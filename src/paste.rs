@@ -1,4 +1,7 @@
 use std::ffi::{c_char, c_void};
+use std::fs;
+use std::ops::RangeInclusive;
+use std::path::Path;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -86,23 +89,10 @@ const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const BAD_PASTEBOARD_FLAVOR: i32 = -25133;
 const DUPLICATE_PASTEBOARD_FLAVOR: i32 = -25134;
 const PASTE_SETTLE_DELAY: Duration = Duration::from_millis(100);
-// Chrome 155 and 156 on macOS can drop a ⌘V posted right after a pasteboard
-// write (#136, fixed upstream by Chromium CL 8503629, expected in Chrome 157).
-const CHROMIUM_PRE_PASTE_DELAY: Duration = Duration::from_millis(150);
-// Matched case-insensitively at a dot boundary, so release channels
-// (`com.google.Chrome.beta`) and installed web apps (`com.google.Chrome.app.…`)
-// share their browser's delay.
-const CHROMIUM_BUNDLE_FAMILIES: &[&str] = &[
-    "com.google.Chrome",
-    "com.brave.Browser",
-    "company.thebrowser.Browser",
-    "company.thebrowser.dia",
-    "com.microsoft.edgemac",
-    "com.vivaldi.Vivaldi",
-    "com.operasoftware.Opera",
-    "com.operasoftware.OperaGX",
-    "org.chromium.Chromium",
-];
+// Chromium 155 and 156 on macOS can drop a ⌘V that races its own pasteboard
+// change notification, however long Hex waits first (#136, #212). The bug
+// arrived with Chromium CL 8217390 and is fixed by CL 8503629 in 157.
+const CLIPBOARD_RACE_CHROMIUM: RangeInclusive<u32> = 155..=156;
 const SYSTEM_TRANSLATED_FLAVOR: u32 = 1 << 8;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -247,6 +237,35 @@ impl Paster {
                 || text.to_string(),
                 |continuation| join(&continuation.inserted, text),
             );
+        if crate::context::frontmost_bundle_path().is_some_and(|bundle| has_clipboard_race(&bundle))
+        {
+            commit_prepared_paste(
+                || Ok(()),
+                commit,
+                |()| {
+                    if matches!(mode, PasteMode::Standalone) {
+                        self.continuation = None;
+                    }
+                    tracing::debug!("typing instead of pasting into Chromium 155 or 156");
+                    keyboard::type_text(&text)
+                },
+            )?;
+        } else {
+            self.paste_through_clipboard(&text, mode, commit)?;
+        }
+        self.continuation = (!matches!(mode, PasteMode::Standalone)).then_some(Continuation {
+            revision,
+            inserted: text,
+        });
+        Ok(())
+    }
+
+    fn paste_through_clipboard(
+        &mut self,
+        text: &str,
+        mode: PasteMode,
+        commit: impl FnOnce() -> bool,
+    ) -> Result<()> {
         let generation = commit_prepared_paste(
             || {
                 let restore = self
@@ -282,7 +301,7 @@ impl Paster {
                 if matches!(mode, PasteMode::Standalone) {
                     self.continuation = None;
                 }
-                if let Err(error) = write_clipboard_text(&self.clipboard, &text) {
+                if let Err(error) = write_clipboard_text(&self.clipboard, text) {
                     if let Err(restore_error) = restore_clipboard(&self.clipboard, &previous) {
                         tracing::error!(%restore_error, "could not recover the clipboard after a failed write");
                     }
@@ -293,16 +312,8 @@ impl Paster {
             },
         )?;
 
-        let delay = pre_paste_delay(crate::context::frontmost_bundle_identifier().as_deref());
-        if !delay.is_zero() {
-            tracing::debug!(
-                delay_ms = delay.as_millis(),
-                "delaying paste for a Chromium browser"
-            );
-        }
         let clipboard_restore = self.clipboard_restore.clone();
         complete_paste(
-            delay,
             || keyboard::post_command('v'),
             move || {
                 thread::spawn(move || {
@@ -330,12 +341,7 @@ impl Paster {
                 });
             },
             thread::sleep,
-        )?;
-        self.continuation = (!matches!(mode, PasteMode::Standalone)).then_some(Continuation {
-            revision,
-            inserted: text,
-        });
-        Ok(())
+        )
     }
 }
 
@@ -353,32 +359,51 @@ pub(crate) fn commit_prepared_paste<P, T>(
     paste(prepared)
 }
 
-fn pre_paste_delay(bundle_id: Option<&str>) -> Duration {
-    if bundle_id.is_some_and(is_chromium_browser) {
-        CHROMIUM_PRE_PASTE_DELAY
-    } else {
-        Duration::ZERO
+/// Whether the app at `bundle` embeds a Chromium 155 or 156 framework. Every
+/// version found counts, so a browser that has staged an update before
+/// relaunching is covered whichever version is running; typing works in any
+/// version, so the wrong guess there costs nothing.
+fn has_clipboard_race(bundle: &Path) -> bool {
+    chromium_major_versions(bundle).any(|major| CLIPBOARD_RACE_CHROMIUM.contains(&major))
+}
+
+/// Chromium browsers (Chrome, Helium, Brave, Edge, Chromium itself and
+/// most forks) ship `Contents/Frameworks/<Name> Framework.framework/Versions/
+/// <major>.<minor>.<build>.<patch>/`. Electron's `Versions/A` has no version.
+fn chromium_major_versions(bundle: &Path) -> impl Iterator<Item = u32> {
+    fs::read_dir(bundle.join("Contents/Frameworks"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|framework| {
+            framework
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with("Framework.framework"))
+        })
+        .flat_map(|framework| fs::read_dir(framework.path().join("Versions")).into_iter())
+        .flatten()
+        .flatten()
+        .filter_map(|version| chromium_major_version(version.file_name().to_str()?))
+}
+
+fn chromium_major_version(version: &str) -> Option<u32> {
+    let components = version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    match components[..] {
+        [major, _, _, _] => Some(major),
+        _ => None,
     }
 }
 
-fn is_chromium_browser(bundle_id: &str) -> bool {
-    CHROMIUM_BUNDLE_FAMILIES.iter().any(|family| {
-        bundle_id
-            .get(..family.len())
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(family))
-            && matches!(bundle_id.as_bytes().get(family.len()), None | Some(b'.'))
-    })
-}
-
 fn complete_paste(
-    pre_paste_delay: Duration,
     post_paste: impl FnOnce() -> Result<()>,
     schedule_restore: impl FnOnce(),
     mut wait: impl FnMut(Duration),
 ) -> Result<()> {
-    if !pre_paste_delay.is_zero() {
-        wait(pre_paste_delay);
-    }
     let posted = post_paste();
     schedule_restore();
     posted?;
@@ -748,7 +773,6 @@ mod tests {
                     |()| {
                         steps.borrow_mut().push("write");
                         complete_paste(
-                            Duration::ZERO,
                             || {
                                 steps.borrow_mut().push("post");
                                 Ok(())
@@ -789,7 +813,6 @@ mod tests {
         let paste = |text| {
             clipboard.set(text);
             complete_paste(
-                Duration::ZERO,
                 || {
                     pending.set(true);
                     steps.borrow_mut().push("post");
@@ -831,7 +854,6 @@ mod tests {
         let restore_scheduled_at = Cell::new(None);
 
         complete_paste(
-            Duration::ZERO,
             || {
                 elapsed.set(Duration::from_secs(1));
                 assert_eq!(restore_scheduled_at.get(), None);
@@ -852,7 +874,6 @@ mod tests {
         let result = send_after_paste(
             || {
                 complete_paste(
-                    Duration::ZERO,
                     || {
                         steps.borrow_mut().push("post");
                         Err(eyre!("post failed"))
@@ -872,68 +893,91 @@ mod tests {
     }
 
     #[test]
-    fn only_chromium_browsers_delay_the_paste_shortcut() {
-        for bundle_id in [
-            "com.google.Chrome",
-            "com.google.Chrome.beta",
-            "com.google.Chrome.canary",
-            "com.google.Chrome.app.kjgfgldnnfoeklkmfkjfagphfepbbdan",
-            "com.brave.Browser",
-            "com.brave.Browser.nightly",
-            "company.thebrowser.Browser",
-            "company.thebrowser.dia",
-            "com.microsoft.edgemac",
-            "com.microsoft.edgemac.Dev",
-            "com.vivaldi.Vivaldi",
-            "com.operasoftware.Opera",
-            "com.operasoftware.OperaGX",
-            "org.chromium.Chromium",
-            "COM.GOOGLE.CHROME",
-        ] {
-            assert_eq!(
-                pre_paste_delay(Some(bundle_id)),
-                CHROMIUM_PRE_PASTE_DELAY,
-                "{bundle_id}"
-            );
+    fn detects_the_chromium_major_version_from_the_bundle_framework() {
+        let root = std::env::temp_dir().join(format!("hex-chromium-{}", std::process::id()));
+        let bundle = |name: &str, frameworks: &[(&str, &[&str])]| {
+            let bundle = root.join(name);
+            for (framework, versions) in frameworks {
+                for version in *versions {
+                    fs::create_dir_all(
+                        bundle
+                            .join("Contents/Frameworks")
+                            .join(framework)
+                            .join("Versions")
+                            .join(version),
+                    )
+                    .unwrap();
+                }
+            }
+            fs::create_dir_all(bundle.join("Contents")).unwrap();
+            bundle
+        };
+
+        let chrome = bundle(
+            "Google Chrome.app",
+            &[("Google Chrome Framework.framework", &["155.0.8059.40"])],
+        );
+        let helium = bundle(
+            "Helium.app",
+            &[("Helium Framework.framework", &["156.0.8078.48"])],
+        );
+        let staged = bundle(
+            "Brave Browser.app",
+            &[(
+                "Brave Browser Framework.framework",
+                &["156.1.88.10", "157.1.89.2"],
+            )],
+        );
+        let fixed = bundle(
+            "Microsoft Edge.app",
+            &[("Microsoft Edge Framework.framework", &["157.0.8103.15"])],
+        );
+        let older = bundle(
+            "Chromium.app",
+            &[("Chromium Framework.framework", &["154.0.7999.1"])],
+        );
+        let electron = bundle(
+            "Slack.app",
+            &[
+                ("Electron Framework.framework", &["A", "Current"]),
+                ("Squirrel.framework", &["155.0.0.0"]),
+            ],
+        );
+        let safari = bundle("Safari.app", &[]);
+
+        assert_eq!(chromium_major_versions(&chrome).collect::<Vec<_>>(), [155]);
+        let mut staged_versions = chromium_major_versions(&staged).collect::<Vec<_>>();
+        staged_versions.sort_unstable();
+        assert_eq!(staged_versions, [156, 157]);
+        for affected in [&chrome, &helium, &staged] {
+            assert!(has_clipboard_race(affected), "{}", affected.display());
         }
-        for bundle_id in [
-            None,
-            Some(""),
-            Some("com.apple.Safari"),
-            Some("org.mozilla.firefox"),
-            Some("com.mitchellh.ghostty"),
-            Some("com.google.Chromecast"),
-            Some("com.google"),
-            Some("com.brave.Browserish"),
-            Some("çom.google.Chrome"),
+        for unaffected in [
+            &fixed,
+            &older,
+            &electron,
+            &safari,
+            &root.join("Missing.app"),
         ] {
-            assert_eq!(pre_paste_delay(bundle_id), Duration::ZERO, "{bundle_id:?}");
+            assert!(!has_clipboard_race(unaffected), "{}", unaffected.display());
         }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
-    fn chromium_delay_runs_between_the_clipboard_write_and_the_paste_shortcut() {
-        let steps = RefCell::new(Vec::new());
-
-        complete_paste(
-            CHROMIUM_PRE_PASTE_DELAY,
-            || {
-                steps.borrow_mut().push("post".to_string());
-                Ok(())
-            },
-            || steps.borrow_mut().push("restore".to_string()),
-            |delay| {
-                steps
-                    .borrow_mut()
-                    .push(format!("wait {}", delay.as_millis()))
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            steps.into_inner(),
-            ["wait 150", "post", "restore", "wait 100"]
-        );
+    fn chromium_versions_need_four_numeric_components() {
+        assert_eq!(chromium_major_version("155.0.8059.84"), Some(155));
+        assert_eq!(chromium_major_version("156.1.88.10"), Some(156));
+        for version in [
+            "A",
+            "Current",
+            "155",
+            "155.0.8059",
+            "155.0.8059.84.1",
+            "155.0.x.1",
+        ] {
+            assert_eq!(chromium_major_version(version), None, "{version}");
+        }
     }
 
     #[test]

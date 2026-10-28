@@ -606,7 +606,7 @@ regression covering that complete lifecycle.
 ### Slow Paste Consumer
 
 ```ts
-publish clipboard -> Chromium browser frontmost? wait 150 ms (#136) -> post Paste
+Chromium 155/156 frontmost? type instead (#212); else publish clipboard -> post Paste
   ├── settle for 100 ms -> allow next output
   └── schedule restore after 500 ms -> restore only if still owned
 target consumes later?                                // no consumption acknowledgment

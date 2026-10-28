@@ -397,8 +397,8 @@ Completed output                         // output
 Checks in [paste.rs](../../src/paste.rs), [parakeet.rs](../../src/parakeet.rs), and
 [history.rs](../../src/history.rs) cover output and retention boundaries.
 They do not prove that an arbitrary target consumed its clipboard contents.
-Send is not an atomic target-app transaction. Chromium browsers get a 150 ms
-pause before ⌘V for a [Chrome 155 paste bug](dictation.md#ongoing-jobs-and-output).
+Send is not an atomic target-app transaction. Chromium 155 and 156 get the text
+typed instead of pasted for a [Chrome paste bug](dictation.md#ongoing-jobs-and-output).
 
 **Easy to misread:** History Off does not stop diagnostic logging. Diagnostic
 logs are separate and currently unbounded on disk. See the

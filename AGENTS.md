@@ -602,6 +602,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   tones; execution failures use an error tone.
 - Clipboard insertion is the fixed text-insertion path. Restore the previous
   clipboard only if no newer paste or external clipboard change superseded it.
+  The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
+  (read from its bundle's framework version) gets the text typed, because
+  those versions can drop a ⌘V that races their pasteboard notification.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
 - Do not persist captured audio by default. Explicit foreground meeting
