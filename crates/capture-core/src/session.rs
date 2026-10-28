@@ -29,7 +29,7 @@ use crate::manifest::{
     Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Permission, SourceEntry, TrackKind,
     write_json,
 };
-use crate::plan::{MANIFEST_NAME, Names, Source};
+use crate::plan::{Exclusions, MANIFEST_NAME, Names, Source};
 use crate::system_audio::SystemAudioWriter;
 use crate::time::{HostTime, MediaTime, host_delta_millis};
 
@@ -114,6 +114,8 @@ pub(crate) trait SourceStream: Send {
     fn stopper(&self) -> Stopper;
     /// What the recording output says it recorded.
     fn recorded_duration(&self) -> Option<MediaTime>;
+    /// Leaves out `exclude` from now on, without restarting the stream.
+    fn exclude(&self, exclude: &Exclusions) -> Result<(), Error>;
 }
 
 /// Runs `stop` with a bound. A stop that never returns leaves its thread blocked inside
@@ -715,6 +717,28 @@ impl Recording {
             }
         }
         Ok(())
+    }
+
+    /// Replaces what the recording leaves out, without restarting any stream. Each display or
+    /// region source gets a display filter built as [`Recorder::start`](crate::Recorder::start)
+    /// builds it; a region keeps its area. A window source records only its window and is left
+    /// as it is.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first source's failure. Every source is still updated.
+    pub fn set_exclusions(&self, exclude: &Exclusions) -> Result<(), Error> {
+        let Some(active) = &self.active else {
+            return Ok(());
+        };
+        let mut first = None;
+        for run in &active.sources {
+            if let Err(error) = run.stream.exclude(exclude) {
+                tracing::warn!(source = ?run.source, %error, "could not update the exclusions");
+                first.get_or_insert(error);
+            }
+        }
+        first.map_or(Ok(()), Err)
     }
 
     /// Ends the recording now and returns at once. Finishing (closing files, holding the final

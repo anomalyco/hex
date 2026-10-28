@@ -11,6 +11,7 @@ enum Call {
     RemoveHandlers,
     OutputFinished,
     Stop,
+    Exclude(Vec<u32>),
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +30,7 @@ struct FakeStream {
     detach_blocks: Duration,
     outcome: Outcome,
     stop_hangs: bool,
+    exclude_fails: bool,
 }
 
 impl FakeStream {
@@ -87,6 +89,14 @@ impl SourceStream for FakeStream {
     fn recorded_duration(&self) -> Option<MediaTime> {
         None
     }
+
+    fn exclude(&self, exclude: &Exclusions) -> Result<(), Error> {
+        self.log(Call::Exclude(exclude.windows.clone()));
+        if self.exclude_fails {
+            return Err(Error::Exclusion("the display is gone".into()));
+        }
+        Ok(())
+    }
 }
 
 struct Fixture {
@@ -118,6 +128,7 @@ fn fixture(configure: impl FnOnce(&mut FakeStream)) -> Fixture {
         detach_blocks: Duration::ZERO,
         outcome: Outcome::Finish,
         stop_hangs: false,
+        exclude_fails: false,
     };
     configure(&mut stream);
     let rect = Rect {
@@ -195,6 +206,78 @@ fn the_stream_keeps_running_until_the_detached_output_finishes() {
     assert_eq!(finished.error(), None);
     assert_eq!(
         calls(&calls_log),
+        [
+            Call::Detach,
+            Call::RemoveHandlers,
+            Call::OutputFinished,
+            Call::Stop
+        ]
+    );
+}
+
+#[test]
+fn exclusions_reach_every_live_stream_without_stopping_it() {
+    let mut fixture = fixture(|_| {});
+    let window_calls = Arc::new(Mutex::new(Vec::new()));
+    let (sender, receiver) = mpsc::channel();
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 100.0,
+        height: 100.0,
+    };
+    fs::write(fixture.active.dir.join("window.mp4"), b"not a movie").unwrap();
+    fixture.active.names.videos.push("window.mp4".into());
+    fixture.active.sources.insert(
+        0,
+        SourceRun {
+            source: Source::Window(9),
+            name: "window.mp4".into(),
+            path: fixture.active.dir.join("window.mp4"),
+            stream: Box::new(FakeStream {
+                calls: Arc::clone(&window_calls),
+                events: sender,
+                finish_after: Duration::from_millis(10),
+                detach_blocks: Duration::ZERO,
+                outcome: Outcome::Finish,
+                stop_hangs: false,
+                exclude_fails: true,
+            }),
+            events: RecordingEvents::new(receiver),
+            collector: Arc::new(Mutex::new(CursorCollector::new(rect))),
+            attached: fixture.active.anchor,
+            width: 100,
+            height: 100,
+            rect,
+            audio_tracks: Vec::new(),
+        },
+    );
+    let calls_log = Arc::clone(&fixture.calls);
+    let recording = recording(fixture.active);
+
+    let exclude = Exclusions {
+        windows: vec![4, 5],
+        apps: Vec::new(),
+    };
+    assert!(matches!(
+        recording.set_exclusions(&exclude),
+        Err(Error::Exclusion(message)) if message == "the display is gone"
+    ));
+    // The failing source does not keep the other from updating.
+    assert_eq!(calls(&calls_log), [Call::Exclude(vec![4, 5])]);
+    assert_eq!(calls(&window_calls), [Call::Exclude(vec![4, 5])]);
+    recording
+        .set_exclusions(&Exclusions::default())
+        .unwrap_err();
+    assert_eq!(
+        calls(&calls_log),
+        [Call::Exclude(vec![4, 5]), Call::Exclude(Vec::new())]
+    );
+
+    let finished = recording.stop().wait().unwrap();
+    assert_eq!(finished.error(), None);
+    assert_eq!(
+        calls(&calls_log)[2..],
         [
             Call::Detach,
             Call::RemoveHandlers,

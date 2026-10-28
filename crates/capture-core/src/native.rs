@@ -424,6 +424,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     let stream = SCStream::new_with_delegate(&target.filter, &config, stream_callbacks)
         .map_err(|error| Error::Start(error.to_string()))?;
     let mut native = NativeStream {
+        source: context.source,
         stream,
         output,
         handlers: Vec::new(),
@@ -513,6 +514,7 @@ fn recording_callbacks(sender: &Sender<RecordingEvent>) -> RecordingCallbacks {
 }
 
 struct NativeStream {
+    source: Source,
     stream: SCStream,
     output: SCRecordingOutput,
     handlers: Vec<(usize, SCStreamOutputType)>,
@@ -616,5 +618,49 @@ impl SourceStream for NativeStream {
             return None;
         }
         MediaTime::new(duration.value, duration.timescale)
+    }
+
+    fn exclude(&self, exclude: &Exclusions) -> Result<(), Error> {
+        let Some(id) = filtered_display(self.source) else {
+            return Ok(());
+        };
+        let content = SCShareableContent::get()
+            .map_err(|error| Error::ShareableContent(error.to_string()))?;
+        let display = find_display(&content, id).ok_or(Error::SourceUnavailable(self.source))?;
+        let filter = display_filter(&content, &display, exclude)?;
+        // The region's area is the configuration's `sourceRect`, which a new filter leaves alone.
+        self.stream
+            .update_content_filter(&filter)
+            .map_err(|error| Error::Exclusion(error.to_string()))
+    }
+}
+
+/// The display whose filter carries a source's exclusions. A window's filter captures only that
+/// window, so it has none.
+fn filtered_display(source: Source) -> Option<u32> {
+    match source {
+        Source::Display(id) | Source::Region { display: id, .. } => Some(id),
+        Source::Window(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exclusions_change_the_display_filter_of_displays_and_regions_only() {
+        let rect = Rect {
+            x: 10.0,
+            y: 20.0,
+            width: 300.0,
+            height: 200.0,
+        };
+        assert_eq!(filtered_display(Source::Display(3)), Some(3));
+        assert_eq!(
+            filtered_display(Source::Region { display: 4, rect }),
+            Some(4)
+        );
+        assert_eq!(filtered_display(Source::Window(7)), None);
     }
 }
