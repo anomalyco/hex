@@ -1058,6 +1058,13 @@ impl DictationCapture {
         self.recording = None;
     }
 
+    /// When the active recording started, without its pre-roll.
+    pub fn started_at(&self) -> Option<CaptureInstant> {
+        self.recording
+            .as_ref()
+            .map(|recording| recording.started_at)
+    }
+
     /// 16 kHz audio recorded so far, from `start` in final-clip coordinates.
     /// The resampler's tail is only flushed by finishing, so the clip may end
     /// slightly later than what this has returned.

@@ -24,6 +24,11 @@ const OPTION_FLAG: u64 = 1 << 19;
 const CONTROL_KEY_CODE: u16 = 59;
 const CONTROL_FLAG: u64 = 1 << 18;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
+/// A hole in the virtual key codes, between keypad `*` (0x43) and keypad `+`
+/// (0x45): no keyboard sends it, and of the 264 layouts macOS ships only
+/// Unicode Hex Input maps it (to U+0000, never with Option alone). Unlike
+/// F13–F20 or the JIS keys it has no system action and nothing binds it.
+pub const CHORD_BREAKER_KEY_CODE: u16 = 0x44;
 pub const SYNTHETIC_EVENT_MARKER: i64 = 0x0056_4f49_4345;
 static KEY_CODES: OnceLock<LayoutCodes> = OnceLock::new();
 static LAYOUT_ACCESS: Mutex<()> = Mutex::new(());
@@ -245,6 +250,28 @@ pub fn type_text(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// One press of a key that types nothing, under the modifier `flags` held
+/// now, so other apps' modifier-tap detectors read the hold as a chord, as
+/// they do for any key pressed while the modifier is down. It is posted at
+/// the HID tap, so HID and session taps and NSEvent global monitors see it;
+/// Hex's annotated-session tap then drops it before the focused app, which
+/// would otherwise beep at an unhandled key.
+pub fn post_chord_breaker(flags: u64) -> Result<()> {
+    let events = chord_breaker_event_specs(flags)
+        .map(KeyboardEvent::new)
+        .collect::<Result<Vec<_>>>()?;
+    for event in events {
+        event.post();
+    }
+    Ok(())
+}
+
+fn chord_breaker_event_specs(flags: u64) -> impl Iterator<Item = (u16, bool, u64)> {
+    [true, false]
+        .into_iter()
+        .map(move |down| (CHORD_BREAKER_KEY_CODE, down, flags))
+}
+
 pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
     post_repeated_shortcut(key, modifiers, 1)
 }
@@ -421,7 +448,17 @@ mod tests {
         unsafe extern "C" {
             fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
         }
-        for event in shortcut_event_specs(9, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1) {
+        let chord_breaker = chord_breaker_event_specs(OPTION_FLAG).collect::<Vec<_>>();
+        assert_eq!(
+            chord_breaker,
+            [
+                (CHORD_BREAKER_KEY_CODE, true, OPTION_FLAG),
+                (CHORD_BREAKER_KEY_CODE, false, OPTION_FLAG)
+            ]
+        );
+        for event in
+            shortcut_event_specs(9, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1).chain(chord_breaker)
+        {
             let event = KeyboardEvent::new(event).unwrap();
             // SAFETY: the event is valid until `event` drops.
             let mark = unsafe { CGEventGetIntegerValueField(event.0, EVENT_SOURCE_USER_DATA) };

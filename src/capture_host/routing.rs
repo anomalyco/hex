@@ -82,8 +82,8 @@ pub struct RouteDest {
 pub enum RouteAnswer {
     /// Written; the router is still working.
     Looking,
-    /// A rule the person saved (`routing.sites` or `routing.apps`, an
-    /// "Always send … here" among them) says where it goes: sent to `to`
+    /// A rule the person saved (`routing.sites` or `routing.apps`, a
+    /// Shift pick's among them) says where it goes: sent to `to`
     /// at once, and the capsule's Undo takes it back. `site` is what the
     /// rule matches, for an always-rule sending it elsewhere instead.
     Rule {
@@ -121,9 +121,11 @@ pub enum RouteDelivery {
     Sent {
         to: String,
     },
-    /// OpenCode didn't take it; retried every 15 s.
+    /// OpenCode didn't take it; retried every 15 s. `why` says what went
+    /// wrong in a few words ("opencode2 not found").
     Queued {
         to: String,
+        why: String,
     },
     /// Never sent, withdrawn, reverted, or disowned.
     TakenBack,
@@ -143,7 +145,7 @@ pub enum RouteDelivery {
 /// The router with Hex's `capture.routing` and Scrawl's folders under
 /// `~/Library/Application Support/scrawl`. Never reads
 /// `~/.config/scrawl`. Its own log lines name sites and sessions, so they
-/// go to tracing's debug level only.
+/// go to tracing's debug level, except how sends went (`deliver: …`).
 pub fn router() -> Router {
     let settings = crate::app_settings::capture_settings();
     let config = settings.routing.config().clone();
@@ -156,8 +158,15 @@ pub fn router() -> Router {
         Some(settings.captures_dir()),
     );
     Router::new(config, dirs)
-        .with_log(|line| tracing::debug!(line, "capture router"))
+        .with_log(|line| {
+            if line.starts_with("deliver:") {
+                tracing::info!(line, "capture router");
+            } else {
+                tracing::debug!(line, "capture router");
+            }
+        })
         .with_summary(scrawl_capture::sketch::summary_markdown)
+        .with_opencode(crate::dictation_processor::installed_opencode_executable)
 }
 
 fn sends(config: &RouterConfig) -> bool {
@@ -343,6 +352,16 @@ struct Routed {
     sent: Option<Sent>,
     /// The rule offered after the send ([`CaptureRoute::offer`]).
     offered: Option<scrawl_capture::OfferRule>,
+    /// The rule a Shift pick saved with this send, which Undo takes back.
+    saved: Option<SavedRule>,
+}
+
+/// A rule saved with a send, and what its key held before.
+struct SavedRule {
+    kind: RuleKind,
+    key: String,
+    before: Option<String>,
+    was_refused: bool,
 }
 
 struct Sent {
@@ -555,6 +574,7 @@ impl Worker {
             route: CaptureRoute::of(answer),
             sent: None,
             offered: None,
+            saved: None,
         });
         self.publish();
         // A saved rule sends at once; the capsule's Undo takes it back.
@@ -604,6 +624,13 @@ impl Worker {
     fn undo(&mut self) {
         if !self.acting_on_last() {
             return;
+        }
+        if let Some(saved) = self
+            .current
+            .as_mut()
+            .and_then(|current| current.saved.take())
+        {
+            forget_rule(&saved);
         }
         if self.take_back() {
             self.publish();
@@ -703,27 +730,29 @@ impl Worker {
     /// Saves an always-rule from the current capture's site or app to
     /// `session`'s project (or the session itself), on top of what
     /// `settings.json` holds now.
-    fn save_rule(&self, session: &str) {
+    fn save_rule(&mut self, session: &str) {
         let Some((kind, key, target)) = self.rule_for(session) else {
             tracing::info!("no rule can be made for this capture");
             return;
         };
-        let saved = crate::app_settings::AppSettings::load().and_then(|mut settings| {
-            let next = settings
-                .capture
-                .routing
-                .config()
-                .with_rule(kind, &key, &target)
-                .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?;
-            settings.capture.routing = next.into();
-            settings.save()
+        let mut saved = None;
+        let result = edit_routing(|config| {
+            let key = key.trim();
+            saved = Some(SavedRule {
+                kind,
+                key: key.to_owned(),
+                before: rules_of(config, kind).get(key).cloned(),
+                was_refused: config.refused_rules.iter().any(|k| k == key),
+            });
+            config
+                .with_rule(kind, key, &target)
+                .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))
         });
-        match saved {
+        match result {
             Ok(()) => {
                 tracing::info!("saved a capture routing rule");
-                #[cfg(target_os = "macos")]
-                if let Some(runtime) = crate::macos_rune::runtime() {
-                    let _ = runtime.send(crate::macos_rune::Request::ReloadSettings);
+                if let Some(current) = self.current.as_mut() {
+                    current.saved = saved;
                 }
             }
             Err(error) => tracing::warn!(%error, "could not save a capture routing rule"),
@@ -873,7 +902,7 @@ impl Worker {
             .is_some_and(|current| report.sent.iter().any(|(dir, _)| *dir == current.bundle));
         if sent_now
             && let Some(current) = self.current.as_mut()
-            && let Some(RouteDelivery::Queued { to }) = current.route.delivery.take()
+            && let Some(RouteDelivery::Queued { to, .. }) = current.route.delivery.take()
         {
             current.route.delivery = Some(RouteDelivery::Sent { to });
             self.publish();
@@ -920,6 +949,91 @@ fn unreachable_why(error: &str) -> String {
         "it isn't running".into()
     } else {
         error.to_owned()
+    }
+}
+
+/// A send to an OpenCode server on another Mac, with no agent host to copy
+/// the bundle there first.
+const FILES_UNSEEN: &str = "OpenCode can't see files";
+
+/// A failed send (`{err:#}`, outer context first) in the few words the
+/// capsule shows under "Copied". What OpenCode said comes first: it was
+/// reached. `agent_host` is whether bundles are copied to its Mac first.
+fn send_why(error: &str, agent_host: bool) -> String {
+    let fit = |line: &str| match line.char_indices().nth(60) {
+        Some((end, _)) => format!("{}…", &line[..end]),
+        None => line.to_owned(),
+    };
+    // The server reads the contact sheet from its own disk.
+    if error.contains("Unable to read attachment") && !agent_host {
+        return FILES_UNSEEN.into();
+    }
+    if error.contains("HTTP 404") {
+        return "session not found".into();
+    }
+    if let Some(said) = error.strip_prefix("OpenCode said: ") {
+        let said = said.split(": OpenCode API failed").next().unwrap_or(said);
+        return fit(said.lines().next().unwrap_or(said));
+    }
+    if error.starts_with("Could not reach server") {
+        "couldn't reach OpenCode".into()
+    } else if error.contains("didn't answer in time") {
+        "OpenCode didn't answer".into()
+    } else if error.contains("Could not find opencode2") || error.contains("OPENCODE_BIN") {
+        "opencode2 not found".into()
+    } else {
+        fit(&delivery::short(error))
+    }
+}
+
+/// `routing.sites` or `routing.apps`, as `kind` says.
+fn rules_of(
+    config: &scrawl_capture::RouterConfig,
+    kind: RuleKind,
+) -> &std::collections::BTreeMap<String, String> {
+    match kind {
+        RuleKind::Site => &config.sites,
+        RuleKind::App => &config.apps,
+    }
+}
+
+/// Saves `settings.json`'s routing as `edit` makes it, then has the app
+/// reload its settings.
+fn edit_routing(
+    edit: impl FnOnce(&scrawl_capture::RouterConfig) -> color_eyre::Result<scrawl_capture::RouterConfig>,
+) -> color_eyre::Result<()> {
+    let mut settings = crate::app_settings::AppSettings::load()?;
+    let next = edit(settings.capture.routing.config())?;
+    settings.capture.routing = next.into();
+    settings.save()?;
+    #[cfg(target_os = "macos")]
+    if let Some(runtime) = crate::macos_rune::runtime() {
+        let _ = runtime.send(crate::macos_rune::Request::ReloadSettings);
+    }
+    Ok(())
+}
+
+/// Undo of a Shift pick: the rule it saved goes, and what its key held
+/// before comes back.
+fn forget_rule(saved: &SavedRule) {
+    let result = edit_routing(|config| {
+        let mut next = config.clone();
+        let rules = match saved.kind {
+            RuleKind::Site => &mut next.sites,
+            RuleKind::App => &mut next.apps,
+        };
+        match &saved.before {
+            Some(before) => rules.insert(saved.key.clone(), before.clone()),
+            None => rules.remove(&saved.key),
+        };
+        if saved.was_refused && !next.refused_rules.contains(&saved.key) {
+            next.refused_rules.push(saved.key.clone());
+        }
+        Ok(next)
+    });
+    match result {
+        Ok(()) => tracing::info!("took back a capture routing rule"),
+        Err(error) => tracing::warn!(%error, "could not take back a capture routing rule"),
     }
 }
 
@@ -1043,20 +1157,24 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
         .collect()
 }
 
-/// A destination's `via` as a quiet word.
+/// A destination's `via` as a quiet word: a real reason in plain words,
+/// or nothing (a pick with no reason behind it, such as Jev's).
 fn why(via: &str) -> &str {
     match via {
         "rule" | "app-rule" => "rule",
-        "named" => "you said it",
-        "sdk" | "page" => "this page",
+        "named" | "speech" => "mentioned",
+        "sdk" | "page" => "same page",
+        "viewed" => "you were just in it",
         "localhost" | "port" => "dev server",
-        "recorded" => "sent before",
+        "recorded" | "chosen" => "sent before",
         "publisher" => "published it",
         "dev-build" => "dev build",
-        "jev" => "Jev's pick",
-        "jev-home" => "Jev's fallback",
+        "terminal" => "same terminal",
+        "document" => "same file",
+        "app" => "same app",
+        "title" => "same window",
         "weighed" => "recent",
-        other => other,
+        _ => "",
     }
 }
 
@@ -1091,7 +1209,7 @@ fn describe(delivery: &RouteDelivery) -> String {
     match delivery {
         RouteDelivery::Sending { to } => format!("Sending to {to}"),
         RouteDelivery::Sent { to } => format!("Sent to {to}"),
-        RouteDelivery::Queued { to } => format!("Queued for {to}; OpenCode didn't answer"),
+        RouteDelivery::Queued { to, why } => format!("Queued for {to}: {why}"),
         RouteDelivery::TakenBack => "Taken back".into(),
         RouteDelivery::TooLate { to } => format!("Already read in {to}"),
         RouteDelivery::Failed { to, why } => format!("Not sent to {to}: {why}"),
@@ -1102,7 +1220,7 @@ fn delivered_to(delivery: Option<&RouteDelivery>) -> Option<String> {
     match delivery? {
         RouteDelivery::Sending { to }
         | RouteDelivery::Sent { to }
-        | RouteDelivery::Queued { to }
+        | RouteDelivery::Queued { to, .. }
         | RouteDelivery::TooLate { to }
         | RouteDelivery::Failed { to, .. } => Some(to.clone()),
         RouteDelivery::TakenBack => None,
@@ -1163,7 +1281,23 @@ fn deliver(
                 sent,
                 routing::learn_capture(bundle, &dest.session),
             ),
-            Delivery::Queued { .. } => (RouteDelivery::Queued { to }, None, None),
+            Delivery::Queued { error, .. } => {
+                let agent_host = router.config().agent_host().is_some();
+                let why = send_why(&error, agent_host);
+                if why == FILES_UNSEEN {
+                    tracing::warn!(
+                        error = delivery::short(&error),
+                        "OpenCode can't read a capture from its own disk; if it runs on another \
+                         Mac, set capture.routing.agentHost to that Mac's SSH host. Retrying"
+                    );
+                } else {
+                    tracing::warn!(
+                        error = delivery::short(&error),
+                        "a capture's send didn't go; retrying"
+                    );
+                }
+                (RouteDelivery::Queued { to, why }, None, None)
+            }
             Delivery::Saved => (
                 RouteDelivery::Failed {
                     to,
@@ -1278,12 +1412,8 @@ mod tests {
     fn only_a_saved_rule_sends_on_its_own() {
         use smart::{Basis, Source};
         for (basis, why, shown) in [
-            (
-                Basis::JevHome,
-                "Jev couldn't tell, so HOME",
-                "Jev's fallback",
-            ),
-            (Basis::Jev, "Jev's pick", "Jev's pick"),
+            (Basis::JevHome, "Jev couldn't tell, so HOME", ""),
+            (Basis::Jev, "Jev's pick", ""),
             (
                 Basis::Clue(Source::Port),
                 "port 5173 is Alpha's",
@@ -1292,14 +1422,14 @@ mod tests {
             (
                 Basis::Clue(Source::Page),
                 "the page registered with data-session",
-                "this page",
+                "same page",
             ),
             (
                 Basis::Clue(Source::Publisher),
                 "Alpha published the file",
                 "published it",
             ),
-            (Basis::Clue(Source::Named), "you said alpha", "you said it"),
+            (Basis::Clue(Source::Named), "you said alpha", "mentioned"),
         ] {
             let answered = sent_by(basis, why);
             assert!(answered.send.is_none(), "{why}: nothing sends until picked");
@@ -1408,6 +1538,61 @@ mod tests {
         let Answered { answer, send, .. } = answer_for(Decided::Failed, None, None, &candidates, 0);
         assert!(send.is_none());
         assert!(matches!(answer, RouteAnswer::NoAnswer { ref recent } if recent.len() == 1));
+    }
+
+    /// The Air's first sends: Studio's OpenCode couldn't read the contact
+    /// sheet yet, and the capsule said only "couldn't reach SEER".
+    #[test]
+    fn a_failed_send_says_what_went_wrong() {
+        let unread = "OpenCode said: Unable to read attachment: file:///Users/kit/Library/\
+                      Application%20Support/scrawl/captures/1.scrawl/contact-sheet.png: \
+                      OpenCode API failed: HTTP 400 Bad Request";
+        assert_eq!(send_why(unread, false), FILES_UNSEEN);
+        assert_eq!(
+            send_why(unread, true),
+            "Unable to read attachment: file:///Users/kit/Library/Applica…"
+        );
+        let cases = [
+            (
+                "OpenCode said: Skill not found: x: OpenCode API failed: HTTP 400 Bad Request",
+                "Skill not found: x",
+            ),
+            (
+                "Could not find opencode2; set OPENCODE_BIN or add it to PATH",
+                "opencode2 not found",
+            ),
+            (
+                "Could not reach server at http://127.0.0.1:4096: Connection refused (os error 61)",
+                "couldn't reach OpenCode",
+            ),
+            (
+                "OpenCode at http://127.0.0.1:4096 didn't answer in time: Resource temporarily \
+                 unavailable",
+                "OpenCode didn't answer",
+            ),
+            (
+                "OpenCode API failed: HTTP 404 Not Found",
+                "session not found",
+            ),
+            (
+                "OpenCode said: Session not found: ses_x: OpenCode API failed: HTTP 404 Not Found",
+                "session not found",
+            ),
+            ("bundle has no contact sheet", "bundle has no contact sheet"),
+        ];
+        for (error, why) in cases {
+            assert_eq!(send_why(error, false), why, "{error}");
+        }
+        let long = send_why(&"x".repeat(100), false);
+        assert_eq!(long.chars().count(), 61);
+        assert!(long.ends_with('…'));
+        assert_eq!(
+            describe(&RouteDelivery::Queued {
+                to: "SEER".into(),
+                why: FILES_UNSEEN.into()
+            }),
+            "Queued for SEER: OpenCode can't see files"
+        );
     }
 
     #[test]

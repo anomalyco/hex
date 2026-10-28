@@ -149,7 +149,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         if selected {
             item = item.fill(c.layer_02);
         }
-        languages = languages.child(source_item(p, item, selected));
+        languages = languages.child(source_item(item, selected));
     }
     let mut models = col().key("models").gap(8.0);
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
@@ -473,7 +473,11 @@ fn model_card(
                 .gap(20.0)
                 .child(metric("speed", tr("Speed"), tr(model.realtime).into()))
                 .child(metric("size", tr("Size"), model.size_label()))
-                .child(metric("wer", "WER", model.quality.into())),
+                .child(metric(
+                    "accuracy",
+                    tr("Accuracy"),
+                    model.accuracy_label().unwrap_or_else(|| "System".into()),
+                )),
         );
     if model.id == TranscriptionModelId::ParakeetV3 {
         card = card.child(

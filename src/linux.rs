@@ -309,7 +309,7 @@ fn listen(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Res
     let mut recognizer = Moonshine::load(Path::new(env!("CARGO_MANIFEST_DIR")))?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open(&[])?,
+        None => AudioInput::open_system_default()?,
     };
     let events = EventLog::create(event_path)?;
     events.emit(&VoiceEvent::SessionStarted {

@@ -5,7 +5,6 @@ use crate::commands::{Action, Command, CommandConfig, ConfiguredCommand, Count, 
 use crate::dictation_processor::{Profile, Profiles};
 use crate::keys::{Key, Modifiers};
 
-pub const INPUT_DEVICES: &[&str] = &["Universal Audio Thunderbolt", "Studio Display Microphone"];
 static DICTATION_PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
 
 pub fn dictation_profiles() -> Profiles {

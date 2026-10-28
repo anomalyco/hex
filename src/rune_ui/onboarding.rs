@@ -778,13 +778,13 @@ fn done(ui: &Ui, p: Paint) -> El {
         .child(
             col()
                 .key("more")
-                .gap(8.0)
+                .gap(super::controls::METRICS.label_gap)
                 .child(
                     text(tr("When you want more"))
                         .key("label")
                         .font(DESCRIPTION)
                         .color(p.muted())
-                        .ml(12.0),
+                        .ml(super::controls::METRICS.row_px),
                 )
                 .child(card(p, "tips-card", tips)),
         )

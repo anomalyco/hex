@@ -138,7 +138,9 @@ pub struct ModelDefinition {
     pub id: TranscriptionModelId,
     pub name: &'static str,
     pub realtime: &'static str,
-    pub quality: &'static str,
+    /// Word error rate on the `quality_context` benchmark, in percent;
+    /// `None` when the system manages the model and publishes none.
+    pub word_error_rate: Option<f64>,
     pub quality_context: &'static str,
     pub coverage: &'static str,
     pub timestamps: &'static str,
@@ -214,6 +216,11 @@ impl ModelDefinition {
             .collect()
     }
 
+    /// Benchmark accuracy, the inverse of its word error rate: `98.4%`.
+    pub fn accuracy_label(&self) -> Option<String> {
+        self.word_error_rate.map(accuracy_label)
+    }
+
     pub fn size_label(&self) -> String {
         match self.runtime {
             ModelRuntime::AppleSpeech => "Managed".into(),
@@ -230,6 +237,10 @@ impl ModelDefinition {
             ModelRuntime::AppleSpeech => None,
         }
     }
+}
+
+fn accuracy_label(word_error_rate: f64) -> String {
+    format!("{:.1}%", (100.0 - word_error_rate).clamp(0.0, 100.0))
 }
 
 const PARAKEET_V3_LANGUAGES: &[&str] = &[
@@ -313,7 +324,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetUnifiedEnglish,
         name: "Parakeet Unified English",
         realtime: "~163x",
-        quality: "1.60%",
+        word_error_rate: Some(1.60),
         quality_context: "English benchmark",
         coverage: "English",
         timestamps: "Token timestamps",
@@ -328,7 +339,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetV2,
         name: "Parakeet v2",
         realtime: "~55x",
-        quality: "1.69%",
+        word_error_rate: Some(1.69),
         quality_context: "English benchmark",
         coverage: "English",
         timestamps: "Token timestamps",
@@ -343,7 +354,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetV3,
         name: "Parakeet v3",
         realtime: "~33x",
-        quality: "1.94%",
+        word_error_rate: Some(1.94),
         quality_context: "English benchmark",
         coverage: "25 languages",
         timestamps: "Token timestamps",
@@ -359,7 +370,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::WhisperLargeV3Turbo,
         name: "Whisper large-v3-turbo",
         realtime: "~19x",
-        quality: "2.01%",
+        word_error_rate: Some(2.01),
         quality_context: "English benchmark",
         coverage: "100 languages",
         timestamps: "Segment timestamps",
@@ -374,7 +385,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::Qwen3Asr06B,
         name: "Qwen3-ASR 0.6B",
         realtime: "~16x",
-        quality: "7.64%",
+        word_error_rate: Some(7.64),
         quality_context: "Mandarin benchmark",
         coverage: "30 languages",
         timestamps: "No timestamps",
@@ -389,7 +400,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::SenseVoiceSmall,
         name: "SenseVoice Small",
         realtime: "~72x",
-        quality: "10.11%",
+        word_error_rate: Some(10.11),
         quality_context: "Mandarin benchmark",
         coverage: "5 languages",
         timestamps: "No timestamps",
@@ -404,7 +415,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::CohereTranscribe,
         name: "Cohere Transcribe",
         realtime: "73x",
-        quality: "1.27%",
+        word_error_rate: Some(1.27),
         quality_context: "English benchmark",
         coverage: "14 languages",
         timestamps: "No timestamps",
@@ -419,7 +430,7 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::AppleSpeech,
         name: "Apple Speech",
         realtime: "On device",
-        quality: "System",
+        word_error_rate: None,
         quality_context: "Apple managed",
         coverage: "System locales",
         timestamps: "Segment timestamps",
@@ -1155,6 +1166,44 @@ mod tests {
                 recommended[0],
                 "{language}"
             );
+        }
+    }
+
+    #[test]
+    fn accuracy_is_the_inverse_of_the_word_error_rate() {
+        assert_eq!(
+            definition(TranscriptionModelId::ParakeetUnifiedEnglish)
+                .accuracy_label()
+                .as_deref(),
+            Some("98.4%")
+        );
+        assert_eq!(
+            definition(TranscriptionModelId::SenseVoiceSmall)
+                .accuracy_label()
+                .as_deref(),
+            Some("89.9%")
+        );
+        assert_eq!(
+            definition(TranscriptionModelId::AppleSpeech).accuracy_label(),
+            None
+        );
+        assert_eq!(accuracy_label(0.0), "100.0%");
+        assert_eq!(accuracy_label(112.5), "0.0%");
+    }
+
+    #[test]
+    fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, the types the
+        // Vulkan backend is built for (`CMAKE_ARGS` in .cargo/config.toml).
+        // Another quantization needs its type added there, or Vulkan aborts.
+        for model in MODELS {
+            if let ModelRuntime::Gguf(artifact) = model.runtime {
+                assert!(
+                    artifact.filename.ends_with("-Q8_0.gguf"),
+                    "{} needs its tensor types in GGML_VULKAN_SHADER_TYPES",
+                    artifact.filename
+                );
+            }
         }
     }
 

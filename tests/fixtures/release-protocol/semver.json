@@ -1,76 +1,12 @@
 {
-  "description": "compare(a, b) is -1, 0 or 1. Invalid strings must be rejected.",
-  "compare": [
-    [
-      "1.0.0",
-      "1.0.0",
-      0
-    ],
-    [
-      "1.0.0",
-      "1.0.1",
-      -1
-    ],
-    [
-      "1.10.0",
-      "1.9.0",
-      1
-    ],
-    [
-      "1.0.0-alpha",
-      "1.0.0",
-      -1
-    ],
-    [
-      "1.0.0-alpha",
-      "1.0.0-alpha.1",
-      -1
-    ],
-    [
-      "1.0.0-alpha.1",
-      "1.0.0-alpha.beta",
-      -1
-    ],
-    [
-      "1.0.0-alpha.beta",
-      "1.0.0-beta",
-      -1
-    ],
-    [
-      "1.0.0-beta.2",
-      "1.0.0-beta.11",
-      -1
-    ],
-    [
-      "1.0.0-beta.11",
-      "1.0.0-rc.1",
-      -1
-    ],
-    [
-      "1.0.0-dev.9",
-      "1.0.0-dev.10",
-      -1
-    ],
-    [
-      "1.0.0-rc.1",
-      "1.0.0",
-      -1
-    ],
-    [
-      "2.0.0-dev.1",
-      "1.9.9",
-      1
-    ],
-    [
-      "1.0.0-1",
-      "1.0.0-a",
-      -1
-    ],
-    [
-      "9007199254740991.0.0",
-      "1.0.0",
-      1
-    ]
+  "description": "Versions the service accepts (strict SemVer 2.0.0 without build metadata, so schema-1 clients from before 2026-10-27 parse them) and refuses. Clients never compare versions.",
+  "valid": [
+    "1.0.0",
+    "2.3.1",
+    "2.3.2-dev.29",
+    "0.0.0-dev-42",
+    "1.0.0-beta.11",
+    "9007199254740991.0.0"
   ],
   "invalid": [
     "1",

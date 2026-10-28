@@ -6,6 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use color_eyre::eyre::{Result, eyre};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
+/// Whether this is a local build (`HEX_LOCAL_BUILD=1`): made from a checkout
+/// for its owner's own machine, so it never checks for or offers updates.
+pub fn is_local_build() -> bool {
+    option_env!("HEX_LOCAL_BUILD") == Some("1")
+}
+
 /// Whether this is a macOS `Hex Test.app` build (`HEX_TEST_BUILD=1`), which
 /// keeps its data, settings, and user config apart from the installed Hex.
 pub fn is_macos_test_build() -> bool {
@@ -354,8 +360,24 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr.and(Mutex::new(process_log)))
         .init();
+    log_panics();
     ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
     Ok(log_dir)
+}
+
+/// Records every panic in `process.log` before the installed report runs.
+/// Desktop apps have no console, so the default stderr report is otherwise
+/// lost and a crashed worker thread leaves no trace.
+fn log_panics() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(
+            thread = std::thread::current().name().unwrap_or("unnamed"),
+            backtrace = %std::backtrace::Backtrace::force_capture(),
+            "panic: {info}"
+        );
+        report(info);
+    }));
 }
 
 pub fn opencode_workspace() -> Result<PathBuf> {

@@ -553,6 +553,13 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(state) = guard.as_mut() {
+            // The hook never sees a release that lands on another desktop,
+            // such as the Windows key of Win+L or the modifiers of
+            // Ctrl+Alt+Delete, so tracked modifiers stayed held after
+            // unlocking and Ctrl+Space no longer matched. Re-read them on
+            // every event: the asynchronous key state does not include this
+            // event yet, so `update` applies it on top.
+            state.modifiers = ModifierState::current();
             let modifier_event = state.modifiers.update(event.vkCode, is_down);
             // During a chord capture the hook only tracks modifier state;
             // it neither triggers actions nor suppresses keys, so the
@@ -740,6 +747,10 @@ fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32
 
 impl ModifierState {
     fn current() -> Self {
+        Self::read(key_down)
+    }
+
+    fn read(key_down: impl Fn(u16) -> bool) -> Self {
         Self {
             left_control: key_down(VK_LCONTROL),
             right_control: key_down(VK_RCONTROL),
@@ -1012,6 +1023,22 @@ mod tests {
             key: None,
         };
         assert!(binding.validate().is_err());
+    }
+
+    #[test]
+    fn a_release_missed_while_locked_does_not_block_the_shortcut() {
+        let binding = WindowsHotkey::default();
+        // Win+L: the hook saw Windows go down, then the lock screen took
+        // its release, so tracking events alone leaves it held.
+        let mut tracked = ModifierState::default();
+        tracked.update(u32::from(VK_LWIN), true);
+        tracked.update(u32::from(VK_LCONTROL), true);
+        assert!(!tracked.matches(&binding));
+        // After unlocking, the system reports every key up before this
+        // Ctrl press, which `update` then applies.
+        let mut synced = ModifierState::read(|_| false);
+        synced.update(u32::from(VK_LCONTROL), true);
+        assert!(synced.matches(&binding));
     }
 
     #[test]

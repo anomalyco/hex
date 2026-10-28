@@ -1,0 +1,689 @@
+name: Release
+
+# Builds, signs, and publishes Hex for macOS, Windows, and Linux from one
+# exact commit to the Anomaly release service (docs/releasing.md,
+# docs/plans/release-service.md), split the way OpenCode's release is:
+#
+# - build jobs (Build desktop, build-macos, Windows installers, the AUR and
+#   Homebrew staging) run repository code: cargo, build.rs, bun, makepkg,
+#   brew. They have no environment, no secrets, and no id-token, and they
+#   produce unsigned files.
+# - sign and publish jobs run in the release environment. They check out only
+#   .github/release/ and run only those scripts and SHA-pinned actions, on
+#   artifacts they treat as data: they never build, install dependencies, or
+#   execute repository code or the artifacts.
+# - every artifact carries a SHA256SUMS whose digest the job that made it
+#   reports as an output; every job that downloads it checks that digest
+#   (.github/release/verify-artifacts.sh), so nothing swapped in between
+#   jobs is signed or published.
+#
+# This file and .github/release/ are the security boundary for releases, and
+# a ruleset lets only Dax change .github/ (docs/releasing.md).
+#
+# There is one environment, release, like OpenCode's: no approval, deployment
+# policy dev and production. The service authorizes the publish jobs by their
+# OIDC token: anomalyco/hex, this file, environment release, the dev channel
+# from dev and stable from production (anomalyco/release registry/hex.json).
+# Hex never uses the service's dev stage.
+#
+# Channels (.github/release/plan.sh):
+# - dev: every push to dev (except docs/site/Markdown-only) publishes
+#   0.0.0-dev-<run number> on the dev channel, as OpenCode numbers dev builds;
+#   a newer push cancels a dev run in progress. Only signed platforms are
+#   published. Versions are display text: installs follow the channel's
+#   current release and never compare versions.
+# - check: a dispatch from dev builds, signs, and verifies the same and
+#   publishes nothing; its last job pushes and deletes a throwaway
+#   v0.0.0-test-<run> tag to prove it can tag.
+# - stable: a dispatch from production publishes the crate version with every
+#   platform signed, the AUR, and Homebrew. Tags trigger nothing: only after
+#   everything published does the last job tag v<version> on the released
+#   commit and create the GitHub release, so a failed run leaves no tag. Deploy the production site afterwards with Site.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, tag, or branch to release
+        required: true
+        default: production
+      channel:
+        description: check (build, sign, and verify; publish nothing), dev (the dev channel; run from dev), or stable (public)
+        type: choice
+        options: [check, dev, stable]
+        default: check
+  push:
+    branches: [dev]
+    # Docs and the site alone cut no dev build.
+    paths-ignore: ["docs/**", "site/**", "**/*.md"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'dev' }}
+  # Only the dev channel: a newer push supersedes a dev build in progress.
+  cancel-in-progress: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel || 'dev') == 'dev' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  HEX_TEAM_ID: 5NZ4Q7NXJ4
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      service: ${{ steps.plan.outputs.service }}
+      tag: ${{ steps.plan.outputs.tag }}
+      notes-url: ${{ steps.plan.outputs.notes-url }}
+      release-channel: ${{ steps.plan.outputs.release-channel }}
+      release-version: ${{ steps.plan.outputs.release-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          sparse-checkout: |
+            /.github/release/
+            /Cargo.toml
+            /docs/releases/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: plan
+        run: SHA=$(git rev-parse HEAD) bash .github/release/plan.sh
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
+          CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'dev' }}
+          GH_TOKEN: ${{ github.token }}
+
+  # ---- Build: repository code; no environment, secrets, or id-token ----------
+
+  build:
+    needs: plan
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.release-version }}
+      channel: ${{ needs.plan.outputs.release-channel }}
+
+  # Hex.app as the release identity (anomaly.hex), ad-hoc signed; sign-macos
+  # signs it with the Developer ID.
+  build-macos:
+    needs: plan
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      HEX_BUILD_CHANNEL: ${{ needs.plan.outputs.release-channel }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Install the Metal toolchain
+        run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Build Hex.app
+        run: |
+          scripts/setup.sh
+          scripts/set-crate-version.sh "$PWD" "$HEX_VERSION"
+          bundle=$(HEX_RELEASE_UNSIGNED=1 scripts/build-app.sh)
+          mkdir -p "$RUNNER_TEMP/macos"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$RUNNER_TEMP/macos/Hex.app.zip"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-macos-arm64
+          path: ${{ runner.temp }}/macos
+
+  # ---- Sign: release environment; only .github/release/ is checked out -------
+
+  # Signs Hex.app inside-out with the Developer ID, notarizes and staples it,
+  # and makes the updater zip and the DMG from the stapled app. Without the
+  # Apple values, dev and check go on without macOS; stable fails.
+  sign-macos:
+    needs: [plan, build-macos]
+    if: ${{ !cancelled() && needs.build-macos.result == 'success' }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: release
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+    outputs:
+      signed: ${{ steps.credentials.outputs.available }}
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - &checkout-release
+        name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: credentials
+        name: Require the Apple values
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_SIGNING_CERTIFICATE }}
+          KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          ISSUER: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          missing=
+          [ -n "$CERTIFICATE" ] || missing="$missing APPLE_SIGNING_CERTIFICATE"
+          [ -n "$KEY" ] || missing="$missing APPLE_NOTARY_KEY"
+          [ -n "$KEY_ID" ] || missing="$missing APPLE_NOTARY_KEY_ID"
+          [ -n "$ISSUER" ] || missing="$missing APPLE_NOTARY_ISSUER_ID"
+          if [ -z "$missing" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [ "$CHANNEL" = stable ]; then
+            echo "::error::Stable releases need the macOS build, and the release environment lacks:$missing."
+            exit 1
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No macOS targets: the release environment lacks$missing." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Download
+        if: steps.credentials.outputs.available == 'true'
+        uses: ./.github/release/download
+        with:
+          pattern: build-macos-arm64
+          digests: build-macos-arm64=${{ needs.build-macos.outputs.digest }}
+      - name: Import the certificate and notary key
+        if: steps.credentials.outputs.available == 'true'
+        run: bash .github/release/macos-credentials.sh "$RUNNER_TEMP/credentials"
+        env:
+          APPLE_SIGNING_CERTIFICATE: ${{ secrets.APPLE_SIGNING_CERTIFICATE }}
+          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+      - name: Sign, notarize, and staple
+        if: steps.credentials.outputs.available == 'true'
+        run: bash .github/release/sign-macos.sh "$RUNNER_TEMP/in/build-macos-arm64/Hex.app.zip" "$RUNNER_TEMP/out"
+        env:
+          HEX_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          HEX_NOTARY_ISSUER: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+      - name: Remove the credentials
+        if: always() && steps.credentials.outputs.available == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/credentials/signing.keychain-db" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/credentials"
+      - id: upload
+        if: steps.credentials.outputs.available == 'true'
+        uses: ./.github/release/upload
+        with:
+          name: sign-macos
+          path: ${{ runner.temp }}/out
+
+  # Authenticode-signs both executables through Azure Artifact Signing.
+  # Without the Azure values, dev and check go on without Windows; stable
+  # fails.
+  sign-windows:
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: &windows-sign-env
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+    outputs:
+      signed: ${{ steps.credentials.outputs.available }}
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - &azure-credentials
+        id: credentials
+        name: Require the Azure values
+        run: |
+          missing=
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_TRUSTED_SIGNING_ENDPOINT \
+            AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE; do
+            [ -n "$(printenv "$name")" ] || missing="$missing $name"
+          done
+          if [ -z "$missing" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [ "$CHANNEL" = stable ]; then
+            echo "::error::Stable releases need signed Windows builds, and the release environment lacks:$missing."
+            exit 1
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No Windows targets: the release environment lacks$missing." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Download
+        if: steps.credentials.outputs.available == 'true'
+        uses: ./.github/release/download
+        with:
+          pattern: build-windows-*
+          digests: build-windows-x86_64=${{ needs.build.outputs.windows-x64-digest }} build-windows-aarch64=${{ needs.build.outputs.windows-arm64-digest }}
+      - name: Gather the executables
+        if: steps.credentials.outputs.available == 'true'
+        run: |
+          temp=$(cygpath -u "$RUNNER_TEMP")
+          mkdir -p "$temp/work" && cp "$temp"/in/build-windows-*/*.exe "$temp/work/"
+      - &azure-login
+        name: Sign in to Azure
+        if: steps.credentials.outputs.available == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - &azure-sign
+        name: Sign
+        if: steps.credentials.outputs.available == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ runner.temp }}\work
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Hex
+          description-url: https://github.com/anomalyco/hex
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - &azure-verify
+        name: Check the signatures
+        if: steps.credentials.outputs.available == 'true'
+        shell: pwsh
+        run: .github/release/verify-authenticode.ps1 -Folders "$env:RUNNER_TEMP/work"
+      - id: upload
+        if: steps.credentials.outputs.available == 'true'
+        uses: ./.github/release/upload
+        with:
+          name: sign-windows
+          path: ${{ runner.temp }}/work
+
+  # Setup.exe around the signed executables (unsigned ones when Windows is not
+  # signed), tested on native x64 and ARM64 runners. Repository code: a build.
+  installers:
+    needs: [plan, build, sign-windows]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sign-windows.result == 'success' }}
+    uses: ./.github/workflows/windows-installers.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.release-version }}
+      pattern: ${{ needs.sign-windows.outputs.signed == 'true' && 'sign-windows' || 'build-windows-*' }}
+      digests: ${{ needs.sign-windows.outputs.signed == 'true' && format('sign-windows={0}', needs.sign-windows.outputs.digest) || format('build-windows-x86_64={0} build-windows-aarch64={1}', needs.build.outputs.windows-x64-digest, needs.build.outputs.windows-arm64-digest) }}
+      artifact-name: build-windows-installers
+
+  sign-windows-installers:
+    needs: [plan, sign-windows, installers]
+    if: ${{ !cancelled() && needs.installers.result == 'success' && needs.sign-windows.outputs.signed == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: *windows-sign-env
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - *azure-credentials
+      - name: Download
+        uses: ./.github/release/download
+        with:
+          pattern: build-windows-installers
+          digests: build-windows-installers=${{ needs.installers.outputs.digest }}
+      - name: Gather the installers
+        run: |
+          temp=$(cygpath -u "$RUNNER_TEMP")
+          mkdir -p "$temp/work" && cp "$temp"/in/build-windows-installers/*.exe "$temp/work/"
+      - *azure-login
+      - *azure-sign
+      - *azure-verify
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-windows-installers
+          path: ${{ runner.temp }}/work
+
+  # ---- Verify: repository code on the signed files; no secrets ----------------
+
+  # What a user's Mac and the in-app updater check, and a launch.
+  verify-macos:
+    needs: [plan, sign-macos]
+    if: ${{ !cancelled() && needs.sign-macos.result == 'success' && needs.sign-macos.outputs.signed == 'true' }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      VOICE_CONTROL_TEAM_ID: 5NZ4Q7NXJ4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: sign-macos
+          digests: sign-macos=${{ needs.sign-macos.outputs.digest }}
+      - name: Check the signed app and DMG
+        run: |
+          dmg="$RUNNER_TEMP/in/sign-macos/Hex-$HEX_VERSION-macos-arm64.dmg"
+          zip="$RUNNER_TEMP/in/sign-macos/Hex-$HEX_VERSION-macos-arm64.zip"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          check=$(mktemp -d)
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$check/dmg" "$dmg"
+          /usr/bin/ditto -x -k "$zip" "$check/update"
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$check/dmg/Hex.app/Contents/Info.plist")
+          scripts/validate-app.sh "$check/dmg/Hex.app" Hex.app "$HEX_VERSION" "$build"
+          scripts/validate-app.sh "$check/update/Hex.app" Hex.app "$HEX_VERSION" "$build"
+          xcrun stapler validate "$check/update/Hex.app"
+          # What the in-app updater requires before it swaps the bundle in.
+          codesign --verify --deep --strict -R="$(cat app/update-requirement.txt)" "$check/update/Hex.app"
+          spctl --assess --type execute --verbose=2 "$check/dmg/Hex.app"
+          diff -qr "$check/dmg/Hex.app" "$check/update/Hex.app"
+          scripts/smoke-macos-app.sh "$check/dmg/Hex.app"
+          hdiutil detach -quiet "$check/dmg"
+          codesign -dv "$check/update/Hex.app" 2>&1 | grep -E '^(Identifier|TeamIdentifier|Authority=Developer)' >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- Publish: release environment; only .github/release/ is checked out ----
+
+  # The only job that publishes to the release service; its OIDC token is the
+  # credential. Publishes every signed platform (stable requires them all).
+  publish:
+    needs: [plan, build, sign-macos, verify-macos, sign-windows, installers, sign-windows-installers]
+    if: >-
+      ${{ !cancelled() && needs.plan.outputs.channel != 'check'
+      && needs.build.result == 'success' && needs.installers.result == 'success'
+      && needs.sign-macos.result == 'success' && needs.sign-windows.result == 'success'
+      && (needs.verify-macos.result == 'success' || needs.sign-macos.outputs.signed != 'true')
+      && (needs.sign-windows-installers.result == 'success' || needs.sign-windows.outputs.signed != 'true') }}
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: &publish-env
+      RELEASE: ${{ needs.plan.outputs.service }}
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      HEX_RELEASE_CHANNEL: ${{ needs.plan.outputs.release-channel }}
+    outputs:
+      linux-x64-url: ${{ steps.publish.outputs.linux-x64-url }}
+      linux-arm64-url: ${{ steps.publish.outputs.linux-arm64-url }}
+    steps:
+      - *checkout-release
+      - name: Download
+        uses: ./.github/release/download
+        with:
+          pattern: "{build-linux-*,sign-macos,sign-windows,sign-windows-installers}"
+          digests: >-
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
+            sign-macos=${{ needs.sign-macos.outputs.digest }}
+            sign-windows=${{ needs.sign-windows.outputs.digest }}
+            sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
+      - name: Gather the release files
+        run: bash .github/release/assemble.sh "$RUNNER_TEMP/in" "$RUNNER_TEMP/dist"
+      - id: publish
+        name: Publish
+        env:
+          NOTES_URL: ${{ needs.plan.outputs.notes-url }}
+        run: |
+          bash .github/release/release-service.sh publish "$RUNNER_TEMP/dist" "$NOTES_URL"
+          for target in linux-x64 linux-arm64; do
+            echo "$target-url=${RELEASE%/release}$(jq -r --arg target "$target" '.release.targets[$target].url' "$RUNNER_TEMP/dist/manifest.json")" >> "$GITHUB_OUTPUT"
+          done
+          { echo '### Manifest'; echo '```json'; cat "$RUNNER_TEMP/dist/manifest.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Record the Nix flake and the Linux packages
+        # The flake builds this commit from source, and the .deb and .rpm are
+        # files of this release, so they serve the version now.
+        if: needs.plan.outputs.channel == 'stable'
+        run: |
+          for kind in nix deb-x64 deb-arm64 rpm-x64 rpm-arm64; do
+            bash .github/release/release-service.sh distribution "$kind" "$HEX_VERSION"
+          done
+
+  # Last, once every platform and the release service published: tags
+  # v<version> on the released commit and mirrors the files to its GitHub
+  # release, with the built-in token; a failed run leaves no tag. Tags trigger
+  # nothing. A check run pushes and deletes a throwaway v0.0.0-test-<run> tag
+  # to prove the token can tag.
+  github:
+    name: Tag and GitHub release
+    needs: [plan, build, publish, sign-macos, verify-macos, sign-windows, installers, sign-windows-installers]
+    if: >-
+      ${{ !cancelled() && (
+        (needs.plan.outputs.channel == 'stable' && needs.publish.result == 'success')
+        || (needs.plan.outputs.channel == 'check' && needs.installers.result == 'success'
+            && (needs.verify-macos.result == 'success' || needs.sign-macos.outputs.signed != 'true')) ) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ needs.plan.outputs.sha }}
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      HEX_RELEASE_COMMIT: ${{ needs.plan.outputs.sha }}
+      HEX_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      HEX_RELEASE_SOURCE: ${{ github.workspace }}
+    steps:
+      # Credentials stay so the job can push the tag; it runs no repository
+      # code beyond .github/release/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          sparse-checkout: |
+            /.github/release/
+            /docs/releases/
+          sparse-checkout-cone-mode: false
+      - name: Tag
+        env:
+          HEX_RELEASE_TAG_TEST: ${{ needs.plan.outputs.channel == 'check' && '1' || '' }}
+        run: bash .github/release/tag-release.sh
+      - name: Download
+        if: needs.plan.outputs.channel == 'stable'
+        uses: ./.github/release/download
+        with:
+          pattern: "{build-linux-*,sign-macos,sign-windows,sign-windows-installers}"
+          digests: >-
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
+            sign-macos=${{ needs.sign-macos.outputs.digest }}
+            sign-windows=${{ needs.sign-windows.outputs.digest }}
+            sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
+      - name: Gather the release files
+        if: needs.plan.outputs.channel == 'stable'
+        run: bash .github/release/assemble.sh "$RUNNER_TEMP/in" "$RUNNER_TEMP/dist"
+      - name: GitHub release
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/release/publish-github-release.sh "$RUNNER_TEMP/dist"
+
+  # Builds and installs hex-bin from the published x64 file, without
+  # secrets; its PKGBUILD also names the published arm64 file.
+  aur-stage:
+    name: AUR package
+    needs: [plan, build, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable' }}
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      LINUX_X64_URL: ${{ needs.publish.outputs.linux-x64-url }}
+      LINUX_ARM64_URL: ${{ needs.publish.outputs.linux-arm64-url }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm --needed git
+          useradd --create-home builder
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: build-linux-*
+          digests: >-
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
+      - name: Stage and test hex-bin
+        run: |
+          stage="$RUNNER_TEMP/aur"
+          x64="$RUNNER_TEMP/in/build-linux-x86_64/hex-$HEX_VERSION-linux-x64"
+          arm64="$RUNNER_TEMP/in/build-linux-aarch64/hex-$HEX_VERSION-linux-arm64"
+          chown -R builder: "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          runuser -u builder -- scripts/release-aur.sh stage "$HEX_VERSION" "$x64" "$LINUX_X64_URL" "$arm64" "$LINUX_ARM64_URL" "$stage"
+          runuser -u builder -- scripts/release-aur.sh test "$stage"
+          pacman -U --noconfirm "$stage"/hex-bin-*.pkg.tar.zst
+          test "$(hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
+          # The PKGBUILD's sources are the published files.
+          curl -fsS "$LINUX_X64_URL" | cmp - "$x64"
+          curl -fsS "$LINUX_ARM64_URL" | cmp - "$arm64"
+          mkdir -p "$RUNNER_TEMP/aur-out"
+          (cd "$stage" && cp PKGBUILD .SRCINFO hex.desktop hex.service LICENSE hex-bin.install "$RUNNER_TEMP/aur-out/")
+          { echo '### AUR PKGBUILD'; echo '```'; cat "$stage/PKGBUILD"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-aur
+          path: ${{ runner.temp }}/aur-out
+
+  aur:
+    name: AUR
+    needs: [plan, aur-stage]
+    if: ${{ !cancelled() && needs.aur-stage.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: build-aur
+          digests: build-aur=${{ needs.aur-stage.outputs.digest }}
+      - name: Push to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: bash .github/release/push-aur.sh "$RUNNER_TEMP/in/build-aur"
+
+  # Tells AUR installs about the version only once the AUR serves it.
+  record-aur:
+    needs: [plan, aur]
+    if: ${{ !cancelled() && needs.aur.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: *publish-env
+    steps:
+      - *checkout-release
+      - run: bash .github/release/release-service.sh distribution aur "$HEX_VERSION"
+
+  # Renders the cask from the published DMG and checks it with brew, without
+  # secrets.
+  homebrew-stage:
+    name: Homebrew cask
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable' }}
+    runs-on: macos-15
+    env:
+      RELEASE: ${{ needs.plan.outputs.service }}
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      RELEASE_CHANNEL: ${{ needs.plan.outputs.release-channel }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Render the cask from the published DMG
+        run: |
+          curl -fsS "$RELEASE/hex/desktop/$RELEASE_CHANNEL.json" -o "$RUNNER_TEMP/manifest.json"
+          version=$(jq -er .release.version "$RUNNER_TEMP/manifest.json")
+          test "$version" = "$HEX_VERSION"
+          dmg=$(jq -ec '.release.targets["macos-arm64-dmg"]' "$RUNNER_TEMP/manifest.json") || {
+            echo "::error::Hex $version has no macos-arm64-dmg build."
+            exit 1
+          }
+          url="${RELEASE%/release}$(printf '%s' "$dmg" | jq -r .url)"
+          sha256=$(printf '%s' "$dmg" | jq -r .sha256)
+          mkdir -p "$RUNNER_TEMP/cask"
+          scripts/release-homebrew.sh render "$version" "$url" "$sha256" "$RUNNER_TEMP/cask/hex.rb"
+          { echo '### Casks/hex.rb'; echo '```ruby'; cat "$RUNNER_TEMP/cask/hex.rb"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check it with brew
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          brew tap anomalyco/tap
+          cp "$RUNNER_TEMP/cask/hex.rb" "$(brew --repo anomalyco/tap)/Casks/hex.rb"
+          brew style --cask anomalyco/tap/hex
+          brew audit --cask --strict --online anomalyco/tap/hex
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-homebrew
+          path: ${{ runner.temp }}/cask
+
+  homebrew:
+    name: Homebrew
+    needs: [plan, homebrew-stage]
+    if: ${{ !cancelled() && needs.homebrew-stage.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: build-homebrew
+          digests: build-homebrew=${{ needs.homebrew-stage.outputs.digest }}
+      - name: Push to anomalyco/homebrew-tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: bash .github/release/push-homebrew.sh "$RUNNER_TEMP/in/build-homebrew/hex.rb" "$HEX_VERSION"
+
+  # Tells Homebrew installs about the version only once the tap serves it.
+  record-brew:
+    needs: [plan, homebrew]
+    if: ${{ !cancelled() && needs.homebrew.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: *publish-env
+    steps:
+      - *checkout-release
+      - run: bash .github/release/release-service.sh distribution brew "$HEX_VERSION"

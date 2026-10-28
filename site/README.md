@@ -4,8 +4,10 @@
 `bun run dev` starts Vite. `bun run build [--mode dev]` checks TypeScript and
 builds Cloudflare Build Output with base `/hex/`; `bun run check:downloads`
 checks that every download link serves a file. `cloudflare.config.ts` defines
-both Workers; CI deploys them with `bun run deploy:dev` / `deploy:production`
-(`cf deploy --prebuilt --mode <mode>`), never a laptop. `worker.ts` serves the
+both Workers. CI deploys them, never a laptop: Site builds without secrets and
+`.github/release/deploy-site.sh` deploys the verified Build Output
+(`cf deploy --prebuilt --mode <mode>`), refusing any Worker, route, or binding
+other than this config's (docs/releasing.md). `worker.ts` serves the
 site and, at `/hex/files/`, the environment's R2 bucket of release files, and
 301s other hosts and plain HTTP to the canonical host.
 

@@ -137,7 +137,26 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 }
 
 #[test]
-fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
+fn a_shortcut_without_a_key_says_so() {
+    let rt = runtime("portal-unbound", true, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "F12 won't work until you add it to your desktop's keybindings")
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("Your desktop granted"))
+    );
+    assert!(shown.iter().any(|text| text == "Waiting for a keybinding"));
+    assert!(!shown.iter().any(|text| text.starts_with("Ready anywhere")));
+    assert!(rt.find("dictation/card/refused").is_none());
+}
+
+#[test]
+fn advanced_opens_while_in_use_and_always_closes() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert!(rt.find("microphone-mode").is_none());
     tap(&mut rt, "advanced-toggle");
@@ -147,12 +166,17 @@ fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
     assert!(!rt.state.confirm_release, "collapsing drops the question");
     assert!(rt.find("microphone-mode").is_none());
 
+    rt.state.advanced = None;
     rt.state.settings.release_microphone_while_idle = true;
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("microphone-mode").is_some(), "in use opens it");
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_some(), "and keeps it open");
+    assert!(rt.find("microphone-mode").is_none(), "but it still closes");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("microphone-mode").is_some());
+
+    rt.state.advanced = None;
 
     rt.state.settings.release_microphone_while_idle = false;
     rt.state.settings.double_tap_lock = true;
@@ -185,6 +209,59 @@ fn toggles_save_through_the_host() {
     assert!(!rt.state.settings.paste_with_shift);
     assert_eq!(saved(&rt), 1);
     assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn choosing_an_update_channel_saves_it_and_checks_now() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        rt.state.settings.updates.channel,
+        Some(crate::app_settings::UpdateChannel::Dev)
+    );
+    assert_eq!(saved(&rt), 1);
+    assert!(matches!(
+        sent(&rt),
+        [Request::Desktop(DesktopAction::CheckForUpdates)]
+    ));
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        saved(&rt),
+        1,
+        "choosing the same channel again saves nothing"
+    );
+}
+
+#[test]
+fn choosing_the_channel_in_effect_keeps_following_the_build() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment0");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    assert_eq!(saved(&rt), 0);
+    assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn installs_that_never_update_hide_the_update_channel() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("update-channel").is_some());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::PackageManager;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::SourceBuild;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
 }
 
 #[test]
@@ -610,7 +687,7 @@ fn a_settings_row_shows_no_hover_or_press_of_its_own() {
 fn hover_leaves_at_once() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     for key in [
-        "check-for-updates",
+        "update-status",
         "dictation-hotkey",
         "microphone-control-field-trigger",
     ] {
@@ -694,6 +771,28 @@ fn choosing_an_opencode_model_saves_it() {
     assert_eq!(
         rt.state.settings.voice_action.model, None,
         "back to the OpenCode default"
+    );
+}
+
+#[test]
+fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
+    let mut rt = runtime("voice-action-models-long", true, PANE_SIZE);
+    settle(&mut rt);
+    let [_, top, _, height] = rt.presented("model-results").unwrap().0;
+    assert!(
+        top + height <= PANE_SIZE.1 - 8.0,
+        "the list ends inside the window: {top} + {height}"
+    );
+    tap(&mut rt, "model-search");
+    for _ in 0..40 {
+        key(&mut rt, Key::Down, Mods::default());
+    }
+    settle(&mut rt);
+    let [_, row_top, _, row_height] = rt.presented("model40").unwrap().0;
+    assert!(
+        row_top >= top && row_top + row_height <= top + height,
+        "the highlighted row scrolled into view: {row_top} in {top}..{}",
+        top + height
     );
 }
 
@@ -1133,6 +1232,46 @@ fn recognition_hints_save_when_typing_pauses() {
         ui.settings.transcription.recognition_hints,
         "OpenCode, Effect"
     );
+}
+
+#[test]
+fn the_microphone_field_names_the_input_in_use() {
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let rt = runtime("mac-settings", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+
+    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+    let texts = texts(&rt);
+    assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
+    assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
+}
+
+#[test]
+fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
+    let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&note.to_owned()), "{shown:?}");
+    assert!(shown.contains(&"off while the lid is closed".to_owned()));
+
+    // A saved built-in microphone shows the default standing in, too.
+    rt.state.settings.microphone = Some("MacBook Pro Microphone".into());
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices.default_is_off_with_lid_closed = false;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    assert!(texts(&rt).contains(&note.to_owned()));
 }
 
 // ---------------------------------------------------------------------------

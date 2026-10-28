@@ -6,17 +6,19 @@
 anoma.ly/release/hex/                      the Anomaly release service (docs/releasing.md)
 ├── index.json, desktop/stable.json        what the site, installers, and apps read
 └── files/<sha256>/<name>                  Hex-<v>-macos-arm64.{zip,dmg}, Hex-<v>-windows-<arch>.exe,
-                                           Hex-Setup-<v>-windows-<arch>.exe, hex-<v>-linux-x64
+                                           Hex-Setup-<v>-windows-<arch>.exe,
+                                           hex-<v>-linux-<x64|arm64>{,.deb,.rpm}
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
 ├── install-linux.sh, install-windows.ps1  installers from the stable manifest
 └── files/…                                hex-production-files, frozen at 2.3.1 for old clients:
     ├── linux-update.json, windows-update.json, windows-aarch64-update.json, appcast.xml
     └── releases/HEX-2.3.1-…, install-linux.sh, install-windows.ps1 (the 2.3.1 installers)
-dev.anoma.ly/release/hex/, dev.anoma.ly/hex       dev service (staging releases) and dev site
+dev.anoma.ly/hex                           the dev site (reads anoma.ly/release; the service's dev stage
+                                           is only for testing the service)
 hex.kitlangton.com, .dev                   Kit's old site; should redirect to anoma.ly/hex
 downloads.hex.kitlangton.dev, .com         Kit's old bucket; releases up to 2.3.1 compiled it;
                                            redirects to anoma.ly/hex/files (keep forever)
-github.com/anomalyco/hex/releases/tag/app-v<version>   identical-byte mirror of every file
+github.com/anomalyco/hex/releases/tag/v<version>       identical-byte mirror of every file (app-v through 2.3.1)
 ```
 
 `docs/releasing.md` describes the Worker config, the workflow that publishes

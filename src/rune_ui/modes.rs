@@ -15,8 +15,11 @@ use rune::{Drag, El, Phase, TextEdit, Tx, Waker, col, edit_access, el, row, spac
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Switch, TextArea, TextInput};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, card, note, setting_row};
-use super::lists::{list_row, remove_button, source_list};
+use super::controls::{
+    ButtonKind, DESCRIPTION, Highlight, METRICS, Paint, button, card, note, page, section,
+    section_with, setting_row,
+};
+use super::lists::{LIST_COLUMN_PL, list_row, remove_button, source_list};
 use super::models::{self, Target};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
@@ -27,7 +30,7 @@ use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};
 use crate::text_replacements::TextReplacement;
 
 const LIST_WIDTH: f32 = 240.0;
-const FIELD_WIDTH: f32 = 300.0;
+const FIELD_WIDTH: f32 = 280.0;
 /// How often the transformation host's status file is reread.
 const STATUS_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -659,7 +662,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .key("modes-column")
         .w(LIST_WIDTH)
         .h_full()
-        .pl(16.0)
+        .pl(LIST_COLUMN_PL)
         .pr(8.0)
         .child(super::scroll_body("modes-scroll", source_list(list)));
     let body = row()
@@ -694,16 +697,8 @@ fn mode_row(
 fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let selection = ui.modes.selected;
     let current = mode(&ui.settings, selection);
-    let mut content = col().key("mode-detail-content").px(24.0).gap(16.0);
+    let mut content = page("mode-detail-content");
     content = content.child(basics(ui, p, selection, current));
-    content = content.child(
-        text(tr("Text processing"))
-            .key("processing-label")
-            .font(p.k.ty.ui_medium)
-            .color(p.muted())
-            .ml(12.0)
-            .mt(8.0),
-    );
     content = content.child(corrections(ui, p));
     content = content.child(processing(ui, p, selection, current, layer));
     content = content.child(transformations(ui, p, current));
@@ -931,8 +926,8 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
     }
     col()
         .key("application-picker")
-        .ml(12.0)
-        .mr(12.0)
+        .ml(METRICS.row_px)
+        .mr(METRICS.row_px)
         .mb(8.0)
         .padding(8.0)
         .gap(6.0)
@@ -1005,23 +1000,6 @@ fn monogram(p: Paint, name: &str) -> El {
         )
 }
 
-fn card_header(p: Paint, key: &str, title: &str, action: Option<El>) -> El {
-    row()
-        .key(key)
-        .min_h(40.0)
-        .px(12.0)
-        .gap(8.0)
-        .center_y()
-        .child(
-            text(title)
-                .key("title")
-                .font(p.k.ty.ui_medium)
-                .color(p.text())
-                .grow(1.0),
-        )
-        .children(action)
-}
-
 fn corrections(ui: &Ui, p: Paint) -> El {
     let add = IconButton::new(PLUS)
         .variant(IconButtonVariant::Ghost)
@@ -1030,12 +1008,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
         .on_press(add_replacement)
         .build(p.k)
         .key("add-correction");
-    let mut rows = vec![card_header(
-        p,
-        "corrections-header",
-        tr("Corrections"),
-        Some(add),
-    )];
+    let mut rows = Vec::new();
     if ui.modes.editor.replacements.is_empty() {
         rows.push(note(
             "no-corrections",
@@ -1047,7 +1020,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
         rows.push(
             row()
                 .key(format!("correction{index}"))
-                .px(12.0)
+                .px(METRICS.row_px)
                 .py(6.0)
                 .gap(8.0)
                 .center_y()
@@ -1083,7 +1056,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
                 )),
         );
     }
-    card(p, "corrections-card", rows)
+    section_with(p, "corrections", tr("Corrections"), add.mr(-4.0), rows)
 }
 
 fn processing(
@@ -1105,11 +1078,12 @@ fn processing(
         })
         .build(p.k)
         .key("processing-toggle");
-    let mut rows = vec![card_header(
+    let mut rows = vec![setting_row(
         p,
-        "processing-header",
+        "processing-enabled",
         tr("OpenCode transformation"),
-        Some(toggle),
+        None,
+        toggle,
     )];
     if enabled {
         rows.extend(models::rows(ui, p, Target::Mode(selection), layer));
@@ -1128,7 +1102,7 @@ fn processing(
         rows.push(
             col()
                 .key("instructions")
-                .px(12.0)
+                .px(METRICS.row_px)
                 .py(8.0)
                 .gap(6.0)
                 .child(
@@ -1159,7 +1133,7 @@ fn processing(
     if let Some(notice) = models::unavailable(ui, p, OpenCodeFeature::Transformation) {
         rows.push(notice);
     }
-    card(p, "processing-card", rows)
+    section(p, "processing", tr("Processing"), rows)
 }
 
 fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
@@ -1182,14 +1156,10 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
                 .on_press(|ui: &mut Ui| ui.modes.transformation_picker_open = true)
                 .build(p.k)
                 .key("toggle-transformation-picker")
+                .mr(-4.0)
         }
     });
-    let mut rows = vec![card_header(
-        p,
-        "transformations-header",
-        tr("Transformations"),
-        action,
-    )];
+    let mut rows = Vec::new();
     let dragging = ui.modes.drag.as_ref();
     let order = dragging.map_or(&current.transformations, |drag| &drag.order);
     let pitch = TRANSFORMATION_ROW + p.hair;
@@ -1214,8 +1184,8 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
         let mut item = row()
             .key(format!("transformation{index}"))
             .h(TRANSFORMATION_ROW)
-            .pl(6.0)
-            .pr(12.0)
+            .pl(METRICS.row_px - 6.0)
+            .pr(METRICS.row_px)
             .gap(6.0)
             .center_y()
             .radius(p.k.radius.md)
@@ -1278,7 +1248,18 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
     if let Some(workspace) = workspace_status(ui, p) {
         rows.push(workspace);
     }
-    card(p, "transformations-card", rows)
+    if rows.is_empty() {
+        rows.push(note(
+            "no-transformations",
+            tr("No transformations in this mode."),
+            p.muted(),
+        ));
+    }
+    let title = tr("Transformations");
+    match action {
+        Some(action) => section_with(p, "transformations", title, action, rows),
+        None => section(p, "transformations", title, rows),
+    }
 }
 
 /// The TypeScript workspace behind custom transformations: setup, loading,

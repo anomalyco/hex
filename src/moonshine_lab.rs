@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::audio::{AudioInput, AudioInputEvent};
-use crate::config::INPUT_DEVICES;
 use crate::events::TranscriptPhase;
 use crate::moonshine::{Moonshine, MoonshineConfig, RecognitionUpdate};
 use crate::spoken_text::normalize;
@@ -98,7 +97,7 @@ pub fn run(project_root: &Path, directory: &Path, device: Option<&str>) -> Resul
     save_manifest(&manifest_path, &manifest)?;
     let input = match device {
         Some(device) => AudioInput::open_named(device)?,
-        None => AudioInput::open(INPUT_DEVICES)?,
+        None => AudioInput::open_system_default()?,
     };
     let mut terminal = ratatui::init();
     let result = run_loop(

@@ -6,6 +6,75 @@ use std::sync::RwLock;
 
 use rune::Spring;
 
+pub(crate) use crate::app_settings::CapsuleFlow;
+
+/// A flow's name on the playground's switch and in the clips.
+pub(crate) fn flow_label(flow: CapsuleFlow) -> &'static str {
+    match flow {
+        CapsuleFlow::List => "A · List",
+        CapsuleFlow::Toast => "B · Toast",
+        CapsuleFlow::MenuBar => "C · Menu bar",
+        CapsuleFlow::Cursor => "D · Cursor",
+        CapsuleFlow::Notch => "E · Notch",
+    }
+}
+
+/// How the finished capsule's top line reads, while Kit picks one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TopLine {
+    /// A small check and "Copied" in quiet ink, then Paste and Inspect as
+    /// icons beside ✕.
+    Quiet,
+    /// The check alone, no word; the icons and ✕ at the far end.
+    Icons,
+}
+
+impl TopLine {
+    pub(crate) const ALL: [TopLine; 2] = [TopLine::Quiet, TopLine::Icons];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            TopLine::Quiet => "A · Quiet label",
+            TopLine::Icons => "B · Icons only",
+        }
+    }
+
+    fn rust(self) -> &'static str {
+        match self {
+            TopLine::Quiet => "TopLine::Quiet",
+            TopLine::Icons => "TopLine::Icons",
+        }
+    }
+}
+
+/// How the send-to list sets its key hints apart from its rows, while Kit
+/// picks one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ListFooter {
+    /// A band the list's full width, on its own quiet fill under a rule.
+    Band,
+    /// A rounded well inset like the rows, with no rule.
+    Well,
+}
+
+impl ListFooter {
+    pub(crate) const ALL: [ListFooter; 2] = [ListFooter::Band, ListFooter::Well];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ListFooter::Band => "A · Band",
+            ListFooter::Well => "B · Well",
+        }
+    }
+
+    fn rust(self) -> &'static str {
+        match self {
+            ListFooter::Band => "ListFooter::Band",
+            ListFooter::Well => "ListFooter::Well",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Tuning {
     /// The Undo window: a send, a rule's or a pick's, can be taken back
@@ -18,24 +87,28 @@ pub(crate) struct Tuning {
     pub(crate) brief_hold_s: f64,
     /// A recording's chips close by themselves this long after a tap.
     pub(crate) chips_open_s: f64,
-    /// The walls between phases.
+    /// The walls, and every piece that stays and moves, on every change:
+    /// about 0.3 s with a little bounce, as Dynamic Island's.
     pub(crate) island: Spring,
-    /// The shell's fade and scale on entry.
+    /// The shell's fade and rise on entry; it leaves on 0.9 of it.
     pub(crate) island_scale: Spring,
-    pub(crate) reveal_open: Spring,
-    pub(crate) reveal_close: Spring,
-    pub(crate) switch_width: Spring,
-    pub(crate) switch_slide: Spring,
     /// The selection highlight trailing a mode change.
     pub(crate) highlight: Spring,
-    /// Content leaves on the SwiftUI capsule's exit, 0.20 s × 0.85.
-    pub(crate) presence_exit: Spring,
-    /// Narrowing, the walls start this long after the content.
-    pub(crate) shell_wait_s: f32,
-    /// Between entering chips.
-    pub(crate) stagger_s: f32,
-    /// How long content takes to fade in (× 1.6 for its spring).
-    pub(crate) reveal_enter_s: f32,
+    /// Content coming in: all of it at once, over the walls' move, never
+    /// waiting for them or for what leaves.
+    pub(crate) content_in: Spring,
+    /// Content going, at the same moment, a little quicker.
+    pub(crate) content_out: Spring,
+    /// How blurred (pt) and how small, toward the capsule's middle, content
+    /// is while it comes and goes. Rune keeps blur within 4 pt and scale
+    /// within 0.9.
+    pub(crate) content_blur: f32,
+    pub(crate) content_scale: f32,
+    pub(crate) top_line: TopLine,
+    pub(crate) list_footer: ListFooter,
+    /// The flow after a capture stops: `capture.capsule_flow` in the app,
+    /// the playground's switch there.
+    pub(crate) flow: CapsuleFlow,
 }
 
 pub(crate) const DEFAULT: Tuning = Tuning {
@@ -43,23 +116,45 @@ pub(crate) const DEFAULT: Tuning = Tuning {
     done_hold_s: 25.0,
     brief_hold_s: 4.0,
     chips_open_s: 3.5,
-    island: Spring::new(0.32, 0.0),
-    island_scale: Spring::new(0.22, 0.0),
-    reveal_open: Spring::new(0.36, 0.16),
-    reveal_close: Spring::new(0.32, 0.08),
-    switch_width: Spring::new(0.30, 0.0),
-    switch_slide: Spring::new(0.36, 0.0),
+    island: Spring::new(0.30, 0.12),
+    island_scale: Spring::new(0.28, 0.10),
     highlight: Spring::new(0.25, 0.0),
-    presence_exit: Spring::new(0.20 * 0.85, 0.0),
-    shell_wait_s: 0.06,
-    stagger_s: 0.008,
-    reveal_enter_s: 0.16,
+    content_in: Spring::new(0.30, 0.10),
+    content_out: Spring::new(0.24, 0.0),
+    content_blur: 3.0,
+    content_scale: 0.92,
+    top_line: TopLine::Quiet,
+    list_footer: ListFooter::Band,
+    flow: CapsuleFlow::List,
 };
 
 static CURRENT: RwLock<Tuning> = RwLock::new(DEFAULT);
 
+#[cfg(test)]
+thread_local! {
+    /// A test's flow, on its own thread only, so tests in parallel never
+    /// see each other's.
+    static TEST_FLOW: std::cell::Cell<Option<CapsuleFlow>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `body` with `flow` in use on this thread.
+#[cfg(test)]
+pub(crate) fn with_flow<T>(flow: CapsuleFlow, body: impl FnOnce() -> T) -> T {
+    let before = TEST_FLOW.replace(Some(flow));
+    let out = body();
+    TEST_FLOW.set(before);
+    out
+}
+
 /// The values in use: [`DEFAULT`] unless the playground changed them.
 pub(crate) fn get() -> Tuning {
+    #[cfg(test)]
+    if let Some(flow) = TEST_FLOW.get() {
+        return Tuning {
+            flow,
+            ..*CURRENT.read().unwrap_or_else(|e| e.into_inner())
+        };
+    }
     *CURRENT.read().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -80,15 +175,14 @@ impl Tuning {
              \x20   chips_open_s: {:.2},\n\
              \x20   island: {},\n\
              \x20   island_scale: {},\n\
-             \x20   reveal_open: {},\n\
-             \x20   reveal_close: {},\n\
-             \x20   switch_width: {},\n\
-             \x20   switch_slide: {},\n\
              \x20   highlight: {},\n\
-             \x20   presence_exit: {},\n\
-             \x20   shell_wait_s: {:.3},\n\
-             \x20   stagger_s: {:.3},\n\
-             \x20   reveal_enter_s: {:.3},\n\
+             \x20   content_in: {},\n\
+             \x20   content_out: {},\n\
+             \x20   content_blur: {:.2},\n\
+             \x20   content_scale: {:.3},\n\
+             \x20   top_line: {},\n\
+             \x20   list_footer: {},\n\
+             \x20   flow: CapsuleFlow::{:?},\n\
              }};\n",
             self.undo_s,
             self.done_hold_s,
@@ -96,15 +190,14 @@ impl Tuning {
             self.chips_open_s,
             spring(self.island),
             spring(self.island_scale),
-            spring(self.reveal_open),
-            spring(self.reveal_close),
-            spring(self.switch_width),
-            spring(self.switch_slide),
             spring(self.highlight),
-            spring(self.presence_exit),
-            self.shell_wait_s,
-            self.stagger_s,
-            self.reveal_enter_s,
+            spring(self.content_in),
+            spring(self.content_out),
+            self.content_blur,
+            self.content_scale,
+            self.top_line.rust(),
+            self.list_footer.rust(),
+            self.flow,
         )
     }
 }
@@ -118,9 +211,12 @@ mod tests {
         let rust = DEFAULT.to_rust();
         for field in [
             "undo_s: 5.00",
-            "island: Spring::new(0.320, 0.000)",
-            "reveal_open: Spring::new(0.360, 0.160)",
-            "reveal_enter_s: 0.160",
+            "island: Spring::new(0.300, 0.120)",
+            "content_in: Spring::new(0.300, 0.100)",
+            "content_scale: 0.920",
+            "top_line: TopLine::Quiet",
+            "list_footer: ListFooter::Band",
+            "flow: CapsuleFlow::List",
         ] {
             assert!(rust.contains(field), "{field} missing from\n{rust}");
         }

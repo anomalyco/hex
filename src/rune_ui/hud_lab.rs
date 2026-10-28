@@ -7,7 +7,7 @@
 use rune::{El, Tx, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, segmented};
+use super::controls::{ButtonKind, DESCRIPTION, Paint, bare_page, button, segmented};
 use super::lists::slider;
 use super::platform::{HudDemo, HudLab, HudTuning, PlatformRequest};
 use crate::desktop_i18n::tr;
@@ -277,11 +277,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             move |ui, value, _| configure(ui, |lab| control.set(&mut lab.tuning, value)),
         ));
     }
-    let content = col()
-        .key("content")
-        .px(24.0)
-        .pt(4.0)
-        .gap(24.0)
+    let content = bare_page("content")
         .child(controls)
         .child(cards)
         .child(sliders)

@@ -340,7 +340,7 @@ fn enqueue(player: Option<&SyncSender<Request>>, request: Request) {
 /// How long a provisional start tone waits before sounding. Modifiers pressed
 /// together for another application's shortcut arrive within this window, so
 /// those chords stay silent while a deliberate press still sounds at once.
-const CHORD_GRACE: Duration = Duration::from_millis(40);
+pub(crate) const CHORD_GRACE: Duration = Duration::from_millis(40);
 /// How quickly a retracted start tone fades out instead of clicking off.
 const RETRACT_FADE: Duration = Duration::from_millis(20);
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(250);

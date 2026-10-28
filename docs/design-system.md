@@ -69,7 +69,8 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 
 | Job | Piece |
 |---|---|
-| Settings card, titled card | `card`, `section` |
+| Settings page (the gutter and the rhythm between sections) | `page` (cards hang `row_px` past the gutter so row text sits on the title's edge) or `bare_page` (free-standing content on the gutter); their numbers are `METRICS`, the one set of layout tokens |
+| Settings card, titled card, a card whose label line carries a control | `card`, `section`, `section_with` (Advanced, a status, an add button) |
 | Settings row (title, description, control) | `setting_row`, `described_row`, `link_row` (a one-line link under the title, at the plain row height), `toggle_row`; a row that toggles shows `row_switch`; any other row pressed as a whole: `pressable_row` |
 | A few exclusive choices / a dropdown | `segmented`, `select` |
 | A value whose choices open in a sheet, not a menu | `sheet_button` (the value and a trailing chevron) |

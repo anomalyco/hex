@@ -51,7 +51,8 @@ pub(crate) enum DesktopShortcuts {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopGrantedShortcut {
     pub(crate) name: String,
-    /// The trigger the desktop granted; `None` when it refused.
+    /// The trigger the desktop granted; `None` when it refused, and empty
+    /// when it took the shortcut without a key (Hyprland).
     pub(crate) trigger: Option<String>,
 }
 
@@ -65,16 +66,23 @@ pub(crate) enum DesktopUpdateStatus {
     Current,
     Failed,
     Downloading,
-    /// A newer release exists that this install cannot apply itself; the
+    /// Another release exists that this install cannot apply itself; the
     /// window links to its download.
     Available,
     ReadyToRestart,
+    /// The Update channel setting names another channel; its current
+    /// release installs only once the user confirms ("Switch to Stable
+    /// 2.3.1").
+    SwitchAvailable {
+        channel: String,
+        version: String,
+    },
     /// Installed from a source checkout, which updates it; the release
     /// service never replaces it.
     SourceBuild,
     /// Installed by a package manager (pacman, Nix), which updates it.
     PackageManager,
-    /// The package manager that installed Hex serves a newer version.
+    /// The package manager that installed Hex serves another version.
     PackageUpdate {
         command: String,
     },
@@ -98,6 +106,10 @@ pub(crate) enum DesktopAction {
     /// Opens the download an install cannot apply itself.
     OpenUpdate,
     RestartIntoUpdate,
+    /// Installs the other channel's release the Update channel setting chose.
+    ConfirmUpdateSwitch,
+    /// The window opened or gained focus; the Dev channel checks then.
+    WindowFocused,
     SetDictationShortcut(DesktopShortcut),
     StartListening,
     StopListening,

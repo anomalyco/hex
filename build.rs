@@ -70,11 +70,14 @@ fn main() {
     }
 }
 
-/// A test build carries its commit (`HEX_COMMIT`), which the sidebar shows
+/// A test or local build carries its commit (`HEX_COMMIT`), which the sidebar shows
 /// beside the version.
 fn test_build_commit() {
     println!("cargo:rerun-if-env-changed=HEX_TEST_BUILD");
-    if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1") {
+    println!("cargo:rerun-if-env-changed=HEX_LOCAL_BUILD");
+    if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1")
+        && std::env::var("HEX_LOCAL_BUILD").as_deref() != Ok("1")
+    {
         return;
     }
     let git = |args: &[&str]| {

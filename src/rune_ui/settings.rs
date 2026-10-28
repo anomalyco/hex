@@ -7,20 +7,21 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, KEY_GAP, KeySize, Paint, button, described_row,
-    folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot, section,
-    segmented, select, setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
+    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS,
+    Paint, button, described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note,
+    page, pulsing_dot, section, section_with, segmented, select, select_sized, setting_row,
+    sheet_button, status_dot, text_field, toggle_row, tray_roll,
 };
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
 use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition, ModifierSide,
-    RecordingAudioBehavior,
+    RecordingAudioBehavior, UpdateChannel,
 };
 use crate::desktop_host::{
-    DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts,
+    DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
 use crate::transcription_models::{self, ModelPreparationStage};
 
@@ -368,9 +369,47 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     ui.open = (ui.open != Some(menu)).then_some(menu);
-    if ui.open == Some(Menu::Microphone) && !matches!(ui.service, Service::Fixture(_)) {
-        ui.microphones = crate::audio::input_device_names().map_err(|error| error.to_string());
+    if ui.open == Some(Menu::Microphone) {
+        refresh_microphones(ui);
     }
+}
+
+/// Lists the microphones again, and what System default resolves to, on a
+/// worker thread; [`poll_microphones`] adopts the result. A change during a
+/// listing in flight is listed again after it.
+pub(super) fn refresh_microphones(ui: &mut Ui) {
+    if matches!(ui.service, Service::Fixture(_)) || ui.microphones_listing.is_some() {
+        return;
+    }
+    ui.microphones_route = Some(crate::audio::input_route_generation());
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let spawned = std::thread::Builder::new()
+        .name("hex-microphones".into())
+        .spawn(move || {
+            let _ = sender.send(crate::audio::input_devices().map_err(|error| error.to_string()));
+        });
+    match spawned {
+        Ok(_) => ui.microphones_listing = Some(receiver),
+        Err(error) => ui.microphones = Err(error.to_string()),
+    }
+}
+
+/// Adopts a finished listing. Returns whether the microphones changed.
+pub(super) fn poll_microphones(ui: &mut Ui) -> bool {
+    let Some(listing) = &ui.microphones_listing else {
+        return false;
+    };
+    let listed = match listing.try_recv() {
+        Ok(listed) => listed,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err("the microphone list stopped".to_owned())
+        }
+    };
+    ui.microphones_listing = None;
+    let changed = ui.microphones != listed;
+    ui.microphones = listed;
+    changed
 }
 
 pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
@@ -390,10 +429,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
 /// the sidebar's version.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use super::platform_settings as os;
-    let mut content = col()
-        .key("content")
-        .px(24.0)
-        .gap(16.0)
+    let mut content = page("content")
         .children(os::permissions_section(ui, p))
         .children(os::error_section(ui, p));
     if ui.platform.caps.listener_control {
@@ -427,6 +463,9 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
     let hint = match (running, ui.settings.shortcut_mode) {
         _ if !ui.records_shortcuts() => {
             tr("Ready anywhere · Use your desktop's shortcuts to dictate").to_string()
+        }
+        (true, _) if has_no_key(ui, ShortcutTarget::Dictation) => {
+            tr("Waiting for a keybinding").to_string()
         }
         (true, ShortcutMode::Toggle) => tr_fill(
             "Ready anywhere · Press {} to start and stop dictating",
@@ -466,14 +505,21 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StartListening)),
         )
     };
+    let dot = if !running {
+        p.muted()
+    } else if has_no_key(ui, ShortcutTarget::Dictation) {
+        p.warning()
+    } else {
+        p.success()
+    };
     let summary = row()
         .key("listener")
-        .min_h(64.0)
-        .px(12.0)
+        .min_h(METRICS.row_h_described)
+        .px(METRICS.row_px)
         .py(8.0)
         .gap(12.0)
         .center_y()
-        .child(status_dot(if running { p.success() } else { p.muted() }))
+        .child(status_dot(dot))
         .child(
             col()
                 .key("copy")
@@ -516,6 +562,22 @@ pub(super) fn granted(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<(Stri
         DesktopGrantedShortcut {
             trigger: Some(trigger),
             ..
+        } if trigger.is_empty() => {
+            // Hyprland takes the shortcut but leaves its key to the user's config.
+            let key = binding(&ui.settings, target)
+                .map(|binding| binding.keycaps().join("+"))
+                .unwrap_or_default();
+            (
+                tr_fill(
+                    "{} won't work until you add it to your desktop's keybindings",
+                    &key,
+                ),
+                p.danger(),
+            )
+        }
+        DesktopGrantedShortcut {
+            trigger: Some(trigger),
+            ..
         } => (tr_fill("Your desktop granted {}", trigger), p.muted()),
         DesktopGrantedShortcut { trigger: None, .. } => (
             tr("Your desktop did not grant this shortcut").to_string(),
@@ -538,6 +600,11 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::CaptureList => "Send-to list",
     };
     granted.iter().find(|shortcut| shortcut.name == name)
+}
+
+/// The desktop took `target`'s shortcut but gave it no key (Hyprland).
+fn has_no_key(ui: &Ui, target: ShortcutTarget) -> bool {
+    portal_grant(ui, target).is_some_and(|shortcut| shortcut.trigger.as_deref() == Some(""))
 }
 
 /// The desktop kept `target`'s shortcut for itself: the note under its row.
@@ -791,23 +858,70 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         )
         .into(),
     );
-    let microphone = settings
+    let listed = ui.microphones.as_ref().ok();
+    let default_name = listed.and_then(|devices| devices.system_default.as_deref());
+    // Only a list that names inputs can tell a saved microphone is missing.
+    let missing = settings.microphone.as_deref().filter(|saved| {
+        listed.is_some_and(|devices| {
+            !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
+        })
+    });
+    // A MacBook's built-in microphone is off while its lid is closed.
+    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
+    let saved_off = settings
         .microphone
-        .clone()
-        .unwrap_or_else(|| tr("Automatic").into());
+        .as_deref()
+        .filter(|saved| off == Some(*saved));
+    // System default's choice, with the input it resolves to in faint text.
+    let system_detail = default_name.map(str::to_owned);
+    // The field always names the input in use, so a missing saved
+    // microphone shows the system default standing in for it.
+    let (microphone, microphone_detail) = match (&settings.microphone, missing.or(saved_off)) {
+        (Some(saved), None) => (saved.clone(), None),
+        _ => (tr("System default").to_owned(), system_detail.clone()),
+    };
+    let mac = ui.platform.caps.os == super::platform::Os::Macos;
+    let lid_note = |built_in: &str| match default_name {
+        Some(name) => tr_named(
+            "{built_in} is off while the lid is closed, so Hex listens to {input}",
+            &[("built_in", built_in), ("input", name)],
+        ),
+        None => tr_fill("{} is off while the lid is closed", built_in),
+    };
+    let microphone_note = listed.and_then(|devices| match &settings.microphone {
+        Some(_) if saved_off.is_some() => saved_off.map(lid_note),
+        Some(_) => missing.map(|saved| {
+            if mac {
+                tr_fill("{} isn't connected; using your Mac's input", saved)
+            } else {
+                tr_fill("{} isn't connected; using the system input", saved)
+            }
+        }),
+        None if devices.default_is_hex_microphone => default_name.map(|name| {
+            tr_fill(
+                "Hex Microphone is the system default, so Hex listens to {}",
+                name,
+            )
+        }),
+        None if devices.default_is_off_with_lid_closed => off.map(lid_note),
+        None => None,
+    });
     let mut devices = vec![Choice {
-        label: tr("Automatic").into(),
+        label: tr("System default").to_owned(),
+        detail: system_detail,
         selected: settings.microphone.is_none(),
         choose: Box::new(|ui: &mut Ui| {
             ui.open = None;
             ui.update(|settings| settings.microphone = None);
         }),
     }];
-    if let Ok(names) = &ui.microphones {
-        devices.extend(names.iter().map(|device| {
+    if let Ok(listed) = &ui.microphones {
+        devices.extend(listed.names.iter().map(|device| {
             let name = device.clone();
             Choice {
                 label: device.clone(),
+                detail: (off == Some(device.as_str()))
+                    .then(|| tr("off while the lid is closed").to_owned()),
                 selected: settings.microphone.as_deref() == Some(device),
                 choose: Box::new(move |ui: &mut Ui| {
                     ui.open = None;
@@ -817,20 +931,30 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             }
         }));
     }
+    if let Some(saved) = missing {
+        devices.push(Choice {
+            label: saved.to_owned(),
+            detail: Some(tr("not connected").to_owned()),
+            selected: true,
+            choose: Box::new(|ui: &mut Ui| ui.open = None),
+        });
+    }
     rows.push(
         setting_row(
             p,
             "microphone",
             tr("Microphone"),
-            None,
-            select(
+            microphone_note.as_deref(),
+            select_sized(
                 p,
                 "microphone-control",
                 &microphone,
+                microphone_detail.as_deref(),
                 ui.open == Some(Menu::Microphone),
                 devices,
                 |ui: &mut Ui| toggle_menu(ui, Menu::Microphone),
                 layer,
+                DEVICE_SELECT_WIDTH,
             ),
         )
         .into(),
@@ -867,30 +991,20 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let pinned = advanced_in_use(settings);
     rows.push(folding(
         "advanced-fold",
-        if ui.advanced || pinned {
+        if ui.advanced.unwrap_or(pinned) {
             advanced_rows(ui, p)
         } else {
             Vec::new()
         },
     ));
-    col()
-        .key("dictation")
-        .gap(6.0)
-        .child(
-            row()
-                .key("header-row")
-                .center_y()
-                .child(
-                    text(tr("Dictation"))
-                        .key("header")
-                        .font(p.k.ty.ui_medium.lh(16.0))
-                        .color(p.k.c.text_muted)
-                        .ml(12.0)
-                        .grow(1.0),
-                )
-                .child(advanced_toggle(ui, p, pinned)),
-        )
-        .child(super::controls::card(p, "card", rows))
+    // The toggle's word ends on the box's edge, its hover reaching past it.
+    section_with(
+        p,
+        "dictation",
+        tr("Dictation"),
+        advanced_toggle(ui, p, pinned).mr(-6.0),
+        rows,
+    )
 }
 
 /// The speech model row's description: preparation progress or its error.
@@ -1215,11 +1329,12 @@ fn output_section(ui: &Ui, p: Paint) -> El {
 }
 
 /// An advanced setting is off its default, so Advanced stays open to show
-/// it: the microphone released while idle, or Double-tap only where its row
-/// shows.
+/// it: the microphone released while idle, Double-tap only where its row
+/// shows, or a chosen update channel.
 fn advanced_in_use(settings: &AppSettings) -> bool {
     settings.release_microphone_while_idle
         || (double_tap_only_applies(settings) && settings.double_tap_only)
+        || settings.updates.channel.is_some()
 }
 
 fn double_tap_only_applies(settings: &AppSettings) -> bool {
@@ -1229,12 +1344,12 @@ fn double_tap_only_applies(settings: &AppSettings) -> bool {
 }
 
 /// The Dictation header's disclosure for the options most people never
-/// change, which show at the end of the card. It stays open while one is in
-/// use. (A row above them at the card's end would Tab straight into them,
+/// change, which show at the end of the card. It starts open while one is in
+/// use, and always closes when pressed. (A row above them at the card's end would Tab straight into them,
 /// but costs the 37 px that keeps General from scrolling at 760.)
 fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
     let c = &p.k.c;
-    let open = ui.advanced || pinned;
+    let open = ui.advanced.unwrap_or(pinned);
     let toggle = row()
         .key("advanced-toggle")
         .label(tr("Advanced"))
@@ -1261,18 +1376,15 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
             .key("arrow")
             .color(c.icon_weaker),
         );
-    if pinned {
-        return toggle;
-    }
     toggle
         .role("button")
         .hover(c.hover)
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(|ui: &mut Ui| {
-            ui.advanced = !ui.advanced;
-            if !ui.advanced {
+        .on_press(move |ui: &mut Ui| {
+            ui.advanced = Some(!open);
+            if open {
                 ui.confirm_release = false;
             }
         })
@@ -1282,7 +1394,7 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
 /// microphone's idle release and Double-tap only.
 fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
     let settings = &ui.settings;
-    vec![
+    let mut rows: Vec<CardRow> = vec![
         setting_row(
             p,
             "microphone-mode",
@@ -1298,7 +1410,7 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
                 &[tr("Keep ready (fast)"), tr("Release when idle")],
                 usize::from(settings.release_microphone_while_idle),
                 |ui, index| {
-                    ui.advanced = true;
+                    ui.advanced = Some(true);
                     let release = index == 1;
                     if release && !ui.settings.release_microphone_while_idle {
                         ui.confirm_release = true;
@@ -1332,14 +1444,16 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
                     tr("Wait for two complete shortcut taps before recording"),
                     settings.double_tap_only,
                     |ui: &mut Ui| {
-                        ui.advanced = true;
+                        ui.advanced = Some(true);
                         let enabled = !ui.settings.double_tap_only;
                         ui.update(|settings| settings.double_tap_only = enabled);
                     },
                 )
             }),
         ),
-    ]
+    ];
+    rows.extend(update_channel_row(ui, p).map(CardRow::from));
+    rows
 }
 
 fn release_confirmation(ui: &Ui, p: Paint) -> El {
@@ -1438,6 +1552,7 @@ fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             let selected = settings.ui_language == code;
             Choice {
                 label: tr(name).to_string(),
+                detail: None,
                 selected,
                 choose: Box::new(move |ui: &mut Ui| {
                     ui.open = None;
@@ -1465,4 +1580,57 @@ fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         ),
     ));
     section(p, "application", tr("Application"), rows)
+}
+
+/// Stable or Dev, only while this install updates itself: test, source,
+/// managed, and package-manager installs never check a channel.
+fn update_channel_row(ui: &Ui, p: Paint) -> Option<El> {
+    let updates = matches!(
+        ui.view.as_ref()?.update_status,
+        DesktopUpdateStatus::Checking
+            | DesktopUpdateStatus::Current
+            | DesktopUpdateStatus::Failed
+            | DesktopUpdateStatus::Downloading
+            | DesktopUpdateStatus::Available
+            | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::SwitchAvailable { .. }
+    );
+    if !updates {
+        return None;
+    }
+    let shown = ui
+        .settings
+        .updates
+        .channel
+        .unwrap_or_else(crate::updater::build_channel);
+    let labels: Vec<&str> = UpdateChannel::ALL
+        .iter()
+        .map(|channel| tr(channel.label()))
+        .collect();
+    Some(setting_row(
+        p,
+        "update-channel",
+        tr("Update channel"),
+        None,
+        segmented(
+            p,
+            "update-channel-control",
+            &labels,
+            UpdateChannel::ALL
+                .iter()
+                .position(|item| *item == shown)
+                .unwrap_or(0),
+            move |ui, index| {
+                // Choosing the channel already in effect saves nothing, so an
+                // unset channel keeps following the build.
+                let channel = UpdateChannel::ALL[index];
+                ui.advanced = Some(true);
+                if channel != shown
+                    && ui.update(|settings| settings.updates.channel = Some(channel))
+                {
+                    ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
+                }
+            },
+        ),
+    ))
 }

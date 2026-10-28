@@ -54,12 +54,20 @@ pub fn method() -> Method {
         return Method::Source;
     };
     if replaceable(&bundle) {
+        // The app carries no receipt; its build channel or `updates.channel`
+        // picks another channel (`super::channel`).
         Method::Direct {
             channel: "stable".into(),
         }
     } else {
         Method::DownloadOnly
     }
+}
+
+/// The `macos-arm64` target is a zip of the bundle, which the running app
+/// cannot reproduce, so a Mac build is identified by its version text.
+pub fn running_sha256() -> Option<String> {
+    None
 }
 
 /// Hex replaces the bundle by renaming it inside its parent directory, so

@@ -2,11 +2,20 @@
 set -eu
 
 # Installs Hex from the Anomaly release service (docs/plans/release-service.md):
-# the stable manifest names the linux-x64 executable with its size and
-# SHA-256, and install.json marks the install as one Hex updates itself.
+# the stable manifest names the linux-x64 or linux-arm64 executable with its
+# size and SHA-256, and install.json marks the install as one Hex updates itself.
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
-channel=stable
+# HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
+# install on the Dev update channel.
+channel=${HEX_INSTALL_CHANNEL:-stable}
+case "$channel" in
+  stable | dev) ;;
+  *)
+    echo "HEX_INSTALL_CHANNEL must be stable or dev." >&2
+    exit 1
+    ;;
+esac
 install_dir=${HEX_INSTALL_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
@@ -96,10 +105,14 @@ uninstall() {
   echo "Removed HEX. Logs and settings remain in $support_dir."
 }
 
-if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
-  echo "HEX currently supports x86_64 Linux." >&2
-  exit 1
-fi
+case "$(uname -s) $(uname -m)" in
+  "Linux x86_64") target=linux-x64 ;;
+  "Linux aarch64") target=linux-arm64 ;;
+  *)
+    echo "HEX supports x86_64 and aarch64 Linux." >&2
+    exit 1
+    ;;
+esac
 if [ "$(id -u)" -eq 0 ]; then
   echo "Install HEX as your desktop user, not root." >&2
   exit 1
@@ -171,10 +184,10 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   test "$(jq -r '"\(.schema) \(.app) \(.artifact) \(.channel)"' "$manifest")" = "1 hex desktop $channel" \
     || fail "$manifest_url is not the Hex desktop $channel manifest."
   version=$(jq -er .release.version "$manifest")
-  url=$(jq -er '.release.targets["linux-x64"].url' "$manifest") \
-    || fail "Hex $version has no linux-x64 build."
-  bytes=$(jq -er '.release.targets["linux-x64"].size' "$manifest")
-  sha256=$(jq -er '.release.targets["linux-x64"].sha256' "$manifest")
+  url=$(jq -er --arg target "$target" '.release.targets[$target].url' "$manifest") \
+    || fail "Hex $version has no $target build."
+  bytes=$(jq -er --arg target "$target" '.release.targets[$target].size' "$manifest")
+  sha256=$(jq -er --arg target "$target" '.release.targets[$target].sha256' "$manifest")
   printf '%s\n' "$bytes" | grep -Eq '^[1-9][0-9]*$' \
     || fail "Linux release has an invalid size."
   printf '%s\n' "$sha256" | grep -Eq '^[0-9a-f]{64}$' \
@@ -195,7 +208,8 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Downloaded Linux release checksum does not match."
   chmod 755 "$artifact_path"
 fi
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
+# The version is display text that names a directory, never compared.
+printf '%s\n' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
   || fail "Linux release has an invalid version."
 test -x "$artifact_path" || fail "HEX executable is missing: $artifact_path"
 
@@ -207,7 +221,7 @@ explain_unrunnable() {
   have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }')
   if [ -n "$needed" ] && [ -n "$have" ] &&
     [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" != "$needed" ]; then
-    fail "HEX $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta targets current x86_64 Arch Linux."
+    fail "HEX $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Ubuntu 24.04, Debian 13, Fedora 40, or a newer or rolling distribution."
   fi
   packages=
   if command -v ldd >/dev/null 2>&1; then
@@ -263,26 +277,14 @@ if ! flock -n 9; then
   exit 1
 fi
 current="$support_dir/current"
-current_executable=
+# Installs what was asked for, whatever version is installed now: versions
+# are never compared.
 if [ -e "$current" ] || [ -L "$current" ]; then
   if [ ! -L "$current" ]; then
     fail "Refusing unmanaged current version path: $current"
   fi
-  current_target=$(readlink "$current")
-  printf '%s\n' "$current_target" \
-    | grep -Eq '^versions/[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
+  readlink "$current" | grep -Eq '^versions/[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
     || fail "Installed HEX has an invalid current version link."
-  current_executable="$support_dir/$current_target/hex"
-fi
-if [ -n "$current_executable" ] && [ -x "$current_executable" ]; then
-  current_version=$("$current_executable" --version \
-    | awk 'NF { value=$NF } END { print value }')
-  printf '%s\n' "$current_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
-    || fail "Installed HEX reports an invalid version."
-  newest=$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -1)
-  if [ "$newest" != "$version" ]; then
-    fail "Refusing to downgrade HEX from $current_version to $version."
-  fi
 fi
 version_dir="$support_dir/versions/$version"
 managed_directory "$version_dir"

@@ -89,6 +89,8 @@ mod linux_rune_hud;
 mod linux_service;
 #[cfg(target_os = "linux")]
 mod linux_session;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -155,6 +157,8 @@ mod transcription_models;
 mod transcription_preparation;
 #[cfg(target_os = "macos")]
 mod transcription_service;
+#[cfg(target_os = "macos")]
+mod transcription_stream;
 mod updater;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod vocabulary;
@@ -242,7 +246,7 @@ enum Command {
     },
     /// Run the desktop app with local dictation.
     App {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Arguments for a headless render, such as `--snap out.png --scene modes`.
@@ -251,7 +255,7 @@ enum Command {
     },
     /// Listen and transcribe until interrupted.
     Listen {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
     },
@@ -326,7 +330,7 @@ enum Command {
         /// Corpus directory containing manifest.json and audio/*.wav.
         #[arg(default_value = "perf/moonshine-corpus")]
         directory: PathBuf,
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Evaluate every recorded fixture across every Moonshine profile.
@@ -1037,9 +1041,7 @@ fn open_app(
     rune_args: Vec<String>,
 ) -> Result<()> {
     if !rune_args.is_empty() {
-        crate::rune_ui::app(Default::default())
-            .args(rune_args)
-            .run();
+        crate::rune_ui::render_app(rune_args).run();
         return Ok(());
     }
     let _instance = instance::acquire("listener")?;

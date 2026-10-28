@@ -5,13 +5,13 @@
 # with it.
 #
 # Generated from anomalyco/hex packaging/aur by scripts/release-aur.sh, which
-# sets pkgver, the release service's linux-x64 file URL, and the checksums for
-# each release.
+# sets pkgver, the release service's linux-x64 and linux-arm64 file URLs, and
+# the checksums for each release.
 pkgname=hex-bin
 pkgver=@VERSION@
 pkgrel=1
 pkgdesc='Hex voice dictation app by Anomaly: hold a key, speak, and it types (Linux beta; not the hex dump tool)'
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url='https://github.com/anomalyco/hex'
 license=('MIT')
 # Linked: alsa-lib, gcc-libs, glib2, glibc, vulkan-icd-loader. Loaded at
@@ -31,18 +31,22 @@ optdepends=(
 options=('!strip' '!debug')
 install=hex-bin.install
 source=(
-  "hex-${pkgver}-linux-x64::@URL@"
   'hex.desktop'
   'hex.service'
   'LICENSE'
 )
-sha256sums=('@SHA256@'
-            '@DESKTOP_SHA256@'
+source_x86_64=("hex-${pkgver}-linux-x64::@URL_X64@")
+source_aarch64=("hex-${pkgver}-linux-arm64::@URL_ARM64@")
+sha256sums=('@DESKTOP_SHA256@'
             '@SERVICE_SHA256@'
             '@LICENSE_SHA256@')
+sha256sums_x86_64=('@SHA256_X64@')
+sha256sums_aarch64=('@SHA256_ARM64@')
 
 package() {
-  install -Dm755 "hex-${pkgver}-linux-x64" "$pkgdir/usr/bin/hex"
+  local target=x64
+  [ "$CARCH" = aarch64 ] && target=arm64
+  install -Dm755 "hex-${pkgver}-linux-${target}" "$pkgdir/usr/bin/hex"
   install -Dm644 hex.desktop "$pkgdir/usr/share/applications/hex.desktop"
   install -Dm644 hex.service "$pkgdir/usr/lib/systemd/user/hex.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
