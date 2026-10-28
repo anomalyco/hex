@@ -137,7 +137,7 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 }
 
 #[test]
-fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
+fn advanced_opens_while_in_use_and_always_closes() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert!(rt.find("microphone-mode").is_none());
     tap(&mut rt, "advanced-toggle");
@@ -147,12 +147,17 @@ fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
     assert!(!rt.state.confirm_release, "collapsing drops the question");
     assert!(rt.find("microphone-mode").is_none());
 
+    rt.state.advanced = None;
     rt.state.settings.release_microphone_while_idle = true;
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("microphone-mode").is_some(), "in use opens it");
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_some(), "and keeps it open");
+    assert!(rt.find("microphone-mode").is_none(), "but it still closes");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("microphone-mode").is_some());
+
+    rt.state.advanced = None;
 
     rt.state.settings.release_microphone_while_idle = false;
     rt.state.settings.double_tap_lock = true;

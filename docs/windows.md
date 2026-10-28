@@ -150,7 +150,10 @@ Press Enter once to start, then again to stop. Captures shorter than 300 ms are
 discarded. `--device` accepts a case-insensitive fragment from `devices`.
 
 Runtime data is stored under `%APPDATA%\voice-control`. Observations are in
-`logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`.
+`logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
+including every panic with its thread and backtrace. A worker that stops
+unexpectedly leaves its cause there. The app detaches from its console at
+launch, so it has no stdout or stderr.
 Successful pasted dictations are retained, subject to the selected retention
 window and hard size limits, in `history.json`. Captured audio is never retained
 by default.
@@ -308,7 +311,7 @@ is green; opt-in Commands wait on a Windows streaming command model. Shared
 first-run onboarding, complete OpenCode mode rewriting controls, and the bounded
 TypeScript transformation host already ship. Windows releases are built for
 x64 and ARM64 by
-[`release-desktop.yml`](../.github/workflows/release-desktop.yml) with
+[`release.yml`](../.github/workflows/release.yml) with
 [`scripts/build-windows.sh`](../scripts/build-windows.sh), Authenticode-signed,
 and published to the Anomaly release service with the other platforms
 (`docs/releasing.md`); [`scripts/install-windows.ps1`](../scripts/install-windows.ps1)

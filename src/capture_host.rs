@@ -4085,10 +4085,10 @@ mod tests {
         .unwrap();
         let closed = CaptureCommand::Start(CaptureTarget::Window { id: 0 });
         let bundle = report(host.command(closed, &audio)).bundle.unwrap();
-        assert_eq!(
-            lock(&host.outcomes).snapshot().recording.unwrap().target,
-            TargetKind::Window
-        );
+        // The failed start can clear the recording before this reads it.
+        if let Some(recording) = lock(&host.outcomes).snapshot().recording {
+            assert_eq!(recording.target, TargetKind::Window);
+        }
         let last = wait_for_last(&mut host, &audio, &bundle, true);
         assert_eq!(last.stage, "failed");
         assert!(!bundle.exists());

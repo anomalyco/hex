@@ -578,8 +578,9 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
-    /// General's Advanced disclosure is open.
-    advanced: bool,
+    /// General's Advanced disclosure, once pressed: open or closed. Until
+    /// then it is open only while an advanced setting is in use.
+    advanced: Option<bool>,
     capture: Capture,
     hints: TextEdit,
     vocabulary: vocabulary::VocabularyEditor,
@@ -660,7 +661,7 @@ impl Ui {
             microphones_listed_at: 0.0,
             microphones_listing: None,
             confirm_release: false,
-            advanced: false,
+            advanced: None,
             capture: Capture::Idle,
             hints,
             vocabulary,
@@ -1712,7 +1713,7 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
-        ui.advanced = true;
+        ui.advanced = Some(true);
     }),
     ("mac-settings-dev-channel", |ui| {
         *ui = mac_fixture();

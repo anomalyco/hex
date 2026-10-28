@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared helpers for the release scripts. Sourced, never executed.
 #
-# .github/release/ and .github/workflows/release-desktop.yml are the security
+# .github/release/ and .github/workflows/release.yml are the security
 # boundary for releases (docs/releasing.md). Jobs that hold a secret or an
 # OIDC token check out only this directory and run only these scripts, on
 # verified artifacts that they treat as data: they never build, install

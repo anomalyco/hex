@@ -354,8 +354,24 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr.and(Mutex::new(process_log)))
         .init();
+    log_panics();
     ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
     Ok(log_dir)
+}
+
+/// Records every panic in `process.log` before the installed report runs.
+/// Desktop apps have no console, so the default stderr report is otherwise
+/// lost and a crashed worker thread leaves no trace.
+fn log_panics() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(
+            thread = std::thread::current().name().unwrap_or("unnamed"),
+            backtrace = %std::backtrace::Backtrace::force_capture(),
+            "panic: {info}"
+        );
+        report(info);
+    }));
 }
 
 pub fn opencode_workspace() -> Result<PathBuf> {

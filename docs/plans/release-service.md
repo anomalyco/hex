@@ -11,14 +11,23 @@ https://anoma.ly/release/hex/              the service (its dev stage, dev.anoma
 ├─ index.json                              download page and installers
 └─ desktop/<channel>.json                  the manifest the app polls; channels stable, beta, dev
    └─ release.targets
-      ├─ macos-arm64          Hex-<v>-macos-arm64.zip          ditto zip, root Hex.app (updater)
-      ├─ macos-arm64-dmg      Hex-<v>-macos-arm64.dmg          notarized DMG (download page)
-      ├─ windows-x64          Hex-<v>-windows-x64.exe          bare hex.exe (updater)
-      ├─ windows-x64-setup    Hex-Setup-<v>-windows-x64.exe    Inno Setup installer (download page)
-      ├─ windows-arm64        Hex-<v>-windows-arm64.exe
-      ├─ windows-arm64-setup  Hex-Setup-<v>-windows-arm64.exe
-      └─ linux-x64            hex-<v>-linux-x64                bare executable (updater, installer, AUR)
+      ├─ macos-arm64          Hex.zip         ditto zip, root Hex.app (updater)
+      ├─ macos-arm64-dmg      Hex.dmg         notarized DMG (download page)
+      ├─ windows-x64          hex.exe         bare executable (updater)
+      ├─ windows-x64-setup    HexSetup.exe    Inno Setup installer (download page)
+      ├─ windows-arm64        hex.exe
+      ├─ windows-arm64-setup  HexSetup.exe
+      └─ linux-x64            hex             bare executable (updater, installer, AUR)
 ```
+
+Published names carry no version or target: each file lives at
+`/release/hex/files/<sha256>/<name>`, which tells them apart, and the service
+serves it with `Content-Disposition: attachment; filename="<name>"`, so a
+download is saved as `hex`, `Hex.dmg`, and so on. The builds and the GitHub
+release mirror keep versioned names (`Hex-<v>-macos-arm64.dmg`, …), which
+must be unique there; `.github/release/release-service.sh` maps them.
+(`HexSetup.exe`, not `Hex Setup.exe`: the service's file names allow no
+spaces.)
 
 - App `hex`, artifact `desktop`. `stable` is the public channel; every push
   to `dev` publishes `0.0.0-dev-<run number>` on the `dev` channel. `beta` is
