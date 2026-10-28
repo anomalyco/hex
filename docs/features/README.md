@@ -474,10 +474,13 @@ Pause media + Also pause the browser     // browser_media
 ├── Poll 5 windows of 100 ms
 │   ├── 2 windows in a row below -90 dBFS -> Hex paused it
 │   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
-└── Dictation ends and Hex paused it -> listen 300 ms to every browser process
+└── Dictation ends and Hex paused it -> first, before the players: listen 300 ms to every browser process
     ├── Above -60 dBFS (you started it again) -> no play
     ├── No level (browser quit, tap failed) -> no play
-    └── Otherwise -> send the system play command (MediaRemote 0)
+    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+        ├── A window above -60 dBFS -> resumed
+        ├── No level -> stop listening
+        └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 
 Intentional recording                    // recording.environment
 ├── Acquire native macOS no-idle-sleep assertion
@@ -505,14 +508,15 @@ when no supported player is running, acquisition skips AppleScript entirely.
 The script check does not prove subprocess avoidance or exercise Music, Spotify,
 or VLC through Automation.
 The browser pause runs after the AppleScript players and only when System Audio
-Recording is already granted. macOS 15.4 and later no longer tell other apps
+Recording is reported granted (an unknown answer skips it, because the tap would
+open the macOS dialog mid-dictation). macOS 15.4 and later no longer tell other apps
 what is playing, so Hex hears the browsers through a private process tap
 (aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
 play only after it saw the browser go silent right after its own pause. The
 sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
 `a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
 `a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
-`no_level_sends_nothing`; the ignored `native_tap_hears_a_playing_browser`
+`no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`; the ignored `native_tap_hears_a_playing_browser`
 heard Brave at -25.4 dBFS on macOS 27.0.1 (2026-10-28). Which app receives the
 system command is macOS's Now Playing choice; Safari is heard only when its
 WebKit process reports Safari's name. An opt-in native

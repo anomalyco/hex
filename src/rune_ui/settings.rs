@@ -1232,7 +1232,6 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
         .collect()
 }
 
-/// Where dictation goes and what happens around it.
 /// "Also pause the browser", under Pause media on macOS. Hex hears the
 /// browser through System Audio Recording, so turning it on asks for that
 /// here: never while you dictate.
@@ -1277,6 +1276,7 @@ fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
     rows
 }
 
+/// Where dictation goes and what happens around it.
 fn output_section(ui: &Ui, p: Paint) -> El {
     let settings = &ui.settings;
     let mut rows = Vec::new();

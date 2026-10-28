@@ -37,6 +37,9 @@ const CONFIRM_WINDOWS: usize = 5;
 const SILENT_WINDOWS: usize = 2;
 /// The last listen before play.
 const RESUME_LISTEN: Duration = Duration::from_millis(300);
+/// After play, the browser must sound within this many windows (2 s). If it
+/// does not, the play reached something else, so Hex pauses it again.
+const PLAY_CHECK_WINDOWS: usize = 20;
 /// How long a new tap may take to deliver its first cycle.
 const TAP_WARM_UP: Duration = Duration::from_millis(300);
 
@@ -120,11 +123,27 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
             return;
         }
     }
-    if audio.send(MediaCommand::Play) {
-        tracing::info!("resumed the browser");
-    } else {
+    if !audio.send(MediaCommand::Play) {
         tracing::info!("the system refused the play command");
+        return;
     }
+    for _ in 0..PLAY_CHECK_WINDOWS {
+        match audio.peak_dbfs(WINDOW) {
+            Some(peak) if peak > SOUND_DBFS => {
+                tracing::info!("resumed the browser");
+                return;
+            }
+            Some(_) => {}
+            None => {
+                tracing::info!("sent play but cannot hear the browser any more");
+                return;
+            }
+        }
+    }
+    // A closed or reloaded tab stays silent, and the play went to whatever
+    // macOS now treats as playing: pause that again.
+    tracing::info!("the browser stayed silent after play; sent pause again");
+    audio.send(MediaCommand::Pause);
 }
 
 /// The browsers' own output, heard through a private Core Audio process tap,
@@ -451,10 +470,33 @@ mod tests {
             Some(-200.0),
             Some(-200.0),
             Some(-200.0),
+            Some(-200.0),
+            Some(-25.0),
         ]));
         let paused = pause(&mut audio).expect("the pause is confirmed");
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
+    }
+
+    #[test]
+    fn a_play_the_browser_never_takes_is_paused_again() {
+        let mut audio = Fake::new(std::iter::repeat_n(Some(-200.0), 40));
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play, MediaCommand::Pause]);
+    }
+
+    #[test]
+    fn a_browser_that_plays_late_in_the_check_keeps_playing() {
+        let mut audio = Fake::new(std::iter::repeat_n(Some(-200.0), 19).chain([Some(-25.0)]));
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play]);
+    }
+
+    #[test]
+    fn a_browser_it_stops_hearing_after_play_gets_nothing_more() {
+        let mut audio = Fake::new([Some(-200.0), Some(-200.0)]);
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play]);
     }
 
     #[test]

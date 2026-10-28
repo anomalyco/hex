@@ -416,6 +416,19 @@ enum AudioBehaviorGuard {
     None,
 }
 
+/// Only with the permission already granted: a tap without it opens the
+/// macOS dialog, and a dialog must never open while you dictate.
+fn browser_pause_allowed(
+    enabled: bool,
+    authorization: crate::meeting::SystemAudioAuthorization,
+) -> bool {
+    enabled
+        && matches!(
+            authorization,
+            crate::meeting::SystemAudioAuthorization::Granted
+        )
+}
+
 fn paused_guard(players: Vec<MediaPlayer>, browser: Option<PausedBrowser>) -> AudioBehaviorGuard {
     if players.is_empty() && browser.is_none() {
         AudioBehaviorGuard::None
@@ -438,10 +451,10 @@ impl AudioBehaviorGuard {
                 if !players.is_empty() {
                     tracing::info!(?players, "paused media while recording");
                 }
-                // Only with the permission already given: a dialog never
-                // opens while you dictate.
-                let browser = (app_settings::pause_browser_media()
-                    && crate::meeting::system_audio_ready())
+                let browser = browser_pause_allowed(
+                    app_settings::pause_browser_media(),
+                    crate::meeting::system_audio_authorization(),
+                )
                 .then(|| browser_media::pause(&mut NativeBrowserAudio::for_pause()))
                 .flatten();
                 if browser.is_some() {
@@ -465,10 +478,12 @@ impl Drop for AudioBehaviorGuard {
                 }
             }
             Self::Paused { players, browser } => {
-                resume_media(players);
+                // The browser first: its play goes to whatever macOS treats as
+                // playing, which a player resumed just before could become.
                 if let Some(paused) = browser.take() {
                     browser_media::resume(&mut NativeBrowserAudio::for_resume(), paused);
                 }
+                resume_media(players);
             }
             Self::None => {}
         }
@@ -675,6 +690,16 @@ mod tests {
     use Effect::{Mute, Pause, Sleep};
     use Event::{Held, Restored, Then};
     use RecordingAudioBehavior::{DoNothing, Mute as MuteOutput, PauseMedia};
+
+    #[test]
+    fn the_browser_pauses_only_with_system_audio_granted() {
+        use crate::meeting::SystemAudioAuthorization::{Denied, Granted, NotDetermined, Unknown};
+        assert!(browser_pause_allowed(true, Granted));
+        for authorization in [Denied, NotDetermined, Unknown] {
+            assert!(!browser_pause_allowed(true, authorization));
+        }
+        assert!(!browser_pause_allowed(false, Granted));
+    }
 
     #[test]
     fn a_pause_with_nothing_paused_holds_nothing() {
