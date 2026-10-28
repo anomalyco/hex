@@ -665,13 +665,21 @@ fn private_dirs(dir: &Path) -> Result<()> {
 }
 
 /// A fresh owner-only `<captures>/<unix ms>.scrawl` folder; never adopts one
-/// that exists.
+/// that exists. Stamps never repeat within the process: a discarded capture's
+/// folder is removed on its collector's thread, so a switch in the same
+/// millisecond could otherwise reuse its path while it is still unfinished.
 fn new_bundle_dir(captures_dir: &Path) -> Result<PathBuf> {
+    static LAST_STAMP: Mutex<u128> = Mutex::new(0);
     private_dirs(captures_dir)?;
-    let stamp = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
+    let stamp = {
+        let mut last = LAST_STAMP.lock().unwrap_or_else(|error| error.into_inner());
+        *last = now.max(*last + 1);
+        *last
+    };
     for attempt in 0..100 {
         let name = match attempt {
             0 => format!("{stamp}.scrawl"),
