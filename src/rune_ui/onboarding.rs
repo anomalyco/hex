@@ -159,13 +159,17 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
     remember_step(ui, step);
 }
 
-/// Saves a new step so a tour quit part-way resumes there.
+/// Saves a new step so a tour quit part-way resumes there, and sounds the
+/// success chime on reaching the last one.
 fn remember_step(ui: &Ui, before: Step) {
     if let Some(tour) = &ui.tour
         && tour.flow.step() != before
         && ui.live()
     {
         crate::onboarding::record_step(tour.flow.step());
+        if tour.flow.step() == Step::Done {
+            crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
+        }
     }
 }
 
@@ -728,13 +732,15 @@ fn done(ui: &Ui, p: Paint) -> El {
         )),
         keycaps(p, "keys", &ui.settings.edit_hotkey.keycaps()),
     ));
-    tips.push(setting_row(
-        p,
-        "tip-modes",
-        tr("Modes"),
-        Some(tr("Fix names, tone, and formatting per app.")),
-        el().key("none"),
-    ));
+    if ui.platform.modes {
+        tips.push(setting_row(
+            p,
+            "tip-modes",
+            tr("Modes"),
+            Some(tr("Fix names, tone, and formatting per app.")),
+            el().key("none"),
+        ));
+    }
     let send_off = match ui.platform.caps.os {
         Os::Macos => tr_fill(
             "Hex waits in the menu bar. Use {} in any app to dictate.",

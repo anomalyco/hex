@@ -185,6 +185,9 @@ General > Shortcut mode = Toggle
   -> Escape -> Cancel
   // Double-tap to lock and Double-tap only are hidden and ignored
   // Shortcut chords during the first 300 ms still discard
+  Linux: release never arrives (Hyprland Lua bind, Alt up before Z)
+  ├── Press 1 s or more after the last press -> Finish
+  └── Sooner -> Ignored as a key repeat (KWin repeats held shortcuts)
 ```
 
 Toggle reuses the lock state on every platform: each press behaves as the
@@ -194,9 +197,14 @@ each platform's settings; files without it load as Hold. Checks:
 `toggle_mode_escape_cancels_a_locked_capture` in
 [suppression.rs](../../src/suppression.rs) (macOS reducer), the same names in
 [windows_input.rs](../../src/windows_input.rs), and
-`toggle_mode_starts_on_a_tap_and_finishes_on_the_next` in
+`toggle_mode_starts_on_a_tap_and_finishes_on_the_next`,
+`a_capture_that_would_lock_finishes_when_the_desktop_drops_its_release`, and
+`a_repeating_held_press_never_finishes_the_capture` in
 [linux_input.rs](../../src/linux_input.rs), whose one state machine serves X11
-grabs, Wayland portal shortcuts, and the `hex dictation` commands alike. Only
+grabs, Wayland portal shortcuts, and the `hex dictation` commands alike. The
+dropped release was observed on 2026-10-28 on Hyprland 0.56.2 with
+xdg-desktop-portal-hyprland 1.4.1: uinput Alt+Z sent no `Deactivated` when Alt
+came up first (the fix itself has not been run there yet). Only
 the Windows build was compiled and tested locally (2026-10-19); macOS relies on
 CI. The Linux state machine and X11 grab tests ran on 2026-10-22 (the grabs on
 an isolated Xwayland display). No physical keyboard check yet.
@@ -737,6 +745,9 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Voice Action takeover -> Retracted; Voice Action rings at its own hold
      -> Release microphone while idle -> Output warms on press; tone once
         the microphone is open and the hold counts
+  Dictation or Voice Action reply pasted -> Done tone         // dictate.done-tone
+     -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
+  Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
@@ -746,6 +757,23 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Cold audio stack exceeds preload admission -> Warn once; recognition continues
      -> Loader keeps running; later tones play once the output opens
 ```
+
+The sounds are Hex's own (2026-10-27), one kalimba-like FM voice playing one
+motif, D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5
+to A5 (230 ms), done D6 over A5 (330 ms), cancel B5 down to D5 (225 ms), error
+D4 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif
+landing on a D sixth chord (1.1 s), played when the first-run tour reaches
+its last step. They are 48 kHz mono WAVs in `resources/audio/`, each starting
+on its first sample, made by
+[`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
+(`uv run scripts/sounds/synth.py` rewrites them). Their levels match the
+sounds they replaced at the same volume: start like the old start clicks
+(-25.5 LUFS momentary), stop like the old swish, error like macOS Basso;
+cancel is far quieter than the old thud. Windows and Linux play start, stop,
+done, and cancel; their failures stay silent as before. Check:
+`bundled_sounds_are_short_and_sound_immediately` (each sound under its length
+budget, audible within 1 ms). The sounds were checked by waveform, spectrum
+and loudness only, never played aloud on a Mac.
 
 Feedback admission is advisory on every platform: a cold audio stack can exceed
 the two-second preload timeout, so the recognition worker logs a warning and

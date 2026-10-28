@@ -520,6 +520,16 @@ fn every_scene_stops_asking_for_frames() {
 }
 
 #[test]
+fn the_sidebar_has_no_modes_without_the_experiment() {
+    let rt = runtime("modes-off", true, PANE_SIZE);
+    assert!(rt.find("nav-modes").is_none());
+    assert!(rt.find("nav-voice-action").is_some());
+    assert!(!Pane::Modes.shown(&rt.state));
+    let rt = runtime("modes", true, PANE_SIZE);
+    assert!(rt.find("nav-modes").is_some());
+}
+
+#[test]
 fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     for (key, pane) in [

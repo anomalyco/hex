@@ -537,6 +537,9 @@ pub fn run(
             match result.result {
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
+                    if !matches!(result.kind, OutputKind::Repaste) {
+                        crate::feedback::play(crate::feedback::Tone::DictationDone);
+                    }
                     match result.kind {
                         OutputKind::Dictation => {
                             events.emit(&VoiceEvent::Transcript {

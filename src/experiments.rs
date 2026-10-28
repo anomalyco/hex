@@ -32,6 +32,7 @@ pub enum Experiment {
     Capture,
     DotScope,
     LiveChapters,
+    Modes,
     Playground,
     SmartTurn,
     Vocabulary,
@@ -45,6 +46,7 @@ impl Experiment {
         Self::Capture,
         Self::DotScope,
         Self::LiveChapters,
+        Self::Modes,
         Self::Playground,
         Self::SmartTurn,
         Self::Vocabulary,
@@ -71,6 +73,7 @@ impl Experiment {
             Self::Capture => "capture",
             Self::DotScope => "dot-scope",
             Self::LiveChapters => "live-chapters",
+            Self::Modes => "modes",
             Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
             Self::Vocabulary => "vocabulary",
@@ -87,6 +90,9 @@ impl Experiment {
                 "Dot scope: the recording indicator as a braided dot oscilloscope, tuned in HUD Lab (macOS)."
             }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
+            Self::Modes => {
+                "Modes: the pane, per-app corrections, OpenCode rewriting, and transformations."
+            }
             Self::Playground => {
                 "Rune's playground in the window (⇧⌘D, Ctrl+Shift+D off macOS): every fixture scene and story."
             }
@@ -689,6 +695,12 @@ mod tests {
                     {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
+                        "name": "modes",
+                        "description": Experiment::Modes.description(),
                         "enabled": false,
                         "sources": [],
                     },
