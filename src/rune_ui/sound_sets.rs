@@ -141,7 +141,7 @@ fn toggle(ui: &mut Ui, set: SoundSet) {
 
 /// Saves `set` as the sound set and plays its dictation.
 fn choose(ui: &mut Ui, set: SoundSet) {
-    if ui.settings.sound_set != set && !ui.update(|settings| settings.sound_set = set) {
+    if ui.settings.sound_theme != set && !ui.update(|settings| settings.sound_theme = set) {
         return;
     }
     play(ui, set, Audition::Dictation);
@@ -173,7 +173,7 @@ pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool 
 fn staged(ui: &Ui) -> SoundSet {
     ui.sound_sets
         .playing
-        .map_or(ui.settings.sound_set, |playing| playing.set)
+        .map_or(ui.settings.sound_theme, |playing| playing.set)
 }
 
 /// A stable key for `set`'s row.
@@ -188,7 +188,7 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
         return None;
     }
     let c = &p.k.c;
-    let saved = ui.settings.sound_set;
+    let saved = ui.settings.sound_theme;
     let playing = ui.sound_sets.playing;
     let sets =
         source_list(col().key("sets").gap(2.0)).children(SoundSet::ALL.into_iter().map(|set| {

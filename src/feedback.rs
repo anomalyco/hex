@@ -894,6 +894,7 @@ fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     Ok(SamplesBuffer::new(channels, sample_rate, samples))
 }
 
+#[cfg(hex_capture)]
 fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let decoder =
         rodio::Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
