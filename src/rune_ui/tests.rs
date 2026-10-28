@@ -237,6 +237,12 @@ fn installs_that_never_update_hide_the_update_channel() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("update-channel").is_none());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::SourceBuild;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
 }
 
 #[test]

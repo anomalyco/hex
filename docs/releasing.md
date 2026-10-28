@@ -142,7 +142,8 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   Every build is stamped with its channel (`HEX_BUILD_CHANNEL`); an install
   whose Update channel setting names another channel offers that channel's
   current release ("Switch to Stable 2.3.1") and switches only once the user
-  confirms. The first build after this change, 2.3.2-dev.<run> on
+  confirms. Source, local (`HEX_LOCAL_BUILD=1`) and test builds never check or offer
+  a switch. The first build after this change, 2.3.2-dev.<run> on
   2026-10-27, carried the new client to installs whose older client took only
   higher versions; every build since is `0.0.0-dev-<run>`. It publishes only signed builds, because the
   updater checks signatures: until `release` has the Apple secrets it has

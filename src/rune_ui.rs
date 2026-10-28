@@ -1353,7 +1353,11 @@ fn footer(ui: &Ui, p: Paint) -> El {
         }
         Some(DesktopUpdateStatus::SourceBuild) => Some(line(
             "update-status",
-            tr("Updated from your source checkout"),
+            if crate::app_paths::is_local_build() {
+                tr("Local build · updates off")
+            } else {
+                tr("Updated from your source checkout")
+            },
             p.faint(),
         )),
         Some(DesktopUpdateStatus::PackageManager) => Some(line(
@@ -1381,12 +1385,19 @@ fn footer(ui: &Ui, p: Paint) -> El {
 /// The footer's lines: as tall as each other, so a check moves nothing.
 const FOOTER_LINE: f32 = 20.0;
 
-/// Test builds also name their commit: main moves past a release without
+/// Test and local builds also name their commit: main moves past a release without
 /// changing the version.
 fn version_label() -> String {
     let version = env!("CARGO_PKG_VERSION");
     match option_env!("HEX_COMMIT") {
-        Some(commit) => tr_fill("Version {}", &format!("{version} (test {commit})")),
+        Some(commit) => {
+            let kind = if crate::app_paths::is_local_build() {
+                "local"
+            } else {
+                "test"
+            };
+            tr_fill("Version {}", &format!("{version} ({kind} {commit})"))
+        }
         None => tr_fill("Version {}", version),
     }
 }

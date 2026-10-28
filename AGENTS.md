@@ -1113,7 +1113,9 @@ workflow on every push to `dev` with `test-build`, plus an ad-hoc signed
 `anomaly.hex.test`, its own `hex-test` data folder and `~/.config/hex-test`;
 it must never read the real `hex` data), as unsigned 14-day artifacts for
 teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
-themselves. Every push to `dev` (except docs/site-only changes) publishes a dev-channel
+themselves, and neither do local builds (`HEX_LOCAL_BUILD=1`, the owner's own
+build from a checkout: footer "Local build · updates off", version label with its
+commit, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
 build (the service lets a run from `dev` publish only the `dev` channel, and
 only signed platforms are published). Stable runs only from `production`.
 Like OpenCode, every run uses the one `release` environment, with no

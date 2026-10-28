@@ -196,6 +196,8 @@ impl Updater {
         let method = platform::method();
         let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") {
             Some(DesktopUpdateStatus::Unavailable)
+        } else if crate::app_paths::is_local_build() {
+            Some(DesktopUpdateStatus::SourceBuild)
         } else if managed_by_policy() {
             Some(DesktopUpdateStatus::Managed)
         } else if method == Method::Source {

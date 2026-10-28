@@ -6,6 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use color_eyre::eyre::{Result, eyre};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
+/// Whether this is a local build (`HEX_LOCAL_BUILD=1`): made from a checkout
+/// for its owner's own machine, so it never checks for or offers updates.
+pub fn is_local_build() -> bool {
+    option_env!("HEX_LOCAL_BUILD") == Some("1")
+}
+
 /// Whether this is a macOS `Hex Test.app` build (`HEX_TEST_BUILD=1`), which
 /// keeps its data, settings, and user config apart from the installed Hex.
 pub fn is_macos_test_build() -> bool {
