@@ -78,7 +78,8 @@ let finished = finishing.wait()?;   // or poll with finishing.try_wait()
   of the WAV is the clock anchor and every sample stays at its true time. The manifest lists
   every gap. The core never opens a microphone in this mode.
 - `AudioPlan::system`: system audio, captured on the first source's stream. It is always a track
-  in that source's MP4 (ScreenCaptureKit's recording output records what the stream captures).
+  in that source's MP4 (ScreenCaptureKit's recording output records what the stream captures,
+  mixing system audio and a `Mic::Device` microphone into one AAC track).
   When `Names::system_audio` is set, it is also written as a separate AAC file, cut at the stop.
   If no system audio arrives, that file is not left behind and the manifest does not list it.
 

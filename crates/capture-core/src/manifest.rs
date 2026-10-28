@@ -50,8 +50,8 @@ pub struct SourceEntry {
     pub height: u32,
     /// The captured area in global top-left points when the recording started.
     pub frame: Rect,
-    /// Whether the microphone ([`Mic::Device`](crate::Mic::Device)) and system audio are tracks in
-    /// this video.
+    /// Which of the microphone ([`Mic::Device`](crate::Mic::Device)) and system audio this video
+    /// contains. `ScreenCaptureKit` mixes both into the video's single AAC track.
     pub audio_tracks: Vec<TrackKind>,
     /// Why this source's video is missing or incomplete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
