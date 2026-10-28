@@ -1896,6 +1896,13 @@ const SCENES: &[Scene] = &[
         ui.platform.login_item = Some(crate::login_item::LoginItemStatus::RequiresApproval);
         ui.platform.accessibility_renamed = true;
     }),
+    ("mac-settings-pause-browser", |ui| {
+        *ui = mac_fixture();
+        ui.settings.recording_audio_behavior =
+            crate::app_settings::RecordingAudioBehavior::PauseMedia;
+        ui.settings.pause_browser_media = true;
+        ui.platform.system_audio = false;
+    }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
         ui.advanced = Some(true);

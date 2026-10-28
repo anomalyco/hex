@@ -326,6 +326,50 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 }
 
 #[test]
+fn the_browser_switch_shows_only_with_pause_media() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    assert!(rt.find("pause-browser").is_none());
+    rt.state.settings.recording_audio_behavior =
+        crate::app_settings::RecordingAudioBehavior::PauseMedia;
+    refresh(&mut rt);
+    assert!(rt.find("pause-browser").is_some());
+    assert!(
+        rt.find("pause-browser-audio").is_none(),
+        "the permission row waits for the switch"
+    );
+}
+
+#[test]
+fn the_browser_switch_turns_on_and_asks_for_system_audio() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
+    assert!(
+        rt.find("pause-browser-allow-control/mark/dot").is_some(),
+        "the permission row waits with a dot"
+    );
+}
+
+#[test]
+fn an_allowed_browser_switch_asks_nothing() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    rt.state.platform.system_audio = true;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert!(asked(&rt).is_empty());
+    assert!(
+        rt.find("pause-browser-allow-control/mark/ink/check")
+            .is_some(),
+        "shows Allowed"
+    );
+}
+
+#[test]
 fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     assert!(rt.find("microphone-mode").is_none());

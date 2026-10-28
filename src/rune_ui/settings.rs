@@ -12,6 +12,8 @@ use super::controls::{
     page, pulsing_dot, section, section_with, segmented, select, select_sized, setting_row,
     sheet_button, status_dot, text_field, toggle_row, tray_roll,
 };
+use super::lists::{PermissionControl, permission_control};
+use super::platform::PlatformRequest;
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
 use crate::app_settings::{
@@ -23,6 +25,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
+use crate::onboarding::PermissionKind;
 use crate::transcription_models::{self, ModelPreparationStage};
 
 static CHECK: &rune::Icon = &rune_theme_opencode::icons::CHECK_SMALL;
@@ -1230,6 +1233,50 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
 }
 
 /// Where dictation goes and what happens around it.
+/// "Also pause the browser", under Pause media on macOS. Hex hears the
+/// browser through System Audio Recording, so turning it on asks for that
+/// here: never while you dictate.
+fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
+    let on = ui.settings.pause_browser_media;
+    let mut rows = vec![toggle_row(
+        p,
+        "pause-browser",
+        tr("Also pause the browser"),
+        tr("YouTube and other tabs, resumed only if Hex paused them"),
+        on,
+        |ui: &mut Ui| {
+            let on = !ui.settings.pause_browser_media;
+            ui.update(|settings| settings.pause_browser_media = on);
+            if on && !ui.platform.system_audio {
+                ui.ask(PlatformRequest::SystemAudio);
+            }
+        },
+    )];
+    if on {
+        let permitted = ui.platform.system_audio;
+        rows.push(setting_row(
+            p,
+            "pause-browser-audio",
+            tr("Screen & System Audio Recording"),
+            Some(tr("Lets Hex hear whether a tab is playing")),
+            permission_control(
+                p,
+                "pause-browser-allow",
+                if permitted {
+                    PermissionControl::Allowed
+                } else if ui.platform.asked(PermissionKind::SystemAudio) {
+                    PermissionControl::Waiting
+                } else {
+                    PermissionControl::Allow
+                },
+                ButtonKind::Secondary,
+                |ui: &mut Ui| ui.ask(PlatformRequest::SystemAudio),
+            ),
+        ));
+    }
+    rows
+}
+
 fn output_section(ui: &Ui, p: Paint) -> El {
     let settings = &ui.settings;
     let mut rows = Vec::new();
@@ -1263,6 +1310,11 @@ fn output_section(ui: &Ui, p: Paint) -> El {
             },
         ),
     ));
+    if ui.platform.caps.os == super::platform::Os::Macos
+        && settings.recording_audio_behavior == RecordingAudioBehavior::PauseMedia
+    {
+        rows.extend(pause_browser_rows(ui, p));
+    }
     let indicator_index = match settings.indicator_position {
         IndicatorPosition::Top => 0,
         IndicatorPosition::Bottom => 1,
