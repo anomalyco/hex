@@ -20,7 +20,7 @@ The visitor's OS and architecture are selected on first paint and refined with
 UA client hints; the .deb and .rpm rows follow the detected architecture.
 Versions, URLs, and commands live in `src/release.ts`; file links name
 `/hex/download/<target>`, which the Worker sends to the stable release once
-there is one and to the newest dev build until then. The AUR tab appears from
+there is one and to the newest dev build until then. The AUR row appears from
 the first build after a stable release, which pushes `hex-bin`. Add
 `?platform=mac|mac-intel|windows-x64|windows-arm64|linux|linux-arm64|mobile`
 to see each default.
