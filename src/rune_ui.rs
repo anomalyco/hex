@@ -138,7 +138,7 @@ pub(crate) fn run_app(
     let mut app = self::app(Some(host.clone()))
         .args(Vec::new())
         .windowless()
-        .window_options(fixed_window());
+        .float_on_open();
     crate::linux_rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
@@ -381,12 +381,10 @@ pub(crate) fn render() {
 /// The window's logical size, which every pane and the picker fit.
 const WINDOW_SIZE: (f32, f32) = (980.0, 760.0);
 
-/// One fixed size the user cannot change. Tiling window managers float such
-/// a window instead of tiling it: sway, Hyprland, niri, and i3 on Linux
-/// (Wayland has no other way to ask for floating), and AeroSpace, yabai, and
-/// Spaceman on macOS, where the first-run tour opens centred this way. With
+/// One fixed size the user cannot change, which macOS tiling window managers
+/// (AeroSpace, yabai) float: the first-run tour opens centred this way. With
 /// the playground, it resizes, so the stage beside its columns has room.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 pub(crate) fn fixed_window() -> rune::WindowOptions {
     if playground::enabled() {
         return rune::WindowOptions::default();

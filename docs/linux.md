@@ -30,12 +30,11 @@ tray icon: click it to open the window, or use its menu's **Show Hex** and
 **Quit Hex**. Without a tray, quit with **Quit Hex** at the bottom of the
 window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
-The window has one fixed size on Linux, 980×760 logical pixels (so fractional
-scaling keeps it sharp); it cannot be resized. Wayland has no way to ask a
-tiling compositor to float a window, but sway, Hyprland, and niri float a
-toplevel whose minimum and maximum size match, and X11 window managers such as
-i3 float a window whose size hints are fixed. The window therefore opens
-floating instead of taking a tile. macOS and Windows keep a resizable window.
+The window opens at 980×760 logical pixels and floats on tiling window
+managers with no window rule: it maps with its minimum size equal to its
+maximum, which sway, Hyprland, niri, and X11 managers such as i3 float, then
+drops the maximum so you can resize it down to 860×560 or up to any size.
+macOS and Windows open the same resizable window.
 
 Settings live in `settings.json` in Hex's data directory, the same file macOS
 and Windows use.

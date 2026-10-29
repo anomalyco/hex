@@ -1229,7 +1229,7 @@ Linux process                            // maintain.linux-service
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|voice-action|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
-├── Open the window -> One fixed 980×760 size (min = max) -> Tiling WMs float it
+├── Open the window -> Maps at 980×760 (min = max), tiling WMs float it -> Resizable from 860×560
 ├── Close the window -> Keep microphone, accepted jobs, model preparation, and HUD
 │   └── Uncommitted shortcut capture -> Cancel and restore the prior listening state
 ├── Crash -> systemd Restart=on-failure -> Hex without a window
