@@ -24,7 +24,9 @@ pub enum TranscriptionModelId {
     Qwen3Asr06B,
     SenseVoiceSmall,
     CohereTranscribe,
+    #[serde(rename = "underdog_bark_3_pro")]
     UnderdogBark3Pro,
+    #[serde(rename = "underdog_bark_3_clean")]
     UnderdogBark3Clean,
     AppleSpeech,
 }
