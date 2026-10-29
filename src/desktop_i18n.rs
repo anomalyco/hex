@@ -976,6 +976,7 @@ mod tests {
         include_str!("rune_ui/history.rs"),
         include_str!("rune_ui/hud_lab.rs"),
         include_str!("rune_ui/linux_host.rs"),
+        include_str!("rune_ui/list_detail.rs"),
         include_str!("rune_ui/lists.rs"),
         include_str!("rune_ui/macos_host.rs"),
         include_str!("rune_ui/meeting_capsules.rs"),
