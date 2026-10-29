@@ -37,6 +37,7 @@ pub(crate) enum Spot {
     /// At `y` in Rune's global space (points from the primary display's
     /// top-left, y down), centred on `x`; the plate hangs down from `y`
     /// when `below`, else rises from it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Global { x: f32, y: f32, below: bool },
 }
 
