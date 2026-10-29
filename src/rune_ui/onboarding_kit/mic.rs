@@ -46,7 +46,14 @@ pub(crate) fn mic_level(
 /// Where the words leave from: the Hex mark in a disc `d` across, centred
 /// on `centre`, swelling with the meter while `live` under a warm glow, as
 /// the site's face lights as it talks.
-pub(crate) fn mouth(p: Paint, key: &str, centre: [f32; 2], d: f32, meter: (f32, f32), live: bool) -> El {
+pub(crate) fn mouth(
+    p: Paint,
+    key: &str,
+    centre: [f32; 2],
+    d: f32,
+    meter: (f32, f32),
+    live: bool,
+) -> El {
     let k = p.k;
     let (average, peak) = if live { meter } else { (0.0, 0.0) };
     let glow_d = d * 1.9;
@@ -57,7 +64,11 @@ pub(crate) fn mouth(p: Paint, key: &str, centre: [f32; 2], d: f32, meter: (f32, 
         .radius(glow_d / 2.0)
         .fill(super::flight::ember(0.55).alpha(if k.dark { 0.5 } else { 0.35 }))
         .blur(d * 0.28)
-        .opacity(if live { (0.25 + 1.4 * average).min(1.0) } else { 0.0 })
+        .opacity(if live {
+            (0.25 + 1.4 * average).min(1.0)
+        } else {
+            0.0
+        })
         .opacity_motion(rune::Spring::new(0.12, 0.0));
     let disc = el()
         .key("disc")
@@ -66,7 +77,14 @@ pub(crate) fn mouth(p: Paint, key: &str, centre: [f32; 2], d: f32, meter: (f32, 
         .radius(d / 2.0)
         .center()
         .fill(k.c.surface_raised)
-        .border(p.hair, if live { k.c.border_focus } else { k.c.border_weak })
+        .border(
+            p.hair,
+            if live {
+                k.c.border_focus
+            } else {
+                k.c.border_weak
+            },
+        )
         .child(
             hex_meter(p, "mark", d * 0.46, 1.0, 1.0)
                 .scale(1.0 + 0.16 * peak.min(1.0))

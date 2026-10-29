@@ -334,7 +334,10 @@ fn permissions_page(p: Paint, s: &Onboard) -> El {
             p,
             "permissions-head",
             "Let Hex hear you and type for you",
-            lead(p, "macOS asks once. You can change these in System Settings."),
+            lead(
+                p,
+                "macOS asks once. You can change these in System Settings.",
+            ),
         ))
         .child(card(p, "setup-card", rows).w(PERMISSIONS_W))
         .child(system(p, s, e))
@@ -478,12 +481,30 @@ fn settings_and_guide(p: Paint, s: &Onboard, e: f64) -> El {
         .radius(8.0)
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
-        .child(app_row(p, "raycast", "Raycast", app_icon(srgb(1.0, 0.39, 0.39, 1.0)), true))
-        .child(app_row(p, "rectangle", "Rectangle", app_icon(srgb(0.35, 0.55, 1.0, 1.0)), true));
+        .child(app_row(
+            p,
+            "raycast",
+            "Raycast",
+            app_icon(srgb(1.0, 0.39, 0.39, 1.0)),
+            true,
+        ))
+        .child(app_row(
+            p,
+            "rectangle",
+            "Rectangle",
+            app_icon(srgb(0.35, 0.55, 1.0, 1.0)),
+            true,
+        ));
     if landed {
         list = list.child(
-            app_row(p, "hex", "Hex", hex_meter(p, "icon", 16.0, 1.0, 1.0), e >= SWITCH_ON)
-                .transition(Transition::opacity()),
+            app_row(
+                p,
+                "hex",
+                "Hex",
+                hex_meter(p, "icon", 16.0, 1.0, 1.0),
+                e >= SWITCH_ON,
+            )
+            .transition(Transition::opacity()),
         );
     }
     let window = el()
@@ -514,7 +535,11 @@ fn settings_and_guide(p: Paint, s: &Onboard, e: f64) -> El {
         .radius(8.0)
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
-        .opacity(if dragged.is_some() || landed { 0.45 } else { 1.0 })
+        .opacity(if dragged.is_some() || landed {
+            0.45
+        } else {
+            1.0
+        })
         .child(hex_meter(p, "icon", 20.0, 1.0, 1.0))
         .child(text("Hex").key("name").font(k.ty.ui_medium).color(p.text()));
     let guide = el()

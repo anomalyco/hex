@@ -38,87 +38,87 @@ pub(crate) fn caret(p: Paint, key: &str, x: f32, line: usize) -> El {
 }
 
 impl Field {
-/// How far `run` advances the pen; Rune measures an empty run as a space.
-fn advance(self, run: &str) -> f32 {
-    if run.is_empty() {
-        0.0
-    } else {
-        rune::text::advance(run, self.font)
-    }
-}
-
-/// The reply's lines as byte ranges, broken after spaces once a word
-/// would run past the field.
-pub(crate) fn wrap(self, reply: &str) -> Vec<(usize, usize)> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut space = None;
-    let bytes = reply.as_bytes();
-    for (i, c) in reply.char_indices() {
-        if c == ' ' {
-            space = Some(i + 1);
-            continue;
-        }
-        let end = i + c.len_utf8();
-        let word_ends = end == reply.len() || bytes[end] == b' ';
-        if !word_ends {
-            continue;
-        }
-        if self.advance(&reply[start..end]) > self.width
-            && let Some(at) = space.filter(|&at| at > start)
-        {
-            lines.push((start, at));
-            start = at;
+    /// How far `run` advances the pen; Rune measures an empty run as a space.
+    fn advance(self, run: &str) -> f32 {
+        if run.is_empty() {
+            0.0
+        } else {
+            rune::text::advance(run, self.font)
         }
     }
-    lines.push((start, reply.len()));
-    lines
-}
 
-/// Where a caret after byte `caret` goes: its x, and its line.
-pub(crate) fn caret_point(self, reply: &str, caret: usize) -> (f32, usize) {
-    let lines = self.wrap(reply);
-    let line = lines
-        .iter()
-        .rposition(|&(start, _)| start <= caret)
-        .unwrap_or(0);
-    let start = lines[line].0;
-    (self.advance(&reply[start..caret]), line)
-}
-
-/// Every word of `reply` where it lands.
-pub(crate) fn slots(self, reply: &str) -> Vec<Slot<'_>> {
-    let mut out = Vec::new();
-    for (line, (start, end)) in self.wrap(reply).into_iter().enumerate() {
-        let text = &reply[start..end];
-        let mut at = 0;
-        for word in text.split(' ') {
-            if !word.is_empty() {
-                let left = self.advance(&text[..at]);
-                let right = left + self.advance(word);
-                out.push(Slot {
-                    word,
-                    line,
-                    left,
-                    right,
-                    centre: [(left + right) / 2.0, (line as f32 + 0.5) * self.line],
-                });
+    /// The reply's lines as byte ranges, broken after spaces once a word
+    /// would run past the field.
+    pub(crate) fn wrap(self, reply: &str) -> Vec<(usize, usize)> {
+        let mut lines = Vec::new();
+        let mut start = 0;
+        let mut space = None;
+        let bytes = reply.as_bytes();
+        for (i, c) in reply.char_indices() {
+            if c == ' ' {
+                space = Some(i + 1);
+                continue;
             }
-            at += word.len() + 1;
+            let end = i + c.len_utf8();
+            let word_ends = end == reply.len() || bytes[end] == b' ';
+            if !word_ends {
+                continue;
+            }
+            if self.advance(&reply[start..end]) > self.width
+                && let Some(at) = space.filter(|&at| at > start)
+            {
+                lines.push((start, at));
+                start = at;
+            }
         }
+        lines.push((start, reply.len()));
+        lines
     }
-    out
-}
 
-/// A text caret at `(x, line)`.
-pub(crate) fn caret(self, p: Paint, key: &str, x: f32, line: usize) -> El {
-    let inset = (self.line * 0.11).round();
-    el().key(key.to_string())
-        .absolute(x, line as f32 * self.line + inset)
-        .size((self.line / 12.0).max(1.5), self.line - 2.0 * inset)
-        .radius(0.75)
-        .fill(p.k.c.text_accent)
-}
+    /// Where a caret after byte `caret` goes: its x, and its line.
+    pub(crate) fn caret_point(self, reply: &str, caret: usize) -> (f32, usize) {
+        let lines = self.wrap(reply);
+        let line = lines
+            .iter()
+            .rposition(|&(start, _)| start <= caret)
+            .unwrap_or(0);
+        let start = lines[line].0;
+        (self.advance(&reply[start..caret]), line)
+    }
+
+    /// Every word of `reply` where it lands.
+    pub(crate) fn slots(self, reply: &str) -> Vec<Slot<'_>> {
+        let mut out = Vec::new();
+        for (line, (start, end)) in self.wrap(reply).into_iter().enumerate() {
+            let text = &reply[start..end];
+            let mut at = 0;
+            for word in text.split(' ') {
+                if !word.is_empty() {
+                    let left = self.advance(&text[..at]);
+                    let right = left + self.advance(word);
+                    out.push(Slot {
+                        word,
+                        line,
+                        left,
+                        right,
+                        centre: [(left + right) / 2.0, (line as f32 + 0.5) * self.line],
+                    });
+                }
+                at += word.len() + 1;
+            }
+        }
+        out
+    }
+
+    /// A text caret at `(x, line)`.
+    pub(crate) fn caret(self, p: Paint, key: &str, x: f32, line: usize) -> El {
+        let inset = (self.line * 0.11).round();
+        el().key(key.to_string())
+            .absolute(x, line as f32 * self.line + inset)
+            .size((self.line / 12.0).max(1.5), self.line - 2.0 * inset)
+            .radius(0.75)
+            .fill(p.k.c.text_accent)
+    }
 }
 
 /// One word's slot: its text, its line, and its box's left and centre
@@ -131,7 +131,6 @@ pub(crate) struct Slot<'a> {
     pub(crate) right: f32,
     pub(crate) centre: [f32; 2],
 }
-
 
 /// `reply` as typed so far, with the caret after byte `caret` while it's
 /// being typed, on `lines` lines kept however much there is.
