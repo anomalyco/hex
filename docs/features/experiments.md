@@ -4,7 +4,8 @@ Experiments are unfinished features whose code sits on `dev` but stays
 dormant until someone turns one on for their own Hex. They are **unsupported**:
 an experiment may misbehave, change, or disappear without notice, and the
 window offers no switch for them. There is a flag, not a setting. Panes an
-experiment adds list under **Experiments** at the bottom of the sidebar.
+experiment adds list under **Labs** at the bottom of the sidebar, indented
+while Labs or one of them is open.
 
 ```ts
 Turn an experiment on                    // experiments.sources

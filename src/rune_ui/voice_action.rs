@@ -4,11 +4,11 @@
 
 use rune::El;
 
-use super::ShortcutTarget;
-use super::Ui;
-use super::controls::{Paint, card, described_row, folding, note, page, section, toggle_row};
+use super::controls::{CardRow, Paint, card, folding, icon_toggle_row, note, page};
 use super::models::{self, Target};
-use super::settings::{cancel_capture, shortcut_control};
+use super::platform_settings::{SIDES, picked_side, side_binding};
+use super::settings::cancel_capture;
+use super::{Pane, ShortcutTarget, Ui, general, icons};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::tr;
 use crate::opencode_catalog::OpenCodeFeature;
@@ -35,7 +35,7 @@ fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static
     Ok(())
 }
 
-fn toggle(ui: &mut Ui) {
+pub(super) fn toggle(ui: &mut Ui) {
     cancel_capture(ui);
     let enabled = !ui.settings.voice_action.enabled;
     let mut candidate = ui.drafted();
@@ -51,65 +51,87 @@ fn toggle(ui: &mut Ui) {
     }
 }
 
+/// Why the last switch failed, under the switch.
+pub(super) fn error_note(ui: &Ui, p: Paint) -> Option<El> {
+    ui.voice_action_error.as_ref().map(|error| {
+        note(
+            "voice-action-error",
+            &format!("{} {error}", tr("Could not update Voice Action:")),
+            p.danger(),
+        )
+    })
+}
+
+/// The opt-in, the shortcut, and the OpenCode model; the shortcut's side and
+/// the model's thinking behind Advanced.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let enabled = ui.settings.voice_action.enabled;
     // The switch stays reachable without OpenCode; it says why it won't work.
     let reason = (!ui.models.checking())
         .then(|| models::unavailable_reason(ui, OpenCodeFeature::VoiceAction))
         .flatten();
-    let mut content = page("content");
-    let enable = vec![
-        toggle_row(
+    let mut rows: Vec<CardRow> = vec![
+        icon_toggle_row(
             p,
             "voice-action-enabled",
+            &super::VOICE_ACTION_ICON,
             tr("Enable Voice Action"),
             reason.unwrap_or_else(|| description(enabled)),
             enabled,
             toggle,
         )
         .into(),
-        folding(
-            "voice-action-error-fold",
-            ui.voice_action_error.as_ref().map(|error| {
-                note(
-                    "voice-action-error",
-                    &format!("{} {error}", tr("Could not update Voice Action:")),
-                    p.danger(),
-                )
-            }),
-        ),
+        folding("voice-action-error-fold", error_note(ui, p)),
     ];
-    content = content.child(card(p, "enable", enable));
     if ui.records_shortcuts() {
-        let mut rows = vec![described_row(
-            p,
-            "voice-action-shortcut",
-            tr("Shortcut"),
-            Some(
-                super::settings::granted(ui, p, ShortcutTarget::VoiceAction).unwrap_or_else(|| {
-                    let purpose = if enabled {
-                        tr("Hold to speak; selected text is included automatically")
-                    } else {
-                        tr("Saved for when Voice Action is enabled")
-                    };
-                    (purpose.to_string(), p.muted())
-                }),
-            ),
-            shortcut_control(ui, p, ShortcutTarget::VoiceAction),
-        )];
-        rows.extend(super::settings::refused_note(
+        rows.extend(general::shortcut_rows(
             ui,
             p,
+            "voice-action-shortcut",
+            &icons::KEYBOARD,
+            tr("Shortcut"),
             ShortcutTarget::VoiceAction,
+            Some(if enabled {
+                tr("Hold to speak; selected text is included automatically")
+            } else {
+                tr("Saved for when Voice Action is enabled")
+            }),
         ));
-        content = content.child(section(p, "capture", tr("Capture"), rows));
+    }
+    let mut more: Vec<CardRow> = Vec::new();
+    if ui.records_shortcuts()
+        && let Some(side) = picked_side(ui, ShortcutTarget::VoiceAction)
+    {
+        more.push(general::side_row(
+            ui,
+            p,
+            "voice-action-side",
+            side,
+            |ui, index| {
+                let target = ShortcutTarget::VoiceAction;
+                if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
+                    ui.update(|settings| super::settings::set_binding(settings, target, candidate));
+                }
+            },
+            layer,
+        ));
     }
     if enabled {
-        let rows = match models::unavailable(ui, p, OpenCodeFeature::VoiceAction) {
-            Some(notice) => vec![notice],
-            None => models::rows(ui, p, Target::VoiceAction, layer),
-        };
-        content = content.child(section(p, "processing", tr("Processing"), rows));
+        match models::unavailable(ui, p, OpenCodeFeature::VoiceAction) {
+            Some(notice) => rows.push(notice.into()),
+            None => {
+                let mut models = models::icon_rows(ui, p, Target::VoiceAction, layer).into_iter();
+                rows.extend(models.next().map(CardRow::from));
+                more.extend(models.map(CardRow::from));
+            }
+        }
+    }
+    let mut content = page("content").child(card(p, "basics", rows));
+    if !more.is_empty() {
+        content = content.child(general::advanced_toggle(ui, p, Pane::VoiceAction));
+        if general::advanced_open(ui, Pane::VoiceAction) {
+            content = content.child(card(p, "advanced", more));
+        }
     }
     super::scroll_body("scroll", content)
 }

@@ -7,38 +7,32 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS,
-    Paint, button, described_row, fixed_select, folding, icon_button, key_tray, keycap, keycaps,
-    link_row, note, page, pulsing_dot, section, section_with, segmented, select, select_sized,
-    setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
+    ButtonKind, Choice, DESCRIPTION, KEY_GAP, KeySize, METRICS, Paint, button, fixed_select,
+    keycap, note, pulsing_dot, section, select, setting_row, status_dot,
 };
-use super::lists::{PermissionControl, permission_control, slider};
-use super::platform::PlatformRequest;
+use super::host;
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
-use super::{explainer, host};
 use crate::app_settings::{
-    AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition, KeyboardModelChoice,
-    ModifierSide, RecordingAudioBehavior, UpdateChannel,
+    AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, KeyboardModelChoice, ModifierSide,
 };
 use crate::desktop_host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 use crate::keyboard_model_switching::InputSource;
-use crate::onboarding::PermissionKind;
 use crate::transcription_models::{self, ModelPreparationStage};
 
 static CHECK: &rune::Icon = &rune_theme_opencode::icons::CHECK_SMALL;
 
-const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
+pub(super) const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
     ("Off", 0.0),
     ("25%", 0.25),
     ("50%", 0.5),
     ("75%", 0.75),
     ("100%", 1.0),
 ];
-const SOUND_THEMES: [(&str, crate::feedback::SoundTheme); 2] = [
+pub(super) const SOUND_THEMES: [(&str, crate::feedback::SoundTheme); 2] = [
     ("Signature", crate::feedback::SoundTheme::Signature),
     ("Classic", crate::feedback::SoundTheme::Classic),
 ];
@@ -226,7 +220,7 @@ pub(super) fn hold(ui: &mut Ui, modifiers: HotkeyModifiers) {
     }
 }
 
-fn begin_capture(ui: &mut Ui, target: ShortcutTarget) {
+pub(super) fn begin_capture(ui: &mut Ui, target: ShortcutTarget) {
     if let Capture::Listening { target: active, .. } = ui.capture {
         cancel_capture(ui);
         if active == target {
@@ -360,7 +354,7 @@ pub(super) fn set_binding(
     }
 }
 
-fn sound_volume_index(settings: &AppSettings) -> usize {
+pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
     if !settings.sound_effects {
         return 0;
     }
@@ -485,34 +479,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
     ]
 }
 
-/// General: the missing permissions, the listener (Windows and Linux), then
-/// the Dictation (with its Advanced disclosure), Output, and Application
-/// cards. Features' own settings live in their panes; updates live under
-/// the sidebar's version.
-pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    use super::platform_settings as os;
-    let mut content = page("content")
-        .children(os::permissions_section(ui, p))
-        .children(os::error_section(ui, p));
-    if ui.platform.caps.listener_control {
-        content = content.child(listener_card(ui, p));
-    }
-    if !ui.records_shortcuts() {
-        content = content.child(desktop_commands(ui, p));
-    }
-    content = content
-        .child(dictation_section(ui, p, layer))
-        .children(
-            ui.platform
-                .vocabulary
-                .then(|| super::vocabulary::section_view(ui, p)),
-        )
-        .child(output_section(ui, p))
-        .child(application_section(ui, p, layer));
-    super::scroll_body("scroll", content)
-}
-
-fn listener_card(ui: &Ui, p: Paint) -> El {
+pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
     let running = ui.running();
     let status = match &ui.view {
         Some(view) => tr(&view.listener.status).to_string(),
@@ -655,137 +622,9 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
         })
 }
 
-/// The desktop's own dialog for the shortcuts its portal bound, where the
-/// user changes a trigger the desktop kept from an earlier binding.
-fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
-    ui.view
-        .as_ref()
-        .is_some_and(|view| view.listener.shortcuts_configurable)
-        .then(|| {
-            setting_row(
-                p,
-                "configure-shortcuts",
-                tr("Desktop shortcuts"),
-                Some(tr("Change the keys your desktop gave Hex")),
-                button(
-                    p,
-                    "configure-shortcuts-control",
-                    tr("Open"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::ConfigureShortcuts)),
-                ),
-            )
-        })
-}
-
-/// One recordable shortcut beside its recorder, with what a shortcuts
-/// portal granted for it.
-fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
-    let (key, title) = match target {
-        ShortcutTarget::Dictation => ("dictation-shortcut", tr("Shortcut")),
-        ShortcutTarget::PasteLast => ("paste-last", tr("Paste last dictation")),
-        ShortcutTarget::VoiceAction => ("voice-action-shortcut", tr("Voice Action")),
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => ("capture-shortcut", tr("Shortcut")),
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => ("capture-list-shortcut", tr("Send-to list")),
-    };
-    described_row(
-        p,
-        key,
-        title,
-        granted(ui, p, target),
-        shortcut_control(ui, p, target),
-    )
-}
-
-/// The side picker (macOS), the shortcut's keys in their tray, the
-/// recorder, and Clear for Paste last. The recorder keeps one width through
-/// every state, so the keys and the picker hold still; a new shortcut of
-/// another width moves them together on one spring.
-const CONTROL_GAP: f32 = 8.0;
-/// The key tray keeps a little more room on each side than the controls
-/// keep between them.
-const TRAY_GAP: f32 = CONTROL_GAP + 4.0;
-
-pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
-    let key = match target {
-        ShortcutTarget::Dictation => "dictation-shortcut-control",
-        ShortcutTarget::PasteLast => "paste-last-control",
-        ShortcutTarget::VoiceAction => "voice-action-shortcut-control",
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => "capture-shortcut-control",
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => "capture-list-shortcut-control",
-    };
-    let picker = super::platform_settings::side_selector(ui, p, target);
-    // The picker hangs off the keys' left edge in the room its margin
-    // keeps, so both stay put while either changes; a leaving picker fades
-    // where it stands.
-    let room = picker.as_ref().map_or(0.0, |_| {
-        super::platform_settings::SIDE_PICKER_WIDTH + TRAY_GAP
-    });
-    let keys = match binding(&ui.settings, target) {
-        Some(binding) => keycaps(
-            p,
-            "keys",
-            &shortcut_caps(
-                binding,
-                super::platform_settings::picked_side(ui, target).is_some(),
-            ),
-        ),
-        None => key_tray(
-            p,
-            "keys",
-            KeySize::Small,
-            // Off trades places with the keys by rolling, never fading
-            // over them.
-            [row()
-                .key("off")
-                .h(KeySize::Small.height())
-                .px(5.0)
-                .center()
-                .transition(tray_roll())
-                .child(
-                    text(tr("Off"))
-                        .key("label")
-                        .font(DESCRIPTION)
-                        .color(p.faint()),
-                )],
-        ),
-    };
-    let mut control = row()
-        .key(key)
-        .gap(CONTROL_GAP)
-        .center_y()
-        .motion(p.k.motion.control)
-        .child(
-            row()
-                .key("recorder-slot")
-                .ml(room)
-                .gap(TRAY_GAP)
-                .center_y()
-                .children(picker.map(|picker| picker.pin(Some(-room), Some(0.0), None, None)))
-                .child(keys)
-                .child(hotkey_control(ui, p, target)),
-        );
-    if target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some() {
-        control = control.child(icon_button(
-            p,
-            "clear-paste-last",
-            &rune_theme_opencode::icons::TRASH,
-            tr("Clear shortcut"),
-            |ui: &mut Ui| {
-                ui.update(|settings| settings.paste_last_hotkey = None);
-            },
-        ));
-    }
-    control
-}
-
 /// Without a shortcuts portal the desktop's keybindings own every shortcut:
 /// the commands to bind there.
-fn desktop_commands(ui: &Ui, p: Paint) -> El {
+pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
     let mut rows = vec![
         note(
             "no-portal",
@@ -849,219 +688,9 @@ fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[
     setting_row(p, key, title, Some(description), lines)
 }
 
-/// The shortcut and how it triggers, the speech model, and the microphone.
-fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let settings = &ui.settings;
-    let mut rows: Vec<CardRow> = Vec::new();
-    if ui.records_shortcuts() {
-        rows.push(shortcut_row(ui, p, ShortcutTarget::Dictation).into());
-        rows.extend(refused_note(ui, p, ShortcutTarget::Dictation).map(CardRow::from));
-        rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
-    }
-    let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
-    rows.push(
-        link_row(
-            p,
-            "shortcut-mode",
-            tr("Shortcut mode"),
-            explainer::link(p),
-            segmented(
-                p,
-                "shortcut-mode-control",
-                &[tr("Hold"), tr("Toggle")],
-                usize::from(toggle_mode),
-                |ui, index| {
-                    let mode = if index == 1 {
-                        ShortcutMode::Toggle
-                    } else {
-                        ShortcutMode::Hold
-                    };
-                    if ui.settings.shortcut_mode != mode {
-                        ui.update(|settings| settings.shortcut_mode = mode);
-                    }
-                },
-            ),
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "double-tap-fold",
-        (!toggle_mode).then(|| {
-            toggle_row(
-                p,
-                "double-tap",
-                tr("Double-tap to lock"),
-                None,
-                settings.double_tap_lock,
-                explainer::flip_lock,
-            )
-        }),
-    ));
-    let model = transcription_models::definition(settings.transcription.model);
-    rows.push(
-        described_row(
-            p,
-            "transcription",
-            tr("Speech model"),
-            transcription_status(ui, p),
-            sheet_button(p, "transcription-control", model.name, super::picker::open),
-        )
-        .into(),
-    );
-    rows.push(super::picker::language_row(ui, p, layer).into());
-    let listed = ui.microphones.as_ref().ok();
-    let default_name = listed.and_then(|devices| devices.system_default.as_deref());
-    let missing = missing_microphone(ui);
-    // A MacBook's built-in microphone is off while its lid is closed.
-    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
-    let saved_off = settings
-        .microphone
-        .as_deref()
-        .filter(|saved| off == Some(*saved));
-    // System default's choice, with the input it resolves to in faint text.
-    let system_detail = default_name.map(str::to_owned);
-    // The field always names the input in use, so a missing saved
-    // microphone shows the system default standing in for it.
-    let (microphone, microphone_detail) = match (&settings.microphone, missing.or(saved_off)) {
-        (Some(saved), None) => (saved.clone(), None),
-        _ => (tr("System default").to_owned(), system_detail),
-    };
-    let mac = ui.platform.caps.os == super::platform::Os::Macos;
-    let lid_note = |built_in: &str| match default_name {
-        Some(name) => tr_named(
-            "{built_in} is off while the lid is closed, so Hex listens to {input}",
-            &[("built_in", built_in), ("input", name)],
-        ),
-        None => tr_fill("{} is off while the lid is closed", built_in),
-    };
-    let microphone_note = listed.and_then(|devices| match &settings.microphone {
-        Some(_) if saved_off.is_some() => saved_off.map(lid_note),
-        Some(_) => missing.map(|saved| {
-            if mac {
-                tr_fill("{} isn't connected; using your Mac's input", saved)
-            } else {
-                tr_fill("{} isn't connected; using the system input", saved)
-            }
-        }),
-        None if devices.default_is_hex_microphone => default_name.map(|name| {
-            tr_fill(
-                "Hex Microphone is the system default, so Hex listens to {}",
-                name,
-            )
-        }),
-        None if devices.default_is_off_with_lid_closed => off.map(lid_note),
-        None => devices
-            .bluetooth_default_passed_over
-            .as_deref()
-            .zip(default_name)
-            .map(|(bluetooth, input)| {
-                tr_named(
-                    "{bluetooth} is Bluetooth, so Hex listens to {input}",
-                    &[("bluetooth", bluetooth), ("input", input)],
-                )
-            }),
-    });
-    let devices = microphone_choices(ui);
-    rows.push(
-        setting_row(
-            p,
-            "microphone",
-            tr("Microphone"),
-            microphone_note.as_deref(),
-            select_sized(
-                p,
-                "microphone-control",
-                &microphone,
-                microphone_detail.as_deref(),
-                ui.open == Some(Menu::Microphone),
-                devices,
-                |ui: &mut Ui| toggle_menu(ui, Menu::Microphone),
-                layer,
-                DEVICE_SELECT_WIDTH,
-            ),
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "devices-error-fold",
-        match (ui.open, &ui.microphones) {
-            (Some(Menu::Microphone), Err(error)) => Some(note("devices-error", error, p.danger())),
-            _ => None,
-        },
-    ));
-    if model.supports_recognition_hints {
-        rows.push(
-            setting_row(
-                p,
-                "hints",
-                tr("Recognition hints"),
-                Some(tr("Names and terms to prime the speech model")),
-                text_field(
-                    p,
-                    "hints-field",
-                    &ui.hints,
-                    tr("Names and terms Whisper should expect, e.g. OpenCode, Effect…"),
-                    |ui: &mut Ui| &mut ui.hints,
-                    |ui: &mut Ui, _| {
-                        let hints = ui.hints.text.clone();
-                        ui.update(|settings| settings.transcription.recognition_hints = hints);
-                    },
-                ),
-            )
-            .into(),
-        );
-    }
-    if ui.platform.caps.keyboard_model_switching {
-        rows.push(
-            toggle_row(
-                p,
-                "keyboard-model-switching",
-                tr("Switch model with keyboard language"),
-                Some(tr(
-                    "Changing input source selects its mapped model and language; manual choices still work",
-                )),
-                settings.keyboard_model_switching.enabled,
-                |ui| {
-                    ui.open = None;
-                    ui.update(|settings| {
-                        settings.keyboard_model_switching.enabled =
-                            !settings.keyboard_model_switching.enabled;
-                    });
-                },
-            )
-            .into(),
-        );
-        rows.push(folding(
-            "input-source-mappings",
-            if settings.keyboard_model_switching.enabled {
-                input_source_rows(ui, p, layer)
-            } else {
-                Vec::new()
-            },
-        ));
-    }
-    let pinned = advanced_in_use(settings);
-    rows.push(folding(
-        "advanced-fold",
-        if ui.advanced.unwrap_or(pinned) {
-            advanced_rows(ui, p)
-        } else {
-            Vec::new()
-        },
-    ));
-    // The toggle's word ends on the box's edge, its hover reaching past it.
-    section_with(
-        p,
-        "dictation",
-        tr("Dictation"),
-        advanced_toggle(ui, p, pinned).mr(-6.0),
-        rows,
-    )
-}
-
 /// One row per enabled input source: "Don't switch" or an installed model,
 /// then a language that model supports, as the Language row offers it.
-fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
     ui.platform
         .input_sources
         .iter()
@@ -1208,7 +837,7 @@ fn input_source_language(
 }
 
 /// The speech model row's description: preparation progress or its error.
-fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::Color)> {
+pub(super) fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::Color)> {
     let transcription = &ui.view.as_ref()?.transcription;
     if let Some(error) = &transcription.error {
         return Some((error.clone(), p.danger()));
@@ -1229,7 +858,7 @@ fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::Color)> {
 
 /// What a recorder shows; each change rolls up into it from below.
 #[derive(Clone, Copy, PartialEq)]
-enum Face {
+pub(super) enum Face {
     /// What pressing does (Change shortcut), or that it just saved; the
     /// shortcut's keys sit in their tray beside the recorder.
     Shortcut {
@@ -1239,7 +868,7 @@ enum Face {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Prompt {
+pub(super) enum Prompt {
     Press,
     /// Why the last chord was rejected.
     Rejected(&'static str),
@@ -1256,11 +885,9 @@ const RECORDER_CAP_INSET: f32 = 3.0;
 const HELD_FADE: f32 = 8.0;
 const HELD_SHADOW_ROOM: f32 = (RECORDER_HEIGHT - KeySize::Small.height()) / 2.0;
 
-/// The shortcut's recorder: a button that keeps the width of its widest
-/// face, so nothing beside it moves while it records, and swaps faces
-/// inside its own rounded clip.
-pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
-    let key = match target {
+/// The recorder's key for `target`.
+pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
+    match target {
         ShortcutTarget::Dictation => "dictation-hotkey",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
@@ -1268,8 +895,12 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         ShortcutTarget::Capture => "capture-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::CaptureList => "capture-list-hotkey",
-    };
-    let face = match ui.capture {
+    }
+}
+
+/// What `target`'s recorder shows now.
+pub(super) fn face(ui: &Ui, target: ShortcutTarget) -> Face {
+    match ui.capture {
         Capture::Listening {
             target: active,
             message,
@@ -1284,59 +915,7 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         }
         Capture::Saved { target: active, .. } if active == target => Face::Shortcut { saved: true },
         _ => Face::Shortcut { saved: false },
-    };
-    // The widths it reserves: every face but held modifiers, which clip.
-    let mut sizes = vec![
-        Face::Shortcut { saved: false },
-        Face::Shortcut { saved: true },
-        Face::Listening(Prompt::Press),
-        Face::Listening(Prompt::Saving),
-    ];
-    sizes.extend(
-        ["Unsupported key", "Add a modifier", "Already in use"]
-            .map(|message| Face::Listening(Prompt::Rejected(tr(message)))),
-    );
-    if matches!(face, Face::Listening(Prompt::Rejected(_))) && !sizes.contains(&face) {
-        sizes.push(face);
     }
-    let c = &p.k.c;
-    let listening =
-        matches!(ui.capture, Capture::Listening { target: active, .. } if active == target);
-    let mut frame = row()
-        .key(key)
-        .role("button")
-        .label(face_label(face))
-        .h(RECORDER_HEIGHT)
-        .radius(p.k.radius.md)
-        .fill(c.bg_button_neutral)
-        // While listening, keys reach the recorder rather than pressing it again.
-        .focusable(!listening)
-        .focus_ring(2.0, 2.5, c.border_focus)
-        .on_press(move |ui: &mut Ui| begin_capture(ui, target));
-    for shadow in &p.k.elevation.button_neutral {
-        frame = frame.box_shadow(*shadow);
-    }
-    if face == (Face::Shortcut { saved: false }) {
-        frame = frame.hover(c.hover).press(c.pressed);
-    }
-    frame.child(
-        col()
-            .key("faces")
-            .equal_columns(1)
-            .clip_rounded(p.k.radius.md)
-            .children(sizes.into_iter().enumerate().map(|(index, size)| {
-                recorder_face(p, size, false)
-                    .key(format!("size{index}"))
-                    .role("none")
-                    .grid_cell(0)
-                    .opacity(0.0)
-            }))
-            .child(
-                recorder_face(p, face, true)
-                    .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                    .transition(roll()),
-            ),
-    )
 }
 
 /// In from below, out through the top, both inside the recorder's clip.
@@ -1344,7 +923,7 @@ fn roll() -> Transition {
     Transition::push(Edge::Bottom)
 }
 
-fn face_label(face: Face) -> &'static str {
+pub(super) fn face_label(face: Face) -> &'static str {
     match face {
         Face::Shortcut { saved: false } => tr("Change shortcut"),
         Face::Shortcut { saved: true } => tr("Saved"),
@@ -1356,7 +935,7 @@ fn face_label(face: Face) -> &'static str {
 
 /// One face of the recorder at its full height. Only the shown face
 /// (`live`) pulses.
-fn recorder_face(p: Paint, face: Face, live: bool) -> El {
+pub(super) fn recorder_face(p: Paint, face: Face, live: bool) -> El {
     let label_style = p.k.ty.ui_medium.lh(16.0);
     let label = |key: &str, copy: &str, color| text(copy).key(key).font(label_style).color(color);
     let face_row = |key: &str| row().key(key).h(RECORDER_HEIGHT).gap(8.0).center_y();
@@ -1451,334 +1030,13 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
         .collect()
 }
 
-/// "Also pause the browser", under Pause media on macOS. Hex hears the
-/// browser through System Audio Recording, so turning it on asks for that
-/// here: never while you dictate.
-fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
-    let on = ui.settings.pause_browser_media;
-    let mut rows = vec![toggle_row(
-        p,
-        "pause-browser",
-        tr("Also pause the browser"),
-        tr("YouTube and other tabs, resumed only if Hex paused them"),
-        on,
-        |ui: &mut Ui| {
-            let on = !ui.settings.pause_browser_media;
-            ui.update(|settings| settings.pause_browser_media = on);
-            if on && !ui.platform.system_audio {
-                ui.ask(PlatformRequest::SystemAudio);
-            }
-        },
-    )];
-    if on {
-        let permitted = ui.platform.system_audio;
-        rows.push(setting_row(
-            p,
-            "pause-browser-audio",
-            tr("Screen & System Audio Recording"),
-            Some(tr("Lets Hex hear whether a tab is playing")),
-            permission_control(
-                p,
-                "pause-browser-allow",
-                if permitted {
-                    PermissionControl::Allowed
-                } else if ui.platform.asked(PermissionKind::SystemAudio) {
-                    PermissionControl::Waiting
-                } else {
-                    PermissionControl::Allow
-                },
-                ButtonKind::Secondary,
-                |ui: &mut Ui| ui.ask(PlatformRequest::SystemAudio),
-            ),
-        ));
-    }
-    rows
-}
-
-/// Where dictation goes and what happens around it.
-fn output_section(ui: &Ui, p: Paint) -> El {
-    let settings = &ui.settings;
-    let mut rows = Vec::new();
-    if ui.records_shortcuts() {
-        rows.push(shortcut_row(ui, p, ShortcutTarget::PasteLast));
-        rows.extend(refused_note(ui, p, ShortcutTarget::PasteLast));
-    }
-    let behaviors: Vec<_> = RecordingAudioBehavior::ALL
-        .into_iter()
-        .filter(|behavior| *behavior != RecordingAudioBehavior::Duck || ui.platform.caps.duck_audio)
-        .collect();
-    let audio_labels: Vec<&str> = behaviors
-        .iter()
-        .map(|behavior| tr(behavior.label()))
-        .collect();
-    let audio_index = behaviors
-        .iter()
-        .position(|behavior| *behavior == settings.recording_audio_behavior)
-        .unwrap_or(2);
-    rows.push(setting_row(
-        p,
-        "while-dictating",
-        tr("While dictating"),
-        None,
-        segmented(
-            p,
-            "while-dictating-control",
-            &audio_labels,
-            audio_index,
-            move |ui, index| {
-                let behavior = behaviors[index];
-                if ui.settings.recording_audio_behavior != behavior {
-                    ui.update(|settings| settings.recording_audio_behavior = behavior);
-                }
-            },
-        ),
-    ));
-    if ui.platform.caps.duck_audio
-        && settings.recording_audio_behavior == RecordingAudioBehavior::Duck
-    {
-        rows.push(setting_row(
-            p,
-            "recording-duck-volume",
-            tr("Lower to"),
-            Some(tr("Percent of the current output volume")),
-            slider(
-                p,
-                "recording-duck-slider",
-                tr("Volume while recording"),
-                ui.duck_volume_drag
-                    .unwrap_or(settings.recording_duck_volume),
-                format!(
-                    "{:.0}%",
-                    ui.duck_volume_drag
-                        .unwrap_or(settings.recording_duck_volume)
-                        * 100.0
-                ),
-                200.0,
-                |ui, value, done| {
-                    let value = (value * 100.0).round() / 100.0;
-                    ui.duck_volume_drag = if done { None } else { Some(value) };
-                    if done {
-                        ui.update(|settings| settings.recording_duck_volume = value);
-                    }
-                },
-            ),
-        ));
-    }
-    if ui.platform.caps.os == super::platform::Os::Macos
-        && settings.recording_audio_behavior == RecordingAudioBehavior::PauseMedia
-    {
-        rows.extend(pause_browser_rows(ui, p));
-    }
-    let indicator_index = match settings.indicator_position {
-        IndicatorPosition::Top => 0,
-        IndicatorPosition::Bottom => 1,
-        IndicatorPosition::Hidden => 2,
-    };
-    rows.push(setting_row(
-        p,
-        "indicator",
-        tr("Dictation HUD"),
-        None,
-        segmented(
-            p,
-            "indicator-control",
-            &[tr("Top"), tr("Bottom"), tr("Off")],
-            indicator_index,
-            |ui, index| {
-                let position = [
-                    IndicatorPosition::Top,
-                    IndicatorPosition::Bottom,
-                    IndicatorPosition::Hidden,
-                ][index];
-                if ui.settings.indicator_position != position {
-                    ui.update(|settings| settings.indicator_position = position);
-                }
-            },
-        ),
-    ));
-    if ui.platform.caps.terminal_paste {
-        rows.push(toggle_row(
-            p,
-            "terminal-paste",
-            tr("Terminal paste"),
-            tr("Paste with Ctrl+Shift+V so terminals accept it"),
-            settings.paste_with_shift,
-            |ui: &mut Ui| {
-                let enabled = !ui.settings.paste_with_shift;
-                ui.update(|settings| settings.paste_with_shift = enabled);
-            },
-        ));
-    }
-    section(p, "output", tr("Output"), rows)
-}
-
-/// An advanced setting is off its default, so Advanced stays open to show
-/// it: the microphone released while idle, Double-tap only where its row
-/// shows, a chosen update channel, a shared shortcut, or a Bluetooth default
-/// allowed.
-fn advanced_in_use(settings: &AppSettings) -> bool {
-    settings.release_microphone_while_idle
-        || (double_tap_only_applies(settings) && settings.double_tap_only)
-        || settings.updates.channel.is_some()
-        || settings.share_dictation_shortcut
-        || !settings.avoid_bluetooth_microphone
-}
-
-fn double_tap_only_applies(settings: &AppSettings) -> bool {
+pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
     settings.shortcut_mode == ShortcutMode::Hold
         && settings.double_tap_lock
         && settings.dictation_hotkey.key.is_some()
 }
 
-/// The Dictation header's disclosure for the options most people never
-/// change, which show at the end of the card. It starts open while one is in
-/// use, and always closes when pressed. (A row above them at the card's end would Tab straight into them,
-/// but costs the 37 px that keeps General from scrolling at 760.)
-fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
-    let c = &p.k.c;
-    let open = ui.advanced.unwrap_or(pinned);
-    let toggle = row()
-        .key("advanced-toggle")
-        .label(tr("Advanced"))
-        .h(18.0)
-        .px(6.0)
-        .gap(2.0)
-        .center_y()
-        .radius(p.k.radius.md)
-        .child(
-            text(tr("Advanced"))
-                .key("title")
-                .font(p.k.ty.ui.lh(16.0))
-                .color(c.text_muted),
-        )
-        .child(
-            rune::icon(
-                if open {
-                    p.k.glyph.triangle_down
-                } else {
-                    p.k.glyph.triangle_right
-                },
-                14.0,
-            )
-            .key("arrow")
-            .color(c.icon_weaker),
-        );
-    toggle
-        .role("button")
-        .hover(c.hover)
-        .press(c.pressed)
-        .focusable(true)
-        .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(move |ui: &mut Ui| {
-            ui.advanced = Some(!open);
-            if open {
-                ui.confirm_release = false;
-            }
-        })
-}
-
-/// Advanced dictation rows, shown at the end of the Dictation card: the
-/// microphone's idle release, Double-tap only, and (macOS) passing over a
-/// Bluetooth default.
-fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
-    let settings = &ui.settings;
-    let mut rows: Vec<CardRow> = vec![
-        setting_row(
-            p,
-            "microphone-mode",
-            tr("Microphone mode"),
-            Some(if settings.release_microphone_while_idle {
-                tr("Opens only while holding the shortcut. Disables pre-roll and commands.")
-            } else {
-                tr("Keeps the microphone open for instant start and pre-roll")
-            }),
-            segmented(
-                p,
-                "microphone-mode-control",
-                &[tr("Keep ready (fast)"), tr("Release when idle")],
-                usize::from(settings.release_microphone_while_idle),
-                |ui, index| {
-                    ui.advanced = Some(true);
-                    let release = index == 1;
-                    if release && !ui.settings.release_microphone_while_idle {
-                        ui.confirm_release = true;
-                        return;
-                    }
-                    ui.confirm_release = false;
-                    if ui.settings.release_microphone_while_idle != release {
-                        let mut candidate = ui.drafted();
-                        match candidate.set_release_microphone_while_idle(release) {
-                            Ok(()) => {
-                                ui.commit(candidate);
-                            }
-                            Err(error) => ui.error = Some(format!("{error:#}")),
-                        }
-                    }
-                },
-            ),
-        )
-        .into(),
-        folding(
-            "release-confirmation-fold",
-            ui.confirm_release.then(|| release_confirmation(ui, p)),
-        ),
-        folding(
-            "double-tap-only-fold",
-            double_tap_only_applies(settings).then(|| {
-                toggle_row(
-                    p,
-                    "double-tap-only",
-                    tr("Double-tap only"),
-                    tr("Wait for two complete shortcut taps before recording"),
-                    settings.double_tap_only,
-                    |ui: &mut Ui| {
-                        ui.advanced = Some(true);
-                        let enabled = !ui.settings.double_tap_only;
-                        ui.update(|settings| settings.double_tap_only = enabled);
-                    },
-                )
-            }),
-        ),
-    ];
-    if ui.platform.caps.os == super::platform::Os::Macos {
-        rows.push(
-            toggle_row(
-                p,
-                "avoid-bluetooth-microphone",
-                tr("Use the Mac's microphone instead of Bluetooth"),
-                tr("Keeps AirPods and other headsets out of call-quality audio"),
-                settings.avoid_bluetooth_microphone,
-                |ui: &mut Ui| {
-                    ui.advanced = Some(true);
-                    let enabled = !ui.settings.avoid_bluetooth_microphone;
-                    ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
-                },
-            )
-            .into(),
-        );
-    }
-    if ui.platform.caps.share_shortcut {
-        rows.push(
-            toggle_row(
-                p,
-                "share-dictation-shortcut",
-                tr("Share dictation shortcut with other apps"),
-                tr("Lets apps such as Discord detect the same key"),
-                settings.share_dictation_shortcut,
-                |ui: &mut Ui| {
-                    ui.advanced = Some(true);
-                    let enabled = !ui.settings.share_dictation_shortcut;
-                    ui.update(|settings| settings.share_dictation_shortcut = enabled);
-                },
-            )
-            .into(),
-        );
-    }
-    rows.extend(update_channel_row(ui, p).map(CardRow::from));
-    rows
-}
-
-fn release_confirmation(ui: &Ui, p: Paint) -> El {
+pub(super) fn release_confirmation(ui: &Ui, p: Paint) -> El {
     let description = if ui.settings.commands_enabled {
         tr("Opens the microphone on shortcut press without pre-roll and turns Commands off.")
     } else {
@@ -1819,162 +1077,19 @@ fn release_confirmation(ui: &Ui, p: Paint) -> El {
     .fill(p.k.c.hover)
 }
 
-fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let settings = &ui.settings;
-    let mut rows = super::platform_settings::launch_at_login_rows(ui, p);
-    if ui.platform.caps.listener_control {
-        rows.push(toggle_row(
-            p,
-            "enable-on-launch",
-            tr("Enable on launch"),
-            tr("Start listening when Hex opens"),
-            settings.enable_on_launch,
-            |ui: &mut Ui| {
-                let enabled = !ui.settings.enable_on_launch;
-                ui.update(|settings| settings.enable_on_launch = enabled);
-            },
-        ));
-    }
-    rows.extend(super::platform_settings::dock_icon_row(ui, p));
-    let volume_labels: Vec<&str> = SOUND_VOLUME_STEPS
-        .iter()
-        .map(|(label, _)| tr(label))
-        .collect();
-    rows.push(setting_row(
-        p,
-        "sound-volume",
-        tr("Sound volume"),
-        None,
-        segmented(
-            p,
-            "sound-volume-control",
-            &volume_labels,
-            sound_volume_index(settings),
-            |ui, index| {
-                let volume = SOUND_VOLUME_STEPS[index].1;
-                let saved = ui.update(|settings| {
-                    settings.sound_effects = volume > 0.0;
-                    if volume > 0.0 {
-                        settings.sound_effect_volume = volume;
-                    }
-                });
-                if saved && volume > 0.0 && ui.live() {
-                    crate::feedback::play(crate::feedback::Tone::DictationStart);
-                }
-            },
-        ),
-    ));
-    rows.push(setting_row(
-        p,
-        "sound-theme",
-        tr("Sounds"),
-        None,
-        segmented(
-            p,
-            "sound-theme-control",
-            &SOUND_THEMES.map(|(label, _)| tr(label)),
-            SOUND_THEMES
-                .iter()
-                .position(|(_, theme)| *theme == settings.sound_theme)
-                .unwrap_or(0),
-            |ui, index| {
-                let theme = SOUND_THEMES[index].1;
-                let saved = ui.update(|settings| settings.sound_theme = theme);
-                if saved && ui.settings.sound_effects && ui.live() {
-                    crate::feedback::play(crate::feedback::Tone::DictationStart);
-                }
-            },
-        ),
-    ));
-    let language = tr(crate::desktop_i18n::choice_name(
-        settings.ui_language.as_deref(),
-    ));
-    let languages = crate::desktop_i18n::LANGUAGE_CHOICES
-        .iter()
-        .map(|(code, name)| {
-            let code = code.map(str::to_string);
-            let selected = settings.ui_language == code;
-            Choice {
-                label: tr(name).to_string(),
-                detail: None,
-                selected,
-                choose: Box::new(move |ui: &mut Ui| {
-                    ui.open = None;
-                    let code = code.clone();
-                    if ui.update(|settings| settings.ui_language = code.clone()) {
-                        crate::desktop_i18n::apply(code.as_deref());
-                    }
-                }),
-            }
-        })
-        .collect();
-    rows.push(setting_row(
-        p,
-        "interface-language",
-        tr("Interface language"),
-        None,
-        select(
-            p,
-            "interface-language-control",
-            language,
-            ui.open == Some(Menu::Language),
-            languages,
-            |ui: &mut Ui| toggle_menu(ui, Menu::Language),
-            layer,
-        ),
-    ));
-    section(p, "application", tr("Application"), rows)
-}
-
-/// Stable or Dev, only while this install updates itself: test, source,
-/// managed, and package-manager installs never check a channel.
-fn update_channel_row(ui: &Ui, p: Paint) -> Option<El> {
-    let updates = matches!(
-        ui.view.as_ref()?.update_status,
-        DesktopUpdateStatus::Checking
-            | DesktopUpdateStatus::Current
-            | DesktopUpdateStatus::Failed
-            | DesktopUpdateStatus::Downloading
-            | DesktopUpdateStatus::Available
-            | DesktopUpdateStatus::ReadyToRestart
-            | DesktopUpdateStatus::SwitchAvailable { .. }
-    );
-    if !updates {
-        return None;
-    }
-    let shown = ui
-        .settings
-        .updates
-        .channel
-        .unwrap_or_else(crate::updater::build_channel);
-    let labels: Vec<&str> = UpdateChannel::ALL
-        .iter()
-        .map(|channel| tr(channel.label()))
-        .collect();
-    Some(setting_row(
-        p,
-        "update-channel",
-        tr("Update channel"),
-        None,
-        segmented(
-            p,
-            "update-channel-control",
-            &labels,
-            UpdateChannel::ALL
-                .iter()
-                .position(|item| *item == shown)
-                .unwrap_or(0),
-            move |ui, index| {
-                // Choosing the channel already in effect saves nothing, so an
-                // unset channel keeps following the build.
-                let channel = UpdateChannel::ALL[index];
-                ui.advanced = Some(true);
-                if channel != shown
-                    && ui.update(|settings| settings.updates.channel = Some(channel))
-                {
-                    ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
-                }
-            },
-        ),
-    ))
+/// Stable or Dev shows only while this install updates itself: test,
+/// source, managed, and package-manager installs never check a channel.
+pub(super) fn updates_itself(ui: &Ui) -> bool {
+    ui.view.as_ref().is_some_and(|view| {
+        matches!(
+            view.update_status,
+            DesktopUpdateStatus::Checking
+                | DesktopUpdateStatus::Current
+                | DesktopUpdateStatus::Failed
+                | DesktopUpdateStatus::Downloading
+                | DesktopUpdateStatus::Available
+                | DesktopUpdateStatus::ReadyToRestart
+                | DesktopUpdateStatus::SwitchAvailable { .. }
+        )
+    })
 }

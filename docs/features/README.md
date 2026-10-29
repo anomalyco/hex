@@ -473,7 +473,6 @@ Completed output                         // output
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
     ├── Off -> Stop new entries; preserve existing entries
-    └── Clear all -> Explicit deletion
 ```
 
 Checks in [paste.rs](../../src/paste.rs), [parakeet.rs](../../src/parakeet.rs), and
@@ -508,13 +507,20 @@ latency measurement.
 ## Adjust Behavior
 
 ```ts
+Sidebar                                  // settings.nav
+├── General, History, then each opt-in feature that is on (Voice Action, Commands, Meetings)
+└── Labs ▸ -> Labs page: a switch per opt-in feature; one turned on joins the sidebar
+    └── Experiments' panes (and Modes when shown) indent under Labs while it's open
+        // Command-1…9 follow this order (labs::order)
+
 General                                  // settings
-├── Dictation card -> Shortcut, Shortcut mode, Double-tap to lock, Speech model, Language
-│   ├── Shortcut mode > How it works -> Hold/Toggle explainer modal (dictation.md)
-│   └── A row that hides or shows (Double-tap to lock, Advanced, a microphone error)
+├── Basics card -> Shortcut, Speech model, Language, Microphone, Launch at login
+│   ├── Each row leads with an icon; choices are inline dropdowns, not segments
+│   ├── Language -> fixed text for a one-language model, else a dropdown
+│   └── A row that hides or shows (Advanced, a microphone error, Double-tap only)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
-├── Microphone -> Field always names the input in use            // settings.microphone
-│   ├── "System default" + faint "KIT PODS", or a saved device
+├── Microphone -> Value names the input in use, with live level bars // settings.microphone
+│   ├── "System default · Kit Pods", or a saved device
 │   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
 │   ├── System default -> The OS default input, followed live
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
@@ -523,15 +529,21 @@ General                                  // settings
 │   │       ├── Row says "KIT PODS is Bluetooth, so Hex listens to MacBook Pro Microphone"
 │   │       ├── No other usable input (or lid closed, Bluetooth only) -> the Bluetooth default
 │   │       └── A saved Bluetooth mic or `--device` is always used as named
-│   ├── Saved device missing -> System default stands in, field names it
+│   ├── Saved device missing -> System default stands in, value names it
 │   │   ├── Row says "SHURE MV7 isn't connected; using your Mac's input"
 │   │   ├── Menu keeps "SHURE MV7" checked with a faint "not connected"
 │   │   └── Device returns -> Switch back once idle; the setting never changes
 │   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
-├── Advanced ▸ (Dictation header) -> rows at the end of the Dictation card
-│   ├── Open while Release when idle, Double-tap only (Hold), sharing, or Bluetooth allowed
-│   └── Collapse -> drops a pending release confirmation
+├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
+│   ├── Collapse -> drops a pending release confirmation
+│   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
+│   │   Double-tap only, Microphone mode, keyboard-language model switching (macOS),
+│   │   Use the Mac's microphone instead of Bluetooth (macOS),
+│   │   Share dictation shortcut with other apps (Windows), Recognition hints
+│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
+│   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
+│       Interface language, Update channel (self-updating installs)
 ├── Use the Mac's microphone instead of Bluetooth (Advanced, macOS, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Share dictation shortcut with other apps (Advanced, Windows, off)
@@ -540,7 +552,6 @@ General                                  // settings
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Open on press; no pre-roll; startup delay
 │       └── Commands enabled? -> Confirm turning Commands off
-├── Output card -> Paste last shortcut, While dictating, Dictation HUD
 ├── While dictating -> Mute / Pause media / Lower audio (macOS) / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
@@ -550,9 +561,9 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Application card -> Sound volume: immediate feedback; zero suppresses tones
-├── Application card -> Sounds: Signature (default) / Classic; previews start
-└── Voice Action shortcut -> Voice Action pane; Meetings -> Meetings › Settings
+├── Sound volume -> immediate feedback; zero suppresses tones
+├── Sounds -> Signature (default) / Classic; previews start
+└── Linux / Windows -> listener card and desktop commands below the basics
 
 Pause media + Also pause the browser     // browser_media
 ├── A browser uses the microphone (a call) -> leave it alone
@@ -804,7 +815,7 @@ suppression, and the Markdown copy in the user's transcript folder.
 ```ts
 voice-filter experiment, HEX_EXPERIMENTAL_MIC=1, experimental.hex_microphone = true,
 or the driver installed                  // fun.hex-microphone; macOS
-├── Sidebar > Experiments > Voice Filter  // the only home of these controls
+├── Sidebar > Labs > Voice Filter  // the only home of these controls
 ├── Hex Microphone card
 │   ├── Driver status -> Installed v<ver> / In use by <app> + Uninstall
 │   │   ├── Version mismatch -> v<old> installed + Update + Uninstall

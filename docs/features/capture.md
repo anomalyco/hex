@@ -11,7 +11,7 @@ macOS, draw mode on Linux), transcribes the narration with word timestamps on
 Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
 copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
 router (`crates/router`), run in Hex's process. Settings › Annotate (under
-Experiments in the sidebar) holds its settings. Scrawl's capsule (switch
+Labs in the sidebar) holds its settings. Scrawl's capsule (switch
 chips, the on-screen picker, route chips) and its ink and laser overlay are
 Rune overlays.
 

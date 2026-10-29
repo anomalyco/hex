@@ -68,7 +68,7 @@ fn task_label(task: &str) -> &str {
     }
 }
 
-fn set_enabled(ui: &mut Ui, enabled: bool) {
+pub(super) fn set_enabled(ui: &mut Ui, enabled: bool) {
     if enabled && ui.settings.release_microphone_while_idle {
         ui.commands.confirm_enable = true;
         return;
@@ -265,40 +265,43 @@ fn enable_card(ui: &Ui, p: Paint) -> El {
             set_enabled(ui, enabled);
         },
     )];
-    if ui.commands.confirm_enable {
-        rows.push(
-            setting_row(
-                p,
-                "confirm-enable",
-                tr("Keep the microphone ready?"),
-                Some(tr(
-                    "Commands listen all the time, so Hex stops releasing the microphone when idle",
-                )),
-                row()
-                    .key("actions")
-                    .gap(8.0)
-                    .child(button(
-                        p,
-                        "cancel-enable-commands",
-                        tr("Cancel"),
-                        ButtonKind::Secondary,
-                        |ui: &mut Ui, _| ui.commands.confirm_enable = false,
-                    ))
-                    .child(
-                        button(
-                            p,
-                            "confirm-enable-commands",
-                            tr("Keep microphone ready & enable commands"),
-                            ButtonKind::Primary,
-                            |ui: &mut Ui, _| keep_ready_and_enable(ui),
-                        )
-                        .default_button(),
-                    ),
-            )
-            .fill(p.k.c.hover),
-        );
-    }
+    rows.extend(confirm_row(ui, p));
     card(p, "enable", rows)
+}
+
+/// Asks to keep the released microphone ready before commands turn on.
+pub(super) fn confirm_row(ui: &Ui, p: Paint) -> Option<El> {
+    ui.commands.confirm_enable.then(|| {
+        setting_row(
+            p,
+            "confirm-enable",
+            tr("Keep the microphone ready?"),
+            Some(tr(
+                "Commands listen all the time, so Hex stops releasing the microphone when idle",
+            )),
+            row()
+                .key("actions")
+                .gap(8.0)
+                .child(button(
+                    p,
+                    "cancel-enable-commands",
+                    tr("Cancel"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| ui.commands.confirm_enable = false,
+                ))
+                .child(
+                    button(
+                        p,
+                        "confirm-enable-commands",
+                        tr("Keep microphone ready & enable commands"),
+                        ButtonKind::Primary,
+                        |ui: &mut Ui, _| keep_ready_and_enable(ui),
+                    )
+                    .default_button(),
+                ),
+        )
+        .fill(p.k.c.hover)
+    })
 }
 
 /// The voice command model's notice while commands are on and it is not

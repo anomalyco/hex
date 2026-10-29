@@ -11,27 +11,27 @@ Linked checks are locators unless an executed result is recorded below.
 ## How To Get To It
 
 ```ts
-Sidebar > Meetings (always listed on macOS)          // meetings.opt-in; off by default
-├── Off -> opt-in card "Meetings (beta)" -> Turn on -> meetings.enabled = true
-├── On -> header switch Recordings | Settings; menu-bar items, call detection,
-│   Option-Control-V
-│   Settings view: Call recording, Calendar, Detected calls
+Labs > Meetings switch (macOS)                       // meetings.opt-in; off by default
+├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
+├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
+│   menu-bar items, call detection, Option-Control-V
+│   Settings view: Call recording, Calendar, Detected calls, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
 │   │   ├── Decided before -> Privacy pane + drag guide ("System Audio Recording Only")
 │   │   ├── Asked -> pulse; TCC preflight re-read on each poll, no reopen needed
-│   │   └── Granted -> the Allow pill morphs into a green Allowed
-│   ├── Show recording indicator -> on by default; corner-snapping floating capsule
-│   ├── Transcript folder -> ~/Documents/Hex Meetings by default; Reveal / choose
-│   ├── Summarize with Apple Intelligence -> on by default; one-line availability
+│   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
+│   ├── Advanced -> Show recording indicator (on by default; corner-snapping capsule),
+│   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
+│   │   Advanced), Summarize with Apple Intelligence (on by default)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
-           the pane shows only the opt-in card
+           the pane leaves the sidebar
 
-Debug builds -> Always available (DEVELOPER_FEATURES_ENABLED)
+Debug builds -> Always in the sidebar (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
 ```
 

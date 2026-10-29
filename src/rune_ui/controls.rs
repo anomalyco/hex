@@ -294,13 +294,58 @@ pub(super) fn icon_row(
     copy_row(p, key, Some(glyph), title, description, control, false)
 }
 
-/// A [`setting_row`] with a one-line link under its title, as tight as a
-/// row without one.
-pub(super) fn link_row(p: Paint, key: &str, title: &str, link: El, control: El) -> El {
-    copy_row(p, key, None, title, Some(link), control, true)
+/// An [`icon_row`] whose description has its own colour (errors, progress).
+pub(super) fn icon_described_row(
+    p: Paint,
+    key: &str,
+    glyph: &'static rune::Icon,
+    title: &str,
+    description: Option<(String, Color)>,
+    control: El,
+) -> El {
+    let description = description.map(|(copy, color)| {
+        text(copy)
+            .key("description")
+            .font(DESCRIPTION)
+            .color(color)
+            .wrap()
+    });
+    copy_row(p, key, Some(glyph), title, description, control, false)
 }
 
-fn copy_row(
+/// A [`select`]'s field showing its one choice, disabled.
+pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
+    Select::new::<&str>(format!("{key}-field"), &[])
+        .appearance(SelectAppearance::Field)
+        .width(SELECT_WIDTH)
+        .current(Some(label))
+        .disabled(true)
+        .trigger(p.k)
+        .key(key)
+}
+
+/// A whole-row switch led by an icon.
+pub(super) fn icon_toggle_row<'a>(
+    p: Paint,
+    key: &str,
+    glyph: &'static rune::Icon,
+    title: &str,
+    description: impl Into<Option<&'a str>>,
+    on: bool,
+    flip: impl Fn(&mut Ui) + 'static,
+) -> El {
+    pressable_row(icon_row(
+        p,
+        key,
+        glyph,
+        title,
+        description.into(),
+        row_switch(p, on),
+    ))
+    .on_press(flip)
+}
+
+pub(super) fn copy_row(
     p: Paint,
     key: &str,
     glyph: Option<&'static rune::Icon>,
@@ -441,17 +486,6 @@ pub(super) fn select(
         layer,
         SELECT_WIDTH,
     )
-}
-
-/// A [`select`]'s field showing its one choice, disabled.
-pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
-    Select::new::<&str>(format!("{key}-field"), &[])
-        .appearance(SelectAppearance::Field)
-        .width(SELECT_WIDTH)
-        .current(Some(label))
-        .disabled(true)
-        .trigger(p.k)
-        .key(key)
 }
 
 /// A [`select`] `width` points wide, for labels such as device names that
@@ -627,27 +661,6 @@ pub(super) fn button(
         .on_press_tx(press)
         .build_push(p.k)
         .key(key)
-}
-
-/// A Secondary button showing a value, with a trailing chevron because it
-/// opens a sheet rather than a menu. It is as wide as its value.
-pub(super) fn sheet_button(
-    p: Paint,
-    key: &str,
-    value: &str,
-    open: impl Fn(&mut Ui) + 'static,
-) -> El {
-    Button::new(value)
-        .variant(ButtonVariant::Neutral)
-        .on_press(open)
-        .build_push(p.k)
-        .key(key)
-        .pr(6.0)
-        .child(
-            rune::icon(&rune_theme_opencode::icons::CHEVRON_RIGHT, 16.0)
-                .key("chevron")
-                .color(p.k.c.icon_muted),
-        )
 }
 
 /// An icon-only Secondary button the height of [`button`].

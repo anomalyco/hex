@@ -10,7 +10,7 @@ previews, providers, or native actions were run for this split.
 ## How To Get To It
 
 ```ts
-Hex > Commands                                      // commands; off by default
+Labs > Commands switch, or Hex > Commands once on  // commands; off by default
 ├── Top card "Voice commands" switch -> Prepare command model // needs setup permissions
 ├── Model failed -> card below it: Retry / Turn off commands  // only in this pane
 ├── Search / select a row (grouped by task) -> Inspect in the card, not execute

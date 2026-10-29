@@ -11,12 +11,9 @@
 use rune::{El, col, el, row, text};
 use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress};
 
-use super::controls::{
-    ButtonKind, Choice, Paint, button, fixed_select, modal_scrim_transition, modal_transition,
-    select, setting_row,
-};
+use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::lists::error_panel;
-use super::{Menu, Request, Ui};
+use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::transcription_models::{
@@ -115,7 +112,7 @@ fn choose(ui: &mut Ui, model: &'static ModelDefinition) {
 
 /// Prepares the saved model again for `language`, which installs or loads
 /// whatever that language needs (Apple Speech's locales).
-fn choose_language(ui: &mut Ui, language: &str) {
+pub(super) fn choose_language(ui: &mut Ui, language: &str) {
     ui.open = None;
     let current = &ui.settings.transcription;
     if current.language == language {
@@ -129,7 +126,7 @@ fn choose_language(ui: &mut Ui, language: &str) {
 }
 
 /// The fallback's note, once the service saved the model it was chosen for.
-fn fallback_note(ui: &Ui) -> Option<String> {
+pub(super) fn fallback_note(ui: &Ui) -> Option<String> {
     let fallback = ui.picker.fallback.as_ref()?;
     let selection = &ui.settings.transcription;
     (selection.model == fallback.model && selection.language != fallback.from).then(|| {
@@ -145,44 +142,6 @@ fn fallback_note(ui: &Ui) -> Option<String> {
             ],
         )
     })
-}
-
-/// The Language row below the speech model: the saved model's languages, or
-/// its one language fixed.
-pub(super) fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let selection = &ui.settings.transcription;
-    let model = transcription_models::definition(selection.model);
-    let current = language_name(&selection.language);
-    let codes = model.language_choices();
-    let control = if codes.len() <= 1 {
-        fixed_select(p, "transcription-language-control", current)
-    } else {
-        let choices = codes
-            .into_iter()
-            .map(|code| Choice {
-                label: language_name(code).to_owned(),
-                detail: None,
-                selected: code == selection.language,
-                choose: Box::new(move |ui: &mut Ui| choose_language(ui, code)),
-            })
-            .collect();
-        select(
-            p,
-            "transcription-language-control",
-            current,
-            ui.open == Some(Menu::TranscriptionLanguage),
-            choices,
-            |ui: &mut Ui| super::settings::toggle_menu(ui, Menu::TranscriptionLanguage),
-            layer,
-        )
-    };
-    setting_row(
-        p,
-        "transcription-language",
-        tr("Language"),
-        fallback_note(ui).as_deref(),
-        control,
-    )
 }
 
 fn delete(ui: &mut Ui, model: &'static ModelDefinition) {

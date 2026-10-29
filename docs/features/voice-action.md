@@ -12,10 +12,11 @@ providers, or native actions were run for this split.
 ## How To Get To It
 
 ```ts
-Hex > Voice Action                                   // voice-action; off by default
-├── Enable Voice Action -> Activate saved shortcut
+Labs > Voice Action switch, or Hex > Voice Action once on // voice-action; off by default
+├── Enable Voice Action -> Activate saved shortcut; the pane joins the sidebar
 ├── Shortcut -> Option-Command by default             // independent of Dictation
-└── Processing -> OpenCode model / available Thinking variant
+├── Processing -> OpenCode model
+└── Advanced ▸ -> Shortcut side, available Thinking variant
 
 Foreground text target -> Optional selection -> Hold shortcut -> Speak -> Release
 ```

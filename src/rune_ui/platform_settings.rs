@@ -8,13 +8,13 @@
 use rune::{El, Icon, row, text};
 
 use super::controls::{
-    ButtonKind, Choice, DESCRIPTION, Paint, button, note, pressable_row, row_switch, section,
-    segmented, select, setting_row, toggle_row,
+    ButtonKind, Choice, DESCRIPTION, Paint, button, card, icon_row, icon_toggle_row, note, section,
+    select, setting_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, PlatformRequest};
 use super::settings::toggle_menu;
-use super::{Menu, ShortcutTarget, Ui};
+use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
     AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy,
     MeetingProviderChoice, ModifierSide,
@@ -22,7 +22,6 @@ use crate::app_settings::{
 use crate::calendar::{CalendarAccess, CallProvider};
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::hex_microphone::DriverActionState;
-use crate::login_item::LoginItemStatus;
 use crate::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
 
 /// A permission's row key, its name as System Settings lists it, and what
@@ -156,9 +155,10 @@ fn folder_label(ui: &Ui) -> String {
 /// The Meetings (beta) switch: the opt-in card's only row, and the first row
 /// of Meetings › Settings.
 pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
-    toggle_row(
+    icon_toggle_row(
         p,
         "meetings-enabled",
+        Pane::Meetings.icon(),
         tr("Meetings (beta)"),
         tr("Offer to record calls and save local transcripts"),
         ui.settings.meetings.enabled,
@@ -169,17 +169,21 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
     )
 }
 
-/// Meetings › Settings: the opt-in, then its permission, indicator, folder,
-/// and Apple Intelligence notes; once on, Calendar and each detected call
-/// provider's Ask / Always record / Never offer choice.
+/// Meetings › Settings: the opt-in (and the system-audio permission while
+/// it's missing); once on, Calendar and each detected call provider's Ask /
+/// Always record / Never offer choice; behind Advanced the indicator,
+/// folder, Apple Intelligence notes, and the granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+    use super::general::{advanced_open, advanced_toggle};
     let meetings = &ui.settings.meetings;
     let mut rows = vec![meetings_toggle(ui, p)];
+    let mut more = Vec::new();
     if meetings.enabled {
         let permitted = ui.platform.system_audio;
-        rows.push(setting_row(
+        let system_audio = icon_row(
             p,
             "meeting-system-audio",
+            &icons::SPEAKER,
             tr("Screen & System Audio Recording"),
             Some(if permitted {
                 tr("Captures the other participants' audio")
@@ -203,10 +207,16 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     ui.ask(PlatformRequest::SystemAudio);
                 },
             ),
-        ));
-        rows.push(toggle_row(
+        );
+        if permitted {
+            more.push(system_audio);
+        } else {
+            rows.push(system_audio);
+        }
+        more.push(icon_toggle_row(
             p,
             "meeting-indicator",
+            &icons::PILL,
             tr("Show recording indicator"),
             tr("Floating pill to copy live transcript turns or stop recording"),
             meetings.show_recording_indicator,
@@ -215,9 +225,10 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 ui.update(|settings| settings.meetings.show_recording_indicator = show);
             },
         ));
-        rows.push(setting_row(
+        more.push(icon_row(
             p,
             "meeting-folder",
+            &icons::FOLDER,
             tr("Transcript folder"),
             Some(tr("Finished meetings are saved here as Markdown")),
             row()
@@ -239,9 +250,10 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder)),
                 )),
         ));
-        rows.push(toggle_row(
+        more.push(icon_toggle_row(
             p,
             "meeting-notes",
+            &icons::SPARKLES,
             tr("Summarize with Apple Intelligence"),
             notes_description(ui.platform.notes),
             meetings.summarize_with_apple_intelligence,
@@ -251,13 +263,18 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             },
         ));
         if let Some(error) = &ui.platform.meeting_folder_error {
-            rows.push(note("meeting-folder-error", error, p.danger()));
+            // A failed folder change shows where it happened, opening the fold.
+            more.push(note("meeting-folder-error", error, p.danger()));
         }
     }
-    let mut sections = vec![section(p, "meetings", tr("Call recording"), rows)];
+    let mut sections = vec![card(p, "meetings", rows)];
     if meetings.enabled {
         sections.extend(calendar_section(ui, p, layer));
-        sections.push(detected_calls_section(ui, p));
+        sections.push(detected_calls_section(ui, p, layer));
+        sections.push(advanced_toggle(ui, p, Pane::Meetings));
+        if advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some() {
+            sections.push(card(p, "advanced", more));
+        }
     }
     sections
 }
@@ -309,9 +326,10 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let calendar = &ui.settings.meetings.calendar;
     let mut rows = Vec::new();
     if view.access.blocked() {
-        rows.push(setting_row(
+        rows.push(icon_row(
             p,
             "calendar-blocked",
+            &icons::CALENDAR,
             tr("Calendar access is off"),
             Some(tr(
                 "Allow Hex under Privacy & Security › Calendars to get meeting reminders",
@@ -329,9 +347,10 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             ),
         ));
     } else if !calendar.connected || view.access != CalendarAccess::FullAccess {
-        rows.push(setting_row(
+        rows.push(icon_row(
             p,
             "calendar-connect",
+            &icons::CALENDAR,
             tr("Remind me before meetings"),
             Some(tr("Names each recording after its calendar event")),
             button(
@@ -351,9 +370,10 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             ),
         ));
     } else {
-        rows.push(toggle_row(
+        rows.push(icon_toggle_row(
             p,
             "calendar-remind",
+            &icons::BELL,
             tr("Remind me before meetings"),
             tr("Shows a reminder with Record and Join buttons"),
             calendar.remind,
@@ -363,27 +383,30 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             },
         ));
         if calendar.remind {
-            let labels = [tr("At start"), tr("1 min"), tr("2 min"), tr("5 min")];
             let lead = calendar.lead().as_secs() / 60;
-            rows.push(setting_row(
+            let control = super::general::pick_select(
+                ui,
                 p,
                 "calendar-lead",
+                vec![tr("At start"), tr("1 min"), tr("2 min"), tr("5 min")],
+                CALENDAR_LEAD_MINUTES
+                    .iter()
+                    .position(|minutes| u64::from(*minutes) == lead)
+                    .unwrap_or(1),
+                |ui, index| {
+                    ui.update(|settings| {
+                        settings.meetings.calendar.lead_minutes = CALENDAR_LEAD_MINUTES[index];
+                    });
+                },
+                layer,
+            );
+            rows.push(icon_row(
+                p,
+                "calendar-lead",
+                &icons::CLOCK,
                 tr("Remind me"),
                 None,
-                segmented(
-                    p,
-                    "lead",
-                    &labels,
-                    CALENDAR_LEAD_MINUTES
-                        .iter()
-                        .position(|minutes| u64::from(*minutes) == lead)
-                        .unwrap_or(1),
-                    |ui, index| {
-                        ui.update(|settings| {
-                            settings.meetings.calendar.lead_minutes = CALENDAR_LEAD_MINUTES[index];
-                        });
-                    },
-                ),
+                control,
             ));
         }
         rows.push(calendars_row(ui, p, layer));
@@ -492,7 +515,7 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 
 /// The known services, then every other website or app the user chose for,
 /// each with Ask / Always record / Never offer.
-fn detected_calls_section(ui: &Ui, p: Paint) -> El {
+fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let choices = &ui.settings.meetings.providers;
     let known = KNOWN_MEETING_PROVIDERS
         .iter()
@@ -521,33 +544,28 @@ fn detected_calls_section(ui: &Ui, p: Paint) -> El {
                 .find(|choice| choice.key == key)
                 .map_or(MeetingPolicy::Ask, |choice| choice.policy);
             let selected = POLICIES.iter().position(|known| *known == policy);
-            setting_row(
+            let control = super::general::quiet_select(
+                ui,
                 p,
-                &format!("call{index}"),
-                &shown,
-                None,
-                segmented(
-                    p,
-                    "policy",
-                    &labels,
-                    selected.unwrap_or(0),
-                    move |ui, index| {
-                        let choice = MeetingProviderChoice {
-                            key: key.clone(),
-                            label: label.clone(),
-                            policy: POLICIES[index],
-                        };
-                        ui.update(|settings| {
-                            crate::app_settings::set_meeting_provider(
-                                &mut settings.meetings,
-                                choice,
-                            );
-                        });
-                    },
-                ),
-            )
+                Menu::Call(index),
+                format!("call{index}-policy-control"),
+                labels.to_vec(),
+                selected.unwrap_or(0),
+                move |ui, index| {
+                    let choice = MeetingProviderChoice {
+                        key: key.clone(),
+                        label: label.clone(),
+                        policy: POLICIES[index],
+                    };
+                    ui.update(|settings| {
+                        crate::app_settings::set_meeting_provider(&mut settings.meetings, choice);
+                    });
+                },
+                layer,
+            );
+            setting_row(p, &format!("call{index}"), &shown, None, control)
         })
-        .collect();
+        .collect::<Vec<_>>();
     section(p, "detected-calls", tr("Detected calls"), rows)
 }
 
@@ -557,64 +575,6 @@ const POLICIES: [MeetingPolicy; 3] = [
     MeetingPolicy::AlwaysRecord,
     MeetingPolicy::NeverOffer,
 ];
-
-/// Launch at login, driven by the OS's login item: macOS's `SMAppService`
-/// (which may need approval) or Windows's `Run` key.
-pub(super) fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<El> {
-    if !ui.platform.caps.launch_at_login {
-        return Vec::new();
-    }
-    let status = ui.platform.login_item;
-    let control = match status {
-        None => text(if ui.platform.login_item_checking {
-            tr("Checking…")
-        } else {
-            tr("Unavailable")
-        })
-        .key("login-item-status")
-        .font(DESCRIPTION)
-        .color(p.muted()),
-        Some(LoginItemStatus::RequiresApproval) => button(
-            p,
-            "launch-at-login-approval",
-            tr("Open settings"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| ui.ask(PlatformRequest::OpenLoginItemSettings),
-        ),
-        Some(_) => row_switch(p, ui.platform.login_item_on()),
-    };
-    let mut row = setting_row(p, "launch-at-login", tr("Launch at login"), None, control);
-    if matches!(
-        status,
-        Some(LoginItemStatus::Enabled | LoginItemStatus::Disabled)
-    ) {
-        row = pressable_row(row).on_press(|ui: &mut Ui| {
-            let enabled = !ui.platform.login_item_on();
-            ui.ask(PlatformRequest::SetLaunchAtLogin(enabled));
-        });
-    }
-    let mut rows = vec![row];
-    if let Some(error) = &ui.platform.login_item_error {
-        rows.push(note("launch-at-login-error", error, p.danger()));
-    }
-    rows
-}
-
-pub(super) fn dock_icon_row(ui: &Ui, p: Paint) -> Option<El> {
-    ui.platform.caps.dock_icon.then(|| {
-        toggle_row(
-            p,
-            "dock-icon",
-            tr("Show Dock icon"),
-            None,
-            ui.settings.show_dock_icon,
-            |ui: &mut Ui| {
-                let show = !ui.settings.show_dock_icon;
-                ui.update(|settings| settings.show_dock_icon = show);
-            },
-        )
-    })
-}
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
@@ -749,7 +709,7 @@ pub(super) fn side_binding(
     (!super::settings::conflicts(settings, target, &candidate)).then_some(candidate)
 }
 
-const SIDES: [ModifierSide; 3] = [
+pub(super) const SIDES: [ModifierSide; 3] = [
     ModifierSide::Left,
     ModifierSide::Either,
     ModifierSide::Right,
@@ -762,36 +722,4 @@ pub(super) fn picked_side(ui: &Ui, target: ShortcutTarget) -> Option<ModifierSid
         return None;
     }
     super::settings::binding(&ui.settings, target)?.standalone_side()
-}
-
-/// Left, Either, or Right for a modifier-only shortcut (macOS), before its
-/// recorder; sides that would collide with another shortcut are disabled.
-pub(super) const SIDE_PICKER_WIDTH: f32 = 180.0;
-
-pub(super) fn side_selector(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
-    let side = picked_side(ui, target)?;
-    let key = match target {
-        ShortcutTarget::Dictation => "dictation-side",
-        ShortcutTarget::PasteLast => "paste-last-side",
-        ShortcutTarget::VoiceAction => "voice-action-side",
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => "capture-side",
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => "capture-list-side",
-    };
-    let labels = [tr("Left"), tr("Either"), tr("Right")];
-    let selected = SIDES.iter().position(|s| *s == side).unwrap_or(1);
-    let mut control = rune_kit::SegmentedControl::new(&labels, Some(selected))
-        .width(Some(SIDE_PICKER_WIDTH))
-        .on_pick(move |ui: &mut Ui, index: usize, _: &mut rune::Tx| {
-            if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
-                ui.update(|settings| super::settings::set_binding(settings, target, candidate));
-            }
-        });
-    for (index, side) in SIDES.into_iter().enumerate() {
-        if side_binding(&ui.settings, target, side).is_none() {
-            control = control.segment_state(index, rune_kit::State::Disabled);
-        }
-    }
-    Some(control.build(p.k).key(key).role("segmented"))
 }

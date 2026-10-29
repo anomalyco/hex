@@ -16,6 +16,7 @@ mod commands;
 mod controls;
 mod explainer;
 mod fun;
+mod general;
 mod hero;
 mod history;
 #[cfg_attr(target_os = "linux", path = "rune_ui/linux_host.rs")]
@@ -25,6 +26,8 @@ mod host;
 mod hud_lab;
 #[cfg(target_os = "macos")]
 mod hud_stories;
+mod icons;
+mod labs;
 mod list_detail;
 mod lists;
 pub(crate) mod live_text;
@@ -577,9 +580,7 @@ enum Menu {
     InputSourceLanguage(usize),
     /// The microphone under the tour's practice field.
     TourMicrophone,
-    Language,
-    /// The speech model's language.
-    TranscriptionLanguage,
+    /// How long History keeps dictations.
     HistoryRetention,
     /// The OpenCode thinking variant.
     Variant,
@@ -592,6 +593,10 @@ enum Menu {
     /// How long annotations are kept (the Annotate pane).
     #[cfg(hex_capture)]
     CaptureRetention,
+    /// A settings row's quiet select, by the row's key.
+    Pick(&'static str),
+    /// A detected call provider's policy, by its row.
+    Call(usize),
 }
 
 pub(crate) struct Ui {
@@ -621,9 +626,10 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
-    /// General's Advanced disclosure, once pressed: open or closed. Until
-    /// then it is open only while an advanced setting is in use.
-    advanced: Option<bool>,
+    /// The panes whose Advanced fold is open.
+    advanced: Vec<Pane>,
+    /// The Labs page shows in place of a pane.
+    labs_open: bool,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -714,7 +720,8 @@ impl Ui {
             microphones_listed_at: 0.0,
             microphones_listing: None,
             confirm_release: false,
-            advanced: None,
+            advanced: Vec::new(),
+            labs_open: false,
             build_preview: None,
             capture: Capture::Idle,
             hints,
@@ -989,7 +996,8 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
-        if self.pane == pane {
+        let labs = std::mem::take(&mut self.labs_open);
+        if self.pane == pane && !labs {
             return;
         }
         tx.settle();
@@ -1029,11 +1037,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         && ui.tour.is_none()
     {
         let index = digit as usize - '1' as usize;
-        let pane = Pane::ALL
-            .iter()
-            .copied()
-            .filter(|pane| pane.shown(ui))
-            .nth(index);
+        let pane = labs::order(ui).get(index).copied();
         if let Some(pane) = pane {
             ui.select_pane(pane, tx);
         }
@@ -1181,7 +1185,8 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
-        Pane::General => (Vec::new(), settings::pane(ui, p, &mut layer)),
+        _ if ui.labs_open => (Vec::new(), labs::page(ui, p)),
+        Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::Commands => commands::pane(ui, p),
         Pane::VoiceAction => (Vec::new(), voice_action::pane(ui, p, &mut layer)),
@@ -1208,8 +1213,12 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         .clip_soft(0.0)
         .child(pane_header(
             p,
-            ui.pane.title(),
-            (ui.pane == Pane::Meetings)
+            if ui.labs_open {
+                tr("Labs")
+            } else {
+                ui.pane.title()
+            },
+            (ui.pane == Pane::Meetings && !ui.labs_open)
                 .then(|| meetings::view_switch(ui, p))
                 .flatten(),
             actions,
@@ -1275,42 +1284,17 @@ fn title_bar(element: El) -> El {
 }
 
 fn sidebar(ui: &Ui, p: Paint) -> El {
-    let panes: Vec<Pane> = Pane::ALL
-        .iter()
-        .copied()
-        .filter(|pane| pane.shown(ui))
-        .collect();
-    // The Experiments heading opens a wider gap before the first
-    // experimental pane, shared by the items on either side of it.
-    let heading = lists::group_label_height(p, false);
-    let starts_group =
-        |index: usize| index > 0 && panes[index].experimental() && !panes[index - 1].experimental();
-    let half_gap = |wide: bool| {
-        if wide {
-            (heading + 2.0 * NAV_ROW_GAP) / 2.0
-        } else {
-            NAV_ROW_GAP / 2.0
-        }
-    };
     let mut nav = lists::source_list(col().key("nav"));
-    for (index, &pane) in panes.iter().enumerate() {
-        let group = starts_group(index);
-        let mut slot = nav_slot(
+    for pane in labs::main_panes(ui) {
+        nav = nav.child(nav_slot(
             p,
             pane,
-            ui.pane == pane,
-            half_gap(group),
-            half_gap(index + 1 < panes.len() && starts_group(index + 1)),
-        );
-        if group {
-            slot = slot.child(
-                lists::group_label(p, "nav-experiments", tr("Experiments"), false)
-                    .px(6.0)
-                    .absolute(0.0, -heading / 2.0),
-            );
-        }
-        nav = nav.child(slot);
+            ui.pane == pane && !ui.labs_open,
+            NAV_ROW_GAP / 2.0,
+            NAV_ROW_GAP / 2.0,
+        ));
     }
+    nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => Some((
             tr("Restart to update").to_owned(),
@@ -1837,7 +1821,7 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
         ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
-        ui.open = Some(Menu::TranscriptionLanguage);
+        ui.open = Some(Menu::Pick("transcription-language"));
     }),
     ("shortcut-explainer", |ui| {
         *ui = mac_fixture();
@@ -1911,6 +1895,7 @@ const SCENES: &[Scene] = &[
     ("mac-input-source-models", |ui| {
         use crate::app_settings::KeyboardModelChoice;
         *ui = mac_fixture();
+        ui.advanced = vec![Pane::General];
         ui.settings.keyboard_model_switching.enabled = true;
         ui.settings.keyboard_model_switching.mappings = [
             (
@@ -1975,7 +1960,7 @@ const SCENES: &[Scene] = &[
             devices.system_default = Some("MacBook Pro Microphone".into());
             devices.bluetooth_default_passed_over = Some("Kit Pods".into());
         }
-        ui.advanced = Some(true);
+        ui.advanced = vec![Pane::General];
     }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
@@ -2018,7 +2003,7 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
-        ui.advanced = Some(true);
+        ui.advanced = vec![Pane::General];
     }),
     ("mac-settings-dev-channel", |ui| {
         *ui = mac_fixture();
@@ -2205,6 +2190,7 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-sides", |ui| {
         *ui = mac_fixture();
+        ui.advanced = vec![Pane::General];
         ui.settings.dictation_hotkey = HotkeyBinding {
             modifiers: HotkeyModifiers {
                 option: Some(crate::app_settings::ModifierSide::Left),

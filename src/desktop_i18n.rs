@@ -165,15 +165,6 @@ fn language_from_env(
         .unwrap_or_default()
 }
 
-/// The native display name for the persisted choice.
-pub(crate) fn choice_name(setting: Option<&str>) -> &'static str {
-    LANGUAGE_CHOICES
-        .iter()
-        .find(|(code, _)| *code == setting)
-        .map(|(_, name)| *name)
-        .unwrap_or("System")
-}
-
 /// Translate one UI string. Returns the input unchanged for English or for
 /// strings missing from the table, so dynamic values pass through safely.
 pub(crate) fn tr(english: &str) -> &str {
@@ -234,6 +225,14 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Not installed", ["Nie zainstalowano", "未安装", "未インストール", "Nicht installiert", "No instalado", "Не встановлено"]),
     ("Switch model with keyboard language", ["Zmieniaj model z językiem klawiatury", "随键盘语言切换模型", "キーボード言語に合わせてモデルを切り替える", "Modell mit Tastatursprache wechseln", "Cambiar modelo con el idioma del teclado", "Перемикати модель разом із мовою клавіатури"]),
     ("Changing input source selects its mapped model and language; manual choices still work", ["Zmiana źródła wprowadzania wybiera przypisany model i język; nadal można wybrać je ręcznie", "更改输入源时选择对应的模型和语言；仍可手动选择", "入力ソースを変更すると対応するモデルと言語を選択します。手動でも選択できます", "Ein Wechsel der Eingabequelle wählt das zugeordnete Modell und die Sprache; manuelle Auswahl bleibt möglich", "Cambiar la fuente de entrada selecciona su modelo e idioma; la selección manual sigue disponible", "Зміна джерела введення вибирає призначені йому модель і мову; ручний вибір теж працює"]),
+    ("Shortcut side", ["Strona skrótu", "快捷键侧", "ショートカットの左右", "Seite des Kürzels", "Lado del atajo", "Бік комбінації клавіш"]),
+    ("Labs", ["Laboratorium", "实验室", "ラボ", "Labs", "Labs", "Лабораторія"]),
+    ("Open apps and press keys by voice", ["Otwieraj aplikacje i naciskaj klawisze głosem", "用语音打开应用和按键", "声でアプリを開き、キーを押します", "Apps öffnen und Tasten drücken per Stimme", "Abre apps y pulsa teclas con la voz", "Відкривайте застосунки й натискайте клавіші голосом"]),
+    ("Record calls and keep transcripts", ["Nagrywaj rozmowy i zachowuj transkrypcje", "录制通话并保留转录", "通話を録音して文字起こしを残します", "Anrufe aufnehmen und Transkripte behalten", "Graba llamadas y guarda transcripciones", "Записуйте дзвінки й зберігайте транскрипти"]),
+    ("Speak an instruction, paste the answer", ["Wypowiedz polecenie, wklej odpowiedź", "说出指令，粘贴结果", "指示を話すと、答えを貼り付けます", "Anweisung sprechen, Antwort einfügen", "Di una instrucción y pega la respuesta", "Скажіть інструкцію, вставте відповідь"]),
+    ("Turn a feature on and it joins the sidebar.", ["Włącz funkcję, a pojawi się na pasku bocznym.", "开启功能后，它会出现在侧边栏中。", "機能をオンにすると、サイドバーに加わります。", "Schalte eine Funktion ein, dann erscheint sie in der Seitenleiste.", "Activa una función y aparecerá en la barra lateral.", "Увімкніть функцію, і вона з’явиться на бічній панелі."]),
+    ("Clear history", ["Wyczyść historię", "清除历史记录", "履歴を消去", "Verlauf löschen", "Borrar historial", "Очистити історію"]),
+    ("Keep for", ["Przechowuj przez", "保留时长", "保存期間", "Behalten für", "Conservar durante", "Зберігати"]),
     #[cfg(hex_capture)]
     ("Annotate", ["Adnotacje", "Annotate", "Annotate", "Annotate", "Annotate", "Annotate"]),
     ("Press to start and again to stop. While it records, Ctrl+Alt+D turns drawing on and off.", ["Naciśnij, aby zacząć, i ponownie, aby zatrzymać. Podczas nagrywania Ctrl+Alt+D włącza i wyłącza rysowanie.", "按一下开始，再按一下停止。录制时，Ctrl+Alt+D 可开关绘制。", "押すと開始、もう一度押すと停止します。録画中は Ctrl+Alt+D で描画のオンとオフを切り替えます。", "Drücken zum Starten, erneut zum Stoppen. Während der Aufnahme schaltet Strg+Alt+D das Zeichnen ein und aus.", "Pulsa para empezar y otra vez para parar. Mientras graba, Ctrl+Alt+D activa y desactiva el dibujo.", "Натисніть, щоб почати, і ще раз, щоб зупинити. Під час запису Ctrl+Alt+D вмикає й вимикає малювання."]),
@@ -979,8 +978,10 @@ mod tests {
         include_str!("rune_ui/commands.rs"),
         include_str!("rune_ui/explainer.rs"),
         include_str!("rune_ui/fun.rs"),
+        include_str!("rune_ui/general.rs"),
         include_str!("rune_ui/history.rs"),
         include_str!("rune_ui/hud_lab.rs"),
+        include_str!("rune_ui/labs.rs"),
         include_str!("rune_ui/linux_host.rs"),
         include_str!("rune_ui/list_detail.rs"),
         include_str!("rune_ui/lists.rs"),

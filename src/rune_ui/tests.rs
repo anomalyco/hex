@@ -61,6 +61,12 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
     settle(rt);
 }
 
+/// Chooses option `index` from the quiet select keyed `{key}-control`.
+fn pick(rt: &mut Runtime<Ui>, key: &str, index: usize) {
+    tap(rt, &format!("{key}-control-trigger"));
+    tap(rt, &format!("option{index}"));
+}
+
 fn key(rt: &mut Runtime<Ui>, key: Key, mods: Mods) {
     rt.key(KeyEvent { key, mods });
     rt.frame(1.0 / 60.0);
@@ -150,41 +156,26 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 }
 
 #[test]
-fn advanced_opens_while_in_use_and_always_closes() {
+fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
-    assert!(rt.find("microphone-mode").is_none());
+    rt.state.settings.release_microphone_while_idle = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("microphone-mode").is_none(), "closed even in use");
     tap(&mut rt, "advanced-toggle");
-    tap(&mut rt, "microphone-mode-control/segment1");
+    pick(&mut rt, "microphone-mode", 1);
     assert!(rt.state.confirm_release);
     tap(&mut rt, "advanced-toggle");
     assert!(!rt.state.confirm_release, "collapsing drops the question");
     assert!(rt.find("microphone-mode").is_none());
 
-    rt.state.advanced = None;
-    rt.state.settings.release_microphone_while_idle = true;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(rt.find("microphone-mode").is_some(), "in use opens it");
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_none(), "but it still closes");
-    tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_some());
-
-    rt.state.advanced = None;
-
-    rt.state.settings.release_microphone_while_idle = false;
     rt.state.settings.double_tap_lock = true;
     rt.state.settings.double_tap_only = true;
     rt.invalidate();
     settle(&mut rt);
-    assert!(
-        rt.find("double-tap-only").is_some(),
-        "so does Double-tap only"
-    );
-    rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(rt.find("microphone-mode").is_none(), "but not in Toggle");
+    assert!(rt.find("double-tap-only").is_some());
+    assert_eq!(rt.state.advanced, vec![Pane::General]);
 }
 
 #[test]
@@ -210,15 +201,15 @@ fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
     assert_eq!(rt.state.settings.updates.channel, None);
-    let (other, segment) = other_update_channel();
-    tap(&mut rt, &segment);
+    let (other, index) = other_update_channel();
+    pick(&mut rt, "update-channel", index);
     assert_eq!(rt.state.settings.updates.channel, Some(other));
     assert_eq!(saved(&rt), 1);
     assert!(matches!(
         sent(&rt),
         [Request::Desktop(DesktopAction::CheckForUpdates)]
     ));
-    tap(&mut rt, &segment);
+    pick(&mut rt, "update-channel", index);
     assert_eq!(
         saved(&rt),
         1,
@@ -226,18 +217,15 @@ fn choosing_an_update_channel_saves_it_and_checks_now() {
     );
 }
 
-/// The channel this build does not follow, and its segment's id: the build's
-/// own channel depends on its version (a local build follows dev).
-fn other_update_channel() -> (crate::app_settings::UpdateChannel, String) {
+/// The channel this build does not follow, and its option's index: the
+/// build's own channel depends on its version (a local build follows dev).
+fn other_update_channel() -> (crate::app_settings::UpdateChannel, usize) {
     let build = crate::updater::build_channel();
     let index = crate::app_settings::UpdateChannel::ALL
         .iter()
         .position(|channel| *channel != build)
         .unwrap();
-    (
-        crate::app_settings::UpdateChannel::ALL[index],
-        format!("update-channel-control/segment{index}"),
-    )
+    (crate::app_settings::UpdateChannel::ALL[index], index)
 }
 
 #[test]
@@ -250,7 +238,7 @@ fn choosing_the_channel_in_effect_keeps_following_the_build() {
         .iter()
         .position(|channel| *channel == build)
         .unwrap();
-    tap(&mut rt, &format!("update-channel-control/segment{index}"));
+    pick(&mut rt, "update-channel", index);
     assert_eq!(rt.state.settings.updates.channel, None);
     assert_eq!(saved(&rt), 0);
     assert!(sent(&rt).is_empty());
@@ -296,7 +284,7 @@ fn enabling_sends_the_listener_action() {
 fn releasing_the_microphone_asks_first() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
-    tap(&mut rt, "microphone-mode-control/segment1");
+    pick(&mut rt, "microphone-mode", 1);
     assert!(rt.state.confirm_release);
     assert!(!rt.state.settings.release_microphone_while_idle);
     tap(&mut rt, "confirm-release/actions/confirm-release");
@@ -1230,7 +1218,7 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     rt.invalidate();
     settle(&mut rt);
     tap(&mut rt, "transcription-language-control-field-trigger");
-    assert_eq!(rt.state.open, Some(Menu::TranscriptionLanguage));
+    assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
     // Whisper lists every language in the catalog's order.
     let japanese =
         crate::transcription_models::definition(TranscriptionModelId::WhisperLargeV3Turbo)

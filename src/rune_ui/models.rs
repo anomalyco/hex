@@ -278,6 +278,23 @@ fn status(models: &Models) -> String {
 
 /// The model row (and the thinking row when the model has variants).
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
+    rows_led(ui, p, target, layer, false)
+}
+
+/// [`rows`], each led by an icon.
+pub(super) fn icon_rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
+    rows_led(ui, p, target, layer, true)
+}
+
+fn rows_led(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>, icons: bool) -> Vec<El> {
+    let row_for =
+        |key: &str, glyph: &'static rune::Icon, title: &str, description: &str, control| {
+            if icons {
+                super::controls::icon_row(p, key, glyph, title, Some(description), control)
+            } else {
+                setting_row(p, key, title, Some(description), control)
+            }
+        };
     let (model, variant) = selected(&ui.settings, target);
     let presentation = model_presentation(&ui.models.state, model);
     let c = &p.k.c;
@@ -346,11 +363,11 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
         .child(picker)
         .children(refresh);
     let description = status(&ui.models);
-    let mut rows = vec![setting_row(
-        p,
+    let mut rows = vec![row_for(
         "opencode-model",
+        &super::icons::SPARKLES,
         tr("OpenCode model"),
-        Some(&description),
+        &description,
         control,
     )];
     let catalog = ui.models.catalog();
@@ -382,11 +399,11 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
                 choose_variant(ui, target, variant);
             })
             .build(p.k, layer);
-        rows.push(setting_row(
-            p,
+        rows.push(row_for(
             "thinking",
+            &super::icons::ZAP,
             tr("Thinking"),
-            Some(tr("Choose how much reasoning the model should use")),
+            tr("Choose how much reasoning the model should use"),
             select,
         ));
     }

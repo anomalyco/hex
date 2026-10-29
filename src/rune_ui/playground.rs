@@ -144,11 +144,8 @@ mod tests {
         rt.open_playground("General/mac-settings", None);
         let stage = rt.playground_state::<Ui>().expect("the scene's state");
         assert_eq!(stage.pane, Pane::General);
-        let second = Pane::ALL
-            .iter()
-            .copied()
-            .filter(|pane| pane.shown(stage))
-            .nth(1)
+        let second = *super::super::labs::order(stage)
+            .get(1)
             .expect("a second pane");
         rt.key(rune::KeyEvent {
             key: rune::Key::Command('2'),

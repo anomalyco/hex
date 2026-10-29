@@ -10,9 +10,10 @@ use super::controls::{
     ButtonKind, Choice, Paint, card, described_row, folding, note, page, section, segmented,
     select, setting_row, toggle_row,
 };
+use super::general::keys_button;
 use super::lists::{PermissionControl, permission_control};
 use super::platform::{PlatformRequest, ScrawlRequest, ScrawlView};
-use super::settings::{cancel_capture, shortcut_control};
+use super::settings::cancel_capture;
 use super::{Menu, ShortcutTarget, Ui};
 use crate::app_settings::{AppSettings, CaptureTranscriber};
 use crate::desktop_i18n::{tr, tr_fill};
@@ -165,7 +166,7 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
         "capture-shortcut",
         tr("Shortcut"),
         Some((purpose.to_string(), p.muted())),
-        shortcut_control(ui, p, ShortcutTarget::Capture),
+        keys_button(ui, p, ShortcutTarget::Capture),
     )];
     let list_purpose = if enabled {
         tr("Opens the list of sessions while an annotation is showing or waiting to be sent")
@@ -177,7 +178,7 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
         "capture-list-shortcut",
         tr("Send-to list"),
         Some((list_purpose.to_string(), p.muted())),
-        shortcut_control(ui, p, ShortcutTarget::CaptureList),
+        keys_button(ui, p, ShortcutTarget::CaptureList),
     ));
     // Linux asks through the desktop's screen-cast portal when a capture
     // starts, and Wayland can't keep an overlay out of a recording.
@@ -502,6 +503,7 @@ mod tests {
     fn opening_the_pane_reads_screen_recording_again() {
         let mut rt = pane("mac-scrawl");
         tap(&mut rt, "nav-general");
+        tap(&mut rt, "nav-labs");
         tap(&mut rt, "nav-annotate");
         assert_eq!(
             asked(&rt),

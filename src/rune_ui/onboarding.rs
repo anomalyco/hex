@@ -771,7 +771,7 @@ pub(super) fn mic_warning(p: Paint, warning: &str) -> El {
 const MIC_LEVEL: f32 = 14.0;
 
 /// Three short bars, as tall as Hex hears it.
-fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
+pub(super) fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
     const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
     let mut bars = row()
         .key("level")

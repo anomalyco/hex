@@ -1072,7 +1072,7 @@ island fit. Notch metrics come from `safeAreaInsets.top` and
 `auxiliaryTopLeftArea`/`auxiliaryTopRightArea`; the bar's height from
 `NSStatusBar.systemStatusBar.thickness`. HUD Lab tunes it live in debug
 builds, and in release builds while the `playground` experiment is on
-(Settings › Experiments › HUD Lab):
+(Settings › Labs › HUD Lab):
 
 ```ts
 HUD Lab

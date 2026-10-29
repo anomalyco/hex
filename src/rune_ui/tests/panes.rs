@@ -391,7 +391,7 @@ fn general_hides_advanced_options_until_asked() {
 fn double_tap_to_lock_shows_only_for_hold() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     assert!(rt.find("double-tap").is_some());
-    tap(&mut rt, "shortcut-mode-control/segment1");
+    pick(&mut rt, "shortcut-mode", 1);
     assert_eq!(
         rt.state.settings.shortcut_mode,
         crate::dictation::ShortcutMode::Toggle
@@ -1025,12 +1025,12 @@ fn meetings_settings_save_and_ask_for_system_audio() {
             .map(|choice| choice.policy)
     };
     // Known services first (Zoom is second), then the sites and apps chosen for.
-    tap(&mut rt, "call1/policy/segment1");
+    pick(&mut rt, "call1-policy", 1);
     assert_eq!(
         policy(&rt, "us.zoom.xos"),
         Some(MeetingPolicy::AlwaysRecord)
     );
-    tap(&mut rt, "call5/policy/segment0");
+    pick(&mut rt, "call5-policy", 0);
     assert_eq!(
         policy(&rt, "problems.kitlangton.com"),
         Some(MeetingPolicy::Ask)
@@ -1080,7 +1080,7 @@ fn a_connected_calendar_saves_reminders_and_lists_meetings() {
         rt.find("upcoming2/provider/icon").is_none(),
         "no link, no icon"
     );
-    tap(&mut rt, "calendar-lead/lead/segment3");
+    pick(&mut rt, "calendar-lead", 3);
     assert_eq!(rt.state.settings.meetings.calendar.lead_minutes, 5);
     tap(&mut rt, "calendar-remind");
     assert!(!rt.state.settings.meetings.calendar.remind);
@@ -1636,7 +1636,7 @@ fn activity_lists_events_and_shows_the_raw_one() {
 fn modifier_only_shortcuts_choose_their_side() {
     use crate::app_settings::ModifierSide;
     let mut rt = runtime("mac-settings-sides", true, (980.0, 2400.0));
-    tap(&mut rt, "dictation-side/segment2");
+    pick(&mut rt, "dictation-side", 2);
     assert_eq!(
         rt.state.settings.dictation_hotkey.modifiers.option,
         Some(ModifierSide::Right)

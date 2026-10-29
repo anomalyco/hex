@@ -36,13 +36,16 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
 fn keyboard_model_switching_is_a_macos_only_saved_opt_in() {
     let mut rt = runtime("mac-settings");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
+    assert!(rt.find("keyboard-model-switching").is_none(), "in Advanced");
+    tap(&mut rt, "advanced-toggle");
     tap(&mut rt, "keyboard-model-switching");
     assert!(rt.state.settings.keyboard_model_switching.enabled);
     assert_eq!(rt.state.saved, 1);
     tap(&mut rt, "keyboard-model-switching");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
     for scene in ["portal", "windows-settings"] {
-        let rt = runtime(scene);
+        let mut rt = runtime(scene);
+        tap(&mut rt, "advanced-toggle");
         assert!(rt.find("keyboard-model-switching").is_none());
     }
 }
@@ -57,7 +60,9 @@ fn keyboard_model_switching_maps_enabled_sources_to_an_installed_model_and_langu
         languages: vec!["es".into()],
     }];
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
+    rt.state.advanced = vec![Pane::General];
     rt.invalidate();
+    rt.settle_all();
     rt.frame(0.0);
     tap(&mut rt, "keyboard-model-switching");
     assert!(rt.find("input-source-language0").is_none());
