@@ -92,7 +92,7 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 # Smart Turn: loads the ONNX Runtime dylib Moonshine already ships.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-23"] }
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "a7c643b07637ed2304a84416a23d9be2d9daa53f" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "bfb8facae2e4665e5e6d17afe85561884a7fd402" }
 ratatui = "0.30.2"
 realfft = "3.5.0"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
@@ -116,15 +116,15 @@ zbus = { version = "6.1.0", default-features = false, features = ["tokio", "prox
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "a7c643b07637ed2304a84416a23d9be2d9daa53f" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "bfb8facae2e4665e5e6d17afe85561884a7fd402" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 pollster = "1.0.1"
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "a7c643b07637ed2304a84416a23d9be2d9daa53f", features = ["native-file-dialog"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "a7c643b07637ed2304a84416a23d9be2d9daa53f" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "a7c643b07637ed2304a84416a23d9be2d9daa53f" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "bfb8facae2e4665e5e6d17afe85561884a7fd402", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "bfb8facae2e4665e5e6d17afe85561884a7fd402" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "bfb8facae2e4665e5e6d17afe85561884a7fd402" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
