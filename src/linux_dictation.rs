@@ -435,6 +435,10 @@ pub(crate) fn run(
         }
         while let Ok(control) = capture_controls.try_recv() {
             let reply = match (&mut capture_host, control) {
+                (Some(host), crate::capture_host::CaptureControl::Draw) => {
+                    draw_pending = host.draw_shortcut(&timeline);
+                    crate::control::ControlReply::done("drawing")
+                }
                 (Some(host), crate::capture_host::CaptureControl::Scrawl(action)) => {
                     host.control(action, &timeline)
                 }

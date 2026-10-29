@@ -62,6 +62,8 @@ pub(crate) enum Request {
     },
     /// `hex annotate undo`: takes the newest send back.
     CaptureUndo,
+    /// `hex annotate draw`: drawing on or off, as Ctrl+Alt+D.
+    CaptureDraw,
     Status,
     /// Drain accepted work and exit.
     Quit,
@@ -359,6 +361,15 @@ pub(crate) fn capture_send(
     }
 }
 
+/// `hex annotate draw`: drawing on or off in the running Hex.
+pub(crate) fn capture_draw() -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    match request(Request::CaptureDraw) {
+        Ok(_) => ControlReply::done("Drawing on or off; it starts a recording when none records"),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
 /// `hex annotate undo`: the running Hex takes its newest send back.
 pub(crate) fn capture_undo() -> crate::control::ControlReply {
     use crate::control::ControlReply;
@@ -550,6 +561,9 @@ fn serve_client(
                         .unwrap_or_else(crate::control::ControlReply::from),
                 );
                 Ok(())
+            }
+            Request::CaptureDraw => {
+                crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Draw)
             }
             Request::CaptureUndo => {
                 crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Command(

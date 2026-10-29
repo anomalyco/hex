@@ -1379,7 +1379,7 @@ impl CaptureHost {
         if !crate::app_settings::capture_on() {
             return None;
         }
-        tracing::info!("capture experiment on: `hex capture` is available");
+        tracing::info!("Annotate is on: `hex annotate` is available");
         let host = shared_engine(engine.as_ref()).and_then(|engine| {
             let mut host = Self::with(engine, None)?;
             host.environment = Some(environment.clone());
@@ -2053,7 +2053,11 @@ pub fn set_drawing(on: bool) {
         DRAWING.store(false, Ordering::Release);
         return;
     }
-    if !DRAWING.swap(on, Ordering::AcqRel) || on {
+    if DRAWING.swap(on, Ordering::AcqRel) == on {
+        return;
+    }
+    tracing::info!(on, "Annotate drawing");
+    if on {
         return;
     }
     report_input(
@@ -2367,6 +2371,9 @@ pub enum ShortcutActivity {
 pub enum CaptureControl {
     Scrawl(ScrawlCaptureAction),
     Command(CaptureCommand),
+    /// Drawing on or off, or a recording that draws (`hex annotate draw`).
+    #[cfg(target_os = "linux")]
+    Draw,
 }
 
 /// Hands `control` to the listener without waiting for it.

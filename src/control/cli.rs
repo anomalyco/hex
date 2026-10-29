@@ -407,6 +407,14 @@ pub enum CaptureCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Turn drawing on or off while a recording runs, or start one that
+    /// draws (Ctrl+Alt+D). Bind it in your desktop's keyboard shortcuts when
+    /// it has no shortcuts portal.
+    #[cfg(target_os = "linux")]
+    Draw {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Take back the newest send while it can be undone (as the capsule's
     /// Undo).
     Undo {
@@ -462,6 +470,10 @@ pub fn capture(command: CaptureCommand) -> u8 {
             output,
         } => (C::ScrawlCaptureRoute { capture, ask_jev }, output),
         CaptureCommand::Undo { output } => (C::ScrawlCaptureUndo, output),
+        #[cfg(target_os = "linux")]
+        CaptureCommand::Draw { output } => {
+            return print(crate::linux_service::capture_draw(), output);
+        }
     };
     #[cfg(target_os = "macos")]
     return send(command, output);
