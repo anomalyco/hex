@@ -229,9 +229,9 @@ impl Drop for ChordWatch {
     }
 }
 
-/// Turns key and modifier events into a binding: a key with its held
-/// modifiers, or the most modifiers held at once when they are all released
-/// without a key.
+/// Turns key and modifier events into a chord: a key with its held
+/// modifiers, or the most modifier keys held at once when they are all
+/// released without a key, with the sides `recorded_sides` keeps.
 #[derive(Default)]
 struct ChordCapture {
     peak: HotkeyModifiers,
@@ -286,7 +286,7 @@ impl ChordCapture {
 
     /// While modifiers are down, reports the ones their release would record.
     fn flags_changed(&mut self, flags: u64) -> Option<Chord> {
-        let current = normalize_captured_modifiers(modifiers_from_flags(flags));
+        let current = modifiers_from_flags(flags).recorded_sides();
         if !current.is_empty() {
             if self.keyed {
                 return None;
@@ -305,27 +305,6 @@ impl ChordCapture {
             modifiers: peak,
             key: None,
         })))
-    }
-}
-
-/// One side for every modifier when they all share it; otherwise either
-/// side, since the listener can't require mixed sides.
-fn normalize_captured_modifiers(modifiers: HotkeyModifiers) -> HotkeyModifiers {
-    let mut sides = [
-        modifiers.control,
-        modifiers.option,
-        modifiers.shift,
-        modifiers.command,
-    ]
-    .into_iter()
-    .flatten();
-    let Some(first) = sides.next() else {
-        return modifiers;
-    };
-    if sides.all(|side| side == first) {
-        modifiers
-    } else {
-        modifiers.without_side_constraints()
     }
 }
 
@@ -1808,17 +1787,18 @@ mod tests {
         assert_eq!(held(capture.flags_changed(LEFT_OPTION)), ["L⌥"]);
         assert_eq!(
             held(capture.flags_changed(LEFT_OPTION | LEFT_COMMAND)),
-            ["L⌥", "L⌘"]
+            ["⌥", "⌘"],
+            "two modifiers record from either side"
         );
         assert_eq!(
             held(capture.flags_changed(LEFT_OPTION)),
-            ["L⌥", "L⌘"],
+            ["⌥", "⌘"],
             "letting one go still shows what releasing records"
         );
         let binding = captured(capture.flags_changed(0)).unwrap();
         assert_eq!(binding.key, None);
-        assert_eq!(binding.modifiers.option, Some(ModifierSide::Left));
-        assert_eq!(binding.modifiers.command, Some(ModifierSide::Left));
+        assert_eq!(binding.modifiers.option, Some(ModifierSide::Either));
+        assert_eq!(binding.modifiers.command, Some(ModifierSide::Either));
         let binding = {
             assert_eq!(held(capture.flags_changed(RIGHT_OPTION)), ["R⌥"]);
             captured(capture.flags_changed(0)).unwrap()
@@ -1830,6 +1810,45 @@ mod tests {
                 .unwrap()
                 .modifiers
                 .function
+        );
+    }
+
+    #[test]
+    fn both_options_record_as_one_chord_of_two_keys() {
+        let mut capture = ChordCapture::default();
+        assert_eq!(held(capture.flags_changed(RIGHT_OPTION)), ["R⌥"]);
+        assert_eq!(
+            held(capture.flags_changed(LEFT_OPTION | RIGHT_OPTION)),
+            ["L⌥", "R⌥"]
+        );
+        assert_eq!(
+            held(capture.flags_changed(LEFT_OPTION)),
+            ["L⌥", "R⌥"],
+            "the peak stays"
+        );
+        let binding = captured(capture.flags_changed(0)).unwrap();
+        assert_eq!(binding.modifiers.option, Some(ModifierSide::Both));
+        assert_eq!(binding.modifiers.count(), 2);
+        assert_eq!(binding.standalone_side(), None, "no side picker");
+        assert_eq!(
+            crate::control::settings::format_hotkey(&binding),
+            "left-option+right-option"
+        );
+        assert!(!binding.overlaps(&HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key: None,
+        }));
+        assert!(
+            binding.overlaps(&HotkeyBinding::default()),
+            "⌥ takes both too"
+        );
+        assert_eq!(
+            held(capture.flags_changed(LEFT_OPTION | RIGHT_OPTION | LEFT_COMMAND)),
+            ["L⌥", "R⌥", "⌘"],
+            "an extra key shows while held"
         );
     }
 

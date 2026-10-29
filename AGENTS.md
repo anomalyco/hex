@@ -454,6 +454,22 @@ CoreAudio formats, AppleScript details, or event serialization.
 - The dictation shortcut defaults to Option but supports modifier-only,
   modifier-plus-key, standalone Globe/Fn, and standalone function-key bindings.
   Capturing a new binding suspends global matching.
+- Every shortcut is a chord: the set of keys held together, any order and
+  nothing else, each modifier key with its side (left, right, or any) plus at
+  most one other key or mouse button. It is down on the edge that completes
+  the set and up when any of its keys lifts; hold, double-tap lock, Toggle,
+  the hold threshold, the provisional start tone, extra-key discards, stale
+  recovery, and the release tail all run on those edges, on the events' own
+  timestamps. A one-key chord is down at once, with no added wait. Both sides
+  of one modifier (`[⌥ left, ⌥ right]`) are down only when the second side
+  goes down within `BOTH_SIDES_WINDOW` (80 ms) of the first; one held and the
+  other added later presses nothing. A sided key never matches with its twin
+  also down; any side matches one or both, as before chords, so it conflicts
+  with a both-sides chord. Settings store `{"keys": [...]}`; the old
+  `modifiers`/`key` shape loads as the same chord and is written back once.
+  macOS and Windows match sides (device flags, the low-level hook); Linux
+  binds a key with side-less modifiers only, and its recorder says so when
+  modifiers are pressed alone.
 - GUI startup must successfully call `keyboard::initialize_layout` on the OS
   main thread before settings, keyboard-using workers, or Rune start. That
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.

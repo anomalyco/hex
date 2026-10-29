@@ -6,7 +6,6 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
-use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -68,25 +67,25 @@ pub fn window_process_path(
     }
 }
 
-/// A shortcut as the keyboard hook matches it: which modifiers are held and
-/// the named key. Settings store it as a portable `HotkeyBinding`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
+/// A shortcut as the keyboard hook matches it: the chord's modifier keys,
+/// each with its side, and the named key. Settings store it as a portable
+/// `HotkeyBinding`.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WindowsHotkey {
-    pub control: bool,
-    pub windows: bool,
-    pub alt: bool,
-    pub shift: bool,
+    pub control: Option<ModifierSide>,
+    pub windows: Option<ModifierSide>,
+    pub alt: Option<ModifierSide>,
+    pub shift: Option<ModifierSide>,
     pub key: Option<String>,
 }
 
 impl Default for WindowsHotkey {
     fn default() -> Self {
         Self {
-            control: true,
-            windows: false,
-            alt: false,
-            shift: false,
+            control: Some(ModifierSide::Either),
+            windows: None,
+            alt: None,
+            shift: None,
             key: Some("space".into()),
         }
     }
@@ -96,10 +95,10 @@ impl Default for WindowsHotkey {
 impl From<&HotkeyBinding> for WindowsHotkey {
     fn from(binding: &HotkeyBinding) -> Self {
         Self {
-            control: binding.modifiers.control.is_some(),
-            windows: binding.modifiers.command.is_some(),
-            alt: binding.modifiers.option.is_some(),
-            shift: binding.modifiers.shift.is_some(),
+            control: binding.modifiers.control,
+            windows: binding.modifiers.command,
+            alt: binding.modifiers.option,
+            shift: binding.modifiers.shift,
             key: binding.key.as_ref().map(HotkeyKey::name),
         }
     }
@@ -107,30 +106,31 @@ impl From<&HotkeyBinding> for WindowsHotkey {
 
 impl From<&WindowsHotkey> for HotkeyBinding {
     fn from(hotkey: &WindowsHotkey) -> Self {
-        let side = |held: bool| held.then_some(ModifierSide::Either);
         Self {
-            modifiers: HotkeyModifiers {
-                control: side(hotkey.control),
-                option: side(hotkey.alt),
-                shift: side(hotkey.shift),
-                command: side(hotkey.windows),
-                function: false,
-            },
+            modifiers: hotkey.modifiers(),
             key: hotkey.key.as_deref().map(HotkeyKey::named),
         }
     }
 }
 
 impl WindowsHotkey {
+    fn modifiers(&self) -> HotkeyModifiers {
+        HotkeyModifiers {
+            control: self.control,
+            option: self.alt,
+            shift: self.shift,
+            command: self.windows,
+            function: false,
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
-        let modifier_count = [self.control, self.windows, self.alt, self.shift]
-            .into_iter()
-            .filter(|enabled| *enabled)
-            .count();
+        // Both Alts count as two keys, so they make a chord of their own.
+        let modifier_count = self.modifiers().count();
         let Some(key) = self.key.as_deref() else {
             if modifier_count < 2 {
                 return Err(eyre!(
-                    "modifier-only Windows dictation shortcuts require at least two modifiers"
+                    "modifier-only Windows dictation shortcuts require at least two modifier keys"
                 ));
             }
             return Ok(());
@@ -216,6 +216,7 @@ struct CallbackState {
     voice_action: Option<WindowsHotkey>,
     voice_trigger_vk: Option<u32>,
     modifiers: ModifierState,
+    side_down: SideDownTimes,
     trigger_down: bool,
     paste_trigger_down: bool,
     voice_trigger_down: bool,
@@ -408,6 +409,7 @@ impl WindowsHotkeyMonitor {
             voice_action,
             voice_trigger_vk,
             modifiers: ModifierState::default(),
+            side_down: SideDownTimes::default(),
             trigger_down: false,
             paste_trigger_down: false,
             voice_trigger_down: false,
@@ -620,6 +622,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
             // event yet, so `update` applies it on top.
             state.modifiers = ModifierState::current();
             let modifier_event = state.modifiers.update(vk, is_down);
+            state.side_down.update(vk, is_down, time);
             // During a chord capture the hook only tracks modifier state;
             // it neither triggers actions nor suppresses keys, so the
             // capture can observe every key through GetAsyncKeyState.
@@ -739,6 +742,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)
+                    && state.side_down.together(&state.binding)
                 {
                     // Only a modifier-only shortcut finishes on a modifier
                     // press. A key chord such as Ctrl+Space finishes on its
@@ -764,6 +768,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)
+                    && state.side_down.together(&state.binding)
                     && let Some(action) =
                         state
                             .capture
@@ -840,18 +845,85 @@ impl ModifierState {
         true
     }
 
+    /// Exactly the chord's modifier keys are down: a side alone, both sides
+    /// only for `Both`, and either side (or both) for `Either`.
     fn matches(&self, binding: &WindowsHotkey) -> bool {
-        binding.control == (self.left_control || self.right_control)
-            && binding.windows == (self.left_windows || self.right_windows)
-            && binding.alt == (self.left_alt || self.right_alt)
-            && binding.shift == (self.left_shift || self.right_shift)
+        side_matches(binding.control, self.left_control, self.right_control)
+            && side_matches(binding.windows, self.left_windows, self.right_windows)
+            && side_matches(binding.alt, self.left_alt, self.right_alt)
+            && side_matches(binding.shift, self.left_shift, self.right_shift)
     }
 
     fn any_required_down(&self, binding: &WindowsHotkey) -> bool {
-        (binding.control && (self.left_control || self.right_control))
-            || (binding.windows && (self.left_windows || self.right_windows))
-            || (binding.alt && (self.left_alt || self.right_alt))
-            || (binding.shift && (self.left_shift || self.right_shift))
+        (binding.control.is_some() && (self.left_control || self.right_control))
+            || (binding.windows.is_some() && (self.left_windows || self.right_windows))
+            || (binding.alt.is_some() && (self.left_alt || self.right_alt))
+            || (binding.shift.is_some() && (self.left_shift || self.right_shift))
+    }
+}
+
+fn side_matches(side: Option<ModifierSide>, left: bool, right: bool) -> bool {
+    match side {
+        None => !left && !right,
+        Some(ModifierSide::Either) => left || right,
+        Some(ModifierSide::Left) => left && !right,
+        Some(ModifierSide::Right) => right && !left,
+        Some(ModifierSide::Both) => left && right,
+    }
+}
+
+/// The sided modifier keys, left then right for each modifier.
+const SIDE_KEYS: [u16; 8] = [
+    VK_LCONTROL,
+    VK_RCONTROL,
+    VK_LWIN,
+    VK_RWIN,
+    VK_LMENU,
+    VK_RMENU,
+    VK_LSHIFT,
+    VK_RSHIFT,
+];
+
+/// When each sided modifier key went down, in hook time (ms), for chords
+/// that hold both sides of one modifier.
+#[derive(Default)]
+struct SideDownTimes([Option<u32>; 8]);
+
+impl SideDownTimes {
+    fn update(&mut self, vk: u32, is_down: bool, time: u32) {
+        // A side-less modifier code reads as the left key, as `ModifierState`.
+        let vk = match vk as u16 {
+            VK_CONTROL => VK_LCONTROL,
+            VK_MENU => VK_LMENU,
+            VK_SHIFT => VK_LSHIFT,
+            vk => vk,
+        };
+        if let Some(index) = SIDE_KEYS.iter().position(|&key| key == vk) {
+            if is_down {
+                // Auto-repeat keeps the first press.
+                self.0[index].get_or_insert(time);
+            } else {
+                self.0[index] = None;
+            }
+        }
+    }
+
+    /// Both keys of each `Both` modifier went down within
+    /// `BOTH_SIDES_WINDOW`, in either order; true for every other chord.
+    fn together(&self, binding: &WindowsHotkey) -> bool {
+        let window = crate::dictation::BOTH_SIDES_WINDOW.as_millis() as u32;
+        [binding.control, binding.windows, binding.alt, binding.shift]
+            .into_iter()
+            .enumerate()
+            .filter(|(_, side)| *side == Some(ModifierSide::Both))
+            .all(
+                |(index, _)| match (self.0[2 * index], self.0[2 * index + 1]) {
+                    (Some(left), Some(right)) => {
+                        left.wrapping_sub(right).min(right.wrapping_sub(left)) <= window
+                    }
+                    _ => false,
+                },
+            )
     }
 }
 
@@ -871,14 +943,14 @@ pub(crate) enum ChordPoll {
 
 /// Records the next chord the user presses: modifiers plus a regular key
 /// complete immediately; a modifier-only chord completes when every
-/// accumulated modifier is released; Escape cancels.
+/// accumulated modifier key is released, keeping the sides
+/// `HotkeyModifiers::recorded_sides` keeps (both Alts stay both); Escape
+/// cancels.
 #[derive(Default)]
 pub(crate) struct ChordCapture {
     mouse_armed: bool,
-    seen_control: bool,
-    seen_windows: bool,
-    seen_alt: bool,
-    seen_shift: bool,
+    /// Every sided modifier key seen down since the chord began.
+    seen: ModifierState,
 }
 
 /// Non-modifier keys the capture scans, paired with the names
@@ -917,16 +989,14 @@ impl ChordCapture {
                 return ChordPoll::Pending;
             }
         }
-        let control = key_down(VK_CONTROL);
-        let windows = key_down(VK_LWIN) || key_down(VK_RWIN);
-        let alt = key_down(VK_MENU);
-        let shift = key_down(VK_SHIFT);
+        let held = ModifierState::current();
         if let Some(key) = pressed_capture_key() {
+            let any = |down: bool| down.then_some(ModifierSide::Either);
             return ChordPoll::Captured(WindowsHotkey {
-                control,
-                windows,
-                alt,
-                shift,
+                control: any(held.left_control || held.right_control),
+                windows: any(held.left_windows || held.right_windows),
+                alt: any(held.left_alt || held.right_alt),
+                shift: any(held.left_shift || held.right_shift),
                 key: Some(key),
             });
         }
@@ -938,32 +1008,61 @@ impl ChordCapture {
             *self = Self::default();
             return ChordPoll::Pending;
         }
-        self.seen_control |= control;
-        self.seen_windows |= windows;
-        self.seen_alt |= alt;
-        self.seen_shift |= shift;
-        let seen_any = self.seen_control || self.seen_windows || self.seen_alt || self.seen_shift;
-        if seen_any && !control && !windows && !alt && !shift {
-            return ChordPoll::Captured(WindowsHotkey {
-                control: self.seen_control,
-                windows: self.seen_windows,
-                alt: self.seen_alt,
-                shift: self.seen_shift,
-                key: None,
-            });
+        self.seen.add(&held);
+        if self.seen.any() && !held.any() {
+            return ChordPoll::Captured(self.held());
         }
         ChordPoll::Pending
     }
 
-    /// The modifiers a release would record so far.
+    /// The modifier keys a release would record so far.
     pub fn held(&self) -> WindowsHotkey {
+        let seen = &self.seen;
+        let side = |left: bool, right: bool| match (left, right) {
+            (true, true) => Some(ModifierSide::Both),
+            (true, false) => Some(ModifierSide::Left),
+            (false, true) => Some(ModifierSide::Right),
+            (false, false) => None,
+        };
+        let modifiers = HotkeyModifiers {
+            control: side(seen.left_control, seen.right_control),
+            option: side(seen.left_alt, seen.right_alt),
+            shift: side(seen.left_shift, seen.right_shift),
+            command: side(seen.left_windows, seen.right_windows),
+            function: false,
+        }
+        .recorded_sides();
         WindowsHotkey {
-            control: self.seen_control,
-            windows: self.seen_windows,
-            alt: self.seen_alt,
-            shift: self.seen_shift,
+            control: modifiers.control,
+            windows: modifiers.command,
+            alt: modifiers.option,
+            shift: modifiers.shift,
             key: None,
         }
+    }
+}
+
+impl ModifierState {
+    fn add(&mut self, other: &Self) {
+        self.left_control |= other.left_control;
+        self.right_control |= other.right_control;
+        self.left_windows |= other.left_windows;
+        self.right_windows |= other.right_windows;
+        self.left_alt |= other.left_alt;
+        self.right_alt |= other.right_alt;
+        self.left_shift |= other.left_shift;
+        self.right_shift |= other.right_shift;
+    }
+
+    fn any(&self) -> bool {
+        self.left_control
+            || self.right_control
+            || self.left_windows
+            || self.right_windows
+            || self.left_alt
+            || self.right_alt
+            || self.left_shift
+            || self.right_shift
     }
 }
 
@@ -1086,10 +1185,10 @@ mod tests {
     fn mouse_buttons_validate_and_round_trip_without_modifiers() {
         for number in 1..=5 {
             let binding = WindowsHotkey {
-                control: false,
-                windows: false,
-                alt: false,
-                shift: false,
+                control: None,
+                windows: None,
+                alt: None,
+                shift: None,
                 key: Some(format!("mouse{number}")),
             };
             assert!(binding.validate().is_ok());
@@ -1130,22 +1229,100 @@ mod tests {
     #[test]
     fn unmodified_letters_are_rejected() {
         let binding = WindowsHotkey {
-            control: false,
-            windows: false,
-            alt: false,
-            shift: false,
+            control: None,
+            windows: None,
+            alt: None,
+            shift: None,
             key: Some("d".into()),
         };
         assert!(binding.validate().is_err());
     }
 
     #[test]
+    fn both_sides_of_one_modifier_make_a_chord_of_two_keys() {
+        let both_alts = WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: Some(ModifierSide::Both),
+            shift: None,
+            key: None,
+        };
+        assert!(both_alts.validate().is_ok());
+        assert_eq!(both_alts.label(), "Alt+Alt");
+        let right_alt = WindowsHotkey {
+            alt: Some(ModifierSide::Right),
+            ..both_alts.clone()
+        };
+        assert!(right_alt.validate().is_err(), "one key alone stays unsafe");
+        assert_eq!(
+            WindowsHotkey::from(&HotkeyBinding::from(&both_alts)),
+            both_alts
+        );
+
+        let mut held = ModifierState::default();
+        held.update(u32::from(VK_LMENU), true);
+        assert!(!held.matches(&both_alts), "one Alt is not the chord");
+        held.update(u32::from(VK_RMENU), true);
+        assert!(held.matches(&both_alts));
+        let either_alt_and_control = WindowsHotkey {
+            control: Some(ModifierSide::Either),
+            alt: Some(ModifierSide::Either),
+            ..both_alts.clone()
+        };
+        held.update(u32::from(VK_LCONTROL), true);
+        assert!(!held.matches(&both_alts), "an extra key is not the chord");
+        assert!(
+            held.matches(&either_alt_and_control),
+            "either side still takes both"
+        );
+    }
+
+    #[test]
+    fn both_sides_must_go_down_together() {
+        let both_alts = WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: Some(ModifierSide::Both),
+            shift: None,
+            key: None,
+        };
+        let window = crate::dictation::BOTH_SIDES_WINDOW.as_millis() as u32;
+        let mut times = SideDownTimes::default();
+        times.update(u32::from(VK_RMENU), true, 1_000);
+        assert!(!times.together(&both_alts));
+        times.update(u32::from(VK_LMENU), true, 1_000 + window);
+        assert!(
+            times.together(&both_alts),
+            "either order, inside the window"
+        );
+        times.update(u32::from(VK_LMENU), true, 5_000);
+        assert!(
+            times.together(&both_alts),
+            "auto-repeat keeps the first press"
+        );
+        times.update(u32::from(VK_LMENU), false, 5_100);
+        times.update(u32::from(VK_LMENU), true, 5_200);
+        assert!(
+            !times.together(&both_alts),
+            "added later, it presses nothing"
+        );
+        assert!(
+            times.together(&WindowsHotkey::default()),
+            "other chords never wait"
+        );
+        let mut wrapped = SideDownTimes::default();
+        wrapped.update(u32::from(VK_LMENU), true, u32::MAX - 10);
+        wrapped.update(u32::from(VK_RMENU), true, 10);
+        assert!(wrapped.together(&both_alts), "tick wraparound");
+    }
+
+    #[test]
     fn one_modifier_is_not_safe_as_a_modifier_only_binding() {
         let binding = WindowsHotkey {
-            control: true,
-            windows: false,
-            alt: false,
-            shift: false,
+            control: Some(ModifierSide::Either),
+            windows: None,
+            alt: None,
+            shift: None,
             key: None,
         };
         assert!(binding.validate().is_err());
@@ -1172,16 +1349,16 @@ mod tests {
         for hotkey in [
             WindowsHotkey::default(),
             WindowsHotkey {
-                control: true,
-                windows: false,
-                alt: true,
-                shift: false,
+                control: Some(ModifierSide::Either),
+                windows: None,
+                alt: Some(ModifierSide::Either),
+                shift: None,
                 key: Some("v".into()),
             },
             WindowsHotkey {
                 key: Some("pageup".into()),
-                shift: true,
-                windows: true,
+                shift: Some(ModifierSide::Either),
+                windows: Some(ModifierSide::Either),
                 ..WindowsHotkey::default()
             },
         ] {

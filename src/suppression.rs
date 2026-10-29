@@ -13,7 +13,7 @@ use color_eyre::eyre::{Result, eyre};
 use crate::app_settings::HotkeyBinding;
 use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
-use crate::dictation::MINIMUM_HOLD_DURATION;
+use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
@@ -1319,6 +1319,9 @@ pub struct DictationHotkey {
     modifier_history: ModifierHistory,
     // When each tracked key last went down.
     key_down_at: HashMap<u16, CaptureInstant>,
+    // When each modifier key (by its device flag) went down, for chords
+    // that hold both sides of one.
+    side_down_at: HashMap<u64, CaptureInstant>,
     physical: PhysicalKeyboard,
 }
 
@@ -1369,6 +1372,7 @@ impl DictationHotkey {
             chord_break_at: None,
             modifier_history: ModifierHistory::reset(CaptureInstant::ZERO),
             key_down_at: HashMap::new(),
+            side_down_at: HashMap::new(),
             physical: PhysicalKeyboard::SESSION,
         }
     }
@@ -1429,6 +1433,7 @@ impl DictationHotkey {
         self.state = State::IDLE;
         self.pressed_keys.clear();
         self.key_down_at.clear();
+        self.side_down_at.clear();
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
         was_recording.then_some(HotkeyAction::Cancel)
@@ -1572,6 +1577,17 @@ impl DictationHotkey {
             || self
                 .recovery_ignore_through
                 .is_some_and(|fence| at <= fence);
+        if let InputEvent::Flags(flags) = event {
+            for mask in MODIFIER_SIDE_MASKS {
+                if flags & mask == 0 {
+                    self.side_down_at.remove(&mask);
+                } else {
+                    self.side_down_at.entry(mask).or_insert(at);
+                }
+            }
+        } else if matches!(event, InputEvent::TapDisabled) {
+            self.side_down_at.clear();
+        }
         if let InputEvent::Flags(flags) = event
             && at >= self.function_modifier.0
         {
@@ -2014,6 +2030,7 @@ impl DictationHotkey {
                 matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
                     && !self.binding.modifiers.is_empty()
                     && !self.binding.required_modifiers_down(prior_flags)
+                    && self.both_sides_went_down_together()
             }
         }
     }
@@ -2123,10 +2140,44 @@ impl DictationHotkey {
                 matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
                     && !self.binding.modifiers.is_empty()
                     && self.pressed_keys.is_empty()
+                    && self.both_sides_went_down_together()
             }
         }
     }
+
+    /// A modifier-only chord on both sides of a modifier (both Options)
+    /// presses only when its two keys go down within `BOTH_SIDES_WINDOW`,
+    /// in either order, as one gesture; one held and the other added later
+    /// presses nothing. Other chords press as soon as their keys are down.
+    fn both_sides_went_down_together(&self) -> bool {
+        self.binding.both_sides_masks().all(|(left, right)| {
+            match (self.side_down_at.get(&left), self.side_down_at.get(&right)) {
+                (Some(&left), Some(&right)) => {
+                    left.max(right).duration_since(left.min(right)) <= BOTH_SIDES_WINDOW
+                }
+                _ => false,
+            }
+        })
+    }
 }
+
+/// Each modifier key's device flag, left and right.
+const MODIFIER_SIDE_MASKS: [u64; 8] = {
+    use crate::app_settings::{
+        LEFT_COMMAND_MASK, LEFT_CONTROL_MASK, LEFT_OPTION_MASK, LEFT_SHIFT_MASK,
+        RIGHT_COMMAND_MASK, RIGHT_CONTROL_MASK, RIGHT_OPTION_MASK, RIGHT_SHIFT_MASK,
+    };
+    [
+        LEFT_CONTROL_MASK,
+        RIGHT_CONTROL_MASK,
+        LEFT_OPTION_MASK,
+        RIGHT_OPTION_MASK,
+        LEFT_SHIFT_MASK,
+        RIGHT_SHIFT_MASK,
+        LEFT_COMMAND_MASK,
+        RIGHT_COMMAND_MASK,
+    ]
+};
 
 /// The device-independent flag bits of `modifiers`, either side.
 fn modifier_mask(modifiers: crate::app_settings::HotkeyModifiers) -> u64 {
@@ -5793,5 +5844,181 @@ mod tests {
         activity.invalidate();
 
         assert_ne!(activity.revision(), revision);
+    }
+
+    fn both_options() -> RuntimeHotkey {
+        use crate::app_settings::{HotkeyModifiers, ModifierSide};
+        RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Both),
+                ..Default::default()
+            },
+            key_code: None,
+        }
+    }
+
+    const LEFT_OPTION: u64 = OPTION_KEY_MASK | crate::app_settings::LEFT_OPTION_MASK;
+    const RIGHT_OPTION: u64 = OPTION_KEY_MASK | crate::app_settings::RIGHT_OPTION_MASK;
+    const BOTH_OPTIONS: u64 = LEFT_OPTION | RIGHT_OPTION;
+
+    #[test]
+    fn both_options_press_on_the_second_key_and_release_on_either() {
+        let now = capture_time();
+        let ms = Duration::from_millis;
+        for (first, release_to) in [(LEFT_OPTION, RIGHT_OPTION), (RIGHT_OPTION, LEFT_OPTION)] {
+            let mut hotkey = DictationHotkey::with_binding(false, now, false, both_options());
+            assert_eq!(hotkey.process(InputEvent::Flags(first), now), None);
+            assert!(!hotkey.is_recording(), "one Option is not the chord");
+            // The press is the second key's own edge: the hold threshold and
+            // pre-roll count from it, never from an earlier key.
+            let down = now + ms(30);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(BOTH_OPTIONS), down),
+                Some(HotkeyAction::Start)
+            );
+            assert!(
+                hotkey
+                    .process(InputEvent::Flags(BOTH_OPTIONS), down + ms(500))
+                    .is_none()
+            );
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(release_to), down + ms(800)),
+                Some(HotkeyAction::Finish),
+                "lifting either key ends the chord"
+            );
+            assert_eq!(hotkey.process(InputEvent::Flags(0), down + ms(900)), None);
+        }
+    }
+
+    #[test]
+    fn both_options_must_go_down_together() {
+        let now = capture_time();
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, both_options());
+        assert_eq!(hotkey.process(InputEvent::Flags(LEFT_OPTION), now), None);
+        let late = now + BOTH_SIDES_WINDOW + Duration::from_millis(1);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(BOTH_OPTIONS), late),
+            None,
+            "an Option held while the other is added later presses nothing"
+        );
+        assert_eq!(hotkey.process(InputEvent::Flags(LEFT_OPTION), late), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(0), late), None);
+        let again = late + Duration::from_secs(1);
+        assert_eq!(hotkey.process(InputEvent::Flags(RIGHT_OPTION), again), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(BOTH_OPTIONS), again + BOTH_SIDES_WINDOW),
+            Some(HotkeyAction::Start),
+            "the window's edge still counts"
+        );
+    }
+
+    #[test]
+    fn both_options_discard_an_extra_key_within_the_hold() {
+        let now = capture_time();
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, both_options());
+        hotkey.process(InputEvent::Flags(LEFT_OPTION), now);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(BOTH_OPTIONS), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(BOTH_OPTIONS | COMMAND_KEY_MASK),
+                now + Duration::from_millis(100)
+            ),
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
+        );
+        let mut typed = DictationHotkey::with_binding(false, now, false, both_options());
+        typed.process(InputEvent::Flags(BOTH_OPTIONS), now);
+        assert_eq!(
+            typed.process(
+                InputEvent::Key {
+                    code: 0,
+                    down: true,
+                    flags: BOTH_OPTIONS,
+                },
+                now + Duration::from_secs(2)
+            ),
+            Some(HotkeyAction::Discard(DiscardCause::Key)),
+            "a held modifier-only chord plus a key is a chord at any time"
+        );
+    }
+
+    #[test]
+    fn both_options_lock_on_a_double_tap_and_in_toggle_mode() {
+        let ms = Duration::from_millis;
+        let now = capture_time();
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, both_options());
+        let tap = |hotkey: &mut DictationHotkey, at: CaptureInstant| {
+            let pressed = hotkey.process(InputEvent::Flags(BOTH_OPTIONS), at);
+            let released = hotkey.process(InputEvent::Flags(0), at + ms(60));
+            (pressed, released)
+        };
+        assert_eq!(
+            tap(&mut hotkey, now),
+            (Some(HotkeyAction::Start), Some(HotkeyAction::Finish))
+        );
+        assert_eq!(
+            tap(&mut hotkey, now + ms(150)),
+            (Some(HotkeyAction::Start), None)
+        );
+        assert!(hotkey.is_locked());
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(RIGHT_OPTION), now + ms(2_000)),
+            None,
+            "one Option does not finish the lock"
+        );
+        hotkey.process(InputEvent::Flags(0), now + ms(2_050));
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(BOTH_OPTIONS), now + ms(3_000)),
+            Some(HotkeyAction::Finish)
+        );
+
+        let mut toggle = DictationHotkey::with_binding(false, now, false, both_options());
+        toggle.set_toggle(true);
+        assert_eq!(tap(&mut toggle, now), (Some(HotkeyAction::Start), None));
+        assert!(toggle.is_locked());
+        assert_eq!(
+            toggle.process(InputEvent::Flags(BOTH_OPTIONS), now + ms(5_000)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn one_sided_options_never_start_with_both_held_but_either_side_does() {
+        use crate::app_settings::{HotkeyModifiers, ModifierSide};
+        let now = capture_time();
+        let sided = |side| RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                option: Some(side),
+                ..Default::default()
+            },
+            key_code: None,
+        };
+        let mut right =
+            DictationHotkey::with_binding(false, now, false, sided(ModifierSide::Right));
+        assert_eq!(right.process(InputEvent::Flags(BOTH_OPTIONS), now), None);
+        let mut either =
+            DictationHotkey::with_binding(false, now, false, sided(ModifierSide::Either));
+        assert_eq!(
+            either.process(InputEvent::Flags(BOTH_OPTIONS), now),
+            Some(HotkeyAction::Start),
+            "Option keeps matching both held, as before chords"
+        );
+        // Right Option held, then the left one added: the extra key
+        // discards a press still inside its hold.
+        let mut promoted =
+            DictationHotkey::with_binding(false, now, false, sided(ModifierSide::Right));
+        assert_eq!(
+            promoted.process(InputEvent::Flags(RIGHT_OPTION), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            promoted.process(
+                InputEvent::Flags(BOTH_OPTIONS),
+                now + Duration::from_millis(40)
+            ),
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
+        );
     }
 }

@@ -337,7 +337,8 @@ settings but do not observe input-source changes or show these controls.
   the OS default is a Bluetooth headset, so its audio stays out of call
   quality. A saved microphone and `--device` are always used as named.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
-  `control+space`, `fn`, or `f5`. On macOS, Windows and X11, `mouse4` and `option+mouse4`
+  `control+space`, `fn`, `f5`, or `left-option+right-option` (both Options
+  held together). `left-` and `right-` apply to shortcuts without a key. On macOS, Windows and X11, `mouse4` and `option+mouse4`
   also work (Mouse 1/2/3 are left/right/middle). Key names resolve on the active keyboard
   layout, the OS's rules for Settings' recorder apply, and a binding another
   Hex shortcut uses is refused with `shortcut-in-use`. `double_tap_only`

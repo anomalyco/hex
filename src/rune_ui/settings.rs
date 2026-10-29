@@ -159,9 +159,67 @@ pub(super) fn on_key(ui: &mut Ui, event: &KeyEvent, _: &mut Tx) -> bool {
         return true;
     }
     if host::RECORDS_KEY_EVENTS {
-        record(ui, target, recorded_binding(event));
+        match event.key {
+            Key::Modifier { modifier, pressed } => {
+                modifier_alone(ui, modifier, pressed, event.mods)
+            }
+            _ => record(ui, target, recorded_binding(event)),
+        }
     }
     true
+}
+
+/// Where the window records key events (Linux), a modifier pressed on its
+/// own shows among the held keys, and releasing them all without a key
+/// says why Linux can't bind that and what it can: a key with them. The
+/// GlobalShortcuts portal and X11 grabs take a key plus modifiers, never a
+/// modifier alone or one side of it.
+fn modifier_alone(ui: &mut Ui, modifier: rune::Modifier, pressed: bool, mods: rune::Mods) {
+    let Capture::Listening { message, held, .. } = &mut ui.capture else {
+        return;
+    };
+    if pressed {
+        use rune::Modifier as M;
+        let slot = match modifier {
+            M::ControlLeft | M::ControlRight => &mut held.control,
+            M::AltLeft | M::AltRight => &mut held.option,
+            M::ShiftLeft | M::ShiftRight => &mut held.shift,
+            M::SuperLeft | M::SuperRight => &mut held.command,
+            _ => return,
+        };
+        let side = match modifier.side() {
+            Some(rune::KeySide::Left) => ModifierSide::Left,
+            Some(rune::KeySide::Right) => ModifierSide::Right,
+            None => ModifierSide::Either,
+        };
+        *slot = Some(match (*slot, side) {
+            (Some(ModifierSide::Left), ModifierSide::Right)
+            | (Some(ModifierSide::Right), ModifierSide::Left) => ModifierSide::Both,
+            (Some(current), _) => current,
+            (None, side) => side,
+        });
+        *message = None;
+        return;
+    }
+    if mods.ctrl || mods.alt || mods.shift || mods.logo {
+        return;
+    }
+    let peak = std::mem::take(held);
+    if !peak.is_empty() {
+        *message = Some(modifier_only_hint(peak));
+    }
+}
+
+/// The nearest chord Linux binds to modifiers held alone: the same
+/// modifiers, one side or either, with a key.
+pub(super) fn modifier_only_hint(peak: HotkeyModifiers) -> &'static str {
+    let both =
+        [peak.control, peak.option, peak.shift, peak.command].contains(&Some(ModifierSide::Both));
+    if both {
+        tr("Linux can't bind both sides. Use one with a key, like Space")
+    } else {
+        tr("Linux needs a key too. Hold these and press one, like Space")
+    }
 }
 
 /// Saves a recorded chord, or keeps listening with why it was rejected.
@@ -959,10 +1017,10 @@ pub(super) fn recorder_face(p: Paint, face: Face, live: bool) -> El {
                     Prompt::Press => label("prompt", tr("Press shortcut"), p.text()),
                     Prompt::Rejected(message) => label("rejected", message, p.danger()),
                     Prompt::Held(held) => {
-                        let held = HotkeyBinding {
-                            modifiers: held.without_side_constraints(),
+                        let held = held_caps(&HotkeyBinding {
+                            modifiers: held,
                             key: None,
-                        };
+                        });
                         // Held keys stand on the recorder, down. Too many
                         // to fit fade out at the right, so Esc stays.
                         row()
@@ -974,7 +1032,7 @@ pub(super) fn recorder_face(p: Paint, face: Face, live: bool) -> El {
                             .pr(HELD_FADE)
                             .clip_fade(0.0, 0.0, HELD_FADE, 0.0)
                             .child(row().key("keys").gap(KEY_GAP).children(
-                                held.keycaps().iter().enumerate().map(|(index, cap)| {
+                                held.iter().enumerate().map(|(index, cap)| {
                                     keycap(p, index, cap, KeySize::Small, true)
                                 }),
                             ))
@@ -1005,6 +1063,17 @@ const ESCAPE_KEYCAP: &str = if cfg!(target_os = "macos") {
 } else {
     "Esc"
 };
+
+/// The keys held while recording, each with its side, so an extra key or
+/// the second Option shows before it is recorded: compact on the Mac
+/// (L⌥ R⌥), named elsewhere.
+fn held_caps(held: &HotkeyBinding) -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        held.keycaps()
+    } else {
+        shortcut_caps(held, false)
+    }
+}
 
 /// A shortcut's keycaps, naming the side a modifier must be pressed on
 /// unless a side picker beside them already shows it.

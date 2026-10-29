@@ -249,6 +249,10 @@ fn build(connect: host::Connect, with_playground: bool) -> rune::App<Ui> {
         .init(move || Ui::load_with(connect))
         .on_close(on_close)
         .compositor(WindowCompositor::default());
+    // Linux records shortcuts from the window's keys, so a modifier pressed
+    // alone reaches the recorder, which says Linux needs a key with it.
+    #[cfg(target_os = "linux")]
+    let app = app.modifier_keys();
     let app = if with_playground {
         playground::attach(app)
     } else {

@@ -90,6 +90,55 @@ that does not ask for Fn; Fn stays significant everywhere else. Check:
 `function_keys_match_despite_the_fn_flag_macos_adds` in `suppression.rs`
 (constructed events; no physical-keyboard run).
 
+### Chord Shortcuts
+
+**Added October 29, 2026 (issue 394):** every shortcut (dictation, Voice
+Action, Paste Last, Annotate) is a chord: the set of keys held together, in any
+order and nothing else. A modifier key names its side (left, right, or any);
+at most one other key or mouse button joins them. Both Options together is
+`[⌥ left, ⌥ right]`, so it no longer reads as plain Option.
+
+```ts
+Press the chord's keys -> Down on the edge that completes the set  // dictate.chord
+  ├── One key (⌥, Right ⌥, F5, Mouse 4) -> Down at once, no added wait
+  ├── Both sides of one modifier (⌥⌥)
+  │   ├── Second side within 80 ms of the first, either order -> Down
+  │   └── One held, the other added later -> Nothing until both lift
+  ├── A side alone (Right ⌥) with the other side also down -> Nothing
+  ├── Option (any side) -> One Option or both, as before chords
+  └── Modifiers then a key (⌥ Space) -> Down on the key, as before
+Lift any of the chord's keys -> Up
+Hold, double-tap lock, Toggle, the 300 ms hold threshold, the provisional
+start tone, extra-key discards, stale recovery, and the release tail run on
+Down and Up unchanged, on the same event timestamps.
+```
+
+Karabiner-Elements' simultaneous keys default to 50 ms against typing rollover;
+two thumbs on two modifiers do not roll during typing, so the window is 80 ms
+(`BOTH_SIDES_WINDOW`). The recorder keeps a lone modifier's side (the Left ·
+Either · Right picker widens it, and shows only for one-modifier chords),
+keeps both sides of a modifier, and records every other modifier as either
+side, so ⌥⌘ works from either hand. While recording, every held key shows with
+its side (`L⌥ R⌥ ⌘` on the Mac, `Left Alt` elsewhere), so an accidental extra
+key is visible before release. `hex settings` takes
+`left-option+right-option`. Settings store `{"keys": [...]}`; files with the
+old `modifiers`/`key` shape load as the same chord and are written back once.
+Windows matches sides through its low-level hook and accepts both Alts (two
+keys) as a modifier-only chord; one modifier alone stays refused there. Linux
+binds what the portal and X11 grabs take, a key with modifiers and no side:
+releasing modifiers pressed alone in the recorder says Linux needs a key (or
+can't bind both sides) and suggests adding one, such as Space.
+
+Checks: the `both_options_*` tests and
+`one_sided_options_never_start_with_both_held_but_either_side_does` in
+`suppression.rs`, `shortcuts_store_as_chords_and_old_files_convert_once` and
+`both_sides_conflict_only_with_either_side_and_match_only_together` in
+`app_settings.rs`, `both_options_record_as_one_chord_of_two_keys` in
+`rune_ui/macos_host.rs`, `both_sides_must_go_down_together` in
+`windows_input.rs`, and
+`a_modifier_alone_says_linux_needs_a_key_and_suggests_one` in
+`rune_ui/tests.rs`. Constructed events only; no physical keyboard run on any OS.
+
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 

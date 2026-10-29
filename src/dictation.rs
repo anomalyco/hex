@@ -17,6 +17,13 @@ pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
 pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
+/// How far apart the two keys of a both-sides chord (both Options) may go
+/// down and still count as one press. Karabiner-Elements' simultaneous
+/// keys default to 50 ms, tuned against typing rollover on letter keys;
+/// two thumbs on two modifiers don't roll during typing, so a little more
+/// room costs no false presses and saves missed ones.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub const BOTH_SIDES_WINDOW: Duration = Duration::from_millis(80);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;

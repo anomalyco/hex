@@ -773,8 +773,9 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     }
 }
 
-/// Reads a shortcut such as `option`, `right-command`, `fn`, `f5`, or
-/// `control+option+space`: modifiers, then at most one key.
+/// Reads a shortcut such as `option`, `right-command`, `fn`, `f5`,
+/// `left-option+right-option` (both Options), or `control+option+space`:
+/// modifiers, then at most one key.
 pub fn parse_hotkey(
     text: &str,
     key_named: fn(&str) -> Result<HotkeyKey, String>,
@@ -806,11 +807,13 @@ pub fn parse_hotkey(
         };
         match slot {
             Some(slot) => {
-                if slot.is_some() {
-                    return Err(format!("{part} appears twice"));
-                }
                 sided |= side.is_some();
-                *slot = Some(side.unwrap_or(ModifierSide::Either));
+                *slot = Some(match (*slot, side) {
+                    (None, side) => side.unwrap_or(ModifierSide::Either),
+                    (Some(ModifierSide::Left), Some(ModifierSide::Right))
+                    | (Some(ModifierSide::Right), Some(ModifierSide::Left)) => ModifierSide::Both,
+                    _ => return Err(format!("{part} appears twice")),
+                });
             }
             None if side.is_none() && matches!(name.as_str(), "fn" | "function" | "globe") => {
                 if modifiers.function {
@@ -849,8 +852,6 @@ pub fn parse_hotkey(
         }
     } else if modifiers.is_empty() {
         return Err("expected at least one modifier or key".into());
-    } else if sided && binding.standalone_side().is_none() {
-        return Err("every modifier of a modifier-only shortcut must share its side".into());
     }
     Ok(binding)
 }
@@ -862,13 +863,15 @@ fn is_function_key(label: &str) -> bool {
         .is_some_and(|number| (1..=20).contains(&number))
 }
 
-/// The text `parse_hotkey` reads back: `left-option`, `option+shift+v`.
+/// The text `parse_hotkey` reads back: `left-option`, `option+shift+v`,
+/// `left-option+right-option`.
 pub fn format_hotkey(binding: &HotkeyBinding) -> String {
     let modifiers = binding.modifiers;
     let side = |side: Option<ModifierSide>, name: &str| match side {
         Some(ModifierSide::Left) => Some(format!("left-{name}")),
         Some(ModifierSide::Right) => Some(format!("right-{name}")),
         Some(ModifierSide::Either) => Some(name.to_string()),
+        Some(ModifierSide::Both) => Some(format!("left-{name}+right-{name}")),
         None => None,
     };
     let mut parts: Vec<String> = [
@@ -1211,6 +1214,9 @@ mod tests {
             "control+option+space",
             "option+shift+v",
             "left-option+left-shift",
+            "left-option+right-shift",
+            "left-option+right-option",
+            "control+left-option+right-option",
         ] {
             let binding = parse_hotkey(text, rules.key_named).unwrap();
             assert_eq!(format_hotkey(&binding), text);
@@ -1222,11 +1228,21 @@ mod tests {
             "fn+v",
             "left-option+v",
             "option+v+b",
-            "left-option+right-shift",
             "option+option",
+            "left-option+left-option",
+            "option+right-option",
+            "left-option+right-option+v",
         ] {
             assert!(parse_hotkey(text, rules.key_named).is_err(), "{text}");
         }
+        assert_eq!(
+            parse_hotkey("right-option+left-option", rules.key_named)
+                .unwrap()
+                .modifiers
+                .option,
+            Some(ModifierSide::Both),
+            "both Options in either order"
+        );
         assert_eq!(
             parse_hotkey("control+left", rules.key_named)
                 .unwrap()

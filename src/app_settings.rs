@@ -75,6 +75,9 @@ pub const LEFT_OPTION_MASK: u64 = 0x0000_0020;
 pub const RIGHT_OPTION_MASK: u64 = 0x0000_0040;
 pub const RIGHT_CONTROL_MASK: u64 = 0x0000_2000;
 
+/// Which of a modifier's keys a shortcut holds. `Either` is one key on
+/// either side (or both, as before chords); `Both` is the left and the
+/// right key together, such as both Options.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModifierSide {
@@ -82,6 +85,7 @@ pub enum ModifierSide {
     Right,
     #[default]
     Either,
+    Both,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -171,12 +175,34 @@ impl HotkeyModifiers {
             && !self.function
     }
 
+    /// How many keys the modifiers hold: both sides of one count as two.
     pub const fn count(self) -> u8 {
-        self.control.is_some() as u8
-            + self.option.is_some() as u8
-            + self.shift.is_some() as u8
-            + self.command.is_some() as u8
+        side_count(self.control)
+            + side_count(self.option)
+            + side_count(self.shift)
+            + side_count(self.command)
             + self.function as u8
+    }
+
+    /// The sides a recorder keeps from the modifiers held at a modifier-only
+    /// chord's peak: a lone modifier keeps its side (the side picker can
+    /// widen it), both sides of one stay both (both Options), and every
+    /// other side becomes either, so ⌥⌘ works from either side.
+    pub fn recorded_sides(self) -> Self {
+        if self.count() == 1 {
+            return self;
+        }
+        let keep_both = |side: Option<ModifierSide>| match side {
+            Some(ModifierSide::Both) => Some(ModifierSide::Both),
+            side => either_side(side),
+        };
+        Self {
+            control: keep_both(self.control),
+            option: keep_both(self.option),
+            shift: keep_both(self.shift),
+            command: keep_both(self.command),
+            function: self.function,
+        }
     }
 
     pub const fn without_side_constraints(self) -> Self {
@@ -189,64 +215,117 @@ impl HotkeyModifiers {
         }
     }
 
+    /// Every key `required` names is among these held ones; others may be
+    /// held too.
     fn contains(self, required: Self) -> bool {
-        modifier_contains(self.control, required.control)
-            && modifier_contains(self.option, required.option)
-            && modifier_contains(self.shift, required.shift)
-            && modifier_contains(self.command, required.command)
+        side_covers(self.control, required.control)
+            && side_covers(self.option, required.option)
+            && side_covers(self.shift, required.shift)
+            && side_covers(self.command, required.command)
             && (!required.function || self.function)
     }
 
-    #[cfg(target_os = "macos")]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
-        self.sided_keycaps()
-            .map(|(label, side)| side_keycap(side, label))
+    /// Exactly the keys `required` names are held: no other modifier, and
+    /// no other side of one it names.
+    fn holds_exactly(self, required: Self) -> bool {
+        side_exact(self.control, required.control)
+            && side_exact(self.option, required.option)
+            && side_exact(self.shift, required.shift)
+            && side_exact(self.command, required.command)
+            && self.function == required.function
     }
 
-    /// Each modifier's keycap and the side it must be pressed on.
-    #[cfg(target_os = "macos")]
-    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+    /// One keycap per modifier key, so both Options show as two.
+    fn sided(self) -> impl Iterator<Item = (Modifier, ModifierSide)> {
+        let function = self.function.then_some(ModifierSide::Either);
         [
-            (self.function.then_some(ModifierSide::Either), "fn"),
-            (self.control, "⌃"),
-            (self.option, "⌥"),
-            (self.shift, "⇧"),
-            (self.command, "⌘"),
+            (Modifier::Function, function),
+            (Modifier::Control, self.control),
+            (Modifier::Option, self.option),
+            (Modifier::Shift, self.shift),
+            (Modifier::Command, self.command),
         ]
         .into_iter()
-        .filter_map(|(side, label)| Some((label, side?)))
+        .flat_map(|(modifier, side)| {
+            let sides: &[ModifierSide] = match side {
+                None => &[],
+                Some(ModifierSide::Both) => &[ModifierSide::Left, ModifierSide::Right],
+                Some(ModifierSide::Left) => &[ModifierSide::Left],
+                Some(ModifierSide::Right) => &[ModifierSide::Right],
+                Some(ModifierSide::Either) => &[ModifierSide::Either],
+            };
+            sides.iter().map(move |side| (modifier, *side))
+        })
     }
 
-    /// Windows and Linux keycaps never name a side.
+    #[cfg(target_os = "macos")]
+    fn keycaps(self) -> impl Iterator<Item = &'static str> {
+        self.sided()
+            .map(|(modifier, side)| side_keycap(side, modifier.keycap()))
+    }
+
+    /// Each modifier key's keycap and the side it must be pressed on.
+    /// Linux binds no side, so its keycaps never name one.
+    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+        self.sided().map(|(modifier, side)| {
+            let side = if cfg!(target_os = "linux") {
+                ModifierSide::Either
+            } else {
+                side
+            };
+            (modifier.keycap(), side)
+        })
+    }
+
     #[cfg(not(target_os = "macos"))]
-    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
-        self.keycaps().map(|label| (label, ModifierSide::Either))
-    }
-
-    /// Windows names Command the Windows key and Option Alt.
-    #[cfg(target_os = "windows")]
     fn keycaps(self) -> impl Iterator<Item = &'static str> {
-        [
-            (self.control.is_some(), "Ctrl"),
-            (self.command.is_some(), "Win"),
-            (self.option.is_some(), "Alt"),
-            (self.shift.is_some(), "Shift"),
-        ]
-        .into_iter()
-        .filter_map(|(enabled, label)| enabled.then_some(label))
+        self.sided_keycaps().map(|(label, _)| label)
     }
+}
 
-    /// Linux names Command the Super key and Option Alt.
-    #[cfg(target_os = "linux")]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
-        [
-            (self.control.is_some(), "Ctrl"),
-            (self.option.is_some(), "Alt"),
-            (self.shift.is_some(), "Shift"),
-            (self.command.is_some(), "Super"),
-        ]
-        .into_iter()
-        .filter_map(|(enabled, label)| enabled.then_some(label))
+/// One modifier, as a chord names it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Modifier {
+    Function,
+    Control,
+    Option,
+    Shift,
+    Command,
+}
+
+impl Modifier {
+    /// The Mac's symbols; Windows names Command the Windows key and Option
+    /// Alt, and Linux names them Super and Alt.
+    pub const fn keycap(self) -> &'static str {
+        match self {
+            Self::Function => "fn",
+            #[cfg(target_os = "macos")]
+            Self::Control => "⌃",
+            #[cfg(target_os = "macos")]
+            Self::Option => "⌥",
+            #[cfg(target_os = "macos")]
+            Self::Shift => "⇧",
+            #[cfg(target_os = "macos")]
+            Self::Command => "⌘",
+            #[cfg(not(target_os = "macos"))]
+            Self::Control => "Ctrl",
+            #[cfg(not(target_os = "macos"))]
+            Self::Option => "Alt",
+            #[cfg(not(target_os = "macos"))]
+            Self::Shift => "Shift",
+            #[cfg(target_os = "windows")]
+            Self::Command => "Win",
+            #[cfg(target_os = "linux")]
+            Self::Command => "Super",
+        }
+    }
+}
+
+const fn side_count(side: Option<ModifierSide>) -> u8 {
+    match side {
+        None => 0,
+        Some(ModifierSide::Both) => 2,
+        Some(_) => 1,
     }
 }
 
@@ -257,12 +336,25 @@ const fn either_side(side: Option<ModifierSide>) -> Option<ModifierSide> {
     }
 }
 
-fn modifier_contains(candidate: Option<ModifierSide>, required: Option<ModifierSide>) -> bool {
-    match (candidate, required) {
+/// `held` is what the keyboard reports for one modifier: a side, `Both`,
+/// or `Either` for input that names no side. `Either` asks for any key of
+/// it, held alone or with its twin.
+fn side_covers(held: Option<ModifierSide>, required: Option<ModifierSide>) -> bool {
+    match (held, required) {
         (_, None) => true,
-        (Some(ModifierSide::Either), Some(_)) | (Some(_), Some(ModifierSide::Either)) => true,
-        (Some(candidate), Some(required)) => candidate == required,
         (None, Some(_)) => false,
+        (Some(_), Some(ModifierSide::Either)) => true,
+        (Some(ModifierSide::Both), Some(ModifierSide::Left | ModifierSide::Right)) => true,
+        (Some(held), Some(required)) => held == required,
+    }
+}
+
+fn side_exact(held: Option<ModifierSide>, required: Option<ModifierSide>) -> bool {
+    match (held, required) {
+        (None, None) => true,
+        (Some(_), Some(ModifierSide::Either)) => true,
+        (Some(held), Some(required)) => held == required,
+        _ => false,
     }
 }
 
@@ -376,11 +468,184 @@ fn key_label(name: &str) -> String {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
+/// A shortcut as a chord: the set of keys held together, any order and
+/// nothing else. Modifiers name their side (or either), and at most one
+/// other key or mouse button joins them. Settings store it as `keys`
+/// ([`ChordKey`]); files from before chords stored `modifiers` and `key`,
+/// which load as the same chord and are written back as `keys` once.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HotkeyBinding {
     pub modifiers: HotkeyModifiers,
     pub key: Option<HotkeyKey>,
+}
+
+/// One key of a stored chord: a modifier with its side, or a key.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ChordKey {
+    Modifier {
+        modifier: ChordModifier,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        side: Option<ChordSide>,
+    },
+    Key(HotkeyKey),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChordModifier {
+    Fn,
+    Control,
+    Option,
+    Shift,
+    Command,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChordSide {
+    Left,
+    Right,
+    Any,
+}
+
+#[derive(Deserialize, Serialize)]
+struct StoredChord {
+    keys: Vec<ChordKey>,
+}
+
+/// The shape settings stored before chords.
+#[derive(Deserialize)]
+struct LegacyBinding {
+    #[serde(default = "legacy_default_modifiers")]
+    modifiers: HotkeyModifiers,
+    #[serde(default = "legacy_default_key")]
+    key: Option<HotkeyKey>,
+}
+
+fn legacy_default_modifiers() -> HotkeyModifiers {
+    HotkeyBinding::default().modifiers
+}
+
+fn legacy_default_key() -> Option<HotkeyKey> {
+    HotkeyBinding::default().key
+}
+
+impl HotkeyBinding {
+    /// The chord's keys in a fixed order: fn, Control, Option, Shift,
+    /// Command (left before right), then the key.
+    pub fn chord_keys(&self) -> Vec<ChordKey> {
+        let mut keys = Vec::new();
+        if self.modifiers.function {
+            keys.push(ChordKey::Modifier {
+                modifier: ChordModifier::Fn,
+                side: None,
+            });
+        }
+        for (modifier, side) in [
+            (ChordModifier::Control, self.modifiers.control),
+            (ChordModifier::Option, self.modifiers.option),
+            (ChordModifier::Shift, self.modifiers.shift),
+            (ChordModifier::Command, self.modifiers.command),
+        ] {
+            let sides: &[ChordSide] = match side {
+                None => &[],
+                Some(ModifierSide::Left) => &[ChordSide::Left],
+                Some(ModifierSide::Right) => &[ChordSide::Right],
+                Some(ModifierSide::Either) => &[ChordSide::Any],
+                Some(ModifierSide::Both) => &[ChordSide::Left, ChordSide::Right],
+            };
+            keys.extend(sides.iter().map(|side| ChordKey::Modifier {
+                modifier,
+                side: Some(*side),
+            }));
+        }
+        keys.extend(self.key.clone().map(ChordKey::Key));
+        keys
+    }
+
+    /// The chord of `keys`, which may come in any order. Both sides of a
+    /// modifier are `Both`; a key twice, a side beside "any", or a second
+    /// key besides modifiers is refused.
+    pub fn from_chord_keys(keys: impl IntoIterator<Item = ChordKey>) -> Result<Self, String> {
+        let mut binding = Self {
+            modifiers: HotkeyModifiers::default(),
+            key: None,
+        };
+        for key in keys {
+            match key {
+                ChordKey::Key(key) => {
+                    if binding.key.is_some() {
+                        return Err("a shortcut holds at most one key besides modifiers".into());
+                    }
+                    binding.key = Some(key);
+                }
+                ChordKey::Modifier {
+                    modifier: ChordModifier::Fn,
+                    side,
+                } => {
+                    if binding.modifiers.function {
+                        return Err("fn appears twice".into());
+                    }
+                    if side.is_some_and(|side| side != ChordSide::Any) {
+                        return Err("fn has no side".into());
+                    }
+                    binding.modifiers.function = true;
+                }
+                ChordKey::Modifier { modifier, side } => {
+                    let slot = match modifier {
+                        ChordModifier::Control => &mut binding.modifiers.control,
+                        ChordModifier::Option => &mut binding.modifiers.option,
+                        ChordModifier::Shift => &mut binding.modifiers.shift,
+                        ChordModifier::Command => &mut binding.modifiers.command,
+                        ChordModifier::Fn => unreachable!("fn is matched above"),
+                    };
+                    let side = match side.unwrap_or(ChordSide::Any) {
+                        ChordSide::Left => ModifierSide::Left,
+                        ChordSide::Right => ModifierSide::Right,
+                        ChordSide::Any => ModifierSide::Either,
+                    };
+                    *slot = Some(match (*slot, side) {
+                        (None, side) => side,
+                        (Some(ModifierSide::Left), ModifierSide::Right)
+                        | (Some(ModifierSide::Right), ModifierSide::Left) => ModifierSide::Both,
+                        _ => return Err(format!("{modifier:?} appears twice").to_lowercase()),
+                    });
+                }
+            }
+        }
+        Ok(binding)
+    }
+}
+
+impl Serialize for HotkeyBinding {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        StoredChord {
+            keys: self.chord_keys(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for HotkeyBinding {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("keys").is_some() {
+            let chord: StoredChord = serde_json::from_value(value).map_err(D::Error::custom)?;
+            return Self::from_chord_keys(chord.keys).map_err(D::Error::custom);
+        }
+        let legacy: LegacyBinding = serde_json::from_value(value).map_err(D::Error::custom)?;
+        Ok(Self {
+            modifiers: legacy.modifiers,
+            key: legacy.key,
+        })
+    }
 }
 
 impl Default for HotkeyBinding {
@@ -605,27 +870,26 @@ impl HotkeyBinding {
         same_key && modifiers_overlap(self.modifiers, other.modifiers)
     }
 
-    /// The one side every modifier of a modifier-only binding shares, or
-    /// none for key chords and mixed sides.
+    /// The side of a chord that is one modifier key, such as Right Option;
+    /// none for every other chord, whose keys name their own sides.
     pub fn standalone_side(&self) -> Option<ModifierSide> {
-        if self.key.is_some() {
+        if self.key.is_some() || self.modifiers.function || self.modifiers.count() != 1 {
             return None;
         }
-        let mut sides = [
+        [
             self.modifiers.control,
             self.modifiers.option,
             self.modifiers.shift,
             self.modifiers.command,
         ]
         .into_iter()
-        .flatten();
-        let first = sides.next()?;
-        sides.all(|side| side == first).then_some(first)
+        .flatten()
+        .next()
     }
 
-    /// Moves a modifier-only binding to `side`; key chords are unchanged.
+    /// Moves a one-modifier chord to `side`; other chords are unchanged.
     pub fn set_standalone_side(&mut self, side: ModifierSide) {
-        if self.standalone_side().is_none() {
+        if self.standalone_side().is_none() || side == ModifierSide::Both {
             return;
         }
         for current in [
@@ -649,6 +913,8 @@ fn modifiers_overlap(left: HotkeyModifiers, right: HotkeyModifiers) -> bool {
         && left.function == right.function
 }
 
+/// Whether one press could match both: `Either` takes any side, `Both`
+/// only both.
 fn modifier_overlap(left: Option<ModifierSide>, right: Option<ModifierSide>) -> bool {
     match (left, right) {
         (None, None) => true,
@@ -669,10 +935,11 @@ impl RuntimeHotkey {
         self.modifiers.is_empty() && self.key_code.is_none()
     }
 
+    /// Exactly the binding's modifier keys are down: a sided binding wants
+    /// its side alone, and both sides of a modifier only for `Both`.
     pub fn exact_modifiers(self, flags: u64) -> bool {
         let flags = self.without_implied_function(flags);
-        modifiers_from_flags(flags).matches_exactly(self.modifiers)
-            && self.required_modifiers_down(flags)
+        modifiers_from_flags(flags).holds_exactly(self.modifiers)
     }
 
     /// macOS marks every press of a function, arrow, or navigation key with
@@ -690,22 +957,31 @@ impl RuntimeHotkey {
         }
     }
 
+    /// Every modifier key of the binding is down, whatever else is.
     pub fn required_modifiers_down(self, flags: u64) -> bool {
         modifiers_from_flags(flags).contains(self.modifiers)
-            // `Either` also represents side-less input and both sides held. Only the
-            // original device flags distinguish those cases for a sided binding.
-            && [
-                (self.modifiers.control, LEFT_CONTROL_MASK, RIGHT_CONTROL_MASK),
-                (self.modifiers.option, LEFT_OPTION_MASK, RIGHT_OPTION_MASK),
-                (self.modifiers.shift, LEFT_SHIFT_MASK, RIGHT_SHIFT_MASK),
-                (self.modifiers.command, LEFT_COMMAND_MASK, RIGHT_COMMAND_MASK),
-            ]
-            .into_iter()
-            .all(|(side, left, right)| match side {
-                Some(ModifierSide::Left) => flags & left != 0,
-                Some(ModifierSide::Right) => flags & right != 0,
-                Some(ModifierSide::Either) | None => true,
-            })
+    }
+
+    /// The device flags of each modifier the binding holds on both sides,
+    /// whose two keys must go down together (`suppression`).
+    pub fn both_sides_masks(self) -> impl Iterator<Item = (u64, u64)> {
+        [
+            (
+                self.modifiers.control,
+                LEFT_CONTROL_MASK,
+                RIGHT_CONTROL_MASK,
+            ),
+            (self.modifiers.option, LEFT_OPTION_MASK, RIGHT_OPTION_MASK),
+            (self.modifiers.shift, LEFT_SHIFT_MASK, RIGHT_SHIFT_MASK),
+            (
+                self.modifiers.command,
+                LEFT_COMMAND_MASK,
+                RIGHT_COMMAND_MASK,
+            ),
+        ]
+        .into_iter()
+        .filter(|(side, ..)| *side == Some(ModifierSide::Both))
+        .map(|(_, left, right)| (left, right))
     }
 
     pub fn matches_key_press(self, code: u16, flags: u64) -> bool {
@@ -721,16 +997,6 @@ fn key_reports_function_flag(code: u16) -> bool {
         123, 124, 125, 126, 115, 119, 116, 121, 117, 114,
     ];
     CODES.contains(&code)
-}
-
-impl HotkeyModifiers {
-    pub fn matches_exactly(self, expected: Self) -> bool {
-        modifiers_overlap(self, expected)
-            && self.control.is_some() == expected.control.is_some()
-            && self.option.is_some() == expected.option.is_some()
-            && self.shift.is_some() == expected.shift.is_some()
-            && self.command.is_some() == expected.command.is_some()
-    }
 }
 
 pub fn modifiers_from_flags(flags: u64) -> HotkeyModifiers {
@@ -753,11 +1019,13 @@ pub fn modifiers_from_flags(flags: u64) -> HotkeyModifiers {
     }
 }
 
+/// Input without device flags (synthetic events) names no side.
 fn side_from_flags(flags: u64, general: u64, left: u64, right: u64) -> Option<ModifierSide> {
     match (flags & left != 0, flags & right != 0) {
         (true, false) => Some(ModifierSide::Left),
         (false, true) => Some(ModifierSide::Right),
-        (true, true) | (false, false) if flags & general != 0 => Some(ModifierSide::Either),
+        (true, true) => Some(ModifierSide::Both),
+        (false, false) if flags & general != 0 => Some(ModifierSide::Either),
         _ => None,
     }
 }
@@ -3559,27 +3827,29 @@ mod tests {
                 }))
                 .unwrap();
                 let binding = binding.runtime();
-                for (device_flags, matches) in [
-                    (0, side == "either"),
-                    (left, side != "right"),
-                    (right, side != "left"),
-                    (left | right, true),
+                // Both sides held hold a sided binding's key, but only an
+                // either-side binding matches them exactly.
+                for (device_flags, held, exact) in [
+                    (0, side == "either", side == "either"),
+                    (left, side != "right", side != "right"),
+                    (right, side != "left", side != "left"),
+                    (left | right, true, side == "either"),
                 ] {
                     let flags = general | device_flags;
                     assert_eq!(
                         binding.required_modifiers_down(flags),
-                        matches,
+                        held,
                         "{side:?}, flags={flags:#x}"
                     );
                     assert_eq!(
                         binding.matches_key_press(0, flags),
-                        matches,
+                        exact,
                         "{side:?}, flags={flags:#x}"
                     );
                     assert!(!binding.exact_modifiers(flags | FUNCTION_KEY_MASK));
                     assert_eq!(
                         binding.required_modifiers_down(flags | FUNCTION_KEY_MASK),
-                        matches
+                        held
                     );
                 }
             }
@@ -3657,35 +3927,37 @@ mod tests {
     }
 
     #[test]
-    fn side_selection_changes_modifier_only_bindings_and_ignores_key_chords() {
+    fn side_selection_changes_one_modifier_chords_only() {
         let mut standalone = HotkeyBinding {
             modifiers: HotkeyModifiers {
                 option: Some(ModifierSide::Left),
-                command: Some(ModifierSide::Left),
                 ..Default::default()
             },
             key: None,
         };
         assert_eq!(standalone.standalone_side(), Some(ModifierSide::Left));
         standalone.set_standalone_side(ModifierSide::Right);
-        assert_eq!(
-            standalone.modifiers,
-            HotkeyModifiers {
-                option: Some(ModifierSide::Right),
-                command: Some(ModifierSide::Right),
-                ..Default::default()
-            }
-        );
+        assert_eq!(standalone.modifiers.option, Some(ModifierSide::Right));
+        standalone.set_standalone_side(ModifierSide::Both);
+        assert_eq!(standalone.modifiers.option, Some(ModifierSide::Right));
 
-        let mixed = HotkeyBinding {
-            modifiers: HotkeyModifiers {
+        for modifiers in [
+            HotkeyModifiers {
                 option: Some(ModifierSide::Left),
-                command: Some(ModifierSide::Right),
+                command: Some(ModifierSide::Left),
                 ..Default::default()
             },
-            key: None,
-        };
-        assert_eq!(mixed.standalone_side(), None);
+            HotkeyModifiers {
+                option: Some(ModifierSide::Both),
+                ..Default::default()
+            },
+        ] {
+            let chord = HotkeyBinding {
+                modifiers,
+                key: None,
+            };
+            assert_eq!(chord.standalone_side(), None, "{modifiers:?}");
+        }
 
         let mut chord = HotkeyBinding {
             modifiers: HotkeyModifiers {
@@ -3700,6 +3972,175 @@ mod tests {
         assert_eq!(chord.standalone_side(), None);
         chord.set_standalone_side(ModifierSide::Right);
         assert_eq!(chord.modifiers.option, Some(ModifierSide::Left));
+    }
+
+    #[test]
+    fn shortcuts_store_as_chords_and_old_files_convert_once() {
+        let both_options = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Both),
+                ..Default::default()
+            },
+            key: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&both_options).unwrap(),
+            serde_json::json!({ "keys": [
+                { "modifier": "option", "side": "left" },
+                { "modifier": "option", "side": "right" },
+            ]})
+        );
+        let chord: HotkeyBinding = serde_json::from_value(serde_json::json!({ "keys": [
+            { "code": 49, "label": "Space" },
+            { "modifier": "option", "side": "right" },
+            { "modifier": "option", "side": "left" },
+        ]}))
+        .unwrap();
+        assert_eq!(
+            chord.modifiers.option,
+            Some(ModifierSide::Both),
+            "any order"
+        );
+        assert_eq!(chord.key.unwrap().code, 49);
+        for refused in [
+            serde_json::json!({ "keys": [
+                { "modifier": "option", "side": "left" },
+                { "modifier": "option", "side": "left" },
+            ]}),
+            serde_json::json!({ "keys": [
+                { "modifier": "option", "side": "any" },
+                { "modifier": "option", "side": "right" },
+            ]}),
+            serde_json::json!({ "keys": [
+                { "code": 49, "label": "Space" },
+                { "code": 0, "label": "A" },
+            ]}),
+            serde_json::json!({ "keys": [{ "modifier": "hyper" }] }),
+        ] {
+            assert!(
+                serde_json::from_value::<HotkeyBinding>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
+
+        // Every shortcut in a file from before chords is the same chord after.
+        let legacy = serde_json::json!({
+            "dictation_hotkey": { "modifiers": { "option": "right" }, "key": null },
+            "edit_hotkey": { "modifiers": { "option": true, "command": true, "control": false }, "key": null },
+            "paste_last_hotkey": {
+                "modifiers": { "option": "either", "shift": "either" },
+                "key": { "code": 9, "label": "V" }
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            settings.dictation_hotkey.modifiers,
+            HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            settings.edit_hotkey.modifiers,
+            HotkeyModifiers::option_command()
+        );
+        let stored = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            stored["dictation_hotkey"],
+            serde_json::json!({ "keys": [{ "modifier": "option", "side": "right" }] })
+        );
+        assert_eq!(
+            stored["paste_last_hotkey"],
+            serde_json::json!({ "keys": [
+                { "modifier": "option", "side": "any" },
+                { "modifier": "shift", "side": "any" },
+                { "code": 9, "label": "V" },
+            ]})
+        );
+        let reloaded: AppSettings = serde_json::from_value(stored).unwrap();
+        assert_eq!(reloaded.dictation_hotkey, settings.dictation_hotkey);
+        assert_eq!(reloaded.edit_hotkey, settings.edit_hotkey);
+        assert_eq!(reloaded.paste_last_hotkey, settings.paste_last_hotkey);
+        for binding in [
+            HotkeyBinding::default(),
+            HotkeyBinding::edit_default(),
+            HotkeyBinding::paste_last_default(),
+            HotkeyBinding::paste_meeting_default(),
+        ] {
+            let json = serde_json::to_value(&binding).unwrap();
+            assert_eq!(
+                serde_json::from_value::<HotkeyBinding>(json).unwrap(),
+                binding
+            );
+        }
+    }
+
+    #[test]
+    fn both_sides_conflict_only_with_either_side_and_match_only_together() {
+        let option = |side| HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(side),
+                ..Default::default()
+            },
+            key: None,
+        };
+        let both = option(ModifierSide::Both);
+        assert!(both.overlaps(&option(ModifierSide::Either)));
+        assert!(!both.overlaps(&option(ModifierSide::Left)));
+        assert!(!both.overlaps(&option(ModifierSide::Right)));
+        assert_eq!(both.modifiers.count(), 2);
+        let both = both.runtime();
+        let general = OPTION_KEY_MASK;
+        assert!(both.exact_modifiers(general | LEFT_OPTION_MASK | RIGHT_OPTION_MASK));
+        assert!(!both.exact_modifiers(general | LEFT_OPTION_MASK));
+        assert!(!both.exact_modifiers(general | RIGHT_OPTION_MASK));
+        assert!(!both.exact_modifiers(general), "input naming no side");
+        assert!(
+            !both
+                .exact_modifiers(general | LEFT_OPTION_MASK | RIGHT_OPTION_MASK | COMMAND_KEY_MASK)
+        );
+        assert!(both.required_modifiers_down(
+            general | LEFT_OPTION_MASK | RIGHT_OPTION_MASK | COMMAND_KEY_MASK
+        ));
+        assert_eq!(
+            both.both_sides_masks().collect::<Vec<_>>(),
+            [(LEFT_OPTION_MASK, RIGHT_OPTION_MASK)]
+        );
+        assert_eq!(
+            option(ModifierSide::Either)
+                .runtime()
+                .both_sides_masks()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn recorded_sides_keep_one_modifiers_side_and_both_sides() {
+        let lone = HotkeyModifiers {
+            option: Some(ModifierSide::Right),
+            ..Default::default()
+        };
+        assert_eq!(lone.recorded_sides(), lone);
+        let pair = HotkeyModifiers {
+            option: Some(ModifierSide::Left),
+            command: Some(ModifierSide::Right),
+            ..Default::default()
+        };
+        assert_eq!(pair.recorded_sides(), HotkeyModifiers::option_command());
+        let both = HotkeyModifiers {
+            option: Some(ModifierSide::Both),
+            shift: Some(ModifierSide::Left),
+            ..Default::default()
+        };
+        assert_eq!(
+            both.recorded_sides(),
+            HotkeyModifiers {
+                option: Some(ModifierSide::Both),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            }
+        );
     }
 
     #[cfg(hex_capture)]

@@ -363,6 +363,62 @@ fn recording_a_shortcut_sends_the_chord_to_the_host() {
     assert!(matches!(rt.state.capture, Capture::Saving { .. }));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_modifier_alone_says_linux_needs_a_key_and_suggests_one() {
+    use rune::Modifier;
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    // As the Linux app asks (`rune_ui::build`).
+    rt.set_modifier_keys(true);
+    tap(&mut rt, "dictation-hotkey");
+    let alt = Mods {
+        alt: true,
+        ..Mods::default()
+    };
+    let modifier = |modifier, pressed| Key::Modifier { modifier, pressed };
+    key(&mut rt, modifier(Modifier::AltLeft, true), alt);
+    assert!(matches!(
+        rt.state.capture,
+        Capture::Listening { message: None, held, .. } if held.option.is_some()
+    ));
+    key(&mut rt, modifier(Modifier::AltLeft, false), Mods::default());
+    assert!(matches!(
+        rt.state.capture,
+        Capture::Listening {
+            message: Some("Linux needs a key too. Hold these and press one, like Space"),
+            ..
+        }
+    ));
+    // Both Alts: Linux binds no side, so it says that instead.
+    key(&mut rt, modifier(Modifier::AltRight, true), alt);
+    key(&mut rt, modifier(Modifier::AltLeft, true), alt);
+    key(&mut rt, modifier(Modifier::AltLeft, false), alt);
+    assert!(matches!(
+        rt.state.capture,
+        Capture::Listening { message: None, .. }
+    ));
+    key(
+        &mut rt,
+        modifier(Modifier::AltRight, false),
+        Mods::default(),
+    );
+    assert!(matches!(
+        rt.state.capture,
+        Capture::Listening {
+            message: Some("Linux can't bind both sides. Use one with a key, like Space"),
+            ..
+        }
+    ));
+    // Modifiers spent on a key say nothing when released.
+    key(&mut rt, modifier(Modifier::AltLeft, true), alt);
+    key(&mut rt, Key::Text("d".into()), alt);
+    assert!(matches!(rt.state.capture, Capture::Saving { .. }));
+    assert!(sent(&rt).iter().any(|request| matches!(
+        request,
+        Request::SetShortcut { shortcut, .. } if shortcut.alt && shortcut.key == "d"
+    )));
+}
+
 #[test]
 fn escape_cancels_a_shortcut_recording() {
     let mut rt = runtime("capturing", true, GOLDEN_SIZE);
