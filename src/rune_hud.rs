@@ -8,6 +8,8 @@
 //!
 //! Listeners report through [`HudSender`], which never waits: each event is
 //! an overlay update, applied on the event thread before the next frame.
+//!
+//! The Sounds sheet draws its preview of the HUD with the same [`Painter`].
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -32,16 +34,15 @@ pub(crate) use macos::DictationIndicatorUi;
 
 pub(crate) type HudEvent = DictationIndicatorEvent;
 
-#[cfg(not(target_os = "macos"))]
-const TOP_OFFSET: f32 = 12.0;
-#[cfg(not(target_os = "macos"))]
-const BOTTOM_OFFSET: f32 = 24.0;
+/// The window's margin from the top or bottom edge on Linux and Windows.
+pub(crate) const TOP_OFFSET: f32 = 12.0;
+pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
 /// The HUD window: room for Dot scope's widest plate and drop shadow, and
 /// on macOS for an island grown out of the widest notch.
 #[cfg(target_os = "macos")]
-const WINDOW: (f32, f32) = (320.0, 128.0);
+pub(crate) const WINDOW: (f32, f32) = (320.0, 128.0);
 #[cfg(not(target_os = "macos"))]
-const WINDOW: (f32, f32) = (304.0, 80.0);
+pub(crate) const WINDOW: (f32, f32) = (304.0, 80.0);
 /// The notch's own bottom corner radius, which the island starts from.
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
@@ -288,7 +289,7 @@ impl DotUniforms {
         }
         let rgba = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
         Self {
-            resolution: [target.size.0 as f32, target.size.1 as f32],
+            resolution: [target.viewport[2], target.viewport[3]],
             backing_scale: target.scale,
             width: pose.width,
             height: pose.height,
@@ -368,15 +369,31 @@ fn packed_dots(frame: &DotFrame) -> Vec<u8> {
 
 /// What a frame draws into.
 #[derive(Clone, Copy)]
-struct Target {
-    /// In device pixels.
-    size: (u32, u32),
-    scale: f32,
-    dark: bool,
+pub(crate) struct Target {
+    /// The HUD's window in the target, x, y, width and height in device
+    /// pixels.
+    pub(crate) viewport: [f32; 4],
+    /// The pixels it may touch, x, y, width and height, inside the target.
+    pub(crate) clip: [u32; 4],
+    /// Device pixels per point.
+    pub(crate) scale: f32,
+    pub(crate) dark: bool,
+}
+
+impl Target {
+    /// All of a target `size` device pixels big.
+    fn whole(size: (u32, u32), scale: f32, dark: bool) -> Self {
+        Self {
+            viewport: [0.0, 0.0, size.0 as f32, size.1 as f32],
+            clip: [0, 0, size.0, size.1],
+            scale,
+            dark,
+        }
+    }
 }
 
 struct HudCompositor {
-    gpu: Option<Gpu>,
+    gpu: Option<Painter>,
     animating: Arc<AtomicBool>,
 }
 
@@ -389,11 +406,7 @@ impl Compositor<Hud> for HudCompositor {
     /// clears the target.
     fn render(&mut self, f: &mut Frame<'_, Hud>) {
         let reduce = f.rt.reduced_motion;
-        let target = Target {
-            size: f.size,
-            scale: f.rt.env.scale,
-            dark: f.rt.env.system_dark,
-        };
+        let target = Target::whole(f.size, f.rt.env.scale, f.rt.env.system_dark);
         let hud = &mut f.rt.state;
         hud.reduce = reduce;
         if hud.model.active() {
@@ -411,7 +424,7 @@ impl Compositor<Hud> for HudCompositor {
             return;
         };
         if self.gpu.as_ref().is_none_or(|gpu| gpu.format != f.format) {
-            self.gpu = Some(Gpu::new(f.device, f.format));
+            self.gpu = Some(Painter::new(f.device, f.format));
         }
         let gpu = self.gpu.as_ref().expect("created above");
         gpu.write(&drawn, layout, target, |buffer, data| {
@@ -422,16 +435,17 @@ impl Compositor<Hud> for HudCompositor {
     }
 }
 
-struct Gpu {
-    format: wgpu::TextureFormat,
+/// The HUD's shaders, ready to draw into targets of one format.
+pub(crate) struct Painter {
+    pub(crate) format: wgpu::TextureFormat,
     dot_uniforms: wgpu::Buffer,
     dots: wgpu::Buffer,
     bind: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
 }
 
-impl Gpu {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Gpu {
+impl Painter {
+    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Painter {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hex hud"),
             source: wgpu::ShaderSource::Wgsl(include_str!("rune_hud.wgsl").into()),
@@ -482,6 +496,8 @@ impl Gpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
+        // Display values; a linear target decodes them.
+        let constants = [("linear_target", f64::from(u8::from(format.is_srgb())))];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dot_scope_fragment"),
             layout: Some(&pipeline_layout),
@@ -497,7 +513,10 @@ impl Gpu {
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("dot_scope_fragment"),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
@@ -507,7 +526,7 @@ impl Gpu {
             multiview_mask: None,
             cache: None,
         });
-        Gpu {
+        Painter {
             format,
             dot_uniforms,
             dots,
@@ -517,7 +536,7 @@ impl Gpu {
     }
 
     /// Writes `frame`'s buffers through `write`.
-    fn write(
+    pub(crate) fn write(
         &self,
         frame: &DotFrame,
         layout: Layout,
@@ -534,6 +553,39 @@ impl Gpu {
     /// Clears `view` and draws Dot scope into it.
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut pass = clear_pass(encoder, view);
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Draws Dot scope over what `view` holds, in `target`'s viewport and
+    /// clip only.
+    pub(crate) fn draw_over(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        target: Target,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("hex hud preview"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let [x, y, width, height] = target.viewport;
+        pass.set_viewport(x, y, width, height, 0.0, 1.0);
+        let [cx, cy, cw, ch] = target.clip;
+        pass.set_scissor_rect(cx, cy, cw, ch);
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..3, 0..1);

@@ -4,11 +4,23 @@
 // colours are sRGB-encoded, premultiplied. `smoothstep` is spelled out
 // (`sstep`) because `coverage` relies on descending edges, which WGSL leaves
 // to the backend.
+//
+// The viewport is the HUD's window: the whole overlay, or the Sounds sheet's
+// stage in the Settings window. `uv` runs across it and `position` is the
+// pixel within it. A linear (sRGB-format) target gets the colours decoded.
+
+override linear_target: bool = false;
+
+struct Varyings {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f,
+}
 
 @vertex
-fn indicator_vertex(@builtin(vertex_index) vertex_id: u32) -> @builtin(position) vec4f {
+fn indicator_vertex(@builtin(vertex_index) vertex_id: u32) -> Varyings {
     var positions = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-    return vec4f(positions[vertex_id], 0.0, 1.0);
+    let p = positions[vertex_id];
+    return Varyings(vec4f(p, 0.0, 1.0), vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5));
 }
 
 fn sstep(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -43,6 +55,16 @@ fn dithered(result_in: vec4f, position: vec2f) -> vec4f {
         result = vec4f(clamp(result.rgb + vec3f(dither), vec3f(0.0), vec3f(result.a)), result.a);
     }
     return result;
+}
+
+// Premultiplied display colour as the target takes it.
+fn for_target(result: vec4f) -> vec4f {
+    if (!linear_target || result.a <= 0.0) {
+        return result;
+    }
+    let c = result.rgb / result.a;
+    let linear = select(pow((c + 0.055) / 1.055, vec3f(2.4)), c / 12.92, c <= vec3f(0.04045));
+    return vec4f(linear * result.a, result.a);
 }
 
 // Each dot's (brightness, freshness) arrives as normalized u16s, row by row;
@@ -106,8 +128,9 @@ fn dot_value(index: i32) -> vec2f {
 }
 
 @fragment
-fn dot_scope_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
-    let uv = position.xy / u.resolution;
+fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
+    let uv = in.uv;
+    let position = uv * u.resolution;
     let scale = max(u.scale, 0.001) * max(u.plate_layout.z, 0.01);
     let window_point = (uv * u.resolution - u.resolution * 0.5) / u.backing_scale;
     let point = (window_point - u.plate_layout.xy) / scale;
@@ -192,5 +215,5 @@ fn dot_scope_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f 
     if (in_island) {
         result.a += island_shape * (1.0 - result.a);
     }
-    return dithered(result, position.xy);
+    return for_target(dithered(result, position));
 }

@@ -1338,6 +1338,12 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     tap(&mut rt, "set-wood");
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Wood);
     assert_eq!(playing(&rt), Some((SoundSet::Wood, Audition::Dictation)));
+    // The stage holds the HUD's window as the start sound plays.
+    for _ in 0..6 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (window, _) = rt.presented("sound-sets-hud").expect("the HUD's window");
+    assert!(window[2] > 0.0 && window[3] > 0.0);
 
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
@@ -1602,6 +1608,19 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, rt.clear_color());
+    // The window compositor's own pass: the Sounds sheet's HUD.
+    super::sound_sets::Preview::default().render(&mut rune::compose::Frame {
+        device: &gpu.device,
+        queue: &gpu.queue,
+        encoder: &mut encoder,
+        target: &target.view,
+        format: OFFSCREEN_FORMAT,
+        size: (width, height),
+        dt: 0.0,
+        update_ms: 0.0,
+        rt: &mut rt,
+        ui: &mut renderer,
+    });
     target.copy(&mut encoder);
     gpu.queue.submit([encoder.finish()]);
     Some((width, height, target.read(&gpu.device)))

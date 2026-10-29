@@ -190,7 +190,7 @@ fn rune_hud_frames() {
     let adapter = block_on(instance.request_adapter(&Default::default())).expect("a GPU adapter");
     let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    let gpu = Gpu::new(&device, format);
+    let gpu = Painter::new(&device, format);
     let scale = 2.0;
     let window = CAPTURE_DOT_WINDOW;
     let size = ((window.0 * scale) as u32, (window.1 * scale) as u32);
@@ -217,7 +217,7 @@ fn rune_hud_frames() {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    let target = Target { size, scale, dark };
+    let target = Target::whole(size, scale, dark);
     let mut dump = Vec::new();
     dump.extend(size.0.to_le_bytes());
     dump.extend(size.1.to_le_bytes());

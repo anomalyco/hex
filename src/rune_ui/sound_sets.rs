@@ -1,31 +1,39 @@
 //! Sounds: a sheet from General's Sounds row where each sound set can be
 //! heard in context. A stage at the top plays a short dictation (start, a
-//! moment of speaking, stop, a moment of transcribing, done) while a small
-//! capsule shows each moment as its sound plays, and its chips play one
-//! sound at a time. Below it each set has its name, what it sounds like and
-//! a play button; picking one is the setting, and plays it.
+//! moment of speaking, stop, a moment of transcribing, done) while Hex's own
+//! HUD, where this OS puts it, does what it does at each sound; its chips
+//! play one sound at a time. Below it each set has its name, what it sounds
+//! like and a play button; picking one is the setting, and plays it.
 //!
-//! The capsule runs on the window's poll clock while a sound plays. Any
-//! playback stops the one before it, and closing the sheet stops it.
+//! The HUD runs on the window's poll clock while a sound plays and until it
+//! leaves. Any playback stops the one before it, and closing the sheet stops
+//! it.
 
-use std::cell::Cell;
+mod hud;
+
 use std::time::Duration;
 
-use rune::{Cursor, Cx, El, Icon, Transition, Tx, col, el, row, text};
+use rune::{Cursor, El, Icon, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
+pub(crate) use self::hud::Preview;
+use self::hud::Hud;
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, status_dot,
+    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition,
 };
 use super::lists::{list_row, source_list};
+use super::platform::Os;
+use crate::app_settings::IndicatorPosition;
 use crate::desktop_i18n::tr;
 use crate::feedback::{self, Audition, Cue, SoundSet};
+use crate::rune_hud::{BOTTOM_OFFSET, TOP_OFFSET};
 
 const MODAL_WIDTH: f32 = 460.0;
 const PADDING: f32 = 18.0;
-const CAPSULE_WIDTH: f32 = 92.0;
-const CAPSULE_HEIGHT: f32 = 28.0;
+/// The slice of screen the stage shows.
+const SCREEN_HEIGHT: f32 = 84.0;
+const MENU_BAR: f32 = 24.0;
 const FRAME: Duration = Duration::from_micros(16_667);
 
 static PLAY: Icon = Icon {
@@ -45,9 +53,8 @@ pub(super) struct SoundSets {
     next_frame: f64,
     /// A fixed moment for snapshots.
     held: bool,
-    /// Reduce Motion, as the last view saw it: the capsule's level holds
-    /// still, while its moments still follow the sounds.
-    reduced: Cell<bool>,
+    /// The HUD while something plays and until it leaves.
+    hud: Option<Hud>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +98,7 @@ pub(super) fn open(ui: &mut Ui) {
     ui.open = None;
     ui.sound_sets.open = true;
     ui.sound_sets.playing = None;
+    ui.sound_sets.hud = None;
 }
 
 /// Closes the sheet, stopping whatever it plays.
@@ -98,6 +106,7 @@ pub(super) fn close(ui: &mut Ui) {
     if ui.sound_sets.playing.take().is_some() && ui.live() {
         feedback::stop_audition();
     }
+    ui.sound_sets.hud = None;
     ui.sound_sets.open = false;
 }
 
@@ -105,15 +114,20 @@ pub(super) fn close(ui: &mut Ui) {
 pub(super) fn fixture(ui: &mut Ui, playing: Option<(SoundSet, Audition, f64)>) {
     open(ui);
     if let Some((set, what, ms)) = playing {
+        let mut hud = Hud::new(ui.platform.hud.tuning, what);
+        hud.advance_to((ms / 1000.0) as f32);
         ui.sound_sets.playing = Some(Playing { set, what });
+        ui.sound_sets.hud = Some(hud);
         ui.sound_sets.elapsed_ms = ms;
         ui.sound_sets.held = true;
     }
 }
 
 fn play(ui: &mut Ui, set: SoundSet, what: Audition) {
+    let hud = Hud::new(ui.platform.hud.tuning, what);
     let sheet = &mut ui.sound_sets;
     sheet.playing = Some(Playing { set, what });
+    sheet.hud = Some(hud);
     sheet.start = None;
     sheet.elapsed_ms = 0.0;
     sheet.next_frame = 0.0;
@@ -131,6 +145,7 @@ fn toggle(ui: &mut Ui, set: SoundSet) {
         .is_some_and(|playing| playing.set == set)
     {
         ui.sound_sets.playing = None;
+        ui.sound_sets.hud = None;
         if ui.live() {
             feedback::stop_audition();
         }
@@ -147,7 +162,8 @@ fn choose(ui: &mut Ui, set: SoundSet) {
     play(ui, set, Audition::Dictation);
 }
 
-/// Advances the capsule while something plays. True when it moved.
+/// Advances the HUD while something plays and until it leaves. True when
+/// it moved.
 pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool {
     let sheet = &mut ui.sound_sets;
     let Some(playing) = sheet.playing else {
@@ -158,8 +174,14 @@ pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool 
     }
     let start = *sheet.start.get_or_insert(clock);
     sheet.elapsed_ms = (clock - start) * 1000.0;
-    if sounding(playing.what, sheet.elapsed_ms).is_none() {
+    if let Some(hud) = &mut sheet.hud {
+        hud.advance_to((sheet.elapsed_ms / 1000.0) as f32);
+    }
+    if sounding(playing.what, sheet.elapsed_ms).is_none()
+        && sheet.hud.as_ref().is_none_or(Hud::settled)
+    {
         sheet.playing = None;
+        sheet.hud = None;
         return true;
     }
     if visible && clock >= sheet.next_frame {
@@ -181,9 +203,7 @@ fn set_key(set: SoundSet) -> String {
     format!("set-{set:?}").to_lowercase()
 }
 
-pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
-    // Kept while closed too, so the first frame after opening already knows.
-    ui.sound_sets.reduced.set(cx.system_reduced_motion());
+pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     if !ui.sound_sets.open {
         return None;
     }
@@ -205,7 +225,7 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
         }));
     let mut footer = row().key("footer").gap(12.0).center_y();
     footer = footer.child(
-        // Nothing plays with Sound volume off; the capsule still shows.
+        // Nothing plays with Sound volume off; the HUD still shows.
         text(if ui.settings.sound_effects {
             ""
         } else {
@@ -289,7 +309,7 @@ fn play_button(p: Paint, set: SoundSet, sounding: bool) -> El {
         .key("play")
 }
 
-/// The capsule over the staged set's sounds, one chip each.
+/// The HUD over the staged set's sounds, one chip each.
 fn stage(ui: &Ui, p: Paint) -> El {
     let c = &p.k.c;
     let set = staged(ui);
@@ -304,13 +324,7 @@ fn stage(ui: &Ui, p: Paint) -> El {
         .gap(12.0)
         .radius(p.k.radius.lg)
         .fill(c.layer_01)
-        .child(
-            row()
-                .key("screen")
-                .h(CAPSULE_HEIGHT + 16.0)
-                .center()
-                .child(capsule(ui, p, sounding)),
-        )
+        .child(screen(ui, p))
         .child(
             row()
                 .key("cues")
@@ -329,8 +343,8 @@ fn stage(ui: &Ui, p: Paint) -> El {
         )
 }
 
-/// One sound of `set`, played alone. Inverted while its moment shows, as
-/// the capsule is; faint and inert when the set has no such sound.
+/// One sound of `set`, played alone. Inverted while its moment shows; faint
+/// and inert when the set has no such sound.
 fn chip(p: Paint, set: SoundSet, cue: Cue, lit: bool) -> El {
     let c = &p.k.c;
     let label = tr(cue.name());
@@ -372,97 +386,48 @@ fn chip(p: Paint, set: SoundSet, cue: Cue, lit: bool) -> El {
     chip
 }
 
-/// A small stand-in for the dictation HUD: an empty slot at rest, then the
-/// moment the sound marks.
-fn capsule(ui: &Ui, p: Paint, sounding: Option<Cue>) -> El {
+/// A slice of the screen with Hex's HUD where this OS puts it: on a Mac its
+/// plate 6 pt under the menu bar or 24 pt above the Dock, on Linux and
+/// Windows its window 12 pt from the top or 24 pt from the bottom. Off shows
+/// nothing. The window's compositor draws the HUD itself.
+fn screen(ui: &Ui, p: Paint) -> El {
     let c = &p.k.c;
-    let pill = row()
-        .key("capsule")
+    let mac = ui.platform.caps.os == Os::Macos;
+    let radius = p.k.radius.md;
+    let mut screen = el()
+        .key(hud::SCREEN_KEY)
         .role("none")
-        .w(CAPSULE_WIDTH)
-        .h(CAPSULE_HEIGHT)
-        .radius(CAPSULE_HEIGHT / 2.0)
-        .center()
-        .gap(7.0);
-    let Some(cue) = sounding else {
-        return pill.border(p.hair, c.border_weak);
-    };
-    let seconds = ui.sound_sets.elapsed_ms / 1000.0;
-    let still = ui.sound_sets.reduced.get();
-    let fades = || Transition::opacity();
-    let moment = match cue {
-        Cue::Start => row()
-            .key("recording")
-            .gap(7.0)
-            .center_y()
-            .child(status_dot(p.danger()))
-            .child(levels(p, seconds, still)),
-        Cue::Stop => thinking(p, seconds, still),
-        Cue::Done => glyph(p, "done", p.k.glyph.check_small, c.text_inverse),
-        Cue::Cancel => glyph(p, "cancelled", p.k.glyph.close, c.text_inverse),
-        Cue::Error => glyph(
-            p,
-            "failed",
-            &rune_theme_opencode::icons::WARNING,
-            p.danger(),
-        ),
-    };
-    pill.fill(c.bg_inverse).child(moment.transition(fades()))
-}
-
-fn glyph(_: Paint, key: &str, icon: &'static Icon, color: rune::Color) -> El {
-    row()
-        .key(key)
-        .center()
-        .child(rune::icon(icon, 16.0).key("icon").color(color))
-}
-
-/// Five bars moving as a voice would, still under Reduce Motion.
-fn levels(p: Paint, seconds: f64, still: bool) -> El {
-    const STILL: [f64; 5] = [0.4, 0.8, 0.55, 0.9, 0.5];
-    row()
-        .key("levels")
-        .gap(2.5)
-        .center_y()
-        .children((0..5).map(|bar| {
-            let level = if still {
-                STILL[bar]
-            } else {
-                let phase = bar as f64;
-                ((seconds * 7.3 + phase * 1.9).sin() * 0.6
-                    + (seconds * 13.1 + phase * 0.7).sin() * 0.4)
-                    .abs()
-            };
-            el().key(format!("bar{bar}"))
+        .w_full()
+        .h(SCREEN_HEIGHT)
+        .radius(radius)
+        .clip_rounded(radius)
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak);
+    if mac {
+        screen = screen.child(
+            el().key("menu-bar")
                 .role("none")
-                .w(3.0)
-                .h(4.0 + 10.0 * level as f32)
-                .radius(1.5)
-                .fill(p.k.c.text_inverse)
-        }))
-}
-
-/// Three dots lighting in turn while Hex transcribes, held under Reduce
-/// Motion.
-fn thinking(p: Paint, seconds: f64, still: bool) -> El {
-    row()
-        .key("transcribing")
-        .gap(4.0)
-        .center_y()
-        .children((0..3).map(|dot| {
-            let lit = if still {
-                1.0
-            } else {
-                let wave = ((seconds * 6.0 - dot as f64 * 0.9).sin() + 1.0) / 2.0;
-                0.35 + 0.65 * wave as f32
-            };
-            let ink = p.k.c.text_inverse;
-            el().key(format!("dot{dot}"))
-                .role("none")
-                .size(5.0, 5.0)
-                .radius(2.5)
-                .fill(ink.alpha(ink.a * lit))
-        }))
+                .absolute(0.0, 0.0)
+                .w_full()
+                .h(MENU_BAR)
+                .fill(c.layer_02),
+        );
+    }
+    let position = ui.settings.indicator_position;
+    let Some(hud) = &ui.sound_sets.hud else {
+        return screen;
+    };
+    if position == IndicatorPosition::Hidden {
+        return screen;
+    }
+    let (hud, height, inset) = hud.view();
+    let y = match (position, mac) {
+        (IndicatorPosition::Bottom, true) => SCREEN_HEIGHT - 24.0 - height + inset,
+        (IndicatorPosition::Bottom, false) => SCREEN_HEIGHT - BOTTOM_OFFSET - height,
+        (_, true) => MENU_BAR + crate::hud_placement::TOP_OFFSET as f32 - inset,
+        (_, false) => TOP_OFFSET,
+    };
+    screen.child(hud.absolute(0.0, y))
 }
 
 #[cfg(test)]
