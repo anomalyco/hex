@@ -590,7 +590,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   else the first real input, logged and shown in Settings. With a MacBook's
   lid closed (`AppleClamshellState`), the built-in microphone is off in
   hardware but still listed, so it is passed over the same way, and with no
-  other input Hex reports why instead of recording silence. A saved microphone
+  other input Hex reports why instead of recording silence. On macOS, with
+  `avoid_bluetooth_microphone` on (the default; General › Advanced), a
+  Bluetooth default (CoreAudio transport Bluetooth or Bluetooth LE) is passed
+  over the same way, so the headset never drops into call audio, but kept when
+  no other usable input exists; a saved Bluetooth microphone and `--device`
+  are always honoured, and a change to the setting re-resolves like a
+  device-list change. Settings names the stand-in. A saved microphone
   that is missing or will not open falls back to the system default without
   changing the setting, and Hex switches back when it returns. Any switch
   (selection, default, device list, or lid) happens only while capture is idle,

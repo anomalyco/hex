@@ -1970,6 +1970,15 @@ const SCENES: &[Scene] = &[
         }
         ui.open = Some(Menu::Microphone);
     }),
+    // System default passes over the Bluetooth default for the built-in mic.
+    ("mac-microphone-bluetooth", |ui| {
+        *ui = mac_fixture();
+        if let Ok(devices) = &mut ui.microphones {
+            devices.system_default = Some("MacBook Pro Microphone".into());
+            devices.bluetooth_default_passed_over = Some("Kit Pods".into());
+        }
+        ui.advanced = Some(true);
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);

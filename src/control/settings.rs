@@ -137,6 +137,11 @@ const KEYS: &[Key] = &[
         "Microphone by name; system-default (or none) follows the system's default input",
     ),
     key(
+        "avoid_bluetooth_microphone",
+        Kind::Bool,
+        "System default records from the Mac's microphone, not a Bluetooth headset's (macOS)",
+    ),
+    key(
         "recording_audio_behavior",
         Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
         "What other audio does while you dictate",

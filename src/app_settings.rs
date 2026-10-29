@@ -1352,6 +1352,9 @@ pub struct AppSettings {
     pub sound_effect_volume: f32,
     pub sound_theme: crate::feedback::SoundTheme,
     pub microphone: Option<String>,
+    /// System default records from the built-in microphone, else another
+    /// real input, rather than a Bluetooth default (macOS).
+    pub avoid_bluetooth_microphone: bool,
     pub recording_audio_behavior: RecordingAudioBehavior,
     /// Fraction of the original output volume while ducking (macOS).
     pub recording_duck_volume: f32,
@@ -1439,6 +1442,7 @@ impl Default for AppSettings {
             sound_effect_volume: 0.5,
             sound_theme: crate::feedback::SoundTheme::default(),
             microphone: None,
+            avoid_bluetooth_microphone: true,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             recording_duck_volume: 0.2,
             pause_browser_media: false,
@@ -1817,6 +1821,7 @@ impl AppSettings {
         let policy =
             u8::from(self.commands_enabled) | (u8::from(self.release_microphone_while_idle) << 1);
         MICROPHONE_POLICY.store(policy, Ordering::Release);
+        crate::audio::set_avoid_bluetooth_microphone(self.avoid_bluetooth_microphone);
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
             transformations_used(&self.dictation_processing),
             Ordering::Release,

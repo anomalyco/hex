@@ -1419,6 +1419,7 @@ fn platform_goldens() {
     check_golden("shortcut-explainer-chord", false, PANE_SIZE);
     check_golden("mac-settings-permissions", true, PANE_SIZE);
     check_golden("mac-settings-advanced", false, PANE_SIZE);
+    check_golden("mac-microphone-bluetooth", true, PANE_SIZE);
     check_golden("meetings-calendar-denied", true, PANE_SIZE);
     check_golden("mac-commands-unavailable", true, PANE_SIZE);
     check_golden("windows-settings", false, GOLDEN_SIZE);

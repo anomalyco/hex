@@ -1,7 +1,7 @@
 use std::ops::Add;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,6 +9,20 @@ use std::time::{Duration, Instant};
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
+
+/// Whether System default passes over a Bluetooth default input, whose
+/// microphone drops the headset into low-quality call audio. A change
+/// resolves the input again once capture is idle.
+pub fn set_avoid_bluetooth_microphone(avoid: bool) {
+    if AVOID_BLUETOOTH_MICROPHONE.swap(avoid, Ordering::AcqRel) != avoid {
+        INPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn avoid_bluetooth_microphone() -> bool {
+    AVOID_BLUETOOTH_MICROPHONE.load(Ordering::Acquire)
+}
 
 /// How long ago a microphone stream last reported an overload it continued
 /// through, for diagnosing captures.
@@ -480,8 +494,15 @@ impl AudioInput {
     pub fn open_named(name: &str) -> Result<Self> {
         let host = cpal::default_host();
         let (devices, names) = input_devices_of(&host)?;
-        let plan = resolve_input(Some(name), None, &names, None, |_| false, false)
-            .map_err(|e| eyre!(e))?;
+        let plan = resolve_input(
+            Some(name),
+            None,
+            &names,
+            None,
+            |_| Transport::Other,
+            Route::default(),
+        )
+        .map_err(|e| eyre!(e))?;
         let InputTarget::Named(index) = plan.target else {
             unreachable!("an override resolves by name");
         };
@@ -945,9 +966,30 @@ enum InputTarget {
     /// The OS's default input.
     SystemDefault,
     /// A real input standing in for a default that is Hex Microphone, the
-    /// built-in microphone with the lid closed, or missing: the built-in
-    /// microphone while the lid is open, else the first usable one listed.
+    /// built-in microphone with the lid closed, a passed-over Bluetooth
+    /// headset, or missing: the built-in microphone while the lid is open,
+    /// else the first usable one listed.
     StandIn(usize),
+}
+
+/// How an input connects, as far as resolving it cares.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Transport {
+    BuiltIn,
+    /// Bluetooth or Bluetooth LE: opening its microphone switches the
+    /// headset into low-quality call audio.
+    Bluetooth,
+    Other,
+}
+
+/// The state of the machine an input resolves against.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Route {
+    /// A MacBook's lid is closed, so its built-in microphone is off.
+    lid_closed: bool,
+    /// System default passes over a Bluetooth default while another real
+    /// input is listed.
+    avoid_bluetooth: bool,
 }
 
 const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
@@ -961,20 +1003,25 @@ struct InputPlan {
 /// Resolves the input Hex captures from: `--device` exactly as named, else
 /// the saved microphone while it is listed, else the system default. Hex
 /// never captures from its own virtual microphone, so a default that is Hex
-/// Microphone (or none) falls back to a real input. With `lid_closed`, the
+/// Microphone (or none) falls back to a real input. With the lid closed, the
 /// built-in microphone is switched off in hardware though still listed, so
-/// it is passed over the same way.
+/// it is passed over the same way. With `avoid_bluetooth`, a Bluetooth
+/// default is passed over for the built-in microphone, else the first other
+/// real input, and kept only when nothing else is usable. Saved microphones
+/// and `--device` are never passed over for being Bluetooth.
 fn resolve_input(
     device_override: Option<&str>,
     selected: Option<&str>,
     names: &[String],
     default: Option<&str>,
-    is_built_in: impl Fn(usize) -> bool,
-    lid_closed: bool,
+    transport: impl Fn(usize) -> Transport,
+    route: Route,
 ) -> std::result::Result<InputPlan, String> {
     let is_hex = crate::hex_microphone::is_hex_virtual_device_name;
     let position = |name: &str| names.iter().position(|listed| listed == name);
-    let off = |index: usize| lid_closed && is_built_in(index);
+    let is_built_in = |index: usize| transport(index) == Transport::BuiltIn;
+    let avoided = |index: usize| route.avoid_bluetooth && transport(index) == Transport::Bluetooth;
+    let off = |index: usize| route.lid_closed && is_built_in(index);
     if let Some(name) = device_override {
         if is_hex(name) {
             return Err(format!(
@@ -1002,9 +1049,10 @@ fn resolve_input(
         None => Selection::InUse,
     };
     // ALSA names a default even with no devices listed.
-    if !names.is_empty()
-        && default.is_some_and(|name| !is_hex(name) && !position(name).is_some_and(off))
-    {
+    let default_usable = !names.is_empty()
+        && default.is_some_and(|name| !is_hex(name) && !position(name).is_some_and(off));
+    let default_avoided = default.and_then(position).is_some_and(avoided);
+    if default_usable && !default_avoided {
         return Ok(InputPlan {
             target: InputTarget::SystemDefault,
             selection,
@@ -1013,11 +1061,12 @@ fn resolve_input(
     let usable = || (0..names.len()).filter(|&index| !is_hex(&names[index]) && !off(index));
     usable()
         .find(|&index| is_built_in(index))
-        .or_else(|| usable().next())
-        .map(|index| InputPlan {
-            target: InputTarget::StandIn(index),
-            selection,
-        })
+        .or_else(|| usable().find(|&index| !avoided(index)))
+        .map(InputTarget::StandIn)
+        // A Bluetooth default beats recording nothing.
+        .or_else(|| default_usable.then_some(InputTarget::SystemDefault))
+        .or_else(|| usable().next().map(InputTarget::StandIn))
+        .map(|target| InputPlan { target, selection })
         .ok_or_else(|| {
             if (0..names.len()).any(off) {
                 LID_CLOSED_ERROR.into()
@@ -1025,6 +1074,13 @@ fn resolve_input(
                 "no microphone is available".into()
             }
         })
+}
+
+fn current_route() -> Route {
+    Route {
+        lid_closed: lid_closed(),
+        avoid_bluetooth: avoid_bluetooth_microphone(),
+    }
 }
 
 /// Whether a MacBook's lid is closed, which switches its built-in microphone
@@ -1211,15 +1267,16 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     let host = cpal::default_host();
     let (devices, names) = input_devices_of(&host)?;
     let (default, default_name) = default_input_of(&host).unzip();
-    let lid_closed = lid_closed();
+    let transports = devices.iter().map(transport).collect::<Vec<_>>();
+    let route = current_route();
     let resolve = |selected: Option<&str>| {
         resolve_input(
             request.device_override.as_deref(),
             selected,
             &names,
             default_name.as_deref(),
-            |index| is_built_in(&devices[index]),
-            lid_closed,
+            |index| transports[index],
+            route,
         )
         .map_err(|error| eyre!(error))
     };
@@ -1245,8 +1302,9 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
             tracing::warn!(
                 default = default_name.as_deref().unwrap_or("none"),
                 using = %name,
-                lid_closed,
-                "the system default input is Hex Microphone, off with the lid closed, or missing; using another microphone"
+                lid_closed = route.lid_closed,
+                avoid_bluetooth = route.avoid_bluetooth,
+                "the system default input is Hex Microphone, off with the lid closed, Bluetooth, or missing; using another microphone"
             );
         }
         match plan.selection {
@@ -1343,6 +1401,9 @@ pub struct InputDevices {
     pub off_with_lid_closed: Option<String>,
     /// The OS default is `off_with_lid_closed`, so `system_default` stands in.
     pub default_is_off_with_lid_closed: bool,
+    /// The OS default, a Bluetooth headset that `system_default` stands in
+    /// for so the headset keeps its audio quality.
+    pub bluetooth_default_passed_over: Option<String>,
 }
 
 pub fn input_devices() -> Result<InputDevices> {
@@ -1354,26 +1415,37 @@ pub fn input_devices() -> Result<InputDevices> {
     let default_is_hex_microphone = default
         .as_deref()
         .is_some_and(crate::hex_microphone::is_hex_virtual_device_name);
-    let lid_closed = lid_closed();
+    let transports = devices.iter().map(transport).collect::<Vec<_>>();
+    let route = current_route();
     let off_with_lid_closed = (0..devices.len())
-        .find(|&index| lid_closed && is_built_in(&devices[index]))
+        .find(|&index| route.lid_closed && transports[index] == Transport::BuiltIn)
         .map(|index| listed[index].clone());
     let default_is_off_with_lid_closed =
         off_with_lid_closed.is_some() && default == off_with_lid_closed;
-    let system_default = resolve_input(
+    let plan = resolve_input(
         None,
         None,
         &listed,
         default.as_deref(),
-        |index| is_built_in(&devices[index]),
-        lid_closed,
+        |index| transports[index],
+        route,
     )
-    .ok()
-    .and_then(|plan| match plan.target {
-        InputTarget::SystemDefault => default.clone(),
-        InputTarget::Named(index) | InputTarget::StandIn(index) => Some(listed[index].clone()),
-    })
-    .filter(|_| cfg!(not(target_os = "linux")));
+    .ok();
+    let bluetooth_default_passed_over = default
+        .clone()
+        .filter(|name| {
+            listed
+                .iter()
+                .position(|listed| listed == name)
+                .is_some_and(|index| transports[index] == Transport::Bluetooth)
+        })
+        .filter(|_| matches!(plan.map(|plan| plan.target), Some(InputTarget::StandIn(_))));
+    let system_default = plan
+        .and_then(|plan| match plan.target {
+            InputTarget::SystemDefault => default.clone(),
+            InputTarget::Named(index) | InputTarget::StandIn(index) => Some(listed[index].clone()),
+        })
+        .filter(|_| cfg!(not(target_os = "linux")));
     let mut names = listed
         .into_iter()
         .filter(|name| !crate::hex_microphone::is_hex_virtual_device_name(name))
@@ -1386,6 +1458,7 @@ pub fn input_devices() -> Result<InputDevices> {
         default_is_hex_microphone,
         off_with_lid_closed,
         default_is_off_with_lid_closed,
+        bluetooth_default_passed_over,
     })
 }
 
@@ -1395,20 +1468,22 @@ pub fn input_device_names() -> Result<Vec<String>> {
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn is_built_in(_device: &Device) -> bool {
-    false
+/// Linux and Windows don't tell built-in or Bluetooth inputs apart yet.
+fn transport(_device: &Device) -> Transport {
+    Transport::Other
 }
 
-/// Whether CoreAudio reports `device` as built in, such as a MacBook's
-/// microphone.
+/// How CoreAudio reports `device` connects: built in, such as a MacBook's
+/// microphone, or Bluetooth (classic or LE), such as AirPods.
 #[cfg(target_os = "macos")]
-fn is_built_in(device: &Device) -> bool {
+fn transport(device: &Device) -> Transport {
     use std::ffi::c_void;
     use std::ptr::NonNull;
 
     use objc2_core_audio::{
         AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
         AudioObjectPropertySelector, kAudioDevicePropertyTransportType,
+        kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
         kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyTranslateUIDToDevice,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
@@ -1441,7 +1516,7 @@ fn is_built_in(device: &Device) -> bool {
     }
 
     let Ok(id) = device.id() else {
-        return false;
+        return Transport::Other;
     };
     let uid = CFString::from_str(id.id());
     let uid_ref: *const CFString = &*uid;
@@ -1452,10 +1527,18 @@ fn is_built_in(device: &Device) -> bool {
         std::mem::size_of::<*const CFString>() as u32,
     )
     .filter(|device_id| *device_id != 0) else {
-        return false;
+        return Transport::Other;
     };
-    read_u32(device_id, kAudioDevicePropertyTransportType, None, 0)
-        == Some(kAudioDeviceTransportTypeBuiltIn)
+    match read_u32(device_id, kAudioDevicePropertyTransportType, None, 0) {
+        Some(kind) if kind == kAudioDeviceTransportTypeBuiltIn => Transport::BuiltIn,
+        Some(kind)
+            if kind == kAudioDeviceTransportTypeBluetooth
+                || kind == kAudioDeviceTransportTypeBluetoothLE =>
+        {
+            Transport::Bluetooth
+        }
+        _ => Transport::Other,
+    }
 }
 
 fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f32> {
@@ -1558,6 +1641,158 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
+    const OPEN: Route = Route {
+        lid_closed: false,
+        avoid_bluetooth: false,
+    };
+    const CLOSED: Route = Route {
+        lid_closed: true,
+        avoid_bluetooth: false,
+    };
+
+    fn other(_: usize) -> Transport {
+        Transport::Other
+    }
+
+    fn built_in_at(at: usize) -> impl Fn(usize) -> Transport {
+        move |index| {
+            if index == at {
+                Transport::BuiltIn
+            } else {
+                Transport::Other
+            }
+        }
+    }
+
+    #[test]
+    fn system_default_passes_over_a_bluetooth_default() {
+        use InputTarget::{Named, StandIn, SystemDefault};
+        use Transport::{Bluetooth, BuiltIn, Other};
+        let names = listed(&[
+            "Hex Microphone",
+            "AirPods Pro",
+            "MacBook Pro Microphone",
+            "USB Mic",
+        ]);
+        let transports = [Other, Bluetooth, BuiltIn, Other];
+        let transport = |index: usize| transports[index];
+        let avoid = Route {
+            lid_closed: false,
+            avoid_bluetooth: true,
+        };
+        let found = |target, selection| Ok(InputPlan { target, selection });
+        let plan = |selected, default, route| {
+            resolve_input(None, selected, &names, default, transport, route)
+        };
+
+        // A Bluetooth default stands in with the built-in microphone.
+        assert_eq!(
+            plan(None, Some("AirPods Pro"), avoid),
+            found(StandIn(2), Selection::InUse)
+        );
+        // A missing saved microphone falls back the same way.
+        assert_eq!(
+            plan(Some("Gone"), Some("AirPods Pro"), avoid),
+            found(StandIn(2), Selection::Unlisted)
+        );
+        // A saved Bluetooth microphone is honoured, and so is `--device`.
+        assert_eq!(
+            plan(Some("AirPods Pro"), Some("USB Mic"), avoid),
+            found(Named(1), Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                Some("AirPods Pro"),
+                None,
+                &names,
+                Some("AirPods Pro"),
+                transport,
+                avoid
+            ),
+            found(Named(1), Selection::InUse)
+        );
+        // Other defaults are followed.
+        assert_eq!(
+            plan(None, Some("USB Mic"), avoid),
+            found(SystemDefault, Selection::InUse)
+        );
+        // With the setting off, System default follows the Bluetooth default.
+        assert_eq!(
+            plan(None, Some("AirPods Pro"), OPEN),
+            found(SystemDefault, Selection::InUse)
+        );
+        // With the lid closed, the next real input stands in.
+        let closed = Route {
+            lid_closed: true,
+            ..avoid
+        };
+        assert_eq!(
+            plan(None, Some("AirPods Pro"), closed),
+            found(StandIn(3), Selection::InUse)
+        );
+        // A Hex Microphone default prefers a wired input to Bluetooth too.
+        let no_built_in = listed(&["Hex Microphone", "AirPods Pro", "USB Mic"]);
+        let no_built_in_transports = [Other, Bluetooth, Other];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &no_built_in,
+                Some("Hex Microphone"),
+                |index| no_built_in_transports[index],
+                avoid
+            ),
+            found(StandIn(2), Selection::InUse)
+        );
+    }
+
+    #[test]
+    fn a_bluetooth_default_is_kept_when_nothing_else_is_usable() {
+        use InputTarget::SystemDefault;
+        use Transport::{Bluetooth, BuiltIn, Other};
+        let avoid = Route {
+            lid_closed: false,
+            avoid_bluetooth: true,
+        };
+        let found = |target| {
+            Ok(InputPlan {
+                target,
+                selection: Selection::InUse,
+            })
+        };
+
+        let only_bluetooth = listed(&["Hex Microphone", "AirPods Pro", "Beats"]);
+        let bluetooth = |index: usize| [Other, Bluetooth, Bluetooth][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &only_bluetooth,
+                Some("AirPods Pro"),
+                bluetooth,
+                avoid
+            ),
+            found(SystemDefault)
+        );
+        // With the lid closed the built-in microphone is no alternative.
+        let lid = listed(&["AirPods Pro", "MacBook Pro Microphone"]);
+        let lid_transports = |index: usize| [Bluetooth, BuiltIn][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &lid,
+                Some("AirPods Pro"),
+                lid_transports,
+                Route {
+                    lid_closed: true,
+                    avoid_bluetooth: true,
+                }
+            ),
+            found(SystemDefault)
+        );
+    }
+
     #[test]
     fn an_unreadable_device_name_is_skipped_instead_of_panicking() {
         let unreadable: std::result::Result<cpal::DeviceDescription, cpal::Error> =
@@ -1583,9 +1818,9 @@ mod tests {
             "MacBook Pro Microphone",
             "USB Mic",
         ]);
-        let built_in = |index: usize| index == 2;
+        let built_in = built_in_at(2);
         let plan =
-            |selected, default| resolve_input(None, selected, &names, default, built_in, false);
+            |selected, default| resolve_input(None, selected, &names, default, &built_in, OPEN);
         let found = |target, selection| Ok(InputPlan { target, selection });
 
         // A listed saved microphone wins over the default.
@@ -1613,8 +1848,7 @@ mod tests {
             found(StandIn(2), Selection::Unlisted)
         );
         // Without a built-in mic or any default, the first real input stands in.
-        let no_built_in =
-            resolve_input(None, None, &names, Some("Hex Microphone"), |_| false, false);
+        let no_built_in = resolve_input(None, None, &names, Some("Hex Microphone"), other, OPEN);
         assert_eq!(no_built_in, found(StandIn(1), Selection::InUse));
         assert_eq!(plan(None, None), found(StandIn(2), Selection::InUse));
         // A saved Hex Microphone is never captured from.
@@ -1629,13 +1863,13 @@ mod tests {
                 None,
                 &listed(&["Hex Microphone"]),
                 Some("Hex Microphone"),
-                built_in,
-                false
+                &built_in,
+                OPEN
             ),
             Err("no microphone is available".into())
         );
         assert_eq!(
-            resolve_input(None, Some("USB Mic"), &[], None, built_in, false),
+            resolve_input(None, Some("USB Mic"), &[], None, &built_in, OPEN),
             Err("no microphone is available".into())
         );
         assert_eq!(
@@ -1644,8 +1878,8 @@ mod tests {
                 None,
                 &[],
                 Some("Default Audio Device"),
-                built_in,
-                false
+                &built_in,
+                OPEN
             ),
             Err("no microphone is available".into())
         );
@@ -1660,9 +1894,9 @@ mod tests {
             "Studio Display Microphone",
             "USB Mic",
         ]);
-        let built_in = |index: usize| index == 1;
+        let built_in = built_in_at(1);
         let closed =
-            |selected, default| resolve_input(None, selected, &names, default, built_in, true);
+            |selected, default| resolve_input(None, selected, &names, default, &built_in, CLOSED);
         let found = |target, selection| Ok(InputPlan { target, selection });
 
         // A built-in default stands in with the first other real input.
@@ -1705,8 +1939,8 @@ mod tests {
                 None,
                 &names,
                 Some("MacBook Pro Microphone"),
-                built_in,
-                false
+                &built_in,
+                OPEN
             ),
             found(SystemDefault, Selection::InUse)
         );
@@ -1714,7 +1948,7 @@ mod tests {
         let only_built_in = listed(&["Hex Microphone", "MacBook Pro Microphone"]);
         for default in [Some("MacBook Pro Microphone"), Some("Hex Microphone"), None] {
             assert_eq!(
-                resolve_input(None, None, &only_built_in, default, built_in, true),
+                resolve_input(None, None, &only_built_in, default, &built_in, CLOSED),
                 Err(LID_CLOSED_ERROR.into())
             );
         }
@@ -1724,8 +1958,8 @@ mod tests {
                 Some("MacBook Pro Microphone"),
                 &only_built_in,
                 Some("MacBook Pro Microphone"),
-                built_in,
-                true
+                &built_in,
+                CLOSED
             ),
             Err(LID_CLOSED_ERROR.into())
         );
@@ -1740,8 +1974,8 @@ mod tests {
                 Some("KIT PODS"),
                 &names,
                 Some("KIT PODS"),
-                |_| false,
-                false,
+                other,
+                OPEN,
             )
         };
 

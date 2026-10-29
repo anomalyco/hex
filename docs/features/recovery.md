@@ -196,6 +196,10 @@ MacBook lid closed (macOS)                            // built-in mic is off but
   ├── no other input -> "the built-in microphone is off while the lid is closed"
   └── lid opens or closes -> re-resolve like a device-list change // IOKit clamshell notification
         -> switch once capture is idle
+Bluetooth default input (macOS, avoid_bluetooth_microphone on) // transport type, read per resolve
+  -> built-in mic stands in, else the first other real input
+  ├── no other usable input -> the Bluetooth default
+  └── setting changes -> re-resolve like a device-list change -> switch once idle
 
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss

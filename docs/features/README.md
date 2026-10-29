@@ -517,9 +517,13 @@ General                                  // settings
 ├── Microphone -> Field always names the input in use            // settings.microphone
 │   ├── "System default" + faint "KIT PODS", or a saved device
 │   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
-│   ├── System default -> The OS default input, followed live      // a Bluetooth default is kept
+│   ├── System default -> The OS default input, followed live
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
-│   │   └── Default is Hex Microphone -> Built-in mic, else first real input; row says so
+│   │   ├── Default is Hex Microphone -> Built-in mic, else first real input; row says so
+│   │   └── Default is Bluetooth (macOS, Advanced switch on) -> Built-in mic, else first wired/USB input
+│   │       ├── Row says "KIT PODS is Bluetooth, so Hex listens to MacBook Pro Microphone"
+│   │       ├── No other usable input (or lid closed, Bluetooth only) -> the Bluetooth default
+│   │       └── A saved Bluetooth mic or `--device` is always used as named
 │   ├── Saved device missing -> System default stands in, field names it
 │   │   ├── Row says "SHURE MV7 isn't connected; using your Mac's input"
 │   │   ├── Menu keeps "SHURE MV7" checked with a faint "not connected"
@@ -527,8 +531,10 @@ General                                  // settings
 │   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Advanced ▸ (Dictation header) -> rows at the end of the Dictation card
-│   ├── Open while Release when idle, Double-tap only (Hold), or sharing is on
+│   ├── Open while Release when idle, Double-tap only (Hold), sharing, or Bluetooth allowed
 │   └── Collapse -> drops a pending release confirmation
+├── Use the Mac's microphone instead of Bluetooth (Advanced, macOS, on)
+│   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Share dictation shortcut with other apps (Advanced, Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Microphone mode (Advanced)
@@ -645,15 +651,25 @@ Bluetooth default swapped for the built-in microphone (the 2.1.22 fix for
 [#106](https://github.com/anomalyco/hex/issues/106) and
 [#88](https://github.com/anomalyco/hex/issues/88)). That skipped a user's
 AirPods default, and Hex Microphone then passed the wrong microphone on to
-calls. Automatic is now System default: exactly the OS default input, followed
-live, so a Bluetooth default does open the headset (and its call profile); pick
-the built-in microphone to avoid that. Checks in [audio.rs](../../src/audio.rs):
+calls. Automatic is now System default: the OS default input, followed live.
+A Bluetooth default (CoreAudio transport Bluetooth or Bluetooth LE) is passed
+over for the built-in microphone, else the first other real input, so AirPods
+keep their music out of call quality while you dictate; it is kept when nothing
+else is usable. Only System default is affected: a saved Bluetooth microphone
+and `--device` are honoured, and General › Advanced › "Use the Mac's microphone
+instead of Bluetooth" (`avoid_bluetooth_microphone`, default on) turns it off.
+Hex Microphone carries whichever input Hex records from. Linux and Windows
+don't detect Bluetooth inputs yet and follow the default. Checks in
+[audio.rs](../../src/audio.rs):
+`system_default_passes_over_a_bluetooth_default`,
+`a_bluetooth_default_is_kept_when_nothing_else_is_usable`,
 `inputs_resolve_to_the_selection_then_the_system_default`,
 `device_override_wins_and_never_falls_back`,
 `a_default_change_switches_only_while_capture_is_idle`, and
 `a_missing_selection_uses_the_default_until_it_returns`, with injected device
-lists and opens. Not verified: the CoreAudio listeners against a real default
-change, or Windows' default-change report on a real PC.
+lists and opens; scene `mac-microphone-bluetooth` shows the row and switch. Not
+verified: the CoreAudio listeners against a real default change, the transport
+read against real AirPods, or Windows' default-change report on a real PC.
 
 **Fixed after 2.1.20:** through 2.1.20 the microphone menu was painted without
 occluding the panel, so hovering or clicking a device also reached the setting

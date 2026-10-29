@@ -312,6 +312,10 @@ settings but do not observe input-source changes or show these controls.
 - Optional settings take `none` to clear them.
 - `microphone` takes a device name exactly as Settings lists it, or
   `system-default` (or `none`) to follow the OS default input.
+- `avoid_bluetooth_microphone` (macOS, default on) makes System default record
+  from the Mac's built-in microphone, else another wired or USB input, when
+  the OS default is a Bluetooth headset, so its audio stays out of call
+  quality. A saved microphone and `--device` are always used as named.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, or `f5`. On macOS, Windows and X11, `mouse4` and `option+mouse4`
   also work (Mouse 1/2/3 are left/right/middle). Key names resolve on the active keyboard
@@ -349,7 +353,7 @@ default 0.2), applied on the next intentional capture when ducking is selected.
 
 Writable keys: `commands_enabled`, `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
-`recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
+`avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `edit_hotkey`, `paste_last_hotkey`,
 `show_dock_icon`, `transcription.recognition_hints`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,

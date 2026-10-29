@@ -950,7 +950,16 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             )
         }),
         None if devices.default_is_off_with_lid_closed => off.map(lid_note),
-        None => None,
+        None => devices
+            .bluetooth_default_passed_over
+            .as_deref()
+            .zip(default_name)
+            .map(|(bluetooth, input)| {
+                tr_named(
+                    "{bluetooth} is Bluetooth, so Hex listens to {input}",
+                    &[("bluetooth", bluetooth), ("input", input)],
+                )
+            }),
     });
     let devices = microphone_choices(ui);
     rows.push(
@@ -1605,12 +1614,14 @@ fn output_section(ui: &Ui, p: Paint) -> El {
 
 /// An advanced setting is off its default, so Advanced stays open to show
 /// it: the microphone released while idle, Double-tap only where its row
-/// shows, or a chosen update channel.
+/// shows, a chosen update channel, a shared shortcut, or a Bluetooth default
+/// allowed.
 fn advanced_in_use(settings: &AppSettings) -> bool {
     settings.release_microphone_while_idle
         || (double_tap_only_applies(settings) && settings.double_tap_only)
         || settings.updates.channel.is_some()
         || settings.share_dictation_shortcut
+        || !settings.avoid_bluetooth_microphone
 }
 
 fn double_tap_only_applies(settings: &AppSettings) -> bool {
@@ -1667,7 +1678,8 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
 }
 
 /// Advanced dictation rows, shown at the end of the Dictation card: the
-/// microphone's idle release and Double-tap only.
+/// microphone's idle release, Double-tap only, and (macOS) passing over a
+/// Bluetooth default.
 fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = vec![
@@ -1728,6 +1740,23 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
             }),
         ),
     ];
+    if ui.platform.caps.os == super::platform::Os::Macos {
+        rows.push(
+            toggle_row(
+                p,
+                "avoid-bluetooth-microphone",
+                tr("Use the Mac's microphone instead of Bluetooth"),
+                tr("Keeps AirPods and other headsets out of call-quality audio"),
+                settings.avoid_bluetooth_microphone,
+                |ui: &mut Ui| {
+                    ui.advanced = Some(true);
+                    let enabled = !ui.settings.avoid_bluetooth_microphone;
+                    ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
+                },
+            )
+            .into(),
+        );
+    }
     if ui.platform.caps.share_shortcut {
         rows.push(
             toggle_row(
