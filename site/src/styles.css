@@ -789,7 +789,8 @@ button.download:hover {
 
 /* Install: OS tabs over one aligned stack of install methods. */
 .install {
-  width: min(100%, 38rem);
+  /* As wide as the headline at its largest size. */
+  width: min(100%, 42.5rem);
   gap: 1rem;
 }
 
@@ -809,7 +810,7 @@ button.download:hover {
 
 .stack__row {
   display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr) 6rem;
+  grid-template-columns: 7rem minmax(0, 1fr) 6.5rem;
   align-items: center;
   gap: 1rem;
   height: 3.25rem;
