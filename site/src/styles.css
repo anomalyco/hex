@@ -615,60 +615,59 @@ button.download:hover {
   background: rgba(242, 242, 239, 0.1);
 }
 
-.install__methods {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem 1.1rem;
-  min-height: 1.75rem;
-}
-
-.install__methods [role="tablist"] {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.25rem 1.1rem;
-}
-
-.install__arch {
-  padding-left: 1.1rem;
-  border-left: 1px solid rgba(242, 242, 239, 0.14);
-}
-
-.install__methods button {
-  padding: 0.2rem 0 0.3rem;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  color: #777b82;
-  background: transparent;
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: color 160ms ease, border-color 160ms ease;
-}
-
-.install__methods button:hover {
-  color: #c9cace;
-}
-
-.install__methods button[aria-selected="true"] {
-  border-bottom-color: #f2f2ef;
-  color: #f2f2ef;
-}
-
 .install {
-  gap: 1rem;
+  gap: 1.1rem;
 }
 
-.install__methods {
-  margin-top: 0.15rem;
+.install__files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.download--secondary {
+  min-width: 0;
+  border-color: rgba(242, 242, 239, 0.14);
+  color: #f2f2ef;
+  background: transparent;
+}
+
+.download--compact {
+  display: inline-flex;
+  min-width: 0;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+a.download--secondary:hover {
+  border-color: rgba(242, 242, 239, 0.32);
+  background: rgba(242, 242, 239, 0.04);
+}
+
+.install__commands {
+  display: flex;
+  width: min(100%, 36rem);
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .install .command {
-  width: min(100%, 36rem);
-  min-height: 3.25rem;
+  width: 100%;
+  min-height: 3rem;
   text-align: left;
+}
+
+.install .command code {
+  padding: 0.76rem 1.75rem 0.64rem 1rem;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 1.75rem), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 1.75rem), transparent);
+}
+
+.install .command__copy {
+  min-width: 4.25rem;
+  padding: 0.45rem 0.7rem;
 }
 
 .mark {
@@ -747,15 +746,28 @@ button.download:hover {
   }
 
   .install .command {
-    min-height: 3.5rem;
+    min-height: 2.75rem;
   }
 
-  .install__arch {
-    flex-basis: 100%;
-    padding-left: 0;
-    border-left: 0;
+  .install__files {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
   }
 
+  .install__files--even {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .install__files .download {
+    justify-content: center;
+  }
+
+  .install .command__copy {
+    min-width: 3.75rem;
+    padding: 0.4rem 0.6rem;
+  }
 }
 
 @media (max-height: 46rem) and (min-width: 40rem) {

@@ -11,13 +11,14 @@ other than this config's (docs/releasing.md). `worker.ts` serves the
 site and, at `/hex/files/`, the environment's R2 bucket of release files, and
 301s other hosts and plain HTTP to the canonical host.
 
-The download section (`src/Download.tsx`) is one install switcher and nothing
-else: macOS, Windows, and Linux tabs, each with every way to install there
-(Mac: DMG, Homebrew; Windows: installer, PowerShell script; Linux: script,
-AUR, .deb, .rpm, Nix, binary), an x64/ARM64 toggle where the file differs, and
-the download button or copyable command. It selects the visitor's OS and
-architecture on first paint and refines them with UA client hints. Versions,
-URLs, and commands live in `src/release.ts`; file links name
+The download section (`src/Download.tsx`) is an OS switcher (macOS, Windows,
+Linux) over every way to install on the chosen OS, all at once: download
+buttons (Windows and Linux for both x64 and ARM64) and one copyable row per
+command (Homebrew; PowerShell; the install script, .deb, .rpm, Nix, and from
+the first stable release the AUR). Nothing else: no version or helper text.
+The visitor's OS and architecture are selected on first paint and refined with
+UA client hints; the .deb and .rpm rows follow the detected architecture.
+Versions, URLs, and commands live in `src/release.ts`; file links name
 `/hex/download/<target>`, which the Worker sends to the stable release once
 there is one and to the newest dev build until then. The AUR tab appears from
 the first build after a stable release, which pushes `hex-bin`. Add
