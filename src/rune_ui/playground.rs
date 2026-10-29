@@ -302,6 +302,7 @@ fn path(scene: &str) -> Option<&'static str> {
         .map(|(_, path)| *path)
 }
 
+#[cfg(any(target_os = "macos", test))]
 /// The groups a story or scene listed under before they nested, for links
 /// made then.
 const OLD_GROUPS: &[&str] = &[
@@ -320,10 +321,12 @@ const OLD_GROUPS: &[&str] = &[
     "Onboarding",
 ];
 
+#[cfg(any(target_os = "macos", test))]
 /// The groups of prototypes that listed at the top before they moved under
 /// [`PROTOTYPES`].
 const OLD_PROTOTYPES: &[&str] = &["Onboarding", "HUD", "Capture capsule"];
 
+#[cfg(any(target_os = "macos", test))]
 /// Today's name for a story link made before the list nested: a scene's
 /// `--scene` name, its old `Group/scene` path or that path's slug, or a
 /// prototype's path or slug without `Prototypes/`. `None` when `story`
@@ -357,6 +360,7 @@ pub(super) fn alias(story: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
     let head = text.get(..prefix.len())?;
     head.eq_ignore_ascii_case(prefix)
