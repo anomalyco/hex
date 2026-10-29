@@ -72,7 +72,8 @@ The known experiments are compiled into
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
 - `modes`: Modes ([Process Text With Modes](README.md#process-text-with-modes)),
-  every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
+  every OS. Off by default (Kit, 2026-10-27): no Output pane (the read-only
+  view that replaced the Modes editor, t694) or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,
   OpenCode rewrite, mode correction, or transformation ever touches a
   transcript, and custom transformations load only for the user's own
@@ -83,7 +84,7 @@ The known experiments are compiled into
   on and restarting brings them back unchanged. Checks:
   `without_the_experiment_only_global_replacements_run`,
   `without_the_modes_experiment_the_profile_is_global_replacements_only`,
-  `the_sidebar_has_no_modes_without_the_experiment`; scene `modes-off`.
+  `the_sidebar_has_no_output_without_the_experiment`; scene `modes-off`.
 - `playground`: Rune's playground in the window (every OS). ⇧⌘D (View ›
   Playground on macOS) or Ctrl+Shift+D swaps the window for a list of
   folded groups, nested by path:

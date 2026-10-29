@@ -703,7 +703,7 @@ Commands still needs open input; it is not Release when idle.
 
 ```ts
 Experiment `modes` off (the default)     // experiments.md; modes.experiment
-├── Sidebar -> No Modes pane; onboarding -> No Modes tip
+├── Sidebar -> No Output pane; onboarding -> No Modes tip
 ├── `window show --pane modes` -> Stays on the current pane
 ├── Processing -> Global replacements only    // literal, cheap, still applied
 │   └── No per-app mode, corrections, OpenCode rewrite, or transformations
@@ -712,12 +712,19 @@ Experiment `modes` off (the default)     // experiments.md; modes.experiment
 └── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
     // `hex experiments enable modes` + restart -> everything below, as saved
 
-Modes                                    // modes
-├── Select a row -> Edit that mode        // does NOT manually activate it
-└── Foreground context -> Select processing
-    ├── Matching Brave website
-    ├── Otherwise matching application
-    └── Otherwise Global
+Output (Labs, replaces the Modes editor) // rune_ui/output.rs; scenes output*
+├── Edit with agent -> Copy a prompt naming the steps' keys and `hex settings`
+├── Open file -> settings.json in the default editor
+├── Every dictation -> Global's steps, numbered, read-only
+├── Try -> Global's corrections and built-ins on a typed sentence
+│   └── Scripts and rewriting run only when dictating
+└── In some apps -> Each mode's apps and its steps (Only: …), opens to list them
+    // the old Modes editor stays in the code for its scenes, unreachable
+
+Foreground context -> Select processing
+├── Matching Brave website
+├── Otherwise matching application
+└── Otherwise Global
 
 Selected mode                            // replaces Global, does not layer over it
   -> Corrections

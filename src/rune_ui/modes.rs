@@ -139,7 +139,7 @@ pub(super) struct ModesPane {
     icons_ready: usize,
     /// Whether the listener can tell which app is frontmost (X11, not Wayland).
     focused_app_known: bool,
-    status: StatusSnapshot,
+    pub(super) status: StatusSnapshot,
     status_read: Option<Instant>,
     workspace: PathBuf,
     config_exists: bool,
@@ -317,7 +317,7 @@ impl ModesPane {
     }
 
     /// The icon for an application a mode names, once the catalog lists it.
-    fn named_icon(&self, name: &str) -> Option<rune::Pixels> {
+    pub(super) fn named_icon(&self, name: &str) -> Option<rune::Pixels> {
         let Applications::Loaded(applications) = &self.applications else {
             return None;
         };
@@ -972,7 +972,7 @@ fn choose_file_button(p: Paint) -> El {
     )
 }
 
-fn application_icon(key: impl Into<String>, icon: &rune::Pixels, size: f32) -> El {
+pub(super) fn application_icon(key: impl Into<String>, icon: &rune::Pixels, size: f32) -> El {
     el().key(key)
         .size(size, size)
         .pixels_fit(icon, rune::SurfaceFit::Fit)
@@ -980,7 +980,7 @@ fn application_icon(key: impl Into<String>, icon: &rune::Pixels, size: f32) -> E
 
 /// An app's initial on a tinted square, while its icon loads or when it has
 /// none.
-fn monogram(p: Paint, name: &str) -> El {
+pub(super) fn monogram(p: Paint, name: &str) -> El {
     let letter = name
         .chars()
         .find(|c| c.is_alphanumeric())

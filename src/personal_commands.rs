@@ -109,6 +109,12 @@ fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
         .find(|transformation| transformation.id == id)
 }
 
+/// `text` after the built-in transformation `id`, or None when `id` is not
+/// built in (a script runs in the transformation host instead).
+pub fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {
+    builtin_transformation(id).map(|builtin| (builtin.apply)(text))
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {

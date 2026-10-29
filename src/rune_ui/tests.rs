@@ -574,9 +574,9 @@ fn flush(rt: &mut Runtime<Ui>) {
 /// A shown window keeps drawing while its runtime animates, has input queued
 /// or has live values pending (Rune's `Host::redraw`). Five seconds after
 /// mounting, with nothing changing, the only motion left in any scene is the
-/// pulsing dot of something live or the shortcut explainer's looping demo,
-/// and under Reduce Motion, which stills both, no scene asks for another
-/// frame.
+/// pulsing dot of something live, Output's breathing agent card, or the
+/// shortcut explainer's looping demo, and under Reduce Motion, which stills
+/// them all, no scene asks for another frame.
 #[test]
 fn every_scene_stops_asking_for_frames() {
     const FRAME: f64 = 1.0 / 60.0;
@@ -593,7 +593,7 @@ fn every_scene_stops_asking_for_frames() {
             moving.extend(
                 rt.elements()
                     .into_iter()
-                    .filter(|e| e.moving && e.key.as_deref() != Some("dot"))
+                    .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot" | "glow")))
                     .map(|e| format!("{scene}: {}", e.path)),
             );
         }
@@ -614,14 +614,15 @@ fn every_scene_stops_asking_for_frames() {
 }
 
 #[test]
-fn the_sidebar_has_no_modes_without_the_experiment() {
+fn the_sidebar_has_no_output_without_the_experiment() {
     let mut rt = runtime("modes-off", true, PANE_SIZE);
     tap(&mut rt, "nav-labs");
-    assert!(rt.find("nav-modes").is_none());
-    assert!(!Pane::Modes.shown(&rt.state));
-    let rt = runtime("modes", true, PANE_SIZE);
+    assert!(rt.find("nav-output").is_none());
+    assert!(!Pane::Output.shown(&rt.state));
+    let rt = runtime("output", true, PANE_SIZE);
+    assert!(rt.find("nav-modes").is_none(), "Output replaces Modes");
     assert!(
-        rt.find("nav-modes").is_some(),
+        rt.find("nav-output").is_some(),
         "Labs unfolds around its pane"
     );
 }
@@ -631,7 +632,7 @@ fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     tap(&mut rt, "nav-labs");
     for (key, pane) in [
-        ("nav-modes", Pane::Modes),
+        ("nav-output", Pane::Output),
         ("nav-history", Pane::History),
         ("nav-general", Pane::General),
     ] {
@@ -647,13 +648,13 @@ fn the_sidebar_switches_on_press_not_release() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     tap(&mut rt, "nav-labs");
     settle(&mut rt);
-    let (x, y) = rt.find("nav-modes").expect("the Modes item");
+    let (x, y) = rt.find("nav-output").expect("the Output item");
     rt.pointer_down(x, y);
     rt.frame(1.0 / 60.0);
-    assert_eq!(rt.state.pane, Pane::Modes);
+    assert_eq!(rt.state.pane, Pane::Output);
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
-    assert_eq!(rt.state.pane, Pane::Modes);
+    assert_eq!(rt.state.pane, Pane::Output);
 }
 
 #[test]
@@ -661,7 +662,7 @@ fn switching_panes_is_instant() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     tap(&mut rt, "nav-labs");
     settle(&mut rt);
-    let (x, y) = rt.find("nav-modes").expect("the Modes item");
+    let (x, y) = rt.find("nav-output").expect("the Output item");
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
@@ -1790,6 +1791,7 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "output",
             "modes",
             "modes-picker",
             "picker-downloading",

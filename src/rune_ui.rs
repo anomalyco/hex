@@ -38,6 +38,7 @@ mod models;
 mod modes;
 mod onboarding;
 mod onboarding_kit;
+mod output;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -83,6 +84,11 @@ static MODES_ICON: Icon = Icon {
     name: "hex-modes",
     view: 24.0,
     body: include_str!("../assets/icons/modes.svg"),
+};
+static OUTPUT_ICON: Icon = Icon {
+    name: "hex-output",
+    view: 24.0,
+    body: include_str!("../assets/icons/output.svg"),
 };
 static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
@@ -309,7 +315,7 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     let pane = match &destination {
         Destination::Settings | Destination::Models => Pane::General,
         Destination::Meetings(_) => Pane::Meetings,
-        Destination::Modes => Pane::Modes,
+        Destination::Modes => Pane::Output,
         Destination::Commands => Pane::Commands,
         Destination::History => Pane::History,
     };
@@ -474,6 +480,10 @@ enum Pane {
     /// Dictation, output, and application basics.
     #[default]
     General,
+    /// What Hex does to every dictation and in some apps, read-only: the
+    /// person's agent edits it (the `modes` experiment).
+    Output,
+    /// The old per-app editor, kept for its scenes until it is removed.
     Modes,
     /// The voice command catalog and its opt-in (macOS).
     Commands,
@@ -497,6 +507,7 @@ enum Pane {
 impl Pane {
     const ALL: &[Pane] = &[
         Pane::General,
+        Pane::Output,
         Pane::Modes,
         Pane::Commands,
         Pane::Meetings,
@@ -511,7 +522,8 @@ impl Pane {
     fn shown(self, ui: &Ui) -> bool {
         let caps = ui.platform.caps;
         match self {
-            Pane::Modes => ui.platform.modes,
+            Pane::Output => ui.platform.modes,
+            Pane::Modes => false,
             Pane::Commands => caps.commands,
             Pane::Meetings => caps.meetings,
             Pane::VoiceFilter => {
@@ -545,6 +557,7 @@ impl Pane {
     fn title(self) -> &'static str {
         match self {
             Pane::General => tr("General"),
+            Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
             Pane::Commands => tr("Commands"),
             Pane::History => tr("History"),
@@ -560,6 +573,7 @@ impl Pane {
     fn key(self) -> &'static str {
         match self {
             Pane::General => "nav-general",
+            Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
             Pane::Commands => "nav-commands",
             Pane::History => "nav-history",
@@ -575,6 +589,7 @@ impl Pane {
     fn icon(self) -> &'static Icon {
         match self {
             Pane::General => &SETTINGS_ICON,
+            Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
             Pane::Commands => &COMMANDS_ICON,
             Pane::History => &HISTORY_ICON,
@@ -661,6 +676,7 @@ pub(crate) struct Ui {
     models: models::Models,
     history: history::HistoryPane,
     modes: modes::ModesPane,
+    output: output::OutputPane,
     picker: picker::Picker,
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
@@ -750,6 +766,7 @@ impl Ui {
             models: models::Models::default(),
             history: history::HistoryPane::default(),
             modes,
+            output: output::OutputPane::default(),
             picker: picker::Picker::default(),
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
@@ -1026,6 +1043,7 @@ impl Ui {
         picker::close(self);
         explainer::close(self);
         sound_sets::close(self);
+        self.output.prompt_copied = false;
         if self.pane == Pane::HudLab {
             self.ask(platform::PlatformRequest::EndHudDemo);
         }
@@ -1114,7 +1132,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.models.poll(ui.live());
     changed |= ui.history.poll(ui.pane == Pane::History);
     // Mode rows show their applications' icons, which the catalog locates.
-    if ui.pane == Pane::Modes
+    if matches!(ui.pane, Pane::Modes | Pane::Output)
         && ui
             .settings
             .dictation_processing
@@ -1211,6 +1229,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let (actions, body) = match ui.pane {
         _ if ui.labs_open => (Vec::new(), labs::page(ui, p)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
+        Pane::Output => (Vec::new(), output::pane(ui, p)),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::Commands => commands::pane(ui, p),
         Pane::History => history::pane(ui, p, &mut layer),
@@ -1752,6 +1771,22 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture_empty();
         ui.pane = Pane::History;
+    }),
+    ("output", |ui| {
+        *ui = portal_fixture();
+        output::fixture(ui);
+        ui.pane = Pane::Output;
+    }),
+    ("output-open", |ui| {
+        *ui = portal_fixture();
+        output::fixture(ui);
+        ui.output.expanded = Some(0);
+        ui.output.prompt_copied = true;
+        ui.pane = Pane::Output;
+    }),
+    ("output-empty", |ui| {
+        *ui = portal_fixture();
+        ui.pane = Pane::Output;
     }),
     ("modes", |ui| {
         *ui = portal_fixture();

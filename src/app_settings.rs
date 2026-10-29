@@ -2666,7 +2666,7 @@ pub fn hide_application() {
     NSApplication::sharedApplication(marker).hide(None);
 }
 
-fn path() -> Result<PathBuf> {
+pub(crate) fn path() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("settings.json"))
 }
 

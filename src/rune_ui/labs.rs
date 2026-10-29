@@ -76,13 +76,13 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     panes
 }
 
-/// The experiments' panes this install has, Modes among them: listed under
+/// The experiments' panes this install has, Output among them: listed under
 /// Labs, never in the main sidebar.
 pub(super) fn experiments(ui: &Ui) -> Vec<Pane> {
     Pane::ALL
         .iter()
         .copied()
-        .filter(|pane| pane.shown(ui) && (pane.experimental() || *pane == Pane::Modes))
+        .filter(|pane| pane.shown(ui) && (pane.experimental() || *pane == Pane::Output))
         .collect()
 }
 
