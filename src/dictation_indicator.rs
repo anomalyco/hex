@@ -314,7 +314,7 @@ impl IndicatorModel {
     }
 
     /// Spreads Dot scope's field across the notch island it now sits in.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", test))]
     pub fn set_island(&mut self, island: Option<Island>) {
         if self.island != island {
             self.island = island;
