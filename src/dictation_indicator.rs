@@ -219,16 +219,35 @@ pub struct DotFrame {
     pub dots: Vec<[u16; 2]>,
 }
 
-/// The tuning that fills an island: the field as wide as the island minus
-/// its corners, recording and processing alike, with as many more columns
-/// as keep the dot spacing.
+/// The middle of `rune_hud.wgsl`'s fade of dots near the field's edge
+/// (1.4 to 4.6 pt in): a row or column nearer than this barely shows.
+const FIELD_EDGE_FADE: f32 = 3.0;
+
+/// How far in from the top and bottom the outermost row that shows sits.
+fn field_edge(tuning: &Tuning) -> f32 {
+    let outer = (tuning.height - (tuning.rows - 1.0) * tuning.spacing) / 2.0;
+    if outer < FIELD_EDGE_FADE && tuning.rows > 2.0 {
+        outer + tuning.spacing
+    } else {
+        outer
+    }
+}
+
+/// The tuning that fills an island: the field as wide as the island less
+/// its padding, recording and processing alike, at the same dot spacing.
+/// The width snaps to whole columns, with the outer columns as far in from
+/// the ends as the outermost rows that show are from the top and bottom,
+/// so the island (which follows the field) is even all round.
 fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
     let Some(island) = island else {
         return tuning;
     };
-    let width = island.plate_width();
+    let pitch = tuning.spacing;
+    let edge = field_edge(&tuning);
+    let columns = ((island.plate_width() - 2.0 * edge) / pitch).floor() + 1.0;
+    let width = (columns - 1.0) * pitch + 2.0 * edge;
     Tuning {
-        columns: (tuning.columns * width / tuning.width).round(),
+        columns,
         width,
         processing_width: width,
         ..tuning
@@ -490,8 +509,18 @@ mod tests {
             top: -64.0,
         };
         let filled = fill_island(tuning, Some(island)).clamped();
-        assert_eq!((filled.width, filled.processing_width), (209.0, 209.0));
-        assert_eq!((filled.columns, filled.rows), (80.0, tuning.rows));
+        assert_eq!((filled.columns, filled.rows), (84.0, tuning.rows));
+        assert_eq!(filled.width, filled.processing_width);
+        // The outer columns sit as far in from the ends as the outermost
+        // rows that show from the top and bottom (the faint outer row
+        // doesn't), within the island less its padding.
+        let side = (filled.width - (filled.columns - 1.0) * filled.spacing) / 2.0;
+        assert!((side - field_edge(&filled)).abs() < 1e-3);
+        assert!((field_edge(&filled) - 5.2).abs() < 1e-3);
+        assert!(
+            filled.width <= island.plate_width()
+                && island.plate_width() - filled.width < filled.spacing
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ fn dot_uniform_layout_matches_wgsl() {
     assert_eq!(std::mem::offset_of!(DotUniforms, shadow), 128);
     assert_eq!(std::mem::offset_of!(DotUniforms, plate_layout), 144);
     assert_eq!(std::mem::offset_of!(DotUniforms, island), 160);
+    assert_eq!(std::mem::offset_of!(DotUniforms, field), 176);
 }
 
 #[test]
@@ -63,9 +64,9 @@ fn schedule(model: &mut IndicatorModel, start: Instant) -> Vec<DotFrame> {
         .collect()
 }
 
-/// The layout a 14-inch MacBook Pro gives `tuning`'s placement.
-fn macbook_layout(tuning: Tuning) -> Layout {
-    let screen = crate::hud_placement::Screen {
+/// A 1512 × 982 point 14-inch MacBook Pro: a 32 pt notch 185 pt wide.
+fn macbook() -> crate::hud_placement::Screen {
+    crate::hud_placement::Screen {
         frame: crate::hud_placement::Rect {
             x: 0.0,
             y: 0.0,
@@ -82,11 +83,36 @@ fn macbook_layout(tuning: Tuning) -> Layout {
         aux_left: 663.5,
         aux_right: 663.5,
         bar: 24.0,
-    };
+    }
+}
+
+/// An Apple Studio Display at its default 2560 × 1440 points: no notch, a
+/// 24 pt menu bar.
+fn studio_display() -> crate::hud_placement::Screen {
+    crate::hud_placement::Screen {
+        frame: crate::hud_placement::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 2560.0,
+            height: 1440.0,
+        },
+        visible: crate::hud_placement::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 2560.0,
+            height: 1416.0,
+        },
+        bar: 24.0,
+        ..Default::default()
+    }
+}
+
+/// Where `screen` puts the capture window for `tuning`'s placement.
+fn place_on(screen: &crate::hud_placement::Screen, tuning: Tuning) -> crate::hud_placement::Placed {
     let (width, height) = CAPTURE_DOT_WINDOW;
     crate::hud_placement::place(
         tuning.placement,
-        &screen,
+        screen,
         crate::hud_placement::Content {
             window: (f64::from(width), f64::from(height)),
             plate: (f64::from(width) - 24.0, f64::from(dot_scope::PLATE_HEIGHT)),
@@ -94,7 +120,30 @@ fn macbook_layout(tuning: Tuning) -> Layout {
         },
         false,
     )
-    .layout
+}
+
+/// What the screen shows behind the window.
+#[derive(Clone, Copy)]
+struct Backdrop {
+    /// How far the window's top sits below the screen's, pt.
+    drop: f32,
+    /// The menu bar's height.
+    bar: f32,
+    /// The notch's width and height, if any.
+    notch: Option<(f32, f32)>,
+}
+
+fn backdrop(
+    screen: &crate::hud_placement::Screen,
+    placed: &crate::hud_placement::Placed,
+) -> Backdrop {
+    Backdrop {
+        drop: (screen.frame.y + screen.frame.height - placed.top_left.1) as f32,
+        bar: screen.bar_height() as f32,
+        notch: screen
+            .notch()
+            .map(|notch| (notch.width as f32, notch.height as f32)),
+    }
 }
 
 /// Renders a dictation through the real shaders offscreen, as PNG frames
@@ -105,8 +154,9 @@ fn macbook_layout(tuning: Tuning) -> Layout {
 /// ```
 ///
 /// `HEX_HUD_TUNING` overrides Dot scope's tuning as JSON, such as
-/// `{"processing": "pulse", "placement": "notch"}`, placed on a pretend
-/// 14-inch MacBook Pro; `HEX_HUD_THEME=light` draws over a light desktop. `HEX_HUD_DUMP=<file>` also writes
+/// `{"processing": "pulse", "placement": "notch"}`, placed on a 14-inch
+/// MacBook Pro, or with `HEX_HUD_SCREEN=studio` on a Studio Display (no
+/// notch); `HEX_HUD_THEME=light` draws over a light desktop. `HEX_HUD_DUMP=<file>` also writes
 /// every frame's shader inputs, for rendering the same frames elsewhere.
 #[test]
 #[ignore = "writes frames for a review clip"]
@@ -123,9 +173,17 @@ fn rune_hud_frames() {
     }
     let tuning: Tuning = serde_json::from_value(fields).unwrap();
     let start = Instant::now();
+    let screen = if std::env::var("HEX_HUD_SCREEN").as_deref() == Ok("studio") {
+        studio_display()
+    } else {
+        macbook()
+    };
+    let placed = place_on(&screen, tuning);
+    let layout = placed.layout;
+    let backdrop = backdrop(&screen, &placed);
     let mut model = IndicatorModel::new(tuning, start);
+    model.set_island(layout.island);
     let frames = schedule(&mut model, start);
-    let layout = macbook_layout(tuning);
 
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -197,26 +255,58 @@ fn rune_hud_frames() {
         }
         drop(mapped);
         readback.unmap();
-        write_over_desktop(&out.join(format!("{n:04}.png")), size, &rgba, dark);
+        write_over_desktop(
+            &out.join(format!("{n:04}.png")),
+            size,
+            scale,
+            &rgba,
+            dark,
+            backdrop,
+        );
     }
     if let Ok(path) = std::env::var("HEX_HUD_DUMP") {
         std::fs::write(path, dump).unwrap();
     }
 }
 
-/// Premultiplied RGBA over the desktop colour, as an RGB PNG.
-fn write_over_desktop(path: &std::path::Path, size: (u32, u32), rgba: &[u8], dark: bool) {
-    let desktop: [f32; 3] = if dark {
-        [0.11, 0.11, 0.13]
+/// Premultiplied RGBA over the desktop colour, the menu bar, and the notch
+/// (`backdrop`), as an RGB PNG.
+fn write_over_desktop(
+    path: &std::path::Path,
+    size: (u32, u32),
+    scale: f32,
+    rgba: &[u8],
+    dark: bool,
+    backdrop: Backdrop,
+) {
+    let (desktop, menu_bar): ([f32; 3], [f32; 3]) = if dark {
+        ([0.11, 0.11, 0.13], [0.2, 0.2, 0.22])
     } else {
-        [0.93, 0.93, 0.94]
+        ([0.93, 0.93, 0.94], [0.98, 0.98, 0.98])
+    };
+    let behind = |x: u32, y: u32| {
+        // In points from the screen's top middle.
+        let px = (x as f32 + 0.5) / scale - size.0 as f32 / scale / 2.0;
+        let py = (y as f32 + 0.5) / scale + backdrop.drop;
+        if let Some((width, height)) = backdrop.notch {
+            // The notch's bottom corners are rounded 8 pt.
+            let radius = 8.0;
+            let dx = (px.abs() - (width / 2.0 - radius)).max(0.0);
+            let dy = (py - (height - radius)).max(0.0);
+            if px.abs() <= width / 2.0 && py <= height && dx.hypot(dy) <= radius {
+                return [0.0; 3];
+            }
+        }
+        if py < backdrop.bar { menu_bar } else { desktop }
     };
     let rgb: Vec<u8> = rgba
         .chunks(4)
-        .flat_map(|p| {
+        .enumerate()
+        .flat_map(|(i, p)| {
+            let under = behind(i as u32 % size.0, i as u32 / size.0);
             let a = f32::from(p[3]) / 255.0;
             (0..3).map(move |c| {
-                let v = f32::from(p[c]) / 255.0 + desktop[c] * (1.0 - a);
+                let v = f32::from(p[c]) / 255.0 + under[c] * (1.0 - a);
                 (v * 255.0).round().clamp(0.0, 255.0) as u8
             })
         })

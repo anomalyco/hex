@@ -21,7 +21,9 @@ use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
 use crate::dictation_indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
-use crate::dot_scope::{self, MAX_DOTS, PLATE_HEIGHT};
+#[cfg(not(target_os = "macos"))]
+use crate::dot_scope::PLATE_HEIGHT;
+use crate::dot_scope::{self, MAX_DOTS};
 use crate::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
 use crate::rune_ui::live_text::Spot;
 
@@ -263,9 +265,10 @@ struct DotUniforms {
     shadow: [f32; 4],
     plate_layout: [f32; 4],
     island: [f32; 4],
+    field: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<DotUniforms>() == 176);
+const _: () = assert!(std::mem::size_of::<DotUniforms>() == 192);
 const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
 
 impl DotUniforms {
@@ -314,6 +317,7 @@ impl DotUniforms {
             island: layout
                 .island
                 .map_or([0.0; 4], |island| island_shape(island, pose)),
+            field: [field_radius(layout, pose), 0.0, 0.0, 0.0],
         }
     }
 }
@@ -334,6 +338,16 @@ fn island_shape(island: Island, pose: &dot_scope::Pose) -> [f32; 4] {
         island.top,
         (NOTCH_RADIUS + (ISLAND_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(height / 2.0),
     ]
+}
+
+/// The field's corner radius: a pill on a plate, and in an island its
+/// corners follow the island's, the same distance in all round.
+fn field_radius(layout: Layout, pose: &dot_scope::Pose) -> f32 {
+    let half_height = pose.height / 2.0;
+    match layout.island {
+        Some(_) => (ISLAND_RADIUS - ISLAND_PAD as f32).min(half_height),
+        None => half_height,
+    }
 }
 
 fn bytes<T: Copy>(value: &T) -> &[u8] {

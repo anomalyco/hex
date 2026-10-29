@@ -1059,8 +1059,10 @@ Placement                                     // hud_placement::place
 │   screen, just right of the notch on a notched one
 ├── From the notch -> A black island grows out of the notch, 28 pt wider
 │   each side (Island past the notch, 0–60 pt), and shrinks back into it;
-│   the field fills it, less 16 pt each side, at the same dot spacing (more
-│   columns); In the menu bar on a flat screen
+│   the field fills it at the same dot spacing (more columns), inset 7 pt
+│   all round with corners that follow the island's, snapped to whole
+│   columns so the dots sit as far from the sides as from the top and
+│   bottom; In the menu bar on a flat screen
 ├── Pretend notch -> Draws the island from a 185 pt notch on a flat screen
 └── Over the menu bar -> Window level NSStatusWindowLevel + 1, click-through
 ```

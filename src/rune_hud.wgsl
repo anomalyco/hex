@@ -73,6 +73,9 @@ struct DotUniforms {
     plate_layout: vec4f,
     // The island's half width, height, top edge, and bottom radius, pt.
     island: vec4f,
+    // The field's corner radius, pt: half its height on a plate, the
+    // island's corners less its padding in an island.
+    field: vec4f,
 }
 
 // The island grown out of the notch: a box hanging from the screen's top
@@ -112,7 +115,7 @@ fn dot_scope_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f 
     let softness = max(u.softness, 0.0);
     let aa = pixel * 0.75 + softness * 0.72;
     let half_size = vec2f(u.width, u.height) * 0.5;
-    let radius = u.height * 0.5;
+    let radius = clamp(u.field.x, 0.0, u.height * 0.5);
     let distance = rounded_box(point, half_size, radius);
     let dark = u.dark > 0.5;
     var result = vec4f(0.0);
@@ -157,8 +160,7 @@ fn dot_scope_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f 
                 continue;
             }
             let center = (vec2f(f32(i), f32(j)) - center_offset) * pitch;
-            let cap_dx = max(abs(center.x) - (u.width * 0.5 - radius), 0.0);
-            let cap = radius - length(vec2f(cap_dx, center.y));
+            let cap = -rounded_box(center, half_size, radius);
             let mask = sstep(1.4, 4.6, cap);
             if (mask <= 0.0) {
                 continue;
@@ -166,7 +168,7 @@ fn dot_scope_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f 
             let value = dot_value(j * columns + i);
             let power = max(value.x, 1e-5);
             let fresh = value.y;
-            let row = abs(center.y) / radius;
+            let row = abs(center.y) / half_size.y;
             let floor_alpha = unlit * (1.0 - 0.7 * sstep(0.35, 0.95, row)) * presence * u.grid;
             let alpha = floor_alpha + (full - floor_alpha) * pow(power, curve * mix(1.4, 1.0, fresh));
             let dot_radius = (0.25 + 0.17 * pow(power, 0.6))

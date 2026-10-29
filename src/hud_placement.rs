@@ -17,8 +17,9 @@ pub const BAR_INSET: f64 = 3.0;
 const NOTCH_GAP: f64 = 10.0;
 /// The island's room around the plate below the notch.
 pub const ISLAND_PAD: f64 = 7.0;
-/// The island's room either side of the plate, about its corner radius.
-pub const ISLAND_INSET: f64 = 16.0;
+/// The island's room either side of the plate: the same as above and
+/// below it, so the field sits evenly in the island.
+pub const ISLAND_INSET: f64 = ISLAND_PAD;
 /// "Pretend notch" on a flat screen: a 14-inch MacBook Pro's notch width.
 const PRETEND_NOTCH_WIDTH: f64 = 185.0;
 
@@ -429,7 +430,7 @@ mod tests {
         assert_eq!(island.notch, [185.0, 32.0]);
         assert_eq!(island.top, -64.0, "the window hangs from the top edge");
         assert_eq!(island.width, 241.0, "28 pt past the notch each side");
-        assert_eq!(island.plate_width(), 209.0);
+        assert_eq!(island.plate_width(), 227.0);
         let wide = Content {
             island_spread: 500.0,
             ..CONTENT
