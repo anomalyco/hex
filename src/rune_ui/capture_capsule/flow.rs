@@ -1949,7 +1949,7 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 0.0);
         let before = done(&flow, 0.5);
-        assert_eq!(before.ask_keys, ["⌥", "⇧", "V"]);
+        assert_eq!(before.ask_keys, ["⌥", "⇧", "L"]);
         let rebound = HotkeyBinding {
             modifiers: HotkeyModifiers::option_command(),
             ..HotkeyBinding::capture_list_default()

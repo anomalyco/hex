@@ -233,7 +233,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Turn a feature on and it joins the sidebar.", ["Włącz funkcję, a pojawi się na pasku bocznym.", "开启功能后，它会出现在侧边栏中。", "機能をオンにすると、サイドバーに加わります。", "Schalte eine Funktion ein, dann erscheint sie in der Seitenleiste.", "Activa una función y aparecerá en la barra lateral.", "Увімкніть функцію, і вона з’явиться на бічній панелі."]),
     ("Clear history", ["Wyczyść historię", "清除历史记录", "履歴を消去", "Verlauf löschen", "Borrar historial", "Очистити історію"]),
     ("Keep for", ["Przechowuj przez", "保留时长", "保存期間", "Behalten für", "Conservar durante", "Зберігати"]),
-    #[cfg(hex_capture)]
     ("Annotate", ["Adnotacje", "Annotate", "Annotate", "Annotate", "Annotate", "Annotate"]),
     ("Press to start and again to stop. While it records, Ctrl+Alt+D turns drawing on and off.", ["Naciśnij, aby zacząć, i ponownie, aby zatrzymać. Podczas nagrywania Ctrl+Alt+D włącza i wyłącza rysowanie.", "按一下开始，再按一下停止。录制时，Ctrl+Alt+D 可开关绘制。", "押すと開始、もう一度押すと停止します。録画中は Ctrl+Alt+D で描画のオンとオフを切り替えます。", "Drücken zum Starten, erneut zum Stoppen. Während der Aufnahme schaltet Strg+Alt+D das Zeichnen ein und aus.", "Pulsa para empezar y otra vez para parar. Mientras graba, Ctrl+Alt+D activa y desactiva el dibujo.", "Натисніть, щоб почати, і ще раз, щоб зупинити. Під час запису Ctrl+Alt+D вмикає й вимикає малювання."]),
     #[cfg(hex_capture)]

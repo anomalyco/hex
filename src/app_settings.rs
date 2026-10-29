@@ -2550,11 +2550,11 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     /// The capsule's ask chip and footer hint show the send-to list's own shortcut,
-    /// ⌥⇧V unless rebound, and no keys while the list has none.
+    /// ⌥⇧L unless rebound, and no keys while the list has none.
     #[cfg(hex_capture)]
     #[test]
     fn the_capsule_shows_the_list_shortcuts_own_keys() {
-        assert_eq!(list_keycaps(), ["⌥", "⇧", "V"]);
+        assert_eq!(list_keycaps(), ["⌥", "⇧", "L"]);
         let rebound = HotkeyBinding {
             modifiers: HotkeyModifiers::option_command(),
             key: Some(HotkeyKey::named("l")),

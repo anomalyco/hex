@@ -4133,9 +4133,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn the_host_is_absent_while_captures_are_off() {
-        // Captures are off by default, so no host, engine, thread, or sink
-        // exists and the listener answers `feature-off`.
-        assert!(!crate::app_settings::CaptureSettings::default().enabled);
+        // While captures are off, no host, engine, thread, or sink exists
+        // and the listener answers `feature-off`.
         if !crate::app_settings::capture_on() {
             assert!(CaptureHost::start(None, &Environment::for_test()).is_none());
         }
