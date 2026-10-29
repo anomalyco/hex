@@ -1744,13 +1744,15 @@ mod tests {
                 );
                 assert!(capture.flags_changed(0).is_none());
                 let text = crate::control::settings::format_hotkey(&binding);
-                assert_eq!(
-                    crate::control::settings::parse_hotkey(&text, |name| {
-                        hotkey_key_named(name).map_err(str::to_owned)
-                    })
-                    .unwrap(),
-                    binding
-                );
+                let parsed = crate::control::settings::parse_hotkey(&text, |name| {
+                    hotkey_key_named(name).map_err(str::to_owned)
+                });
+                // A bare left click is recorded, then refused (issue 411).
+                if binding.is_bare_primary_click() {
+                    assert!(parsed.is_err());
+                } else {
+                    assert_eq!(parsed.unwrap(), binding);
+                }
             }
         }
         let mut capture = ChordCapture::default();
