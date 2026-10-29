@@ -78,7 +78,8 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 | Short message under a control | `note` |
 | Text entry saved when typing pauses | `text_field` |
 | Keyboard highlight in a search popover | `Highlight` |
-| List + detail | `split` with `list_row`, `group_label`, `detail_header`, `detail_title`, `section_label`, `fact` |
+| List + detail (Commands, Meetings, History) | `list_detail`: `list_column` (search over the rows, on the title's edge, no divider) and `item` rows (no hover fill, time on the right, a hover action in its place via `row_action`), grouped by `group`; the selected item in `body`'s raised card with `card_header`, `card_title`, `meta_text`, `ghost_icon` actions, `card_scroll`, and `facts`; `empty_state` for nothing to show |
+| List + detail (Activity) | `split` with `list_row`, `group_label`, `detail_header`, `detail_title`, `section_label`, `fact` |
 | Keyboard-selectable list (sidebar, list + detail, picker languages) | `source_list` around rows made with `list_row` or `source_item` |
 | Nothing to show, errors | `message`, `placeholder`, `error_panel` |
 | A permission's Allow / Allowed control | `permission_control`, `allowed` |

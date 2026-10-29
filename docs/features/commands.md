@@ -13,7 +13,7 @@ previews, providers, or native actions were run for this split.
 Hex > Commands                                      // commands; off by default
 ├── Top card "Voice commands" switch -> Prepare command model // needs setup permissions
 ├── Model failed -> card below it: Retry / Turn off commands  // only in this pane
-├── Search / select a catalog row -> Inspect, not execute
+├── Search / select a row (grouped by task) -> Inspect in the card, not execute
 └── Create config / Edit config / Copy agent prompt  // personal workspace
 
 hex commands init -> Create or refresh ~/.config/hex // does not start listening

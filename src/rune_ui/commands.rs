@@ -8,13 +8,9 @@ use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::TextInput;
 
 use super::Ui;
-use super::controls::{
-    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, setting_row, toggle_row,
-};
-use super::lists::{
-    detail_header, detail_title, error_panel, fact, group_label, list_row, message, placeholder,
-    source_list, split,
-};
+use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, setting_row, toggle_row};
+use super::list_detail::{self as ld, Item};
+use super::lists::error_panel;
 use super::platform::{CatalogCommand, CommandModel, PlatformRequest, Workspace};
 use crate::commands::CommandScope;
 use crate::desktop_i18n::tr;
@@ -110,6 +106,110 @@ fn agent_prompt(workspace: &str) -> String {
 /// The header actions (workspace, prompt), the opt-in card and notices, and
 /// the list + detail body.
 pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
+    let (visible, selected) = visible(ui);
+    let mut list = col().key("commands-list");
+    for (group, task) in tasks(&visible).iter().enumerate() {
+        list = list.child(ld::group(
+            p,
+            &format!("task{group}"),
+            task_label(task),
+            group == 0,
+        ));
+        for command in visible.iter().filter(|command| command.task == *task) {
+            let id = command.id.clone();
+            list = list.child(ld::item(
+                p,
+                Item {
+                    key: format!("command-{}", command.id),
+                    title: command.phrase.clone(),
+                    meta: command.description.clone(),
+                    meta_ink: None,
+                    time: scope_label(&command.scope),
+                    hover: Vec::new(),
+                    selected: selected == Some(command.id.as_str()),
+                },
+                move |ui: &mut Ui| ui.commands.selected = Some(id.clone()),
+            ));
+        }
+    }
+    let column = ld::list_column(search(ui, p), "commands-scroll", list);
+    let command = selected.and_then(|id| ui.platform.commands.iter().find(|c| c.id == id));
+    let body = ld::body(p, "commands-body", column, detail(ui, p, command));
+    (
+        header_actions(ui, p),
+        col()
+            .key("commands-pane")
+            .grow(1.0)
+            .shrink()
+            .child(ld::notices(notices(ui, p)))
+            .child(body),
+    )
+}
+
+fn search(ui: &Ui, p: Paint) -> El {
+    TextInput::new(&ui.commands.search)
+        .placeholder(tr("Search commands"))
+        .width(None)
+        .leading_icon(p.k.glyph.search)
+        .on_edit(|ui: &mut Ui| &mut ui.commands.search)
+        .build(p.k)
+        .key("commands-search")
+}
+
+/// The tasks of `visible`, in catalog order.
+fn tasks<'a>(visible: &[&'a CatalogCommand]) -> Vec<&'a str> {
+    let mut tasks: Vec<&str> = Vec::new();
+    for command in visible {
+        if !tasks.contains(&command.task.as_str()) {
+            tasks.push(&command.task);
+        }
+    }
+    tasks
+}
+
+/// The commands the search matches, and the selected one's id (the first
+/// when none is).
+fn visible(ui: &Ui) -> (Vec<&CatalogCommand>, Option<&str>) {
+    let query = ui.commands.search.text.trim().to_lowercase();
+    let visible: Vec<&CatalogCommand> = ui
+        .platform
+        .commands
+        .iter()
+        .filter(|command| matches(command, &query))
+        .collect();
+    let selected = ui
+        .commands
+        .selected
+        .as_deref()
+        .filter(|id| visible.iter().any(|command| command.id == *id))
+        .or_else(|| visible.first().map(|command| command.id.as_str()));
+    (visible, selected)
+}
+
+/// Above the list: the opt-in card, then any workspace or model notice.
+fn notices(ui: &Ui, p: Paint) -> Vec<El> {
+    let state = &ui.platform;
+    let mut top = vec![enable_card(ui, p)];
+    if let Some(error) = state
+        .workspace_error
+        .as_deref()
+        .filter(|_| state.workspace == Workspace::Error)
+    {
+        top.push(error_panel(
+            p,
+            "commands-error",
+            tr("Personal commands are not loading."),
+            error,
+        ));
+    }
+    if let Some((title, description)) = model_notice(ui) {
+        top.push(model_notice_panel(ui, p, title, description));
+    }
+    top
+}
+
+/// The workspace and agent prompt actions.
+fn header_actions(ui: &Ui, p: Paint) -> Vec<El> {
     let state = &ui.platform;
     let mut actions = Vec::new();
     actions.push(match state.workspace {
@@ -148,108 +248,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             },
         ));
     }
-    let query = ui.commands.search.text.trim().to_lowercase();
-    let visible: Vec<&CatalogCommand> = state
-        .commands
-        .iter()
-        .filter(|command| matches(command, &query))
-        .collect();
-    let selected = ui
-        .commands
-        .selected
-        .as_deref()
-        .filter(|id| visible.iter().any(|command| command.id == *id))
-        .or_else(|| visible.first().map(|command| command.id.as_str()));
-    let mut tasks: Vec<&str> = Vec::new();
-    for command in &visible {
-        if !tasks.contains(&command.task.as_str()) {
-            tasks.push(&command.task);
-        }
-    }
-    let mut list = col().key("commands-list");
-    if visible.is_empty() {
-        list = list.child(message(
-            p,
-            "commands-empty",
-            if query.is_empty() {
-                tr("No commands yet.")
-            } else {
-                tr("No matching commands.")
-            },
-            None,
-        ));
-    }
-    for (group, task) in tasks.iter().enumerate() {
-        list = list.child(group_label(
-            p,
-            &format!("task{group}"),
-            task_label(task),
-            group == 0,
-        ));
-        for command in visible.iter().filter(|command| command.task == *task) {
-            let id = command.id.clone();
-            list = list.child(list_row(
-                p,
-                &format!("command-{}", command.id),
-                &command.phrase,
-                Vec::new(),
-                &command.description,
-                selected == Some(command.id.as_str()),
-                move |ui: &mut Ui| ui.commands.selected = Some(id.clone()),
-            ));
-        }
-    }
-    let search = TextInput::new(&ui.commands.search)
-        .placeholder(tr("Search commands"))
-        .leading_icon(p.k.glyph.search)
-        .on_edit(|ui: &mut Ui| &mut ui.commands.search)
-        .build(p.k)
-        .key("commands-search");
-    let column = col()
-        .key("commands-column")
-        .h_full()
-        .gap(8.0)
-        .child(search)
-        .child(super::scroll_body("commands-scroll", source_list(list)));
-    let detail = detail(
-        ui,
-        p,
-        selected.and_then(|id| state.commands.iter().find(|c| c.id == id)),
-    );
-    let body = split(p, "commands-body", column, detail);
-
-    let mut top = vec![enable_card(ui, p)];
-    if let Some(error) = state
-        .workspace_error
-        .as_deref()
-        .filter(|_| state.workspace == Workspace::Error)
-    {
-        top.push(error_panel(
-            p,
-            "commands-error",
-            tr("Personal commands are not loading."),
-            error,
-        ));
-    }
-    if let Some((title, description)) = model_notice(ui) {
-        top.push(model_notice_panel(ui, p, title, description));
-    }
-    (
-        actions,
-        col()
-            .key("commands-pane")
-            .grow(1.0)
-            .shrink()
-            .child(
-                col()
-                    .key("notices")
-                    .px(METRICS.gutter)
-                    .pb(12.0)
-                    .gap(8.0)
-                    .children(top),
-            )
-            .child(body),
-    )
+    actions
 }
 
 /// The opt-in, and the confirmation that keeps the released microphone
@@ -357,46 +356,43 @@ fn model_notice_panel(ui: &Ui, p: Paint, title: &str, description: &str) -> El {
 
 fn detail(ui: &Ui, p: Paint, command: Option<&CatalogCommand>) -> El {
     let Some(command) = command else {
-        return placeholder(p, "command-detail", tr("Select a command."));
+        let searching = !ui.commands.search.text.trim().is_empty();
+        return ld::empty_state(
+            p,
+            "command-detail",
+            ld::SEARCH_ICON,
+            if searching {
+                tr("No matching commands.")
+            } else {
+                tr("No commands yet.")
+            },
+            None,
+        );
     };
     let aliases = if command.aliases.is_empty() {
         tr("None").to_string()
     } else {
-        command.aliases.join("\n")
+        command.aliases.join(", ")
     };
     let context = ui
         .platform
         .context
         .clone()
         .unwrap_or_else(|| tr("Unavailable").into());
-    let facts = col()
-        .key("facts")
-        .gap(10.0)
-        .pt(16.0)
-        .child(fact(p, "task", tr("Task"), task_label(&command.task)))
-        .child(fact(
-            p,
-            "context",
-            tr("Context"),
-            &scope_label(&command.scope),
-        ))
-        .child(fact(p, "aliases", tr("Aliases"), &aliases))
-        .child(fact(p, "current-context", tr("Current context"), &context));
     col()
         .key("command-detail")
-        .grow(1.0)
-        .shrink()
-        .px(METRICS.gutter)
-        .pb(16.0)
-        .child(detail_header(
-            detail_title(p, &command.phrase),
-            vec![
-                text(command.description.clone())
-                    .key("description")
-                    .font(DESCRIPTION)
-                    .color(p.muted()),
-            ],
+        .gap(16.0)
+        .child(ld::card_header(
+            ld::card_title(p, &command.phrase),
+            vec![ld::meta_text(p, &command.description)],
             Vec::new(),
         ))
-        .child(facts)
+        .child(ld::facts(
+            p,
+            vec![
+                (tr("Context"), scope_label(&command.scope)),
+                (tr("Aliases"), aliases),
+                (tr("Current context"), context),
+            ],
+        ))
 }

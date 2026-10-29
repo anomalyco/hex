@@ -471,8 +471,8 @@ Completed output                         // output
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   └── Last completed dictation, not Voice Action
 └── History
-    ├── Inspect / search / copy / delete
-    ├── Retention -> Seven days by default, always hard-capped
+    ├── Inspect / search / copy (row hover or the card) / delete
+    ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
     ├── Off -> Stop new entries; preserve existing entries
     └── Clear all -> Explicit deletion
 ```

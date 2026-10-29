@@ -683,7 +683,7 @@ Final publication                                   // meetings.output
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal
-Meetings pane -> Row Copy (completed rows), detail Copy transcript, Reveal Markdown (or Reveal Files when none)
+Meetings pane -> Copy icon on a completed row's hover, the card's Copy transcript icon, Reveal Markdown (or Reveal Files when none)
 Menu bar (idle) -> Copy Last Meeting Transcript
 Option-Control-V -> `MeetingPasteCursor` in `meeting.rs` over the transcript
 │   through the press (meetings.copy-through-now)
@@ -700,28 +700,34 @@ Option-Control-V -> `MeetingPasteCursor` in `meeting.rs` over the transcript
 ### Meetings Pane
 
 ```ts
-Header: Search meetings (title, app, notes, final transcript) + Start recording
-        (the pane's one Primary button) / Stop & transcribe (Secondary, red dot,
-        elapsed time)
-List (grouped Today / Yesterday / date)
-└── Row: title (generated when present) · time · length · app · status chip · Copy (completed rows, fixed-width inline "Copied")
-    └── Recording (red dot) / Transcribing / Interrupted / Failed; Ready in detail
-Detail
-├── Title, status chip, date · time · duration · app
-├── Actions: Copy transcript, Rename (finished only), "…" overflow menu
+Header: Start recording (the pane's one Primary button) / red dot, elapsed
+        time, and Stop & transcribe (Secondary), grouped at the right
+List (on the title's edge, no divider; grouped Today / Yesterday / date)
+├── Search meetings (title, app, notes, final transcript) above the rows
+└── Row: title (generated when present), time on the right; meta line
+    "Recording · Zoom" / "Failed · 2 min" / "Zoom · 38 min" (red while
+    recording or failed); no hover fill; a completed row shows a Copy
+    icon in the time's place on hover (pointer only; "Copied" as a check)
+Detail (a raised card beside the list)
+├── Title, status chip (not when Ready), date · time · duration · app
+├── Ghost icons top right: Copy transcript, Rename (finished only), "…" menu
 │   └── Copy summary (stays open to show "Copied"), Reveal Markdown, Summarize /
 │       Regenerate summary ("Summarizing…" disabled while running), separator,
 │       Delete… (finished meetings only for the last three)
 ├── Errors at the top of the scroll area
 ├── Summary: one paragraph, at most two sentences
-└── Transcript: Them left, You right in accent; merged turns; timestamps;
-    30 s+ pause dividers; live view follows the tail; "Listening..." while recording
+├── Chapters (when present): start, name, line, and a Copy section icon
+└── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
+    faint, each with its clock; merged turns; 30 s+ pause lines;
+    "Listening…" while recording
+Empty: "No meetings yet." with a one-line hint; "No meetings match." while
+searching
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
   -> file name unchanged; empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
-  / Cancel, which replace the action row until answered
+  / Cancel, under the title in place of the icons until answered
   -> exported Markdown, then Application Support/meetings/<id>, to the Trash
   -> refused while recording, transcribing, or writing notes   // meetings.delete
 ```

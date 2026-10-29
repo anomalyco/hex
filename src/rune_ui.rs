@@ -25,6 +25,7 @@ mod host;
 mod hud_lab;
 #[cfg(target_os = "macos")]
 mod hud_stories;
+mod list_detail;
 mod lists;
 pub(crate) mod live_text;
 #[cfg(target_os = "macos")]
@@ -1654,7 +1655,11 @@ const SCROLL_FADE: (f32, f32) = (4.0, 24.0);
 /// are never cut; content needing room beside the edges (bordered cards)
 /// pads itself horizontally.
 fn scroll_body(key: &str, content: El) -> El {
-    let (top, bottom) = SCROLL_FADE;
+    faded_body(key, content, SCROLL_FADE)
+}
+
+/// A [`scroll_body`] with its own top and bottom fades.
+fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
     col()
         .key(key)
         .grow(1.0)

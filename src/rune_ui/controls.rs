@@ -181,12 +181,16 @@ const SECTION_LABEL_LINE: f32 = 16.0;
 
 /// A raised card of rows with hairline separators between them.
 pub(super) fn card(p: Paint, key: &str, rows: Vec<impl Into<CardRow>>) -> El {
-    let c = &p.k.c;
-    let mut card = col().key(key).fill(c.bg_base).radius(p.k.radius.lg);
+    raised(p, key).children(stack(p, rows.into_iter().map(Into::into).collect()))
+}
+
+/// The card's raised surface, empty.
+pub(super) fn raised(p: Paint, key: &str) -> El {
+    let mut surface = col().key(key).fill(p.k.c.bg_base).radius(p.k.radius.lg);
     for shadow in &p.k.elevation.raised {
-        card = card.box_shadow(*shadow);
+        surface = surface.box_shadow(*shadow);
     }
-    card.children(stack(p, rows.into_iter().map(Into::into).collect()))
+    surface
 }
 
 /// `rows` as a card's children, a separator between each pair.
