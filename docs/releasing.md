@@ -220,7 +220,7 @@ cloudflare.config.ts (cf deploy --prebuilt --mode <mode>, from CI only)
 
 https://anoma.ly/hex/                      the site; downloads read the service's stable manifest at build time
 ├─ download/dev                            302 to the dev channel's macos-arm64-dmg, read per request
-├─ install-linux.sh, install-windows.ps1   the installers, copied from scripts/ at build time
+├─ install-linux.sh, install-windows.ps1   the installers, copied from .github/release/ at build time
 └─ files/                                  the frozen 2.3.1 bucket for old clients (below)
 ```
 
@@ -314,10 +314,9 @@ app (new updater, and on macOS a new bundle ID), so:
   Artifact Signing subject). Check the first Azure-signed Hex build's subject
   against it before a stable release; unsigned builds never update.
 - **Linux and Windows:** the feeds stay at 2.3.1; the site and README tell
-  users to reinstall. `HEX_RELEASE_SIGNING_KEY` (the old ed25519 feed key,
-  public key in 2.3.1's `src/self_update.rs`) stays in the `release`
-  environment, unused, in case those installs should later be pointed at the
-  new build by a signed feed.
+  users to reinstall. `HEX_RELEASE_SIGNING_KEY` (the ed25519 key 2.3.1's
+  feeds were signed with) now signs every Linux executable Release publishes
+  (`.github/release/sign-linux.sh`).
 
 ### Transition from Kit's hosting
 
@@ -357,7 +356,8 @@ it. No reviewer is required.
 | `HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
 | `AZURE_*` | Authenticode (docs/windows-signing.md) |
 | `APPLE_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
-| `HEX_RELEASE_SIGNING_KEY`, `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 feed keys; unused, kept for old clients |
+| `HEX_RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
+| `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
 
 ## Linux packages
 

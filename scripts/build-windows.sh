@@ -43,7 +43,7 @@ if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit or remove all working-tree changes before building a release." >&2
   exit 1
 fi
-installer="$root/scripts/install-windows.ps1"
+installer="$root/.github/release/install-windows.ps1"
 # PowerShell needs a Windows path; Git Bash converts only bare arguments.
 installer_windows=$(cygpath -w "$installer" 2>/dev/null || printf '%s' "$installer")
 powershell -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw '$installer_windows'))"

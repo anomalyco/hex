@@ -2,8 +2,10 @@
 //! (`<support>/install.json`) updates itself by activating a new version
 //! directory and switching the `current` symlink atomically. Source builds
 //! (the `source-build` marker) and package-managed executables (pacman,
-//! dpkg, rpm, Nix) never replace themselves. Linux has no OS code signature to check:
-//! HTTPS and the manifest's SHA-256 are the only integrity checks.
+//! dpkg, rpm, Nix) never replace themselves. Linux has no OS code signature,
+//! so every executable carries an ed25519 signature by Anomaly's release key
+//! (`<target>-sig`, made by `.github/release/sign-linux.sh`) over its SHA-256,
+//! which [`verify_signature`] checks before the download is even fetched.
 
 use std::fs::{self, File, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
@@ -21,6 +23,39 @@ pub const TARGET: &str = "linux-x64";
 #[cfg(target_arch = "aarch64")]
 pub const TARGET: &str = "linux-arm64";
 pub const DOWNLOAD_TARGET: &str = TARGET;
+
+/// Anomaly's ed25519 Linux release key, `.github/release/linux-signing.pub`
+/// (the `HEX_RELEASE_SIGNING_KEY` secret signs with its private half).
+pub const SIGNING_KEY: [u8; 32] = [
+    0xbf, 0xad, 0x02, 0xe6, 0x22, 0x08, 0xff, 0x14, 0x4b, 0x5c, 0x9d, 0x21, 0xc7, 0xe7, 0x9c, 0x7c,
+    0x16, 0xc6, 0x90, 0x42, 0x99, 0xa4, 0x37, 0xd8, 0x57, 0x30, 0x30, 0x07, 0xcd, 0x4f, 0xf7, 0xd8,
+];
+
+/// The manifest target holding the signature of [`TARGET`].
+pub fn signature_target() -> String {
+    format!("{TARGET}-sig")
+}
+
+fn signed_message(sha256: &str) -> String {
+    format!("anomaly.hex.linux-artifact.v1\n{sha256}\n")
+}
+
+/// Whether `signature` is Anomaly's release key signing the executable whose
+/// SHA-256 is `sha256`. The manifest names that SHA-256, and the download is
+/// checked against it, so this ties the bytes to the key.
+pub fn verify_signature(sha256: &str, signature: &[u8]) -> Result<()> {
+    verify_with(&SIGNING_KEY, sha256, signature)
+}
+
+fn verify_with(key: &[u8; 32], sha256: &str, signature: &[u8]) -> Result<()> {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let signature =
+        Signature::from_slice(signature).wrap_err("the Linux update's signature is malformed")?;
+    VerifyingKey::from_bytes(key)
+        .wrap_err("invalid Linux release key")?
+        .verify_strict(signed_message(sha256).as_bytes(), &signature)
+        .wrap_err("the Linux update is not signed by Anomaly's release key")
+}
 
 /// The release service's distribution kinds for this architecture's `.deb`
 /// and `.rpm` packages: their update commands download this architecture's
@@ -205,6 +240,55 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signatures_bind_the_release_key_to_the_sha256() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let public = key.verifying_key().to_bytes();
+        let sha = "a".repeat(64);
+        let signature = key.sign(signed_message(&sha).as_bytes()).to_bytes();
+        assert!(verify_with(&public, &sha, &signature).is_ok());
+        assert!(verify_with(&public, &"b".repeat(64), &signature).is_err());
+        assert!(verify_with(&SIGNING_KEY, &sha, &signature).is_err());
+        assert!(verify_with(&public, &sha, &signature[..63]).is_err());
+    }
+
+    #[test]
+    fn the_compiled_key_is_the_published_one() {
+        // .github/release/ is outside the Nix source; skip there.
+        let Ok(pem) = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/release/linux-signing.pub"),
+        ) else {
+            return;
+        };
+        // SubjectPublicKeyInfo for Ed25519: a fixed 12-byte prefix, then the key.
+        let mut der = vec![
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+        ];
+        der.extend_from_slice(&SIGNING_KEY);
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut encoded = String::new();
+        for chunk in der.chunks(3) {
+            let bits = chunk.iter().enumerate().fold(0u32, |bits, (index, byte)| {
+                bits | u32::from(*byte) << (16 - 8 * index)
+            });
+            for index in 0..4 {
+                encoded.push(if index <= chunk.len() {
+                    char::from(ALPHABET[(bits >> (18 - 6 * index) & 63) as usize])
+                } else {
+                    '='
+                });
+            }
+        }
+        assert!(pem.lines().any(|line| line == encoded), "{encoded}");
+        let installer = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/release/install-linux.sh"),
+        )
+        .unwrap();
+        assert!(installer.contains(&format!("\nsigning_key={encoded}\n")));
+    }
 
     #[test]
     fn activation_switches_current_without_removing_the_old_version() {

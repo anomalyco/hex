@@ -1,6 +1,7 @@
 #!/bin/sh
 # Publishes Hex to the Anomaly release service through its shared client,
-# https://anoma.ly/release/client.sh (anomalyco/release docs/publishing.md).
+# vendored as release-client.sh (anomalyco/release docs/publishing.md), so
+# nothing fetched at run time executes here.
 # The client trades the job's GitHub OIDC token for a one-hour publish
 # session, uploads in parallel (skipping files already stored), retries with
 # backoff and checks the published files. Runs only in the Release
@@ -24,8 +25,7 @@ esac
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-curl -fsSL --retry 5 --retry-all-errors "$RELEASE/client.sh" -o "$temporary/client.sh"
-client() { RELEASE=$RELEASE bash "$temporary/client.sh" "$@"; }
+client() { RELEASE=$RELEASE bash "$(dirname "$0")/release-client.sh" "$@"; }
 
 # The package managers that mirror Hex, each as the service lists it.
 distributions='[
@@ -54,9 +54,11 @@ publish() {
     "windows-arm64=Hex-$version-windows-arm64.exe=hex.exe" \
     "windows-arm64-setup=Hex-Setup-$version-windows-arm64.exe=HexSetup.exe" \
     "linux-x64=hex-$version-linux-x64=hex" \
+    "linux-x64-sig=hex-$version-linux-x64.sig=hex.sig" \
     "linux-x64-deb=hex-$version-linux-x64.deb=hex.deb" \
     "linux-x64-rpm=hex-$version-linux-x64.rpm=hex.rpm" \
     "linux-arm64=hex-$version-linux-arm64=hex" \
+    "linux-arm64-sig=hex-$version-linux-arm64.sig=hex.sig" \
     "linux-arm64-deb=hex-$version-linux-arm64.deb=hex.deb" \
     "linux-arm64-rpm=hex-$version-linux-arm64.rpm=hex.rpm"
   do

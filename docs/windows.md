@@ -280,7 +280,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Signed automatic self-update for managed installs | Implemented for x64 and ARM64; the same ed25519 key and `https://anoma.ly/hex/files` origin as Linux, one feed per architecture, activating into a user-local versions directory. Checks 10 s after launch and every 6 h (or Check for updates); a staged update shows Restart to update in the tray menu and the window's sidebar footer, and the tray tooltip says an update is available. Source builds keep the GitHub release link (Download update); CI test builds never check |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
 | Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
-| Managed installer with Start Menu integration and clean uninstall | Implemented as `scripts/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
+| Managed installer with Start Menu integration and clean uninstall | Implemented as `.github/release/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
 | First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only once setup is recorded — the shared Rune tour |
 | Activity pane with the live session and recent transcripts | Implemented in developer builds; the shared read-only pane |
 | Developer Meetings, live drafts, and meeting paste | Missing |
@@ -315,6 +315,6 @@ x64 and ARM64 by
 [`release.yml`](../.github/workflows/release.yml) with
 [`scripts/build-windows.sh`](../scripts/build-windows.sh), Authenticode-signed,
 and published to the Anomaly release service with the other platforms
-(`docs/releasing.md`); [`scripts/install-windows.ps1`](../scripts/install-windows.ps1)
+(`docs/releasing.md`); [`.github/release/install-windows.ps1`](../.github/release/install-windows.ps1)
 installs from its stable manifest. Users install
 with the command under [Install](#install).

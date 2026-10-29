@@ -101,7 +101,7 @@ Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/win
 [release publisher](../../.github/release/release-service.sh),
 [mirror publisher](../../scripts/publish-app-mirror.sh),
 [macOS release publisher](../../scripts/release-app.sh),
-[Linux installer](../../scripts/install-linux-release.sh), and
+[Linux installer](../../.github/release/install-linux.sh), and
 [updater](../../src/updater.rs).
 Model transfer failures in [transcription_models.rs](../../src/transcription_models.rs)
 and [moonshine.rs](../../src/moonshine.rs) explain the source host, retry, and

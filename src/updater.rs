@@ -662,6 +662,8 @@ fn check(
                 *lock(&shared.state) = State::Downloading;
             }
             transport::prune(&updates, Some(&target.sha256));
+            #[cfg(target_os = "linux")]
+            verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
             let file = transport::download(&url, &user_agent, &target, &updates)?;
             let staged = platform::stage(&file, &version)
                 .wrap_err_with(|| format!("could not stage Hex {version}"))?;
@@ -672,6 +674,32 @@ fn check(
             Ok(State::Ready)
         }
     }
+}
+
+/// Checks the manifest's `<target>-sig` file: Anomaly's release key signing
+/// the SHA-256 the executable is downloaded against. Without it, whoever
+/// controls the manifest could name any executable.
+#[cfg(target_os = "linux")]
+fn verify_linux_signature(
+    manifest: &str,
+    manifest_url: &str,
+    user_agent: &str,
+    target: &protocol::Target,
+    updates: &Path,
+) -> Result<()> {
+    let manifest = protocol::parse_manifest(manifest)
+        .ok_or_else(|| eyre!("the update manifest was rejected: malformed"))?;
+    let signature = manifest
+        .release
+        .target(&platform::signature_target())
+        .ok_or_else(|| eyre!("the Linux update has no signature"))?;
+    if signature.size != 64 {
+        return Err(eyre!("the Linux update's signature is malformed"));
+    }
+    let url = protocol::resolve_url(manifest_url, &signature.url)
+        .ok_or_else(|| eyre!("the signature URL {} is not usable", signature.url))?;
+    let file = transport::download(&url, user_agent, signature, updates)?;
+    platform::verify_signature(&target.sha256, &std::fs::read(file)?)
 }
 
 /// Whether `decision` replaces the staged update: only a different release

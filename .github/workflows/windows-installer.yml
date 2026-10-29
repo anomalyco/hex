@@ -31,7 +31,7 @@ jobs:
       version: ${{ steps.fetch.outputs.version }}
       available: ${{ steps.fetch.outputs.available }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - id: fetch
@@ -55,7 +55,7 @@ jobs:
           done
           echo "Testing installers around Hex $version from $manifest." >> "$GITHUB_STEP_SUMMARY"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: steps.fetch.outputs.available == 'true'
         with:
           name: published
@@ -81,10 +81,10 @@ jobs:
     env:
       HEX_VERSION: ${{ needs.published.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: published
           path: published
@@ -99,12 +99,12 @@ jobs:
         run: scripts/test-windows-installer.ps1 -Installer "installers/Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
       - name: Upload installer logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: installer-logs-${{ matrix.label }}
           path: ${{ runner.temp }}/hex-installer-logs
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: hex-setup-${{ matrix.label }}
           path: installers/

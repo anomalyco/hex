@@ -1,5 +1,5 @@
 # Install Hex as a managed, self-updating Windows application for the
-# current user, mirroring install-linux-release.sh: the executable lands
+# current user, mirroring install-linux.sh: the executable lands
 # in %APPDATA%\hex\versions\<version>\hex.exe, a Start Menu
 # shortcut points at it, install.json marks the install as direct, and the
 # app then keeps itself current from the Anomaly release service

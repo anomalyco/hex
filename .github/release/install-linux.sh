@@ -4,6 +4,10 @@ set -eu
 # Installs Hex from the Anomaly release service (docs/plans/release-service.md):
 # the stable manifest names the linux-x64 or linux-arm64 executable with its
 # size and SHA-256, and install.json marks the install as one Hex updates itself.
+# Anomaly's ed25519 Linux release key (.github/release/linux-signing.pub):
+# every executable must carry its signature as the release's <target>-sig
+# file, over "anomaly.hex.linux-artifact.v1\n<sha256>\n".
+signing_key=MCowBQYDK2VwAyEAv60C5iII/xRLXJ0hx+ecfBbGkEKZpDfYVzAwB81P99g=
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
 # HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
@@ -170,7 +174,7 @@ if [ -n "${HEX_INSTALL_ARTIFACT:-}" ] && [ -z "$channel" ]; then channel=stable;
 version=${HEX_INSTALL_VERSION:-}
 
 if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
-  for command in curl jq; do
+  for command in curl jq openssl; do
     require "$command"
   done
   curl_version=$(curl --version | awk 'NR == 1 { print $2 }')
@@ -224,6 +228,26 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Downloaded Linux release has the wrong size."
   test "$(sha256sum "$artifact_path" | awk '{ print $1 }')" = "$sha256" \
     || fail "Downloaded Linux release checksum does not match."
+
+  # The signature ties the manifest's SHA-256 to Anomaly's release key, so a
+  # tampered manifest cannot name another executable.
+  signature_url=$(jq -er --arg target "$target-sig" '.release.targets[$target].url' "$manifest") \
+    || fail "Hex $version has no signature for $target."
+  signature_bytes=$(jq -er --arg target "$target-sig" '.release.targets[$target].size' "$manifest")
+  signature_sha256=$(jq -er --arg target "$target-sig" '.release.targets[$target].sha256' "$manifest")
+  test "$signature_bytes" = 64 || fail "Linux release has an invalid signature."
+  printf '%s\n' "$signature_url" | grep -Eq '^/([A-Za-z0-9._-]+/)*hex/files/[0-9a-f]{64}/[A-Za-z0-9._-]+$' \
+    || fail "Linux release names an unexpected signature URL."
+  curl --fail --location --proto '=https' --proto-redir '=https' \
+    --silent --show-error --connect-timeout 10 --max-time 60 \
+    --max-filesize 64 "$host$signature_url" -o "$temporary/hex.sig"
+  test "$(sha256sum "$temporary/hex.sig" | awk '{ print $1 }')" = "$signature_sha256" \
+    || fail "Downloaded Linux release signature checksum does not match."
+  printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$signing_key" > "$temporary/signing.pem"
+  printf 'anomaly.hex.linux-artifact.v1\n%s\n' "$sha256" > "$temporary/signed"
+  openssl pkeyutl -verify -rawin -pubin -inkey "$temporary/signing.pem" \
+    -in "$temporary/signed" -sigfile "$temporary/hex.sig" > /dev/null 2>&1 \
+    || fail "Linux release signature does not verify; refusing to install it."
   chmod 755 "$artifact_path"
 fi
 # The version is display text that names a directory, never compared.

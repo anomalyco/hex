@@ -8,16 +8,17 @@ name: Installers
 # the release service, so they install the stable release, or the newest dev
 # build until there is one.
 #
-# Split like Release: check runs the installers' tests without secrets and
-# uploads them with a digest; publish runs in the release environment, checks
-# out only .github/release/, verifies the artifact, and uploads it as data
-# with .github/release/r2-put.sh.
+# The installers live in the locked .github/release/ (CODEOWNERS: Dax), so a
+# change to them needs Dax's review. check runs their tests without secrets;
+# publish runs in the release environment, checks out only .github/release/
+# at the same commit, and uploads the installers from there as data with
+# .github/release/r2-put.sh.
 on:
   push:
     branches: [dev]
     paths:
-      - scripts/install-linux-release.sh
-      - scripts/install-windows.ps1
+      - .github/release/install-linux.sh
+      - .github/release/install-windows.ps1
   workflow_dispatch:
 
 permissions:
@@ -31,8 +32,6 @@ jobs:
   check:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
-    outputs:
-      digest: ${{ steps.upload.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,16 +39,7 @@ jobs:
       - name: Test the installers
         run: |
           sh scripts/test-install-linux-release.sh
-          pwsh -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw scripts/install-windows.ps1))"
-          mkdir -p "$RUNNER_TEMP/installers"
-          cp scripts/install-linux-release.sh "$RUNNER_TEMP/installers/install-linux.sh"
-          cp scripts/install-windows.ps1 "$RUNNER_TEMP/installers/install-windows.ps1"
-      - id: upload
-        uses: ./.github/release/upload
-        with:
-          name: installers
-          path: ${{ runner.temp }}/installers
-          retention-days: 7
+          pwsh -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw .github/release/install-windows.ps1))"
 
   publish:
     needs: check
@@ -60,19 +50,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           sparse-checkout: /.github/release/
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - uses: ./.github/release/download
-        with:
-          pattern: installers
-          digests: installers=${{ needs.check.outputs.digest }}
       - name: Upload them
         env:
           R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          in="$RUNNER_TEMP/in/installers"
+          in=.github/release
           sh .github/release/r2-put.sh install-linux.sh "$in/install-linux.sh" text/x-shellscript "public, max-age=300"
           sh .github/release/r2-put.sh install-windows.ps1 "$in/install-windows.ps1" "text/plain; charset=utf-8" "public, max-age=300"
           for name in install-linux.sh install-windows.ps1; do

@@ -403,11 +403,15 @@ pub fn decide(
 }
 
 /// Resolves a target URL against the manifest URL (RFC 3986 for the
-/// absolute-path and relative references the service writes); only HTTPS
-/// results on a normalized path are accepted.
+/// absolute-path and relative references the service writes). Only HTTPS
+/// results on the manifest's own host and a normalized path are accepted, so
+/// a manifest can never send a download elsewhere.
 pub fn resolve_url(manifest_url: &str, reference: &str) -> Option<String> {
+    let rest = manifest_url.strip_prefix("https://")?;
+    let host = rest.split_once('/').map_or(rest, |(host, _)| host);
     if reference.contains("://") {
-        return https_url(&Value::from(reference));
+        let path = reference.strip_prefix(&format!("https://{host}/"))?;
+        return resolve_url(manifest_url, &format!("/{path}"));
     }
     if reference.starts_with("//")
         || reference.contains(['?', '#', '\\'])
@@ -417,8 +421,7 @@ pub fn resolve_url(manifest_url: &str, reference: &str) -> Option<String> {
     {
         return None;
     }
-    let rest = manifest_url.strip_prefix("https://")?;
-    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let path = rest.split_once('/').map_or("", |(_, path)| path);
     let (mut segments, relative): (Vec<&str>, &str) = match reference.strip_prefix('/') {
         Some(absolute) => (Vec::new(), absolute),
         None => {
@@ -541,9 +544,17 @@ mod tests {
             Some("https://anoma.ly/release/hex/desktop/files/abc/Hex.zip")
         );
         assert_eq!(
-            resolve_url(manifest, "https://example.com/a").as_deref(),
-            Some("https://example.com/a")
+            resolve_url(manifest, "https://anoma.ly/release/hex/files/abc/Hex.zip").as_deref(),
+            Some("https://anoma.ly/release/hex/files/abc/Hex.zip")
         );
+        for elsewhere in [
+            "https://example.com/a",
+            "https://anoma.ly.example.com/a",
+            "https://anoma.ly@example.com/a",
+            "https://anoma.ly/../x",
+        ] {
+            assert_eq!(resolve_url(manifest, elsewhere), None, "{elsewhere}");
+        }
         for refused in [
             "http://example.com/a",
             "//example.com/a",

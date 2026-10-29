@@ -1,5 +1,5 @@
 ; Per-user Windows installer for Hex. It installs exactly the managed layout
-; that scripts/install-windows.ps1 creates and src/windows_updater.rs updates:
+; that .github/release/install-windows.ps1 creates and src/windows_updater.rs updates:
 ;
 ;   %APPDATA%\hex\versions\<version>\hex.exe
 ;   %APPDATA%\hex\current-version

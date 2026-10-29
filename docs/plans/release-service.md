@@ -39,8 +39,9 @@ spaces.)
   registered for later use.
 - Every executable and archive is signed before upload (Developer ID +
   notarization on macOS, Authenticode on Windows); the service stores bytes and
-  their size and SHA-256, and manifests are not signed. Linux relies on HTTPS
-  and the manifest's SHA-256.
+  their size and SHA-256, and manifests are not signed. Linux executables
+  carry an ed25519 signature over their SHA-256 as the `linux-<arch>-sig`
+  target (`hex.sig`), which the updater and installer require.
 - Versions are `X.Y.Z` on stable. The service refuses an equal or lower
   version unless the current one is revoked.
 

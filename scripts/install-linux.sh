@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-installer="$root/scripts/install-linux-release.sh"
+installer="$root/.github/release/install-linux.sh"
 
 if [ "${1:-install}" = uninstall ]; then
   exec "$installer" uninstall

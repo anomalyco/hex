@@ -912,7 +912,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   the manifest and, on macOS and Windows, its code signature passes: macOS
   `app/update-requirement.txt` (Developer ID team `5NZ4Q7NXJ4`, `anomaly.hex`,
   notarized), Windows a valid Authenticode signature whose signer is
-  `AUTHENTICODE_SIGNER`. Linux relies on HTTPS and the SHA-256 alone.
+  `AUTHENTICODE_SIGNER`. Linux has no OS signature, so Release signs each
+  Linux executable with Anomaly's ed25519 key (`HEX_RELEASE_SIGNING_KEY`,
+  `.github/release/sign-linux.sh`, which refuses a key that does not match
+  `.github/release/linux-signing.pub`) and publishes the 64-byte signature
+  as the `<target>-sig` file; the updater (`updater/linux.rs`
+  `SIGNING_KEY`) and `install-linux.sh` refuse an executable without a valid
+  signature over its SHA-256. Download URLs must be on the manifest's host
+  (`protocol::resolve_url`).
 - Only direct installs replace themselves: Linux and Windows with our
   installer's receipt (`install.json` in the user-owned data root, which also
   names the channel) and the version layout, macOS a `Hex.app` this user can
@@ -1247,11 +1254,13 @@ and q8_0 tensors and no MUL_MAT_ID (`CMAKE_ARGS` in `.cargo/config.toml`,
 through the patched `transcribe-cpp-sys` in `Cargo.toml`): about 7 MB of
 SPIR-V instead of 44 MB. ggml aborts a Vulkan run whose weights use another
 type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog gains a non-Q8_0
-model. Release executables are stripped (`[profile.release]`). `scripts/install-linux-release.sh` and
-`scripts/install-windows.ps1` (served at `https://anoma.ly/hex/`) install from
-the service's stable manifest and check each file's size and SHA-256;
-`scripts/test-install-linux-release.sh` exercises the Linux one against a
-fixture service.
+model. Release executables are stripped (`[profile.release]`). The
+installers live in the locked `.github/release/` (`install-linux.sh`,
+`install-windows.ps1`; the Installers workflow serves them at
+`https://anoma.ly/hex/files/`) and install from the service's manifest,
+checking each file's size and SHA-256 plus the Linux ed25519 signature or the
+Windows Authenticode signature; `scripts/test-install-linux-release.sh`
+exercises the Linux one against a fixture service with a fixture key.
 
 Use `termctrl` to verify TUI changes at both wide and narrow dimensions. The
 `hex dev dashboard` keys are `1` for commands, `2` for the activity log, `3` for meetings,

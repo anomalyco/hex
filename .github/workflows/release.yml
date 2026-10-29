@@ -455,6 +455,10 @@ jobs:
             sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
       - name: Gather the release files
         run: bash .github/release/assemble.sh "$RUNNER_TEMP/in" "$RUNNER_TEMP/dist"
+      - name: Sign the Linux executables
+        env:
+          HEX_RELEASE_SIGNING_KEY: ${{ secrets.HEX_RELEASE_SIGNING_KEY }}
+        run: bash .github/release/sign-linux.sh "$RUNNER_TEMP/dist"
       - id: publish
         name: Publish
         env:

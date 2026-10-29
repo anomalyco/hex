@@ -62,6 +62,6 @@ const data = current
       manifest: `${legacy}/linux-update.json`,
     }
 writeFileSync(new URL("src/release-data.json", root), `${JSON.stringify(data, null, 2)}\n`)
-copyFileSync(new URL("../scripts/install-linux-release.sh", root), new URL("public/install-linux.sh", root))
-copyFileSync(new URL("../scripts/install-windows.ps1", root), new URL("public/install-windows.ps1", root))
+copyFileSync(new URL("../.github/release/install-linux.sh", root), new URL("public/install-linux.sh", root))
+copyFileSync(new URL("../.github/release/install-windows.ps1", root), new URL("public/install-windows.ps1", root))
 console.log(`Download links name Hex ${data.version}${current ? ` from ${service}` : " (no release on the service yet)"}.`)
