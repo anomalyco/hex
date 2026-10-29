@@ -1892,6 +1892,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "url",
+ "wayland-client",
  "wgpu",
  "windows 0.62.2",
  "windows-future 0.3.2",
@@ -4125,7 +4126,7 @@ dependencies = [
 [[package]]
 name = "procwatch"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
 dependencies = [
  "libc",
 ]
@@ -4593,7 +4594,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
 dependencies = [
  "arboard",
  "blake3",
@@ -4628,6 +4629,7 @@ dependencies = [
  "resvg",
  "rfd",
  "rune-motion",
+ "rune-staging",
  "serde",
  "serde_json",
  "swash",
@@ -4657,7 +4659,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
 dependencies = [
  "rune",
  "rune-motion",
@@ -4667,12 +4669,20 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
+
+[[package]]
+name = "rune-staging"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
+dependencies = [
+ "wgpu",
+]
 
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
+source = "git+https://github.com/anomalyco/rune.git?rev=5482523611949da08b49f6df91fa049e24a51cdd#5482523611949da08b49f6df91fa049e24a51cdd"
 dependencies = [
  "rune",
  "rune-kit",
@@ -5448,7 +5458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

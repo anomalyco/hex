@@ -18,21 +18,14 @@ pub(crate) fn start(
     control: SyncSender<Control>,
     shutdown: &'static AtomicBool,
 ) -> Option<rune::Tray> {
-    let spec = rune::TraySpec {
-        id: "hex".into(),
-        title: "Hex".into(),
-        tooltip: tr("Hex Dictation").into(),
-        icon: rune::TrayIcon {
-            width: ICON_SIZE,
-            height: ICON_SIZE,
-            rgba: ICON_RGBA.to_vec(),
-        },
-        menu: vec![
+    let icon = rune::TrayIcon::rgba(ICON_SIZE, ICON_SIZE, ICON_RGBA.to_vec());
+    let spec = rune::TraySpec::new("hex", "Hex", icon)
+        .tooltip(tr("Hex Dictation"))
+        .menu(vec![
             rune::TrayItem::action("show", tr("Show Hex")),
             rune::TrayItem::Separator,
             rune::TrayItem::action("quit", tr("Quit Hex")),
-        ],
-    };
+        ]);
     let show = move |token| {
         let activation = Activation {
             token,
@@ -45,7 +38,7 @@ pub(crate) fn start(
         rune::TrayEvent::Menu(id) if id == "show" => show(None),
         // As the window's Quit Hex: drains accepted work, then exits.
         rune::TrayEvent::Menu(id) if id == "quit" => shutdown.store(true, Ordering::Release),
-        rune::TrayEvent::Menu(_) => {}
+        _ => {}
     });
     tray.inspect_err(|error| tracing::warn!(%error, "Hex has no tray icon"))
         .ok()

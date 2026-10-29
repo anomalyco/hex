@@ -397,17 +397,14 @@ fn set_caption_color(hwnd: HWND, color: u32) {
 }
 
 fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
-    let spec = rune::TraySpec {
-        id: "hex".into(),
-        title: "Hex".into(),
-        tooltip: tr("Hex Dictation").into(),
-        icon: rune::TrayIcon {
-            width: TRAY_ICON_SIZE,
-            height: TRAY_ICON_SIZE,
-            rgba: include_bytes!("../resources/windows/tray-32.rgba").to_vec(),
-        },
-        menu: tray_menu(None),
-    };
+    let icon = rune::TrayIcon::rgba(
+        TRAY_ICON_SIZE,
+        TRAY_ICON_SIZE,
+        include_bytes!("../resources/windows/tray-32.rgba").to_vec(),
+    );
+    let spec = rune::TraySpec::new("hex", "Hex", icon)
+        .tooltip(tr("Hex Dictation"))
+        .menu(tray_menu(None));
     let tray = rune::Tray::new(spec, move |event| match event {
         // Left click shows the window; right click opens the menu.
         rune::TrayEvent::Activate { .. } => window.open(),
@@ -436,6 +433,7 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
             "quit" => window.quit(),
             _ => {}
         },
+        _ => {}
     })?;
     Ok(tray)
 }
