@@ -1,7 +1,7 @@
 import * as m from "motion/react-m"
 import { useEffect, useState, type ReactNode } from "react"
 import type { Platform } from "./platform"
-import { RELEASE, useRelease, versionLabel, type Current } from "./release"
+import { RELEASE } from "./release"
 
 export function AppleMark() {
   return (
@@ -27,22 +27,13 @@ export function LinuxMark() {
   )
 }
 
-function ShareMark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="mark mark--stroke">
-      <path d="M12 15V4M8 8l4-4 4 4M6 12v7h12v-7" />
-    </svg>
-  )
-}
-
-const SEP = "\u2002\u00b7\u2002"
-
 export const PLATFORM_NAMES: Record<Platform, string> = {
   mac: "Mac",
   "mac-intel": "Mac",
   "windows-x64": "Windows",
   "windows-arm64": "Windows",
   linux: "Linux",
+  "linux-arm64": "Linux",
   mobile: "Mac, Windows, and Linux",
 }
 
@@ -52,6 +43,7 @@ export const SHORTCUTS: Record<Platform, string> = {
   "windows-x64": "Ctrl+Space",
   "windows-arm64": "Ctrl+Space",
   linux: "Alt+Space",
+  "linux-arm64": "Alt+Space",
   mobile: "a shortcut",
 }
 
@@ -94,181 +86,128 @@ function Button({ href, mark, children }: { href: string; mark: ReactNode; child
   )
 }
 
-function SendLink() {
-  const [copied, copy] = useCopy()
-  const send = () => {
-    const url = location.origin + import.meta.env.BASE_URL
-    if (navigator.share) {
-      void navigator.share({ title: "Hex", text: "Voice dictation for Mac, Windows, and Linux", url }).catch(() => {})
-    } else {
-      copy(url)
-    }
-  }
+type Os = "mac" | "windows" | "linux"
+type Arch = "x64" | "arm64"
+type PerArch = Record<Arch, string>
+
+interface Method {
+  id: string
+  label: string
+  file?: string | PerArch
+  command?: string | PerArch
+}
+
+const OSES: { id: Os; label: string; mark: ReactNode; button: string }[] = [
+  { id: "mac", label: "macOS", mark: <AppleMark />, button: "Download for Mac" },
+  { id: "windows", label: "Windows", mark: <WindowsMark />, button: "Download for Windows" },
+  { id: "linux", label: "Linux", mark: <LinuxMark />, button: "Download for Linux" },
+]
+
+function methods(os: Os): Method[] {
+  const linux = RELEASE.linux
+  const all: (Method | false | undefined)[] =
+    os === "mac"
+      ? [
+          { id: "dmg", label: "Download", file: RELEASE.mac.url },
+          { id: "homebrew", label: "Homebrew", command: RELEASE.homebrew },
+        ]
+      : os === "windows"
+        ? [
+            { id: "installer", label: "Installer", file: { x64: RELEASE.windowsX64.url, arm64: RELEASE.windowsArm64.url } },
+            { id: "powershell", label: "PowerShell", command: RELEASE.windows.command },
+          ]
+        : [
+            { id: "script", label: "Script", command: linux.command },
+            linux.aur !== undefined && { id: "aur", label: "AUR", command: linux.aur },
+            { id: "deb", label: "Debian", command: linux.deb },
+            { id: "rpm", label: "Fedora", command: linux.rpm },
+            { id: "nix", label: "Nix", command: RELEASE.nix },
+            { id: "binary", label: "Binary", file: linux.binary },
+          ]
+  return all.filter((method): method is Method => Boolean(method))
+}
+
+const pick = (value: string | PerArch, arch: Arch) => (typeof value === "string" ? value : value[arch])
+const perArch = (method: Method) => typeof method.file === "object" || typeof method.command === "object"
+
+function osOf(platform: Platform): Os {
+  if (platform.startsWith("windows")) return "windows"
+  if (platform.startsWith("linux")) return "linux"
+  return "mac"
+}
+
+const archOf = (platform: Platform): Arch => (platform.endsWith("arm64") ? "arm64" : "x64")
+
+function Tab({ selected, onSelect, children }: { selected: boolean; onSelect: () => void; children: ReactNode }) {
   return (
-    <m.button type="button" className="download" onClick={send} whileTap={{ scale: 0.985 }}>
-      <ShareMark />
-      <span>{copied ? "Link copied" : "Send yourself the link"}</span>
-      <span aria-hidden="true" />
-    </m.button>
+    <button type="button" role="tab" aria-selected={selected} onClick={onSelect}>
+      {children}
+    </button>
   )
 }
 
-const DEV_NOTE = "Hex has no stable release yet: this is the newest dev build, which keeps updating itself from the Dev channel."
+export default function Download({ platform }: { platform: Platform }) {
+  // The visitor's choices; until they pick, the detected platform decides.
+  const [chosenOs, setOs] = useState<Os>()
+  const [chosenArch, setArch] = useState<Arch>()
+  const [chosenMethod, setMethod] = useState<Partial<Record<Os, string>>>({})
+  const os = chosenOs ?? osOf(platform)
+  const arch = chosenArch ?? archOf(platform)
+  const options = methods(os)
+  const method = options.find((option) => option.id === chosenMethod[os]) ?? options[0]
+  const name = OSES.find((entry) => entry.id === os)!
+  const intelMac = platform === "mac-intel" && os === "mac"
 
-function Primary({ platform, release }: { platform: Platform; release: Current }) {
-  const dev = release.channel === "dev" && <p className="download-note">{DEV_NOTE}</p>
-  switch (platform) {
-    case "mac":
-      return (
-        <>
-          <Button href={RELEASE.mac.url} mark={<AppleMark />}>
-            Download for Mac
-          </Button>
-          <p className="requirements">
-            {versionLabel(release)}
-            {SEP}Apple silicon{SEP}macOS 15 or later
-          </p>
-          {dev}
-        </>
-      )
-    case "mac-intel":
-      return (
-        <>
+  return (
+    <div className="hero__action install" data-avoid>
+      <div className="install__os" role="tablist" aria-label="Operating system">
+        {OSES.map((entry) => (
+          <Tab key={entry.id} selected={entry.id === os} onSelect={() => setOs(entry.id)}>
+            {entry.mark}
+            <span>{entry.label}</span>
+          </Tab>
+        ))}
+      </div>
+
+      <div className="install__methods">
+        <div role="tablist" aria-label={`Ways to install on ${name.label}`}>
+          {options.map((option) => (
+            <Tab
+              key={option.id}
+              selected={option.id === method.id}
+              onSelect={() => setMethod((current) => ({ ...current, [os]: option.id }))}
+            >
+              {option.label}
+            </Tab>
+          ))}
+        </div>
+        {perArch(method) && (
+          <div className="install__arch" role="tablist" aria-label="Architecture">
+            <Tab selected={arch === "x64"} onSelect={() => setArch("x64")}>
+              x64
+            </Tab>
+            <Tab selected={arch === "arm64"} onSelect={() => setArch("arm64")}>
+              ARM64
+            </Tab>
+          </div>
+        )}
+      </div>
+
+      {method.file !== undefined &&
+        (intelMac ? (
           <span className="download download--disabled" aria-disabled="true">
-            <AppleMark />
-            <span>Download for Mac</span>
+            {name.mark}
+            <span>Requires Apple silicon</span>
             <span aria-hidden="true" />
           </span>
-          <p className="requirements">Hex needs a Mac with Apple silicon and macOS 15 or later.</p>
-        </>
-      )
-    case "windows-x64":
-    case "windows-arm64": {
-      const arm = platform === "windows-arm64"
-      const build = arm ? RELEASE.windowsArm64 : RELEASE.windowsX64
-      return (
-        <>
-          <Button href={build.url} mark={<WindowsMark />}>
-            Download for Windows
+        ) : (
+          <Button href={pick(method.file, arch)} mark={name.mark}>
+            {name.button}
           </Button>
-          <p className="requirements">
-            {versionLabel(release)}
-            {SEP}Windows 10 or 11{SEP}
-            {arm ? "ARM64" : "x64"}
-            {SEP}beta
-          </p>
-          {dev}
-        </>
-      )
-    }
-    case "linux":
-      return (
-        <>
-          <Command text={RELEASE.linux.command} label="Install command for Linux" />
-          <p className="requirements">
-            {versionLabel(release)}
-            {SEP}x86_64 Arch Linux{SEP}glibc 2.44 or later{SEP}beta
-          </p>
-          <p className="download-note">
-            Paste it into a terminal. The installer checks the signed release, needs no root, and adds Hex to your app
-            launcher.
-          </p>
-          {dev}
-        </>
-      )
-    case "mobile":
-      return (
-        <>
-          <SendLink />
-          <p className="requirements">Hex runs on Mac, Windows, and Linux computers.</p>
-        </>
-      )
-  }
-}
-
-interface Row {
-  key: string
-  mark: ReactNode
-  name: string
-  detail: string
-  href?: string
-  command?: string
-}
-
-function rows(platform: Platform): Row[] {
-  const all: (Row & { platforms: Platform[] })[] = [
-    {
-      key: "mac",
-      platforms: ["mac", "mac-intel"],
-      mark: <AppleMark />,
-      name: "Mac",
-      detail: "Apple silicon, macOS 15 or later",
-      href: RELEASE.mac.url,
-    },
-    {
-      key: "homebrew",
-      platforms: [],
-      mark: <AppleMark />,
-      name: "Homebrew",
-      detail: "Mac",
-      command: RELEASE.homebrew,
-    },
-    {
-      key: "windows-x64",
-      platforms: ["windows-x64"],
-      mark: <WindowsMark />,
-      name: "Windows x64",
-      detail: "Needs a GPU driver with Vulkan",
-      href: RELEASE.windowsX64.url,
-    },
-    {
-      key: "windows-arm64",
-      platforms: ["windows-arm64"],
-      mark: <WindowsMark />,
-      name: "Windows ARM64",
-      detail: "Snapdragon PCs",
-      href: RELEASE.windowsArm64.url,
-    },
-    {
-      key: "linux",
-      platforms: ["linux"],
-      mark: <LinuxMark />,
-      name: "Linux",
-      detail: "x86_64 Arch, glibc 2.44 or later",
-      command: RELEASE.linux.command,
-    },
-  ]
-  return all.filter((row) => !row.platforms.includes(platform))
-}
-
-export default function Download({ platform }: { platform: Platform }) {
-  const release = useRelease()
-  return (
-    <div className="hero__action" data-avoid>
-      <Primary platform={platform} release={release} />
-      <details className="platforms">
-        <summary>Other platforms</summary>
-        <ul>
-          {rows(platform).map((row) => (
-            <li key={row.key} className="platform">
-              {row.mark}
-              <span className="platform__name">{row.name}</span>
-              <span className="platform__detail">{row.detail}</span>
-              {row.href && (
-                <a className="platform__link" href={row.href}>
-                  Download
-                </a>
-              )}
-              {row.command && <Command text={row.command} label={`Install command for ${row.name}`} />}
-            </li>
-          ))}
-          <li className="platform platform--github">
-            <a href={RELEASE.github}>
-              {release.channel === "stable" ? `Every ${release.version} download on GitHub` : "Releases on GitHub"}
-            </a>
-          </li>
-        </ul>
-      </details>
+        ))}
+      {method.command !== undefined && (
+        <Command text={pick(method.command, arch)} label={`${method.label} install command for ${name.label}`} />
+      )}
     </div>
   )
 }

@@ -11,12 +11,18 @@ other than this config's (docs/releasing.md). `worker.ts` serves the
 site and, at `/hex/files/`, the environment's R2 bucket of release files, and
 301s other hosts and plain HTTP to the canonical host.
 
-The download section (`src/Download.tsx`) names the visitor's platform on first
-paint and refines it with UA client hints: a DMG for Apple silicon Macs, the
-x64 or ARM64 `Setup.exe` for Windows, the copyable install command for Linux,
-and "Send yourself the link" on phones. Versions and URLs live in
-`src/release.ts`. Add `?platform=mac|mac-intel|windows-x64|windows-arm64|linux|mobile`
-to see each state.
+The download section (`src/Download.tsx`) is one install switcher and nothing
+else: macOS, Windows, and Linux tabs, each with every way to install there
+(Mac: DMG, Homebrew; Windows: installer, PowerShell script; Linux: script,
+AUR, .deb, .rpm, Nix, binary), an x64/ARM64 toggle where the file differs, and
+the download button or copyable command. It selects the visitor's OS and
+architecture on first paint and refines them with UA client hints. Versions,
+URLs, and commands live in `src/release.ts`; file links name
+`/hex/download/<target>`, which the Worker sends to the stable release once
+there is one and to the newest dev build until then. The AUR tab appears from
+the first build after a stable release, which pushes `hex-bin`. Add
+`?platform=mac|mac-intel|windows-x64|windows-arm64|linux|linux-arm64|mobile`
+to see each default.
 
 The hero is a show (`src/shout/`, plain JS): Kit's notifications pile up around a
 floating head that answers them out loud, dictates prompts into an OpenCode window

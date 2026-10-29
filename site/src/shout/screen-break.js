@@ -12,7 +12,6 @@
 //   golden/white glass dust & bokeh motes suspended in bullet-time.
 
 const SANS = '"Inter Variable", ui-sans-serif, system-ui'
-const MONO = 'ui-monospace, "SF Mono", Menlo, monospace'
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x))
 const lerp = (a, b, t) => a + (b - a) * t
@@ -275,16 +274,6 @@ export class ScreenBreak {
           (dl.textContent || "Download for Mac").trim(),
         )
       }
-    }
-
-    const req = this.root.querySelector(".hero .requirements")
-    if (req) {
-      const rr = req.getBoundingClientRect()
-      targetCtx.font = `450 12.5px ${MONO}`
-      targetCtx.fillStyle = "rgba(160, 164, 176, 0.78)"
-      targetCtx.textAlign = "center"
-      targetCtx.textBaseline = "middle"
-      targetCtx.fillText((req.textContent || "").trim(), rr.left - rootRect.left + rr.width / 2, rr.top - rootRect.top + rr.height / 2)
     }
 
     targetCtx.restore()

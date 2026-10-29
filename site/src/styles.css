@@ -395,8 +395,8 @@ a {
 .header__github:focus-visible,
 .download:focus-visible,
 .command__copy:focus-visible,
-.platforms summary:focus-visible,
-.platforms a:focus-visible {
+.install button:focus-visible,
+.install a:focus-visible {
   outline: 2px solid #a9b9ff;
   outline-offset: 4px;
 }
@@ -414,21 +414,6 @@ a {
 .wordmark__core {
   fill: currentColor;
   stroke: none;
-}
-
-.requirements {
-  color: #777b82;
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
-}
-
-.download-note {
-  max-width: 40ch;
-  color: #777b82;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  text-wrap: pretty;
 }
 
 .header__github {
@@ -592,98 +577,98 @@ button.download:hover {
   background: #fff;
 }
 
-.platforms {
-  width: min(100%, 41rem);
-  margin-top: 0.4rem;
-  color: #9b9da3;
-  font-size: 0.8rem;
-}
-
-.platforms summary {
-  width: fit-content;
-  margin: 0 auto;
-  border-radius: 0.35rem;
-  cursor: pointer;
-  list-style: none;
-  text-decoration: underline;
-  text-decoration-color: rgba(155, 157, 163, 0.4);
-  text-underline-offset: 0.2em;
-}
-
-.platforms summary::-webkit-details-marker {
-  display: none;
-}
-
-.platforms summary:hover {
-  color: #f3f3f0;
-}
-
-.platforms ul {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  margin: 1rem 0 0;
-  padding: 0.25rem 0;
+.install__os {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
   border: 1px solid rgba(242, 242, 239, 0.1);
   border-radius: 0.8rem;
-  list-style: none;
-  text-align: left;
 }
 
-.platform {
+.install__os button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.95rem;
+  border: 0;
+  border-radius: 0.55rem;
+  color: #9b9da3;
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 540;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.install__os .mark {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.install__os button:hover,
+.install__os button[aria-selected="true"] {
+  color: #f2f2ef;
+}
+
+.install__os button[aria-selected="true"] {
+  background: rgba(242, 242, 239, 0.1);
+}
+
+.install__methods {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 0.6rem;
-  padding: 0.6rem 1rem;
+  justify-content: center;
+  gap: 0.4rem 1.1rem;
+  min-height: 1.75rem;
 }
 
-.platform + .platform {
-  border-top: 1px solid rgba(242, 242, 239, 0.06);
+.install__methods [role="tablist"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 1.1rem;
 }
 
-.platform .mark {
-  width: 0.9rem;
-  height: 0.9rem;
-  color: #9b9da3;
+.install__arch {
+  padding-left: 1.1rem;
+  border-left: 1px solid rgba(242, 242, 239, 0.14);
 }
 
-.platform__name {
-  color: #f2f2ef;
-}
-
-.platform__detail {
-  flex: 1;
+.install__methods button {
+  padding: 0.2rem 0 0.3rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
   color: #777b82;
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease;
 }
 
-.platform__link,
-.platform--github a {
+.install__methods button:hover {
+  color: #c9cace;
+}
+
+.install__methods button[aria-selected="true"] {
+  border-bottom-color: #f2f2ef;
   color: #f2f2ef;
-  text-decoration: underline;
-  text-decoration-color: rgba(242, 242, 239, 0.35);
-  text-underline-offset: 0.2em;
 }
 
-.platform__link:hover,
-.platform--github a:hover {
-  text-decoration-color: currentColor;
+.install {
+  gap: 1rem;
 }
 
-.platform .command {
-  width: 100%;
-  max-width: none;
+.install__methods {
+  margin-top: 0.15rem;
 }
 
-.platform .command code {
-  padding-top: 0.55rem;
-  padding-bottom: 0.55rem;
-  font-size: 0.75rem;
-}
-
-.platform .command__copy {
-  min-width: 4rem;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.75rem;
+.install .command {
+  width: min(100%, 36rem);
+  min-height: 3.25rem;
+  text-align: left;
 }
 
 .mark {
@@ -759,6 +744,16 @@ button.download:hover {
 
   .download {
     min-height: 3.5rem;
+  }
+
+  .install .command {
+    min-height: 3.5rem;
+  }
+
+  .install__arch {
+    flex-basis: 100%;
+    padding-left: 0;
+    border-left: 0;
   }
 
 }

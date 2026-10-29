@@ -40,6 +40,13 @@ const data = {
   windowsArm64: download("windows-arm64-setup"),
   linuxInstaller: `${site}/install-linux.sh`,
   linuxCommand: `curl -fsSL ${site}/install-linux.sh | sh`,
+  linuxX64: download("linux-x64"),
+  linuxArm64: download("linux-arm64"),
+  debX64: download("linux-x64-deb"),
+  debArm64: download("linux-arm64-deb"),
+  rpmX64: download("linux-x64-rpm"),
+  rpmArm64: download("linux-arm64-rpm"),
+  windowsInstaller: `${site}/install-windows.ps1`,
   github: stable ? `https://github.com/anomalyco/hex/releases/tag/v${current.release.version}` : "https://github.com/anomalyco/hex/releases",
 }
 writeFileSync(new URL("src/release-data.json", root), `${JSON.stringify(data, null, 2)}\n`)

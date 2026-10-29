@@ -1,6 +1,6 @@
-export type Platform = "mac" | "mac-intel" | "windows-x64" | "windows-arm64" | "linux" | "mobile"
+export type Platform = "mac" | "mac-intel" | "windows-x64" | "windows-arm64" | "linux" | "linux-arm64" | "mobile"
 
-const PLATFORMS: Platform[] = ["mac", "mac-intel", "windows-x64", "windows-arm64", "linux", "mobile"]
+const PLATFORMS: Platform[] = ["mac", "mac-intel", "windows-x64", "windows-arm64", "linux", "linux-arm64", "mobile"]
 
 interface UserAgentData {
   platform?: string
@@ -31,13 +31,13 @@ export function guessPlatform(): Platform {
     return /\bARM64\b|\baarch64\b/i.test(agent) ? "windows-arm64" : "windows-x64"
   }
   if (/Mac OS X|Macintosh/.test(agent) || hint === "macOS") return "mac"
-  if (/Linux|X11|CrOS/.test(agent) || hint === "Linux") return "linux"
+  if (/Linux|X11|CrOS/.test(agent) || hint === "Linux") return /\baarch64\b|\barmv8/i.test(agent) ? "linux-arm64" : "linux"
   return "mac"
 }
 
 /**
  * Chromium browsers report the real CPU architecture through UA client hints,
- * which tells ARM64 Windows and Intel Macs apart. Other browsers keep the guess.
+ * which tells ARM64 Windows and Linux and Intel Macs apart. Other browsers keep the guess.
  */
 export async function refinePlatform(guess: Platform): Promise<Platform> {
   if (override()) return guess
@@ -47,6 +47,9 @@ export async function refinePlatform(guess: Platform): Promise<Platform> {
     const { architecture } = await data.getHighEntropyValues(["architecture", "bitness"])
     if (guess.startsWith("windows") && architecture) {
       return architecture === "arm" ? "windows-arm64" : "windows-x64"
+    }
+    if (guess.startsWith("linux") && architecture) {
+      return architecture === "arm" ? "linux-arm64" : "linux"
     }
     if (guess === "mac" && architecture === "x86") return "mac-intel"
   } catch {
