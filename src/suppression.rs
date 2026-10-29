@@ -2509,6 +2509,56 @@ mod tests {
     }
 
     #[test]
+    fn function_keys_match_despite_the_fn_flag_macos_adds() {
+        const F14: u16 = 107;
+        let bare = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::default(),
+            key_code: Some(F14),
+        };
+        let command = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers {
+                command: Some(crate::app_settings::ModifierSide::Either),
+                ..Default::default()
+            },
+            key_code: Some(F14),
+        };
+        for (binding, held) in [(bare, 0), (command, COMMAND_KEY_MASK)] {
+            let flags = held | FUNCTION_KEY_MASK;
+            assert!(binding.matches_key_press(F14, flags));
+            assert!(!binding.matches_key_press(F14, held | SHIFT_KEY_MASK | FUNCTION_KEY_MASK));
+            let now = capture_time();
+            let mut hotkey = DictationHotkey::with_binding(false, now, false, binding);
+            if held != 0 {
+                assert_eq!(hotkey.process(InputEvent::Flags(held), now), None);
+            }
+            let key = |down| InputEvent::Key {
+                code: F14,
+                down,
+                flags,
+            };
+            assert_eq!(
+                hotkey.process(key(true), now + Duration::from_millis(10)),
+                Some(HotkeyAction::Start)
+            );
+            // Autorepeat carries the same flags and is not a chord.
+            assert_eq!(
+                hotkey.process(key(true), now + Duration::from_millis(100)),
+                None
+            );
+            assert_eq!(
+                hotkey.process(key(false), now + Duration::from_secs(1)),
+                Some(HotkeyAction::Finish)
+            );
+        }
+        // Fn stays significant for keys macOS does not mark with it.
+        let space = RuntimeHotkey {
+            key_code: Some(49),
+            ..command
+        };
+        assert!(!space.matches_key_press(49, COMMAND_KEY_MASK | FUNCTION_KEY_MASK));
+    }
+
+    #[test]
     fn callback_hold_and_double_tap_boundaries_are_milliseconds() {
         for duration_ms in [299, 300, 301] {
             let start = 60_000_000_000;

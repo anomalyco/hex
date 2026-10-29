@@ -75,6 +75,14 @@ Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
 `rune_ui/tests/panes.rs`, the `shortcut-row*` scenes, and the `ChordCapture`
 tests in `rune_ui/macos_host.rs` (no native end-to-end run).
 
+**Fixed October 29, 2026 (issue 400):** macOS marks every function, arrow, and
+navigation key press with the Fn flag, and the recorder leaves it out of the
+binding, so a recorded F14 (or ⌘F14 for Voice Action) never matched and never
+started. Matching now ignores that flag only for a binding on one of those keys
+that does not ask for Fn; Fn stays significant everywhere else. Check:
+`function_keys_match_despite_the_fn_flag_macos_adds` in `suppression.rs`
+(constructed events; no physical-keyboard run).
+
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 

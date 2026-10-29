@@ -662,8 +662,24 @@ impl RuntimeHotkey {
     }
 
     pub fn exact_modifiers(self, flags: u64) -> bool {
+        let flags = self.without_implied_function(flags);
         modifiers_from_flags(flags).matches_exactly(self.modifiers)
             && self.required_modifiers_down(flags)
+    }
+
+    /// macOS marks every press of a function, arrow, or navigation key with
+    /// SecondaryFn whether or not Fn is held, and the recorder leaves it out
+    /// of such a binding. Only for a binding on one of those keys that does
+    /// not ask for Fn is the flag ignored; Fn is never stripped otherwise.
+    fn without_implied_function(self, flags: u64) -> u64 {
+        if cfg!(target_os = "macos")
+            && !self.modifiers.function
+            && self.key_code.is_some_and(key_reports_function_flag)
+        {
+            flags & !FUNCTION_KEY_MASK
+        } else {
+            flags
+        }
     }
 
     pub fn required_modifiers_down(self, flags: u64) -> bool {
@@ -687,6 +703,16 @@ impl RuntimeHotkey {
     pub fn matches_key_press(self, code: u16, flags: u64) -> bool {
         self.key_code == Some(code) && self.exact_modifiers(flags)
     }
+}
+
+/// macOS virtual key codes whose events always carry SecondaryFn: F1–F20,
+/// the arrows, Home, End, Page Up, Page Down, Forward Delete, and Help.
+fn key_reports_function_flag(code: u16) -> bool {
+    const CODES: [u16; 30] = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
+        123, 124, 125, 126, 115, 119, 116, 121, 117, 114,
+    ];
+    CODES.contains(&code)
 }
 
 impl HotkeyModifiers {
