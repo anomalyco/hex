@@ -888,18 +888,6 @@ fn microphone_state() -> PermissionState {
     microphone_authorization_state(status)
 }
 
-/// `usable` is what this process can use; `granted` is what System
-/// Settings shows now. macOS caches the first for the life of the process,
-/// so a switch turned on after launch reaches Hex only after a restart.
-#[cfg(any(target_os = "macos", test))]
-const fn grant_state(usable: bool, granted: bool) -> PermissionState {
-    match (usable, granted) {
-        (true, _) => PermissionState::Ready,
-        (false, true) => PermissionState::NeedsRestart,
-        (false, false) => PermissionState::NeedsSettings,
-    }
-}
-
 /// Accessibility reaches a running Hex: `AXIsProcessTrusted` follows the
 /// switch, and the listener's event taps, created only once setup is ready,
 /// are allowed (macOS offers no "Quit & Reopen" for it, as it does for Input
@@ -1447,11 +1435,6 @@ mod tests {
 
     #[test]
     fn a_grant_the_process_cannot_use_yet_waits_for_a_restart() {
-        assert_eq!(grant_state(true, true), PermissionState::Ready);
-        assert_eq!(grant_state(true, false), PermissionState::Ready);
-        assert_eq!(grant_state(false, true), PermissionState::NeedsRestart);
-        assert_eq!(grant_state(false, false), PermissionState::NeedsSettings);
-
         let waiting = SetupStatus {
             accessibility: PermissionState::NeedsRestart,
             ..ready_status()
