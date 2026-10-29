@@ -373,18 +373,12 @@ const CAPTURE_KEYS: &[Key] = &[
     key(
         "capture.enabled",
         Kind::Bool,
-        "Scrawl captures: record the screen with narration (the capture experiment)",
+        "Annotate: record the screen while you draw and talk (on by default)",
     ),
     key(
         "capture.hotkey",
         Kind::Shortcut(HotkeySlot::Capture),
-        "The capture shortcut: press to start a capture and again to finish it",
-    ),
-    key(
-        "capture.list_hotkey",
-        Kind::Shortcut(HotkeySlot::CaptureList),
-        "Opens the capture capsule's send-to list while a capsule shows or the latest \
-         capture waits for a pick",
+        "The Annotate shortcut: press to start recording and again to finish",
     ),
     key(
         "capture.transcriber",
@@ -614,11 +608,7 @@ pub fn apply(
                 ));
             }
         }
-        "dictation_hotkey"
-        | "edit_hotkey"
-        | "paste_last_hotkey"
-        | "capture.hotkey"
-        | "capture.list_hotkey" => {
+        "dictation_hotkey" | "edit_hotkey" | "paste_last_hotkey" | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
@@ -628,8 +618,6 @@ pub fn apply(
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
-                #[cfg(hex_capture)]
-                HotkeySlot::CaptureList => Some(&candidate.capture.list_hotkey),
             };
             if let Some(binding) = binding {
                 (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
@@ -694,18 +682,6 @@ pub fn apply(
                 "shortcut-in-use",
                 "The capture shortcut is already in use; set capture.hotkey to another \
                  shortcut first",
-            ));
-        }
-        #[cfg(hex_capture)]
-        "capture.enabled"
-            if candidate.capture.enabled
-                && candidate
-                    .hotkey_in_use(HotkeySlot::CaptureList, &candidate.capture.list_hotkey) =>
-        {
-            return Err(ControlError::new(
-                "shortcut-in-use",
-                "The send-to list shortcut is already in use; set capture.list_hotkey to \
-                 another shortcut first",
             ));
         }
         "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),

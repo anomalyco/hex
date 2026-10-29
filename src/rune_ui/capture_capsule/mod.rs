@@ -364,7 +364,7 @@ impl CapsuleState {
         let surface = Surface::new();
         let live = Animated::new(&surface, spawn);
         Self {
-            flow: Flow::new(),
+            flow: Flow::new().suggesting_on_route(!cfg!(target_os = "linux")),
             surface,
             live,
             inbox: Vec::new(),
@@ -438,7 +438,7 @@ impl CapsuleState {
             self.replace = true;
             self.live.thumb = None;
         }
-        // The list shortcut bringing a closed capsule back: under the pointer.
+        // Send to… bringing a closed capsule back: under the pointer.
         if input == Input::OpenList && !self.shown {
             self.replace = true;
         }
@@ -675,7 +675,6 @@ fn key_input(key: crate::capture_host::CapsuleKey) -> Input {
     match key {
         CapsuleKey::Shortcut => Input::Record,
         CapsuleKey::Escape => Input::Escape,
-        CapsuleKey::OpenList => Input::OpenList,
         CapsuleKey::Text(typed) => Input::Type(typed),
         CapsuleKey::Backspace => Input::Backspace,
         CapsuleKey::Up => Input::Move(-1),
@@ -1162,14 +1161,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
         // The quiet way out of a send that just went.
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => keyed(p, base, &[], UNDO_LABEL, MEDIUM).on_press_tx(press(id)),
-        Id::Ask => {
-            let keys = match &surface.pres {
-                Pres::Done(done) => done.ask_keys.as_slice(),
-                _ => &[],
-            };
-            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-            keyed(p, base, &keys, &shown.ident, MEDIUM).on_press_tx(press(id))
-        }
+        Id::Ask => keyed(p, base, &[], &shown.ident, MEDIUM).on_press_tx(press(id)),
         Id::Paste | Id::Inspect => {
             let (name, help) = if id == Id::Paste {
                 ("Paste", "Paste the capture")
@@ -1231,7 +1223,7 @@ fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
         .on_press_tx(press(Id::Pick(row)))
 }
 
-/// A chip's label, then its shortcut as one quiet word ("Send to… ⌥⇧V").
+/// A chip's label, then its shortcut, if any, as one quiet word.
 fn keyed(p: Paint, base: El, keys: &[&str], name: &str, style: rune::TextStyle) -> El {
     let mut chip = base
         .radius(surface::CHIP_RADIUS)

@@ -753,16 +753,20 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS and Linux build and on by default (`capture.enabled`, the
   pane's switch; the `annotate-on-by-default` migration turns it on once
-  for older settings and moves a send-to list shortcut off Paste Last's
-  key). It is not an experiment; Windows never compiles `scrawl-capture`
+  for older settings). It is not an experiment; Windows never compiles `scrawl-capture`
   and shows no pane. Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
   dialog at its first Screen capture. Default shortcuts share no key with
-  the other defaults: ⌥⇧S and ⌥⇧L on macOS, Ctrl+Alt+S, Ctrl+Alt+Shift+V,
-  and Ctrl+Alt+D (draw) on Linux. Drawing on Linux: Ctrl+Alt+D while a
-  capture records turns the ink overlay into a full-screen surface that
-  takes the pointer (`capture_host::draw`: a drag is Shift ink, a click a
-  pin, a right-click undoes), and off again; drawing ends with the capture.
+  the other defaults: ⌥⇧S on macOS, Ctrl+Alt+S and Ctrl+Alt+D (held to
+  draw) on Linux. There is no send-to list shortcut; Send to… is a capsule
+  click. Drawing on Linux lasts while Ctrl+Alt+D is held (portal
+  Activated/Deactivated), as Shift on the Mac: the ink overlay becomes a
+  full-screen surface that takes the pointer (`capture_host::draw`: moving
+  is Shift ink, a click a pin, a right-click undoes); `hex annotate draw`
+  toggles it for desktops without the portal. While a capture records, the
+  dictation and Voice Action shortcuts start nothing on either OS. Sends
+  carry the contact sheet and keyframes as inline `data:` image parts, never
+  a local path. The Linux capsule doesn't open suggestions by itself.
   While drawing, clicks never reach the apps or the capsule. `validate-app.sh` requires
   `scrawl-helper` and the camera description in a macOS bundle. Linux
   never links PipeWire, VA-API, or FFmpeg: the first two load when a

@@ -226,8 +226,23 @@ enum Encoding {
 }
 
 /// The recording thread: see `crate::capture::Sampler`. Writes its movie before it returns.
+/// The recorded screen's size in pixels while a screen recording runs.
+static RECORDED: std::sync::Mutex<Option<(u32, u32)>> = std::sync::Mutex::new(None);
+
+/// The pixel size of the screen being recorded, once its stream started:
+/// a host drawing over the screen in points divides it by the scale.
+pub fn recorded_screen() -> Option<(u32, u32)> {
+    *RECORDED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
-    match record(&sampler) {
+    let recorded = record(&sampler);
+    *RECORDED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    match recorded {
         Ok(movie) => movie,
         Err(error) => {
             scrawl_log(format!("Screen capture failed: {error:#}"));
@@ -264,6 +279,12 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    if source == Source::Screen {
+        *RECORDED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((format.width, format.height));
+    }
     let edge = if source == Source::Window {
         WINDOW_EDGE
     } else {

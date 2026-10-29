@@ -102,10 +102,6 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .capture
             .enabled
             .then(|| LinuxHotkey::from(&crate::app_settings::HotkeyBinding::annotate_draw())),
-        capture_list: settings
-            .capture
-            .enabled
-            .then(|| LinuxHotkey::from(&settings.capture.list_hotkey)),
     };
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
@@ -515,6 +511,13 @@ pub(crate) fn run(
                 .and_then(|hotkey| hotkey.events.try_recv().ok())
         {
             match action {
+                // Annotate records the narration itself: while it records,
+                // dictation and Voice Action start nothing. The desktop
+                // already took the keys, so nothing reaches the app.
+                HotkeyEvent::Start | HotkeyEvent::VoiceStart
+                    if capture_host
+                        .as_mut()
+                        .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start | HotkeyEvent::VoiceStart
                     if !capture.is_recording() && !start_pending =>
                 {
@@ -575,14 +578,10 @@ pub(crate) fn run(
                         host.shortcut(activity.on_press(), &timeline);
                     }
                 }
-                HotkeyEvent::Draw => {
-                    if let Some(host) = &mut capture_host {
-                        draw_pending = host.draw_shortcut(&timeline);
-                    }
-                }
-                HotkeyEvent::CaptureList => {
-                    crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::OpenList);
-                }
+                // Drawing lasts while the draw keys are held, as Shift does
+                // on the Mac; with nothing recording they do nothing.
+                HotkeyEvent::DrawStart => crate::capture_host::set_drawing(true),
+                HotkeyEvent::DrawEnd => crate::capture_host::set_drawing(false),
                 HotkeyEvent::PasteLast if !capture.is_recording() => {
                     match jobs.try_send(OutputJob::PasteLast) {
                         Ok(()) | Err(TrySendError::Full(_)) => {}

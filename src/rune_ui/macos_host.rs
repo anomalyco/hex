@@ -459,11 +459,7 @@ pub(super) fn validate_hotkey(
         return Err(tr("Add a key"));
     }
     #[cfg(hex_capture)]
-    if matches!(
-        target,
-        ShortcutTarget::Capture | ShortcutTarget::CaptureList
-    ) && binding.key.is_none()
-    {
+    if target == ShortcutTarget::Capture && binding.key.is_none() {
         return Err(tr("Add a key"));
     }
     Ok(())

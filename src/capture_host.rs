@@ -1505,9 +1505,10 @@ impl CaptureHost {
         reply
     }
 
-    /// The draw shortcut (Linux): while a capture records it turns drawing
-    /// on or off; otherwise it starts one, and true says drawing should
-    /// turn on once its engine takes input.
+    /// `hex annotate draw` (Linux, for desktops without the shortcuts
+    /// portal): while a capture records it turns drawing on or off;
+    /// otherwise it starts one, and true says drawing should turn on once
+    /// its engine takes input.
     #[cfg(target_os = "linux")]
     pub fn draw_shortcut(&mut self, audio: &impl AudioTimeline) -> bool {
         if self.recording_since(audio).is_some() {
@@ -2029,11 +2030,11 @@ pub fn report_input(at: CaptureInstant, input: Tapped) {
 }
 
 // ---------------------------------------------------------------------------
-// Drawing on Linux. Wayland reports no pointer to Hex outside its own
-// surfaces, so while a capture records, drawing turns the ink overlay into a
-// surface that takes the pointer: its strokes reach the engine as Scrawl's
-// Shift-drawn ink, a click as a pin, and a right-click undoes the last
-// stroke. Off, clicks reach the apps beneath again.
+// Drawing on Linux, as Shift on the Mac. Wayland reports no pointer to Hex
+// outside its own surfaces, so while the draw shortcut is held during a
+// recording, the ink overlay takes the pointer: moving it draws Scrawl's
+// Shift ink, a click drops a pin, and a right-click or Ctrl+Z undoes the
+// last stroke. Let go, and the stroke ends and clicks reach the apps again.
 
 /// The ink overlay takes the pointer and draws.
 #[cfg(target_os = "linux")]
@@ -2070,7 +2071,8 @@ pub fn set_drawing(on: bool) {
     );
 }
 
-/// What the pointer does on the drawing overlay.
+/// What the pointer does on the drawing overlay: it draws as it moves,
+/// like Shift on the Mac; a press and release is a pin.
 #[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug)]
 pub enum Draw {
@@ -2081,18 +2083,19 @@ pub enum Draw {
     Undo,
 }
 
-/// One pointer event on the drawing overlay, at `x`, `y` in its points
-/// over an `area` (its size: the recorded screen). The capture's target
-/// becomes that area, so strokes land where they were drawn.
+/// One pointer event on the drawing overlay, at `x`, `y` in its points;
+/// `scale` is its pixels per point. The capture's target becomes the
+/// recorded screen in points, so strokes land where they were drawn.
 #[cfg(target_os = "linux")]
-pub fn draw(event: Draw, x: f32, y: f32, area: [f32; 2]) {
+pub fn draw(event: Draw, x: f32, y: f32, scale: f32) {
     if !drawing() {
         return;
     }
-    if area[0] > 0.0
-        && area[1] > 0.0
+    if let Some((width, height)) = scrawl_capture::capture::recorded_screen()
+        && scale > 0.0
         && let Some(source) = ink_source()
     {
+        let area = [width as f32 / scale, height as f32 / scale];
         let mut frame = source
             .telemetry
             .target_frame
@@ -2121,21 +2124,13 @@ pub fn draw(event: Draw, x: f32, y: f32, area: [f32; 2]) {
             y,
             modifiers: pen,
         }],
-        // The pen lifts: the stroke ends once Shift is up.
-        Draw::Up => vec![
-            HostInput::Button {
-                down: false,
-                right: false,
-                x,
-                y,
-                modifiers: pen,
-            },
-            HostInput::Moved {
-                x,
-                y,
-                modifiers: Modifiers::default(),
-            },
-        ],
+        Draw::Up => vec![HostInput::Button {
+            down: false,
+            right: false,
+            x,
+            y,
+            modifiers: pen,
+        }],
         Draw::Undo => vec![HostInput::Key {
             name: Some("Z".into()),
             z: true,
@@ -2580,16 +2575,10 @@ impl CaptureShortcut {
 pub enum CapsuleKeys {
     /// The picker: the capture shortcut ([`CapsuleKey::Shortcut`]) and Escape.
     Picker,
-    /// A routed capsule, or a hidden one whose capture still waits for a
-    /// pick: the send-to list shortcut (`capture.list_hotkey`) opens its
-    /// list ([`CapsuleKey::OpenList`]). Never Escape: it goes to the app in
-    /// front, and a send is taken back only by clicking Undo.
-    Route,
     /// The open list: every key press without ⌘ or ⌃ that isn't one of
     /// Hex's shortcuts.
     List,
-    /// A capture's suggestions: the send-to list shortcut (search every
-    /// session), 1 to `rows` with no modifier ([`CapsuleKey::Digit`]), and
+    /// A capture's suggestions: 1 to `rows` with no modifier ([`CapsuleKey::Digit`]), and
     /// a mouse press ([`CapsuleKey::Press`]) that may fold them. `cycle`:
     /// Return and Tab too, for the toast that offers one guess at a time.
     Suggest { rows: u8, cycle: bool },
@@ -2602,8 +2591,6 @@ pub enum CapsuleKey {
     /// The capture shortcut, while picking: record what the picker is on.
     Shortcut,
     Escape,
-    /// The send-to list shortcut, while routed or waiting for a pick.
-    OpenList,
     /// What a key types in the list, in the active layout.
     Text(String),
     Backspace,
@@ -2645,7 +2632,6 @@ fn keys_code(keys: Option<CapsuleKeys>) -> u8 {
     match keys {
         None => 0,
         Some(CapsuleKeys::Picker) => 1,
-        Some(CapsuleKeys::Route) => 2,
         Some(CapsuleKeys::List) => 4,
         Some(CapsuleKeys::Suggest { .. }) => 6,
     }
@@ -2715,13 +2701,6 @@ pub fn list_open() -> bool {
     GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::List))
 }
 
-/// Whether the capsule takes the send-to list shortcut: only then does Hex
-/// match it (`app_settings::runtime_hotkeys`), so it reaches the app in
-/// front the rest of the time.
-pub fn list_key_wanted() -> bool {
-    matches!(GRAB_KEYS.load(Ordering::Acquire), 2 | 4 | 6)
-}
-
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// Whether the capsule's suggestions take their digit keys at the tap.
 pub fn suggesting() -> bool {
@@ -2744,10 +2723,6 @@ pub fn capsule_key(key: CapsuleKey) -> bool {
 fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
     match (keys, key) {
         (CapsuleKeys::Picker, CapsuleKey::Shortcut | CapsuleKey::Escape) => true,
-        (
-            CapsuleKeys::Route | CapsuleKeys::List | CapsuleKeys::Suggest { .. },
-            CapsuleKey::OpenList,
-        ) => true,
         (CapsuleKeys::Suggest { rows, .. }, CapsuleKey::Digit(digit)) => (1..=rows).contains(digit),
         (CapsuleKeys::Suggest { .. }, CapsuleKey::Press | CapsuleKey::Shift(_)) => true,
         (
@@ -2930,13 +2905,30 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     })
 }
 
-/// Linux pastes the summary through Hex's own paste path (Wayland or X11).
+/// Linux pastes as the Mac does, through Hex's own paste path (Wayland or
+/// X11): the contact sheet, then the summary. An app that takes no images
+/// (a terminal) gets only the summary, which names the contact sheet.
 #[cfg(target_os = "linux")]
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     match how {
         HandOff::Paste => {
-            let summary = summary(bundle)?;
-            with_linux_paster(|paster| paster.paste(&summary))
+            let (dir, loaded) = scrawl_capture::handoff::load_bundle(bundle)?;
+            let summary = scrawl_capture::sketch::summary_markdown(&loaded, &dir);
+            let sheet = std::fs::read(dir.join(&loaded.contact_sheet));
+            with_linux_paster(|paster| {
+                match &sheet {
+                    Ok(png) => {
+                        if let Err(error) = paster.paste_png(png) {
+                            tracing::warn!(
+                                error = format!("{error:#}"),
+                                "contact sheet paste failed"
+                            );
+                        }
+                    }
+                    Err(error) => tracing::warn!(%error, "contact sheet unreadable"),
+                }
+                paster.paste(&summary)
+            })
         }
         HandOff::Inspect => inspect(bundle),
     }
@@ -4739,31 +4731,17 @@ mod tests {
             take_keys(CapsuleKeys::Picker, move |key| sent.send((1, key)).unwrap())
         };
         let second = take_keys(CapsuleKeys::Picker, move |key| sent.send((2, key)).unwrap());
-        assert!(picking() && wants_escape() && !list_key_wanted());
+        assert!(picking() && wants_escape());
         assert!(capsule_key(CapsuleKey::Shortcut));
-        assert!(!capsule_key(CapsuleKey::OpenList));
         drop(first);
         assert!(capsule_key(CapsuleKey::Escape));
 
-        // A routed capsule: the list shortcut opens the list; never Escape.
-        second.set(CapsuleKeys::Route);
-        assert!(!picking() && !wants_escape() && list_key_wanted());
-        assert!(!capsule_key(CapsuleKey::Shortcut));
-        assert!(!capsule_key(CapsuleKey::Escape));
-        assert!(capsule_key(CapsuleKey::OpenList));
-        assert!(
-            !capsule_key(CapsuleKey::Press),
-            "a press matters only to the list"
-        );
-        second.set(CapsuleKeys::Route);
-        assert!(!wants_escape() && !capsule_key(CapsuleKey::Escape));
-        // Suggestions: the list shortcut and only their own digits, never
-        // Escape.
+        // Suggestions: only their own digits, never Escape.
         second.set(CapsuleKeys::Suggest {
             rows: 2,
             cycle: false,
         });
-        assert!(suggesting() && !wants_escape() && list_key_wanted() && !list_open());
+        assert!(suggesting() && !wants_escape() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
         assert!(capsule_key(CapsuleKey::Press), "a press may fold them");
         assert!(capsule_key(CapsuleKey::Shift(true)), "Shift shows the rule");
@@ -4783,18 +4761,17 @@ mod tests {
         assert!(!capsule_key(CapsuleKey::Return { shift: true }));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
-        assert!(list_open() && !wants_escape() && list_key_wanted());
+        assert!(list_open() && !wants_escape());
         assert!(capsule_key(CapsuleKey::Text("ho".into())));
         assert!(capsule_key(CapsuleKey::Press));
         drop(second);
-        assert!(!picking() && !list_open() && !list_key_wanted());
+        assert!(!picking() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
         assert_eq!(
             keys.try_iter().collect::<Vec<_>>(),
             [
                 (2, CapsuleKey::Shortcut),
                 (2, CapsuleKey::Escape),
-                (2, CapsuleKey::OpenList),
                 (2, CapsuleKey::Press),
                 (2, CapsuleKey::Shift(true)),
                 (2, CapsuleKey::Digit(2)),

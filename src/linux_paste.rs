@@ -225,13 +225,23 @@ impl LinuxPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
+        self.paste_as(Mime::Text, text.as_bytes())
+    }
+
+    /// Pastes a PNG (a capture's contact sheet) where the focus is, as the
+    /// Mac's capture Paste does before its summary.
+    pub(crate) fn paste_png(&mut self, png: &[u8]) -> Result<()> {
+        self.paste_as(Mime::Png, png)
+    }
+
+    fn paste_as(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
         let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
-            Backend::X11(paster) => paster.paste(text, &self.stop, paste_with_shift)?,
+            Backend::X11(paster) => paster.paste(mime, bytes, &self.stop, paste_with_shift)?,
             Backend::Wayland(wayland) => {
                 let mut copy = Command::new("wl-copy");
-                copy.args(["--type", "text/plain;charset=utf-8"]);
-                run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
+                copy.args(["--type", mime.wayland()]);
+                run_helper(copy, bytes, &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not own the Wayland clipboard; install wl-clipboard and check compositor support")?;
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
@@ -245,6 +255,22 @@ impl LinuxPaster {
         // transcript replaces it. This is a bounded settling policy, not an ACK.
         thread::sleep(PASTE_SETTLE);
         Ok(())
+    }
+}
+
+/// What a paste puts on the clipboard.
+#[derive(Clone, Copy)]
+enum Mime {
+    Text,
+    Png,
+}
+
+impl Mime {
+    fn wayland(self) -> &'static str {
+        match self {
+            Self::Text => "text/plain;charset=utf-8",
+            Self::Png => "image/png",
+        }
     }
 }
 
@@ -271,11 +297,25 @@ impl X11Paster {
         })
     }
 
-    fn paste(&mut self, text: &str, stop: &AtomicBool, paste_with_shift: bool) -> Result<()> {
+    fn paste(
+        &mut self,
+        mime: Mime,
+        bytes: &[u8],
+        stop: &AtomicBool,
+        paste_with_shift: bool,
+    ) -> Result<()> {
         self.wait_for_modifier_release(stop)?;
         let atoms = &self.clipboard.getter.atoms;
+        let target = match mime {
+            Mime::Text => atoms.utf8_string,
+            Mime::Png => self
+                .clipboard
+                .getter
+                .get_atom("image/png")
+                .wrap_err("could not name the X11 image/png target")?,
+        };
         self.clipboard
-            .store(atoms.clipboard, atoms.utf8_string, text.as_bytes())
+            .store(atoms.clipboard, target, bytes)
             .wrap_err("could not own the X11 clipboard")?;
         thread::sleep(Duration::from_millis(60));
         for (type_, key) in [

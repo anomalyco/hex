@@ -1136,20 +1136,6 @@ pub fn listen(
                     continue;
                 }
                 host.shortcut(action, &input);
-                // The send-to list shortcut, matched only while the capsule
-                // takes it; the dictation hotkey still sees the press as a
-                // chord.
-                if let crate::suppression::InputEvent::Key {
-                    code,
-                    down: true,
-                    flags,
-                } = input_event
-                    && crate::app_settings::runtime_hotkeys()
-                        .capture_list
-                        .is_some_and(|list| list.matches_key_press(code, flags))
-                {
-                    crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::OpenList);
-                }
             }
             if voice.is_some() && input_event.is_escape_down() {
                 voice = None;
@@ -1180,6 +1166,19 @@ pub fn listen(
                 && input_event.is_escape_down()
                 && cancel_latest_job(&dictation_worker, &mut events, indicator.as_ref())?
             {
+                continue;
+            }
+            // Annotate records the narration itself: while it records, the
+            // dictation and Voice Action shortcuts start nothing. The tap
+            // still swallows their chords, so they never reach the app.
+            #[cfg(hex_capture)]
+            if !hotkeys.any_recording()
+                && voice.is_none()
+                && capture_host
+                    .as_mut()
+                    .is_some_and(|host| host.recording_since(&input).is_some())
+            {
+                hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }
             let edit_action = hotkeys

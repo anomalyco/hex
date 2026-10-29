@@ -945,29 +945,77 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     if let Some(host) = agent_host() {
         sync_bundle_to(&host, &directory)?;
     }
-    let quoted_directory = shell_quote(&directory.to_string_lossy());
-    let contact_sheet = directory.join(&bundle.contact_sheet);
+    let files = inline_images(&directory, &bundle);
     let text = format!(
-        "{}\n\nThe contact sheet is attached ({}); read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said; open the PNG before acting on the feedback. This capture is {} ms long.",
+        "{}\n\nAttached: the contact sheet (every keyframe in order) and {} keyframe{} at full size. Everything the capture holds is in this message; it was recorded on another machine at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
-        contact_sheet.display(),
-        directory.join("scrawl.json").display(),
-        quoted_directory,
+        files.len().saturating_sub(1),
+        if files.len() == 2 { "" } else { "s" },
+        directory.display(),
         bundle.duration_ms,
     );
-    // The server reads `file://` attachments from its own disk; the bundle is at the same path
-    // there (copied above when the agents run on another Mac).
-    post_prompt(
-        session,
-        serde_json::json!({
-            "text": text,
-            "files": [{
-                "uri": file_uri(&contact_sheet),
-                "name": "contact-sheet.png",
-                "description": "Scrawl contact sheet: the capture's keyframes in order",
-            }],
-        }),
-    )
+    post_prompt(session, serde_json::json!({ "text": text, "files": files }))
+}
+
+/// What a send attaches at most, so a long capture never makes a prompt
+/// OpenCode refuses: the keyframes after the contact sheet, and their bytes.
+const MAX_INLINE_FRAMES: usize = 8;
+const MAX_INLINE_BYTES: usize = 12 << 20;
+
+/// The contact sheet, then the keyframes in order, as `data:` URLs, so an
+/// OpenCode server on another machine gets the pictures without the bundle's
+/// folder. Unreadable files are left out; the budget stops at the first image
+/// that would pass it.
+fn inline_images(directory: &Path, bundle: &ScrawlBundle) -> Vec<serde_json::Value> {
+    let sheet = std::iter::once((
+        bundle.contact_sheet.clone(),
+        "contact-sheet.png".to_owned(),
+        "Scrawl contact sheet: the capture's keyframes in order".to_owned(),
+    ));
+    let frames = bundle
+        .keyframes
+        .iter()
+        .take(MAX_INLINE_FRAMES)
+        .map(|frame| {
+            let seconds = frame.t / 1000;
+            let said = frame
+                .said
+                .as_deref()
+                .map(|said| format!(": \"{said}\""))
+                .unwrap_or_default();
+            (
+                frame.file.clone(),
+                format!("frame-{:02}.png", frame.index + 1),
+                format!(
+                    "Keyframe {} at {}:{:02}{}",
+                    frame.index + 1,
+                    seconds / 60,
+                    seconds % 60,
+                    said
+                ),
+            )
+        });
+    let mut budget = MAX_INLINE_BYTES;
+    let mut files = Vec::new();
+    for (file, name, description) in sheet.chain(frames) {
+        if file.is_empty() {
+            continue;
+        }
+        let Ok(bytes) = fs::read(directory.join(&file)) else {
+            continue;
+        };
+        let encoded = base64(&bytes);
+        if encoded.len() > budget {
+            break;
+        }
+        budget -= encoded.len();
+        files.push(serde_json::json!({
+            "uri": format!("data:image/png;base64,{encoded}"),
+            "name": name,
+            "description": description,
+        }));
+    }
+    files
 }
 
 /// The host's summary of a bundle ([`crate::env::Summary`]), else its `summary.md`.
@@ -989,33 +1037,6 @@ pub fn send_text_to_session(session: &str, text: &str) -> Result<Posted> {
         "Invalid OpenCode session ID"
     );
     post_prompt(session, serde_json::json!({ "text": text }))
-}
-
-/// A `file://` URL for an absolute path, percent-encoding everything but unreserved
-/// characters and `/` ("Application Support" → "Application%20Support"). A Windows path
-/// (`C:\Users\…`, or `\\?\C:\…` after `canonicalize`) becomes `file:///C:/Users/…`.
-fn file_uri(path: &Path) -> String {
-    let mut text = path.to_string_lossy().into_owned();
-    let mut uri = String::from("file://");
-    let windows_path = cfg!(windows) || text.as_bytes().get(1) == Some(&b':');
-    if windows_path {
-        if let Some(rest) = text.strip_prefix(r"\\?\") {
-            text = rest.to_owned();
-        }
-        text = text.replace('\\', "/");
-        if !text.starts_with('/') {
-            uri.push('/');
-        }
-    }
-    for (index, byte) in text.bytes().enumerate() {
-        let drive_colon = windows_path && index == 1 && byte == b':';
-        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) || drive_colon {
-            uri.push(char::from(byte));
-        } else {
-            uri.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    uri
 }
 
 /// A stand-in for OpenCode's session API, for tests here and in hosts.
@@ -1192,16 +1213,6 @@ mod sync_live_check {
 mod session_lookup {
     use super::fake_api::{serve, session};
     use super::*;
-
-    #[test]
-    fn file_uris_are_percent_encoded() {
-        assert_eq!(
-            file_uri(Path::new(
-                "/Users/example/Library/Application Support/scrawl/captures/a b#1.scrawl/contact-sheet.png"
-            )),
-            "file:///Users/example/Library/Application%20Support/scrawl/captures/a%20b%231.scrawl/contact-sheet.png"
-        );
-    }
 
     #[test]
     fn sessions_read_their_directory_from_v2_location_or_v1_field() {

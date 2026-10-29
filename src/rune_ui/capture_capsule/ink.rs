@@ -5,10 +5,11 @@
 //! a ⇧-click pin pulses once; a dot marks the pointer while Shift is held;
 //! and a full-screen capture's edges glow red for its first second.
 //!
-//! On Linux the overlay covers the screen and passes clicks through until
-//! drawing is on (`capture_host::drawing`, Ctrl+Alt+D): then it takes the
-//! pointer, a drag draws ink, a click drops a pin, and a right-click undoes
-//! the last stroke (`capture_host::draw`).
+//! On Linux the overlay covers the screen and passes clicks through, except
+//! while the draw shortcut is held (`capture_host::drawing`): then it takes
+//! the pointer, moving it draws ink as Shift does on the Mac, a click drops
+//! a pin, and a right-click or Ctrl+Z undoes the last stroke
+//! (`capture_host::draw`).
 //!
 //! [`Scene::at`] decides what shows from the capture's strokes and clock;
 //! the view only draws it, and the overlay asks for frames only while a
@@ -248,6 +249,10 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             } else {
                 rune::OverlayInput::None
             });
+            // For Ctrl+Z, where the desktop gives the overlay the keyboard.
+            if drawing {
+                overlay.request_keys();
+            }
         }
     }
     if let Some(overlay) = &s.overlay {
@@ -301,6 +306,12 @@ impl InkOverlay {
                 exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::None,
                 prewarm: true,
+                // Ctrl+Z while drawing (Linux), asked for only then.
+                keys: if cfg!(target_os = "linux") {
+                    rune::KeyPolicy::OnDemand
+                } else {
+                    rune::KeyPolicy::None
+                },
                 ..Default::default()
             })
             .poll(poll)
@@ -335,13 +346,16 @@ impl InkOverlay {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
-pub(crate) fn view(s: &InkState, _cx: &mut rune::Cx<InkState>) -> El {
+pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
     let scene = &s.scene;
     let [w, h] = scene.size;
     #[cfg(not(target_os = "linux"))]
-    let mut root = el().size(w.max(1.0), h.max(1.0));
+    let mut root = {
+        let _ = cx;
+        el().size(w.max(1.0), h.max(1.0))
+    };
     #[cfg(target_os = "linux")]
-    let mut root = draw_surface(s.drawing);
+    let mut root = draw_surface(s.drawing, cx.env().scale);
     if scene.is_empty() {
         return root;
     }
@@ -424,27 +438,42 @@ pub(crate) fn view(s: &InkState, _cx: &mut rune::Cx<InkState>) -> El {
     root
 }
 
-/// The whole screen; while drawing it takes the pointer and hands every
-/// stroke, click, and right-click to the capture.
+/// The whole screen; while the draw shortcut is held it takes the pointer:
+/// every move draws, a click pins, and a right-click or Ctrl+Z undoes.
+/// `scale` is the screen's pixels per point.
 #[cfg(target_os = "linux")]
-fn draw_surface(drawing: bool) -> El {
+fn draw_surface(drawing: bool, scale: f32) -> El {
     use crate::capture_host::{Draw, draw};
     let root = el().w_full().h_full();
     if !drawing {
         return root;
     }
     root.cursor(rune::Cursor::Crosshair)
-        .on_drag(|_: &mut InkState, d: &mut rune::Drag, tx: &mut Tx| {
+        .focusable(true)
+        .on_pointer_move_local(
+            move |_: &mut InkState, p: rune::PointerEvent, tx: &mut Tx| {
+                draw(Draw::Move, p.x, p.y, scale);
+                tx.wake_after(Duration::ZERO);
+            },
+        )
+        .on_drag(move |_: &mut InkState, d: &mut rune::Drag, tx: &mut Tx| {
             let event = match d.phase {
                 rune::Phase::Down => Draw::Down,
                 rune::Phase::Move => Draw::Move,
                 rune::Phase::Up => Draw::Up,
             };
-            draw(event, d.x, d.y, [d.w, d.h]);
+            draw(event, d.x, d.y, scale);
             tx.wake_after(Duration::ZERO);
         })
-        .on_secondary_press_local(|_: &mut InkState, p: rune::PointerEvent, _| {
-            draw(Draw::Undo, p.x, p.y, [0.0, 0.0]);
+        .on_secondary_press_local(move |_: &mut InkState, p: rune::PointerEvent, _| {
+            draw(Draw::Undo, p.x, p.y, scale);
+        })
+        .on_key(move |_: &mut InkState, key: &rune::KeyEvent, _| {
+            let undo = key.is_command('z');
+            if undo {
+                draw(Draw::Undo, 0.0, 0.0, scale);
+            }
+            undo
         })
 }
 

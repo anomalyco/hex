@@ -45,8 +45,6 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     VoiceAction,
     Capture,
-    /// The capsule's send-to list (`capture.list_hotkey`).
-    CaptureList,
 }
 
 struct PreparedTranscription {
@@ -821,7 +819,6 @@ impl LinuxDesktopHost {
                         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
                         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
                         ShortcutTarget::Capture => settings.capture.hotkey = binding,
-                        ShortcutTarget::CaptureList => settings.capture.list_hotkey = binding,
                     }
                 })
             }));

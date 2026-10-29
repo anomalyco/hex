@@ -1149,7 +1149,6 @@ impl ShortcutSuppression {
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
                 capture: None,
-                capture_list: None,
             },
             delivered,
             false,
@@ -2551,7 +2550,6 @@ mod tests {
             paste_last: None,
             paste_meeting: None,
             capture: None,
-            capture_list: None,
         }
     }
 
@@ -5624,44 +5622,6 @@ mod tests {
         assert!(suppression.process_all(key(true), hotkeys, true, false));
         assert!(suppression.process_all(key(false), hotkeys, true, false));
         assert!(!suppression.process_all(key(true), RuntimeHotkeys::default(), true, false));
-    }
-
-    /// The send-to list's ⌥⇧V is Hex's only while the capsule takes it
-    /// (`app_settings::runtime_hotkeys` has it only then); otherwise it's an
-    /// ordinary chord that reaches the app.
-    #[test]
-    fn the_list_shortcut_is_suppressed_only_while_matched() {
-        let list = RuntimeHotkey {
-            modifiers: crate::app_settings::HotkeyModifiers {
-                option: Some(crate::app_settings::ModifierSide::Either),
-                shift: Some(crate::app_settings::ModifierSide::Either),
-                ..Default::default()
-            },
-            key_code: Some(9),
-        };
-        let taken = RuntimeHotkeys {
-            paste_last: None,
-            capture_list: Some(list),
-            ..RuntimeHotkeys::default()
-        };
-        let free = RuntimeHotkeys {
-            capture_list: None,
-            ..taken
-        };
-        let flags = OPTION_KEY_MASK | SHIFT_KEY_MASK;
-        assert!(!is_chord_evidence(9, flags, taken));
-        assert!(is_chord_evidence(9, flags, free));
-        let key = |down| InputEvent::Key {
-            code: 9,
-            down,
-            flags,
-        };
-        let mut suppression = ShortcutSuppression::default();
-        assert!(suppression.process_all(key(true), taken, true, false));
-        // The release goes where the press went, even once the capsule let go.
-        assert!(suppression.process_all(key(false), free, true, false));
-        assert!(!suppression.process_all(key(true), free, true, false));
-        assert!(!suppression.process_all(key(false), taken, true, false));
     }
 
     #[test]

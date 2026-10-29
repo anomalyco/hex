@@ -165,17 +165,20 @@ until you first use it.
 
 - **Start and stop:** **Option-Shift-S** on macOS, **Ctrl+Alt+S** on Linux.
   macOS asks for Screen Recording the first time; Linux asks through the
-  desktop's screen-sharing dialog once, then remembers the screen.
+  desktop's screen-sharing dialog once, then remembers the screen. While it
+  records, the dictation and Voice Action shortcuts do nothing.
 - **Draw:** on macOS hold **Shift** and move the pointer; a Shift-click drops a
-  numbered pin and **⌘Z** takes the last stroke back. On Linux press
-  **Ctrl+Alt+D** while it records, then drag to draw, click to pin, and
-  right-click to take the last stroke back; Ctrl+Alt+D again gives clicks back
-  to your apps. Ink fades from the screen after about a second but stays in
-  the recording.
-- **Send:** when it stops, the summary is on your clipboard, and with
-  OpenCode running the capsule lists its sessions: click one to send the
-  annotation there, and Undo takes it back for a few seconds.
-  **Option-Shift-L** (Ctrl+Alt+Shift+V on Linux) opens the full list.
+  numbered pin and **⌘Z** takes the last stroke back. On Linux hold
+  **Ctrl+Alt+D** and move the pointer; a click while holding drops a pin, and
+  a right-click (or Ctrl+Z) takes the last stroke back. Let go and clicks
+  reach your apps again. Ink fades from the screen after about a second but
+  stays in the recording.
+- **Paste or send:** when it stops, the annotation is on your clipboard and
+  the capsule offers **Paste** (the contact sheet, then the summary) and
+  **Inspect**. With OpenCode running, **Send to…** lists its sessions (macOS
+  also opens its suggestions by itself): click one to send it there, and Undo
+  takes it back for a few seconds. A send carries the transcript and the
+  pictures inline, so it works with an OpenCode server on another machine.
 - `hex annotate list|show|send` (also `hex capture …`) reads and sends from the
   terminal.
 

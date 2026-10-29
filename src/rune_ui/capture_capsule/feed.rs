@@ -761,7 +761,7 @@ mod tests {
             })]
         );
         assert_eq!(follow.next(&routed("a", rule(), sending())), []);
-        // Sent settles it (the list shortcut no longer brings it back) and
+        // Sent settles it (Send to… no longer brings it back) and
         // sounds Sent.
         let sent = Some(RouteDelivery::Sent { to: "SEER".into() });
         assert_eq!(follow.next(&routed("a", rule(), sent)), [Input::Settled]);

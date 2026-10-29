@@ -300,8 +300,6 @@ pub(super) fn conflicts(
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => HotkeySlot::CaptureList,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -329,8 +327,6 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => Some(&settings.capture.list_hotkey),
     }
 }
 
@@ -345,8 +341,6 @@ pub(super) fn set_binding(
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => settings.capture.list_hotkey = binding,
     }
 }
 
@@ -595,8 +589,6 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::VoiceAction => "Voice Action",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "Capture",
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => "Send-to list",
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -889,8 +881,6 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",
-        #[cfg(hex_capture)]
-        ShortcutTarget::CaptureList => "capture-list-hotkey",
     }
 }
 

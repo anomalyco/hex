@@ -182,7 +182,7 @@ pub(crate) enum Input {
     Worked,
     /// The capture shortcut while the picker is open: record what it's on.
     Record,
-    /// The send-to list's shortcut (⌥⇧V): the list opens (or, when open,
+    /// Send to…: the list opens (or, when open,
     /// nothing), and a closed capsule whose capture waits for a pick comes
     /// back with it.
     OpenList,
@@ -323,7 +323,7 @@ impl List {
 }
 
 /// The finished capsule: its lead, a quiet word on why, the Undo chip,
-/// the route chips, the ⌥⇧V chip, and (open) the field with its list.
+/// the route chips, the Send to… chip, and (open) the field with its list.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Done {
     pub(crate) lead: Lead,
@@ -331,11 +331,8 @@ pub(crate) struct Done {
     pub(crate) why: Option<String>,
     /// It can still be taken back: the Undo chip shows, with no countdown.
     pub(crate) undo: bool,
-    /// The ⌥⇧V chip's label.
+    /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
-    /// Its keycaps, the list's shortcut as saved when shown, so a change
-    /// lays the chip out again.
-    pub(crate) ask_keys: Vec<String>,
     /// Open: what's typed into the field, and the list under it.
     pub(crate) open: Option<(String, List)>,
     /// A written capture: Paste and Inspect, as Scrawl's capsule offers.
@@ -358,7 +355,6 @@ impl Done {
             why: None,
             undo: false,
             ask: None,
-            ask_keys: Vec::new(),
             open: None,
             hand_off: false,
             picks: Vec::new(),
@@ -467,7 +463,7 @@ struct Routed {
 struct Open {
     query: String,
     selected: usize,
-    /// Searching every session (the list shortcut): the field
+    /// Searching every session (Send to…): the field
     /// takes typing. Otherwise it's the suggestions a capture opens with.
     typing: bool,
     /// Shift is down: a pick also saves a rule.
@@ -539,9 +535,9 @@ pub(crate) struct Flow {
     /// The written capture shown was closed (dismissed, or its hold ran
     /// out); news of it leaves the capsule closed.
     closed: bool,
-    /// The latest capture's list, closed before anything was picked: the
-    /// send-to list shortcut brings it back until a pick, a paste, a send
-    /// from elsewhere (`hex capture send`), or the next capture.
+    /// The latest capture's list, closed before anything was picked: kept
+    /// until a pick, a paste, a send from elsewhere (`hex capture send`), or
+    /// the next capture.
     waiting: Option<Routed>,
     /// The latest capture was pasted, inspected, or sent from elsewhere:
     /// closing its capsule leaves nothing waiting.
@@ -555,6 +551,10 @@ pub(crate) struct Flow {
     /// Undo is the earlier send's, and so is news of a send elsewhere: the
     /// pick shown stands.
     superseded: bool,
+    /// A guess opens its suggestions under the finished capsule (the Mac).
+    /// On Linux the capsule shows Paste first and Send to… waits for a
+    /// click, so Dax can paste again without a list in the way.
+    suggest_on_route: bool,
 }
 
 impl Default for Flow {
@@ -578,7 +578,15 @@ impl Flow {
             settled: false,
             undoing: false,
             superseded: false,
+            suggest_on_route: true,
         }
+    }
+
+    /// Whether a guess opens its suggestions by itself; the Linux capsule
+    /// says no (see [`Flow::suggest_on_route`]).
+    pub(crate) fn suggesting_on_route(mut self, suggest: bool) -> Self {
+        self.suggest_on_route = suggest;
+        self
     }
 
     /// The sounds due since the last call.
@@ -598,7 +606,7 @@ impl Flow {
             (_, Phase::TakenBack { .. }) => Some(Cue::TakenBack),
             (Phase::Sent(_), Phase::Sent(_)) => None,
             (_, Phase::Sent(_)) => Some(Cue::Sent),
-            // The list shortcut bringing a taken-back capture back.
+            // Send to… bringing a taken-back capture back.
             (Phase::Hidden | Phase::Kept { .. }, Phase::Routed(_)) => None,
             (
                 Phase::Routed(Routed {
@@ -656,7 +664,7 @@ impl Flow {
         actions
     }
 
-    /// A list closed with nothing picked waits for the list shortcut.
+    /// A list closed with nothing picked waits for Send to….
     fn left_waiting(&mut self, before: Phase, actions: &[Action]) {
         // Taken back, it's sent nowhere again: it waits for a pick.
         if actions
@@ -828,7 +836,7 @@ impl Flow {
             // Closed before the router answered (dismissed, or the answer
             // came after the hold): it stays closed, and `hex capture list`
             // and `hex capture send` still offer the capture.
-            // A guess still waits for the list shortcut.
+            // A guess still waits for Send to….
             (Phase::Hidden, Input::Routed(route)) if self.closed => {
                 if !self.settled {
                     self.waiting = waits(Routed {
@@ -844,7 +852,7 @@ impl Flow {
                 Phase::Hidden
             }
             (Phase::Hidden, Input::Delivered(_)) if self.closed => Phase::Hidden,
-            // Closed with nothing picked: the list shortcut brings the list
+            // Closed with nothing picked: Send to… brings the list
             // back.
             (Phase::Hidden | Phase::Kept { .. }, Input::OpenList) if self.waiting.is_some() => {
                 let routed = self.waiting.take().expect("checked");
@@ -862,7 +870,8 @@ impl Flow {
             // Only a rule Kit saved sends by itself; anything else opens on
             // its suggestions, and nothing goes until he picks.
             (_, Input::Routed(route)) => {
-                let suggests = !matches!(route, Route::Rule { .. } | Route::Unreachable { .. })
+                let suggests = self.suggest_on_route
+                    && !matches!(route, Route::Rule { .. } | Route::Unreachable { .. })
                     && sections(&route) != (&[][..], &[][..]);
                 Phase::Routed(Routed {
                     route,
@@ -945,7 +954,7 @@ impl Flow {
                 Phase::Routed(routed)
             }
             // Taken back, folding it starts its hold: it leaves like any
-            // finished capsule, and the list shortcut brings it back.
+            // finished capsule, and Send to… brings it back.
             (Phase::Routed(mut routed), Input::ClickAway) if !self.hovered => {
                 if routed.taken_back {
                     routed.at = now;
@@ -1191,16 +1200,14 @@ impl Flow {
     }
 
     /// The keys the capsule takes from Hex's tap: the picker's, an open
-    /// list's (Escape only in a list Kit opened or the picker), or a routed
-    /// capture's list shortcut; closed, the list shortcut while the capture
-    /// waits for a pick. With no sessions to list, the list shortcut goes
-    /// to the app in front.
+    /// list's (Escape only in a list Kit opened or the picker). Closed or
+    /// routed with nothing open, it takes none.
     pub(crate) fn keys(&self) -> Option<crate::capture_host::CapsuleKeys> {
         use crate::capture_host::CapsuleKeys;
         match &self.phase {
-            Phase::Hidden | Phase::Kept { .. } => self.waiting.as_ref().map(|_| CapsuleKeys::Route),
+            Phase::Hidden | Phase::Kept { .. } => None,
             Phase::Selecting(_) => Some(CapsuleKeys::Picker),
-            // Nothing to list, so ⌥⇧V reaches the app; ✕ dismisses, or it
+            // Nothing to list; ✕ dismisses, or it
             // leaves by itself.
             Phase::TakenBack { .. } => None,
             Phase::Routed(Routed {
@@ -1222,9 +1229,6 @@ impl Flow {
             }) => None,
             // Never Escape here: it goes to the app in front, and a send is
             // taken back only by clicking Undo.
-            Phase::Routed(_) => Some(CapsuleKeys::Route),
-            // A send from the list has no list to open: ⌥⇧V goes to the app.
-            Phase::Sent(_) => None,
             _ => None,
         }
     }
@@ -1666,7 +1670,7 @@ fn short(name: &str) -> String {
 
 fn routed_done(routed: &Routed, undo: bool) -> Done {
     let base = match &routed.route {
-        // Sent nowhere, it waits for a pick: ⌥⇧V or a click reopens the list.
+        // Sent nowhere, it waits for a pick: a click on Send to… reopens the list.
         _ if routed.taken_back => Done {
             // Too late, it's where it went: nothing to offer.
             ask: routed.already_with.is_none().then(|| "Send to…".into()),
@@ -1680,13 +1684,13 @@ fn routed_done(routed: &Routed, undo: bool) -> Done {
             )
         },
         // Sent at once, with a pick's plain Undo while it can be taken
-        // back; ⌥⇧V opens the list throughout.
+        // back.
         Route::Rule { to, .. } => Done {
             why: Some("rule".into()),
             undo,
             ..Done::plain(Lead::Check, sent_to(&to.name))
         },
-        // The suggestions are the ask (closed, the list shortcut opens them).
+        // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
             ask: Some("Send to…".into()),
             ..Done::plain(Lead::Check, "")
@@ -1720,11 +1724,6 @@ fn routed_done(routed: &Routed, undo: bool) -> Done {
         },
         None => Done {
             hand_off: true,
-            ask_keys: if base.ask.is_some() {
-                super::surface::ask_keys()
-            } else {
-                Vec::new()
-            },
             ..base
         },
     }
@@ -1884,7 +1883,7 @@ mod tests {
     }
 
     /// The menu-bar flow's guesses are chips for a moment, then the capsule
-    /// goes; the list shortcut still has the capture.
+    /// goes.
     #[test]
     fn the_menu_bar_hint_is_brief_and_its_chips_send() {
         tuning::with_flow(CapsuleFlow::MenuBar, || {
@@ -1897,7 +1896,7 @@ mod tests {
             assert!(shown.open.is_none());
             flow.tick(MENU_HINT_S + 0.1);
             assert_eq!(flow.pres(MENU_HINT_S + 0.1), Pres::Hidden);
-            assert!(flow.keys().is_some(), "the list shortcut still reaches it");
+            assert_eq!(flow.keys(), None, "no key is Hex's once it's gone");
 
             let mut flow = Flow::new();
             flow.input(Input::Stage(Stage::Done), 0.0);
@@ -1942,28 +1941,6 @@ mod tests {
         assert!(!done(&flow, 21.0).hand_off, "nothing was written");
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn a_list_shortcut_change_changes_the_ask_chip() {
-        use crate::app_settings::{HotkeyBinding, HotkeyModifiers, publish_list_keycaps};
-        let mut flow = Flow::new();
-        flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 0.0);
-        let before = done(&flow, 0.5);
-        assert_eq!(before.ask_keys, ["⌥", "⇧", "L"]);
-        let rebound = HotkeyBinding {
-            modifiers: HotkeyModifiers::option_command(),
-            ..HotkeyBinding::capture_list_default()
-        };
-        publish_list_keycaps(Some(&rebound));
-        let after = done(&flow, 0.5);
-        assert_eq!(after.ask_keys, rebound.keycaps());
-        assert_ne!(before, after, "so the surface lays the chip out again");
-        publish_list_keycaps(None);
-        assert!(done(&flow, 0.5).ask_keys.is_empty());
-        // The keycaps are the process's: later tests and stills expect ⌥⇧V.
-        publish_list_keycaps(Some(&HotkeyBinding::capture_list_default()));
-    }
-
     #[test]
     fn the_capsule_takes_only_the_keys_its_state_needs() {
         use crate::capture_host::CapsuleKeys;
@@ -1975,7 +1952,7 @@ mod tests {
         assert_eq!(flow.keys(), Some(CapsuleKeys::Picker));
 
         flow.input(Input::Routed(rule()), 2.0);
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Route));
+        assert_eq!(flow.keys(), None);
         flow.input(Input::OpenList, 9.0);
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         flow.input(Input::Type("ho".into()), 9.1);
@@ -2346,7 +2323,7 @@ mod tests {
         assert_eq!(done(&flow, 1_000.0).text, "Sent to HOME");
 
         // Clicking away folds the list and gives Escape back to the app; the
-        // capsule leaves like any other, and the list shortcut still brings
+        // capsule leaves like any other, and Send to… still brings
         // it back. Escape (or ✕) is the dismissal, and the bundle is kept.
         let hold = tuning::get().done_hold_s;
         let mut flow = Flow::new();
@@ -2357,7 +2334,7 @@ mod tests {
         let closed = done(&flow, 2.0);
         assert_eq!(closed.text, "Taken back");
         assert_eq!(closed.ask.as_deref(), Some("Send to…"));
-        let waiting = Some(crate::capture_host::CapsuleKeys::Route);
+        let waiting = None;
         assert_eq!(flow.keys(), waiting);
         assert_eq!(flow.next_due(2.0), Some(2.0 + hold));
         assert!(!flow.tick(2.0 + hold - 0.1));
@@ -2430,7 +2407,7 @@ mod tests {
         // It's where it went: once gone, nothing waits for a pick.
         assert_eq!(flow.keys(), None);
 
-        // Folded, it leaves by itself, and the list shortcut stays the app's.
+        // Folded, it leaves by itself, and Send to… stays the app's.
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule_of_three()), 0.0);
         flow.input(Input::Undo, 1.0);
@@ -2493,10 +2470,9 @@ mod tests {
     }
 
     /// A pick taken back is sent nowhere again, even though the router
-    /// said it went: dismissed, the list shortcut brings it back.
+    /// said it went: dismissed, Send to… brings it back.
     #[test]
     fn a_pick_taken_back_waits_for_a_pick_again() {
-        use crate::capture_host::CapsuleKeys;
         for dismiss in [Input::Dismiss, Input::ClickAway] {
             let mut flow = Flow::new();
             flow.input(Input::Routed(guess()), 0.0);
@@ -2509,13 +2485,13 @@ mod tests {
             flow.input(dismiss.clone(), 3.0);
             flow.tick(3.0 + tuning::get().done_hold_s);
             assert_eq!(flow.pres(100.0), Pres::Hidden, "{dismiss:?}");
-            assert_eq!(flow.keys(), Some(CapsuleKeys::Route), "{dismiss:?}");
+            assert_eq!(flow.keys(), None, "{dismiss:?}");
             flow.input(Input::OpenList, 100.0);
             assert!(done(&flow, 100.0).open.is_some(), "{dismiss:?}");
         }
     }
 
-    /// The list shortcut bringing a taken-back capture back is silent: the
+    /// Send to… bringing a taken-back capture back is silent: the
     /// take-back sounded once.
     #[test]
     fn reopening_a_taken_back_list_sounds_nothing() {
@@ -2766,7 +2742,7 @@ mod tests {
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         flow.hover(false, 0.65);
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Route));
+        assert_eq!(flow.keys(), None);
         assert!(matches!(flow.pres(0.8), Pres::Done(_)));
         flow.input(Input::ClickAway, 0.9);
         assert!(matches!(flow.pres(0.9), Pres::Done(_)), "the chips stay");
@@ -3011,7 +2987,6 @@ mod tests {
 
     #[test]
     fn a_click_away_folds_the_suggestions_and_they_leave_like_any_capsule() {
-        use crate::capture_host::CapsuleKeys;
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         // Escape is never Hex's here: it changes nothing.
@@ -3021,7 +2996,7 @@ mod tests {
         let folded = done(&flow, 1.0);
         assert_eq!(folded.open, None);
         assert_eq!(folded.ask.as_deref(), Some("Send to…"));
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Route));
+        assert_eq!(flow.keys(), None);
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         flow.tick(tuning::get().done_hold_s);
@@ -3068,11 +3043,11 @@ mod tests {
         assert!(matches!(flow.pres(closed + 2.0), Pres::Done(_)));
     }
 
-    /// Kit's ⌥⇧V after a guess: the list shortcut opens the list while the
-    /// capsule shows, and brings it back after it closed with nothing
-    /// picked, until something settles the capture.
+    /// Send to… after a guess opens the list while the capsule shows, and
+    /// brings it back after it closed with nothing picked, until something
+    /// settles the capture. No key is Hex's while it's closed.
     #[test]
-    fn the_list_shortcut_brings_back_a_capture_waiting_for_a_pick() {
+    fn send_to_brings_back_a_capture_waiting_for_a_pick() {
         use crate::capture_host::CapsuleKeys;
         let hold = tuning::get().done_hold_s;
         let mut flow = Flow::new();
@@ -3085,10 +3060,10 @@ mod tests {
                 cycle: false
             })
         );
-        // Its hold runs out: hidden, but ⌥⇧V is still the capsule's.
+        // Its hold runs out: hidden, and no key is the capsule's.
         assert!(flow.tick(hold + 1.0));
         assert_eq!(flow.pres(hold + 1.0), Pres::Hidden);
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Route));
+        assert_eq!(flow.keys(), None);
         assert!(flow.input(Input::OpenList, 30.0).is_empty());
         let (query, list) = done(&flow, 30.0).open.expect("the list is open");
         assert_eq!(query, "");
@@ -3101,7 +3076,7 @@ mod tests {
         assert_eq!(flow.pres(32.0 + hold), Pres::Hidden);
         flow.input(Input::OpenList, 40.0);
         assert!(done(&flow, 40.0).open.is_some());
-        // A pick settles it: no key is Hex's, Escape and ⌥⇧V go to the app.
+        // A pick settles it: no key is Hex's, Escape goes to the app.
         assert_eq!(
             flow.input(Input::SendRow(1), 41.0),
             [Action::Send {
@@ -3118,7 +3093,7 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 0.0);
         flow.input(Input::Routed(guess()), 0.0);
         flow.input(Input::Dismiss, 1.0);
-        assert!(flow.keys().is_some());
+        assert_eq!(flow.keys(), None);
         flow.input(Input::Settled, 2.0);
         assert_eq!(flow.keys(), None);
         flow.input(Input::OpenList, 3.0);
@@ -3299,7 +3274,7 @@ mod tests {
         assert_eq!(shown.why.as_deref(), Some("didn't answer in time"));
         assert_eq!(shown.ask, None);
         assert!(shown.hand_off);
-        // Nothing to list, so ⌥⇧V reaches the app, and a stray OpenList opens
+        // Nothing to list, and a stray OpenList opens
         // nothing.
         assert_eq!(flow.keys(), None);
         flow.input(Input::OpenList, 0.5);

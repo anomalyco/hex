@@ -117,12 +117,6 @@ pub(crate) const TIMER: TextStyle = STRONG.features("'tnum' 1");
 pub(crate) const SMALL: TextStyle = TextStyle::new(11.5, 530.0);
 pub(crate) const PROCESSING: &str = "Processing…";
 
-/// The Ask chip's keys: the send-to list's shortcut
-/// (`capture.list_hotkey`); none while it has none.
-pub(crate) fn ask_keys() -> Vec<String> {
-    crate::app_settings::list_keycaps()
-}
-
 /// A shortcut as the capsule says it: one quiet word, "⌥⇧V". Symbols run
 /// together, as macOS menus write them; a named key stands apart.
 pub(crate) fn chord<S: AsRef<str>>(keys: &[S]) -> String {
@@ -208,7 +202,7 @@ pub(crate) enum Id {
     Undo,
     /// Pastes the capture.
     Paste,
-    /// The send-to list's chip (⌥⇧V).
+    /// The Send to… chip.
     Ask,
     Inspect,
     /// The open capsule's field.
@@ -443,20 +437,15 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             keyed_width(&[], UNDO_LABEL, MEDIUM),
             false,
         ));
-    } else if done.hand_off {
-        raw.push((Id::Paste, String::new(), CHIP_H, false));
-        raw.push((Id::Inspect, String::new(), CHIP_H, false));
-    } else if let (Some(ask), false) = (&done.ask, listed) {
-        raw.push((
-            Id::Ask,
-            ask.clone(),
-            keyed_width(
-                &done.ask_keys.iter().map(String::as_str).collect::<Vec<_>>(),
-                ask,
-                MEDIUM,
-            ),
-            false,
-        ));
+    } else {
+        if done.hand_off {
+            raw.push((Id::Paste, String::new(), CHIP_H, false));
+            raw.push((Id::Inspect, String::new(), CHIP_H, false));
+        }
+        // Where to send it is a click away, beside Paste, never opened for you.
+        if let (Some(ask), false) = (&done.ask, listed) {
+            raw.push((Id::Ask, ask.clone(), keyed_width(&[], ask, MEDIUM), false));
+        }
     }
     raw.push((Id::Close, String::new(), CHIP_H, false));
 }
@@ -1015,7 +1004,6 @@ mod tests {
             why: Some("rule".into()),
             undo,
             ask: Some("Send to…".into()),
-            ask_keys: ask_keys(),
             ..Done::plain(Lead::Check, "Sent to SEER")
         })
     }

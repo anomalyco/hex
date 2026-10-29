@@ -27,26 +27,14 @@ fn description(enabled: bool) -> &'static str {
     }
 }
 
-/// Turns captures on or off; turning them on fails while the capture
-/// shortcut or the send-to list's collides with another, and leaves the
-/// shortcuts as they are.
+/// Turns Annotate on or off; turning it on fails while its shortcut
+/// collides with another, and leaves the shortcuts as they are.
 fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
     if enabled
         && super::settings::conflicts(settings, ShortcutTarget::Capture, &settings.capture.hotkey)
     {
         return Err(tr(
             "The capture shortcut is already in use. Change it below before turning captures on.",
-        ));
-    }
-    if enabled
-        && super::settings::conflicts(
-            settings,
-            ShortcutTarget::CaptureList,
-            &settings.capture.list_hotkey,
-        )
-    {
-        return Err(tr(
-            "The send-to list shortcut is already in use. Change it below before turning captures on.",
         ));
     }
     settings.capture.enabled = enabled;
@@ -119,6 +107,86 @@ fn folder_label(ui: &Ui) -> String {
         .unwrap_or_else(|| folder.display().to_string())
 }
 
+/// The steps, each with its keys: start, draw, pin, undo, stop, then paste
+/// or send. Linux draws while its draw keys are held, as the Mac does with
+/// Shift.
+fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
+    let shortcut = ui.settings.capture.hotkey.keycaps();
+    let keys = |key: &str, parts: &[String]| super::controls::keycaps(p, key, parts);
+    let owned = |parts: &[&str]| {
+        parts
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+    };
+    #[cfg(target_os = "linux")]
+    let (draw, pin, undo, draw_how, pin_how, undo_how) = (
+        crate::app_settings::HotkeyBinding::annotate_draw().keycaps(),
+        crate::app_settings::HotkeyBinding::annotate_draw().keycaps(),
+        owned(&["Ctrl", "Z"]),
+        tr("Hold the draw keys and move the pointer"),
+        tr("Click while holding the draw keys"),
+        tr("Right-click, or Ctrl+Z, while holding the draw keys"),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let (draw, pin, undo, draw_how, pin_how, undo_how) = (
+        owned(&["⇧"]),
+        owned(&["⇧"]),
+        owned(&["⌘", "Z"]),
+        tr("Hold Shift and move the pointer"),
+        tr("Shift-click drops a numbered pin"),
+        tr("Takes the last stroke back"),
+    );
+    vec![
+        setting_row(
+            p,
+            "how-start",
+            tr("Start"),
+            Some(tr("Press the shortcut to start recording; talk as you go")),
+            keys("how-start-keys", &shortcut),
+        ),
+        setting_row(
+            p,
+            "how-draw",
+            tr("Draw"),
+            Some(draw_how),
+            keys("how-draw-keys", &draw),
+        ),
+        setting_row(
+            p,
+            "how-pin",
+            tr("Pin"),
+            Some(pin_how),
+            keys("how-pin-keys", &pin),
+        ),
+        setting_row(
+            p,
+            "how-undo",
+            tr("Undo"),
+            Some(undo_how),
+            keys("how-undo-keys", &undo),
+        ),
+        setting_row(
+            p,
+            "how-stop",
+            tr("Stop"),
+            Some(tr(
+                "Press it again: the annotation is copied, ready to paste",
+            )),
+            keys("how-stop-keys", &shortcut),
+        ),
+        setting_row(
+            p,
+            "how-send",
+            tr("Send"),
+            Some(tr(
+                "Paste it anywhere, or click Send to… on the capsule to pick a session",
+            )),
+            rune::el(),
+        ),
+    ]
+}
+
 fn scrawl_request(ui: &mut Ui, request: ScrawlRequest) {
     ui.ask(PlatformRequest::Scrawl(request));
 }
@@ -153,9 +221,7 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
 fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
     let enabled = ui.settings.capture.enabled;
     let purpose = if enabled && cfg!(target_os = "linux") {
-        tr(
-            "Press to start and again to stop. While it records, Ctrl+Alt+D turns drawing on and off.",
-        )
+        tr("Press to start and again to stop")
     } else if enabled {
         tr("Press to start and again to stop; Esc cancels")
     } else {
@@ -168,18 +234,6 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
         Some((purpose.to_string(), p.muted())),
         keys_button(ui, p, ShortcutTarget::Capture),
     )];
-    let list_purpose = if enabled {
-        tr("Opens the list of sessions while an annotation is showing or waiting to be sent")
-    } else {
-        tr("Saved for when Annotate is on")
-    };
-    rows.push(described_row(
-        p,
-        "capture-list-shortcut",
-        tr("Send-to list"),
-        Some((list_purpose.to_string(), p.muted())),
-        keys_button(ui, p, ShortcutTarget::CaptureList),
-    ));
     // Linux asks through the desktop's screen-cast portal when a capture
     // starts, and Wayland can't keep an overlay out of a recording.
     if enabled && cfg!(target_os = "macos") {
@@ -369,6 +423,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Shortcuts"),
         shortcut_rows(ui, p, &view),
     ));
+    if enabled {
+        content = content.child(section(p, "how", tr("How it works"), how_it_works(ui, p)));
+    }
     // Apple's speech recognizer is macOS's; Linux transcribes with Hex's model.
     if enabled && cfg!(target_os = "macos") {
         content = content.child(section(
@@ -409,20 +466,6 @@ mod tests {
         assert_eq!(serde_json::to_value(&taken).unwrap(), before);
         // Turning captures off always works.
         set_enabled(&mut taken, false).unwrap();
-        // A Paste Last binding on the send-to list's shortcut refuses it.
-        let mut list = AppSettings::default();
-        list.paste_last_hotkey = Some(list.capture.list_hotkey.clone());
-        assert!(
-            set_enabled(&mut list, true)
-                .unwrap_err()
-                .contains("send-to list")
-        );
-        list.paste_last_hotkey = Some(crate::app_settings::HotkeyBinding {
-            modifiers: crate::app_settings::HotkeyModifiers::option_command(),
-            key: Some(crate::app_settings::HotkeyKey::named("v")),
-        });
-        set_enabled(&mut list, true).unwrap();
-        assert!(list.capture.enabled);
     }
 
     /// The Scrawl pane drawn from `scene`, laid out headlessly.

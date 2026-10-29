@@ -28,10 +28,18 @@ Turn it on                               // capture.gate
 Draw                                     // capture.draw
 ├── macOS -> hold Shift and move: ink; Shift-click: a numbered pin; ⌘Z: the
 │   last stroke back; the laser follows the pointer while it records
-├── Linux -> Ctrl+Alt+D while it records (or to start one already drawing):
-│   the ink overlay takes the pointer (crosshair); drag: ink, click: a pin,
-│   right-click: the last stroke back; Ctrl+Alt+D again: clicks reach the apps
-│   again. While drawing, the capsule takes no clicks: stop with Ctrl+Alt+S
+├── Linux -> hold Ctrl+Alt+D while it records, as Shift on the Mac (the
+│   portal's Activated/Deactivated, or the X11 grab's press and release;
+│   linux_input DrawStart/DrawEnd -> capture_host::set_drawing): the ink
+│   overlay takes the pointer (crosshair); moving draws ink with no click, a
+│   click drops a pin, right-click (or Ctrl+Z, when the compositor gives the
+│   overlay the keyboard) takes the last stroke back; letting go gives clicks
+│   back to the apps. While held, the capsule takes no clicks.
+│   Held with nothing recording -> nothing. `hex annotate draw` toggles it
+│   instead, for desktops without the portal (it starts a recording drawing)
+│   Shift alone can't be a desktop shortcut; Ctrl+Alt+D sits beside
+│   Ctrl+Alt+S and no other default uses it. Check: none physical (needs a
+│   real hold on a portal desktop); the hold is logged as "Annotate drawing"
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
@@ -56,16 +64,26 @@ On Linux                                 // capture.linux
 │   stream anchored to the monotonic clock); released-while-idle microphones
 │   open for the capture
 ├── Words -> one foreground job on the listener's engine (its loaded model)
-├── Copy and Paste -> the summary text through Hex's Linux clipboard (wl-copy
-│   or the X11 clipboard) and paste path; no image
-├── Shortcuts -> Ctrl+Alt+S (start, stop), Ctrl+Alt+D (draw), and
-│   Ctrl+Alt+Shift+V (send-to list) through the GlobalShortcuts portal
-│   ("Annotate", "Annotate: draw", "Annotate: send to…") or X11 grabs
+├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
+│   X11 clipboard), as the Mac copies it
+├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
+│   each with Hex's own Ctrl+V (linux_paste). An app that takes no image (a
+│   terminal) gets only the summary, which names the contact sheet; the Mac
+│   pastes a terminal the sheet's path instead
+├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
+│   unlike the Mac, a guess doesn't open its suggestions by itself
+│   (Flow::suggesting_on_route(false)): Send to… is a click away
+├── Shortcuts -> Ctrl+Alt+S (start, stop) and Ctrl+Alt+D (hold to draw)
+│   through the GlobalShortcuts portal ("Annotate", "Annotate: hold to draw")
+│   or X11 grabs. There is no send-to list shortcut on any OS
+├── While it records, dictation and Voice Action start nothing (the portal
+│   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
 ├── Sending -> OpenCode's sessions from its service registration
 │   (service.json, HTTP) and prompts through the `opencode2` CLI Hex's
-│   dictation processor finds; the capsule's rows are clicked (no keyboard)
+│   dictation processor finds; the capsule's rows are clicked (no keyboard).
+│   See capture.send: everything goes inline, so a remote server works
 └── Gaps: no Area (Wayland gives Hex no pointer to aim it), no iPhone, no
     laser or click log outside draw mode, no window log, `hex capture status`
     unsupported, choosing another folder only through settings.json
@@ -76,9 +94,9 @@ Settings › Annotate                      // capture.pane
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S) -> same keycap and recorder as dictation;
 │   a key is required; refused when it overlaps dictation, Voice Action, or paste
-├── Send-to list (capture.list_hotkey, default ⌥⇧V) -> the capsule's list; a key
-│   is required, refused on overlap like the shortcut. Paste Last defaults to
-│   ⌥⇧V too, so turning captures on is refused until one of them is rebound
+├── How it works (on) -> start, draw, pin, undo, stop, and send, each with
+│   its keys: ⇧, ⇧-click, ⌘Z on macOS; held Ctrl+Alt+D, a click while held,
+│   right-click or Ctrl+Z on Linux. Check: rune_ui::scrawl tests
 ├── Screen Recording -> read (preflight, never a prompt) once a second and again
 │   when the pane opens or the window becomes key; granted -> Allowed, no button
 │   └── Allow -> rechecks, then the onboarding permission guide over System
@@ -125,7 +143,10 @@ While a capture records                  // capture.quiet
 │   assertion, and it never counts as an intentional dictation
 ├── Stop, cancel, discard, failed start, captures off, quit -> released; a
 │   switch carries it to the next capture without restoring in between
-└── Dictation mid-capture -> each effect is held from the first session that
+├── Dictation and Voice Action shortcuts -> start nothing while it records
+│   (macOS: recognition.rs swallows them in the tap; Linux: linux_dictation
+│   ignores Start and VoiceStart). Nothing leaks to the app in front
+└── Dictation that began before the capture -> each effect is held from the first session that
     wants it to the last, so neither unmutes or resumes what the other still
     holds; a While dictating change mid-capture composes too (the capture keeps
     media paused, the dictation mutes). Only what Hex
@@ -229,8 +250,9 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── The Undo chip counts nothing down: the capsule reads the same for the
 │   │   whole window and wakes once, when it ends
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> the lead alone with the suggestions open under it and Paste
-│   │   beside it; nothing sends until Kit picks
+│   │   answer) -> macOS: the lead alone with the suggestions open under it
+│   │   and Paste beside it; nothing sends until Kit picks. Linux: closed,
+│   │   with Paste, Inspect, and Send to…, which opens them on a click
 │   │   ├── Up to five rows, suggested then recent, numbered 1-5; the first
 │   │   │   carries its reason in the accent. A reason is a real one in plain
 │   │   │   words ("you were just in it", "same page", "mentioned", "recent")
@@ -247,7 +269,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ├── 1-5 or a click -> sends at once: "Sent to X", the Sent tone, and a
 │   │   │   quiet Undo for the same 5 s, with no ring or drain; ✕ closes;
 │   │   │   the capsule then leaves by itself with its exit
-│   │   ├── The list shortcut -> the full list with its search field
+│   │   ├── Send to… -> the full list with its search field
 │   │   ├── Esc -> not Hex's here: it goes to the app in front
 │   │   └── Unpicked -> they leave with the capsule after the done hold
 │   ├── Taken back (a rule's send or a pick) -> never
@@ -257,34 +279,24 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   folds it to "Taken back" with "Send to…", and it leaves after the done
 │   │   hold; nothing here takes Esc. ✕ (or Esc in the typed list) dismisses:
 │   │   "Kept", the bundle untouched. Either way it then
-│   │   waits for the list shortcut, even after the router said the pick went.
+│   │   waits for Send to…, even after the router said the pick went.
 │   │   News of the send being taken back (it went, queued, or failed) leaves
 │   │   that list alone, and a pick made before the router answers the Undo
 │   │   stands: the Undo's answer and the earlier send's news never take it back
 │   ├── Too late to take back -> the same list, the session marked "has it",
 │   │   folded "Sent to X · too late"; a pick sends a copy there,
-│   │   and ✕ just closes (it leaves by itself after the brief hold). Closed, it doesn't wait for the list shortcut.
+│   │   and ✕ just closes (it leaves by itself after the brief hold). Closed, it doesn't wait for a pick.
 │   │   An Undo OpenCode refuses (an error) reads as too late
 │   ├── Sends -> CaptureCommand::Send{to} and Undo, naming the
 │   │   session by id (`RouteDest.session`), so sessions sharing a title never
 │   │   collide; the capsule shows titles
 │   ├── Keys (capture_host::take_keys), never taking focus:
 │   │   ├── Picker -> ⌥⇧S and Esc through the listener
-│   │   ├── Routed -> the send-to list shortcut (capture.list_hotkey; the
-│   │   │   "Send to…" chip shows it) opens the list; never Esc, so a send is
-│   │   │   taken back only by clicking Undo.
-│   │   │   Unreachable has no list, so the shortcut reaches the app in front
-│   │   ├── Closed, waiting for a pick (a guess or taken-back capture closed
-│   │   │   by ✕ or its hold, with nothing sent) -> the list shortcut
-│   │   │   brings the capsule back with its list open, until a pick, Paste,
-│   │   │   Inspect, a send from `hex capture send`, or the next capture
-│   │   ├── Otherwise -> the list shortcut isn't Hex's: runtime_hotkeys has it
-│   │   │   only while the capsule takes it (capture_host::list_key_wanted),
-│   │   │   so suppression passes it through
-│   │   ├── A send from the list still undoable -> no keys; Esc and ⌥⇧V go to the
+│   │   ├── Routed or closed -> no keys: Send to… is click-only, and never
+│   │   │   Esc, so a send is taken back only by clicking Undo
+│   │   ├── A send from the list still undoable -> no keys; Esc goes to the
 │   │   │   app, and the Undo button is the only way back
-│   │   ├── Suggestions -> the list shortcut through the listener,
-│   │   │   and at the session tap only 1 to the number of rows, with no
+│   │   ├── Suggestions -> at the session tap only 1 to the number of rows, with no
 │   │   │   modifier or Shift (`capture_host::suggesting`; Shift's digits read
 │   │   │   by key position), and a mouse press, which folds them (the click
 │   │   │   still reaches the app); every other key, Esc included, goes on to
@@ -300,7 +312,9 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── The top line is calm: the label, its note, one action, and ✕. Undo
 │   │   while a send can be taken back, else Paste and Inspect as two quiet
 │   │   icons (tooltips "Paste the capture", "Open the capture") for a written
-│   │   capture. Where to send it is only ever the list
+│   │   capture, with the click-only Send to… chip beside them while there is
+│   │   somewhere to send it. Paste and Inspect have no key on either OS.
+│   │   The list hangs
 │   │   under the capsule, which is never narrower than LIST_W; the capsule
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
 │   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
@@ -349,8 +363,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     │   guess; ⇥/⇧⇥ cycle (CapsuleKeys::Suggest { cycle }), ⏎ or a click on
     │   the line sends the one shown
     ├── menu_bar -> the frame plus "NAME 1/2/3" chips for MENU_HINT_S (4 s),
-    │   then the capsule folds into the menu-bar item; the list shortcut still
-    │   reaches the capture
+    │   then the capsule folds into the menu-bar item
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
     └── notch -> a black shape grows out of the notch (185 pt wide; on a
@@ -477,6 +490,17 @@ hex capture stop                         // capture.stop
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff)
     └── Sent -> the capture-route thread (capture.route)
+
+What a send carries                      // capture.send (router opencode::send_bundle)
+├── One prompt: the summary (transcript, marks, notes) as text, then the
+│   contact sheet and up to 8 keyframes as inline `data:image/png;base64`
+│   file parts (12 MiB of encoded images at most; past it, later frames are
+│   left out). Nothing in it depends on the bundle's folder, so an OpenCode
+│   server on another machine reads all of it; the text only names where it
+│   was recorded
+├── No video: a capture's movie is too large for a prompt
+└── Check: router opencode tests; a throwaway session on OpenCode V2 stored
+    the parts as inline image/png (2026-10-29)
 
 Where it goes                            // capture.route; capture.routing's autoSend on
 ├── At the stop, beside the writing -> a capture-look thread reads the tab,
