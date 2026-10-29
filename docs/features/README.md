@@ -560,10 +560,14 @@ Pause media + Also pause the browser     // browser_media
 │   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
 └── Dictation ends and Hex paused it -> first, before the players: listen 300 ms to every browser process
     ├── Above -60 dBFS (you started it again) -> no play
-    ├── No level (browser quit, tap failed) -> no play
+    ├── No level, a browser runs and every one has closed its output -> still paused: play
+    │   (a pause longer than about 10 s closes the output; a tap on it delivers nothing)
+    ├── No level otherwise (browser quit, tap failed) -> no play
     └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
         ├── A window above -60 dBFS -> resumed
-        ├── No level -> stop listening
+        ├── No level before the first level (the output is opening again) -> keep polling
+        ├── No level after a level -> stop listening
+        ├── Never a level and a browser opened its output -> stop listening
         └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 
 Intentional recording                    // recording.environment
@@ -633,7 +637,9 @@ play only after it saw the browser go silent right after its own pause. The
 sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
 `a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
 `a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
-`no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`; the ignored `native_tap_hears_a_playing_browser`
+`no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`,
+`a_browser_that_closed_its_output_gets_play`,
+`a_closed_browser_that_never_opens_after_play_is_paused_again`; the ignored `native_tap_hears_a_playing_browser`
 heard Brave at -25.4 dBFS on macOS 27.0.1 (2026-10-28). Which app receives the
 system command is macOS's Now Playing choice; Safari is heard only when its
 WebKit process reports Safari's name. An opt-in native

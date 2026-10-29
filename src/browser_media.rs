@@ -57,6 +57,8 @@ pub(crate) trait BrowserAudio {
     /// Peak of the browsers' output over `window`, in dBFS; None when it cannot listen.
     fn peak_dbfs(&mut self, window: Duration) -> Option<f32>;
     fn send(&mut self, command: MediaCommand) -> bool;
+    /// A browser process runs and every one has closed its audio output.
+    fn output_closed(&mut self) -> bool;
 }
 
 /// Proof that Hex paused a sounding browser; only this allows play.
@@ -112,12 +114,16 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
 }
 
 pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
+    let mut heard = true;
     match audio.peak_dbfs(RESUME_LISTEN) {
         Some(peak) if peak <= SOUND_DBFS => {}
         Some(_) => {
             tracing::info!("the browser already plays again; sent no play");
             return;
         }
+        // A pause longer than about 10 s closes the browser's output, and a
+        // tap on closed outputs delivers nothing: that browser is still paused.
+        None if audio.output_closed() => heard = false,
         None => {
             tracing::info!("cannot hear the browser; sent no play");
             return;
@@ -127,18 +133,24 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
         tracing::info!("the system refused the play command");
         return;
     }
+    // The tap delivers again once play opens the output, about 300 ms later.
     for _ in 0..PLAY_CHECK_WINDOWS {
         match audio.peak_dbfs(WINDOW) {
             Some(peak) if peak > SOUND_DBFS => {
                 tracing::info!("resumed the browser");
                 return;
             }
-            Some(_) => {}
+            Some(_) => heard = true,
+            None if !heard => {}
             None => {
                 tracing::info!("sent play but cannot hear the browser any more");
                 return;
             }
         }
+    }
+    if !heard && !audio.output_closed() {
+        tracing::info!("sent play but cannot hear the browser");
+        return;
     }
     // A closed or reloaded tab stays silent, and the play went to whatever
     // macOS now treats as playing: pause that again.
@@ -196,6 +208,13 @@ impl BrowserAudio for NativeBrowserAudio {
 
     fn send(&mut self, command: MediaCommand) -> bool {
         send_media_command(command)
+    }
+
+    fn output_closed(&mut self) -> bool {
+        use crate::microphone_activity::browser_process_objects;
+        // A quit browser is not a paused one: play would reach another app.
+        browser_process_objects(BrowserProcesses::All).is_ok_and(|all| !all.is_empty())
+            && browser_process_objects(BrowserProcesses::Playing).is_ok_and(|open| open.is_empty())
     }
 }
 
@@ -391,6 +410,7 @@ mod tests {
         sent: Vec<MediaCommand>,
         send_ok: bool,
         listened: usize,
+        output_closed: bool,
     }
 
     impl Fake {
@@ -401,6 +421,7 @@ mod tests {
                 sent: Vec::new(),
                 send_ok: true,
                 listened: 0,
+                output_closed: false,
             }
         }
     }
@@ -419,6 +440,10 @@ mod tests {
             self.sent.push(command);
             self.send_ok
         }
+
+        fn output_closed(&mut self) -> bool {
+            self.output_closed
+        }
     }
 
     /// The three listen windows of a browser that plays.
@@ -431,6 +456,19 @@ mod tests {
     fn native_tap_hears_a_playing_browser() {
         let peak = NativeBrowserAudio::for_pause().peak_dbfs(WINDOW);
         eprintln!("browser peak: {peak:?} dBFS");
+        assert!(peak.is_some_and(|peak| peak > SOUND_DBFS));
+    }
+
+    #[test]
+    #[ignore = "needs a browser playing audio for 15 s and System Audio Recording"]
+    fn native_resume_after_a_long_pause_plays_the_browser() {
+        let paused = pause(&mut NativeBrowserAudio::for_pause()).expect("paused the browser");
+        std::thread::sleep(Duration::from_secs(15));
+        let mut audio = NativeBrowserAudio::for_resume();
+        eprintln!("output closed after 15 s: {}", audio.output_closed());
+        resume(&mut audio, paused);
+        let peak = NativeBrowserAudio::for_pause().peak_dbfs(WINDOW);
+        eprintln!("browser peak after resume: {peak:?} dBFS");
         assert!(peak.is_some_and(|peak| peak > SOUND_DBFS));
     }
 
@@ -558,6 +596,33 @@ mod tests {
         let mut audio = Fake::new([None]);
         resume(&mut audio, PausedBrowser::for_test());
         assert_eq!(audio.sent, []);
+    }
+
+    #[test]
+    fn a_browser_heard_before_play_that_goes_quiet_is_left_alone() {
+        let mut audio = Fake::new([Some(-200.0), None]);
+        audio.output_closed = true;
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play]);
+        assert_eq!(audio.listened, 2);
+    }
+
+    #[test]
+    fn a_browser_that_closed_its_output_gets_play() {
+        // A pause longer than about 10 s: the browser closed its output, so
+        // the tap delivers nothing until play opens it again.
+        let mut audio = Fake::new([None, None, None, None, Some(-25.0)]);
+        audio.output_closed = true;
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play]);
+    }
+
+    #[test]
+    fn a_closed_browser_that_never_opens_after_play_is_paused_again() {
+        let mut audio = Fake::new(std::iter::repeat_n(None, 40));
+        audio.output_closed = true;
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, [MediaCommand::Play, MediaCommand::Pause]);
     }
 
     #[test]
