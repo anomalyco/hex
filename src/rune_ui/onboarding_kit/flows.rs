@@ -30,6 +30,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> El {
         Flow::Fill => fill_flow(p, s),
         Flow::Shout => shout_flow(p, s),
         Flow::Versus => super::versus::view(p, s),
+        Flow::FirstRun => super::first_run::view(p, s),
     };
     col()
         .key("onboarding")
@@ -325,7 +326,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
             .w_full()
             .child(sentence(p, s, false))
             .child(mic_level(p, "mic", 20.0, s.meter.0, s.meter.1, true)),
-        Step::Heard | Step::Done | Step::Ready => sentence(p, s, true),
+        _ => sentence(p, s, true),
     };
     let below = match s.step {
         Step::Ready => ready(p, &s.caps, None),

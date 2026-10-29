@@ -28,6 +28,9 @@ const CARET_RATE: f64 = 45.0;
 const NUDGE: f32 = 18.0;
 const NUDGE_HZ: f32 = 7.0;
 const NUDGE_ZETA: f32 = 0.4;
+/// Any other card springs back at 9.2 Hz, ζ 0.72.
+const HIT_HZ: f32 = 9.2;
+const HIT_ZETA: f32 = 0.72;
 /// The velocity a word starts with, before it has a previous frame.
 const LAUNCH_SPEED: f32 = 1000.0;
 /// Velocity and the angle it sets come from frame to frame.
@@ -125,6 +128,24 @@ impl Flight {
     /// When it reaches its slot.
     pub(crate) fn arrives(&self) -> f64 {
         self.start + self.dur
+    }
+
+    /// Where it lands.
+    pub(crate) fn to(&self) -> [f32; 2] {
+        self.to
+    }
+
+    pub(crate) fn intensity(&self) -> f32 {
+        self.i
+    }
+
+    /// The direction it's heading as it lands, a unit vector.
+    pub(crate) fn heading(&self) -> [f32; 2] {
+        let [x0, y0] = self.point(self.dur - FRAME);
+        let [x1, y1] = self.to;
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let d = dx.hypot(dy).max(1e-3);
+        [dx / d, dy / d]
     }
 
     /// Ease-out-back: no speed at arrival, a few points past it first.
@@ -235,18 +256,50 @@ impl Flight {
     /// How a landing at `now` nudges the card: a velocity kick along the
     /// word's last heading into a damped spring, summed over landings.
     pub(crate) fn nudge(&self, now: f64) -> [f32; 2] {
+        self.nudge_by(now, NUDGE)
+    }
+
+    /// [`Flight::nudge`] for a card hit at the word's intensity, as
+    /// `hitCard` pushes one that isn't the OpenCode window: gently while
+    /// calm, hard past 0.36.
+    pub(crate) fn hit(&self, now: f64) -> [f32; 2] {
+        let push = if self.i < 0.36 {
+            lerp(22.0, 48.0, self.i / 0.36)
+        } else {
+            lerp(75.0, 220.0, self.i)
+        };
+        self.spring(now, push, HIT_HZ, HIT_ZETA)
+    }
+
+    /// How brightly the card flashes from this landing at `now`: the
+    /// site's `lerp(0.28, 0.72, i)`, fading at 6.5 a second.
+    pub(crate) fn flash(&self, now: f64) -> f32 {
+        let t = (now - self.arrives()) as f32;
+        if t < 0.0 {
+            return 0.0;
+        }
+        let start = if self.i < 0.36 {
+            0.14
+        } else {
+            lerp(0.28, 0.72, self.i)
+        };
+        (start - t * 6.5).max(0.0)
+    }
+
+    fn nudge_by(&self, now: f64, push: f32) -> [f32; 2] {
+        self.spring(now, push, NUDGE_HZ, NUDGE_ZETA)
+    }
+
+    fn spring(&self, now: f64, push: f32, hz: f32, zeta: f32) -> [f32; 2] {
         let t = (now - self.arrives()) as f32;
         if t < 0.0 {
             return [0.0, 0.0];
         }
-        let [x0, y0] = self.point(self.dur - FRAME);
-        let [x1, y1] = self.to;
-        let (dx, dy) = (x1 - x0, y1 - y0);
-        let d = dx.hypot(dy).max(1e-3);
-        let w = std::f32::consts::TAU * NUDGE_HZ;
-        let wd = w * (1.0 - NUDGE_ZETA * NUDGE_ZETA).sqrt();
-        let k = NUDGE * (-NUDGE_ZETA * w * t).exp() * (wd * t).sin() / wd;
-        [dx / d * k, dy / d * k]
+        let [ux, uy] = self.heading();
+        let w = std::f32::consts::TAU * hz;
+        let wd = w * (1.0 - zeta * zeta).sqrt();
+        let k = push * (-zeta * w * t).exp() * (wd * t).sin() / wd;
+        [ux * k, uy * k]
     }
 }
 

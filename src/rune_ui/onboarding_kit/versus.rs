@@ -16,10 +16,9 @@ use super::flight::{Flight, caret_x, flicker, flying, typeset};
 use super::flows::continue_button;
 use super::keyboard::{self, keyboard};
 use super::landing::{LEAD, TITLE, arrives, keys, language_pick, ready};
-use super::mic::mic_level;
 use super::mic_line::mic_line;
 use super::pill::{pill, slot};
-use super::stories::{Onboard, Step};
+use super::stories::{Flow, Onboard, Step};
 use super::typing;
 
 const STAGE_W: f32 = 640.0;
@@ -168,7 +167,7 @@ fn typed_secs() -> f64 {
     typing::duration()
 }
 
-fn heading(p: Paint, s: &Onboard) -> El {
+pub(super) fn heading(p: Paint, s: &Onboard) -> El {
     let line = |copy: String| -> El {
         text(copy)
             .key("lead")
@@ -187,7 +186,7 @@ fn heading(p: Paint, s: &Onboard) -> El {
             "Without Hex",
             line("Answering Jay the usual way.".into()),
         ),
-        Step::Parked if s.can_hear() => (
+        Step::Parked if s.demo_hears() => (
             "without",
             "Without Hex",
             line(format!("Sent, after {}.", seconds(typed_secs()))),
@@ -209,7 +208,16 @@ fn heading(p: Paint, s: &Onboard) -> El {
                 .child(keys(p, "keys", &s.caps, s.step == Step::Hearing))
                 .child(text("and say it.").key("rest").font(LEAD).color(p.muted())),
         ),
-        Step::Heard | Step::Done | Step::Ready => (
+        _ if s.flow == Flow::FirstRun => (
+            "heard",
+            "Twice as fast",
+            line(format!(
+                "Typed in {}. Said in {}.",
+                seconds(typed_secs()),
+                seconds(ANSWER_JAY.release)
+            )),
+        ),
+        _ => (
             "heard",
             "That's it",
             line(format!(
@@ -228,7 +236,7 @@ fn heading(p: Paint, s: &Onboard) -> El {
         .child(row().key("lead-row").h(22.0).center().child(lead))
 }
 
-fn stage(p: Paint, s: &Onboard) -> El {
+pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let (kw, kh) = keyboard::size();
     let nudge = landing_nudge(s);
     let card = stacked(p, "stack", notice(p, &JAY, jay_reply(s), false), BEHIND)
@@ -332,7 +340,7 @@ fn jay_reply(s: &Onboard) -> Reply<'static> {
             focus: true,
             sent: false,
         },
-        Step::Heard | Step::Done | Step::Ready => Reply::Lines {
+        _ => Reply::Lines {
             text: "",
             caret: None,
             lines,
@@ -383,25 +391,9 @@ fn clocks(p: Paint, s: &Onboard) -> El {
         .child(stat("said", said, "saying"))
 }
 
-/// The microphone the words leave from, its level live while held.
+/// The Hex the words leave from, swelling with the voice while held.
 fn mouth(p: Paint, s: &Onboard) -> El {
-    let k = p.k;
-    let live = s.step == Step::Hearing;
-    el().key("mouth")
-        .absolute(MOUTH[0] - MOUTH_D / 2.0, MOUTH[1] - MOUTH_D / 2.0)
-        .size(MOUTH_D, MOUTH_D)
-        .radius(MOUTH_D / 2.0)
-        .center()
-        .fill(k.c.surface_raised)
-        .border(
-            p.hair,
-            if live {
-                k.c.border_focus
-            } else {
-                k.c.border_weak
-            },
-        )
-        .child(mic_level(p, "mic", 26.0, s.meter.0, s.meter.1, live))
+    super::mic::mouth(p, "mouth", MOUTH, MOUTH_D, s.meter, s.step == Step::Hearing)
 }
 
 /// How the landings so far push the card, as the site's calm words do.

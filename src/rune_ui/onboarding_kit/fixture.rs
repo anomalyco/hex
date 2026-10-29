@@ -136,6 +136,20 @@ pub(crate) const ANSWER_JAY: Take = Take {
     release: 3.2,
 };
 
+/// Saying anything on the try screen.
+pub(crate) const ANSWER_TRY: Take = Take {
+    updates: &[
+        (0.4, "Okay"),
+        (0.7, "Okay this"),
+        (0.88, "Okay this is"),
+        (1.2, "Okay this is actually"),
+        (1.45, "Okay this is actually kind"),
+        (1.6, "Okay this is actually kind of"),
+        (2.0, "Okay, this is actually kind of magic."),
+    ],
+    release: 2.4,
+};
+
 /// The examples that type themselves into the demo cards.
 pub(crate) const EXAMPLE_REPLIES: [&str; 2] = ["Yes, call me after this.", "Give me five minutes."];
 
