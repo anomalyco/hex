@@ -16,8 +16,8 @@ use std::time::Duration;
 use rune::{Cursor, El, Icon, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-pub(crate) use self::hud::Preview;
 use self::hud::Hud;
+pub(crate) use self::hud::Preview;
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition,
