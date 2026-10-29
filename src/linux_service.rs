@@ -33,6 +33,8 @@ const VERSION: u32 = 2;
 const MAX_FRAME: usize = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
+/// A send waits for the router's answer (it waits 8 s itself).
+const SEND_WAIT: Duration = Duration::from_secs(10);
 const UNIT: &str = "hex.service";
 /// How long a launch waits for a started unit's socket. `Type=notify`
 /// units are ready when `systemctl start` returns; units an older installer
@@ -50,8 +52,16 @@ pub(crate) enum Request {
     },
     /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
     Shortcut(ShortcutCommand),
-    /// `hex capture start|stop|cancel` (the `capture` experiment).
+    /// `hex annotate start|stop|cancel`.
     Capture(crate::control::ScrawlCaptureAction),
+    /// `hex annotate send`: the listener's router sends it and says how.
+    CaptureSend {
+        capture: String,
+        to: Option<String>,
+        always: bool,
+    },
+    /// `hex annotate undo`: takes the newest send back.
+    CaptureUndo,
     Status,
     /// Drain accepted work and exit.
     Quit,
@@ -173,6 +183,9 @@ struct Reply {
     #[serde(default)]
     status: Option<Status>,
     error: Option<String>,
+    /// What an Annotate command did, for the CLI to print.
+    #[serde(default)]
+    control: Option<crate::control::ControlReply>,
 }
 
 fn socket_path() -> Result<PathBuf> {
@@ -223,7 +236,11 @@ fn read_exact(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) 
 }
 
 fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
-    let deadline = Instant::now() + IO_TIMEOUT;
+    read_frame_within(stream, IO_TIMEOUT)
+}
+
+fn read_frame_within<T: DeserializeOwned>(stream: &mut UnixStream, wait: Duration) -> Result<T> {
+    let deadline = Instant::now() + wait;
     let mut header = [0; 4];
     read_exact(stream, &mut header, deadline)?;
     let length = u32::from_be_bytes(header) as usize;
@@ -319,8 +336,48 @@ pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::con
     }
 }
 
+/// `hex annotate send`, carried out by the running Hex's router.
+pub(crate) fn capture_send(
+    capture: String,
+    to: Option<String>,
+    always: bool,
+) -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    let sent = exchange(
+        Request::CaptureSend {
+            capture,
+            to,
+            always,
+        },
+        SEND_WAIT,
+    );
+    match sent {
+        Ok(reply) => reply
+            .control
+            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
+/// `hex annotate undo`: the running Hex takes its newest send back.
+pub(crate) fn capture_undo() -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    match request(Request::CaptureUndo) {
+        Ok(_) => ControlReply::done("Asked Hex to take the newest send back"),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
 /// Sends one request to the running instance. Never starts one.
 pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestError> {
+    let reply = exchange(request, IO_TIMEOUT)?;
+    reply
+        .status
+        .ok_or_else(|| RequestError::Failed(eyre!("Invalid Hex reply")))
+}
+
+/// One request and its reply, which may take up to `wait`.
+fn exchange(request: Request, wait: Duration) -> std::result::Result<Reply, RequestError> {
     let mut stream = connect()?;
     write_frame(
         &mut stream,
@@ -330,16 +387,14 @@ pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestEr
         },
     )
     .map_err(RequestError::Failed)?;
-    let reply: Reply = read_frame(&mut stream).map_err(RequestError::Failed)?;
+    let reply: Reply = read_frame_within(&mut stream, wait).map_err(RequestError::Failed)?;
     if reply.version != VERSION {
         return Err(RequestError::Outdated);
     }
-    if let Some(error) = reply.error {
-        return Err(RequestError::Failed(eyre!(error)));
+    if let Some(error) = &reply.error {
+        return Err(RequestError::Failed(eyre!(error.clone())));
     }
-    reply
-        .status
-        .ok_or_else(|| RequestError::Failed(eyre!("Invalid Hex reply")))
+    Ok(reply)
 }
 
 pub(crate) struct Server {
@@ -458,10 +513,12 @@ fn serve_client(
                     version: VERSION,
                     status: None,
                     error: Some("Unsupported Hex request; restart Hex".into()),
+                    control: None,
                 },
             );
             break;
         };
+        let mut answer = None;
         let result = match message.request {
             Request::Activate {
                 activation,
@@ -483,6 +540,22 @@ fn serve_client(
             Request::Capture(action) => crate::capture_host::send_to_listener(
                 crate::capture_host::CaptureControl::Scrawl(action),
             ),
+            Request::CaptureSend {
+                capture,
+                to,
+                always,
+            } => {
+                answer = Some(
+                    crate::capture_host::send_capture(&capture, to, always)
+                        .unwrap_or_else(crate::control::ControlReply::from),
+                );
+                Ok(())
+            }
+            Request::CaptureUndo => {
+                crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Command(
+                    crate::capture_host::CaptureCommand::Undo,
+                ))
+            }
             Request::Status => Ok(()),
             Request::Quit => {
                 shutdown.store(true, Ordering::Release);
@@ -503,6 +576,7 @@ fn serve_client(
                 version: VERSION,
                 status,
                 error,
+                control: answer,
             },
         )
         .is_err()

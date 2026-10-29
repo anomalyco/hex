@@ -164,6 +164,8 @@ pub enum ControlCommand {
         #[serde(default)]
         always: bool,
     },
+    /// Takes the newest send back while it can be undone.
+    ScrawlCaptureUndo,
     /// What routing sees for a capture and what it decides. `ask_jev` asks
     /// Jev again (one call).
     ScrawlCaptureRoute {

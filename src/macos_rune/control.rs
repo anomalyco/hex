@@ -144,6 +144,17 @@ impl Pump {
                 None
             }
             #[cfg(hex_capture)]
+            ControlCommand::ScrawlCaptureUndo => {
+                background(reply, move || {
+                    listener_ready(&runtime)?;
+                    ask(&runtime, |reply| RecognitionControl::CaptureCommand {
+                        command: crate::capture_host::CaptureCommand::Undo,
+                        reply,
+                    })
+                });
+                None
+            }
+            #[cfg(hex_capture)]
             ControlCommand::ScrawlCaptureRoute { capture, ask_jev } => {
                 background(reply, move || {
                     crate::capture_host::explain_capture(&capture, ask_jev)
@@ -155,6 +166,7 @@ impl Pump {
             | ControlCommand::ScrawlCaptureList { .. }
             | ControlCommand::ScrawlCaptureShow { .. }
             | ControlCommand::ScrawlCaptureSend { .. }
+            | ControlCommand::ScrawlCaptureUndo
             | ControlCommand::ScrawlCaptureRoute { .. } => Some(ControlReply::error(
                 "unsupported",
                 "this build has no capture engine: it is a build option (`--features capture`), off in public builds",

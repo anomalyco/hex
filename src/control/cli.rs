@@ -407,6 +407,12 @@ pub enum CaptureCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Take back the newest send while it can be undone (as the capsule's
+    /// Undo).
+    Undo {
+        #[command(flatten)]
+        output: Output,
+    },
     /// What routing sees for a capture and what it decides (Scrawl's
     /// `route --explain`). Sends nothing.
     Route {
@@ -455,6 +461,7 @@ pub fn capture(command: CaptureCommand) -> u8 {
             ask_jev,
             output,
         } => (C::ScrawlCaptureRoute { capture, ask_jev }, output),
+        CaptureCommand::Undo { output } => (C::ScrawlCaptureUndo, output),
     };
     #[cfg(target_os = "macos")]
     return send(command, output);
@@ -463,11 +470,13 @@ pub fn capture(command: CaptureCommand) -> u8 {
         let reply = match command {
             C::ScrawlCaptureList { limit } => crate::capture_host::list_captures(limit),
             C::ScrawlCaptureShow { capture } => crate::capture_host::show_capture(&capture),
+            // The running Hex's router sends, so its Undo can take it back.
             C::ScrawlCaptureSend {
                 capture,
                 to,
                 always,
-            } => crate::capture_host::send_capture(&capture, to, always),
+            } => Ok(crate::linux_service::capture_send(capture, to, always)),
+            C::ScrawlCaptureUndo => Ok(crate::linux_service::capture_undo()),
             C::ScrawlCaptureRoute { capture, ask_jev } => {
                 crate::capture_host::explain_capture(&capture, ask_jev)
             }
