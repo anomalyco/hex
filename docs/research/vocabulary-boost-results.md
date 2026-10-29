@@ -1,7 +1,8 @@
 # Vocabulary boost on real clips
 
-**Status:** Measured, 2026-10-28. Shipped dormant behind the `vocabulary`
-experiment. Follows [`custom-vocabulary.md`](custom-vocabulary.md),
+**Status:** Measured, 2026-10-28; whole-clip RNN-T runs moved to decoder
+biasing on 2026-10-29 ([below](#decoder-biasing-whole-clip-rnn-t)). Shipped
+dormant behind the `vocabulary` experiment. Follows [`custom-vocabulary.md`](custom-vocabulary.md),
 [`vocabulary-real-clips.md`](vocabulary-real-clips.md) and the no-ship
 `spike/parakeet-boost` branch.
 
@@ -20,8 +21,8 @@ finish when the clip has a candidate, and nothing when it doesn't.
 ## How it works
 
 The change lives in the `transcribe.cpp` fork (`anomalyco/transcribe.cpp`,
-branch `hex/parakeet-vocabulary`, pinned at `9badd2a`) under
-`src/arch/parakeet/vocabulary.cpp`.
+branch `hex/parakeet-vocabulary`, `9badd2a`) under
+`src/arch/parakeet/vocabulary.cpp`. Streams and TDT models still use it.
 
 ```ts
 greedy decode, unchanged ─▶ words with their frames
@@ -139,6 +140,46 @@ rescore. A clip with none pays nothing. Where there are candidates, rescoring
 takes a median of 62 ms offline and 122 ms at a stream's finish, and at most
 0.55 s. An earlier, looser candidate finder scored 146 clips for the same
 results and cost about twice as much.
+
+## Decoder biasing (whole-clip RNN-T)
+
+Measured 2026-10-29 on the same clips and list, offline only. Fork branch
+`hex/parakeet-vocabulary-tree`, `7045d1c` (`decode_rnnt_tree` in
+`src/arch/parakeet/decoder.cpp`). A whole-clip run on an RNN-T model now biases
+while decoding instead of rescoring afterwards:
+
+```ts
+greedy decode ─▶ the words, exactly as before
+  └─ where a term's first piece is plausible at a word start
+       └─ shadow hypotheses spell the term through the vocabulary trie
+            ├─ boost per piece: the full boost if the greedy words sound like
+            │  the term (classify_vocabulary_span), else 0.6 × boost
+            ├─ same skips as rescoring: case-only, inflections, addresses
+            └─ at the word boundary: the term replaces the greedy span only
+               if it scores higher; otherwise the shadows are dropped
+```
+
+A plain RNN-T beam search with the trie (shallow fusion) was tried first and
+lost to rescoring: this model gives blank so much weight that summed paths drop
+whole phrases, and it ran about 2.5× slower than greedy. Keeping the greedy
+path and branching only inside terms fixes both.
+
+| | Off | Rescoring, Normal | Decoder, Light (2.0) | Decoder, Normal (2.5) | Decoder, Strong (4.0) |
+|---|---|---|---|---|---|
+| rve Abattoir | 4/19 | 12/19 | 11/19 | **14/19** | 18/19 |
+| rve all terms | 136/157 | 146/157 | 148/157 | **151/157** | 155/157 |
+| rve WER, all | 5.05 | 4.90 | 4.87 | **4.80** | 4.80 |
+| rve WER, no-term clips | 3.14 | 3.14 | 3.14 | **3.14** | 3.24 |
+| tc all terms | 47/56 | 53/56 | 53/56 | **54/56** | 55/56 |
+| tc WER, all | 1.82 | 1.69 | 1.69 | **1.67** | 1.65 |
+| tc WER, no-term clips | 1.63 | 1.63 | 1.63 | **1.63** | 1.63 |
+| Decoder time vs greedy | 1× | +rescoring pass | 1.07–1.09× | 1.04–1.08× | 1.17–1.20× |
+
+Strong again turns one ordinary word into a term on a no-term clip, as
+rescoring did at 3.0. Rescoring's same-run baseline was 147/157 and 4.88; the
+table keeps the published 2026-10-28 figures. Live streams keep rescoring:
+decoding the whole utterance again at a stream's finish would cost the latency
+streaming exists to save.
 
 ## Settings
 

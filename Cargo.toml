@@ -40,8 +40,8 @@ strip = true
 # Parakeet's vocabulary rescoring (branch hex/parakeet-vocabulary). Drop this
 # once a transcribe.cpp release carries both.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "9badd2a27f660c38e76c379713b9d6c63d45eaaa" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "9badd2a27f660c38e76c379713b9d6c63d45eaaa" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
 
 [profile.moonshine-lab]
 inherits = "release"

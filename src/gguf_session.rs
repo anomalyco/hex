@@ -103,7 +103,7 @@ pub(crate) struct OfflineGgufSession {
     options: transcribe_cpp::SessionOptions,
     /// When the last run or live stream completed; `None` until the first.
     last_run: Option<Instant>,
-    /// Whether runs rescore toward the vocabulary: Parakeet's transducer
+    /// Whether runs are biased toward the vocabulary: Parakeet's transducer
     /// heads (TDT, RNN-T), which take it as a run extension.
     takes_vocabulary: bool,
 }
@@ -136,8 +136,9 @@ impl OfflineGgufSession {
 
     /// `options` with the vocabulary (`crate::vocabulary::transcription_bias`)
     /// added, read now so a settings change applies from the next run. The
-    /// engine rescores spans of the greedy transcript that resemble a term
-    /// and swaps the term in only when the audio supports it.
+    /// engine writes a term in place of the heard words only when the audio
+    /// supports it: an RNN-T whole-clip run decodes the term alongside the
+    /// greedy path, and streams and TDT heads rescore the greedy transcript.
     fn with_vocabulary<'a>(
         &self,
         options: &'a transcribe_cpp::RunOptions,

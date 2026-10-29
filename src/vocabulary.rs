@@ -1,7 +1,7 @@
 //! The shared vocabulary: names Hex should know (people, projects,
 //! products), each with spellings a transcript may show instead ("sounds
 //! like"). Search uses it to find a term's likely mis-transcriptions,
-//! prompts can read it through [`terms`], and Parakeet rescores its
+//! prompts can read it through [`terms`], and Parakeet biases its
 //! transcripts toward it through [`transcription_bias`].
 //!
 //! Dormant behind the `vocabulary` experiment: while it is off, nothing reads
@@ -21,9 +21,9 @@ const MAX_TERM_CHARS: usize = 64;
 /// Most entries in the list, and most "sounds like" spellings per entry.
 pub const MAX_ENTRIES: usize = 500;
 const MAX_SOUNDS_LIKE: usize = 16;
-/// Most terms one transcription rescores toward, first in list order: the
+/// Most terms one transcription is biased toward, first in list order: the
 /// engine's own cap (`k_vocab_max_terms` in transcribe.cpp), which keeps the
-/// rescoring pass a bounded cost after each decode.
+/// biasing a bounded cost per decode.
 const MAX_BIASED_TERMS: usize = 64;
 /// Read limit for settings.json when reading it without loading `AppSettings`.
 const SETTINGS_READ_LIMIT: u64 = 4 * 1024 * 1024;
@@ -118,7 +118,7 @@ pub fn entries() -> Vec<VocabularyEntry> {
         .clone()
 }
 
-/// The terms and options a Parakeet run rescores its transcript with, read
+/// The terms and options a Parakeet run biases its transcript with, read
 /// at the start of each run and live stream so settings changes apply to the
 /// next one. `None` while the experiment is off, the list is empty, or the
 /// boost is off.
