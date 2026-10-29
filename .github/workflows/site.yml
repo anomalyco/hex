@@ -1,9 +1,9 @@
 name: Site
 
-# Builds site/ and checks every download link on pull requests; a push to dev
-# deploys dev (https://dev.anoma.ly/hex). Production (https://anoma.ly/hex)
-# deploys after a stable Release publishes, or by dispatching this workflow
-# with mode production from production.
+# Builds site/ and checks every download link on pull requests. A push (or a
+# dispatch) on dev deploys the dev site (https://dev.anoma.ly/hex); on
+# production, which moves only by a fast-forward from dev, the production
+# site (https://anoma.ly/hex). The mode always follows the branch.
 on:
   pull_request:
     paths:
@@ -12,20 +12,19 @@ on:
       - ".github/workflows/site-deploy.yml"
       - ".github/release/deploy-site.sh"
       - ".github/release/cf/**"
+      - ".github/release/install-linux.sh"
+      - ".github/release/install-windows.ps1"
   push:
-    branches: [dev]
+    branches: [dev, production]
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
       - ".github/workflows/site-deploy.yml"
       - ".github/release/deploy-site.sh"
       - ".github/release/cf/**"
+      - ".github/release/install-linux.sh"
+      - ".github/release/install-windows.ps1"
   workflow_dispatch:
-    inputs:
-      mode:
-        type: choice
-        options: [dev, production]
-        default: dev
 
 permissions:
   contents: read
@@ -51,8 +50,8 @@ jobs:
       - run: bun run check:downloads
 
   deploy:
-    if: github.event_name == 'push' || inputs.mode == 'dev' || github.ref == 'refs/heads/production'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production')
     uses: ./.github/workflows/site-deploy.yml
     with:
-      mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'dev' }}
+      mode: ${{ github.ref == 'refs/heads/production' && 'production' || 'dev' }}
     secrets: inherit

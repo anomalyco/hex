@@ -61,6 +61,15 @@ jobs:
       group: site-deploy-${{ inputs.mode }}
       cancel-in-progress: false
     steps:
+      - name: Require the branch for the mode
+        env:
+          MODE: ${{ inputs.mode }}
+          REF: ${{ github.ref }}
+        run: |
+          case "$MODE:$REF" in
+            production:refs/heads/production | dev:refs/heads/dev) ;;
+            *) echo "::error::The $MODE site deploys only from its own branch, not $REF."; exit 1 ;;
+          esac
       - name: Check out the release scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
