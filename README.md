@@ -315,10 +315,14 @@ examples.
 
 ## Contributing
 
+Issues are welcome, including detailed diagnoses and proposed fixes. Hex's team
+writes every change, so pull requests from outside the team aren't accepted; we
+credit your analysis in the pull request that fixes it. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 Architecture, development commands, active plans, and historical research are
-indexed in [`docs/README.md`](docs/README.md). Start with
-[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md) before changing
-the native application. Report vulnerabilities through the process in
+indexed in [`docs/README.md`](docs/README.md), with development rules in
+[`AGENTS.md`](AGENTS.md). Report vulnerabilities through the process in
 [`SECURITY.md`](SECURITY.md).
 
 Hex is available under the [MIT License](LICENSE).

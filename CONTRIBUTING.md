@@ -1,5 +1,17 @@
 # Contributing To Hex
 
+Thanks for helping. Hex's team writes every code change, so we don't accept pull
+requests from outside the team. Issues are where you can help most:
+
+- Report bugs and request features with the
+  [issue templates](https://github.com/anomalyco/hex/issues/new/choose).
+- Detailed diagnoses and proposed fixes are very welcome in the issue: logs (redacted),
+  the code path you suspect, or a patch described in prose or a diff snippet.
+- When your analysis shapes a fix, we credit you in the pull request that lands it.
+
+The rest of this guide covers building and validating Hex locally, which is
+useful for diagnosing issues.
+
 Hex is a native Rust macOS application with explicit Windows (x64 and ARM64) and
 x86_64 Linux (X11 and compatible wlroots Wayland) betas. Read [`AGENTS.md`](AGENTS.md)
 and [`docs/design-system.md`](docs/design-system.md) before changing behavior or

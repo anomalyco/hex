@@ -7,6 +7,8 @@ body:
         Thanks for helping improve Hex. Please search existing issues first.
         Do not share private dictation, audio recordings, credentials, or full logs.
         Review and redact any diagnostic excerpts or screenshots before attaching them.
+        Diagnoses and proposed fixes are welcome here. We don't accept outside pull
+        requests, but we credit your analysis in the pull request that fixes it.
   - type: input
     id: version
     attributes:
