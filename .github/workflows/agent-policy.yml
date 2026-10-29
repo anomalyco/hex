@@ -1,0 +1,45 @@
+name: hex-agent-policy
+
+# Deterministic gate for pull requests opened by the automated issue pipeline
+# (head branch agent/*). It runs the base branch's .github/agent-policy/check.ts
+# on the diff, so a patch cannot change its own policy. Patches touching
+# Dax-only paths always fail; flagged patches pass only after the pipeline's
+# strict reviewer approved them (label agent-strict-review). Other pull
+# requests pass immediately.
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  hex-agent-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ !startsWith(github.head_ref, 'agent/') }}
+        run: echo "Not an agent pull request."
+      - if: ${{ startsWith(github.head_ref, 'agent/') }}
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - if: ${{ startsWith(github.head_ref, 'agent/') }}
+        uses: oven-sh/setup-bun@v2
+      - if: ${{ startsWith(github.head_ref, 'agent/') }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          STRICT_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'agent-strict-review') }}
+        run: |
+          git fetch -q origin "$HEAD"
+          git diff --binary "$BASE...$HEAD" > "$RUNNER_TEMP/patch.diff"
+          set +e
+          bun .github/agent-policy/check.ts "$RUNNER_TEMP/patch.diff"
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then echo "::error::Touches Dax-only paths."; exit 1; fi
+          if [ "$code" -eq 1 ] && [ "$STRICT_APPROVED" != true ]; then echo "::error::Flagged; needs the strict reviewer's approval."; exit 1; fi
+          [ "$code" -le 1 ]
