@@ -1,3 +1,18 @@
 # Release workflows and their locked scripts (.github/release/) hold the
 # release secrets; changing them needs Dax. See docs/releasing.md.
 /.github/ @thdxr
+
+# Code that ships verbatim or decides what users install: the public
+# installers, release and signing scripts, the updater and its trust rules,
+# entitlements and release packaging. Agents and bots cannot approve these.
+/scripts/install-linux-release.sh @thdxr
+/scripts/install-windows.ps1 @thdxr
+/scripts/release-*.sh @thdxr
+/scripts/publish-*.sh @thdxr
+/scripts/notarize-app.sh @thdxr
+/scripts/macos-signing.sh @thdxr
+/src/updater.rs @thdxr
+/src/updater/ @thdxr
+/app/update-requirement.txt @thdxr
+*.entitlements @thdxr
+/packaging/ @thdxr
