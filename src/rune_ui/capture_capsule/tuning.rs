@@ -2,6 +2,9 @@
 //! app reads [`DEFAULT`]; the playground (`hex capsule-playground`) changes
 //! them live in its own process and prints them back as the constants.
 
+// Only the macOS playground reads much of this.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use std::sync::RwLock;
 
 use rune::Spring;

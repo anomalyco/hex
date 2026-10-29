@@ -753,6 +753,20 @@ impl NativeHost for MacHost {
             return changed;
         }
         self.refresh_at = Instant::now() + PLATFORM_REFRESH;
+        // Input sources are read only while keyboard model switching is on.
+        let switching = crate::macos_rune::runtime()
+            .and_then(|runtime| runtime.published())
+            .is_some_and(|published| published.settings.keyboard_model_switching.enabled);
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            changed |= update(
+                &mut state.input_sources,
+                if switching {
+                    crate::keyboard_input_sources::enabled(mtm)
+                } else {
+                    Vec::new()
+                },
+            );
+        }
         changed |= self.calendar.poll(&mut state.calendar);
         changed |= update(
             &mut state.tuning,
@@ -777,9 +791,6 @@ impl NativeHost for MacHost {
         let asked_len = state.permissions_asked.len();
         state.permissions_asked.retain(|kind| match kind {
             PermissionKind::Microphone => permissions.microphone != PermissionState::Ready,
-            PermissionKind::InputMonitoring => {
-                permissions.input_monitoring != PermissionState::Ready
-            }
             PermissionKind::Accessibility => permissions.accessibility != PermissionState::Ready,
             PermissionKind::SystemAudio => !system_audio,
             PermissionKind::ScreenRecording => !crate::meeting::screen_recording_permitted(),
@@ -1293,7 +1304,6 @@ fn choose_folder() -> crate::file_dialog::Pending {
     crate::file_dialog::open(
         Dialog {
             title: tr("Transcript folder").into(),
-            accept: tr("Use Folder").into(),
             target: Target::Folder,
             directory: Some(crate::app_settings::meeting_output_folder()),
         },
@@ -1334,7 +1344,6 @@ impl ScrawlHost {
                     self.folder_choice = Some(crate::file_dialog::open(
                         Dialog {
                             title: tr("Captures folder").into(),
-                            accept: tr("Use Folder").into(),
                             target: Target::Folder,
                             directory: Some(crate::app_settings::capture_settings().captures_dir()),
                         },

@@ -236,7 +236,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     sync_file(&pointer_partial)?;
     fs::rename(&pointer_partial, &pointer)?;
 
-    let running = env!("CARGO_PKG_VERSION");
+    let running = crate::VERSION;
     for entry in fs::read_dir(&versions)? {
         let entry = entry?;
         let name = entry.file_name();

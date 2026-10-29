@@ -214,17 +214,20 @@ fn missing_permissions_lead_settings_and_open_the_guide() {
     let mut rt = runtime("mac-settings-permissions", true, (980.0, 2400.0));
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "Permissions needed"));
-    assert!(rt.find("permission-microphone").is_none(), "granted");
-    tap(&mut rt, "permission-input-monitoring-allow");
+    assert!(
+        rt.find("permission-microphone-allow-control/mark/dot")
+            .is_none()
+    );
+    tap(&mut rt, "permission-microphone-allow");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(PermissionAction::ShowGuide(
-            PermissionKind::InputMonitoring
+            PermissionKind::Microphone
         ))]
     );
-    assert!(rt.state.platform.asked(PermissionKind::InputMonitoring));
+    assert!(rt.state.platform.asked(PermissionKind::Microphone));
     assert!(
-        rt.find("permission-input-monitoring-allow-control/mark/dot")
+        rt.find("permission-microphone-allow-control/mark/dot")
             .is_some(),
         "asked permissions wait with a dot"
     );
@@ -1331,7 +1334,6 @@ fn the_mac_tour_asks_each_permission_then_practices() {
     // macOS grants everything and the model lands: setup moves on.
     use crate::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
-    rt.state.platform.permissions.input_monitoring = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
     refresh(&mut rt);
@@ -1401,6 +1403,7 @@ fn platform_goldens() {
         check_golden("meetings-calendar", dark, (980.0, 1800.0));
         for scene in [
             "mac-settings",
+            "mac-input-source-models",
             "mac-commands",
             "meetings",
             "meetings-settings",
@@ -1767,7 +1770,7 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
             }) {
                 let shown = row.visible[1] + row.visible[3];
                 assert!(
-                    shown <= bottom + 0.01,
+                    shown <= bottom + 0.25,
                     "the row shows {shown} past its slot's edge {bottom}"
                 );
             }

@@ -14,10 +14,10 @@ pkgdesc='Hex voice dictation app by Anomaly: hold a key, speak, and it types (Li
 arch=('x86_64' 'aarch64')
 url='https://github.com/anomalyco/hex'
 license=('MIT')
-# Linked: alsa-lib, gcc-libs, glib2, glibc, vulkan-icd-loader. Loaded at
+# Linked: alsa-lib, gcc-libs, glibc, vulkan-icd-loader. Loaded at
 # runtime: the X11/Wayland/xkbcommon client libraries and OpenBLAS.
 depends=(
-  'alsa-lib' 'curl' 'gcc-libs' 'glib2' 'glibc' 'libx11' 'libxcb' 'libxcursor'
+  'alsa-lib' 'curl' 'gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxcursor'
   'libxi' 'libxkbcommon' 'libxkbcommon-x11' 'openblas' 'vulkan-icd-loader'
   'wayland'
 )

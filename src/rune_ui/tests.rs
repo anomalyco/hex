@@ -198,17 +198,15 @@ fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
     assert_eq!(rt.state.settings.updates.channel, None);
-    tap(&mut rt, "update-channel-control/segment1");
-    assert_eq!(
-        rt.state.settings.updates.channel,
-        Some(crate::app_settings::UpdateChannel::Dev)
-    );
+    let (other, segment) = other_update_channel();
+    tap(&mut rt, &segment);
+    assert_eq!(rt.state.settings.updates.channel, Some(other));
     assert_eq!(saved(&rt), 1);
     assert!(matches!(
         sent(&rt),
         [Request::Desktop(DesktopAction::CheckForUpdates)]
     ));
-    tap(&mut rt, "update-channel-control/segment1");
+    tap(&mut rt, &segment);
     assert_eq!(
         saved(&rt),
         1,
@@ -216,12 +214,31 @@ fn choosing_an_update_channel_saves_it_and_checks_now() {
     );
 }
 
+/// The channel this build does not follow, and its segment's id: the build's
+/// own channel depends on its version (a local build follows dev).
+fn other_update_channel() -> (crate::app_settings::UpdateChannel, String) {
+    let build = crate::updater::build_channel();
+    let index = crate::app_settings::UpdateChannel::ALL
+        .iter()
+        .position(|channel| *channel != build)
+        .unwrap();
+    (
+        crate::app_settings::UpdateChannel::ALL[index],
+        format!("update-channel-control/segment{index}"),
+    )
+}
+
 #[test]
 fn choosing_the_channel_in_effect_keeps_following_the_build() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
     assert_eq!(rt.state.settings.updates.channel, None);
-    tap(&mut rt, "update-channel-control/segment0");
+    let build = crate::updater::build_channel();
+    let index = crate::app_settings::UpdateChannel::ALL
+        .iter()
+        .position(|channel| *channel == build)
+        .unwrap();
+    tap(&mut rt, &format!("update-channel-control/segment{index}"));
     assert_eq!(rt.state.settings.updates.channel, None);
     assert_eq!(saved(&rt), 0);
     assert!(sent(&rt).is_empty());
@@ -959,8 +976,14 @@ fn mode_corrections_and_names_save_from_their_fields() {
 
 #[test]
 fn mode_transformations_add_reorder_and_remove() {
-    let mut rt = runtime("modes-picker", true, GOLDEN_SIZE);
-    tap(&mut rt, "available-transformation0/add");
+    let mut rt = runtime("modes", true, GOLDEN_SIZE);
+    // The + opens a menu of only the transformations the mode lacks.
+    assert!(rt.find("transformation-option0").is_none());
+    tap(&mut rt, "add-transformation");
+    assert!(rt.find("transformation-option0").is_some());
+    assert!(rt.find("transformation-option1").is_none());
+    tap(&mut rt, "transformation-option0");
+    assert!(rt.find("transformation-option0").is_none());
     let ids = |rt: &Runtime<Ui>| {
         rt.state.settings.dictation_processing.modes[0]
             .transformations
@@ -994,9 +1017,26 @@ fn mode_transformations_add_reorder_and_remove() {
 }
 
 #[test]
+fn the_transformation_menu_offers_what_the_mode_lacks_and_escape_closes_it() {
+    let mut rt = runtime("modes-transformation-menu", true, GOLDEN_SIZE);
+    let offered: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.path.contains("transformation-option") && e.path.ends_with("/name"))
+        .filter_map(|e| e.text)
+        .collect();
+    assert_eq!(offered, ["Normalize links"]);
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.open.is_none());
+    assert!(rt.find("transformation-option0").is_none());
+}
+
+#[test]
 fn escape_cancels_a_transformation_reorder_without_saving() {
-    let mut rt = runtime("modes-picker", true, GOLDEN_SIZE);
-    tap(&mut rt, "available-transformation0/add");
+    let mut rt = runtime("modes", true, GOLDEN_SIZE);
+    tap(&mut rt, "add-transformation");
+    tap(&mut rt, "transformation-option0");
     let order = |rt: &Runtime<Ui>| {
         rt.state.settings.dictation_processing.modes[0]
             .transformations

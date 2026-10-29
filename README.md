@@ -77,8 +77,7 @@ Or install manually:
 3. Complete the permission and model steps in setup.
 
 - **Microphone** lets Hex record while you dictate.
-- **Input Monitoring** lets Hex detect its shortcut globally. Drag the Hex tile into the list.
-- **Accessibility** lets Hex paste into the foreground app. Drag the Hex tile into the list.
+- **Accessibility** lets Hex notice its shortcut in every app and paste into the foreground app. Drag the Hex tile into the list. Hex does not need Input Monitoring.
 - **Transcription model** downloads the speech model that runs locally.
 
 Hex checks for signed updates automatically. Use **Hex > Check for Updates…**
@@ -161,12 +160,16 @@ available while command recognition is off or asleep.
 
 The Commands pane lists built-in phrases and filters them by global, application,
 and Brave website context. Advanced users can create
-`~/.config/hex/hex.config.ts` for custom TypeScript commands. Custom commands
-require [Bun](https://bun.sh/); Hex provides an Edit Config action and a prompt
-you can paste into a local coding agent.
+`~/.config/hex/hex.config.ts` for custom commands and dictation
+transformations, written in TypeScript or JavaScript. Hex runs the config
+itself in an embedded JavaScript engine and reloads it on save; nothing else
+needs installing. Hex provides an Edit Config action and a prompt you can paste
+into a local coding agent, and `hex commands check` reports what the config
+registers or why it fails.
 
-Custom command files and dependencies are executable local code with your user
-permissions. Review agent changes and install only dependencies you trust.
+Config scripts get no filesystem, network, or process access: handlers return
+actions (open a URL, path, or app, press keys, type text) that Hex carries out,
+so review agent changes before enabling commands.
 
 To teach a coding agent how to configure personal commands and transformations,
 install the official Hex skill:
@@ -218,7 +221,7 @@ Review and redact diagnostics before sharing them.
 | Symptom | Check |
 | --- | --- |
 | Hex appears to disappear | Open Hex from its menu-bar hexagon. If the status item could not start, Hex keeps its Dock icon visible. |
-| The shortcut does nothing | Open Hex and verify Microphone and Input Monitoring access. |
+| The shortcut does nothing | Open Hex and verify Microphone and Accessibility access. |
 | Recording works but text does not paste | Verify Accessibility access. |
 | Transcription does not start | Confirm that the selected local model is installed. |
 | OpenCode features fail | Verify the separate OpenCode installation and model provider. |

@@ -227,6 +227,9 @@ pub(crate) enum HotkeyEvent {
     VoiceStart,
     /// The Voice Action shortcut came up: run the instruction.
     VoiceFinish,
+    /// The capture shortcut went down (the `capture` experiment): the
+    /// capture host decides whether it starts or finishes a capture.
+    Capture,
 }
 
 /// What a `hex` command asks of the running listener. Each one is
@@ -263,6 +266,8 @@ pub(crate) struct HotkeyOptions {
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Held to record a Voice Action instruction.
     pub(crate) voice_action: Option<LinuxHotkey>,
+    /// Starts or finishes a capture, while captures are on.
+    pub(crate) capture: Option<LinuxHotkey>,
 }
 
 pub(crate) const ESCAPE_CANCEL_WARNING: &str =
@@ -308,10 +313,16 @@ enum Shortcut {
     Dictation,
     PasteLast,
     VoiceAction,
+    Capture,
 }
 
 impl Shortcut {
-    const ALL: [Self; 3] = [Self::Dictation, Self::PasteLast, Self::VoiceAction];
+    const ALL: [Self; 4] = [
+        Self::Dictation,
+        Self::PasteLast,
+        Self::VoiceAction,
+        Self::Capture,
+    ];
 
     fn index(self) -> usize {
         self as usize
@@ -323,6 +334,7 @@ impl Shortcut {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::VoiceAction => ("voice-action", "Voice Action"),
+            Self::Capture => ("capture", "Capture"),
         }
     }
 }
@@ -492,6 +504,8 @@ impl ShortcutState {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
             Input::Released(Shortcut::PasteLast) => None,
+            Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
+            Input::Released(Shortcut::Capture) => None,
             Input::Command(command) => match command {
                 ShortcutCommand::DictationStart => self.start_dictation(),
                 ShortcutCommand::DictationStop => self.stop_dictation(),
@@ -721,6 +735,7 @@ impl Backend {
                 .voice_action
                 .as_ref()
                 .map(|key| (Shortcut::VoiceAction, key)),
+            options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
         ];
         let mut shortcuts = Vec::new();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -750,7 +765,7 @@ impl Backend {
             let key = match shortcut {
                 Shortcut::Dictation => Some(&binding),
                 Shortcut::VoiceAction => options.voice_action.as_ref(),
-                Shortcut::PasteLast => None,
+                Shortcut::PasteLast | Shortcut::Capture => None,
             }?;
             let trigger = key.portal_trigger_for("Escape").ok()?;
             (trigger != "Escape").then_some(trigger)
@@ -832,6 +847,7 @@ impl Backend {
             Some((Shortcut::Dictation, binding)),
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
             options.voice_action.map(|key| (Shortcut::VoiceAction, key)),
+            options.capture.map(|key| (Shortcut::Capture, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let code = keymap.keycode(keysym(&key.key)?)?;
@@ -908,8 +924,8 @@ impl Backend {
 /// [`RELEASE_GRACE`] passes without a new press.
 #[derive(Default)]
 struct X11Keys {
-    held: [bool; 3],
-    releasing: [Option<Instant>; 3],
+    held: [bool; Shortcut::ALL.len()],
+    releasing: [Option<Instant>; Shortcut::ALL.len()],
 }
 
 impl X11Keys {

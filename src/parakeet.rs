@@ -36,8 +36,11 @@ pub struct Parakeet {
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
+    _weights: procwatch::Lease,
 }
 
+/// Loaded model weights, estimated from the model file size (they live in Metal buffers).
+static MODEL_WEIGHTS: procwatch::Gauge = procwatch::Gauge::new("speech.model_weights");
 static TRANSCRIBE_LOGGING: Once = Once::new();
 const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
 const MAX_PENDING_OUTPUTS: usize = 16;
@@ -1328,6 +1331,7 @@ impl Parakeet {
             language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
+        let weights_bytes = std::fs::metadata(model_path).map_or(0, |meta| meta.len() as usize);
         Ok(Self {
             session,
             options: RunOptions {
@@ -1347,6 +1351,7 @@ impl Parakeet {
                 capabilities.max_audio_ms,
             ),
             stream: None,
+            _weights: MODEL_WEIGHTS.track(weights_bytes),
         })
     }
 

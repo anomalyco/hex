@@ -166,6 +166,7 @@ const DOT_SCOPE_GROUPS: [(&str, &[&str]); 5] = [
             "dot-width",
             "dot-processing-width",
             "dot-height",
+            "dot-island-spread",
         ],
     ),
     ("Braid", &["dot-braid-speed", "dot-helix"]),
@@ -258,7 +259,7 @@ fn dot_scope_choices(p: Paint, tuning: &Tuning) -> El {
             p,
             "dot-processing",
             "Processing",
-            Some("How the HUD shows it is working, and how it settles into done"),
+            Some("How the HUD shows it is working. Done always clears from the middle out"),
             segmented(
                 p,
                 "segments",

@@ -12,12 +12,19 @@ use crate::transcription_models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
 
+/// A word or segment's start and end (ms from the clip's start) and text.
+#[cfg(target_os = "linux")]
+pub type TimedSpan = (i64, i64, String);
+
 pub struct LocalTranscriber {
     session: OfflineGgufSession,
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
+    /// The finest timestamps the model gives, for a capture's word times.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    finest_timestamps: TimestampKind,
 }
 
 #[cfg(target_os = "linux")]
@@ -196,6 +203,10 @@ impl LocalTranscriber {
                 capabilities.max_audio_ms,
             ),
             stream: None,
+            finest_timestamps: match capabilities.max_timestamp_kind {
+                TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
+                kind => kind,
+            },
         };
         let started = Instant::now();
         transcriber.transcribe(&vec![0.0; 24_000])?;
@@ -234,6 +245,49 @@ impl LocalTranscriber {
 
     pub fn device_label(&self) -> &str {
         &self.device_label
+    }
+
+    /// Text and word times (ms from the clip's start) for a capture, in
+    /// chunks the model takes whole. A model without word times gives its
+    /// segments instead.
+    #[cfg(target_os = "linux")]
+    pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
+        const CHUNK: usize = 30 * 16_000;
+        let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
+        let options = RunOptions {
+            timestamps: self.finest_timestamps,
+            ..self.options.clone()
+        };
+        let (mut texts, mut words) = (Vec::new(), Vec::new());
+        for (index, part) in samples.chunks(chunk.max(1)).enumerate() {
+            let offset = (index * chunk / 16) as i64;
+            let transcript = self
+                .session
+                .run(part, &options)
+                .wrap_err("transcription failed")?;
+            let text = transcript.text.trim();
+            if !text.is_empty() {
+                texts.push(text.to_owned());
+            }
+            let spans = if transcript.words.is_empty() {
+                transcript
+                    .segments
+                    .into_iter()
+                    .map(|s| (s.t0_ms, s.t1_ms, s.text))
+                    .collect::<Vec<_>>()
+            } else {
+                transcript
+                    .words
+                    .into_iter()
+                    .map(|w| (w.t0_ms, w.t1_ms, w.text))
+                    .collect()
+            };
+            words.extend(spans.into_iter().filter_map(|(t0, t1, text)| {
+                let text = text.trim().to_owned();
+                (!text.is_empty()).then(|| (t0.max(0) + offset, t1.max(t0) + offset, text))
+            }));
+        }
+        Ok((texts.join(" "), words))
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {

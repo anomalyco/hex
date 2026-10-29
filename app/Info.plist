@@ -18,6 +18,17 @@
   <string>Hex</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>anomaly.hex</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>hex</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleShortVersionString</key>
   <string>2.0.9</string>
   <key>CFBundleVersion</key>
@@ -36,8 +47,6 @@
   <string>Hex reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
   <key>NSCalendarsUsageDescription</key>
   <string>Hex reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
-  <key>NSInputMonitoringUsageDescription</key>
-  <string>Hex uses Input Monitoring to detect your dictation shortcuts in every app.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Hex uses your microphone for private local dictation and does not store the captured audio.</string>
 </dict>

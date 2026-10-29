@@ -398,10 +398,12 @@ impl HotkeyBinding {
         binding
     }
 
-    /// Option-Shift-S, Scrawl's capture shortcut.
+    /// Option-Shift-S, Scrawl's capture shortcut; Ctrl+Alt+S on Linux, beside
+    /// its other Ctrl+Alt defaults.
     #[cfg(hex_capture)]
     pub fn capture_default() -> Self {
-        Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
             modifiers: HotkeyModifiers {
                 option: Some(ModifierSide::Either),
                 shift: Some(ModifierSide::Either),
@@ -411,13 +413,18 @@ impl HotkeyBinding {
                 code: layout_key_code('s').unwrap_or(1),
                 label: "S".into(),
             }),
-        }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(HotkeyModifiers::control_option(), "s");
+        binding
     }
 
-    /// Option-Shift-V, Scrawl's key for the send-to list.
+    /// Option-Shift-V, Scrawl's key for the send-to list; Ctrl+Alt+Shift+V on
+    /// Linux.
     #[cfg(hex_capture)]
     pub fn capture_list_default() -> Self {
-        Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
             modifiers: HotkeyModifiers {
                 option: Some(ModifierSide::Either),
                 shift: Some(ModifierSide::Either),
@@ -427,7 +434,16 @@ impl HotkeyBinding {
                 code: paste_key_code(),
                 label: "V".into(),
             }),
-        }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(
+            HotkeyModifiers {
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::control_option()
+            },
+            "v",
+        );
+        binding
     }
 
     pub fn paste_meeting_default() -> Self {
@@ -1087,9 +1103,8 @@ impl Default for VoiceActionSettings {
     }
 }
 
-/// Scrawl captures inside Hex: the `capture` experiment, in builds with the
-/// `capture` build option (`capture_host`). Off by default; off means no
-/// capture work at all.
+/// Scrawl captures inside Hex: the `capture` experiment on macOS and Linux
+/// (`capture_host`). Off by default; off means no capture work at all.
 #[cfg(hex_capture)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -1284,6 +1299,7 @@ pub struct AppSettings {
     pub release_microphone_while_idle: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
+    pub sound_theme: crate::feedback::SoundTheme,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
     /// With Pause media on macOS, also pause a browser that is audibly playing.
@@ -1301,6 +1317,7 @@ pub struct AppSettings {
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
+    pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
     pub history_retention: crate::history::HistoryRetention,
@@ -1318,6 +1335,9 @@ pub struct AppSettings {
     pub enable_on_launch: bool,
     /// Paste with Ctrl-Shift-V for terminals (Linux).
     pub paste_with_shift: bool,
+    /// Let other apps see the dictation shortcut's key presses too
+    /// (Windows), so a push-to-talk key can drive both.
+    pub share_dictation_shortcut: bool,
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
@@ -1362,6 +1382,7 @@ impl Default for AppSettings {
             release_microphone_while_idle: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
+            sound_theme: crate::feedback::SoundTheme::default(),
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             pause_browser_media: false,
@@ -1374,6 +1395,7 @@ impl Default for AppSettings {
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
+            keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
             history_retention: crate::history::HistoryRetention::default(),
@@ -1385,12 +1407,47 @@ impl Default for AppSettings {
             experimental: ExperimentalSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
+            share_dictation_shortcut: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
+        }
+    }
+}
+
+/// macOS input-source IDs mapped to the model and language they select. An
+/// absent entry means "Don't switch"; this never changes the model merely
+/// because dictation starts.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct KeyboardModelSwitching {
+    pub enabled: bool,
+    pub mappings: std::collections::BTreeMap<String, KeyboardModelChoice>,
+}
+
+/// What one input source selects: a model and a language it supports.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KeyboardModelChoice {
+    pub model: TranscriptionModelId,
+    pub language: String,
+}
+
+impl KeyboardModelChoice {
+    /// The picker's downloadable models only; Apple Speech is never mapped.
+    pub fn validate(&self) -> Result<()> {
+        let model = crate::transcription_models::validate(&TranscriptionSelection {
+            model: self.model,
+            language: self.language.clone(),
+            recognition_hints: String::new(),
+        })?;
+        match model.runtime {
+            crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
+            crate::transcription_models::ModelRuntime::AppleSpeech => {
+                Err(eyre!("{} can't be switched to by input source", model.name))
+            }
         }
     }
 }
@@ -1645,6 +1702,11 @@ impl AppSettings {
                 settings.migrate_disabled_transcription_model();
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
+                // A model that is gone, or a language it lost, maps to nothing.
+                settings
+                    .keyboard_model_switching
+                    .mappings
+                    .retain(|_, choice| choice.validate().is_ok());
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 if serde_json::to_value(&settings)? != loaded
@@ -1693,6 +1755,7 @@ impl AppSettings {
         );
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(self.sound_theme);
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
@@ -2313,8 +2376,7 @@ pub fn capture_on() -> bool {
     CAPTURE_ON.load(Ordering::Acquire)
 }
 
-/// Whether this build can capture at all: it has the build option and the
-/// `capture` experiment is on.
+/// Whether this build can capture at all: the `capture` experiment is on.
 #[cfg(hex_capture)]
 pub fn capture_available() -> bool {
     crate::experiments::enabled(crate::experiments::Experiment::Capture)
@@ -2387,6 +2449,7 @@ pub fn exists() -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     /// The capsule's ask chip and footer hint show the send-to list's own shortcut,
     /// ⌥⇧V unless rebound, and no keys while the list has none.
     #[cfg(hex_capture)]
@@ -2423,6 +2486,7 @@ mod tests {
         *HOTKEYS.get().unwrap().write().unwrap() = RuntimeHotkeys::default();
     }
 
+    #[cfg(target_os = "macos")]
     /// The list's ⌥⇧V never shares a key with another shortcut: Paste Last
     /// left on its own ⌥⇧V default keeps it, and the list gets another.
     #[cfg(hex_capture)]
@@ -2455,6 +2519,54 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::Capture, &list));
         // The others don't see them while off.
         assert!(!settings.hotkey_in_use(HotkeySlot::VoiceAction, &capture));
+    }
+
+    #[test]
+    fn keyboard_model_switching_is_opt_in_and_source_mappings_round_trip() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.keyboard_model_switching.enabled);
+        assert!(settings.keyboard_model_switching.mappings.is_empty());
+        settings.keyboard_model_switching.enabled = true;
+        settings.keyboard_model_switching.mappings.insert(
+            "com.apple.keylayout.Spanish".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            },
+        );
+        let restored: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored.keyboard_model_switching,
+            settings.keyboard_model_switching
+        );
+    }
+
+    #[test]
+    fn loading_drops_keyboard_mappings_to_a_language_the_model_lacks() {
+        let dir = TestSettingsDir::new("keyboard-mappings");
+        let mut settings = AppSettings::default();
+        let russian = KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "ru".into(),
+        };
+        settings
+            .keyboard_model_switching
+            .mappings
+            .insert("Russian".into(), russian.clone());
+        settings.keyboard_model_switching.mappings.insert(
+            "Japanese".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                language: "ja".into(),
+            },
+        );
+        settings.write_to(&dir.path).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            loaded.keyboard_model_switching.mappings,
+            [("Russian".to_owned(), russian)].into()
+        );
     }
 
     #[test]

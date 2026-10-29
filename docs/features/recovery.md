@@ -333,8 +333,8 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
 Voice Action fails -> paste nothing                    // different contract, no fallback
 either path -> later request -> expected output         // recovery still needs observation
 ```
-Stage-specific sources, checks, and the known host failure are in the
-[index](README.md); late native replies are also covered below.
+Stage-specific sources and checks are in the [index](README.md); runaway
+scripts are covered below.
 Proof limit: fallback behavior alone does not establish that the next request
 succeeds.
 
@@ -586,21 +586,20 @@ issue [#23](https://github.com/anomalyco/hex/issues/23).
 Missing evidence: both modifier orders with a controlled opener, followed by
 native onset evidence.
 
-### Late Native Tool Reply
+### Runaway Script
 
 ```ts
-tool invocation interrupted -> host.ts removes correlation
-  -> late native reply -> unmatched -> rejected
-invocation completes with outstanding tools -> personal_commands.rs rejects completion
-
-timeout + late reply -> unaffected concurrent work -> later successful command
-                                                      // missing lifecycle regression
+handler or transformation runs past 1 s -> interrupted -> that call fails
+  -> transformation chain -> its input is kept           // ordered processing goes on
+  -> later call on the same config -> succeeds
+config load past 2 s or past 64 MiB -> rejected -> previous config stays active
 ```
-Sources: [host.ts](../../sdk/commands/src/host.ts),
+Sources: [script.rs](../../src/personal_commands/script.rs),
 [personal_commands.rs](../../src/personal_commands.rs);
-issue [#20](https://github.com/anomalyco/hex/issues/20).
-Proof limit: rejection paths do not prove host recovery. Retain a Rust/TypeScript
-regression covering that complete lifecycle.
+check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`.
+Handlers return actions instead of awaiting native results, so the old late
+native tool reply ([#20](https://github.com/anomalyco/hex/issues/20)) cannot
+occur.
 
 ### Slow Paste Consumer
 

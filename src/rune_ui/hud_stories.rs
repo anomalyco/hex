@@ -1,10 +1,10 @@
 //! Dot scope's HUD as playground stories (the `playground` experiment, ⇧⌘D,
-//! group HUD, while `dot-scope` is on). The HUD is a Metal panel of its
-//! own, not a Rune view, so a story can't draw it: each one drives the real
+//! group HUD, while `dot-scope` is on). The HUD is a Rune overlay of its
+//! own, not a view in the window, so a story can't draw it: each one drives the real
 //! HUD at the top of the screen through the same events dictation sends,
 //! and its stage says what it's showing. Every story starts from HUD Lab's
-//! tuning ([`dot_scope::lab`]); its placement variants and look triggers
-//! change that one tuning, so HUD Lab shows them too.
+//! tuning ([`dot_scope::lab`]); playing one puts its placement and look into
+//! that one tuning, so HUD Lab shows them too.
 
 use rune::{Cx, El, Play, Playground, Story, col, text};
 
@@ -25,58 +25,83 @@ const JOB: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Flow {
+    /// Records, then processes and is done, or is cancelled.
     Whole,
-    Recording,
     Processing,
+    YourVoice,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ending {
     Done,
     Cancel,
-    YourVoice,
 }
 
 pub(crate) struct HudStory {
     flow: Flow,
+    /// Where the HUD sits and whether the notch is pretend; `None` keeps
+    /// HUD Lab's.
+    placement: Option<(Placement, bool)>,
+    /// The processing look; `None` keeps HUD Lab's.
+    look: Option<Processing>,
+    ending: Ending,
     /// Bumped by each play, so a replay's steps never meet an older one's.
     run: u64,
     /// What the HUD shows now, for the stage.
     showing: &'static str,
 }
 
-/// Adds the HUD's stories to `playground`.
-pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
+/// The placement stories: each plays a whole dictation from one placement.
+const PLACEMENTS: [(&str, Placement, bool); 4] = [
+    ("HUD/Notch", Placement::Notch, false),
+    ("HUD/Pretend notch", Placement::Notch, true),
+    ("HUD/Menu bar", Placement::MenuBar, false),
+    ("HUD/Below the menu bar", Placement::Below, false),
+];
+
+/// Adds the HUD's stories to `playground`. A placement story's variants
+/// are each look with each ending (`flow-done`, `sweep-cancel`, …); the
+/// Processing and Your voice stories' variants are placements (`notch`,
+/// `menu-bar`, …). Links name both, so these names stay put.
+pub(crate) fn add<S: 'static>(mut playground: Playground<S>) -> Playground<S> {
+    for (name, placement, pretend) in PLACEMENTS {
+        playground = playground.story(endings(story(name, move || HudStory {
+            placement: Some((placement, pretend)),
+            ..HudStory::new(Flow::Whole)
+        })));
+    }
     playground
-        .story(story("HUD/Whole flow", || HudStory::new(Flow::Whole)))
-        .story(story("HUD/Recording · canned voice", || {
-            HudStory::new(Flow::Recording)
-        }))
-        .story(story("HUD/Recording · your voice", || {
+        .story(placements(story("HUD/Processing", || {
+            HudStory::new(Flow::Processing)
+        })))
+        .story(placements(story("HUD/Your voice", || {
             HudStory::new(Flow::YourVoice)
-        }))
-        .story(story("HUD/Processing", || HudStory::new(Flow::Processing)))
-        .story(story("HUD/Done", || HudStory::new(Flow::Done)))
-        .story(story("HUD/Cancel", || HudStory::new(Flow::Cancel)))
+        })))
 }
 
 impl HudStory {
     fn new(flow: Flow) -> Self {
         Self {
             flow,
+            placement: None,
+            look: None,
+            ending: Ending::Done,
             run: 0,
             showing: "Nothing yet",
         }
     }
 }
 
-fn story(name: &'static str, init: fn() -> HudStory) -> Story<HudStory> {
+fn story(name: &'static str, init: impl Fn() -> HudStory + 'static) -> Story<HudStory> {
     Story::new(name, init, view)
         .trigger('r', "Play", play)
         .trigger('p', "Next processing look", |s, play| {
-            retune(|t| {
-                let next = Processing::ALL
-                    .iter()
-                    .position(|look| *look == t.processing)
-                    .map_or(0, |index| (index + 1) % Processing::ALL.len());
-                t.processing = Processing::ALL[next];
-            });
+            let look = s.look.unwrap_or(dot_scope::lab().processing);
+            let next = Processing::ALL
+                .iter()
+                .position(|each| *each == look)
+                .map_or(0, |index| (index + 1) % Processing::ALL.len());
+            s.look = Some(Processing::ALL[next]);
             replay(s, play);
         })
         .trigger('a', "Auto level on or off", |s, play| {
@@ -84,12 +109,40 @@ fn story(name: &'static str, init: fn() -> HudStory) -> Story<HudStory> {
             replay(s, play);
         })
         .trigger('s', "Stop", |s, _| stop(s))
-        .variant("Placement as HUD Lab has it", |_| {})
-        .variant("Below the menu bar", |_| place(Placement::Below, false))
-        .variant("In the menu bar", |_| place(Placement::MenuBar, false))
-        .variant("From the notch", |_| place(Placement::Notch, false))
-        .variant("From a pretend notch", |_| place(Placement::Notch, true))
         .side(side)
+}
+
+/// Every look with every ending.
+fn endings(story: Story<HudStory>) -> Story<HudStory> {
+    let mut story = story;
+    for (name, look, ending) in [
+        ("flow-done", Processing::Flow, Ending::Done),
+        ("pulse-done", Processing::Pulse, Ending::Done),
+        ("sweep-done", Processing::Sweep, Ending::Done),
+        ("flow-cancel", Processing::Flow, Ending::Cancel),
+        ("pulse-cancel", Processing::Pulse, Ending::Cancel),
+        ("sweep-cancel", Processing::Sweep, Ending::Cancel),
+    ] {
+        story = story.variant(name, move |s| {
+            s.look = Some(look);
+            s.ending = ending;
+        });
+    }
+    story
+}
+
+/// HUD Lab's placement, then each placement.
+fn placements(story: Story<HudStory>) -> Story<HudStory> {
+    story
+        .variant("hud-lab", |s| s.placement = None)
+        .variant("notch", |s| s.placement = Some((Placement::Notch, false)))
+        .variant("pretend-notch", |s| {
+            s.placement = Some((Placement::Notch, true))
+        })
+        .variant("menu-bar", |s| {
+            s.placement = Some((Placement::MenuBar, false))
+        })
+        .variant("below", |s| s.placement = Some((Placement::Below, false)))
 }
 
 fn send(event: Event) {
@@ -106,10 +159,16 @@ fn retune(change: impl FnOnce(&mut Tuning)) {
     send(Event::ConfigureDotScope(tuning));
 }
 
-fn place(placement: Placement, pretend_notch: bool) {
+/// Puts this story's placement and look into the shared tuning.
+fn apply(s: &HudStory) {
     retune(|t| {
-        t.placement = placement;
-        t.pretend_notch = pretend_notch;
+        if let Some((placement, pretend_notch)) = s.placement {
+            t.placement = placement;
+            t.pretend_notch = pretend_notch;
+        }
+        if let Some(look) = s.look {
+            t.processing = look;
+        }
     });
 }
 
@@ -142,7 +201,7 @@ fn then(
 
 fn record(s: &mut HudStory) {
     send(Event::Reset);
-    send(Event::ConfigureDotScope(dot_scope::lab()));
+    apply(s);
     send(Event::Started);
     send(Event::DemoVoice);
     s.showing = "Recording a canned voice";
@@ -169,39 +228,29 @@ fn play(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
     match s.flow {
         Flow::Whole => {
             record(s);
-            then(s, play, RECORD_SECS, |s, play| {
-                process(s);
-                then(s, play, PROCESS_SECS, done);
+            then(s, play, RECORD_SECS, |s, play| match s.ending {
+                Ending::Done => {
+                    process(s);
+                    then(s, play, PROCESS_SECS, done);
+                }
+                Ending::Cancel => {
+                    send(Event::Cancelled);
+                    s.showing = "Cancelled";
+                    then(s, play, SETTLE_SECS, |s, _| {
+                        send(Event::Reset);
+                        s.showing = "Hidden";
+                    });
+                }
             });
-        }
-        Flow::Recording => {
-            record(s);
-            then(s, play, HOLD_SECS, |s, _| stop(s));
         }
         Flow::Processing => {
             record(s);
             process(s);
             then(s, play, HOLD_SECS, done);
         }
-        Flow::Done => {
-            record(s);
-            process(s);
-            then(s, play, 0.8, done);
-        }
-        Flow::Cancel => {
-            record(s);
-            then(s, play, RECORD_SECS, |s, play| {
-                send(Event::Cancelled);
-                s.showing = "Cancelled";
-                then(s, play, SETTLE_SECS, |s, _| {
-                    send(Event::Reset);
-                    s.showing = "Hidden";
-                });
-            });
-        }
         Flow::YourVoice => {
             send(Event::Reset);
-            send(Event::ConfigureDotScope(dot_scope::lab()));
+            apply(s);
             s.showing = "Waiting for your dictation shortcut";
         }
     }
@@ -230,9 +279,18 @@ fn view(s: &HudStory, cx: &mut Cx<HudStory>) -> El {
         )
         .child(
             text(format!(
-                "{} · {} · auto level {}",
+                "{}{} · {} · {} · auto level {}",
                 tuning.placement.label(),
+                if tuning.pretend_notch {
+                    " (pretend)"
+                } else {
+                    ""
+                },
                 tuning.processing.label(),
+                match s.ending {
+                    Ending::Done => "done",
+                    Ending::Cancel => "cancel",
+                },
                 if tuning.auto_level { "on" } else { "off" },
             ))
             .key("tuning")

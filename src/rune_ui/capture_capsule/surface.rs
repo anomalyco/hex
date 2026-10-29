@@ -1217,6 +1217,7 @@ mod tests {
         assert_ne!(old, new, "crossfades rather than swapping text in place");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn entry_lands_the_pose_instantly_then_springs_to_rest_with_its_content() {
         let mut s = Surface::new();
@@ -1279,6 +1280,7 @@ mod tests {
         assert_eq!(chord(&["fn", "V"]), "fn V");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_mode_change_in_place_slides_the_highlight() {
         let mut s = Surface::new().settled(Pres::Selecting {

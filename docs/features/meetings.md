@@ -418,6 +418,8 @@ While recording                                      // meetings.rolling
      │   (so a chunk is at most 12 s of audio)
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
+     ├── No speech detected (Silero, once installed) -> empty transcript, no
+     │   inference; coverage still advances
      └── A dictation request or live stream came first -> retried once idle
   -> Timed words joined word by word at a shared word near each overlap's middle
      -> sentences (punctuation or a 600 ms pause)
@@ -502,6 +504,21 @@ Repeated words (two to twelve) at the join are removed, and Stop publishes the
 words still waiting on a seam. Joining
 words rather than sentences keeps a sentence that runs across a hard cut whole;
 joining sentences lost its words on one side (10% word error on `You` lines).
+
+Speechless chunks: models invent text for silence and noise ("Thank you",
+"Grazie a tutti", or the recognition hints), and room or keyboard noise passes
+the -60 dB silent-chunk check, so every chunk that passes it also goes through
+the Silero speech detector used by dictation (see
+[dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
+least 160 ms becomes an empty transcript without inference, in rolling
+transcription, the Stop & Transcribe fallback, and `meeting echo`. In a probe
+outside the tree, run on each microphone entry of one 63-minute Italian call,
+the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
+and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
+scanned the call in 1.6 s on the CPU. Invented text inside a
+chunk that also holds speech is not addressed. Without the detector only the
+-60 dB check applies, as before. A Whisper chunk that returns only the recognition
+hints is emptied too ([models](README.md#get-ready)).
 
 In-call text was a Moonshine draft until 2026-10-22: the pane showed Parakeet
 only for time rolling had covered, and Option-Control-V and the GPUI capsule's
@@ -619,6 +636,8 @@ Other checks:
 `chunks_end_at_the_first_pause_after_the_target_length`,
 `short_recordings_become_one_chunk_and_silence_tails_are_dropped`,
 `overlapping_chunks_join_at_the_middle_of_the_overlap`, `seam_drops_repeated_words`,
+`speechless_chunks_skip_the_model_and_still_advance_coverage`,
+`a_speechless_chunk_after_an_overlap_keeps_earlier_entries`,
 `a_sentence_across_a_hard_cut_keeps_every_word`,
 `rolling_publishes_only_entries_a_later_seam_cannot_replace`,
 `a_capture_gap_restarts_the_track_after_it_instead_of_dropping_it`,

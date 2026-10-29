@@ -2922,7 +2922,7 @@ fn handle_command(
                 },
         } => {
             let outcome = personal_commands
-                .ok_or("personal command host is unavailable")
+                .ok_or("personal commands are unavailable")
                 .and_then(|runtime| {
                     runtime.invoke(generation, id, heard, context.clone(), captures)
                 });

@@ -7,7 +7,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export MACOSX_DEPLOYMENT_TARGET=15.0
-cargo build --locked --release --features capture --bin hex --manifest-path "$root/Cargo.toml"
+cargo build --locked --release --bin hex --manifest-path "$root/Cargo.toml"
 target=${CARGO_TARGET_DIR:-$root/target}
 bundle="${HEX_PLAYGROUND_OUT:-$root/target/app}/Hex Playground.app"
 rm -rf "$bundle"

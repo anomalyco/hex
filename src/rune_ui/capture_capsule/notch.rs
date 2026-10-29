@@ -5,6 +5,9 @@
 //! the screen's top, so it covers the notch as it grows and shrinks back
 //! into it.
 
+// Only the macOS playground and notch reads much of this.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use rune::{Color, El, Path, Shape, Spring, canvas, el};
 
 use super::surface::CX;

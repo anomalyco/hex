@@ -12,8 +12,6 @@ version=$3
 build_number=$4
 team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
 plist="$bundle/Contents/Info.plist"
-# Logged only by a build with the `capture` feature (src/capture_host.rs).
-capture_marker='capture experiment on: `hex capture` is available'
 
 fail() {
   echo "Rust Hex bundle validation failed: $*" >&2
@@ -33,15 +31,15 @@ plist_value() {
 [ "$(plist_value CFBundleShortVersionString)" = "$version" ] || fail "wrong version"
 [ "$(plist_value CFBundleVersion)" = "$build_number" ] || fail "wrong build number"
 [ "$(plist_value LSMinimumSystemVersion)" = 15.0 ] || fail "wrong minimum macOS"
+[ "$(plist_value CFBundleURLTypes:0:CFBundleURLSchemes:0)" = hex ] || fail "wrong URL scheme"
 # Hex updates itself through the Anomaly release service; Sparkle is gone.
 ! plist_value SUFeedURL >/dev/null 2>&1 || fail "a Sparkle feed is still configured"
 [ ! -e "$bundle/Contents/Frameworks/Sparkle.framework" ] || fail "Sparkle.framework is still bundled"
 [ "$(plist_value LSUIElement)" = true ] || fail "menu-bar application policy is disabled"
-# The capture build option is never released (scripts/build-app.sh HEX_CAPTURE).
-[ ! -e "$bundle/Contents/MacOS/scrawl-helper" ] || fail "built with the capture build option: scrawl-helper is bundled"
-! plist_value NSCameraUsageDescription >/dev/null 2>&1 || fail "built with the capture build option: Info.plist asks for the camera"
 [ -x "$bundle/Contents/MacOS/hex" ] || fail "packaged executable is missing"
-! LC_ALL=C grep -aqF "$capture_marker" "$bundle/Contents/MacOS/hex" || fail "built with the capture build option: hex has the capture engine"
+# The `capture` experiment's movie decoder, and the camera its iPhone mirror asks for.
+[ -x "$bundle/Contents/MacOS/scrawl-helper" ] || fail "scrawl-helper is missing"
+plist_value NSCameraUsageDescription >/dev/null 2>&1 || fail "Info.plist does not explain the camera"
 [ "$(lipo -archs "$bundle/Contents/MacOS/hex")" = arm64 ] || fail "packaged executable is not arm64-only"
 [ -x "$bundle/Contents/Library/HexMicrophone.driver/Contents/MacOS/HexMicrophoneDriver" ] || fail "bundled HexMicrophone.driver is missing"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Library/HexMicrophone.driver/Contents/Info.plist")" = anomaly.hex.microphone.driver ] || fail "bundled driver has wrong bundle identifier"

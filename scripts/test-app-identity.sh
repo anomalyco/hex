@@ -38,18 +38,9 @@ expect_rejection 'wrong executable name'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 2.1.0' "$plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 20100' "$plist"
 mkdir -p "$bundle/Contents/MacOS"
-printf 'stub' >"$bundle/Contents/MacOS/scrawl-helper"
-expect_rejection 'built with the capture build option: scrawl-helper is bundled'
-rm "$bundle/Contents/MacOS/scrawl-helper"
-printf '#!/bin/sh\n# capture experiment on: `hex capture` is available\n' >"$bundle/Contents/MacOS/hex"
+printf '#!/bin/sh\n' >"$bundle/Contents/MacOS/hex"
 chmod +x "$bundle/Contents/MacOS/hex"
-expect_rejection 'built with the capture build option: hex has the capture engine'
-
-if output=$(HEX_CAPTURE=1 sh "$root/scripts/release-app.sh" 2>&1); then
-  echo "Unexpectedly allowed release-app.sh with HEX_CAPTURE." >&2
-  exit 1
-fi
-printf '%s\n' "$output" | grep -Fq 'the capture build option is never released'
+expect_rejection 'scrawl-helper is missing'
 
 for script in build-app.sh build-service-app.sh release-app.sh; do
   if output=$(env -u HEX_TEAM_ID sh "$root/scripts/$script" 2>&1); then

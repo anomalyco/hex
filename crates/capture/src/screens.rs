@@ -277,6 +277,22 @@ pub fn pointer() -> Option<[f64; 2]> {
     crate::win::cursor_position().map(|(x, y)| [x, y])
 }
 
+/// Wayland tells an app nothing of the displays or the pointer: the portal picks the screen.
+#[cfg(target_os = "linux")]
+pub fn displays() -> Vec<Screen> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn current() -> Vec<Screen> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn pointer() -> Option<[f64; 2]> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

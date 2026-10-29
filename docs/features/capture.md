@@ -1,9 +1,10 @@
-# Captures (experimental, a build option)
+# Captures (experimental, macOS and Linux)
 
 Scrawl's capture engine hosted inside Hex, steps 3 to 5 of
 [the plan](../plans/capture-in-hex.md). It runs the real
 `scrawl-capture` crate, imported into `crates/capture`: it records the active
-display with ScreenCaptureKit (or a cabled iPhone through `scrawl-helper`'s
+display with ScreenCaptureKit, or on Linux the screen-cast portal and
+PipeWire (`capture.linux`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes Shift ink and clicks from
 Hex's event tap, transcribes the narration with word timestamps on Hex's
 loaded model, writes a Scrawl bundle into Scrawl's captures folder, copies it
@@ -14,18 +15,44 @@ picker, route chips) and its ink and laser overlay are Rune overlays.
 
 ```ts
 Turn it on                               // capture.gate
-├── macOS build with `--features capture`, debug or release; off in every public build
-│   ├── `HEX_CAPTURE=1 scripts/build-app.sh` -> Hex.app with scrawl-helper signed
-│   │   beside `hex`; scripts/check and macOS CI test with the feature
-│   └── + `hex experiments enable capture` (or HEX_EXPERIMENTS=capture) -> restart
-├── Any build without the feature (every public release, Linux, Windows, Nix) ->
-│   `capture` is not an experiment: absent from `hex experiments list`, `enable
-│   capture` is an unknown name, and a file line naming it is ignored; `hex capture`
-│   -> unsupported. The crate is not compiled at all
-├── Release path -> release-app.sh refuses HEX_CAPTURE; validate-app.sh refuses a
-│   bundle with scrawl-helper or the capture engine in `hex`
+├── Every macOS and Linux build carries it, dormant: `hex experiments enable
+│   capture` (or HEX_EXPERIMENTS=capture) -> restart -> Settings › Experiments
+│   › Scrawl -> Capture with Hex (capture.enabled)
+│   └── macOS bundles sign scrawl-helper beside `hex`; validate-app.sh requires it
+├── Windows -> `capture` is not an experiment: absent from `hex experiments
+│   list`, `enable capture` is an unknown name; the crate is not compiled
 ├── Experiment on -> Settings › Experiments › Scrawl appears
 └── Off -> no capture host, engine, sink, thread, or folder; `hex capture` -> feature-off
+
+On Linux                                 // capture.linux
+├── Source -> the ScreenCast portal (zbus): Screen asks the desktop once and
+│   keeps its restore token (<support>/screencast-token), so later captures
+│   start without a dialog; Window shows the desktop's picker every time (the
+│   capsule's Window chip goes straight to it); the cursor is embedded
+├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
+│   time; 32-bit RGB as a linear DMA-BUF (niri, GNOME, KDE) or shared memory
+├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
+│   to a 2560 px long edge (1920 for a window) and converted on the video
+│   engine, H.264 High at a constant QP with Hex-written headers, 30 fps;
+│   `ffmpeg -c copy` muxes recording.mp4. No VA-API -> frames copied and
+│   encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors)
+├── Candidates -> a small copy from the video engine (at most 4× smaller per
+│   pass: radeonsi crashes past it)
+├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`
+├── Missing PipeWire, ffmpeg, or a picker answer -> that capture fails with why
+├── Narration -> the listener's microphone through ListenerTimeline (each
+│   stream anchored to the monotonic clock); released-while-idle microphones
+│   open for the capture
+├── Words -> one foreground job on the listener's engine (its loaded model)
+├── Copy and Paste -> the summary text through Hex's Linux clipboard (wl-copy
+│   or the X11 clipboard) and paste path; no image
+├── Shortcut -> Ctrl+Alt+S through the GlobalShortcuts portal ("Capture") or
+│   an X11 grab; a press starts, the next (after 400 ms) stops
+├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
+│   recordings" (the portal asks; Wayland can't keep overlays out)
+└── Gaps: no Area (Wayland gives Hex no pointer to aim it), no iPhone, no
+    pointer, click, or ink input, no window log, `hex capture status`
+    unsupported, choosing another folder only through settings.json
 
 Settings › Experiments › Scrawl          // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
@@ -120,8 +147,8 @@ A cabled iPhone                          // capture.phone
 ├── Start(Phone) -> scrawl-helper's mirror window shows the phone and records
 │   its native video into recording.mov; `--no-microphone`: the mirror never
 │   asks for or opens a microphone
-│   ├── Camera access -> macOS asks on Hex's behalf (HEX_CAPTURE builds carry
-│   │   NSCameraUsageDescription; validate-app.sh refuses it)
+│   ├── Camera access -> macOS asks on Hex's behalf (every bundle carries
+│   │   NSCameraUsageDescription; validate-app.sh requires it)
 │   └── Pointer and pen input -> normalized to the mirror's picture
 ├── Narration -> Hex's timeline, as for the screen, moved onto the movie's clock
 │   (its first frame, measured from the capture's start) and transcribed by Hex's
@@ -314,6 +341,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
         (capture_capsule/notch.rs). The playground's "Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
+    The playground's "Capture capsule/family" story (playground/family.rs)
+    plays a dictation and then a capture in one shape on the same springs:
+    from the notch on a 14-inch MacBook Pro, and on a flat 27-inch display
+    inside the menu bar (hud_placement's 3 pt inset) or floating 6 pt under
+    it. Its variants draw the voice as Dot scope's braid (its real
+    simulation), bars, or a line; only the capture adds a red dot or a small
+    screen, the cue alternating each loop
     Gap: only the shapes are prototyped; the menu-bar item's capture list
     is not, the app doesn't read the screen's notch (the overlay still puts
     the pill's content under it), and no flow but list has run live
@@ -526,7 +560,7 @@ control commands in [control.rs](../../src/control.rs).
 
 Checks:
 
-- Gate: `capture_exists_only_with_its_build_option` in
+- Gate: `capture_exists_only_where_it_has_a_host` in
   [experiments.rs](../../src/experiments.rs);
   `the_host_is_absent_while_the_experiment_is_off` in capture_host.rs;
   [test-app-identity.sh](../../scripts/test-app-identity.sh) for the

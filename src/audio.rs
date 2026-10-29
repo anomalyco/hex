@@ -146,6 +146,19 @@ impl CaptureInstant {
         Self::from_mach_ticks(unsafe { mach_absolute_time() })
     }
 
+    /// The monotonic clock. Linux's microphone streams count from when they
+    /// opened, so the capture timeline anchors them to this.
+    #[cfg(target_os = "linux")]
+    pub fn now() -> Self {
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `now` is a valid timespec to fill.
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+        Self(now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64)
+    }
+
     #[cfg(target_os = "macos")]
     pub fn from_mach_ticks(ticks: u64) -> Self {
         let Some((numerator, denominator)) = mach_timebase() else {

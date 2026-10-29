@@ -1,6 +1,6 @@
 [package]
 name = "hex"
-version = "2.3.1"
+version = "0.0.0"
 edition = "2024"
 default-run = "hex"
 license = "MIT"
@@ -9,8 +9,8 @@ repository = "https://github.com/anomalyco/hex"
 # Crates imported from Scrawl live under `crates/`. Plain `cargo build` and
 # `cargo test` still select only Hex; pass `--workspace` or `-p` for the others.
 # `crates/capture` and `crates/capture-core` are excluded so `--workspace`
-# never builds them: they compile only as the `capture` feature's macOS
-# dependencies, and `-p scrawl-capture` / `-p capture-core` test and lint
+# never builds them: they compile only as the macOS and Linux dependencies
+# of the `capture` experiment, and `-p scrawl-capture` / `-p capture-core` test and lint
 # them. The root package is a member without being listed; listing "." would
 # defeat `exclude`.
 [workspace]
@@ -29,10 +29,6 @@ embed-resource = "3"
 
 [features]
 onnx-benchmark = ["dep:transcribe-rs"]
-# The `capture` experiment's engine (Scrawl's `scrawl-capture`, macOS only): a
-# build option (`HEX_CAPTURE=1 scripts/build-app.sh`), off by default and in
-# every public build, which never compile it or its Swift helper.
-capture = ["dep:scrawl-capture", "dep:anyhow", "dep:rune-motion"]
 
 # Shipped executables carry no symbol table (about 11 MB on Linux). Panic
 # backtraces lose function names; debug builds keep them.
@@ -60,10 +56,15 @@ getrandom = "0.4.3"
 hound = "3.5.1"
 libc = "0.2.189"
 libloading = "0.9.0"
+oxc_allocator = "0.156.0"
+oxc_ast = "0.156.0"
+oxc_ast_visit = "0.156.0"
+oxc_parser = "0.156.0"
+oxc_span = "0.156.0"
 regex = "1.13.1"
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader"] }
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3"] }
 rubato = "5.0.1"
-semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
@@ -75,13 +76,10 @@ unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-anyhow = { version = "1.0.104", optional = true }
 arboard = { version = "3.6.1", default-features = false }
 block2 = "0.6.2"
 core-graphics-types = "0.1.3"
-core-video = "0.4.3"
 crossterm = "0.29.0"
-metal = "0.29.0"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-core-audio = "0.3.2"
@@ -92,29 +90,38 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 # Smart Turn: loads the ONNX Runtime dylib Moonshine already ships.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-23"] }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "07520d007df09a1fa899a6085cd6279d6b6275a5" }
 ratatui = "0.30.2"
 realfft = "3.5.0"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
-scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"], optional = true }
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 unicode-normalization = "0.1.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ctrlc = { version = "3.5.2", features = ["termination"] }
-gio = "0.18.4"
-glib = "0.18.5"
+futures-util = { version = "0.3.34", default-features = false }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time"] }
 transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xtest"] }
+zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
+
+# The `capture` experiment (Scrawl's capture engine), compiled into every macOS
+# and Linux build and dormant until `hex experiments enable capture` and
+# `capture.enabled`. Windows has no host for it yet.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+anyhow = "1.0.104"
+# The capture capsule's motion-lint trace.
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "07520d007df09a1fa899a6085cd6279d6b6275a5" }
+scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "e5a6431ccbdbee8442921a3e28e25185f2707f12" }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "e5a6431ccbdbee8442921a3e28e25185f2707f12" }
-# The capture capsule's motion-lint trace (`capture` only).
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "e5a6431ccbdbee8442921a3e28e25185f2707f12", optional = true }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "e5a6431ccbdbee8442921a3e28e25185f2707f12" }
+pollster = "1.0.1"
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "07520d007df09a1fa899a6085cd6279d6b6275a5", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "07520d007df09a1fa899a6085cd6279d6b6275a5" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "07520d007df09a1fa899a6085cd6279d6b6275a5" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
@@ -123,7 +130,6 @@ png = "0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
-tray-icon = { version = "0.24.1", default-features = false }
 winreg = "0.55.0"
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
@@ -142,7 +148,7 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
-windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility"] }
 windows-future = "0.3.2"
 
 # x64 Windows decodes on the GPU through Vulkan. ARM64 Windows stays CPU-only,

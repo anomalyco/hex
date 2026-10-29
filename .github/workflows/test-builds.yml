@@ -77,7 +77,6 @@ jobs:
           key: test-build
           cache-on-failure: true
       - uses: astral-sh/setup-uv@v6
-      - uses: oven-sh/setup-bun@v2
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Build Hex Test.app

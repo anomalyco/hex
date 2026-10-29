@@ -40,7 +40,7 @@ The quarantined public DMG and a genuine automatic 2.0.0-to-2.0.1 Sparkle update
 have been validated on the development Mac. Before broadly sharing it, validate
 the DMG from a clean macOS account, including every TCC permission, model
 installation, and source-free launch. Preserve the stable bundle identity that
-owns Microphone, Accessibility, Input Monitoring, and Automation permissions.
+owns Microphone, Accessibility, and Automation permissions.
 
 ## Finish Settings And First-Run Health
 
@@ -56,7 +56,7 @@ sound-effect volume, application/browser-host processing modes, and the native
 and persist atomically; launch-at-login remains owned by macOS rather than the
 settings file. A persistent menu-bar item keeps Settings, Paste Last, updates,
 and Quit reachable when the Dock icon is hidden. Settings now surfaces revoked
-Microphone, Accessibility, or Input Monitoring access after onboarding, and
+Microphone or Accessibility access after onboarding, and
 supported transcription runtimes expose automatic language detection. Modes own
 corrections, optional OpenCode rewriting, and ordered text transformations;
 stage failures preserve the preceding pipeline output. Do not add a generalized

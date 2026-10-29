@@ -1,7 +1,7 @@
-//! Child processes Hex starts for its own work: the Bun command host, the
-//! OpenCode CLI, curl, and PowerShell. The native app detaches from its
-//! console, so on Windows each console program would otherwise open a
-//! terminal window of its own, and closing it would kill the child.
+//! Child processes Hex starts for its own work: the OpenCode CLI, curl, and
+//! PowerShell. The native app detaches from its console, so on Windows each
+//! console program would otherwise open a terminal window of its own, and
+//! closing it would kill the child.
 
 use std::ffi::OsStr;
 use std::process::Command;

@@ -40,6 +40,8 @@ pub(crate) mod playground;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+#[cfg(target_os = "macos")]
+pub(crate) mod story_link;
 mod vocabulary;
 mod voice_action;
 
@@ -136,6 +138,9 @@ pub(crate) fn run_app(
         .windowless()
         .window_options(fixed_window());
     crate::linux_rune_hud::install(&mut app);
+    // The capture capsule, picker, and ink, with the `capture` experiment on.
+    let _capture_overlays = crate::app_settings::capture_available()
+        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let handle = app.handle();
     host.set_window_visible({
         let handle = handle.clone();
@@ -169,7 +174,27 @@ pub(crate) fn run_app(
 /// The window as a Rune app whose lifetime the caller chooses, connected to
 /// its host through `connect`, with the playground when its experiment is on.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
-    build(connect, playground::enabled())
+    let app = build(connect, playground::enabled());
+    #[cfg(target_os = "macos")]
+    let app = app.on_open_url(on_open_url);
+    app
+}
+
+/// A `hex://` link the system opened with Hex: a story link opens the window
+/// on that playground story; anything else is ignored.
+#[cfg(target_os = "macos")]
+fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
+    let link = match story_link::parse(link, story_link::scheme()) {
+        Ok(link) => link,
+        Err(why) => {
+            tracing::warn!(%why, "ignored a link opened with Hex");
+            return;
+        }
+    };
+    if let Err(why) = story_link::open(&link, tx) {
+        tracing::warn!(story = %link.story, %why, "a story link opened only the window");
+    }
+    crate::macos_rune::bring_window_forward();
 }
 
 /// `hex app -- --snap …`: a headless render of a fixture scene. With the
@@ -548,6 +573,10 @@ impl Pane {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     Microphone,
+    /// An input source's model in keyboard model switching.
+    InputSourceModel(usize),
+    /// An input source's language in keyboard model switching.
+    InputSourceLanguage(usize),
     /// The microphone under the tour's practice field.
     TourMicrophone,
     Language,
@@ -560,6 +589,8 @@ enum Menu {
     MeetingActions,
     /// The calendars meeting reminders read.
     Calendars,
+    /// The transformations a mode can add (the Modes pane).
+    Transformations,
     /// How long captures are kept (the Scrawl pane).
     #[cfg(hex_capture)]
     CaptureRetention,
@@ -1480,7 +1511,8 @@ const FOOTER_LINE: f32 = 20.0;
 /// Test and local builds also name their commit: main moves past a release without
 /// changing the version.
 fn version_label() -> String {
-    let version = env!("CARGO_PKG_VERSION");
+    // Goldens render a fixed version: a local build's names its commit.
+    let version = if cfg!(test) { "0.0.0" } else { crate::VERSION };
     match option_env!("HEX_COMMIT") {
         Some(commit) => {
             let kind = if crate::app_paths::is_local_build() {
@@ -1750,8 +1782,13 @@ const SCENES: &[Scene] = &[
     ("modes-picker", |ui| {
         *ui = portal_fixture();
         modes::fixture(ui);
-        ui.modes.transformation_picker_open = true;
         ui.modes.application_picker_open = true;
+        ui.pane = Pane::Modes;
+    }),
+    ("modes-transformation-menu", |ui| {
+        *ui = portal_fixture();
+        modes::fixture(ui);
+        ui.open = Some(Menu::Transformations);
         ui.pane = Pane::Modes;
     }),
     ("picker", |ui| {
@@ -1850,6 +1887,52 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-input-source-models", |ui| {
+        use crate::app_settings::KeyboardModelChoice;
+        *ui = mac_fixture();
+        ui.settings.keyboard_model_switching.enabled = true;
+        ui.settings.keyboard_model_switching.mappings = [
+            (
+                "com.apple.keylayout.ABC",
+                TranscriptionModelId::ParakeetUnifiedEnglish,
+                "en",
+            ),
+            (
+                "com.apple.keylayout.RussianWin",
+                TranscriptionModelId::ParakeetV3,
+                "ru",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, model, language)| {
+            (
+                id.into(),
+                KeyboardModelChoice {
+                    model,
+                    language: language.into(),
+                },
+            )
+        })
+        .collect();
+        ui.platform.input_sources = [
+            ("com.apple.keylayout.ABC", "ABC", "en"),
+            ("com.apple.keylayout.RussianWin", "Russian - PC", "ru"),
+            ("com.apple.keylayout.Spanish", "Spanish", "es"),
+        ]
+        .into_iter()
+        .map(
+            |(id, name, language)| crate::keyboard_model_switching::InputSource {
+                id: id.into(),
+                name: name.into(),
+                languages: vec![language.into()],
+            },
+        )
+        .collect();
+        ui.picker.installed = Some(vec![
+            TranscriptionModelId::ParakeetUnifiedEnglish,
+            TranscriptionModelId::ParakeetV3,
+        ]);
+    }),
     ("mac-microphone-missing", |ui| {
         *ui = mac_fixture();
         ui.settings.microphone = Some("Shure MV7".into());
@@ -1888,7 +1971,7 @@ const SCENES: &[Scene] = &[
     ("mac-settings-permissions", |ui| {
         *ui = mac_fixture();
         use crate::onboarding::PermissionState;
-        ui.platform.permissions.input_monitoring = PermissionState::NeedsSettings;
+        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
         ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
         ui.platform
             .permissions_asked
@@ -2341,3 +2424,9 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+#[cfg(test)]
+mod keyboard_model_tests;
+
+#[cfg(test)]
+mod dmg_keycap;

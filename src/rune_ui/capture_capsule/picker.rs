@@ -431,7 +431,7 @@ impl PickerState {
 
     /// `aim` at rest, shown or (`on` false) closed, as a still or the start
     /// of a clip.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn still(aim: Aim, on: bool) -> Self {
         let mut state = Self::new();
         state.rest = aim.pointer.unwrap_or(state.rest);
@@ -448,23 +448,23 @@ impl PickerState {
         state
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn set_act(&mut self, act: super::Act) {
         self.act = Some(act);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn want(&mut self, mode: Option<Mode>) {
         self.want = mode;
     }
 
     /// Whether the scene shows, rather than fading out or gone.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn showing(&self) -> bool {
         self.scene.on
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn aim(&self) -> Option<&Aim> {
         self.aim.as_ref()
     }
@@ -835,6 +835,9 @@ pub(super) fn placement(display: [f32; 4]) -> rune::OverlayPlacement {
 pub(crate) struct PickerOverlay {
     overlay: OverlayHandle<PickerState>,
     shortcut: Arc<Mutex<Option<CaptureTarget>>>,
+    /// Where a Linux window pick goes: straight to the portal's own picker.
+    #[cfg(target_os = "linux")]
+    act: super::Act,
 }
 
 impl PickerOverlay {
@@ -866,14 +869,23 @@ impl PickerOverlay {
                 }
             });
         let mut state = PickerState::new();
-        state.act = Some(Arc::new(act));
+        let act: super::Act = Arc::new(act);
+        state.act = Some(act.clone());
         let shortcut = state.shortcut.clone();
         let overlay = app.overlay(spec, state);
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
-        Self { overlay, shortcut }
+        #[cfg(not(target_os = "linux"))]
+        drop(act);
+        Self {
+            overlay,
+            shortcut,
+            #[cfg(target_os = "linux")]
+            act,
+        }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the picker, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
         self.overlay.set_exclude_from_capture(!shown);
@@ -881,6 +893,12 @@ impl PickerOverlay {
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.
     pub(crate) fn set(&self, mode: Option<Mode>) {
+        // Wayland lists no windows to pick from: the portal's picker does.
+        #[cfg(target_os = "linux")]
+        if mode == Some(Mode::Window) {
+            (self.act)(Action::Start(CaptureTarget::Window { id: 0 }));
+            return;
+        }
         self.overlay.update(move |s, tx| {
             s.want = mode;
             tx.wake_after(Duration::ZERO);

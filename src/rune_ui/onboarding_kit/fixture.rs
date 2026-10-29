@@ -100,7 +100,6 @@ impl Take {
     }
 
     /// The final transcript.
-    #[cfg(test)]
     pub(crate) fn text(&self) -> &'static str {
         self.updates.last().map_or("", |(_, text)| text)
     }

@@ -381,7 +381,8 @@ Release that will transcribe                          // dictate.stop-tone
   -> Stop tone and mute/pause/sleep restore at the release, while the tail is
      still captured; a muted output (macOS, Linux) unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
-     ├── Clip later near-silent -> Tone already played; discard, nothing pasted
+     ├── Clip later near-silent or without speech -> Tone already played;
+     │   discard, nothing pasted
      └── Escape after the release -> Not bound; the clip still transcribes
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail
@@ -655,6 +656,10 @@ Finish
   ├── Near-silent capture -> Discard, no inference    // dictate.silence-gate
   │       // loudest 30 ms window (DC removed) below -50 dBFS; no paste,
   │       // History, or last-result update; process.log records the level
+  ├── Louder capture, no detected speech -> Discard, no inference
+  │       // the Silero speech detector, once installed, finds no speech of
+  │       // at least 160 ms before the release; process.log records
+  │       // audio_ms and vad_ms (at debug level when speech passes)
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus
   │       // the clipboard write carries nspasteboard.org Transient and
@@ -677,13 +682,31 @@ The silence gate stops models from hallucinating closing phrases such as "thank
 you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
 covers hotkey, voice-delimited, and Voice Action captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
-are deliberately left ungated: they return the model's raw output to the caller.
+are deliberately left ungated: they skip both silence checks, and only Whisper
+output that repeats the recognition hints is dropped there.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
-tone, or a key click can lift a capture above it, and those captures still reach
-the model. Hallucinations after real speech are not addressed.
-`silence_gate_discards_only_near_silent_captures` in
-[dictation.rs](../../src/dictation.rs) checks the level policy on synthetic
-samples, not real microphone noise floors.
+tone, or a key click can lift a capture above it. Those captures then go to the
+Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
+which discards them when it finds no speech. The detector (1.2 MB, pinned
+revision and checksum in [transcription_models.rs](../../src/transcription_models.rs))
+downloads in the background whenever a transcription model is downloaded or
+activated, and at the first dictation, so an installed model still activates at
+once offline; a failed download is retried at the next dictation. Model
+preparation (macOS, Windows) and the Linux listener load it when present and
+never download it. It runs on the CPU with a speech threshold of 0.4 instead of
+Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
+load, captures above the threshold still reach the model, as before.
+Whisper output that only repeats the recognition hints is dropped as well
+([models](README.md#get-ready)). Other hallucinations after real
+speech are not addressed.
+`silence_gate_discards_only_near_silent_captures` and
+`speech_detector_discards_loud_captures_without_speech` in
+[dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
+with the detector's verdict fixed; `real_detector_rejects_silence_and_noise`,
+`real_detector_hears_speech`, and `real_detector_hears_quiet_whispers` (ignored;
+`HEX_VAD_MODEL`, `HEX_VAD_SPEECH_WAV`, `HEX_VAD_WHISPER_WAV`) run the real
+detector, and `an_installed_model_does_not_wait_for_the_speech_detector` checks
+the background download.
 Key resolution: [keyboard.rs](../../src/keyboard.rs); non-Latin layout
 fallback details live in [shortcut recovery](recovery.md#keyboard-layout-resolution).
 Checks in [parakeet.rs](../../src/parakeet.rs):
@@ -768,6 +791,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
+  Sounds = Signature (default) / Classic                    // dictate.sound-theme
+     -> Change -> Save, apply live, preview the start tone (unless muted)
+     -> Classic -> Previous start clicks, stop swish, cancel thud; macOS
+        errors play Basso; no done tone; onboarding keeps the signature chime
   Feedback volume = 0 -> No tones
      -> Playback worker releases output on its next 250 ms observation
      -> Volume enabled again -> Reopen for the next tone, never capture/UI
@@ -791,6 +818,13 @@ done, and cancel; their failures stay silent as before. Check:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget, audible within 1 ms). The sounds were checked by waveform, spectrum
 and loudness only, never played aloud on a Mac.
+
+The **Sounds** setting (`sound_theme`, next to Sound volume, issue #302)
+switches to **Classic**: the MP3s Hex played before the signature set
+(`startRecording`, `stopRecording`, `cancel` in `resources/audio/`, restored
+byte-for-byte), macOS Basso for errors, and no done tone. The onboarding chime
+and capture tones have no classic counterpart and stay the same. Check:
+`bundled_sounds_decode_without_an_audio_device` covers both sets.
 
 Feedback admission is advisory on every platform: a cold audio stack can exceed
 the two-second preload timeout, so the recognition worker logs a warning and
@@ -875,7 +909,7 @@ behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
-At the top position the capsule sits 12 pt below the menu bar, or below the
+At the top position the capsule sits 6 pt below the menu bar (`hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
 and normal Spaces keep their position. Check: `scripts/check
@@ -884,10 +918,13 @@ fullscreen app on a notched Mac is not yet observed.
 
 ### Dot scope (experiment `dot-scope`)
 
-With the `dot-scope` experiment on, the macOS HUD draws Dot scope instead of
+With the `dot-scope` experiment on, the HUD draws Dot scope instead of
 the capsule ([dot_scope.rs](../../src/dot_scope.rs),
-`dot_scope_fragment` in [dictation_indicator.metal](../../src/dictation_indicator.metal)).
-It is the t422 prototype's look A with its values.
+`dot_scope_fragment` in [rune_hud.wgsl](../../src/rune_hud.wgsl), drawn by
+a Rune overlay on every OS). It is the t422 prototype's look A with its
+values. Linux and Windows draw it in a 176×80 pt window at the HUD's edge
+(no menu-bar or notch placement). Every OS takes dark or light and Reduce
+Motion from Rune, and loads `dot-scope.json` at launch.
 
 ```ts
 Dot scope                                    // dot_scope
@@ -900,8 +937,8 @@ Dot scope                                    // dot_scope
 │   ├── Flow (default) -> The braid keeps turning; bands of light travel right
 │   ├── Pulse -> Rings leave the middle
 │   └── Sweep -> Braid irons flat; a cool beam sweeps 76 pt (round 1)
-├── Completed -> Flow carries its last band off the right edge, Pulse clears
-│   from the middle out, Sweep's beam wipes the field (0.3 s); then it fades
+├── Completed -> Every look clears from the middle out as it collapses
+│   (0.3 s; Sweep's dark field shows only the two fronts); then it fades
 ├── Failed -> Coral, then fades
 ├── Reduce Motion -> A still braid; opacity fades only
 ├── Dark / light -> Read from AppleInterfaceStyle at each capture start
@@ -918,8 +955,10 @@ Placement                                     // hud_placement::place
 ├── Below the menu bar (default) -> Where the capsule sits, or above the Dock
 ├── In the menu bar -> A plate fitted to the bar's height, centred on a flat
 │   screen, just right of the notch on a notched one
-├── From the notch -> A black island grows out of the notch, holding the plate,
-│   and shrinks back into it; In the menu bar on a flat screen
+├── From the notch -> A black island grows out of the notch, 28 pt wider
+│   each side (Island past the notch, 0–60 pt), and shrinks back into it;
+│   the field fills it, less 16 pt each side, at the same dot spacing (more
+│   columns); In the menu bar on a flat screen
 ├── Pretend notch -> Draws the island from a 185 pt notch on a flat screen
 └── Over the menu bar -> Window level NSStatusWindowLevel + 1, click-through
 ```
@@ -938,7 +977,8 @@ HUD Lab (dot-scope on)
 ├── Move a slider -> Applies live to whatever the HUD shows, a real
 │   dictation included; the demo doesn't restart
 ├── Recording / Transcribing / Processing -> Restarts the demo in that state
-├── Processing, Placement, Pretend notch, Auto level -> Apply live
+├── Processing, Placement, Pretend notch, Auto level, Island past the notch
+│   -> Apply live
 ├── Save -> Writes dot-scope.json in Application Support; the HUD loads it at launch
 ├── Copy values -> The same JSON; Reset -> the prototype's values
 └── Leave the pane or close the window -> The demo hides; unsaved values
@@ -946,12 +986,24 @@ HUD Lab (dot-scope on)
 ```
 
 The playground (⇧⌘D, experiment `playground`) lists HUD stories while
-`dot-scope` is on ([hud_stories.rs](../../src/rune_ui/hud_stories.rs)):
-Whole flow, Recording with a canned voice or your own (hold the shortcut),
-Processing, Done, and Cancel, each with a variant per placement. The HUD is
-a Metal panel, not a Rune view, so a story drives the real HUD at the top
-of the screen and its stage only says what it shows. Stories and HUD Lab
-edit one tuning (`dot_scope::lab`).
+`dot-scope` is on ([hud_stories.rs](../../src/rune_ui/hud_stories.rs)),
+so every combination plays without HUD Lab:
+
+```ts
+HUD stories                                  // R plays, P next look, A auto level, S stop
+├── Notch, Pretend notch, Menu bar, Below the menu bar -> A whole dictation
+│   from that placement; variants flow-done, pulse-done, sweep-done,
+│   flow-cancel, pulse-cancel, sweep-cancel (keys 1–6)
+├── Processing -> Records, then holds processing 12 s
+├── Your voice -> Waits for your shortcut and meters your microphone
+│   └── Both: variants hud-lab, notch, pretend-notch, menu-bar, below
+└── Links name the story's slug and variant: hud-notch, pulse-cancel
+```
+
+The HUD is its own Rune overlay, not a view in the window, so a story drives
+the real HUD at the top of the screen and its stage only says what it shows. Playing a story
+puts its placement and look into the one tuning it shares with HUD Lab
+(`dot_scope::lab`).
 
 Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
@@ -959,9 +1011,12 @@ every component.
 Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
 Reduce Motion, the stages, auto level, each processing look settling dark),
 `scripts/check hud_placement` (each placement on flat and notched screens),
-and `dot_scope_view::tests::dot_scope_frames` (ignored; renders the real
-shader offscreen from a WAV into PNG frames, with `HEX_DOT_SCOPE_TUNING`
-for the look and placement over a pretend 14-inch MacBook Pro's menu bar).
+and `rune_hud::tests::rune_hud_frames` (ignored; renders a fixed
+dictation through the real shaders offscreen into PNG frames, with
+`HEX_HUD_TUNING` for the look and placement over a pretend 14-inch MacBook
+Pro's menu bar). On 2026-10-28 its capsule, Dot scope, and notch frames
+matched the retired Metal HUD's render of the same inputs on hailmary to
+within 3/255 per channel.
 Not yet observed on a real notched display, over a fullscreen app, or with
 a hidden menu bar.
 

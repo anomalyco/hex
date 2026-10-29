@@ -8,23 +8,24 @@ use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
     ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS,
-    Paint, button, described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note,
-    page, pulsing_dot, section, section_with, segmented, select, select_sized, setting_row,
-    sheet_button, status_dot, text_field, toggle_row, tray_roll,
+    Paint, button, described_row, fixed_select, folding, icon_button, key_tray, keycap, keycaps,
+    link_row, note, page, pulsing_dot, section, section_with, segmented, select, select_sized,
+    setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
 };
 use super::lists::{PermissionControl, permission_control};
 use super::platform::PlatformRequest;
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
 use crate::app_settings::{
-    AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition, ModifierSide,
-    RecordingAudioBehavior, UpdateChannel,
+    AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition, KeyboardModelChoice,
+    ModifierSide, RecordingAudioBehavior, UpdateChannel,
 };
 use crate::desktop_host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
+use crate::keyboard_model_switching::InputSource;
 use crate::onboarding::PermissionKind;
 use crate::transcription_models::{self, ModelPreparationStage};
 
@@ -36,6 +37,10 @@ const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
     ("50%", 0.5),
     ("75%", 0.75),
     ("100%", 1.0),
+];
+const SOUND_THEMES: [(&str, crate::feedback::SoundTheme); 2] = [
+    ("Signature", crate::feedback::SoundTheme::Signature),
+    ("Classic", crate::feedback::SoundTheme::Classic),
 ];
 /// How long a newly saved shortcut shows "Saved".
 const SAVED_FOR: Duration = Duration::from_secs(1);
@@ -969,6 +974,35 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             .into(),
         );
     }
+    if ui.platform.caps.keyboard_model_switching {
+        rows.push(
+            toggle_row(
+                p,
+                "keyboard-model-switching",
+                tr("Switch model with keyboard language"),
+                Some(tr(
+                    "Changing input source selects its mapped model and language; manual choices still work",
+                )),
+                settings.keyboard_model_switching.enabled,
+                |ui| {
+                    ui.open = None;
+                    ui.update(|settings| {
+                        settings.keyboard_model_switching.enabled =
+                            !settings.keyboard_model_switching.enabled;
+                    });
+                },
+            )
+            .into(),
+        );
+        rows.push(folding(
+            "input-source-mappings",
+            if settings.keyboard_model_switching.enabled {
+                input_source_rows(ui, p, layer)
+            } else {
+                Vec::new()
+            },
+        ));
+    }
     let pinned = advanced_in_use(settings);
     rows.push(folding(
         "advanced-fold",
@@ -985,6 +1019,154 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Dictation"),
         advanced_toggle(ui, p, pinned).mr(-6.0),
         rows,
+    )
+}
+
+/// One row per enabled input source: "Don't switch" or an installed model,
+/// then a language that model supports, as the Language row offers it.
+fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+    ui.platform
+        .input_sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let mapped = ui
+                .settings
+                .keyboard_model_switching
+                .mappings
+                .get(&source.id)
+                .cloned();
+            let source_id = source.id.clone();
+            let mut choices = vec![Choice {
+                label: tr("Don't switch").into(),
+                detail: None,
+                selected: mapped.is_none(),
+                choose: Box::new(move |ui| {
+                    ui.open = None;
+                    ui.update(|settings| {
+                        settings
+                            .keyboard_model_switching
+                            .mappings
+                            .remove(&source_id);
+                    });
+                }),
+            }];
+            choices.extend(transcription_models::MODELS.iter().filter_map(|model| {
+                let fallback = ui.settings.transcription_for_model(model.id).language;
+                if !model.available()
+                    || !matches!(model.runtime, transcription_models::ModelRuntime::Gguf(_))
+                    || !ui.picker.installed(model, &fallback)
+                {
+                    return None;
+                }
+                let language = match &mapped {
+                    Some(choice) if model.supports_language(&choice.language) => {
+                        choice.language.clone()
+                    }
+                    _ => source.language_for(model, &fallback),
+                };
+                let source_id = source.id.clone();
+                let id = model.id;
+                Some(Choice {
+                    label: model.name.into(),
+                    detail: None,
+                    selected: mapped.as_ref().is_some_and(|choice| choice.model == id),
+                    choose: Box::new(move |ui| {
+                        ui.open = None;
+                        ui.update(|settings| {
+                            settings.keyboard_model_switching.mappings.insert(
+                                source_id.clone(),
+                                KeyboardModelChoice {
+                                    model: id,
+                                    language: language.clone(),
+                                },
+                            );
+                        });
+                    }),
+                })
+            }));
+            let label = mapped.as_ref().map_or_else(
+                || tr("Don't switch").to_string(),
+                |choice| {
+                    let model = transcription_models::definition(choice.model);
+                    if ui.picker.installed(model, &choice.language) {
+                        model.name.into()
+                    } else {
+                        format!("{} · {}", model.name, tr("Not installed"))
+                    }
+                },
+            );
+            let mut controls = row().gap(8.0).center_y();
+            if let Some(choice) = &mapped {
+                controls =
+                    controls.child(input_source_language(ui, p, index, source, choice, layer));
+            }
+            setting_row(
+                p,
+                &format!("input-source{index}"),
+                &source.name,
+                None,
+                controls.child(select(
+                    p,
+                    &format!("input-source-model{index}"),
+                    &label,
+                    ui.open == Some(Menu::InputSourceModel(index)),
+                    choices,
+                    move |ui| toggle_menu(ui, Menu::InputSourceModel(index)),
+                    layer,
+                )),
+            )
+        })
+        .collect()
+}
+
+/// A mapped source's language: a select, or fixed for one-language models.
+fn input_source_language(
+    ui: &Ui,
+    p: Paint,
+    index: usize,
+    source: &InputSource,
+    choice: &KeyboardModelChoice,
+    layer: &mut Vec<El>,
+) -> El {
+    let key = format!("input-source-language{index}");
+    let current = transcription_models::language_name(&choice.language);
+    let codes = transcription_models::definition(choice.model).language_choices();
+    if codes.len() <= 1 {
+        return fixed_select(p, &key, current);
+    }
+    let choices = codes
+        .into_iter()
+        .map(|code| {
+            let source_id = source.id.clone();
+            let model = choice.model;
+            Choice {
+                label: transcription_models::language_name(code).to_owned(),
+                detail: None,
+                selected: code == choice.language,
+                choose: Box::new(move |ui: &mut Ui| {
+                    ui.open = None;
+                    ui.update(|settings| {
+                        settings.keyboard_model_switching.mappings.insert(
+                            source_id.clone(),
+                            KeyboardModelChoice {
+                                model,
+                                language: code.to_owned(),
+                            },
+                        );
+                    });
+                }),
+            }
+        })
+        .collect();
+    select(
+        p,
+        &key,
+        current,
+        ui.open == Some(Menu::InputSourceLanguage(index)),
+        choices,
+        move |ui| toggle_menu(ui, Menu::InputSourceLanguage(index)),
+        layer,
     )
 }
 
@@ -1365,6 +1547,7 @@ fn advanced_in_use(settings: &AppSettings) -> bool {
     settings.release_microphone_while_idle
         || (double_tap_only_applies(settings) && settings.double_tap_only)
         || settings.updates.channel.is_some()
+        || settings.share_dictation_shortcut
 }
 
 fn double_tap_only_applies(settings: &AppSettings) -> bool {
@@ -1482,6 +1665,23 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
             }),
         ),
     ];
+    if ui.platform.caps.share_shortcut {
+        rows.push(
+            toggle_row(
+                p,
+                "share-dictation-shortcut",
+                tr("Share dictation shortcut with other apps"),
+                tr("Lets apps such as Discord detect the same key"),
+                settings.share_dictation_shortcut,
+                |ui: &mut Ui| {
+                    ui.advanced = Some(true);
+                    let enabled = !ui.settings.share_dictation_shortcut;
+                    ui.update(|settings| settings.share_dictation_shortcut = enabled);
+                },
+            )
+            .into(),
+        );
+    }
     rows.extend(update_channel_row(ui, p).map(CardRow::from));
     rows
 }
@@ -1567,6 +1767,28 @@ fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                     }
                 });
                 if saved && volume > 0.0 && ui.live() {
+                    crate::feedback::play(crate::feedback::Tone::DictationStart);
+                }
+            },
+        ),
+    ));
+    rows.push(setting_row(
+        p,
+        "sound-theme",
+        tr("Sounds"),
+        None,
+        segmented(
+            p,
+            "sound-theme-control",
+            &SOUND_THEMES.map(|(label, _)| tr(label)),
+            SOUND_THEMES
+                .iter()
+                .position(|(_, theme)| *theme == settings.sound_theme)
+                .unwrap_or(0),
+            |ui, index| {
+                let theme = SOUND_THEMES[index].1;
+                let saved = ui.update(|settings| settings.sound_theme = theme);
+                if saved && ui.settings.sound_effects && ui.live() {
                     crate::feedback::play(crate::feedback::Tone::DictationStart);
                 }
             },

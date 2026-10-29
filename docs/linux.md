@@ -124,7 +124,7 @@ To install the dependencies up front, or to inspect the installer before
 running it:
 
 ```sh
-sudo pacman -S --needed alsa-lib curl glib2 jq \
+sudo pacman -S --needed alsa-lib curl jq \
   libxkbcommon libxkbcommon-x11 libx11 libxcb openblas openssl util-linux \
   vulkan-icd-loader wl-clipboard wtype xxd
 curl --proto '=https' --tlsv1.2 -fsSLO \
@@ -186,7 +186,7 @@ Install the native dependencies and, for a source build, the Rust toolchain:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux glib2 libxkbcommon libxkbcommon-x11 libx11 libxcb openblas \
+  util-linux libxkbcommon libxkbcommon-x11 libx11 libxcb openblas \
   vulkan-headers vulkan-icd-loader \
   shaderc spirv-headers clang cmake pkgconf wl-clipboard wtype
 rustup default stable

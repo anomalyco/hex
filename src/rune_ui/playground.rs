@@ -41,7 +41,7 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
     } else {
         playground
     };
-    #[cfg(hex_capture)]
+    #[cfg(all(hex_capture, target_os = "macos"))]
     let playground = super::capture_capsule::playground::stories(playground);
     app.playground(playground)
 }

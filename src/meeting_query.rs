@@ -1626,7 +1626,7 @@ fn snippet(passage: &Passage, matched: &[usize]) -> String {
         .max_by_key(|start| {
             let count = matched
                 .iter()
-                .filter(|position| (*start..start + window).contains(position))
+                .filter(|&&position| (*start..*start + window).contains(&position))
                 .count();
             // Prefer windows that lead into the first match a little.
             (

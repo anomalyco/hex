@@ -23,7 +23,7 @@ const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
-#[command(version, about = "Local Hex dictation for Windows")]
+#[command(version = crate::VERSION, about = "Local Hex dictation for Windows")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

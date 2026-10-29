@@ -69,7 +69,7 @@ pub(crate) struct WindowsDesktopHost {
     settings: AppSettings,
     history: Option<History>,
     last_dictation: Arc<Mutex<Option<String>>>,
-    indicator: crate::windows_rune_hud::WindowsIndicatorSender,
+    indicator: crate::rune_hud::HudSender,
     mode_runtime: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
     transformations: Arc<crate::personal_commands::TransformationClient>,
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
@@ -152,7 +152,7 @@ impl WindowsDesktopHost {
         settings: AppSettings,
         settings_error: Option<String>,
         history: Option<History>,
-        indicator: crate::windows_rune_hud::WindowsIndicatorSender,
+        indicator: crate::rune_hud::HudSender,
     ) -> Self {
         crate::desktop_i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
@@ -236,17 +236,11 @@ impl WindowsDesktopHost {
             | DesktopAction::OpenUpdate
             | DesktopAction::RestartIntoUpdate
             | DesktopAction::ConfirmUpdateSwitch
-            | DesktopAction::WindowFocused => match self.updater.act(&action) {
-                // Ends the app so the new version can take the named event.
-                Ok(quit) if quit => {
-                    self.stop();
-                    return true;
-                }
-                Ok(_) => {}
-                Err(error) => {
+            | DesktopAction::WindowFocused => {
+                if let Err(error) = self.updater.act(&action) {
                     self.error = Some(tr_fill("Could not restart Hex: {}", &format!("{error:#}")));
                 }
-            },
+            }
             // Windows saves shortcuts from the window.
             DesktopAction::SetDictationShortcut(_) => {}
         }
@@ -359,6 +353,7 @@ impl WindowsDesktopHost {
         let current = settings;
         crate::feedback::set_enabled(current.sound_effects);
         crate::feedback::set_volume(current.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(current.sound_theme);
         if previous.indicator_position != current.indicator_position {
             self.indicator.set_position(current.indicator_position);
         }
@@ -493,6 +488,23 @@ impl WindowsDesktopHost {
             }
             (false, true) => self.personal_commands = None,
             _ => {}
+        }
+    }
+
+    /// True once Restart to update has handed off to the new version, after
+    /// the updater's final check; Hex then quits so it can take the named
+    /// event.
+    pub(crate) fn update_restarted(&mut self) -> bool {
+        match self.updater.take_restart() {
+            Some(Ok(())) => {
+                self.stop();
+                true
+            }
+            Some(Err(error)) => {
+                self.error = Some(tr_fill("Could not restart Hex: {}", &format!("{error:#}")));
+                false
+            }
+            None => false,
         }
     }
 

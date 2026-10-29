@@ -20,11 +20,6 @@ if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != prepare ]; }; then
   echo "Usage: $0 [prepare]" >&2
   exit 1
 fi
-# Public builds never carry the capture build option.
-if [ -n "${HEX_CAPTURE:-}" ]; then
-  echo "Unset HEX_CAPTURE: the capture build option is never released." >&2
-  exit 1
-fi
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit or remove all working-tree changes before releasing." >&2
   exit 1

@@ -15,6 +15,7 @@ use crate::model::{
 // displays and windows, and the screen recorder. Each platform module provides the same items.
 #[cfg_attr(target_os = "macos", path = "capture/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "capture/windows.rs")]
+#[cfg_attr(target_os = "linux", path = "capture/linux.rs")]
 mod platform;
 pub use platform::*;
 
@@ -23,6 +24,7 @@ pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// decoded from `recording.mp4` at full size afterwards.
 pub const CANDIDATE_EDGE: f64 = 480.0;
 /// Without a recording to decode from, the candidates are the keyframes, so keep them sharper.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const CANDIDATE_EDGE_NO_VIDEO: f64 = 1280.0;
 /// The candidates' memory ceiling, however long the capture runs.
 pub const CANDIDATE_BUDGET_BYTES: usize = 384 << 20;
@@ -732,6 +734,7 @@ pub fn hotkey_combos(kind: ShortcutKind, cfg: &ShortcutConfig) -> Vec<(u32, u32)
     combos
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn clean_label(input: &str) -> String {
     let squashed = input.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = squashed.trim();
@@ -832,10 +835,10 @@ pub(crate) struct Sampler {
     pub target: TargetInfo,
     pub video_output_path: Option<PathBuf>,
     /// Scrawl's own windows to leave out of the recording.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     pub excluded_window_ids: Arc<Mutex<Vec<u32>>>,
     /// [`OwnWindows::recorded`]: while set, nothing of the host's is left out.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     pub own_windows_recorded: Arc<AtomicBool>,
     pub started_at: Instant,
     /// `started_at` on the host clock, which places the movie's start on the frames' clock.
@@ -1221,16 +1224,16 @@ pub struct SharedCaptureTelemetry {
     /// The last `on_scrawl_window` answer (when, where, what), reused for a burst of scrolls.
     scrawl_hit: Mutex<Option<(Instant, f64, f64, bool)>>,
     /// macOS's key event tap (`CFMachPortRef`), made once Accessibility is on (`check_key_tap`).
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     tap_port: AtomicU64,
     /// The key event tap thread's run loop (retained), so `check_key_tap` can stop it.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     tap_run_loop: AtomicU64,
     /// A key tap thread is being started.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     tap_starting: AtomicBool,
     /// When the last key tap was tried (ms since `UNIX_EPOCH`), to space out retries.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     tap_tried_ms: AtomicU64,
     /// Whether key presses are arriving (macOS's key tap, Windows' keyboard hook).
     tap_live: AtomicBool,
@@ -1684,7 +1687,7 @@ impl SharedCaptureTelemetry {
     }
 
     /// The helper process whose window is the capture target (the iPhone mirror).
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     pub fn set_capture_source_pid(&self, pid: u32) {
         self.capture_source_pid
             .store(i32::try_from(pid).unwrap_or(0), Ordering::Release);
@@ -2025,6 +2028,7 @@ impl SharedCaptureTelemetry {
 /// Clicks from the mouse buttons' polled state, while the mouse monitor (or hook) is missing: a
 /// press starts a click (unless it lands on Scrawl's own window), a release ends it. A ⇧-press may
 /// be a pin, as in the mouse monitor's handler.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn poll_clicks(
     telemetry: &SharedCaptureTelemetry,
     prev: &mut [bool; 2],
@@ -2135,6 +2139,7 @@ fn same_target_frame(a: TargetFrame, b: TargetFrame) -> bool {
 /// One poll of the Shift ink: holding Shift alone and moving the cursor inside the capture
 /// target draws a persistent stroke; letting go of Shift commits it. `pure_shift` is Shift
 /// without other modifiers (and not left over from a chord such as the capture shortcut).
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn track_shift_ink(
     telemetry: &SharedCaptureTelemetry,
     (x, y): (f64, f64),

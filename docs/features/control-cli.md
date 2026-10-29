@@ -39,7 +39,9 @@ Agent or terminal                                  // control.cli; macOS release
 ├── hex commands enable [--yes] | disable | retry
 ├── hex window show [pane] | hide
 │   ├── settings -> the General pane (status window.pane stays "settings")
-│   └── meetings pane with Meetings off -> the pane's opt-in card
+│   ├── meetings pane with Meetings off -> the pane's opt-in card
+│   └── story <story> [--variant V] [--play] -> a playground story, as a
+│       hex://story link opens (experiments.md); experiment off -> feature-off
 ├── hex history clear --yes -> without --yes refused before Hex is asked
 ├── hex check-for-updates -> The updater checks now
 ├── hex launch-at-login [on|off] -> SMAppService; changes need Hex.app

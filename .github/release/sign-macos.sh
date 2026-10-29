@@ -5,7 +5,9 @@
 # two macOS targets from the stapled app: Hex-<version>-macos-arm64.zip (root
 # Hex.app, for the updater) and Hex-<version>-macos-arm64.dmg (signed,
 # notarized, stapled, with an Applications link). The app is data here: it is
-# never launched.
+# never launched. The DMG's window comes from dmg-background.tiff and
+# dmg-DS_Store beside the zip (packaging/macos/dmg), also data: they are
+# checked by magic number and size and copied in for Finder to read.
 #
 # Environment: HEX_VERSION, HEX_SIGNING_IDENTITY, HEX_KEYCHAIN, HEX_NOTARY_KEY,
 # HEX_NOTARY_KEY_ID, HEX_NOTARY_ISSUER (macos-credentials.sh).
@@ -29,6 +31,22 @@ fi
   die "Hex.app has the wrong bundle identifier."
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$HEX_VERSION" ] ||
   die "Hex.app is not version $HEX_VERSION."
+
+layout=$(dirname "$input")
+background="$layout/dmg-background.tiff"
+finder="$layout/dmg-DS_Store"
+check_layout() { # <file> <magic numbers in hex>...
+  file=$1
+  shift
+  { [ -f "$file" ] && [ ! -L "$file" ]; } || die "The macOS build lacks $(basename "$file")."
+  [ "$(wc -c < "$file")" -le 4194304 ] || die "$(basename "$file") is over 4 MiB."
+  for magic in "$@"; do
+    [ "$(head -c $((${#magic} / 2)) "$file" | xxd -p)" = "$magic" ] && return
+  done
+  die "$(basename "$file") is not the file type it should be."
+}
+check_layout "$background" 4d4d002a 49492a00
+check_layout "$finder" 0000000142756431
 
 # Every Mach-O in the bundle must be one this script signs.
 expected=$(printf '%s\n' Contents/MacOS/hex \
@@ -62,6 +80,8 @@ rm -f "$zip" "$dmg"
 mkdir "$work/staging"
 /usr/bin/ditto "$app" "$work/staging/Hex.app"
 ln -s /Applications "$work/staging/Applications"
+cp "$background" "$work/staging/.background.tiff"
+cp "$finder" "$work/staging/.DS_Store"
 hdiutil create -quiet -fs APFS -format ULFO -volname Hex -srcfolder "$work/staging" "$dmg"
 codesign --force --timestamp --keychain "$HEX_KEYCHAIN" --sign "$HEX_SIGNING_IDENTITY" "$dmg"
 notarize "$dmg"

@@ -1,73 +1,56 @@
-//! Native open dialogs for one file or one folder: `NSOpenPanel` on macOS,
-//! `IFileOpenDialog` on Windows, and the FileChooser portal on Linux. Each
-//! runs where its OS requires (AppKit's main thread, a dedicated STA thread,
-//! a dedicated portal thread) and answers on a channel, so neither the window
-//! nor the runtime waits on the person.
+//! Native open dialogs for one file or one folder, through Rune's
+//! `FileDialogs`: `NSOpenPanel` on macOS, the common item dialog on Windows,
+//! and the FileChooser portal on Linux. Each runs on its own thread and
+//! answers on a channel, so neither the window nor the runtime waits on the
+//! person.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 
-#[cfg(target_os = "macos")]
-#[path = "file_dialog/macos.rs"]
-mod platform;
-#[cfg(target_os = "windows")]
-#[path = "file_dialog/windows.rs"]
-mod platform;
-
-#[cfg(target_os = "linux")]
-mod platform {
-    use super::{Dialog, Reply};
-
-    pub(super) fn open(dialog: Dialog, reply: Reply) {
-        let _ = std::thread::Builder::new()
-            .name("hex-file-dialog".into())
-            .spawn(move || {
-                let choice =
-                    crate::linux_file_chooser::open(&dialog).map_err(|error| format!("{error:#}"));
-                reply.send(choice);
-            });
-    }
+fn show(dialog: Dialog, reply: Reply) {
+    // A failed spawn drops the reply, which answers "nothing chosen".
+    let _ = std::thread::Builder::new()
+        .name("hex-file-dialog".into())
+        .spawn(move || {
+            let dialogs = rune::FileDialogs::native();
+            let mut options = rune::FileDialogOptions {
+                title: dialog.title,
+                directory: dialog.directory.filter(|path| path.is_dir()),
+                ..Default::default()
+            };
+            let choice = match dialog.target {
+                Target::Folder => pollster::block_on(dialogs.open_folder(options)),
+                Target::File(filters) => {
+                    for filter in filters {
+                        options = options.filter(filter.label, filter.extensions);
+                    }
+                    pollster::block_on(dialogs.open(options))
+                }
+            };
+            reply.send(choice.map_err(|error| error.to_string()));
+        });
 }
 
 pub(crate) struct Dialog {
     pub(crate) title: String,
-    /// The confirming button's label.
-    pub(crate) accept: String,
     pub(crate) target: Target,
     /// Where the dialog starts, when it exists.
     pub(crate) directory: Option<PathBuf>,
 }
 
 pub(crate) enum Target {
-    /// One existing file. macOS has no filter menu, so it allows only the
-    /// first filter's extensions.
+    /// One existing file.
     File(Vec<Filter>),
     /// Only the macOS meetings folder asks for one yet.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Folder,
 }
 
-/// A named set of extensions without the dot ("app", "exe"); none means any
+/// A named set of extensions without the dot ("app", "exe"); `"*"` is any
 /// file.
 pub(crate) struct Filter {
-    /// macOS shows no filter names.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) label: String,
     pub(crate) extensions: &'static [&'static str],
-}
-
-impl Filter {
-    /// Glob patterns: `*.app`, or `*` for any file.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub(crate) fn patterns(&self) -> Vec<String> {
-        if self.extensions.is_empty() {
-            return vec!["*".into()];
-        }
-        self.extensions
-            .iter()
-            .map(|extension| format!("*.{extension}"))
-            .collect()
-    }
 }
 
 /// The chosen path, `None` when the person cancelled.
@@ -76,7 +59,7 @@ pub(crate) type Choice = Result<Option<PathBuf>, String>;
 /// Opens `dialog` without waiting for it; `wake` runs once it answers.
 pub(crate) fn open(dialog: Dialog, wake: impl Fn() + Send + 'static) -> Pending {
     let (reply, pending) = channel(wake);
-    platform::open(dialog, reply);
+    show(dialog, reply);
     pending
 }
 
@@ -175,15 +158,5 @@ mod tests {
         let (reply, pending) = channel(wake);
         reply.send(Err("no file chooser portal".into()));
         assert_eq!(pending.poll(), Some(Err("no file chooser portal".into())));
-    }
-
-    #[test]
-    fn filters_become_globs() {
-        let filter = |extensions| Filter {
-            label: String::new(),
-            extensions,
-        };
-        assert_eq!(filter(&["exe"]).patterns(), ["*.exe"]);
-        assert_eq!(filter(&[]).patterns(), ["*"]);
     }
 }

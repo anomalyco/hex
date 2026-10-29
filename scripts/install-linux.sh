@@ -12,9 +12,9 @@ if [ "${1:-install}" != install ]; then
   exit 1
 fi
 
-version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 cargo build --locked --release --manifest-path "$root/Cargo.toml"
+version=$("$target_dir/release/hex" --version | awk 'NF { value=$NF } END { print value }')
 
 HEX_INSTALL_SOURCE=1 \
 HEX_INSTALL_ARTIFACT="$target_dir/release/hex" \

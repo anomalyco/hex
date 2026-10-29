@@ -560,18 +560,6 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
                 _ => tr("Hears you only while you hold the shortcut").into(),
             },
         ),
-        SetupItem::InputMonitoring => (
-            "setup-input-monitoring",
-            &glyphs::KEYBOARD,
-            tr("Input Monitoring"),
-            if row.status == ItemStatus::Restart {
-                tr("Turns on when Hex restarts").into()
-            } else if waiting {
-                tr("Drag Hex into the list, or switch it on if it is there").into()
-            } else {
-                tr("Notices the shortcut in every app").into()
-            },
-        ),
         SetupItem::Accessibility => (
             "setup-accessibility",
             &glyphs::CURSOR_TEXT,
@@ -581,7 +569,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             } else if waiting {
                 tr("Drag Hex into the list, or switch it on if it is there").into()
             } else {
-                tr("Pastes your words into the app you are using").into()
+                tr("Notices the shortcut and pastes your words in any app").into()
             },
         ),
         SetupItem::Model => (
@@ -700,52 +688,8 @@ fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
     };
     let open = ui.open == Some(Menu::TourMicrophone);
     let name = in_use.unwrap_or(tr("System default"));
-    let level = if warning.is_some() {
-        0.0
-    } else {
-        tour.mic.level
-    };
-    let tint = if warning.is_some() {
-        p.warning()
-    } else {
-        p.faint()
-    };
-    let meter = mic_bars(p, level, tint);
-    let c = &p.k.c;
-    let chevron = if open {
-        p.k.glyph.chevron_up
-    } else {
-        p.k.glyph.chevron_down
-    };
-    let mut trigger = row()
-        .key("tour-mic-field")
-        .role("button")
-        .label(tr_fill("Microphone, {}", name))
-        .focusable(true)
-        .focus_ring(1.0, 0.0, c.border_focus)
-        .h(24.0)
-        // The pill bleeds past the line's edge so the level sits on it.
-        .ml(-6.0)
-        .px(6.0)
-        .gap(6.0)
-        .center_y()
-        .radius(p.k.radius.md)
-        .child(meter)
-        .child(
-            text(name)
-                .key("name")
-                .font(DESCRIPTION)
-                .color(if open { p.text() } else { p.muted() })
-                .truncate()
-                .shrink(),
-        )
-        .child(rune::icon(chevron, 12.0).key("chevron").color(c.icon_muted))
+    let trigger = mic_trigger(p, name, tour.mic.level, warning.is_some(), open)
         .on_press(|ui: &mut Ui| super::settings::toggle_menu(ui, Menu::TourMicrophone));
-    trigger = if open {
-        trigger.fill(c.hover)
-    } else {
-        trigger.hover(c.hover)
-    };
     let mut menu = rune_kit::Menu::new("tour-mic")
         .trigger(trigger)
         .placement(rune_kit::Placement::BottomStart)
@@ -766,14 +710,62 @@ fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
         .gap(6.0)
         .center_y()
         .child(menu.build(p.k, layer))
-        .children(warning.map(|warning| {
-            text(warning)
-                .key("warning")
+        .children(warning.map(|warning| mic_warning(p, warning)))
+}
+
+/// The microphone line's menu button: the live level and the name of the
+/// microphone `name`, at rest and tinted while `warned`, as the
+/// onboarding stories draw it too.
+pub(super) fn mic_trigger(p: Paint, name: &str, level: f32, warned: bool, open: bool) -> El {
+    let (level, tint) = if warned {
+        (0.0, p.warning())
+    } else {
+        (level, p.faint())
+    };
+    let c = &p.k.c;
+    let chevron = if open {
+        p.k.glyph.chevron_up
+    } else {
+        p.k.glyph.chevron_down
+    };
+    let trigger = row()
+        .key("tour-mic-field")
+        .role("button")
+        .label(tr_fill("Microphone, {}", name))
+        .focusable(true)
+        .focus_ring(1.0, 0.0, c.border_focus)
+        .h(24.0)
+        // The pill bleeds past the line's edge so the level sits on it.
+        .ml(-6.0)
+        .px(6.0)
+        .gap(6.0)
+        .center_y()
+        .radius(p.k.radius.md)
+        .child(mic_bars(p, level, tint))
+        .child(
+            text(name)
+                .key("name")
                 .font(DESCRIPTION)
-                .color(p.muted())
+                .color(if open { p.text() } else { p.muted() })
                 .truncate()
-                .shrink()
-        }))
+                .shrink(),
+        )
+        .child(rune::icon(chevron, 12.0).key("chevron").color(c.icon_muted));
+    if open {
+        trigger.fill(c.hover)
+    } else {
+        trigger.hover(c.hover)
+    }
+}
+
+/// The short warning beside the microphone when it gives Hex nothing.
+pub(super) fn mic_warning(p: Paint, warning: &str) -> El {
+    text(warning)
+        .key("warning")
+        .font(DESCRIPTION)
+        .color(p.muted())
+        .truncate()
+        .shrink()
 }
 
 const MIC_LEVEL: f32 = 14.0;
@@ -1034,7 +1026,7 @@ pub(super) enum MacStep {
     Setup,
     SetupProgress,
     SetupDenied,
-    /// Every permission on, Input Monitoring waiting for a restart.
+    /// Every permission on, Accessibility waiting for a restart.
     SetupRestart,
     SetupDownloadFailed,
     TryIt,
@@ -1050,7 +1042,6 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     use PermissionState::{NeedsRequest, NeedsRestart, NeedsSettings, Ready};
     let fresh = crate::onboarding::SetupStatus {
         microphone: NeedsRequest,
-        input_monitoring: NeedsSettings,
         accessibility: NeedsSettings,
         transcription_model: false,
     };
@@ -1066,7 +1057,6 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         MacStep::Welcome | MacStep::Setup | MacStep::SetupDownloadFailed => fresh,
         MacStep::SetupProgress => crate::onboarding::SetupStatus {
             microphone: Ready,
-            input_monitoring: Ready,
             ..fresh
         },
         MacStep::SetupDenied => crate::onboarding::SetupStatus {
@@ -1075,13 +1065,11 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         },
         MacStep::SetupRestart => crate::onboarding::SetupStatus {
             microphone: Ready,
-            input_monitoring: NeedsRestart,
-            accessibility: Ready,
+            accessibility: NeedsRestart,
             ..fresh
         },
         _ => crate::onboarding::SetupStatus {
             microphone: Ready,
-            input_monitoring: Ready,
             accessibility: Ready,
             transcription_model: true,
         },
@@ -1098,11 +1086,7 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         input(ui, Input::Continue);
     }
     if state == MacStep::SetupProgress {
-        for item in [
-            SetupItem::Microphone,
-            SetupItem::InputMonitoring,
-            SetupItem::Accessibility,
-        ] {
+        for item in [SetupItem::Microphone, SetupItem::Accessibility] {
             input(ui, Input::Grant(item));
         }
     }
@@ -1168,7 +1152,6 @@ mod tests {
     fn try_it_focuses_the_practice_field_until_the_dictation_lands() {
         let ready = crate::onboarding::SetupStatus {
             microphone: PermissionState::Ready,
-            input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: true,
         };

@@ -31,18 +31,17 @@ hex experiments                          // experiments.cli; macOS, Windows, Lin
 The known experiments are compiled into
 [experiments.rs](../../src/experiments.rs):
 
-- `capture`: Scrawl's capture engine hosted in Hex (macOS; see
-  [Captures](capture.md)). It is a build option, off in every public build:
-  only a build with `--features capture` (`HEX_CAPTURE=1
-  scripts/build-app.sh` for an app) knows the name. Any other build's `list`
-  omits it, `enable` rejects it, and a source naming it is ignored. The
+- `capture`: Scrawl's capture engine hosted in Hex (macOS and Linux; see
+  [Captures](capture.md)). Every macOS and Linux build knows the name; on
+  Windows `list` omits it, `enable` rejects it, and a source naming it is
+  ignored. The
   gate is where the work starts: the listener builds no capture host, so there
   is no sink, thread, or bundle folder while it is off. On, it adds
   Settings › Experiments › Scrawl, whose own opt-in (`capture.enabled`,
   default off) is the second gate. Check:
-  `capture_exists_only_with_its_build_option` in
+  `capture_exists_only_where_it_has_a_host` in
   [experiments.rs](../../src/experiments.rs).
-- `dot-scope`: the macOS recording HUD as Dot scope, a plate of dots lit
+- `dot-scope`: the recording HUD (macOS, Linux, and Windows) as Dot scope, a plate of dots lit
   by a braided pair of oscilloscope traces that follow the microphone level
   (auto-levelled), with a choice of processing looks and of placement below
   the menu bar, in it, or out of the notch (see
@@ -60,8 +59,8 @@ The known experiments are compiled into
   every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,
   OpenCode rewrite, mode correction, or transformation ever touches a
-  transcript, and the transformations host starts only for the user's own
-  `hex.config.ts` workspace. The gate is where the work starts:
+  transcript, and custom transformations load only for the user's own
+  `hex.config.ts`. The gate is where the work starts:
   `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
   (macOS), and `app_settings::transformations_used`. Saved modes stay in
   `settings.json` and keep their `hex settings` keys; turning the experiment
@@ -82,6 +81,22 @@ The known experiments are compiled into
   `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
   "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
   in [playground.rs](../../src/rune_ui/playground.rs).
+  On macOS a story opens from a link or the CLI:
+
+  ```ts
+  open 'hex://story/hud/recording-your-voice?play=1'   // hex-test:// in Hex Test.app
+  hex window story HUD/Processing [--variant 2] [--play]
+  ├── the window opens on the story: its path, name, or slug, `/` or `-` between group and name
+  ├── variant=<n|name> → that variant
+  ├── play=1 → its `r` trigger runs, as pressing R does
+  ├── experiment off → only the window opens; process.log says why, the CLI answers feature-off
+  └── another link, or longer than 2 KiB → ignored and logged
+  ```
+
+  An unknown story opens the list and an unknown variant the story; Rune
+  logs which to stderr. Checks: `reads_story_links`, `ignores_other_links`
+  in [story_link.rs](../../src/rune_ui/story_link.rs); the URL handler and
+  the replay have no automated end-to-end check.
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The

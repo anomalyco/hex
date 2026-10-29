@@ -308,8 +308,7 @@ impl ServerHandler for MeetingServer {
                 .build(),
         )
         .with_server_info(
-            Implementation::new("hex-meetings", env!("CARGO_PKG_VERSION"))
-                .with_title("Hex Meetings"),
+            Implementation::new("hex-meetings", crate::VERSION).with_title("Hex Meetings"),
         )
         .with_instructions(INSTRUCTIONS)
     }
