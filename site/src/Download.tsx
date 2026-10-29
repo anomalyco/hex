@@ -74,9 +74,24 @@ function Command({ text, label }: { text: string; label: string }) {
   )
 }
 
-function Button({ href, mark, children }: { href: string; mark: ReactNode; children: ReactNode }) {
+function Button({
+  href,
+  mark,
+  secondary,
+  children,
+}: {
+  href: string
+  mark?: ReactNode
+  secondary?: boolean
+  children: ReactNode
+}) {
   return (
-    <m.a className="download" href={href} whileHover={{ y: -1 }} whileTap={{ scale: 0.985 }}>
+    <m.a
+      className={secondary ? `download download--secondary${mark ? "" : " download--compact"}` : "download"}
+      href={href}
+      whileHover={{ y: -1 }}
+      whileTap={{ scale: 0.985 }}
+    >
       {mark}
       <span>{children}</span>
       <span className="download__arrow" aria-hidden="true">
@@ -88,47 +103,49 @@ function Button({ href, mark, children }: { href: string; mark: ReactNode; child
 
 type Os = "mac" | "windows" | "linux"
 type Arch = "x64" | "arm64"
-type PerArch = Record<Arch, string>
 
-interface Method {
-  id: string
-  label: string
-  file?: string | PerArch
-  command?: string | PerArch
-}
-
-const OSES: { id: Os; label: string; mark: ReactNode; button: string }[] = [
-  { id: "mac", label: "macOS", mark: <AppleMark />, button: "Download for Mac" },
-  { id: "windows", label: "Windows", mark: <WindowsMark />, button: "Download for Windows" },
-  { id: "linux", label: "Linux", mark: <LinuxMark />, button: "Download for Linux" },
+const OSES: { id: Os; label: string; mark: ReactNode }[] = [
+  { id: "mac", label: "macOS", mark: <AppleMark /> },
+  { id: "windows", label: "Windows", mark: <WindowsMark /> },
+  { id: "linux", label: "Linux", mark: <LinuxMark /> },
 ]
 
-function methods(os: Os): Method[] {
-  const linux = RELEASE.linux
-  const all: (Method | false | undefined)[] =
-    os === "mac"
-      ? [
-          { id: "dmg", label: "Download", file: RELEASE.mac.url },
-          { id: "homebrew", label: "Homebrew", command: RELEASE.homebrew },
-        ]
-      : os === "windows"
-        ? [
-            { id: "installer", label: "Installer", file: { x64: RELEASE.windowsX64.url, arm64: RELEASE.windowsArm64.url } },
-            { id: "powershell", label: "PowerShell", command: RELEASE.windows.command },
-          ]
-        : [
-            { id: "script", label: "Script", command: linux.command },
-            linux.aur !== undefined && { id: "aur", label: "AUR", command: linux.aur },
-            { id: "deb", label: "Debian", command: linux.deb },
-            { id: "rpm", label: "Fedora", command: linux.rpm },
-            { id: "nix", label: "Nix", command: RELEASE.nix },
-            { id: "binary", label: "Binary", file: linux.binary },
-          ]
-  return all.filter((method): method is Method => Boolean(method))
+const ARCH_NAMES: Record<Arch, string> = { x64: "x64", arm64: "ARM64" }
+
+interface Install {
+  // Download buttons: the first names the visitor's architecture.
+  files: { label: string; url: string }[]
+  commands: string[]
+  // Linux lists its commands first: the binary is the least common way in.
+  commandsFirst?: boolean
 }
 
-const pick = (value: string | PerArch, arch: Arch) => (typeof value === "string" ? value : value[arch])
-const perArch = (method: Method) => typeof method.file === "object" || typeof method.command === "object"
+function install(os: Os, arch: Arch): Install {
+  const other: Arch = arch === "x64" ? "arm64" : "x64"
+  const pair = (name: string, urls: Record<Arch, string>) => [
+    { label: `Download for ${name}`, url: urls[arch] },
+    { label: ARCH_NAMES[other], url: urls[other] },
+  ]
+  const both = (urls: Record<Arch, string>) =>
+    [arch, other].map((value) => ({ label: `Download ${ARCH_NAMES[value]}`, url: urls[value] }))
+  switch (os) {
+    case "mac":
+      return { files: [{ label: "Download for Mac", url: RELEASE.mac.url }], commands: [RELEASE.homebrew] }
+    case "windows":
+      return {
+        files: pair("Windows", { x64: RELEASE.windowsX64.url, arm64: RELEASE.windowsArm64.url }),
+        commands: [RELEASE.windows.command],
+      }
+    case "linux": {
+      const linux = RELEASE.linux
+      return {
+        files: both(linux.binary),
+        commands: [linux.command, ...(linux.aur ? [linux.aur] : []), linux.deb[arch], linux.rpm[arch], RELEASE.nix],
+        commandsFirst: true,
+      }
+    }
+  }
+}
 
 function osOf(platform: Platform): Os {
   if (platform.startsWith("windows")) return "windows"
@@ -138,76 +155,57 @@ function osOf(platform: Platform): Os {
 
 const archOf = (platform: Platform): Arch => (platform.endsWith("arm64") ? "arm64" : "x64")
 
-function Tab({ selected, onSelect, children }: { selected: boolean; onSelect: () => void; children: ReactNode }) {
-  return (
-    <button type="button" role="tab" aria-selected={selected} onClick={onSelect}>
-      {children}
-    </button>
-  )
-}
-
 export default function Download({ platform }: { platform: Platform }) {
-  // The visitor's choices; until they pick, the detected platform decides.
-  const [chosenOs, setOs] = useState<Os>()
-  const [chosenArch, setArch] = useState<Arch>()
-  const [chosenMethod, setMethod] = useState<Partial<Record<Os, string>>>({})
-  const os = chosenOs ?? osOf(platform)
-  const arch = chosenArch ?? archOf(platform)
-  const options = methods(os)
-  const method = options.find((option) => option.id === chosenMethod[os]) ?? options[0]
-  const name = OSES.find((entry) => entry.id === os)!
+  // The visitor's choice; until they pick, the detected platform decides.
+  const [chosen, setChosen] = useState<Os>()
+  const os = chosen ?? osOf(platform)
+  const entry = OSES.find((option) => option.id === os)!
+  const { files, commands, commandsFirst } = install(os, archOf(platform))
   const intelMac = platform === "mac-intel" && os === "mac"
+
+  const buttons = (
+    <div className={commandsFirst ? "install__files install__files--even" : "install__files"}>
+      {intelMac ? (
+        <span className="download download--disabled" aria-disabled="true">
+          {entry.mark}
+          <span>Requires Apple silicon</span>
+          <span aria-hidden="true" />
+        </span>
+      ) : (
+        files.map((file, index) => (
+          <Button key={file.url} href={file.url} mark={index === 0 && !commandsFirst ? entry.mark : undefined} secondary={index > 0 || commandsFirst}>
+            {file.label}
+          </Button>
+        ))
+      )}
+    </div>
+  )
+  const rows = (
+    <div className="install__commands">
+      {commands.map((command) => (
+        <Command key={command} text={command} label={`Install command for ${entry.label}`} />
+      ))}
+    </div>
+  )
 
   return (
     <div className="hero__action install" data-avoid>
       <div className="install__os" role="tablist" aria-label="Operating system">
-        {OSES.map((entry) => (
-          <Tab key={entry.id} selected={entry.id === os} onSelect={() => setOs(entry.id)}>
-            {entry.mark}
-            <span>{entry.label}</span>
-          </Tab>
+        {OSES.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={option.id === os}
+            onClick={() => setChosen(option.id)}
+          >
+            {option.mark}
+            <span>{option.label}</span>
+          </button>
         ))}
       </div>
-
-      <div className="install__methods">
-        <div role="tablist" aria-label={`Ways to install on ${name.label}`}>
-          {options.map((option) => (
-            <Tab
-              key={option.id}
-              selected={option.id === method.id}
-              onSelect={() => setMethod((current) => ({ ...current, [os]: option.id }))}
-            >
-              {option.label}
-            </Tab>
-          ))}
-        </div>
-        {perArch(method) && (
-          <div className="install__arch" role="tablist" aria-label="Architecture">
-            <Tab selected={arch === "x64"} onSelect={() => setArch("x64")}>
-              x64
-            </Tab>
-            <Tab selected={arch === "arm64"} onSelect={() => setArch("arm64")}>
-              ARM64
-            </Tab>
-          </div>
-        )}
-      </div>
-
-      {method.file !== undefined &&
-        (intelMac ? (
-          <span className="download download--disabled" aria-disabled="true">
-            {name.mark}
-            <span>Requires Apple silicon</span>
-            <span aria-hidden="true" />
-          </span>
-        ) : (
-          <Button href={pick(method.file, arch)} mark={name.mark}>
-            {name.button}
-          </Button>
-        ))}
-      {method.command !== undefined && (
-        <Command text={pick(method.command, arch)} label={`${method.label} install command for ${name.label}`} />
-      )}
+      {commandsFirst ? rows : buttons}
+      {commandsFirst ? buttons : rows}
     </div>
   )
 }

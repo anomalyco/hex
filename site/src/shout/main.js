@@ -148,7 +148,7 @@ function measureAvoid() {
   }
   // Also measure individual hero children so wide containers never hide inner bounds, and unify the hero stack
   // from above h1 all the way to the bottom of the viewport so no card ever wedges between copy and Download.
-  for (const el of root.querySelectorAll(".hero h1, .hero__copy p, .hero .download, .hero .command, .hero .install__os, .hero .install__methods")) {
+  for (const el of root.querySelectorAll(".hero h1, .hero__copy p, .hero .download, .hero .command, .hero .install__os")) {
     const e = el.getBoundingClientRect()
     if (e.width <= 0 || e.height <= 0) continue
     heroL = Math.min(heroL, e.left - r.left - 34)
