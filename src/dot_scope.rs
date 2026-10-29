@@ -446,8 +446,14 @@ impl AutoLevel {
             follow(&mut self.peak, lowest, release);
         }
         self.peak = self.peak.max(lowest);
+        self.level(db, noise_floor)
+    }
+
+    /// Where `loudness` dBFS sits in the current window, 0 to 1, without
+    /// learning from it.
+    pub fn level(&self, loudness: f32, noise_floor: f32) -> f32 {
         let low = (self.room.max(noise_floor) + AUTO_ROOM_MARGIN).max(self.peak - AUTO_RANGE);
-        ((db - low) / (self.peak - low).max(1.0)).clamp(0.0, 1.0)
+        ((loudness - low) / (self.peak - low).max(1.0)).clamp(0.0, 1.0)
     }
 
     /// The speaker's recent peak and the room, dBFS.

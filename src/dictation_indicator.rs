@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use crate::dot_scope::{self, Pose, Scope, Stage, Tuning};
+use crate::dot_scope::{self, AutoLevel, Pose, Scope, Stage, Tuning};
 use crate::hud_placement::Island;
 use crate::spring::{REDUCED_FADE, Spec, Spring};
 
@@ -26,8 +26,14 @@ const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
-/// Dot scope's loudness before any meter arrives, dBFS.
+/// The loudness before any meter arrives, dBFS.
 const SILENT: f32 = -120.0;
+/// How far a speech peak sits above its RMS, dB: the capsule's peak beam
+/// reads the peak through the RMS window shifted by this.
+const PEAK_CREST: f32 = 9.5;
+/// The capsule's auto level: Dot scope's default release and noise floor.
+const CAPSULE_AUTO_RELEASE: f32 = 3.0;
+const CAPSULE_NOISE_FLOOR: f32 = -60.0;
 /// Dot scope's done wipe (0.3 s) and a beat of the dark plate after it.
 const DOT_SCOPE_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
 
@@ -362,8 +368,12 @@ pub struct IndicatorModel {
     tuning: HudTuning,
     /// Drawn instead of the capsule while the `dot-scope` experiment is on.
     dot_scope: Option<DotScope>,
-    /// The microphone's loudness for Dot scope, dBFS.
+    /// The microphone's loudness, dBFS.
     loudness: f32,
+    /// The capsule's level window: the speaker's recent peak over the room,
+    /// so a hot microphone moves it as much as a quiet one instead of
+    /// pinning it at full. Kept across dictations, like Dot scope's.
+    auto: AutoLevel,
     /// HUD Lab's synthetic voice and how far into it Dot scope is.
     demo_voice: Option<f32>,
     /// Since an event, until a step finds everything settled out of sight.
@@ -400,6 +410,7 @@ impl IndicatorModel {
                 island: None,
             }),
             loudness: SILENT,
+            auto: AutoLevel::default(),
             demo_voice: None,
             active: false,
         }
@@ -486,9 +497,11 @@ impl IndicatorModel {
                 self.editing = true;
             }
             DictationIndicatorEvent::Meter { average, peak } => {
-                self.target_average = (average * 9.0).clamp(0.0, 1.0);
-                self.target_peak = (peak * 3.0).clamp(0.0, 1.0);
                 self.loudness = dot_scope::loudness(average);
+                if self.capturing {
+                    let peak = dot_scope::loudness(peak) - PEAK_CREST;
+                    self.target_peak = self.auto.level(peak, CAPSULE_NOISE_FLOOR);
+                }
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -641,6 +654,11 @@ impl IndicatorModel {
             0.0
         };
 
+        if self.capturing && matches!(self.phase, Phase::Recording) {
+            self.target_average =
+                self.auto
+                    .step(self.loudness, dt, CAPSULE_AUTO_RELEASE, CAPSULE_NOISE_FLOOR);
+        }
         let meter_average_spec = Spec::from_omega(22.0);
         let meter_peak_spec = Spec::from_omega(26.0);
         let geometry_spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
@@ -813,6 +831,40 @@ mod tests {
                 model.step(at, 1.0 / 60.0, false)
             })
             .collect()
+    }
+
+    /// A hot Linux microphone speaks near −18 dBFS RMS, which the old fixed
+    /// gain (RMS × 9) pinned at full: the capsule sat still.
+    #[test]
+    fn a_hot_microphone_still_moves_the_capsule() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(None, start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        let mut levels = Vec::new();
+        for n in 0..360 {
+            let t = n as f32 / 60.0;
+            let now = start + Duration::from_secs_f32(t);
+            // Syllables at 4 Hz between −24 and −12 dBFS.
+            let db = -18.0 + 6.0 * (t * 4.0 * std::f32::consts::TAU).sin();
+            let rms = 10_f32.powf(db / 20.0);
+            model.handle(
+                DictationIndicatorEvent::Meter {
+                    average: rms,
+                    peak: (rms * 3.0).min(1.0),
+                },
+                now,
+                false,
+            );
+            if let Drawn::Capsule(uniforms) = model.step(now, 1.0 / 60.0, false)
+                && t > 2.0
+            {
+                levels.push(uniforms.average);
+            }
+        }
+        let low = levels.iter().copied().fold(f32::MAX, f32::min);
+        let high = levels.iter().copied().fold(0.0, f32::max);
+        // The fixed gain swung 0.77..0.96 here.
+        assert!(high - low > 0.35, "the level swings {low}..{high}");
     }
 
     #[test]
