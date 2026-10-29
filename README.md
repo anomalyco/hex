@@ -260,6 +260,7 @@ Review and redact diagnostics before sharing them.
 | The shortcut does nothing | Open Hex and verify Microphone and Accessibility access. |
 | Recording works but text does not paste | Verify Accessibility access. |
 | Transcription does not start | Confirm that the selected local model is installed. |
+| Start and stop sounds do not play | Check **General › Advanced › Sound volume** in Settings; zero turns the tones off. |
 | OpenCode features fail | Verify the separate OpenCode installation and model provider. |
 | Voice commands do not respond | Confirm Commands is enabled and voice control is awake. |
 | Website context does not match | Website-aware modes and commands currently require Brave Browser. |
