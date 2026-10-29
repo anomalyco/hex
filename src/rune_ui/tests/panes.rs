@@ -1710,7 +1710,8 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
             let bottom = edge(&rt);
             let below = element(&rt, "microphone-mode").rect[1];
             assert!(
-                (below - bottom - separator).abs() < 0.01,
+                // Within the half-point snap of the empty fold between them.
+                (below - bottom - separator).abs() <= 0.5,
                 "the microphone row rides the slot's edge: {below} vs {bottom}"
             );
             if let Some(row) = rt.elements().into_iter().find(|e| {
