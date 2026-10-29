@@ -123,13 +123,19 @@ cargo run -- app -- --list-scenes
 cargo run -- app -- --snap /tmp/hex-modes.png --scene modes
 cargo run -- app -- --snap /tmp/hex-modes-light.png --scene modes --theme light
 cargo run -- app -- --snap /tmp/hex-mac-settings.png --scene mac-settings
+# Both themes of several scenes into one folder:
+OUT=/tmp/hex-snaps scripts/snap-set.sh modes mac-settings
 # Goldens (light and dark) and pane behavior:
-cargo test --bin hex rune_ui
+scripts/check rune_ui
+# After an intended visual change, rewrite the goldens (Linux only):
+HEX_UPDATE_GOLDENS=1 cargo test --locked --bin hex rune_ui
 ```
 
 On a machine without a GPU, render on lavapipe with
 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`. Goldens live in
-`tests/golden/` and are compared within a small per-pixel tolerance; rewrite
-them only for an intended visual change. A scene is a fixture, not native
-end-to-end proof: the real window, overlays, and input still need a person on
-each OS.
+`tests/golden/` and are compared within a small per-pixel tolerance. The golden
+tests run only on Linux; from a Mac, dispatch `check-linux.yml` on the branch
+and take its `golden-actual` artifact. Look at every changed image and commit
+it with the change that caused it. A scene is a fixture, not native end-to-end
+proof: the meeting capsules and the HUD have no scene, and the real window,
+overlays, and input still need a person on each OS.
