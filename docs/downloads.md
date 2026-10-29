@@ -17,9 +17,11 @@ anoma.ly/hex                               the one site: platform-aware download
     └── releases/HEX-2.3.1-…                    frozen 2.3.1 files
 dev.anoma.ly/hex                           the dev site (reads anoma.ly/release; the service's dev stage
                                            is only for testing the service)
-hex.kitlangton.com, .dev                   Kit's old site; should redirect to anoma.ly/hex
-downloads.hex.kitlangton.dev, .com         Kit's old bucket; releases up to 2.3.1 compiled it;
-                                           redirects to anoma.ly/hex/files (keep forever)
+hex.kitlangton.com, .dev                   Kit's old site (Kit's Cloudflare account); should 301 to
+                                           anoma.ly/hex (Kit's change; nothing links to it)
+downloads.hex.kitlangton.dev, .com         Kit's old bucket, frozen at 2.3.1; releases up to 2.3.1
+                                           compiled it, so it stays up forever (a redirect to
+                                           anoma.ly/hex/files would serve the same bytes)
 github.com/anomalyco/hex/releases/tag/v<version>       identical-byte mirror of every file (app-v through 2.3.1)
 ```
 

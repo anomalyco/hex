@@ -157,7 +157,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
   meta = {
     description = "Local-first voice dictation (Linux beta)";
-    homepage = "https://github.com/anomalyco/hex";
+    homepage = "https://anoma.ly/hex/";
     license = lib.licenses.mit;
     mainProgram = "hex";
     platforms = [ "x86_64-linux" ];

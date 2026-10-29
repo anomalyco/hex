@@ -1299,7 +1299,7 @@ mod tests {
             .command(
                 Command::new("website.open.training", "Open website")
                     .phrases(["go to training", "open training"])
-                    .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training".into())),
+                    .action(|()| Action::OpenUrl("https://example.com/training".into())),
             )
             .command(
                 Command::new("slack.threads", "Use application shortcut")

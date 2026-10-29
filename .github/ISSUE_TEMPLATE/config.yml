@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Installation and troubleshooting
-    url: https://github.com/anomalyco/hex#install-hex
+    url: https://anoma.ly/hex/
     about: Download the macOS app, check permissions, and find troubleshooting steps.
   - name: Linux beta requirements
     url: https://github.com/anomalyco/hex/blob/dev/docs/linux.md
