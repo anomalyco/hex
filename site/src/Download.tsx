@@ -1,4 +1,3 @@
-import * as m from "motion/react-m"
 import { useEffect, useState, type ReactNode } from "react"
 import type { Platform } from "./platform"
 import { RELEASE } from "./release"
@@ -62,73 +61,46 @@ function useCopy(): [boolean, (text: string) => void] {
   ]
 }
 
-function Command({ text, label }: { text: string; label: string }) {
-  const [copied, copy] = useCopy()
-  return (
-    <div className="command">
-      <code aria-label={label}>{text}</code>
-      <button type="button" className="command__copy" onClick={() => copy(text)}>
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
-  )
-}
-
-function Button({ href, mark, children }: { href: string; mark: ReactNode; children: ReactNode }) {
-  return (
-    <m.a className="download" href={href} whileHover={{ y: -1 }} whileTap={{ scale: 0.985 }}>
-      {mark}
-      <span>{children}</span>
-      <span className="download__arrow" aria-hidden="true">
-        {"\u2193"}
-      </span>
-    </m.a>
-  )
-}
-
 type Os = "mac" | "windows" | "linux"
 type Arch = "x64" | "arm64"
-type PerArch = Record<Arch, string>
 
-interface Method {
-  id: string
+interface Row {
   label: string
-  file?: string | PerArch
-  command?: string | PerArch
+  note?: string
+  file?: string
+  command?: string
 }
 
-const OSES: { id: Os; label: string; mark: ReactNode; button: string }[] = [
-  { id: "mac", label: "macOS", mark: <AppleMark />, button: "Download for Mac" },
-  { id: "windows", label: "Windows", mark: <WindowsMark />, button: "Download for Windows" },
-  { id: "linux", label: "Linux", mark: <LinuxMark />, button: "Download for Linux" },
+const OSES: { id: Os; label: string; mark: ReactNode }[] = [
+  { id: "mac", label: "macOS", mark: <AppleMark /> },
+  { id: "windows", label: "Windows", mark: <WindowsMark /> },
+  { id: "linux", label: "Linux", mark: <LinuxMark /> },
 ]
 
-function methods(os: Os): Method[] {
+function rows(os: Os, arch: Arch): Row[] {
   const linux = RELEASE.linux
-  const all: (Method | false | undefined)[] =
+  const all: (Row | false | undefined)[] =
     os === "mac"
       ? [
-          { id: "dmg", label: "Download", file: RELEASE.mac.url },
-          { id: "homebrew", label: "Homebrew", command: RELEASE.homebrew },
+          { label: "Download", note: "Apple silicon", file: RELEASE.mac.url },
+          { label: "Homebrew", command: RELEASE.homebrew },
         ]
       : os === "windows"
         ? [
-            { id: "installer", label: "Installer", file: { x64: RELEASE.windowsX64.url, arm64: RELEASE.windowsArm64.url } },
-            { id: "powershell", label: "PowerShell", command: RELEASE.windows.command },
+            { label: "Installer", note: "x64", file: RELEASE.windowsX64.url },
+            { label: "Installer", note: "ARM64", file: RELEASE.windowsArm64.url },
+            { label: "PowerShell", command: RELEASE.windows.command },
           ]
         : [
-            { id: "script", label: "Script", command: linux.command },
-            linux.aur !== undefined && { id: "aur", label: "AUR", command: linux.aur },
-            { id: "deb", label: "Debian", command: linux.deb },
-            { id: "rpm", label: "Fedora", command: linux.rpm },
-            { id: "nix", label: "Nix", command: RELEASE.nix },
-            { id: "binary", label: "Binary", file: linux.binary },
+            { label: "Script", command: linux.command },
+            linux.aur !== undefined && { label: "AUR", command: linux.aur },
+            { label: "Debian", command: linux.deb[arch] },
+            { label: "Fedora", command: linux.rpm[arch] },
+            { label: "Nix", command: RELEASE.nix },
+            { label: "Binary", note: arch === "arm64" ? "ARM64" : "x64", file: linux.binary[arch] },
           ]
-  return all.filter((method): method is Method => Boolean(method))
+  return all.filter((row): row is Row => Boolean(row))
 }
-
-const pick = (value: string | PerArch, arch: Arch) => (typeof value === "string" ? value : value[arch])
-const perArch = (method: Method) => typeof method.file === "object" || typeof method.command === "object"
 
 function osOf(platform: Platform): Os {
   if (platform.startsWith("windows")) return "windows"
@@ -138,76 +110,53 @@ function osOf(platform: Platform): Os {
 
 const archOf = (platform: Platform): Arch => (platform.endsWith("arm64") ? "arm64" : "x64")
 
-function Tab({ selected, onSelect, children }: { selected: boolean; onSelect: () => void; children: ReactNode }) {
+function StackRow({ row }: { row: Row }) {
+  const [copied, copy] = useCopy()
   return (
-    <button type="button" role="tab" aria-selected={selected} onClick={onSelect}>
-      {children}
-    </button>
+    <div className="stack__row">
+      <span className="stack__label">{row.label}</span>
+      <span className="stack__value">
+        {row.command !== undefined ? <code title={row.command}>{row.command}</code> : <span>{row.note}</span>}
+      </span>
+      {row.command !== undefined ? (
+        <button type="button" className="stack__action" onClick={() => copy(row.command!)}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      ) : (
+        <a className="stack__action stack__action--primary" href={row.file}>
+          Download
+        </a>
+      )}
+    </div>
   )
 }
 
 export default function Download({ platform }: { platform: Platform }) {
-  // The visitor's choices; until they pick, the detected platform decides.
   const [chosenOs, setOs] = useState<Os>()
-  const [chosenArch, setArch] = useState<Arch>()
-  const [chosenMethod, setMethod] = useState<Partial<Record<Os, string>>>({})
   const os = chosenOs ?? osOf(platform)
-  const arch = chosenArch ?? archOf(platform)
-  const options = methods(os)
-  const method = options.find((option) => option.id === chosenMethod[os]) ?? options[0]
-  const name = OSES.find((entry) => entry.id === os)!
-  const intelMac = platform === "mac-intel" && os === "mac"
+  const arch = archOf(platform)
 
   return (
     <div className="hero__action install" data-avoid>
       <div className="install__os" role="tablist" aria-label="Operating system">
         {OSES.map((entry) => (
-          <Tab key={entry.id} selected={entry.id === os} onSelect={() => setOs(entry.id)}>
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            aria-selected={entry.id === os}
+            onClick={() => setOs(entry.id)}
+          >
             {entry.mark}
             <span>{entry.label}</span>
-          </Tab>
+          </button>
         ))}
       </div>
-
-      <div className="install__methods">
-        <div role="tablist" aria-label={`Ways to install on ${name.label}`}>
-          {options.map((option) => (
-            <Tab
-              key={option.id}
-              selected={option.id === method.id}
-              onSelect={() => setMethod((current) => ({ ...current, [os]: option.id }))}
-            >
-              {option.label}
-            </Tab>
-          ))}
-        </div>
-        {perArch(method) && (
-          <div className="install__arch" role="tablist" aria-label="Architecture">
-            <Tab selected={arch === "x64"} onSelect={() => setArch("x64")}>
-              x64
-            </Tab>
-            <Tab selected={arch === "arm64"} onSelect={() => setArch("arm64")}>
-              ARM64
-            </Tab>
-          </div>
-        )}
-      </div>
-
-      {method.file !== undefined &&
-        (intelMac ? (
-          <span className="download download--disabled" aria-disabled="true">
-            {name.mark}
-            <span>Requires Apple silicon</span>
-            <span aria-hidden="true" />
-          </span>
-        ) : (
-          <Button href={pick(method.file, arch)} mark={name.mark}>
-            {name.button}
-          </Button>
+      <div className="stack" role="tabpanel">
+        {rows(os, arch).map((row) => (
+          <StackRow key={`${row.label}-${row.note ?? ""}`} row={row} />
         ))}
-      {method.command !== undefined && (
-        <Command text={pick(method.command, arch)} label={`${method.label} install command for ${name.label}`} />
-      )}
+      </div>
     </div>
   )
 }
