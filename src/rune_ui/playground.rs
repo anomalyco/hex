@@ -136,4 +136,33 @@ mod tests {
                 .is_some_and(|name| name.starts_with("Onboarding/"))
         );
     }
+
+    /// A scene hears the window's ⌘-digit pane shortcuts as soon as it opens
+    /// from the list, without the stage taking the keyboard first, and the
+    /// real window's state stays where it was.
+    #[test]
+    fn a_scene_opened_from_the_list_hears_command_digits() {
+        let app = attach(App::new(spec(super::super::spec())));
+        let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.open_playground("General/mac-settings", None);
+        let stage = rt.playground_state::<Ui>().expect("the scene's state");
+        assert_eq!(stage.pane, Pane::General);
+        let second = Pane::ALL
+            .iter()
+            .copied()
+            .filter(|pane| pane.shown(stage))
+            .nth(1)
+            .expect("a second pane");
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Command('2'),
+            mods: rune::Mods {
+                cmd: true,
+                ..rune::Mods::default()
+            },
+        });
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.playground_state::<Ui>().map(|ui| ui.pane), Some(second));
+        assert_eq!(rt.state.pane, Pane::General);
+    }
 }
