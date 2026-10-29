@@ -30,9 +30,8 @@ have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Experiments](experiments.md) turn unfinished features on per person with a flag;
-the [vocabulary](vocabulary.md) is one, and macOS and Linux builds add
-[Captures](capture.md): Scrawl's capture engine hosted in Hex,
-with its shortcut, input, and Settings › Experiments › Scrawl pane.
+the [vocabulary](vocabulary.md) is one. [Annotate](capture.md) (macOS and
+Linux) records the screen while you draw and talk and sends it to an agent.
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready

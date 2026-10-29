@@ -1,28 +1,40 @@
-# Captures (experimental, macOS and Linux)
+# Annotate (macOS and Linux)
 
-Scrawl's capture engine hosted inside Hex, steps 3 to 5 of
+Annotate is Scrawl's capture engine hosted inside Hex (code and settings keep
+the name `capture`), steps 3 to 5 of
 [the plan](../plans/capture-in-hex.md). It runs the real
 `scrawl-capture` crate, imported into `crates/capture`: it records the active
 display with ScreenCaptureKit, or on Linux the screen-cast portal and
 PipeWire (`capture.linux`), (or a cabled iPhone through `scrawl-helper`'s
-mirror) and narration from Hex's microphone, takes Shift ink and clicks from
-Hex's event tap, transcribes the narration with word timestamps on Hex's
-loaded model, writes a Scrawl bundle into Scrawl's captures folder, copies it
-to the clipboard, and sends it to an OpenCode session with Scrawl's router
-(`crates/router`), run in Hex's process. Settings › Experiments › Scrawl turns
-it on and holds its settings. Scrawl's capsule (switch chips, the on-screen
-picker, route chips) and its ink and laser overlay are Rune overlays.
+mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
+macOS, draw mode on Linux), transcribes the narration with word timestamps on
+Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
+copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
+router (`crates/router`), run in Hex's process. Settings › Annotate (under
+Experiments in the sidebar) holds its settings. Scrawl's capsule (switch
+chips, the on-screen picker, route chips) and its ink and laser overlay are
+Rune overlays.
 
 ```ts
 Turn it on                               // capture.gate
-├── Every macOS and Linux build carries it, dormant: `hex experiments enable
-│   capture` (or HEX_EXPERIMENTS=capture) -> restart -> Settings › Experiments
-│   › Scrawl -> Capture with Hex (capture.enabled)
+├── On by default in every macOS and Linux build (capture.enabled); the
+│   `annotate-on-by-default` migration turns it on once for older settings
 │   └── macOS bundles sign scrawl-helper beside `hex`; validate-app.sh requires it
-├── Windows -> `capture` is not an experiment: absent from `hex experiments
-│   list`, `enable capture` is an unknown name; the crate is not compiled
-├── Experiment on -> Settings › Experiments › Scrawl appears
-└── Off -> no capture host, engine, sink, thread, or folder; `hex capture` -> feature-off
+├── Windows -> not compiled; no pane, no `hex annotate`
+├── Nothing is asked at launch: Screen Recording (macOS) at the first capture,
+│   the portal's dialog (Linux) at the first Screen capture
+└── Off -> no capture host, engine, sink, thread, or folder; `hex annotate` -> feature-off
+
+Draw                                     // capture.draw
+├── macOS -> hold Shift and move: ink; Shift-click: a numbered pin; ⌘Z: the
+│   last stroke back; the laser follows the pointer while it records
+├── Linux -> Ctrl+Alt+D while it records (or to start one already drawing):
+│   the ink overlay takes the pointer (crosshair); drag: ink, click: a pin,
+│   right-click: the last stroke back; Ctrl+Alt+D again: clicks reach the apps
+│   again. While drawing, the capsule takes no clicks: stop with Ctrl+Alt+S
+├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
+│   the bundle (keyframes, contact sheet, scrawl.json)
+└── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
 ├── Source -> the ScreenCast portal (zbus): Screen asks the desktop once and
@@ -46,15 +58,19 @@ On Linux                                 // capture.linux
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy and Paste -> the summary text through Hex's Linux clipboard (wl-copy
 │   or the X11 clipboard) and paste path; no image
-├── Shortcut -> Ctrl+Alt+S through the GlobalShortcuts portal ("Capture") or
-│   an X11 grab; a press starts, the next (after 400 ms) stops
+├── Shortcuts -> Ctrl+Alt+S (start, stop), Ctrl+Alt+D (draw), and
+│   Ctrl+Alt+Shift+V (send-to list) through the GlobalShortcuts portal
+│   ("Annotate", "Annotate: draw", "Annotate: send to…") or X11 grabs
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
+├── Sending -> OpenCode's sessions from its service registration
+│   (service.json, HTTP) and prompts through the `opencode2` CLI Hex's
+│   dictation processor finds; the capsule's rows are clicked (no keyboard)
 └── Gaps: no Area (Wayland gives Hex no pointer to aim it), no iPhone, no
-    pointer, click, or ink input, no window log, `hex capture status`
+    laser or click log outside draw mode, no window log, `hex capture status`
     unsupported, choosing another folder only through settings.json
 
-Settings › Experiments › Scrawl          // capture.pane
+Settings › Annotate                      // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
 │   input, retention, or folder, as with the experiment off
 │   └── On while the shortcut collides -> refused, the shortcut row says why

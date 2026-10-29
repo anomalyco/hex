@@ -88,7 +88,9 @@ enum Command {
         #[command(subcommand)]
         command: crate::experiments::ExperimentsCommand,
     },
-    /// Record, list, and send Scrawl captures (the `capture` experiment).
+    /// Annotate: record your screen with drawing and narration, then list
+    /// and send what you recorded (`hex capture` still works).
+    #[command(name = "annotate", alias = "capture")]
     Capture {
         #[command(subcommand)]
         command: crate::control::cli::CaptureCommand,

@@ -94,8 +94,18 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .voice_action
             .enabled
             .then(|| LinuxHotkey::from(&settings.edit_hotkey)),
-        capture: (crate::app_settings::capture_available() && settings.capture.enabled)
+        capture: settings
+            .capture
+            .enabled
             .then(|| LinuxHotkey::from(&settings.capture.hotkey)),
+        draw: settings
+            .capture
+            .enabled
+            .then(|| LinuxHotkey::from(&crate::app_settings::HotkeyBinding::annotate_draw())),
+        capture_list: settings
+            .capture
+            .enabled
+            .then(|| LinuxHotkey::from(&settings.capture.list_hotkey)),
     };
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
@@ -295,6 +305,9 @@ pub(crate) fn run(
     let capture_controls = crate::capture_host::listen_for_controls();
     // The microphone stays open for a capture even while released when idle.
     let mut capture_holds_microphone = false;
+    // The draw shortcut started a recording: drawing turns on once its
+    // engine takes input.
+    let mut draw_pending = false;
 
     let mut events = EventLog::create(event_path)?;
     let mut audio_ready = input.is_open();
@@ -409,6 +422,17 @@ pub(crate) fn run(
             &environment,
             &timeline,
         );
+        if draw_pending && crate::capture_host::wants_input() {
+            draw_pending = false;
+            crate::capture_host::set_drawing(true);
+        } else if draw_pending
+            && capture_host
+                .as_mut()
+                .is_none_or(|host| host.recording_since(&timeline).is_none())
+        {
+            // The recording never started.
+            draw_pending = false;
+        }
         while let Ok(control) = capture_controls.try_recv() {
             let reply = match (&mut capture_host, control) {
                 (Some(host), crate::capture_host::CaptureControl::Scrawl(action)) => {
@@ -546,6 +570,14 @@ pub(crate) fn run(
                             host.shortcut_activity(crate::audio::CaptureInstant::now(), &timeline);
                         host.shortcut(activity.on_press(), &timeline);
                     }
+                }
+                HotkeyEvent::Draw => {
+                    if let Some(host) = &mut capture_host {
+                        draw_pending = host.draw_shortcut(&timeline);
+                    }
+                }
+                HotkeyEvent::CaptureList => {
+                    crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::OpenList);
                 }
                 HotkeyEvent::PasteLast if !capture.is_recording() => {
                     match jobs.try_send(OutputJob::PasteLast) {

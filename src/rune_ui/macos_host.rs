@@ -1370,7 +1370,7 @@ impl ScrawlHost {
                     use crate::file_dialog::{Dialog, Target};
                     self.folder_choice = Some(crate::file_dialog::open(
                         Dialog {
-                            title: tr("Captures folder").into(),
+                            title: tr("Annotations folder").into(),
                             target: Target::Folder,
                             directory: Some(crate::app_settings::capture_settings().captures_dir()),
                         },
@@ -1384,9 +1384,6 @@ impl ScrawlHost {
     /// The pane shows while the `capture` experiment is on; `refresh` also
     /// rereads the permission and whether Scrawl runs.
     fn poll(&mut self, state: &mut PlatformState, refresh: bool) -> bool {
-        if !crate::app_settings::capture_available() {
-            return state.scrawl.take().is_some();
-        }
         let mut changed = state.scrawl.is_none();
         let view = state.scrawl.get_or_insert_default();
         if let Some(choice) = self.folder_choice.as_ref().and_then(|p| p.poll()) {

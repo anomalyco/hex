@@ -272,7 +272,7 @@ pub(super) struct ScrawlView {
     pub(super) screen_recording: bool,
     /// Scrawl's own app runs, so it owns the capture shortcut.
     pub(super) scrawl_running: bool,
-    /// Use Hex for captures was pressed and Scrawl has not quit yet.
+    /// Use Hex for annotations was pressed and Scrawl has not quit yet.
     pub(super) quitting_scrawl: bool,
     /// A captures folder that could not be revealed or chosen.
     pub(super) folder_error: Option<String>,
@@ -298,7 +298,7 @@ pub(super) enum ScrawlRequest {
     /// Read Screen Recording and Scrawl's app again now (the pane opened
     /// or the window became key), not at the next once-a-second refresh.
     Refresh,
-    /// Use Hex for captures: ask Scrawl's own app to quit. Nothing else
+    /// Use Hex for annotations: ask Scrawl's own app to quit. Nothing else
     /// ever quits it.
     QuitScrawl,
     RevealFolder,
@@ -766,9 +766,6 @@ impl PlatformHost {
 /// granted ahead of time, and Scrawl's own app is macOS's.
 #[cfg(target_os = "linux")]
 fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
-    if !crate::app_settings::capture_available() {
-        return state.scrawl.take().is_some();
-    }
     if state.scrawl.is_some() {
         return false;
     }

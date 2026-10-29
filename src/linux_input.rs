@@ -377,9 +377,14 @@ pub(crate) enum HotkeyEvent {
     VoiceStart,
     /// The Voice Action shortcut came up: run the instruction.
     VoiceFinish,
-    /// The capture shortcut went down (the `capture` experiment): the
-    /// capture host decides whether it starts or finishes a capture.
+    /// The Annotate shortcut went down: the capture host decides whether
+    /// it starts or finishes a capture.
     Capture,
+    /// The draw shortcut went down: drawing on or off while Annotate
+    /// records, or a new recording that draws from the start.
+    Draw,
+    /// The send-to list shortcut went down: the capsule's list opens.
+    CaptureList,
 }
 
 /// What a `hex` command asks of the running listener. Each one is
@@ -416,8 +421,12 @@ pub(crate) struct HotkeyOptions {
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Held to record a Voice Action instruction.
     pub(crate) voice_action: Option<LinuxHotkey>,
-    /// Starts or finishes a capture, while captures are on.
+    /// Starts or finishes a capture, while Annotate is on.
     pub(crate) capture: Option<LinuxHotkey>,
+    /// Turns drawing on and off while Annotate records.
+    pub(crate) draw: Option<LinuxHotkey>,
+    /// Opens the capsule's send-to list.
+    pub(crate) capture_list: Option<LinuxHotkey>,
 }
 
 pub(crate) const ESCAPE_CANCEL_WARNING: &str =
@@ -576,14 +585,18 @@ enum Shortcut {
     PasteLast,
     VoiceAction,
     Capture,
+    Draw,
+    CaptureList,
 }
 
 impl Shortcut {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 6] = [
         Self::Dictation,
         Self::PasteLast,
         Self::VoiceAction,
         Self::Capture,
+        Self::Draw,
+        Self::CaptureList,
     ];
 
     fn index(self) -> usize {
@@ -596,7 +609,9 @@ impl Shortcut {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::VoiceAction => ("voice-action", "Voice Action"),
-            Self::Capture => ("capture", "Capture"),
+            Self::Capture => ("capture", "Annotate"),
+            Self::Draw => ("annotate-draw", "Annotate: draw"),
+            Self::CaptureList => ("annotate-send-to", "Annotate: send to…"),
         }
     }
 }
@@ -767,7 +782,9 @@ impl ShortcutState {
             }
             Input::Released(Shortcut::PasteLast) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
-            Input::Released(Shortcut::Capture) => None,
+            Input::Pressed(Shortcut::Draw) => Some(HotkeyEvent::Draw),
+            Input::Pressed(Shortcut::CaptureList) => Some(HotkeyEvent::CaptureList),
+            Input::Released(Shortcut::Capture | Shortcut::Draw | Shortcut::CaptureList) => None,
             Input::Command(command) => match command {
                 ShortcutCommand::DictationStart => self.start_dictation(),
                 ShortcutCommand::DictationStop => self.stop_dictation(),
@@ -1003,6 +1020,11 @@ impl Backend {
                 .as_ref()
                 .map(|key| (Shortcut::VoiceAction, key)),
             options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
+            options.draw.as_ref().map(|key| (Shortcut::Draw, key)),
+            options
+                .capture_list
+                .as_ref()
+                .map(|key| (Shortcut::CaptureList, key)),
         ];
         let mut shortcuts = Vec::new();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -1064,7 +1086,10 @@ impl Backend {
             let key = match shortcut {
                 Shortcut::Dictation => Some(&binding),
                 Shortcut::VoiceAction => options.voice_action.as_ref(),
-                Shortcut::PasteLast | Shortcut::Capture => None,
+                Shortcut::PasteLast
+                | Shortcut::Capture
+                | Shortcut::Draw
+                | Shortcut::CaptureList => None,
             }?;
             let trigger = key.portal_trigger_for("Escape").ok()?;
             (trigger != "Escape").then_some(trigger)
@@ -1172,6 +1197,8 @@ impl Backend {
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
             options.voice_action.map(|key| (Shortcut::VoiceAction, key)),
             options.capture.map(|key| (Shortcut::Capture, key)),
+            options.draw.map(|key| (Shortcut::Draw, key)),
+            options.capture_list.map(|key| (Shortcut::CaptureList, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);

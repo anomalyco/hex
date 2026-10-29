@@ -8,8 +8,7 @@
 //! so changes apply at the next launch. Unknown names are logged and ignored;
 //! [`RETIRED`] names, experiments that shipped, are ignored silently.
 //! Debug builds read the same sources; `DEVELOPER_FEATURES_ENABLED` turns
-//! nothing on. An experiment a platform has no code for (`capture` on
-//! Windows) is not listed there, cannot be enabled, and its name is unknown.
+//! nothing on.
 //!
 //! Gate an experiment where it starts (the worker, thread, or capture that
 //! does its work), not only where its UI shows: a hidden pane whose worker
@@ -29,11 +28,10 @@ pub const ENV: &str = "HEX_EXPERIMENTS";
 
 /// Experiments that became the default: an old file or env variable may
 /// still name them.
-const RETIRED: [&str; 1] = ["dot-scope"];
+const RETIRED: [&str; 2] = ["capture", "dot-scope"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Experiment {
-    Capture,
     LiveChapters,
     LiveText,
     Modes,
@@ -44,10 +42,7 @@ pub enum Experiment {
 }
 
 impl Experiment {
-    /// Every experiment, including those a platform lacks;
-    /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 8] = [
-        Self::Capture,
+    const ALL: [Self; 7] = [
         Self::LiveChapters,
         Self::LiveText,
         Self::Modes,
@@ -57,24 +52,13 @@ impl Experiment {
         Self::VoiceFilter,
     ];
 
-    /// The experiments this build offers: `capture` only where it has a
-    /// host.
     pub fn available() -> impl Iterator<Item = Self> {
-        Self::ALL
-            .into_iter()
-            .filter(|experiment| experiment.offered())
-    }
-
-    /// Whether this build has the experiment's code: `capture` on macOS
-    /// and Linux.
-    const fn offered(self) -> bool {
-        !matches!(self, Self::Capture) || cfg!(hex_capture)
+        Self::ALL.into_iter()
     }
 
     /// The stable name the env variable, the file, and the CLI use.
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Capture => "capture",
             Self::LiveChapters => "live-chapters",
             Self::LiveText => "live-text",
             Self::Modes => "modes",
@@ -87,7 +71,6 @@ impl Experiment {
 
     pub const fn description(self) -> &'static str {
         match self {
-            Self::Capture => "Scrawl's capture engine (`hex capture`; macOS and Linux).",
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
             Self::LiveText => {
                 "Live text: a streaming model publishes what you have said so far while you dictate."
@@ -108,8 +91,7 @@ impl Experiment {
         }
     }
 
-    /// The offered experiment called `name`; one this build lacks is
-    /// unknown.
+    /// The experiment called `name`.
     pub fn from_name(name: &str) -> Option<Self> {
         Self::available().find(|experiment| experiment.name() == name)
     }
@@ -256,7 +238,7 @@ impl Snapshot {
     }
 
     fn enabled(&self, experiment: Experiment) -> bool {
-        experiment.offered() && self.sources[experiment.index()].any()
+        self.sources[experiment.index()].any()
     }
 
     fn active(&self) -> impl Iterator<Item = Experiment> + '_ {
@@ -504,8 +486,7 @@ mod tests {
     #[test]
     fn names_round_trip_and_stay_kebab_case() {
         for experiment in Experiment::ALL {
-            let expected = experiment.offered().then_some(experiment);
-            assert_eq!(Experiment::from_name(experiment.name()), expected);
+            assert_eq!(Experiment::from_name(experiment.name()), Some(experiment));
             assert!(
                 experiment
                     .name()
@@ -567,27 +548,6 @@ mod tests {
             snapshot.active().collect::<Vec<_>>(),
             [Experiment::Vocabulary]
         );
-    }
-
-    #[test]
-    fn capture_exists_only_where_it_has_a_host() {
-        let built = cfg!(hex_capture);
-        let offered = Experiment::available().any(|experiment| experiment == Experiment::Capture);
-        assert_eq!(offered, built);
-        assert_eq!(Experiment::from_name("capture").is_some(), built);
-
-        let snapshot = Snapshot::parse(Some("capture"), Some("capture\n"));
-        assert_eq!(snapshot.enabled(Experiment::Capture), built);
-        assert_eq!(
-            snapshot.unknown.is_empty(),
-            built,
-            "Windows treats `capture` as unknown"
-        );
-        let listed = list_json(&snapshot, Path::new("/x"))
-            .experiments
-            .iter()
-            .any(|experiment| experiment.name == "capture");
-        assert_eq!(listed, built);
     }
 
     #[test]
@@ -686,12 +646,7 @@ mod tests {
     fn list_reports_each_source() {
         let snapshot = Snapshot::parse(Some("vocabulary"), Some("vocabulary\nmystery\n"));
         let path = Path::new("/home/kit/.config/hex/experiments");
-        let mut json = serde_json::to_value(list_json(&snapshot, path)).unwrap();
-        if cfg!(hex_capture) {
-            let first = json["experiments"].as_array_mut().unwrap().remove(0);
-            assert_eq!(first["name"], "capture");
-            assert_eq!(first["enabled"], false);
-        }
+        let json = serde_json::to_value(list_json(&snapshot, path)).unwrap();
         assert_eq!(
             json,
             serde_json::json!({

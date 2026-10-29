@@ -466,8 +466,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
     #[cfg(hex_capture)]
-    let capture_overlays = crate::app_settings::capture_available()
-        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    let capture_overlays =
+        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
     let pump = Pump {
         window: window.clone(),
         capsules,
@@ -798,7 +798,7 @@ struct Pump {
     window: rune::AppHandle<Ui>,
     capsules: crate::rune_ui::meeting_capsules::MeetingCapsules,
     #[cfg(hex_capture)]
-    capture_overlays: Option<crate::rune_ui::capture_capsule::feed::CaptureOverlays>,
+    capture_overlays: crate::rune_ui::capture_capsule::feed::CaptureOverlays,
     runtime: RuntimeHandle,
     shutdown: &'static AtomicBool,
     indicator_events: Receiver<DictationIndicatorEvent>,
@@ -1009,11 +1009,7 @@ impl Pump {
         }
         self.settle_meeting_waiters(None);
         #[cfg(hex_capture)]
-        if let Some(shown) = self
-            .capture_overlays
-            .as_mut()
-            .and_then(|overlays| overlays.follow_recordings())
-        {
+        if let Some(shown) = self.capture_overlays.follow_recordings() {
             crate::status_item::update_overlays_in_recordings(shown);
         }
         if self.status_actions.is_none() {

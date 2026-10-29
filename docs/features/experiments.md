@@ -31,16 +31,8 @@ hex experiments                          // experiments.cli; macOS, Windows, Lin
 The known experiments are compiled into
 [experiments.rs](../../src/experiments.rs):
 
-- `capture`: Scrawl's capture engine hosted in Hex (macOS and Linux; see
-  [Captures](capture.md)). Every macOS and Linux build knows the name; on
-  Windows `list` omits it, `enable` rejects it, and a source naming it is
-  ignored. The
-  gate is where the work starts: the listener builds no capture host, so there
-  is no sink, thread, or bundle folder while it is off. On, it adds
-  Settings › Experiments › Scrawl, whose own opt-in (`capture.enabled`,
-  default off) is the second gate. Check:
-  `capture_exists_only_where_it_has_a_host` in
-  [experiments.rs](../../src/experiments.rs).
+- `capture` is retired: [Annotate](capture.md) is on by default on macOS
+  and Linux since 2026-10-29. A file or variable naming it is ignored.
 - `dot-scope` is retired: [Dot scope](dictation.md#dot-scope) became the
   HUD on every OS on 2026-10-29, and the capsule it replaced is gone. A file
   or `HEX_EXPERIMENTS` that still names it is ignored silently. Check:

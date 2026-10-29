@@ -473,9 +473,8 @@ const CAPTURE_POINTER_MASK: u64 = (1_u64 << EVENT_MOUSE_MOVED) | (1_u64 << EVENT
 
 fn observation_mask() -> u64 {
     #[cfg(hex_capture)]
-    if crate::app_settings::capture_available() {
-        return OBSERVATION_MASK | CAPTURE_POINTER_MASK;
-    }
+    return OBSERVATION_MASK | CAPTURE_POINTER_MASK;
+    #[cfg(not(hex_capture))]
     OBSERVATION_MASK
 }
 

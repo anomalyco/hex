@@ -538,16 +538,9 @@ pub fn listen(
                     RecognitionControl::ScrawlCapture { action, reply } => {
                         let answer = match capture_host.as_mut() {
                             Some(host) => host.control(action, &input),
-                            None if !crate::app_settings::capture_available() => {
-                                ControlReply::error(
-                                    "feature-off",
-                                    "captures need the `capture` experiment; \
-                                     run `hex experiments enable capture` and restart Hex",
-                                )
-                            }
                             None => ControlReply::error(
                                 "feature-off",
-                                "captures are off; turn them on in Settings › Scrawl or \
+                                "Annotate is off; turn it on in Settings › Annotate or \
                                  run `hex settings set capture.enabled true`",
                             ),
                         };

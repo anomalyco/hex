@@ -1,8 +1,7 @@
-//! The Scrawl pane (the `capture` experiment, macOS and Linux): captures
-//! inside Hex. The opt-in, the capture shortcut,
+//! The Annotate pane (macOS and Linux): Scrawl's captures inside Hex. The opt-in, the capture shortcut,
 //! the send-to list's shortcut, Screen Recording, the transcriber, the captures folder and how long
 //! captures are kept, and Scrawl's own app, which keeps the shortcut while
-//! it runs until "Use Hex for captures" asks it to quit.
+//! it runs until "Use Hex for annotations" asks it to quit.
 
 use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
@@ -21,9 +20,9 @@ use crate::onboarding::{PermissionAction, PermissionKind};
 
 fn description(enabled: bool) -> &'static str {
     if enabled {
-        tr("Record your screen and voice with the shortcut below")
+        tr("Record your screen, draw on it, and talk over it with the shortcut below")
     } else {
-        tr("Off by default. Hex records nothing and keeps no shortcut until you turn this on.")
+        tr("Off. Hex records nothing and keeps no shortcut until you turn this on.")
     }
 }
 
@@ -96,13 +95,13 @@ fn retention_label(policy: Policy) -> String {
 fn retention_description(policy: Policy) -> String {
     match policy.bundle_days {
         Some(days) => tr_fill(
-            "Video and audio go first; captures are removed after {} days",
+            "Video and audio go first; annotations are removed after {} days",
             &days.to_string(),
         ),
         None if policy.media_days.is_some() => {
-            tr("Video and audio go first; captures stay until you remove them").into()
+            tr("Video and audio go first; annotations stay until you remove them").into()
         }
-        None => tr("Captures stay until you remove them").into(),
+        None => tr("Annotations stay until you remove them").into(),
     }
 }
 
@@ -129,7 +128,7 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
     let description = if view.quitting_scrawl {
         tr("Waiting for Scrawl to quit…")
     } else {
-        tr("Hex leaves the capture shortcut to Scrawl until you switch")
+        tr("Hex leaves the Annotate shortcut to Scrawl until you switch")
     };
     card(
         p,
@@ -142,7 +141,7 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
             super::controls::button(
                 p,
                 "use-hex-for-captures",
-                tr("Use Hex for captures"),
+                tr("Use Hex for annotations"),
                 ButtonKind::Primary,
                 |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::QuitScrawl),
             ),
@@ -152,10 +151,14 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
 
 fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
     let enabled = ui.settings.capture.enabled;
-    let purpose = if enabled {
+    let purpose = if enabled && cfg!(target_os = "linux") {
+        tr(
+            "Press to start and again to stop. While it records, Ctrl+Alt+D turns drawing on and off.",
+        )
+    } else if enabled {
         tr("Press to start and again to stop; Esc cancels")
     } else {
-        tr("Saved for when captures are on")
+        tr("Saved for when Annotate is on")
     };
     let mut rows = vec![described_row(
         p,
@@ -165,9 +168,9 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
         shortcut_control(ui, p, ShortcutTarget::Capture),
     )];
     let list_purpose = if enabled {
-        tr("Opens the list of sessions while a capture is showing or waiting to be sent")
+        tr("Opens the list of sessions while an annotation is showing or waiting to be sent")
     } else {
-        tr("Saved for when captures are on")
+        tr("Saved for when Annotate is on")
     };
     rows.push(described_row(
         p,
@@ -184,9 +187,9 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
             "screen-recording",
             tr("Screen Recording"),
             Some(if view.screen_recording {
-                tr("Lets a capture record your screen")
+                tr("Lets Annotate record your screen")
             } else {
-                tr("Required to record your screen. macOS asks at your first capture, or allow it here.")
+                tr("Required to record your screen. macOS asks the first time you annotate, or allow it here.")
             }),
             permission_control(
                 p,
@@ -218,7 +221,7 @@ fn recordings_row(ui: &Ui, p: Paint) -> El {
         p,
         "capture-show-in-recordings",
         tr("Show in screen recordings"),
-        tr("Lets recordings, captures included, show Hex's capsule, ink, and HUD, for demos"),
+        tr("Lets recordings, annotations included, show Hex's capsule, ink, and HUD, for demos"),
         ui.settings.capture.show_overlays_in_recordings,
         |ui: &mut Ui| {
             ui.update(|settings| {
@@ -281,8 +284,8 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
         setting_row(
             p,
             "capture-folder",
-            tr("Captures folder"),
-            Some(tr("Shared with Scrawl, so both list the same captures")),
+            tr("Annotations folder"),
+            Some(tr("Shared with Scrawl, so both list the same annotations")),
             row()
                 .key("controls")
                 .gap(8.0)
@@ -338,7 +341,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             toggle_row(
                 p,
                 "capture-enabled",
-                tr("Capture with Hex"),
+                tr("Annotate"),
                 description(enabled),
                 enabled,
                 toggle,
@@ -349,7 +352,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 view.enable_error.as_ref().map(|error| {
                     note(
                         "capture-error",
-                        &format!("{} {error}", tr("Could not update captures:")),
+                        &format!("{} {error}", tr("Could not update Annotate:")),
                         p.danger(),
                     )
                 }),
@@ -362,7 +365,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     content = content.child(section(
         p,
         "capture",
-        tr("Capture"),
+        tr("Shortcuts"),
         shortcut_rows(ui, p, &view),
     ));
     // Apple's speech recognizer is macOS's; Linux transcribes with Hex's model.
@@ -499,7 +502,7 @@ mod tests {
     fn opening_the_pane_reads_screen_recording_again() {
         let mut rt = pane("mac-scrawl");
         tap(&mut rt, "nav-general");
-        tap(&mut rt, "nav-scrawl");
+        tap(&mut rt, "nav-annotate");
         assert_eq!(
             asked(&rt),
             [PlatformRequest::Scrawl(ScrawlRequest::Refresh)]

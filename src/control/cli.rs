@@ -460,15 +460,6 @@ pub fn capture(command: CaptureCommand) -> u8 {
     return send(command, output);
     #[cfg(target_os = "linux")]
     {
-        if !crate::app_settings::capture_available() {
-            return print(
-                ControlReply::error(
-                    "feature-off",
-                    "captures need the `capture` experiment; run `hex experiments enable capture` and restart Hex",
-                ),
-                output,
-            );
-        }
         let reply = match command {
             C::ScrawlCaptureList { limit } => crate::capture_host::list_captures(limit),
             C::ScrawlCaptureShow { capture } => crate::capture_host::show_capture(&capture),

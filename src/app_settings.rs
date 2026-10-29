@@ -466,8 +466,8 @@ impl HotkeyBinding {
         binding
     }
 
-    /// Option-Shift-V, Scrawl's key for the send-to list; Ctrl+Alt+Shift+V on
-    /// Linux.
+    /// Option-Shift-L for the send-to list (Option-Shift-V is Paste Last's);
+    /// Ctrl+Alt+Shift+V on Linux, where Paste Last is Ctrl+Alt+V.
     #[cfg(hex_capture)]
     pub fn capture_list_default() -> Self {
         #[cfg(target_os = "macos")]
@@ -478,8 +478,8 @@ impl HotkeyBinding {
                 ..Default::default()
             },
             key: Some(HotkeyKey {
-                code: paste_key_code(),
-                label: "V".into(),
+                code: layout_key_code('l').unwrap_or(37),
+                label: "L".into(),
             }),
         };
         #[cfg(not(target_os = "macos"))]
@@ -491,6 +491,13 @@ impl HotkeyBinding {
             "v",
         );
         binding
+    }
+
+    /// Ctrl+Alt+D: drawing on and off while Annotate records (Linux, where
+    /// Wayland gives Hex no Shift-drag to draw with).
+    #[cfg(all(hex_capture, target_os = "linux"))]
+    pub fn annotate_draw() -> Self {
+        Self::chord(HotkeyModifiers::control_option(), "d")
     }
 
     pub fn paste_meeting_default() -> Self {
@@ -558,6 +565,7 @@ fn layout_key_code(character: char) -> Option<u16> {
     if cfg!(test) {
         return match character {
             'e' => Some(14),
+            'l' => Some(37),
             's' => Some(1),
             'v' => Some(9),
             _ => None,
@@ -1151,8 +1159,8 @@ impl Default for VoiceActionSettings {
     }
 }
 
-/// Scrawl captures inside Hex: the `capture` experiment on macOS and Linux
-/// (`capture_host`). Off by default; off means no capture work at all.
+/// Annotate: Scrawl's captures inside Hex, on macOS and Linux
+/// (`capture_host`). On by default; off means no capture work at all.
 #[cfg(hex_capture)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -1219,7 +1227,7 @@ impl Default for CaptureSettings {
     fn default() -> Self {
         let week = scrawl_capture::retention::Preset::Week.policy();
         Self {
-            enabled: false,
+            enabled: true,
             hotkey: HotkeyBinding::capture_default(),
             list_hotkey: HotkeyBinding::capture_list_default(),
             transcriber: CaptureTranscriber::default(),
@@ -1415,6 +1423,13 @@ pub struct AppSettings {
 
 /// Moves English dictation to the streaming English model once.
 const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
+/// Annotate became a default feature: on, with a send-to list shortcut
+/// that no longer shares Paste Last's.
+#[cfg(hex_capture)]
+const ANNOTATE_DEFAULT_MIGRATION: &str = "annotate-on-by-default";
+#[cfg(hex_capture)]
+const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, ANNOTATE_DEFAULT_MIGRATION];
+#[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -1638,7 +1653,7 @@ impl AppSettings {
         #[cfg_attr(not(hex_capture), allow(unused_mut))]
         let mut settings = Self::load_from(&path)?;
         #[cfg(hex_capture)]
-        if capture_available() {
+        {
             let read = |path: PathBuf| fs::read(path).ok();
             let engine = read(scrawl_capture::handoff::default_config_path());
             let mut imported = false;
@@ -1964,6 +1979,18 @@ impl AppSettings {
             self.switch_english_to_streaming_model(installed);
             self.migrations.push(STREAMING_ENGLISH_MIGRATION.into());
         }
+        #[cfg(hex_capture)]
+        if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
+            self.capture.enabled = true;
+            if self
+                .paste_last_hotkey
+                .as_ref()
+                .is_some_and(|paste| paste.overlaps(&self.capture.list_hotkey))
+            {
+                self.capture.list_hotkey = HotkeyBinding::capture_list_default();
+            }
+            self.migrations.push(ANNOTATE_DEFAULT_MIGRATION.into());
+        }
     }
 
     fn has_migration(&self, id: &str) -> bool {
@@ -2043,11 +2070,10 @@ impl AppSettings {
         }
     }
 
-    /// Captures are on: the build has them, the `capture` experiment is on,
-    /// and the person turned them on.
+    /// Annotate is on: the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
-        self.capture.enabled && capture_available()
+        self.capture.enabled
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -2449,16 +2475,10 @@ pub fn capsule_flow() -> CapsuleFlow {
         .unwrap_or_default()
 }
 
-/// Captures are on: [`capture_available`] and `capture.enabled`.
+/// Annotate is on (`capture.enabled`).
 #[cfg(hex_capture)]
 pub fn capture_on() -> bool {
     CAPTURE_ON.load(Ordering::Acquire)
-}
-
-/// Whether this build can capture at all: the `capture` experiment is on.
-#[cfg(hex_capture)]
-pub fn capture_available() -> bool {
-    crate::experiments::enabled(crate::experiments::Experiment::Capture)
 }
 
 /// Scrawl's own app is running, so it owns the capture shortcut and Hex
@@ -2565,23 +2585,37 @@ mod tests {
         *HOTKEYS.get().unwrap().write().unwrap() = RuntimeHotkeys::default();
     }
 
-    #[cfg(target_os = "macos")]
-    /// The list's ⌥⇧V never shares a key with another shortcut: Paste Last
-    /// left on its own ⌥⇧V default keeps it, and the list gets another.
+    /// Annotate is on out of the box, so its two shortcuts and the rest
+    /// of the defaults share no key on any OS.
     #[cfg(hex_capture)]
     #[test]
-    fn the_list_shortcut_never_overlaps_another() {
-        let mut settings = AppSettings::default();
-        let list = settings.capture.list_hotkey.clone();
-        assert_eq!(list, HotkeyBinding::capture_list_default());
-        assert!(settings.hotkey_in_use(HotkeySlot::CaptureList, &list));
-        settings.paste_last_hotkey = Some(HotkeyBinding {
-            modifiers: HotkeyModifiers::option_command(),
-            key: Some(HotkeyKey::named("v")),
-        });
-        assert!(!settings.hotkey_in_use(HotkeySlot::CaptureList, &list));
-        // Captures off, the list key never takes a shortcut from the others.
-        assert!(!settings.hotkey_in_use(HotkeySlot::PasteLast, &list));
+    fn annotates_default_shortcuts_share_no_key() {
+        let settings = AppSettings::default();
+        assert!(settings.capture.enabled);
+        assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &settings.capture.hotkey));
+        assert!(!settings.hotkey_in_use(HotkeySlot::CaptureList, &settings.capture.list_hotkey));
+    }
+
+    /// A settings file from before Annotate was on by default turns it on
+    /// once, and moves a send-to list shortcut off Paste Last's key.
+    #[cfg(hex_capture)]
+    #[test]
+    fn annotate_turns_on_once_for_older_settings() {
+        let mut settings = AppSettings {
+            migrations: vec![STREAMING_ENGLISH_MIGRATION.into()],
+            ..AppSettings::default()
+        };
+        settings.capture.enabled = false;
+        settings.capture.list_hotkey = settings.paste_last_hotkey.clone().unwrap();
+        settings.apply_one_time_migrations_with(|_| true);
+        assert!(settings.capture.enabled);
+        assert_eq!(
+            settings.capture.list_hotkey,
+            HotkeyBinding::capture_list_default()
+        );
+        settings.capture.enabled = false;
+        settings.apply_one_time_migrations_with(|_| true);
+        assert!(!settings.capture.enabled, "only once");
     }
 
     /// The two capture shortcuts are kept apart even while captures are off:
@@ -2590,8 +2624,8 @@ mod tests {
     #[cfg(hex_capture)]
     #[test]
     fn the_capture_shortcuts_never_share_a_key_while_off() {
-        let settings = AppSettings::default();
-        assert!(!settings.capture.enabled);
+        let mut settings = AppSettings::default();
+        settings.capture.enabled = false;
         let capture = settings.capture.hotkey.clone();
         let list = settings.capture.list_hotkey.clone();
         assert!(settings.hotkey_in_use(HotkeySlot::CaptureList, &capture));

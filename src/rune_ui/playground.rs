@@ -92,7 +92,7 @@ fn group(ui: &Ui) -> (usize, &'static str) {
         Pane::Meetings => "Meetings",
         Pane::History => "History",
         #[cfg(hex_capture)]
-        Pane::Scrawl => "Scrawl",
+        Pane::Annotate => "Annotate",
         Pane::VoiceFilter => "Voice Filter",
         Pane::HudLab => "HUD Lab",
         Pane::Activity => "Activity",

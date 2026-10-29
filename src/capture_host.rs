@@ -1505,6 +1505,21 @@ impl CaptureHost {
         reply
     }
 
+    /// The draw shortcut (Linux): while a capture records it turns drawing
+    /// on or off; otherwise it starts one, and true says drawing should
+    /// turn on once its engine takes input.
+    #[cfg(target_os = "linux")]
+    pub fn draw_shortcut(&mut self, audio: &impl AudioTimeline) -> bool {
+        if self.recording_since(audio).is_some() {
+            set_drawing(!drawing());
+            return false;
+        }
+        !matches!(
+            self.shortcut(ShortcutAction::Record, audio),
+            ControlReply::Error { .. }
+        )
+    }
+
     /// The `capture-retention` thread: Scrawl's cleanup of the captures
     /// folder with `capture.*`'s policy, a while after the host starts and
     /// hourly, never while a capture records or is written, and never while
@@ -1933,7 +1948,7 @@ pub fn scrawl_running() -> bool {
     false
 }
 
-/// Asks Scrawl's own app to quit, as "Use Hex for captures" does.
+/// Asks Scrawl's own app to quit, as "Use Hex for annotations" does.
 #[cfg(target_os = "macos")]
 pub fn quit_scrawl() {
     use objc2_app_kit::NSRunningApplication;
@@ -2010,6 +2025,125 @@ pub fn report_input(at: CaptureInstant, input: Tapped) {
         && sender.try_send((at, input)).is_err()
     {
         DROPPED_INPUT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drawing on Linux. Wayland reports no pointer to Hex outside its own
+// surfaces, so while a capture records, drawing turns the ink overlay into a
+// surface that takes the pointer: its strokes reach the engine as Scrawl's
+// Shift-drawn ink, a click as a pin, and a right-click undoes the last
+// stroke. Off, clicks reach the apps beneath again.
+
+/// The ink overlay takes the pointer and draws.
+#[cfg(target_os = "linux")]
+static DRAWING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the ink overlay draws now: only while a capture records.
+#[cfg(target_os = "linux")]
+pub fn drawing() -> bool {
+    DRAWING.load(Ordering::Acquire) && wants_input()
+}
+
+/// Turns drawing on or off for the recording capture; nothing records,
+/// nothing changes. Turning it off ends a stroke under way.
+#[cfg(target_os = "linux")]
+pub fn set_drawing(on: bool) {
+    if !wants_input() {
+        DRAWING.store(false, Ordering::Release);
+        return;
+    }
+    if !DRAWING.swap(on, Ordering::AcqRel) || on {
+        return;
+    }
+    report_input(
+        CaptureInstant::now(),
+        Tapped::Pointer(HostInput::Moved {
+            x: 0.0,
+            y: 0.0,
+            modifiers: Modifiers::default(),
+        }),
+    );
+}
+
+/// What the pointer does on the drawing overlay.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug)]
+pub enum Draw {
+    Down,
+    Move,
+    Up,
+    /// A right-click: take the last stroke back.
+    Undo,
+}
+
+/// One pointer event on the drawing overlay, at `x`, `y` in its points
+/// over an `area` (its size: the recorded screen). The capture's target
+/// becomes that area, so strokes land where they were drawn.
+#[cfg(target_os = "linux")]
+pub fn draw(event: Draw, x: f32, y: f32, area: [f32; 2]) {
+    if !drawing() {
+        return;
+    }
+    if area[0] > 0.0
+        && area[1] > 0.0
+        && let Some(source) = ink_source()
+    {
+        let mut frame = source
+            .telemetry
+            .target_frame
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        frame.x = 0.0;
+        frame.y = 0.0;
+        frame.width = f64::from(area[0]);
+        frame.height = f64::from(area[1]);
+    }
+    let (x, y) = (f64::from(x), f64::from(y));
+    let pen = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    let inputs = match event {
+        Draw::Down => vec![HostInput::Button {
+            down: true,
+            right: false,
+            x,
+            y,
+            modifiers: pen,
+        }],
+        Draw::Move => vec![HostInput::Moved {
+            x,
+            y,
+            modifiers: pen,
+        }],
+        // The pen lifts: the stroke ends once Shift is up.
+        Draw::Up => vec![
+            HostInput::Button {
+                down: false,
+                right: false,
+                x,
+                y,
+                modifiers: pen,
+            },
+            HostInput::Moved {
+                x,
+                y,
+                modifiers: Modifiers::default(),
+            },
+        ],
+        Draw::Undo => vec![HostInput::Key {
+            name: Some("Z".into()),
+            z: true,
+            modifiers: Modifiers {
+                command: true,
+                ..Modifiers::default()
+            },
+        }],
+    };
+    let at = CaptureInstant::now();
+    for input in inputs {
+        report_input(at, Tapped::Pointer(input));
     }
 }
 
@@ -2151,6 +2285,8 @@ impl LiveInput {
         {
             state.target = None;
             TAP_RECORDING.store(false, Ordering::Release);
+            #[cfg(target_os = "linux")]
+            DRAWING.store(false, Ordering::Release);
         }
     }
 
@@ -3115,11 +3251,6 @@ pub fn replay(wavs: &[PathBuf]) -> Result<PathBuf> {
     }
     let sample_rate = sample_rate.ok_or_else(|| eyre!("no WAV files"))?;
     let engine = Arc::new(TranscriptionEngine::start(Default::default())?);
-    if !crate::app_settings::capture_available() {
-        return Err(eyre!(
-            "the `capture` experiment is off; run with HEX_EXPERIMENTS=capture"
-        ));
-    }
     let mut host = CaptureHost::with(shared_engine(Some(&engine))?, None)?;
     let timeline = WavTimeline {
         samples: Arc::new(samples),

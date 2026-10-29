@@ -142,8 +142,8 @@ pub(crate) fn run_app(
     crate::linux_rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
-    let _capture_overlays = crate::app_settings::capture_available()
-        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    let _capture_overlays =
+        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
     let handle = app.handle();
     host.set_window_visible({
         let handle = handle.clone();
@@ -457,11 +457,11 @@ enum Pane {
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
-    /// Scrawl captures inside Hex: the opt-in, shortcut, permission,
-    /// transcriber, folder, retention, and Scrawl's own app (the `capture`
-    /// experiment, under Experiments, in builds with the build option).
+    /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
+    /// permission, transcriber, folder, retention, and Scrawl's own app.
+    /// Listed under Experiments; macOS and Linux only.
     #[cfg(hex_capture)]
-    Scrawl,
+    Annotate,
     /// The Hex Microphone's driver, tuning, and try-it demo (macOS, under
     /// Experiments).
     VoiceFilter,
@@ -480,7 +480,7 @@ impl Pane {
         Pane::Meetings,
         Pane::History,
         #[cfg(hex_capture)]
-        Pane::Scrawl,
+        Pane::Annotate,
         Pane::VoiceFilter,
         Pane::HudLab,
         Pane::Activity,
@@ -506,7 +506,7 @@ impl Pane {
             Pane::HudLab => caps.hud_lab && (ui.platform.developer || ui.platform.playground),
             Pane::Activity => ui.platform.developer,
             #[cfg(hex_capture)]
-            Pane::Scrawl => ui.platform.scrawl.is_some(),
+            Pane::Annotate => ui.platform.scrawl.is_some(),
             _ => true,
         }
     }
@@ -514,7 +514,7 @@ impl Pane {
     /// Listed under the sidebar's Experiments heading.
     fn experimental(self) -> bool {
         #[cfg(hex_capture)]
-        if self == Pane::Scrawl {
+        if self == Pane::Annotate {
             return true;
         }
         matches!(self, Pane::VoiceFilter | Pane::HudLab | Pane::Activity)
@@ -529,7 +529,7 @@ impl Pane {
             Pane::History => tr("History"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
-            Pane::Scrawl => "Scrawl",
+            Pane::Annotate => tr("Annotate"),
             Pane::VoiceFilter => tr("Voice Filter"),
             Pane::HudLab => "HUD Lab",
             Pane::Activity => tr("Activity"),
@@ -545,7 +545,7 @@ impl Pane {
             Pane::History => "nav-history",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
-            Pane::Scrawl => "nav-scrawl",
+            Pane::Annotate => "nav-annotate",
             Pane::VoiceFilter => "nav-voice-filter",
             Pane::HudLab => "nav-hud-lab",
             Pane::Activity => "nav-activity",
@@ -561,7 +561,7 @@ impl Pane {
             Pane::History => &HISTORY_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
-            Pane::Scrawl => &SCRAWL_ICON,
+            Pane::Annotate => &SCRAWL_ICON,
             Pane::VoiceFilter => &VOICE_FILTER_ICON,
             Pane::HudLab => &HUD_LAB_ICON,
             Pane::Activity => &ACTIVITY_ICON,
@@ -591,7 +591,7 @@ enum Menu {
     Calendars,
     /// The transformations a mode can add (the Modes pane).
     Transformations,
-    /// How long captures are kept (the Scrawl pane).
+    /// How long annotations are kept (the Annotate pane).
     #[cfg(hex_capture)]
     CaptureRetention,
 }
@@ -1009,7 +1009,7 @@ impl Ui {
             Pane::History => self.history.reload(),
             Pane::HudLab => self.ask(platform::PlatformRequest::ConfigureHud(self.platform.hud)),
             #[cfg(hex_capture)]
-            Pane::Scrawl => self.ask(platform::PlatformRequest::Scrawl(
+            Pane::Annotate => self.ask(platform::PlatformRequest::Scrawl(
                 platform::ScrawlRequest::Refresh,
             )),
             _ => {}
@@ -1190,7 +1190,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::History => history::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
-        Pane::Scrawl => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
+        Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
         Pane::VoiceFilter => (Vec::new(), fun::pane(ui, p)),
         Pane::HudLab => hud_lab::pane(ui, p),
         Pane::Activity => activity::pane(ui, p),
@@ -1244,9 +1244,9 @@ fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
         ui.send(Request::Desktop(DesktopAction::WindowFocused));
     }
     // Screen Recording is often switched on in System Settings, so the
-    // Scrawl pane reads it again as soon as Hex comes back.
+    // Annotate pane reads it again as soon as Hex comes back.
     #[cfg(hex_capture)]
-    if focused && ui.pane == Pane::Scrawl && ui.platform.scrawl.is_some() {
+    if focused && ui.pane == Pane::Annotate && ui.platform.scrawl.is_some() {
         ui.ask(platform::PlatformRequest::Scrawl(
             platform::ScrawlRequest::Refresh,
         ));
@@ -2271,7 +2271,7 @@ fn hero_tour(ui: &mut Ui, still: bool) {
 
 /// The macOS window with every permission granted, meetings on, the Hex
 /// Microphone experiment on, and sample meetings and commands.
-/// The Scrawl pane with captures `enabled`, a 3-day video retention, and
+/// The Annotate pane with captures `enabled`, a 3-day video retention, and
 /// `adjust` applied to what the host shows.
 #[cfg(hex_capture)]
 fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlView)) {
@@ -2281,7 +2281,7 @@ fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlVi
     let mut view = platform::ScrawlView::preview();
     adjust(&mut view);
     ui.platform.scrawl = Some(view);
-    ui.pane = Pane::Scrawl;
+    ui.pane = Pane::Annotate;
 }
 
 fn mac_fixture() -> Ui {

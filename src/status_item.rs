@@ -158,7 +158,7 @@ struct StatusItemController {
     /// A checkmark for `capture.show_overlays_in_recordings`, in builds
     /// that can capture with the experiment on.
     #[cfg(hex_capture)]
-    overlays_in_recordings: Option<Retained<NSMenuItem>>,
+    overlays_in_recordings: Retained<NSMenuItem>,
     _menu: Retained<NSMenu>,
     target: Retained<StatusItemTarget>,
     model_items: Vec<(TranscriptionModelId, Retained<NSMenuItem>)>,
@@ -223,7 +223,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     );
     add_item(&menu, &target, "Settings…", sel!(openSettings:), mtm);
     #[cfg(hex_capture)]
-    let overlays_in_recordings = crate::app_settings::capture_available().then(|| {
+    let overlays_in_recordings = {
         let item = add_item(
             &menu,
             &target,
@@ -233,7 +233,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         );
         item.setState(isize::from(crate::capture_host::own_windows_recorded()));
         item
-    });
+    };
     let models = NSMenu::initWithTitle(
         NSMenu::alloc(mtm),
         &NSString::from_str("Transcription Model"),
@@ -553,12 +553,10 @@ fn update_title(status: &crate::desktop_host::DesktopUpdateStatus) -> String {
 #[cfg(hex_capture)]
 pub fn update_overlays_in_recordings(shown: bool) {
     STATUS_ITEM.with(|controller| {
-        if let Some(item) = controller
-            .borrow()
-            .as_ref()
-            .and_then(|controller| controller.overlays_in_recordings.as_ref())
-        {
-            item.setState(isize::from(shown));
+        if let Some(controller) = controller.borrow().as_ref() {
+            controller
+                .overlays_in_recordings
+                .setState(isize::from(shown));
         }
     });
 }

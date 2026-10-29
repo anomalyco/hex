@@ -5,6 +5,11 @@
 //! a ⇧-click pin pulses once; a dot marks the pointer while Shift is held;
 //! and a full-screen capture's edges glow red for its first second.
 //!
+//! On Linux the overlay covers the screen and passes clicks through until
+//! drawing is on (`capture_host::drawing`, Ctrl+Alt+D): then it takes the
+//! pointer, a drag draws ink, a click drops a pin, and a right-click undoes
+//! the last stroke (`capture_host::draw`).
+//!
 //! [`Scene::at`] decides what shows from the capture's strokes and clock;
 //! the view only draws it, and the overlay asks for frames only while a
 //! capture records.
@@ -166,6 +171,8 @@ pub(crate) struct InkState {
     placed: Option<[f32; 4]>,
     overlay: Option<OverlayHandle<InkState>>,
     shown: bool,
+    /// The overlay takes the pointer to draw (Linux).
+    drawing: bool,
 }
 
 impl InkState {
@@ -186,6 +193,7 @@ impl InkState {
             placed: None,
             overlay: None,
             shown: true,
+            drawing: false,
         }
     }
 }
@@ -215,11 +223,33 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     });
-    let scene = Scene::at(&ink, source.now_ms(), tip);
+    #[cfg_attr(target_os = "linux", allow(unused_mut))]
+    let mut scene = Scene::at(&ink, source.now_ms(), tip);
+    // Linux learns the screen's size from the first stroke, so the start
+    // glow would be drawn at a guess.
+    #[cfg(target_os = "linux")]
+    {
+        scene.glow = 0.0;
+    }
     let frame = ink.target;
     let rect = [frame.x as f32, frame.y as f32, scene.size[0], scene.size[1]];
+    #[cfg(target_os = "linux")]
+    let drawing = crate::capture_host::drawing();
+    #[cfg(target_os = "linux")]
+    if drawing != s.drawing {
+        s.drawing = drawing;
+        if let Some(overlay) = &s.overlay {
+            overlay.set_input(if drawing {
+                rune::OverlayInput::All
+            } else {
+                rune::OverlayInput::None
+            });
+        }
+    }
     if let Some(overlay) = &s.overlay {
-        if s.placed != Some(rect) {
+        // Linux keeps the whole screen: Wayland says nothing of where the
+        // recorded screen is.
+        if cfg!(not(target_os = "linux")) && s.placed != Some(rect) {
             s.placed = Some(rect);
             overlay.set_placement(Some(rune::OverlayPlacement::Rect {
                 x: rect[0],
@@ -304,7 +334,10 @@ impl InkOverlay {
 pub(crate) fn view(s: &InkState, _cx: &mut rune::Cx<InkState>) -> El {
     let scene = &s.scene;
     let [w, h] = scene.size;
+    #[cfg(not(target_os = "linux"))]
     let mut root = el().size(w.max(1.0), h.max(1.0));
+    #[cfg(target_os = "linux")]
+    let mut root = draw_surface(s.drawing);
     if scene.is_empty() {
         return root;
     }
@@ -385,6 +418,30 @@ pub(crate) fn view(s: &InkState, _cx: &mut rune::Cx<InkState>) -> El {
         );
     }
     root
+}
+
+/// The whole screen; while drawing it takes the pointer and hands every
+/// stroke, click, and right-click to the capture.
+#[cfg(target_os = "linux")]
+fn draw_surface(drawing: bool) -> El {
+    use crate::capture_host::{Draw, draw};
+    let root = el().w_full().h_full();
+    if !drawing {
+        return root;
+    }
+    root.cursor(rune::Cursor::Crosshair)
+        .on_drag(|_: &mut InkState, d: &mut rune::Drag, tx: &mut Tx| {
+            let event = match d.phase {
+                rune::Phase::Down => Draw::Down,
+                rune::Phase::Move => Draw::Move,
+                rune::Phase::Up => Draw::Up,
+            };
+            draw(event, d.x, d.y, [d.w, d.h]);
+            tx.wake_after(Duration::ZERO);
+        })
+        .on_secondary_press_local(|_: &mut InkState, p: rune::PointerEvent, _| {
+            draw(Draw::Undo, p.x, p.y, [0.0, 0.0]);
+        })
 }
 
 /// One canvas holding `segments` (from, to, width), cropped to their bounds

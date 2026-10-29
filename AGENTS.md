@@ -370,12 +370,12 @@ substitute for source inspection or a second roadmap.
   read as nothing chosen.
 - `experiments`: the compiled list of unsupported experiments and the
   launch snapshot of `HEX_EXPERIMENTS` and `~/.config/hex/experiments`
-  behind `experiments::enabled` and `hex experiments`. `capture` exists
-  on macOS and Linux, not Windows.
+  behind `experiments::enabled` and `hex experiments`.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
   `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
   kept out of the workspace; `scripts/check` names it on macOS) hosted in
-  Hex for the `capture` experiment (`docs/plans/capture-in-hex.md`),
+  Hex as Annotate (its user-facing name; code keeps `capture`;
+  `docs/plans/capture-in-hex.md`),
   compiled as `cfg(hex_capture)` into every macOS and Linux build
   (`scripts/build-app.sh` bundles and signs `scrawl-helper` beside `hex`).
   Everything here is shared by both OSes; the engine's own platform
@@ -747,16 +747,26 @@ CoreAudio formats, AppleScript details, or event serialization.
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes never rename the file and rewrite only the heading Hex wrote
   and the `<!-- hex:notes -->` block.
-- Captures (the `capture` experiment) are compiled into every macOS and
-  Linux build and dormant by default; Windows does not know the experiment
-  and never compiles `scrawl-capture`. `validate-app.sh` requires
+- Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
+  every macOS and Linux build and on by default (`capture.enabled`, the
+  pane's switch; the `annotate-on-by-default` migration turns it on once
+  for older settings and moves a send-to list shortcut off Paste Last's
+  key). It is not an experiment; Windows never compiles `scrawl-capture`
+  and shows no pane. Nothing asks for a screen permission until the first
+  capture: macOS's Screen Recording at its first capture, Linux's portal
+  dialog at its first Screen capture. Default shortcuts share no key with
+  the other defaults: ⌥⇧S and ⌥⇧L on macOS, Ctrl+Alt+S, Ctrl+Alt+Shift+V,
+  and Ctrl+Alt+D (draw) on Linux. Drawing on Linux: Ctrl+Alt+D while a
+  capture records turns the ink overlay into a full-screen surface that
+  takes the pointer (`capture_host::draw`: a drag is Shift ink, a click a
+  pin, a right-click undoes), and off again; drawing ends with the capture.
+  While drawing, clicks never reach the apps or the capsule. `validate-app.sh` requires
   `scrawl-helper` and the camera description in a macOS bundle. Linux
   never links PipeWire, VA-API, or FFmpeg: the first two load when a
   capture starts and `ffmpeg` runs as a child, so a missing one fails that
-  capture with a reason and nothing else. With the experiment
-  off, the listener builds no capture host: no engine, sink, thread, bundle
-  folder, or work, and the same holds with the experiment on while
-  `capture.enabled` (the Scrawl pane's opt-in, default off) is off. Scrawl's engine
+  capture with a reason and nothing else. With `capture.enabled` off, the
+  listener builds no capture host: no engine, sink, thread, bundle folder,
+  or work. Scrawl's engine
   records the screen, runs with `SharedResources::none()` (Hex never calls
   `install_shared_resources`: no ingest server, ingest token, or global
   shortcuts), logs to tracing, and writes only to the captures folder

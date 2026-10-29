@@ -52,7 +52,7 @@ hex
 │   ├── list [--json]              every term and its "sounds like" spellings
 │   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
 │   └── remove <term>              any case
-├── capture                        the `capture` experiment, macOS and Linux (features/capture.md)
+├── annotate (alias capture)       Annotate, macOS and Linux (features/capture.md)
 │   ├── start|stop|cancel|status   record a capture, end or discard it, or report
 │   ├── list [--limit N]           the newest captures in the captures folder
 │   ├── show <capture>             one capture's words, files, and where it went
@@ -107,8 +107,8 @@ environment, so Hex passes each `HEX_*` variable to `open --env`. `start`
 takes them from the shell that runs it, `restart` from the running Hex. The
 values are never logged.
 
-`capture` drives the [Captures](features/capture.md) experiment, in every
-macOS and Linux build; with the experiment off it refuses with
+`annotate` (or its old name `capture`) drives [Annotate](features/capture.md),
+in every macOS and Linux build; with `capture.enabled` off it refuses with
 `feature-off`. On Linux, `list`, `show`, `route`, and `send` run in the
 `hex` process itself and `start`, `stop`, and `cancel` are handed to the
 running Hex's listener; `status` is macOS-only for now. `capture stop` replies at once with the bundle

@@ -123,18 +123,12 @@ impl Pump {
             }
             #[cfg(hex_capture)]
             ControlCommand::ScrawlCaptureList { limit } => {
-                background(reply, move || {
-                    captures_on()?;
-                    crate::capture_host::list_captures(limit)
-                });
+                background(reply, move || crate::capture_host::list_captures(limit));
                 None
             }
             #[cfg(hex_capture)]
             ControlCommand::ScrawlCaptureShow { capture } => {
-                background(reply, move || {
-                    captures_on()?;
-                    crate::capture_host::show_capture(&capture)
-                });
+                background(reply, move || crate::capture_host::show_capture(&capture));
                 None
             }
             #[cfg(hex_capture)]
@@ -145,7 +139,6 @@ impl Pump {
             } => {
                 background(reply, move || {
                     listener_ready(&runtime)?;
-                    captures_on()?;
                     crate::capture_host::send_capture(&capture, to, always)
                 });
                 None
@@ -153,7 +146,6 @@ impl Pump {
             #[cfg(hex_capture)]
             ControlCommand::ScrawlCaptureRoute { capture, ask_jev } => {
                 background(reply, move || {
-                    captures_on()?;
                     crate::capture_host::explain_capture(&capture, ask_jev)
                 });
                 None
@@ -534,19 +526,6 @@ fn load() -> Result<AppSettings, ControlError> {
     AppSettings::load().map_err(|error| {
         ControlError::new("internal", format!("couldn't read settings: {error:#}"))
     })
-}
-
-/// Captures need the experiment in this build; `capture.enabled` gates
-/// only recording and sending, not reading the folder.
-#[cfg(hex_capture)]
-fn captures_on() -> Result<(), ControlError> {
-    if crate::app_settings::capture_available() {
-        return Ok(());
-    }
-    Err(ControlError::new(
-        "feature-off",
-        "captures need the `capture` experiment; run `hex experiments enable capture` and restart Hex",
-    ))
 }
 
 fn listener_ready(runtime: &RuntimeHandle) -> Result<(), ControlError> {

@@ -294,8 +294,10 @@ enum Command {
         #[command(subcommand)]
         command: DevCommand,
     },
-    /// Record, list, and send Scrawl captures in the running Hex (the
-    /// `capture` experiment).
+    /// Annotate: record your screen with drawing and narration in the
+    /// running Hex, then list and send what you recorded (`hex capture`
+    /// still works).
+    #[command(name = "annotate", alias = "capture")]
     Capture {
         #[command(subcommand)]
         command: control::cli::CaptureCommand,

@@ -50,7 +50,7 @@ fn permission_copy(
         PermissionKind::ScreenRecording => (
             "permission-screen-recording",
             tr("Screen Recording"),
-            tr("Lets a capture record your screen"),
+            tr("Lets Annotate record your screen"),
         ),
     }
 }
