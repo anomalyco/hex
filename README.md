@@ -116,7 +116,9 @@ Hold **Option**, speak, then release. Hex transcribes and pastes at the current
 focus.
 
 - Double-tap Option to keep recording; press Option again to finish.
-- Press Escape to cancel.
+- Press Escape to cancel. While recording, Escape discards the recording; after
+  you release, it cancels the newest dictation that is still transcribing, so
+  nothing is pasted for it.
 - Press Option-Shift-V to paste the last completed dictation again.
 
 Settings let you change the shortcut, microphone, language, local model,
