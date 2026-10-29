@@ -100,7 +100,6 @@ impl Take {
     }
 
     /// The final transcript.
-    #[cfg(test)]
     pub(crate) fn text(&self) -> &'static str {
         self.updates.last().map_or("", |(_, text)| text)
     }
@@ -135,6 +134,20 @@ pub(crate) const ANSWER_JAY: Take = Take {
         (2.8, "Hey Jay, can we move our sync to Thursday afternoon?"),
     ],
     release: 3.2,
+};
+
+/// Saying anything on the try screen.
+pub(crate) const ANSWER_TRY: Take = Take {
+    updates: &[
+        (0.4, "Okay"),
+        (0.7, "Okay this"),
+        (0.88, "Okay this is"),
+        (1.2, "Okay this is actually"),
+        (1.45, "Okay this is actually kind"),
+        (1.6, "Okay this is actually kind of"),
+        (2.0, "Okay, this is actually kind of magic."),
+    ],
+    release: 2.4,
 };
 
 /// The examples that type themselves into the demo cards.

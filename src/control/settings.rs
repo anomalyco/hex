@@ -97,6 +97,16 @@ const MODEL_CHANGE: &str = "change the transcription model with `hex model use`"
 
 const KEYS: &[Key] = &[
     key(
+        "keyboard_model_switching.enabled",
+        Kind::Bool,
+        "Switch the model when the keyboard input source changes (macOS)",
+    ),
+    key(
+        "keyboard_model_switching.mappings",
+        Kind::Json,
+        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS)",
+    ),
+    key(
         "commands_enabled",
         Kind::Bool,
         "Voice commands (loads the command model; keeps the microphone ready)",
@@ -116,6 +126,11 @@ const KEYS: &[Key] = &[
         UNIT,
         "Tone volume from 0 to 1; 0 turns tones off",
     ),
+    key(
+        "sound_theme",
+        Kind::Choice(&["signature", "classic"]),
+        "Which feedback sounds play: Hex's signature set or the classic tones",
+    ),
     optional(
         "microphone",
         Kind::Text,
@@ -123,8 +138,18 @@ const KEYS: &[Key] = &[
     ),
     key(
         "recording_audio_behavior",
-        Kind::Choice(&["mute", "pause_media", "do_nothing"]),
+        Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
         "What other audio does while you dictate",
+    ),
+    key(
+        "recording_duck_volume",
+        UNIT,
+        "Fraction of original output volume while lowering audio (macOS), from 0 to 1",
+    ),
+    key(
+        "pause_browser_media",
+        Kind::Bool,
+        "Also pause a playing browser tab while dictating (macOS, with Pause media)",
     ),
     key(
         "double_tap_lock",
@@ -183,6 +208,11 @@ const KEYS: &[Key] = &[
         Kind::Json,
         "Recently used models, each with its language and hints",
         "Hex records these as you switch models",
+    ),
+    key(
+        "vocabulary_boost",
+        Kind::Choice(&["off", "light", "normal", "strong"]),
+        "How readily transcription swaps heard words for a vocabulary term (the vocabulary experiment)",
     ),
     key(
         "dictation_processing.default_mode",
@@ -310,9 +340,14 @@ const KEYS: &[Key] = &[
         Kind::Bool,
         "Paste with Ctrl-Shift-V for terminals (Linux)",
     ),
+    key(
+        "share_dictation_shortcut",
+        Kind::Bool,
+        "Let other apps see the dictation shortcut too (Windows)",
+    ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es"]),
+        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk"]),
         "Interface language; none follows the system",
     ),
     key(
@@ -617,6 +652,13 @@ pub fn apply(
                  shortcut first",
             ));
         }
+        "keyboard_model_switching.mappings" => {
+            for choice in candidate.keyboard_model_switching.mappings.values() {
+                choice
+                    .validate()
+                    .map_err(|error| invalid(name, &error.to_string()))?;
+            }
+        }
         "transcription.recognition_hints" => {
             let model = crate::transcription_models::definition(candidate.transcription.model);
             if !model.supports_recognition_hints {
@@ -818,7 +860,7 @@ pub fn parse_hotkey(
         if modifiers.function {
             return Err("fn can't be combined with a key".into());
         }
-        if modifiers.is_empty() && !is_function_key(&key.label) {
+        if modifiers.is_empty() && !is_function_key(&key.label) && !key.is_mouse() {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
     } else if modifiers.is_empty() {
@@ -965,6 +1007,57 @@ mod tests {
                 .code,
             "invalid-value"
         );
+    }
+
+    #[test]
+    fn keyboard_model_switching_settings_map_sources_to_a_model_and_its_language() {
+        let settings = apply(
+            &AppSettings::default(),
+            "keyboard_model_switching.enabled",
+            "on",
+            false,
+            &rules(),
+        )
+        .unwrap()
+        .settings;
+        assert!(settings.keyboard_model_switching.enabled);
+        let change = apply(
+            &settings,
+            "keyboard_model_switching.mappings",
+            r#"{"com.apple.keylayout.Spanish":{"model":"parakeet_v3","language":"es"}}"#,
+            false,
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change
+                .settings
+                .keyboard_model_switching
+                .mappings
+                .get("com.apple.keylayout.Spanish"),
+            Some(&crate::app_settings::KeyboardModelChoice {
+                model: crate::transcription_models::TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            })
+        );
+        for invalid in [
+            r#"{"Spanish":"parakeet_v3"}"#,
+            r#"{"Spanish":{"model":"unknown-model","language":"es"}}"#,
+            r#"{"Japanese":{"model":"parakeet_unified_en","language":"ja"}}"#,
+            r#"{"ABC":{"model":"apple_speech","language":"en"}}"#,
+        ] {
+            assert!(
+                apply(
+                    &settings,
+                    "keyboard_model_switching.mappings",
+                    invalid,
+                    false,
+                    &rules()
+                )
+                .is_err(),
+                "{invalid} was accepted"
+            );
+        }
     }
 
     #[test]

@@ -234,12 +234,13 @@ fn capture_macos() -> Result<ContextSnapshot> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn frontmost_bundle_identifier() -> Option<String> {
+pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     autoreleasepool(|_| {
         NSWorkspace::sharedWorkspace()
             .frontmostApplication()?
-            .bundleIdentifier()
-            .map(|identifier| identifier.to_string())
+            .bundleURL()?
+            .path()
+            .map(|path| path.to_string().into())
     })
 }
 

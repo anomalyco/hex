@@ -67,7 +67,7 @@ jobs:
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - run: cargo fmt --all --check
       - run: scripts/test-app-identity.sh
-      - run: cargo clippy --locked -p voice-control -p scrawl-capture --bin voice-control --lib --tests --features capture -- -D warnings
-      - run: cargo nextest run --locked --profile ci -p voice-control -p scrawl-capture --bin voice-control --lib --features capture
+      - run: cargo clippy --locked -p "$(cargo pkgid)" -p scrawl-capture --bin hex --lib --tests -- -D warnings
+      - run: cargo nextest run --locked --profile ci -p "$(cargo pkgid)" -p scrawl-capture --bin hex --lib
       - name: No compromised eMudhra CA roots
-        run: cargo build --locked --bin voice-control && scripts/check-ca-roots.sh target/debug/voice-control
+        run: cargo build --locked --bin hex && scripts/check-ca-roots.sh target/debug/hex

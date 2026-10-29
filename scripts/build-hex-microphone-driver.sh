@@ -23,9 +23,9 @@ clang -std=c11 -O2 -Wall -Wextra -Werror \
   "$SRC_DIR/HexMicrophoneDriver.c" \
   -o "$BUNDLE_DIR/Contents/MacOS/HexMicrophoneDriver"
 
-SIGN_ID="${VOICE_CONTROL_CODESIGN_IDENTITY:-}"
-if [[ -z "$SIGN_ID" && -n "${VOICE_CONTROL_TEAM_ID:-}" ]]; then
-  SIGN_ID="$(security find-identity -v -p codesigning | awk -F'"' -v team="$VOICE_CONTROL_TEAM_ID" '$2 ~ "^Developer ID Application: .*\\(" team "\\)$" { print $2; exit }')"
+SIGN_ID="${HEX_CODESIGN_IDENTITY:-}"
+if [[ -z "$SIGN_ID" && -n "${HEX_TEAM_ID:-}" ]]; then
+  SIGN_ID="$(security find-identity -v -p codesigning | awk -F'"' -v team="$HEX_TEAM_ID" '$2 ~ "^Developer ID Application: .*\\(" team "\\)$" { print $2; exit }')"
 fi
 if [[ -n "$SIGN_ID" ]]; then
   codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$BUNDLE_DIR"

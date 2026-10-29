@@ -61,9 +61,10 @@ pub fn configured_captures_dir(value: &str) -> Option<PathBuf> {
 }
 
 /// `~/Library/Application Support/scrawl/captures` on macOS, `%LOCALAPPDATA%\scrawl\captures`
-/// on Windows (local, not roaming: the movies are large).
+/// on Windows (local, not roaming: the movies are large), `~/.local/share/scrawl/captures` on
+/// Linux.
 pub fn builtin_captures_dir() -> PathBuf {
-    if cfg!(target_os = "windows") {
+    if cfg!(any(target_os = "windows", target_os = "linux")) {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("scrawl")
@@ -83,7 +84,12 @@ pub fn open_path(target: &Path) -> Result<()> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let status = Command::new("/usr/bin/open").arg(target).status()?;
+        let opener = if cfg!(target_os = "linux") {
+            "xdg-open"
+        } else {
+            "/usr/bin/open"
+        };
+        let status = Command::new(opener).arg(target).status()?;
         ensure!(status.success(), "open {} failed", target.display());
         Ok(())
     }
@@ -95,7 +101,14 @@ pub fn reveal_path(target: &Path) -> Result<()> {
     {
         crate::win::shell::reveal(target)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(target.parent().unwrap_or(target))
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
     {
         Command::new("/usr/bin/open")
             .arg("-R")
@@ -302,6 +315,30 @@ pub fn copy_string_to_clipboard(_content: &str) -> Result<()> {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn copy_png_to_clipboard(_png_bytes: &[u8]) -> Result<()> {
     bail!("Image and text clipboard handoff requires macOS or Windows")
+}
+
+/// Linux hosts copy through their own clipboard path (Hex: `linux_paste`).
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn copy_loaded_bundle_to_clipboard(
+    _directory: &Path,
+    _bundle: &crate::model::ScrawlBundle,
+) -> Result<()> {
+    bail!("Image and text clipboard handoff requires macOS or Windows")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn paste_loaded_bundle_image_and_text(
+    _directory: &Path,
+    _bundle: &crate::model::ScrawlBundle,
+    _terminal: bool,
+    _paste: &dyn Fn() -> Result<()>,
+) -> Result<()> {
+    bail!("Image and text paste handoff requires macOS or Windows")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn post_paste() -> Result<()> {
+    bail!("Image and text paste handoff requires macOS or Windows")
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

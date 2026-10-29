@@ -2,13 +2,13 @@
 set -eu
 
 # Builds the release Hex.app from a clean, pushed commit, signs it with the
-# Developer ID of VOICE_CONTROL_TEAM_ID, notarizes and staples the app and
+# Developer ID of HEX_TEAM_ID, notarizes and staples the app and
 # its DMG, and leaves the two release files the Release workflow publishes
 # to the Anomaly release service (docs/plans/release-service.md):
 #   dist/Hex-<version>-macos-arm64.dmg   download (target macos-arm64-dmg)
 #   dist/Hex-<version>-macos-arm64.zip   in-app update, root Hex.app (target macos-arm64)
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-: "${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}"
+: "${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}"
 . "$root/scripts/macos-signing.sh"
 version=$(hex_version "$root")
 build_number=$(hex_build_number "$version")
@@ -18,11 +18,6 @@ zip="$dist/Hex-$version-macos-arm64.zip"
 
 if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != prepare ]; }; then
   echo "Usage: $0 [prepare]" >&2
-  exit 1
-fi
-# Public builds never carry the capture build option.
-if [ -n "${HEX_CAPTURE:-}" ]; then
-  echo "Unset HEX_CAPTURE: the capture build option is never released." >&2
   exit 1
 fi
 if [ -n "$(git -C "$root" status --porcelain)" ]; then

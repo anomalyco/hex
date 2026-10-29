@@ -178,7 +178,7 @@ one) refuses a manifest newer than it understands.
 `scripts/check` runs them with everything else. For this crate alone:
 
 ```sh
-cargo nextest run -p voice-control -p capture-core --features capture -E 'not package(voice-control)'
+cargo nextest run -p "$(cargo pkgid)" -p capture-core --features capture -E 'not package(hex)'
 ```
 
 The final-frame tests write their fixtures with AVAssetWriter and `ffmpeg`, and check them with

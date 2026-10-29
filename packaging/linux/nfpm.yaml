@@ -38,15 +38,14 @@ contents:
       mode: 0644
 overrides:
   # Linked, then loaded at runtime: the X11, Wayland, and xkbcommon client
-  # libraries. Ubuntu 24.04 renamed alsa and glib for its 64-bit time_t
-  # transition, so each takes either name.
+  # libraries. Ubuntu 24.04 renamed alsa for its 64-bit time_t
+  # transition, so it takes either name.
   deb:
     depends:
       - libc6 (>= 2.39)
       - libgcc-s1
       - libstdc++6
       - libasound2t64 | libasound2
-      - libglib2.0-0t64 | libglib2.0-0
       - libvulkan1
       - libxkbcommon0
       - libxkbcommon-x11-0
@@ -65,8 +64,6 @@ overrides:
   rpm:
     depends:
       - libasound.so.2()(64bit)
-      - libglib-2.0.so.0()(64bit)
-      - libgio-2.0.so.0()(64bit)
       - libvulkan.so.1()(64bit)
       - libxkbcommon.so.0()(64bit)
       - libxkbcommon-x11.so.0()(64bit)

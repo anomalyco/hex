@@ -1,6 +1,6 @@
 //! Hex (the local dictation app) as an optional transcriber, through its desktop local API v2
-//! (`HEX_APPLICATION_SUPPORT_DIR` or `~/Library/Application Support/hex/local-api.json`, or
-//! `voice-control` before Hex moved it, holds the port and bearer token; `GET /health`, `GET /models`, `POST /transcriptions`).
+//! (`HEX_APPLICATION_SUPPORT_DIR` or `~/Library/Application Support/hex/local-api.json` holds
+//! the port and bearer token; `GET /health`, `GET /models`, `POST /transcriptions`).
 //!
 //! Hex returns text and a duration but no word times, and Scrawl needs them to hand each
 //! keyframe its words. So the recording is cut into speech islands (`audio::speech_islands`),

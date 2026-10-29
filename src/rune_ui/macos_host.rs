@@ -183,6 +183,11 @@ impl ChordWatch {
                     )
                 }
                 NSEventType::FlagsChanged => capture.borrow_mut().flags_changed(flags),
+                NSEventType::LeftMouseDown
+                | NSEventType::RightMouseDown
+                | NSEventType::OtherMouseDown => capture
+                    .borrow_mut()
+                    .mouse_down(event_ref.buttonNumber(), flags),
                 // Key releases still reach the window so its key state
                 // stays balanced.
                 _ => return event.as_ptr(),
@@ -198,7 +203,11 @@ impl ChordWatch {
         // is removed on drop, on the main thread that installed it.
         let monitor = unsafe {
             NSEvent::addLocalMonitorForEventsMatchingMask_handler(
-                NSEventMask::KeyDown | NSEventMask::FlagsChanged,
+                NSEventMask::KeyDown
+                    | NSEventMask::FlagsChanged
+                    | NSEventMask::LeftMouseDown
+                    | NSEventMask::RightMouseDown
+                    | NSEventMask::OtherMouseDown,
                 &block,
             )
         };
@@ -231,6 +240,18 @@ struct ChordCapture {
 }
 
 impl ChordCapture {
+    fn mouse_down(&mut self, button: isize, flags: u64) -> Option<Chord> {
+        let key = u16::try_from(button).ok().and_then(HotkeyKey::mouse)?;
+        let mut modifiers = modifiers_from_flags(flags).without_side_constraints();
+        modifiers.function = false;
+        self.keyed = !modifiers.is_empty();
+        self.peak = HotkeyModifiers::default();
+        Some(Chord::Captured(Ok(HotkeyBinding {
+            modifiers,
+            key: Some(key),
+        })))
+    }
+
     fn key_down(
         &mut self,
         code: u16,
@@ -377,6 +398,14 @@ pub(super) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
         .filter(|character| !matches!(character, ' ' | '-' | '_'))
         .flat_map(char::to_lowercase)
         .collect();
+    if let Some(number) = normalized.strip_prefix("mouse") {
+        return number
+            .parse::<u16>()
+            .ok()
+            .and_then(|number| number.checked_sub(1))
+            .and_then(HotkeyKey::mouse)
+            .ok_or(tr("Unsupported key"));
+    }
     let code = match normalized.as_str() {
         "space" => Some(49),
         "tab" => Some(48),
@@ -677,6 +706,14 @@ impl NativeHost for MacHost {
 
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
+        // The playground's HUD stories change the tuning HUD Lab shows.
+        if let Some(tuning) = state.hud.dot_scope {
+            let shared = crate::dot_scope::lab();
+            if shared != tuning {
+                state.hud.dot_scope = Some(shared);
+                changed = true;
+            }
+        }
         if let Some(login) = &mut self.login {
             match login.poll() {
                 Ok(Some(answer)) => {
@@ -745,6 +782,20 @@ impl NativeHost for MacHost {
             return changed;
         }
         self.refresh_at = Instant::now() + PLATFORM_REFRESH;
+        // Input sources are read only while keyboard model switching is on.
+        let switching = crate::macos_rune::runtime()
+            .and_then(|runtime| runtime.published())
+            .is_some_and(|published| published.settings.keyboard_model_switching.enabled);
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            changed |= update(
+                &mut state.input_sources,
+                if switching {
+                    crate::keyboard_input_sources::enabled(mtm)
+                } else {
+                    Vec::new()
+                },
+            );
+        }
         changed |= self.calendar.poll(&mut state.calendar);
         changed |= update(
             &mut state.tuning,
@@ -769,9 +820,6 @@ impl NativeHost for MacHost {
         let asked_len = state.permissions_asked.len();
         state.permissions_asked.retain(|kind| match kind {
             PermissionKind::Microphone => permissions.microphone != PermissionState::Ready,
-            PermissionKind::InputMonitoring => {
-                permissions.input_monitoring != PermissionState::Ready
-            }
             PermissionKind::Accessibility => permissions.accessibility != PermissionState::Ready,
             PermissionKind::SystemAudio => !system_audio,
             PermissionKind::ScreenRecording => !crate::meeting::screen_recording_permitted(),
@@ -841,6 +889,10 @@ impl NativeHost for MacHost {
             inputs.extend(practice.observations().into_iter().map(Input::Dictation));
         }
         inputs
+    }
+
+    fn practice_level(&self) -> f32 {
+        crate::dictation_indicator::recent_peak()
     }
 }
 
@@ -1281,7 +1333,6 @@ fn choose_folder() -> crate::file_dialog::Pending {
     crate::file_dialog::open(
         Dialog {
             title: tr("Transcript folder").into(),
-            accept: tr("Use Folder").into(),
             target: Target::Folder,
             directory: Some(crate::app_settings::meeting_output_folder()),
         },
@@ -1322,7 +1373,6 @@ impl ScrawlHost {
                     self.folder_choice = Some(crate::file_dialog::open(
                         Dialog {
                             title: tr("Captures folder").into(),
-                            accept: tr("Use Folder").into(),
                             target: Target::Folder,
                             directory: Some(crate::app_settings::capture_settings().captures_dir()),
                         },
@@ -1736,6 +1786,57 @@ mod tests {
             "each event is heard once"
         );
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mouse_buttons_record_with_or_without_modifiers() {
+        for button in 0..32 {
+            for flags in [0, LEFT_OPTION, RIGHT_OPTION | LEFT_COMMAND] {
+                let mut capture = ChordCapture::default();
+                capture.flags_changed(flags);
+                let binding = captured(capture.mouse_down(button, flags)).unwrap();
+                assert_eq!(binding.key, HotkeyKey::mouse(button as u16));
+                assert_eq!(
+                    binding.modifiers,
+                    modifiers_from_flags(flags).without_side_constraints()
+                );
+                assert!(capture.flags_changed(0).is_none());
+                let text = crate::control::settings::format_hotkey(&binding);
+                assert_eq!(
+                    crate::control::settings::parse_hotkey(&text, |name| {
+                        hotkey_key_named(name).map_err(str::to_owned)
+                    })
+                    .unwrap(),
+                    binding
+                );
+            }
+        }
+        let mut capture = ChordCapture::default();
+        assert!(capture.mouse_down(-1, 0).is_none());
+        assert!(capture.mouse_down(32, 0).is_none());
+        assert!(matches!(
+            capture.key_down(ESCAPE_KEY_CODE, false, None, 0),
+            Some(Chord::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn mouse_bindings_persist_and_conflict_only_with_the_same_trigger() {
+        let binding = captured(ChordCapture::default().mouse_down(3, 0)).unwrap();
+        let restored: HotkeyBinding =
+            serde_json::from_str(&serde_json::to_string(&binding).unwrap()).unwrap();
+        assert_eq!(restored, binding);
+        assert_eq!(restored.keycaps(), ["Mouse 4"]);
+        assert!(binding.overlaps(&restored));
+        assert!(!binding.overlaps(&captured(ChordCapture::default().mouse_down(4, 0)).unwrap()));
+        assert!(!binding.overlaps(&HotkeyBinding::default()));
+        for name in ["mouse0", "mouse33", "mouse"] {
+            assert!(hotkey_key_named(name).is_err());
+        }
+        assert_eq!(
+            hotkey_key_named("mouse-1").unwrap(),
+            HotkeyKey::mouse(0).unwrap()
+        );
     }
 
     #[test]

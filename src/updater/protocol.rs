@@ -453,7 +453,7 @@ mod tests {
         for valid in vectors["valid"].as_array().unwrap() {
             assert!(is_version_name(valid.as_str().unwrap()), "{valid}");
         }
-        assert!(is_version_name(env!("CARGO_PKG_VERSION")));
+        assert!(is_version_name(crate::VERSION));
         for unsafe_name in ["", ".", "..", ".hidden", "a/b", "a b", "a\\b", "2.4.0\n"] {
             assert!(!is_version_name(unsafe_name), "{unsafe_name:?}");
         }

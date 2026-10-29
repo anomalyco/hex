@@ -291,7 +291,7 @@ impl LocalApi {
         let Some(worker) = self.worker.take() else {
             return;
         };
-        // Retract discovery before draining so a replacement HEX can publish
+        // Retract discovery before draining so a replacement Hex can publish
         // while this listener is still bound and finishing in-flight requests.
         if let Some(discovery) = &self.discovery {
             discovery.remove_if_owned();
@@ -612,6 +612,15 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 control: context.control.is_some(),
             },
         ),
+        ("GET", "/profile/vitals") => match procwatch::snapshot() {
+            Some(snapshot) => HttpResponse {
+                status: 200,
+                reason: reason(200),
+                content_type: Some("application/json"),
+                body: snapshot.to_json().into_bytes(),
+            },
+            None => HttpResponse::code(503, "vitals-unavailable"),
+        },
         ("GET", "/models") => match model_infos(&request.path) {
             Ok(models) => HttpResponse::json(200, &models),
             Err(code) => HttpResponse::code(400, code),
@@ -1900,7 +1909,7 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> std::io::Re
 
 fn current_health() -> HealthResponse {
     HealthResponse {
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::VERSION,
         api_version: API_VERSION,
     }
 }
@@ -1913,11 +1922,11 @@ pub fn call_developer(
     let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
     if status != 200 {
         bail!(
-            "HEX developer control failed: {}",
+            "Hex developer control failed: {}",
             error_code(status, &body)
         );
     }
-    serde_json::from_slice(&body).wrap_err("HEX developer response is invalid")
+    serde_json::from_slice(&body).wrap_err("Hex developer response is invalid")
 }
 
 /// Sends one `hex` control request to the running app.
@@ -2158,6 +2167,11 @@ mod tests {
         assert_eq!(capabilities["developerControl"], false);
         assert_eq!(capabilities["control"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
+        let vitals = request(document.port, Some(&document.token), "/profile/vitals");
+        assert!(vitals.starts_with("HTTP/1.1 200"));
+        let vitals: serde_json::Value = serde_json::from_str(response_body(&vitals)).unwrap();
+        assert!(vitals["footprint"].as_u64().unwrap() > 0);
+        assert!(vitals["heap"]["live"].as_u64().unwrap() > 0);
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
         assert_eq!(
@@ -2293,7 +2307,7 @@ mod tests {
             post_to(
                 port,
                 &client_token,
-                r#"{"version":1,"command":"meeting-record","title":"Standup"}"#,
+                r#"{"version":2,"command":"meeting-record","title":"Standup"}"#,
             )
         });
         let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -2315,14 +2329,14 @@ mod tests {
             ControlReply::done("Started recording")
         );
 
-        let unauthorized = post("hex_wrong", r#"{"version":1,"command":"status"}"#);
+        let unauthorized = post("hex_wrong", r#"{"version":2,"command":"status"}"#);
         assert!(unauthorized.starts_with("HTTP/1.1 401"));
-        let unknown = post(&token, r#"{"version":1,"command":"explode"}"#);
+        let unknown = post(&token, r#"{"version":2,"command":"explode"}"#);
         assert!(unknown.starts_with("HTTP/1.1 400"));
         // Another protocol version is answered without reaching the app.
         for body in [
-            r#"{"version":2,"command":"status"}"#,
-            r#"{"version":2,"command":"explode"}"#,
+            r#"{"version":1,"command":"status"}"#,
+            r#"{"version":1,"command":"explode"}"#,
         ] {
             let mismatch = post(&token, body);
             let reply = serde_json::from_str::<ControlResponse>(response_body(&mismatch))

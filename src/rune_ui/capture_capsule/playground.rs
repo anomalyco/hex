@@ -23,6 +23,7 @@ use super::{CapsuleState, Mode, capsule, tone};
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
+mod family;
 mod stories;
 pub(crate) use stories::add as stories;
 
@@ -64,6 +65,8 @@ pub(crate) struct Playground {
     /// The latest actions and cues, newest last.
     log: Vec<String>,
     copied: bool,
+    /// The screens the notch story shows.
+    screens: stories::Screens,
 }
 
 /// Opens the playground and runs it until its window closes.
@@ -115,6 +118,7 @@ fn init() -> CapsuleState {
         actions,
         log: Vec::new(),
         copied: false,
+        screens: stories::Screens::Both,
     }));
     state
 }

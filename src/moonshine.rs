@@ -414,7 +414,7 @@ impl Moonshine {
         let model_path = model_path()?;
         if !model_path.exists() {
             return Err(eyre!(
-                "Moonshine command model is missing at {}. Finish setup in HEX.",
+                "Moonshine command model is missing at {}. Finish setup in Hex.",
                 model_path.display()
             ));
         }

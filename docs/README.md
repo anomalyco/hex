@@ -5,7 +5,7 @@ override shipped behavior.
 
 ## User Guides
 
-- [`../README.md`](../README.md): install and use HEX on macOS, Windows, and Linux.
+- [`../README.md`](../README.md): install and use Hex on macOS, Windows, and Linux.
 - [`windows.md`](windows.md): Windows x64 and ARM64 beta requirements, installation, and source builds.
 - [`linux.md`](linux.md): Linux X11 and native Wayland beta requirements and installation.
 - [`nix.md`](nix.md): Nix packaging, development, and per-user autostart.
@@ -28,6 +28,8 @@ override shipped behavior.
   source and CLI baseline, integration contract, and validation limits.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal
   command contract and remaining lifecycle work.
+- [`plans/quickjs.md`](plans/quickjs.md): why and how configs run in embedded
+  QuickJS instead of Bun, with size and latency measurements.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
   implemented macOS local-service protocol and lifecycle guarantees.
 

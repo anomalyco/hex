@@ -5,7 +5,9 @@
 # two macOS targets from the stapled app: Hex-<version>-macos-arm64.zip (root
 # Hex.app, for the updater) and Hex-<version>-macos-arm64.dmg (signed,
 # notarized, stapled, with an Applications link). The app is data here: it is
-# never launched.
+# never launched. The DMG's window comes from dmg-background.tiff and
+# dmg-DS_Store beside the zip (packaging/macos/dmg), also data: they are
+# checked by magic number and size and copied in for Finder to read.
 #
 # Environment: HEX_VERSION, HEX_SIGNING_IDENTITY, HEX_KEYCHAIN, HEX_NOTARY_KEY,
 # HEX_NOTARY_KEY_ID, HEX_NOTARY_ISSUER (macos-credentials.sh).
@@ -30,8 +32,24 @@ fi
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$HEX_VERSION" ] ||
   die "Hex.app is not version $HEX_VERSION."
 
+layout=$(dirname "$input")
+background="$layout/dmg-background.tiff"
+finder="$layout/dmg-DS_Store"
+check_layout() { # <file> <magic numbers in hex>...
+  file=$1
+  shift
+  { [ -f "$file" ] && [ ! -L "$file" ]; } || die "The macOS build lacks $(basename "$file")."
+  [ "$(wc -c < "$file")" -le 4194304 ] || die "$(basename "$file") is over 4 MiB."
+  for magic in "$@"; do
+    [ "$(head -c $((${#magic} / 2)) "$file" | xxd -p)" = "$magic" ] && return
+  done
+  die "$(basename "$file") is not the file type it should be."
+}
+check_layout "$background" 4d4d002a 49492a00
+check_layout "$finder" 0000000142756431
+
 # Every Mach-O in the bundle must be one this script signs.
-expected=$(printf '%s\n' Contents/MacOS/hex \
+expected=$(printf '%s\n' Contents/MacOS/hex Contents/MacOS/scrawl-helper \
   Contents/Library/HexMicrophone.driver/Contents/MacOS/HexMicrophoneDriver \
   Contents/Frameworks/libmoonshine.dylib Contents/Frameworks/libonnxruntime.1.23.2.dylib | LC_ALL=C sort)
 found=$(cd "$app" && find . -type f -exec sh -c 'file -b "$1" | grep -q Mach-O && printf "%s\n" "${1#./}"' _ {} \; | LC_ALL=C sort)
@@ -47,6 +65,8 @@ notarize() {
 sign "$app/Contents/Frameworks/libonnxruntime.1.23.2.dylib"
 sign "$app/Contents/Frameworks/libmoonshine.dylib"
 sign "$app/Contents/Library/HexMicrophone.driver"
+# The capture experiment's movie decoder; Hex runs it, so it needs no entitlement.
+sign --identifier anomaly.hex.scrawl-helper "$app/Contents/MacOS/scrawl-helper"
 sign --entitlements "$release/hex.entitlements" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 
@@ -62,6 +82,8 @@ rm -f "$zip" "$dmg"
 mkdir "$work/staging"
 /usr/bin/ditto "$app" "$work/staging/Hex.app"
 ln -s /Applications "$work/staging/Applications"
+cp "$background" "$work/staging/.background.tiff"
+cp "$finder" "$work/staging/.DS_Store"
 hdiutil create -quiet -fs APFS -format ULFO -volname Hex -srcfolder "$work/staging" "$dmg"
 codesign --force --timestamp --keychain "$HEX_KEYCHAIN" --sign "$HEX_SIGNING_IDENTITY" "$dmg"
 notarize "$dmg"

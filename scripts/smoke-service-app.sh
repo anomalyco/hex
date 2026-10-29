@@ -12,7 +12,7 @@ version_dir="$install_root/versions/$version"
 installed="$version_dir/HEX Service.app"
 runtime="$install_root/runtime"
 staging="$install_root/.staging-$version-$$"
-expected_team=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+expected_team=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
 expected_identifier=anomaly.hex.service
 pid=
 

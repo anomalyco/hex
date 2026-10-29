@@ -369,6 +369,27 @@ pub fn raw_windows() -> Vec<RawWindow> {
     out
 }
 
+/// Wayland lists no windows to an app: the window log stays empty on Linux.
+#[cfg(target_os = "linux")]
+pub fn raw_windows() -> Vec<RawWindow> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn dock_rect(_frame: TargetFrame) -> Option<[f64; 4]> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn snapshot(
+    _frame: TargetFrame,
+    _dock: Option<[f64; 4]>,
+    _excluded: &[u32],
+    _cache: &mut HashMap<i32, AppMeta>,
+) -> Vec<WindowEntry> {
+    Vec::new()
+}
+
 /// Reads the visible top-level windows (front to back). Like CGWindowList: the taskbar is the
 /// `Dock` (layer 20), always-on-top and tool windows sit above layer 0, and cloaked (on another
 /// virtual desktop) or minimized windows have no alpha.

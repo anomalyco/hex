@@ -140,7 +140,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(2));
         assert_eq!(
             capture_optional().as_deref(),
-            Some("HEX selected text fixture")
+            Some("Hex selected text fixture")
         );
     }
 }

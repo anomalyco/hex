@@ -1,12 +1,21 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ffi::OsStr;
+//! Personal commands and custom transformations from the user's
+//! `hex.config.ts` (or `hex.config.js`), run in-process by embedded QuickJS
+//! ([`script`]) on one worker thread. The worker loads the config, compiles
+//! its registration into the command registry, reloads it when the config
+//! folder changes (keeping the last good registry when a reload fails),
+//! answers handler and transformation calls, and hands the actions handlers
+//! ask for to Hex's native action executor. The panes read its status from
+//! `personal-commands.json`.
+
+mod script;
+mod typescript;
+
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -21,12 +30,24 @@ use crate::context::ContextSnapshot;
 use crate::dictation::DictationProtocol;
 use crate::keys::{Key, Modifiers};
 
-const MAX_FRAME_BYTES: usize = 256 * 1024;
-const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
-const HOST_START_TIMEOUT: Duration = Duration::from_secs(5);
-const CONFIG_FILE: &str = "hex.config.ts";
+use script::Script;
+
+/// The config file names Hex looks for, in the config folder.
+const CONFIG_FILES: [&str; 2] = ["hex.config.ts", "hex.config.js"];
+/// Files Hex owns in the config folder and rewrites when they differ.
+const MANAGED_FILES: [(&str, &str); 2] = [
+    ("hex.d.ts", include_str!("personal_commands/hex.d.ts")),
+    ("AGENTS.md", include_str!("personal_commands/AGENTS.md")),
+];
+/// Starting points written only where the user has none.
+const TEMPLATE_FILES: [(&str, &str); 1] = [(
+    "tsconfig.json",
+    include_str!("personal_commands/tsconfig.json"),
+)];
+const TEMPLATE_CONFIG: &str = include_str!("personal_commands/hex.config.ts");
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(350);
+const MAX_REGISTRATION_BYTES: usize = 256 * 1024;
 const MAX_COMMANDS: usize = 512;
 const MAX_TRANSFORMATIONS: usize = 128;
 const MAX_TRANSFORMATIONS_PER_INVOCATION: usize = 32;
@@ -40,23 +61,16 @@ const MAX_UNION_MEMBERS: usize = 16;
 const MAX_UNION_DEPTH: usize = 4;
 const MAX_UNION_SERIALIZED_BYTES: usize = 16 * 1024;
 const MAX_REPEAT: u8 = 100;
-const MAX_PENDING_INVOCATIONS: usize = 1024;
-const MAX_PENDING_TOOL_CALLS: usize = 1024;
-const MAX_TOOL_CALLS_PER_INVOCATION: usize = 64;
-const HOST_WRITE_QUEUE: usize = 64;
-const TOOL_QUEUE: usize = 64;
-const TOOL_WORKERS: usize = 2;
-const RETIRE_TIMEOUT: Duration = Duration::from_secs(30);
-const RESTART_BASE_DELAY: Duration = Duration::from_millis(250);
-const RESTART_MAX_DELAY: Duration = Duration::from_secs(8);
-const RESTART_HEALTHY_PERIOD: Duration = Duration::from_secs(30);
-const MAX_AUTOMATIC_RESTARTS: u8 = 5;
+const MAX_ACTIONS_PER_INVOCATION: usize = 64;
+const ACTION_QUEUE: usize = 64;
 const MAX_WATCH_ENTRIES: usize = 4096;
 const MAX_WATCH_DEPTH: usize = 32;
 const MAX_STATUS_BYTES: usize = 256 * 1024;
 const MAX_STATUS_ERROR_BYTES: usize = 4096;
 const MAX_TRANSFORMATION_TEXT_BYTES: usize = 48 * 1024;
-const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a dictation waits for the worker, which may be loading a config
+/// or running a handler first; each script call has its own shorter limit.
+const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(5);
 const LOWERCASE_TRANSFORMATION_ID: &str = "lowercase";
 const SPONGEBOB_TRANSFORMATION_ID: &str = "spongebob-case";
 const NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID: &str = "no-trailing-punctuation";
@@ -217,14 +231,6 @@ fn load_status_at(path: &Path) -> Result<StatusSnapshot> {
     Ok(status)
 }
 
-fn persist_status(status: &StatusSnapshot) {
-    let result = crate::app_paths::personal_commands_status_file()
-        .and_then(|path| persist_status_at(&path, status));
-    if let Err(error) = result {
-        tracing::warn!(%error, "could not persist personal command status");
-    }
-}
-
 fn persist_status_at(path: &Path, status: &StatusSnapshot) -> Result<()> {
     validate_status(status)?;
     let encoded = serde_json::to_vec(status)?;
@@ -322,368 +328,66 @@ fn validate_transformations(
     Ok(ids)
 }
 
+/// The config file in `workspace`, if there is exactly one.
+fn find_config(workspace: &Path) -> Result<Option<&'static str>> {
+    let found = CONFIG_FILES
+        .into_iter()
+        .filter(|name| workspace.join(name).is_file())
+        .collect::<Vec<_>>();
+    match found.as_slice() {
+        [] => Ok(None),
+        [config] => Ok(Some(config)),
+        [first, second, ..] => Err(eyre!(
+            "{first} and {second} both exist; keep only one config file"
+        )),
+    }
+}
+
+/// Whether the personal command folder has a config to load.
+pub fn workspace_configured() -> bool {
+    crate::app_paths::personal_commands_workspace()
+        .is_ok_and(|workspace| matches!(find_config(&workspace), Ok(Some(_)) | Err(_)))
+}
+
+/// Creates the config folder with Hex's typings and agent notes, and a
+/// starter `hex.config.ts` unless a config already exists.
 pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
-    let sdk = crate::app_paths::personal_commands_sdk()?;
-    let bun = find_bun().ok_or_else(|| eyre!("Bun is required to install personal commands"))?;
-    initialize_workspace_at(&workspace, &sdk, |workspace_changed| {
-        if workspace_changed {
-            remove_installed_managed_sdk(&workspace)?;
-        }
-        install_workspace_dependencies(&workspace, &bun)
-    })?;
+    initialize_workspace_at(&workspace)?;
     Ok(workspace)
 }
 
-/// Whether the personal command workspace has a config to host.
-pub fn workspace_configured() -> bool {
-    crate::app_paths::personal_commands_workspace()
-        .is_ok_and(|workspace| workspace.join(CONFIG_FILE).is_file())
-}
-
-/// Provisions the workspace, runs `install` with whether the managed SDK
-/// changed, and only then publishes a missing `hex.config.ts`. A running Hex
-/// starts its host when the config appears, so it must mean the workspace is
-/// installed.
-pub fn initialize_workspace_at(
-    workspace: &Path,
-    sdk: &Path,
-    install: impl FnOnce(bool) -> Result<()>,
-) -> Result<bool> {
-    let template = sdk.join("workspace-template");
-    if !template.is_dir() {
-        return Err(eyre!("personal command SDK resources are incomplete"));
+fn initialize_workspace_at(workspace: &Path) -> Result<()> {
+    fs::create_dir_all(workspace)?;
+    refresh_managed_files(workspace)?;
+    for (name, contents) in TEMPLATE_FILES {
+        let path = workspace.join(name);
+        if !path.exists() {
+            fs::write(path, contents)?;
+        }
     }
-    let workspace_changed = refresh_managed_sdk_at(workspace, sdk)?;
-    copy_directory(&template, workspace, false, Some(OsStr::new(CONFIG_FILE)))?;
-    install(workspace_changed)?;
-    let config = workspace.join(CONFIG_FILE);
-    if !config.exists() {
-        // The staged name ends in .tmp so the workspace watcher ignores it.
-        let staged = workspace.join(format!(".{CONFIG_FILE}.{}.tmp", std::process::id()));
-        fs::copy(template.join(CONFIG_FILE), &staged)?;
-        if let Err(error) = fs::rename(&staged, &config) {
+    if find_config(workspace)?.is_none() {
+        // The staged name ends in .tmp so the watcher never loads a partial file.
+        let staged = workspace.join(format!(".{}.{}.tmp", CONFIG_FILES[0], std::process::id()));
+        fs::write(&staged, TEMPLATE_CONFIG)?;
+        if let Err(error) = fs::rename(&staged, workspace.join(CONFIG_FILES[0])) {
             let _ = fs::remove_file(&staged);
             return Err(error.into());
         }
     }
-    Ok(workspace_changed)
-}
-
-fn workspace_effect_update(workspace: &Path, sdk: &Path) -> Result<Option<Vec<u8>>> {
-    let sdk_manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(sdk.join("package.json"))?)
-            .wrap_err("personal command SDK package.json is invalid")?;
-    let required = sdk_manifest["peerDependencies"]["effect"]
-        .as_str()
-        .filter(|version| {
-            semver::Version::parse(version).is_ok_and(|version| version.build.is_empty())
-        })
-        .ok_or_else(|| {
-            eyre!("personal command SDK peerDependencies.effect must be an exact version")
-        })?;
-    let path = workspace.join("package.json");
-    let linked = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata.file_type().is_symlink(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(error.into()),
-    };
-    let linked_error = || {
-        eyre!(
-            "{} is a symlink; update the linked manifest to Effect \"{required}\" or replace the link with a regular package.json, then retry",
-            path.display()
-        )
-    };
-    let (bytes, mut changed) = match fs::read(&path) {
-        Ok(bytes) => (bytes, false),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if linked {
-                return Err(linked_error());
-            }
-            (fs::read(sdk.join("workspace-template/package.json"))?, true)
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let mut manifest: serde_json::Value = serde_json::from_slice(&bytes)
-        .wrap_err_with(|| format!("{} is invalid JSON; repair it and retry", path.display()))?;
-    let manifest = manifest
-        .as_object_mut()
-        .ok_or_else(|| eyre!("{} must be a JSON object", path.display()))?;
-    let mut has_dependency = false;
-    for section in [
-        "dependencies",
-        "devDependencies",
-        "optionalDependencies",
-        "peerDependencies",
-        "overrides",
-        "resolutions",
-    ] {
-        let Some(entries) = manifest.get_mut(section) else {
-            continue;
-        };
-        let entries = entries
-            .as_object_mut()
-            .ok_or_else(|| eyre!("{} {section} must be a JSON object", path.display()))?;
-        if matches!(section, "overrides" | "resolutions") {
-            let mut pending = vec![(section.to_string(), &*entries)];
-            while let Some((location, entries)) = pending.pop() {
-                for (selector, value) in entries {
-                    let mut parts = selector.rsplit('>').next().unwrap_or(selector).split('/');
-                    let mut targets_effect = false;
-                    while let Some(part) = parts.next() {
-                        targets_effect = part == "effect" || part.starts_with("effect@");
-                        // The slash in @scope/package is not a dependency selector.
-                        if part.starts_with('@') {
-                            let _ = parts.next();
-                            targets_effect = false;
-                        }
-                    }
-                    if targets_effect && (location != section || selector != "effect") {
-                        return Err(eyre!(
-                            "{} has unsupported Effect selector {location}[{selector:?}]; remove this selector and set dependencies.effect to \"{required}\", the version required by the HEX SDK, then retry",
-                            path.display()
-                        ));
-                    }
-                    if let Some(nested) = value.as_object() {
-                        pending.push((format!("{location}[{selector:?}]"), nested));
-                    }
-                }
-            }
-        }
-        let Some(effect) = entries.get_mut("effect") else {
-            continue;
-        };
-        has_dependency |= matches!(
-            section,
-            "dependencies" | "devDependencies" | "optionalDependencies"
-        );
-        match effect.as_str() {
-            Some(version) if version == required => {}
-            Some("4.0.0-beta.97" | "4.0.0-beta.107" | "4.0.0-rc.112") => {
-                *effect = required.into();
-                changed = true;
-            }
-            _ => {
-                return Err(eyre!(
-                    "{} has incompatible {section}.effect ({effect}); set it to \"{required}\", the version required by the HEX SDK, then retry",
-                    path.display()
-                ));
-            }
-        }
-    }
-    if !has_dependency {
-        manifest
-            .entry("dependencies")
-            .or_insert_with(|| serde_json::json!({}))
-            .as_object_mut()
-            .expect("dependencies was validated")
-            .insert("effect".into(), required.into());
-        changed = true;
-    }
-    if !changed {
-        return Ok(None);
-    }
-    if linked {
-        return Err(linked_error());
-    }
-    let mut encoded = serde_json::to_vec_pretty(manifest)?;
-    encoded.push(b'\n');
-    Ok(Some(encoded))
-}
-
-/// The SDK's code: the built `dist` in the macOS bundle and source checkouts,
-/// or the TypeScript `src` the Windows executable embeds (Bun runs it as is).
-fn sdk_code_directory(sdk: &Path) -> Option<&'static str> {
-    if sdk.join("dist/bin.js").is_file() {
-        Some("dist")
-    } else if sdk.join("src/bin.ts").is_file() {
-        Some("src")
-    } else {
-        None
-    }
-}
-
-/// Points a staged source SDK's package exports at its TypeScript entry points.
-fn write_source_sdk_manifest(path: &Path) -> Result<()> {
-    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-    manifest["exports"]["."]["types"] = "./src/index.ts".into();
-    manifest["exports"]["."]["import"] = "./src/index.ts".into();
-    manifest["exports"]["./effect"]["types"] = "./src/effect.ts".into();
-    manifest["exports"]["./effect"]["import"] = "./src/effect.ts".into();
-    manifest["bin"]["hex-commands-host"] = "./src/bin.ts".into();
-    manifest["files"] = serde_json::json!(["src"]);
-    let mut encoded = serde_json::to_vec_pretty(&manifest)?;
-    encoded.push(b'\n');
-    fs::write(path, encoded)?;
     Ok(())
 }
 
-/// The installed managed host entry point for the SDK's code layout.
-fn managed_host_entrypoint(workspace: &Path) -> PathBuf {
-    let package = workspace.join("node_modules/@hex/commands");
-    let source = package.join("src/bin.ts");
-    if source.is_file() {
-        source
-    } else {
-        package.join("dist/bin.js")
-    }
-}
-
-fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
-    let code = sdk_code_directory(sdk);
-    let Some(code) = code.filter(|_| sdk.join("package.json").is_file()) else {
-        return Err(eyre!("personal command SDK resources are incomplete"));
-    };
-    // Validate both manifests before touching the installed SDK or user files.
-    let manifest_update = workspace_effect_update(workspace, sdk)?;
-    fs::create_dir_all(workspace)?;
-    let staged_sdk = workspace.join(".hex-sdk.tmp");
-    let installed_sdk = workspace.join(".hex-sdk");
-    if staged_sdk.exists() {
-        fs::remove_dir_all(&staged_sdk)?;
-    }
-    fs::create_dir(&staged_sdk)?;
-    fs::copy(sdk.join("package.json"), staged_sdk.join("package.json"))?;
-    copy_directory(&sdk.join(code), &staged_sdk.join(code), true, None)?;
-    if code == "src" {
-        write_source_sdk_manifest(&staged_sdk.join("package.json"))?;
-    }
-    let sdk_changed = directory_manifest(&staged_sdk)? != directory_manifest(&installed_sdk)?;
-    if !sdk_changed {
-        fs::remove_dir_all(staged_sdk)?;
-    } else {
-        let previous_sdk = workspace.join(".hex-sdk.previous");
-        if previous_sdk.exists() {
-            fs::remove_dir_all(&previous_sdk)?;
-        }
-        if installed_sdk.exists() {
-            fs::rename(&installed_sdk, &previous_sdk)?;
-        }
-        if let Err(error) = fs::rename(&staged_sdk, &installed_sdk) {
-            if previous_sdk.exists() {
-                let _ = fs::rename(&previous_sdk, &installed_sdk);
-            }
-            return Err(error.into());
-        }
-        if previous_sdk.exists() {
-            fs::remove_dir_all(previous_sdk)?;
-        }
-    }
-    if let Some(encoded) = &manifest_update {
-        write_workspace_manifest(&workspace.join("package.json"), encoded)?;
-    }
-    Ok(sdk_changed || manifest_update.is_some())
-}
-
-fn write_workspace_manifest(path: &Path, encoded: &[u8]) -> Result<()> {
-    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .and_then(|mut file| {
-            let result = (|| {
-                file.write_all(encoded)?;
-                match fs::metadata(path) {
-                    Ok(metadata) => file.set_permissions(metadata.permissions())?,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-                fs::rename(&temporary, path)
-            })();
-            drop(file);
-            if result.is_err() {
-                let _ = fs::remove_file(&temporary);
-            }
-            result
-        })
-    .wrap_err_with(|| format!(
-        "could not update {}; the SDK may already be refreshed; fix filesystem access or space (including {}), then rerun `hex commands init`",
-        path.display(), temporary.display()
-    ))
-}
-
-fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut manifest = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory)? {
-            let entry = entry?;
-            let path = entry.path();
-            let file_type = entry.file_type()?;
-            if file_type.is_symlink() {
-                return Err(eyre!("managed SDK resources must not contain symlinks"));
-            }
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|_| eyre!("managed SDK path escaped its root"))?
-                .to_path_buf();
-            if file_type.is_dir() {
-                manifest.push((relative, None));
-                pending.push(path);
-            } else if file_type.is_file() {
-                manifest.push((relative, Some(fs::read(path)?)));
-            }
-        }
-    }
-    manifest.sort_by(|left, right| left.0.cmp(&right.0));
-    Ok(manifest)
-}
-
-fn install_workspace_dependencies(workspace: &Path, bun: &Path) -> Result<()> {
-    let status = Command::new(bun)
-        // A plain install reuses stale peer metadata for file:.hex-sdk in bun.lock.
-        .args(["update", "@hex/commands"])
-        .current_dir(workspace)
-        .status()
-        .wrap_err("could not install the personal command workspace")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(eyre!(
-            "Bun failed to install the personal command workspace"
-        ))
-    }
-}
-
-fn remove_installed_managed_sdk(workspace: &Path) -> Result<()> {
-    let installed = workspace.join("node_modules/@hex/commands");
-    let Ok(metadata) = fs::symlink_metadata(&installed) else {
-        return Ok(());
-    };
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        fs::remove_dir_all(installed)?;
-    } else {
-        fs::remove_file(installed)?;
-    }
-    Ok(())
-}
-
-fn copy_directory(
-    source: &Path,
-    destination: &Path,
-    overwrite: bool,
-    skip: Option<&OsStr>,
-) -> Result<()> {
-    fs::create_dir_all(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            return Err(eyre!("SDK resources must not contain symlinks"));
-        }
-        if skip == Some(entry.file_name().as_os_str()) {
+/// Writes the typings and agent notes this build of Hex ships, where they
+/// differ, so an existing folder follows app updates.
+fn refresh_managed_files(workspace: &Path) -> Result<()> {
+    for (name, contents) in MANAGED_FILES {
+        let path = workspace.join(name);
+        if fs::read(&path).is_ok_and(|current| current == contents.as_bytes()) {
             continue;
         }
-        let target = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_directory(&entry.path(), &target, overwrite, None)?;
-        } else if file_type.is_file() && (overwrite || !target.exists()) {
-            fs::copy(entry.path(), target)?;
-        }
+        fs::write(&path, contents)
+            .wrap_err_with(|| format!("could not write {}", path.display()))?;
     }
     Ok(())
 }
@@ -696,6 +400,504 @@ pub struct PersonalCommands {
     worker: Option<thread::JoinHandle<()>>,
     worker_done: Receiver<()>,
     transformations: Arc<TransformationClient>,
+}
+
+impl PersonalCommands {
+    pub fn start(base: CommandConfig, transformations: Arc<TransformationClient>) -> Option<Self> {
+        let active = Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(base.clone()))));
+        let (request_sender, requests) = mpsc::sync_channel(32);
+        let (outcome_sender, outcomes) = mpsc::sync_channel(64);
+        let stop = Arc::new(AtomicBool::new(false));
+        let (done_sender, worker_done) = mpsc::sync_channel(1);
+        let actions = spawn_action_runner(outcome_sender.clone())?;
+        let workspace = crate::app_paths::personal_commands_workspace().ok()?;
+        let status_file = crate::app_paths::personal_commands_status_file().ok();
+        let worker_active = active.clone();
+        let worker_transformations = transformations.clone();
+        let worker_requests = request_sender.clone();
+        let worker_stop = stop.clone();
+        let worker = thread::Builder::new()
+            .name("personal-commands".into())
+            .stack_size(script::THREAD_STACK_SIZE)
+            .spawn(move || {
+                // Scripts never leave this thread.
+                Worker {
+                    base,
+                    active: worker_active,
+                    transformations: worker_transformations,
+                    requests: worker_requests,
+                    outcomes: outcome_sender,
+                    actions,
+                    workspace,
+                    status_file,
+                    generation: 0,
+                    script: None,
+                    status: StatusSnapshot {
+                        host_state: HostState::Starting,
+                        ..StatusSnapshot::default()
+                    },
+                }
+                .run(&requests, &worker_stop);
+                let _ = done_sender.send(());
+            })
+            .ok()?;
+        Some(Self {
+            active,
+            requests: request_sender,
+            outcomes,
+            stop,
+            worker: Some(worker),
+            worker_done,
+            transformations,
+        })
+    }
+
+    pub fn snapshot(&self) -> Arc<RuntimeSnapshot> {
+        self.active
+            .read()
+            .expect("command registry poisoned")
+            .clone()
+    }
+
+    pub fn invoke(
+        &self,
+        generation: u64,
+        command_id: impl Into<String>,
+        heard: &str,
+        context: ContextSnapshot,
+        captures: CapturedValues,
+    ) -> Result<(), &'static str> {
+        self.requests
+            .try_send(Request::Invoke(Box::new(Invocation {
+                generation,
+                command_id: command_id.into(),
+                heard: heard.into(),
+                context,
+                captures,
+            })))
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "personal command queue is full",
+                TrySendError::Disconnected(_) => "personal commands are unavailable",
+            })
+    }
+
+    pub fn try_recv(&self) -> Option<ActionOutcome> {
+        self.outcomes.try_recv().ok()
+    }
+}
+
+impl Drop for PersonalCommands {
+    fn drop(&mut self) {
+        self.transformations.clear();
+        self.stop.store(true, Ordering::Release);
+        let _ = self.requests.try_send(Request::Reload);
+        if self
+            .worker_done
+            .recv_timeout(Duration::from_secs(2))
+            .is_ok()
+            && let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("personal command worker panicked during shutdown");
+        }
+    }
+}
+
+struct Invocation {
+    generation: u64,
+    command_id: String,
+    heard: String,
+    context: ContextSnapshot,
+    captures: CapturedValues,
+}
+
+enum Request {
+    Invoke(Box<Invocation>),
+    Transform(Box<TransformationRequest>),
+    /// Reload the config now; also wakes the worker to stop.
+    Reload,
+}
+
+/// The actions one handler asked for, run in order by the action runner.
+struct ActionJob {
+    outcome: ActionOutcome,
+    actions: Vec<Action>,
+}
+
+/// Runs handler actions one job at a time, in submission order, on Hex's
+/// native action executor, so a slow action never holds up the script worker.
+fn spawn_action_runner(outcomes: SyncSender<ActionOutcome>) -> Option<SyncSender<ActionJob>> {
+    let (sender, jobs) = mpsc::sync_channel::<ActionJob>(ACTION_QUEUE);
+    thread::Builder::new()
+        .name("personal-command-actions".into())
+        .spawn(move || {
+            while let Ok(job) = jobs.recv() {
+                let result = job
+                    .actions
+                    .into_iter()
+                    .try_for_each(crate::commands::execute)
+                    .map_err(|error| bounded_error(&error.to_string()));
+                if outcomes
+                    .send(ActionOutcome {
+                        result,
+                        ..job.outcome
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .ok()?;
+    Some(sender)
+}
+
+/// The script worker's state: the loaded config, the registry it compiled
+/// to, and the status the panes read.
+struct Worker {
+    base: CommandConfig,
+    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
+    transformations: Arc<TransformationClient>,
+    requests: SyncSender<Request>,
+    outcomes: SyncSender<ActionOutcome>,
+    actions: SyncSender<ActionJob>,
+    workspace: PathBuf,
+    status_file: Option<PathBuf>,
+    /// Counts every load, so a stale invocation never reaches a newer config.
+    generation: u64,
+    /// The loaded config and the generation it registered as.
+    script: Option<(u64, Script)>,
+    status: StatusSnapshot,
+}
+
+impl Worker {
+    fn run(mut self, requests: &Receiver<Request>, stop: &AtomicBool) {
+        self.persist();
+        if matches!(find_config(&self.workspace), Ok(Some(_)))
+            && let Err(error) = refresh_managed_files(&self.workspace)
+        {
+            tracing::warn!(%error, "could not refresh the personal command typings");
+        }
+        let mut fingerprint = workspace_fingerprint(&self.workspace);
+        self.reload();
+        let mut changed_at = None;
+        let mut reload_now = false;
+        let mut next_poll = Instant::now() + POLL_INTERVAL;
+        while !stop.load(Ordering::Acquire) {
+            match requests.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
+                Ok(Request::Invoke(invocation)) => self.invoke(*invocation),
+                Ok(Request::Transform(request)) => self.transform(*request),
+                Ok(Request::Reload) => reload_now = true,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            let now = Instant::now();
+            if now >= next_poll {
+                next_poll = now + POLL_INTERVAL;
+                let next = workspace_fingerprint(&self.workspace);
+                if next != fingerprint {
+                    fingerprint = next;
+                    changed_at = Some(now);
+                }
+            }
+            if reload_now || changed_at.is_some_and(|changed| changed.elapsed() >= RELOAD_DEBOUNCE)
+            {
+                reload_now = false;
+                changed_at = None;
+                self.reload();
+            }
+        }
+        self.transformations.clear();
+        self.status.host_state = HostState::Stopped;
+        self.persist();
+    }
+
+    /// Loads the config as it is now. A config that fails to load leaves the
+    /// last good one active and reports the error; a removed config
+    /// unregisters everything.
+    fn reload(&mut self) {
+        let config = match find_config(&self.workspace) {
+            Ok(Some(config)) => config,
+            Ok(None) => {
+                if self.script.is_some() || self.status.host_state != HostState::NotConfigured {
+                    self.deactivate();
+                    self.persist();
+                }
+                return;
+            }
+            Err(error) => {
+                self.reject(&error.to_string());
+                return;
+            }
+        };
+        self.generation += 1;
+        let started = Instant::now();
+        match self.load(config) {
+            Ok((script, candidate)) => {
+                self.transformations
+                    .activate(&candidate.runtime, self.requests.clone());
+                *self.active.write().expect("command registry poisoned") =
+                    Arc::new(candidate.runtime);
+                self.script = Some((self.generation, script));
+                self.status = StatusSnapshot {
+                    active_generation: Some(self.generation),
+                    catalog: candidate.catalog,
+                    dictation: candidate.dictation,
+                    transformations: candidate.transformations,
+                    host_state: HostState::Active,
+                    last_reload_error: None,
+                };
+                self.persist();
+                tracing::info!(
+                    generation = self.generation,
+                    duration_us = started.elapsed().as_micros(),
+                    "personal commands loaded"
+                );
+            }
+            Err(error) => self.reject(&format!("{error:#}")),
+        }
+    }
+
+    fn load(&self, config: &str) -> Result<(Script, Candidate)> {
+        load_config(&self.workspace, config, &self.base, self.generation)
+    }
+
+    fn reject(&mut self, error: &str) {
+        self.status.host_state = if self.script.is_some() {
+            HostState::Active
+        } else {
+            HostState::Unavailable
+        };
+        self.status.last_reload_error = Some(bounded_status_error(error));
+        self.persist();
+        tracing::error!(
+            error,
+            "personal command config rejected; keeping the previous one"
+        );
+    }
+
+    /// Forgets everything the last config registered.
+    fn deactivate(&mut self) {
+        self.script = None;
+        self.transformations.clear();
+        *self.active.write().expect("command registry poisoned") =
+            Arc::new(RuntimeSnapshot::native(self.base.clone()));
+        self.status = StatusSnapshot {
+            host_state: HostState::NotConfigured,
+            ..StatusSnapshot::default()
+        };
+    }
+
+    fn persist(&self) {
+        let Some(path) = &self.status_file else {
+            return;
+        };
+        if let Err(error) = persist_status_at(path, &self.status) {
+            tracing::warn!(%error, "could not persist personal command status");
+        }
+    }
+
+    fn script(&self, generation: u64) -> Option<&Script> {
+        self.script
+            .as_ref()
+            .filter(|(loaded, _)| *loaded == generation)
+            .map(|(_, script)| script)
+    }
+
+    fn invoke(&self, invocation: Invocation) {
+        let Some(script) = self.script(invocation.generation) else {
+            emit_failure(
+                invocation,
+                &self.outcomes,
+                "personal command generation is no longer available",
+            );
+            return;
+        };
+        let started = Instant::now();
+        let captures = invocation
+            .captures
+            .iter()
+            .map(|(name, value)| {
+                let value = match value {
+                    CapturedValue::Digit(value) => WireCaptureValue::Number(*value),
+                    CapturedValue::Letter(value) => WireCaptureValue::Text(value.to_string()),
+                    CapturedValue::Choice(value) | CapturedValue::Text(value) => {
+                        WireCaptureValue::Text(value.clone())
+                    }
+                };
+                (name.clone(), value)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let result = script
+            .invoke(
+                &invocation.command_id,
+                &json(&invocation_context(&invocation.context)),
+                &json(&captures),
+            )
+            .and_then(|actions| parse_actions(&actions));
+        tracing::info!(
+            generation = invocation.generation,
+            command_id = invocation.command_id,
+            status = if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+            duration_us = started.elapsed().as_micros(),
+            "personal command handler"
+        );
+        let actions = match result {
+            Ok(actions) => actions,
+            Err(error) => return emit_failure(invocation, &self.outcomes, &error),
+        };
+        let outcome = ActionOutcome {
+            id: invocation.command_id,
+            heard: invocation.heard,
+            context: invocation.context.label(),
+            result: Ok(()),
+        };
+        if actions.is_empty() {
+            let _ = self.outcomes.send(outcome);
+        } else if let Err(error) = self.actions.try_send(ActionJob { outcome, actions }) {
+            let (TrySendError::Full(job) | TrySendError::Disconnected(job)) = error;
+            let _ = self.outcomes.send(ActionOutcome {
+                result: Err("too many personal command actions are waiting".into()),
+                ..job.outcome
+            });
+        }
+    }
+
+    fn transform(&self, request: TransformationRequest) {
+        let started = Instant::now();
+        let result = match self.script(request.generation) {
+            None => Err("custom transformation generation is unavailable".into()),
+            Some(script) => script
+                .transform(
+                    &json(&request.ids),
+                    &request.text,
+                    &json(&invocation_context(&request.context)),
+                )
+                .and_then(|text| {
+                    if text.len() > MAX_TRANSFORMATION_TEXT_BYTES {
+                        Err("custom transformation output is too large".into())
+                    } else {
+                        Ok(text)
+                    }
+                })
+                .map_err(|error| bounded_error(&error)),
+        };
+        tracing::info!(
+            generation = request.generation,
+            status = if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+            duration_us = started.elapsed().as_micros(),
+            "custom transformation"
+        );
+        let _ = request.response.send(result);
+    }
+}
+
+/// Loads `config` from `workspace` and compiles its registration over
+/// `base` as `generation`.
+fn load_config(
+    workspace: &Path,
+    config: &str,
+    base: &CommandConfig,
+    generation: u64,
+) -> Result<(Script, Candidate)> {
+    let script = Script::load(workspace, config).map_err(|error| eyre!(error))?;
+    if script.registration().len() > MAX_REGISTRATION_BYTES {
+        return Err(eyre!(
+            "the config registers more than {MAX_REGISTRATION_BYTES} bytes of commands"
+        ));
+    }
+    let registration: Registration = serde_json::from_str(script.registration())
+        .wrap_err("the config's commands or transformations are invalid")?;
+    let catalog = status_catalog(&registration.commands);
+    let dictation = registration.dictation.clone();
+    let transformations = registration.transformations.clone();
+    let runtime = compile_registration(
+        base,
+        generation,
+        registration.dictation,
+        registration.transformations,
+        registration.commands,
+    )?;
+    Ok((
+        script,
+        Candidate {
+            runtime,
+            catalog,
+            dictation,
+            transformations,
+        },
+    ))
+}
+
+/// Loads the config as the running Hex would, over `base`, without
+/// registering anything: what it registers, or why it fails.
+#[cfg(target_os = "macos")]
+pub fn check_workspace(base: &CommandConfig) -> Result<String> {
+    check_workspace_at(&crate::app_paths::personal_commands_workspace()?, base)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn check_workspace_at(workspace: &Path, base: &CommandConfig) -> Result<String> {
+    let config = find_config(workspace)?.ok_or_else(|| {
+        eyre!(
+            "{} has no hex.config.ts; run `hex commands init`",
+            workspace.display()
+        )
+    })?;
+    let (_, candidate) = load_config(workspace, config, base, 0)?;
+    Ok(format!(
+        "{config}: {} commands, {} transformations",
+        candidate.catalog.len(),
+        candidate.transformations.len()
+    ))
+}
+
+/// What a successful load registers, before it replaces the active registry.
+struct Candidate {
+    runtime: RuntimeSnapshot,
+    catalog: Vec<StatusCommand>,
+    dictation: Option<StatusDictationProtocol>,
+    transformations: Vec<StatusTransformation>,
+}
+
+fn json(value: &impl Serialize) -> String {
+    serde_json::to_string(value).expect("plain data serializes")
+}
+
+/// A handler's actions, validated before any of them runs.
+fn parse_actions(json: &str) -> std::result::Result<Vec<Action>, String> {
+    let actions: Vec<NativeAction> =
+        serde_json::from_str(json).map_err(|error| format!("invalid action: {error}"))?;
+    if actions.len() > MAX_ACTIONS_PER_INVOCATION {
+        return Err(format!(
+            "a command may run at most {MAX_ACTIONS_PER_INVOCATION} actions"
+        ));
+    }
+    actions
+        .into_iter()
+        .map(|action| action.into_action().map_err(|error| error.to_string()))
+        .collect()
+}
+
+/// The registration a config's `install` produces.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Registration {
+    dictation: Option<StatusDictationProtocol>,
+    #[serde(default)]
+    transformations: Vec<StatusTransformation>,
+    commands: Vec<RegistrationCommand>,
 }
 
 #[derive(Clone)]
@@ -802,7 +1004,7 @@ impl TransformationClient {
             .map_err(|error| match error {
                 TrySendError::Full(_) => "custom transformation queue is full".to_string(),
                 TrySendError::Disconnected(_) => {
-                    "custom transformation host is unavailable".to_string()
+                    "custom transformations are unavailable".to_string()
                 }
             })?;
         let started = Instant::now();
@@ -818,7 +1020,7 @@ impl TransformationClient {
                 Ok(result) => return result,
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("custom transformation host stopped".into());
+                    return Err("custom transformations stopped".into());
                 }
             }
         }
@@ -874,144 +1076,6 @@ fn remove_trailing_punctuation(text: &str) -> String {
     let mut output = body.trim_end_matches(TRAILING_PUNCTUATION).to_string();
     output.push_str(trailing_whitespace);
     output
-}
-
-struct Invocation {
-    generation: u64,
-    command_id: String,
-    heard: String,
-    context: ContextSnapshot,
-    captures: CapturedValues,
-}
-
-enum Request {
-    Invoke(Box<Invocation>),
-    Transform(Box<TransformationRequest>),
-    Reload,
-}
-
-enum HostEvent {
-    Frame(u64, HostOutput),
-    Closed(u64, String),
-    ToolResult(u64, ToolResult),
-}
-
-struct ToolResult {
-    invocation_id: String,
-    tool_call_id: String,
-    result: WireResult,
-}
-
-struct HostProcess {
-    generation: u64,
-    child: Child,
-    input: SyncSender<HostInput>,
-    retire_at: Option<Instant>,
-}
-
-struct PendingInvocation {
-    generation: u64,
-    command_id: String,
-    heard: String,
-    context: String,
-    tool_call_count: usize,
-    started: Instant,
-}
-
-impl PendingInvocation {
-    fn into_outcome(self, result: std::result::Result<(), String>) -> ActionOutcome {
-        ActionOutcome {
-            id: self.command_id,
-            heard: self.heard,
-            context: self.context,
-            result,
-        }
-    }
-}
-
-struct PendingTransformation {
-    generation: u64,
-    response: SyncSender<std::result::Result<String, String>>,
-    started: Instant,
-}
-
-/// Live host processes and the work still awaiting each generation's reply.
-#[derive(Default)]
-struct Generations {
-    hosts: HashMap<u64, HostProcess>,
-    pending: HashMap<String, PendingInvocation>,
-    pending_transformations: HashMap<String, PendingTransformation>,
-    pending_tools: HashSet<(u64, String, String)>,
-}
-
-/// Everything a host launch needs that stays fixed for the worker's lifetime.
-struct HostLaunch<'a> {
-    base: &'a CommandConfig,
-    workspace: &'a Path,
-    config: &'a Path,
-    bun: &'a Path,
-    host_entrypoint: &'a Path,
-    event_sender: &'a SyncSender<HostEvent>,
-}
-
-/// A host that registered successfully, before it replaces the active registry.
-struct Candidate {
-    host: HostProcess,
-    runtime: RuntimeSnapshot,
-    catalog: Vec<StatusCommand>,
-    dictation: Option<StatusDictationProtocol>,
-    transformations: Vec<StatusTransformation>,
-}
-
-/// Resolved tooling for the configured personal command workspace.
-struct HostPaths {
-    workspace: PathBuf,
-    config: PathBuf,
-    bun: PathBuf,
-    host_entrypoint: PathBuf,
-}
-
-#[derive(Default)]
-struct RestartBackoff {
-    failures: u8,
-    retry_at: Option<Instant>,
-    active_since: Option<Instant>,
-}
-
-struct ToolJob {
-    generation: u64,
-    invocation_id: String,
-    tool_call_id: String,
-    action: NativeAction,
-}
-
-#[derive(Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum HostOutput {
-    Registration {
-        protocol_version: u8,
-        dictation: Option<StatusDictationProtocol>,
-        #[serde(default)]
-        transformations: Vec<StatusTransformation>,
-        commands: Vec<RegistrationCommand>,
-    },
-    ToolCall {
-        invocation_id: String,
-        tool_call_id: String,
-        action: NativeAction,
-    },
-    InvocationResult {
-        invocation_id: String,
-        result: WireResult,
-    },
-    TransformationResult {
-        invocation_id: String,
-        result: TransformationWireResult,
-    },
 }
 
 #[derive(Deserialize)]
@@ -1101,52 +1165,6 @@ enum NativeAction {
     },
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum WireResult {
-    Success,
-    Failure { message: String },
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-enum TransformationWireResult {
-    Success { text: String },
-    Failure { message: String },
-}
-
-#[derive(Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum HostInput {
-    Invoke {
-        invocation_id: String,
-        command_id: String,
-        context: InvocationContext,
-        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-        captures: BTreeMap<String, WireCaptureValue>,
-    },
-    Transform {
-        invocation_id: String,
-        transformation_ids: Vec<String>,
-        text: String,
-        context: InvocationContext,
-    },
-    ToolResult {
-        invocation_id: String,
-        tool_call_id: String,
-        result: WireResult,
-    },
-    Shutdown,
-}
-
 #[derive(Serialize)]
 #[serde(untagged)]
 enum WireCaptureValue {
@@ -1180,720 +1198,6 @@ const fn one() -> u8 {
     1
 }
 
-impl RestartBackoff {
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    fn host_started(&mut self, now: Instant) {
-        self.retry_at = None;
-        self.active_since = Some(now);
-    }
-
-    fn host_failed(&mut self, now: Instant) {
-        self.active_since = None;
-        self.failures = self.failures.saturating_add(1);
-        self.retry_at = (self.failures <= MAX_AUTOMATIC_RESTARTS).then(|| {
-            let exponent = u32::from(self.failures.saturating_sub(1));
-            let delay = RESTART_BASE_DELAY
-                .saturating_mul(1_u32 << exponent)
-                .min(RESTART_MAX_DELAY);
-            now + delay
-        });
-    }
-
-    fn ready(&self, now: Instant) -> bool {
-        self.retry_at.is_some_and(|retry_at| now >= retry_at)
-    }
-
-    fn reset_if_healthy(&mut self, now: Instant) {
-        if self
-            .active_since
-            .is_some_and(|started| now.duration_since(started) >= RESTART_HEALTHY_PERIOD)
-        {
-            self.reset();
-        }
-    }
-}
-
-impl PersonalCommands {
-    pub fn start(base: CommandConfig, transformations: Arc<TransformationClient>) -> Option<Self> {
-        let active = Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(base.clone()))));
-        let (request_sender, requests) = mpsc::sync_channel(32);
-        let (outcome_sender, outcomes) = mpsc::sync_channel(64);
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_active = active.clone();
-        let worker_stop = stop.clone();
-        let worker_transformations = transformations.clone();
-        let worker_requests = request_sender.clone();
-        let (done_sender, worker_done) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("personal-command-host".into())
-            .spawn(move || {
-                run_worker(
-                    base,
-                    worker_active,
-                    requests,
-                    worker_requests,
-                    outcome_sender,
-                    worker_stop,
-                    worker_transformations,
-                );
-                let _ = done_sender.send(());
-            })
-            .ok()?;
-        Some(Self {
-            active,
-            requests: request_sender,
-            outcomes,
-            stop,
-            worker: Some(worker),
-            worker_done,
-            transformations,
-        })
-    }
-
-    pub fn snapshot(&self) -> Arc<RuntimeSnapshot> {
-        self.active
-            .read()
-            .expect("command registry poisoned")
-            .clone()
-    }
-
-    pub fn invoke(
-        &self,
-        generation: u64,
-        command_id: impl Into<String>,
-        heard: &str,
-        context: ContextSnapshot,
-        captures: CapturedValues,
-    ) -> Result<(), &'static str> {
-        self.requests
-            .try_send(Request::Invoke(Box::new(Invocation {
-                generation,
-                command_id: command_id.into(),
-                heard: heard.into(),
-                context,
-                captures,
-            })))
-            .map_err(|error| match error {
-                TrySendError::Full(_) => "personal command host queue is full",
-                TrySendError::Disconnected(_) => "personal command host is unavailable",
-            })
-    }
-
-    pub fn try_recv(&self) -> Option<ActionOutcome> {
-        self.outcomes.try_recv().ok()
-    }
-}
-
-impl Drop for PersonalCommands {
-    fn drop(&mut self) {
-        self.transformations.clear();
-        self.stop.store(true, Ordering::Release);
-        let _ = self.requests.try_send(Request::Reload);
-        if self
-            .worker_done
-            .recv_timeout(Duration::from_secs(2))
-            .is_ok()
-            && let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
-            tracing::warn!("personal command host worker panicked during shutdown");
-        }
-    }
-}
-
-fn run_worker(
-    base: CommandConfig,
-    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
-    requests: Receiver<Request>,
-    request_sender: SyncSender<Request>,
-    outcomes: SyncSender<ActionOutcome>,
-    stop: Arc<AtomicBool>,
-    transformations: Arc<TransformationClient>,
-) {
-    let mut status = StatusSnapshot {
-        host_state: HostState::Starting,
-        ..StatusSnapshot::default()
-    };
-    persist_status(&status);
-    // Generations keep counting across configure/unconfigure cycles so a stale
-    // invocation can never reach a newer host.
-    let mut generation = 0;
-    while !stop.load(Ordering::Acquire) {
-        let paths = match prepare_host() {
-            Ok(Some(paths)) => paths,
-            Ok(None) => {
-                status = StatusSnapshot {
-                    host_state: HostState::NotConfigured,
-                    ..StatusSnapshot::default()
-                };
-                persist_status(&status);
-                let Ok(workspace) = crate::app_paths::personal_commands_workspace() else {
-                    return;
-                };
-                if !wait_for_config(&workspace, &requests, &outcomes, &stop)
-                    || stop.load(Ordering::Acquire)
-                {
-                    return;
-                }
-                tracing::info!("personal command config appeared; starting the host");
-                status.host_state = HostState::Starting;
-                persist_status(&status);
-                continue;
-            }
-            Err(error) => {
-                let error = format!("{error:#}");
-                status.host_state = HostState::Unavailable;
-                status.last_reload_error = Some(bounded_status_error(&error));
-                persist_status(&status);
-                tracing::warn!(error, "personal commands are unavailable");
-                return;
-            }
-        };
-        let exit = run_host(
-            paths,
-            &base,
-            &active,
-            &requests,
-            &request_sender,
-            &outcomes,
-            &stop,
-            &transformations,
-            &mut generation,
-            &mut status,
-        );
-        match exit {
-            HostExit::Stopped => return,
-            HostExit::Unconfigured => {
-                tracing::info!("personal command config was removed; waiting for a new one");
-                deactivate(&mut status, &active, &base, &transformations);
-                persist_status(&status);
-            }
-        }
-    }
-}
-
-/// Forgets everything the last host registered, so neither the registry nor
-/// the persisted status describes a host that no longer runs.
-fn deactivate(
-    status: &mut StatusSnapshot,
-    active: &RwLock<Arc<RuntimeSnapshot>>,
-    base: &CommandConfig,
-    transformations: &TransformationClient,
-) {
-    transformations.clear();
-    *active.write().expect("command registry poisoned") =
-        Arc::new(RuntimeSnapshot::native(base.clone()));
-    *status = StatusSnapshot {
-        host_state: HostState::NotConfigured,
-        ..StatusSnapshot::default()
-    };
-}
-
-enum HostExit {
-    Stopped,
-    Unconfigured,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_host(
-    paths: HostPaths,
-    base: &CommandConfig,
-    active: &RwLock<Arc<RuntimeSnapshot>>,
-    requests: &Receiver<Request>,
-    request_sender: &SyncSender<Request>,
-    outcomes: &SyncSender<ActionOutcome>,
-    stop: &AtomicBool,
-    transformations: &TransformationClient,
-    generation: &mut u64,
-    status: &mut StatusSnapshot,
-) -> HostExit {
-    let HostPaths {
-        workspace,
-        config,
-        bun,
-        host_entrypoint,
-    } = paths;
-    let (event_sender, events) = mpsc::sync_channel(64);
-    let (tool_sender, tool_jobs) = mpsc::sync_channel(TOOL_QUEUE);
-    spawn_tool_workers(tool_jobs, event_sender.clone());
-    let (reload_sender, reload_requests) = mpsc::sync_channel(1);
-    let session_stop = Arc::new(AtomicBool::new(false));
-    let watcher_session_stop = session_stop.clone();
-    let watcher_workspace = workspace.clone();
-    let _ = thread::Builder::new()
-        .name("personal-command-watch".into())
-        .spawn(move || watch_workspace(watcher_workspace, reload_sender, watcher_session_stop));
-    let launch = HostLaunch {
-        base,
-        workspace: &workspace,
-        config: &config,
-        bun: &bun,
-        host_entrypoint: &host_entrypoint,
-        event_sender: &event_sender,
-    };
-    let mut generations = Generations::default();
-    let mut restart_backoff = RestartBackoff::default();
-    if let Some(host) = reload(
-        &launch,
-        active,
-        generation,
-        status,
-        request_sender,
-        transformations,
-    ) {
-        restart_backoff.host_started(Instant::now());
-        generations.hosts.insert(host.generation, host);
-    } else {
-        restart_backoff.host_failed(Instant::now());
-    }
-    let mut next_invocation = 0_u64;
-    let mut exit = HostExit::Stopped;
-
-    while !stop.load(Ordering::Acquire) {
-        restart_backoff.reset_if_healthy(Instant::now());
-        let mut active_host_failed = false;
-        while let Ok(event) = events.try_recv() {
-            active_host_failed |=
-                handle_host_event(event, &mut generations, outcomes, &tool_sender);
-        }
-        if active_host_failed {
-            restart_backoff.host_failed(Instant::now());
-        }
-        let config_reload = reload_requests.try_recv().is_ok();
-        let request = requests.recv_timeout(Duration::from_millis(50));
-        let config_reload = config_reload || matches!(request, Ok(Request::Reload));
-        if config_reload {
-            restart_backoff.reset();
-        }
-        if config_reload && !stop.load(Ordering::Acquire) && !config.is_file() {
-            if let Ok(request) = request {
-                reject_request(request, outcomes);
-            }
-            exit = HostExit::Unconfigured;
-            break;
-        }
-        let automatic_restart = !config_reload && restart_backoff.ready(Instant::now());
-        if config_reload || automatic_restart {
-            if let Some(candidate) = reload(
-                &launch,
-                active,
-                generation,
-                status,
-                request_sender,
-                transformations,
-            ) {
-                let now = Instant::now();
-                for host in generations.hosts.values_mut() {
-                    if host.retire_at.is_none() {
-                        host.retire_at = Some(now + RETIRE_TIMEOUT);
-                    }
-                }
-                restart_backoff.host_started(now);
-                generations.hosts.insert(candidate.generation, candidate);
-            } else if automatic_restart {
-                restart_backoff.host_failed(Instant::now());
-            }
-        }
-        match request {
-            Ok(Request::Invoke(invocation)) => {
-                let invocation = *invocation;
-                if generations.pending.len() >= MAX_PENDING_INVOCATIONS {
-                    emit_failure(
-                        invocation,
-                        outcomes,
-                        "too many personal commands are still running",
-                    );
-                    continue;
-                }
-                let Some(host) = generations.hosts.get(&invocation.generation) else {
-                    emit_failure(
-                        invocation,
-                        outcomes,
-                        "personal command generation is no longer available",
-                    );
-                    continue;
-                };
-                next_invocation += 1;
-                let invocation_id = format!("{}-{next_invocation}", invocation.generation);
-                let context = invocation_context(&invocation.context);
-                let captures = invocation
-                    .captures
-                    .iter()
-                    .map(|(name, value)| {
-                        let value = match value {
-                            CapturedValue::Digit(value) => WireCaptureValue::Number(*value),
-                            CapturedValue::Letter(value) => {
-                                WireCaptureValue::Text(value.to_string())
-                            }
-                            CapturedValue::Choice(value) => WireCaptureValue::Text(value.clone()),
-                            CapturedValue::Text(value) => WireCaptureValue::Text(value.clone()),
-                        };
-                        (name.clone(), value)
-                    })
-                    .collect();
-                let input = HostInput::Invoke {
-                    invocation_id: invocation_id.clone(),
-                    command_id: invocation.command_id.clone(),
-                    context,
-                    captures,
-                };
-                let host_generation = host.generation;
-                if let Err(error) = host.input.try_send(input) {
-                    let reason = writer_queue_error(error);
-                    emit_failure(invocation, outcomes, reason);
-                    if generations.fail(host_generation, outcomes, reason) {
-                        restart_backoff.host_failed(Instant::now());
-                    }
-                } else {
-                    tracing::info!(
-                        generation = invocation.generation,
-                        invocation_id,
-                        command_id = invocation.command_id,
-                        execution_kind = "handler",
-                        status = "dispatched",
-                        "personal command invocation"
-                    );
-                    generations.pending.insert(
-                        invocation_id,
-                        PendingInvocation {
-                            generation: invocation.generation,
-                            command_id: invocation.command_id,
-                            heard: invocation.heard,
-                            context: invocation.context.label(),
-                            tool_call_count: 0,
-                            started: Instant::now(),
-                        },
-                    );
-                }
-            }
-            Ok(Request::Transform(request)) => {
-                let request = *request;
-                if generations.pending_transformations.len() >= MAX_PENDING_INVOCATIONS {
-                    let _ = request.response.send(Err(
-                        "too many custom transformations are still running".into(),
-                    ));
-                    continue;
-                }
-                let Some(host) = generations.hosts.get(&request.generation) else {
-                    let _ = request
-                        .response
-                        .send(Err("custom transformation generation is unavailable".into()));
-                    continue;
-                };
-                next_invocation += 1;
-                let invocation_id = format!("{}-transform-{next_invocation}", request.generation);
-                let context = invocation_context(&request.context);
-                if host
-                    .input
-                    .try_send(HostInput::Transform {
-                        invocation_id: invocation_id.clone(),
-                        transformation_ids: request.ids,
-                        text: request.text,
-                        context,
-                    })
-                    .is_err()
-                {
-                    let _ = request
-                        .response
-                        .send(Err("custom transformation host is unavailable".into()));
-                } else {
-                    generations.pending_transformations.insert(
-                        invocation_id,
-                        PendingTransformation {
-                            generation: request.generation,
-                            response: request.response,
-                            started: Instant::now(),
-                        },
-                    );
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Ok(Request::Reload) => {}
-        }
-
-        let now = Instant::now();
-        let timed_out_generations = generations
-            .pending_transformations
-            .values()
-            .filter_map(|invocation| {
-                (invocation.started.elapsed() >= TRANSFORMATION_TIMEOUT)
-                    .then_some(invocation.generation)
-            })
-            .collect::<HashSet<_>>();
-        for generation in timed_out_generations {
-            if generations.fail(generation, outcomes, "custom transformations timed out") {
-                restart_backoff.host_failed(now);
-            }
-        }
-        let retired = generations
-            .hosts
-            .iter()
-            .filter_map(|(generation, host)| {
-                let has_pending = generations
-                    .pending
-                    .values()
-                    .any(|invocation| invocation.generation == *generation)
-                    || generations
-                        .pending_transformations
-                        .values()
-                        .any(|invocation| invocation.generation == *generation);
-                should_retire(host.retire_at, has_pending, now).then_some(*generation)
-            })
-            .collect::<Vec<_>>();
-        for generation in retired {
-            generations.fail(generation, outcomes, "personal command generation retired");
-        }
-    }
-    session_stop.store(true, Ordering::Release);
-    for host in generations.hosts.values() {
-        let _ = host.input.try_send(HostInput::Shutdown);
-    }
-    transformations.clear();
-    match exit {
-        HostExit::Stopped => {
-            status.host_state = HostState::Stopped;
-            persist_status(status);
-        }
-        HostExit::Unconfigured => {
-            let hosts = generations.hosts.keys().copied().collect::<Vec<_>>();
-            for host in hosts {
-                generations.fail(host, outcomes, "personal commands are no longer configured");
-            }
-        }
-    }
-    exit
-}
-
-fn reject_request(request: Request, outcomes: &SyncSender<ActionOutcome>) {
-    match request {
-        Request::Invoke(invocation) => {
-            emit_failure(
-                *invocation,
-                outcomes,
-                "personal commands are not configured",
-            );
-        }
-        Request::Transform(request) => {
-            let _ = request
-                .response
-                .send(Err("custom transformations are not configured".into()));
-        }
-        Request::Reload => {}
-    }
-}
-
-/// Waits while personal commands are not configured for `hex.config.ts` to
-/// appear in `workspace`, which may not exist yet. Returns `false` on shutdown.
-/// `hex commands init` publishes the config only after its install finishes,
-/// so the config's appearance means the workspace is ready once it settles.
-fn wait_for_config(
-    workspace: &Path,
-    requests: &Receiver<Request>,
-    outcomes: &SyncSender<ActionOutcome>,
-    stop: &AtomicBool,
-) -> bool {
-    let config = workspace.join(CONFIG_FILE);
-    let mut fingerprint = None;
-    let mut settled_since = Instant::now();
-    while !stop.load(Ordering::Acquire) {
-        match requests.recv_timeout(POLL_INTERVAL) {
-            Ok(request) => reject_request(request, outcomes),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
-        }
-        if stop.load(Ordering::Acquire) {
-            break;
-        }
-        if !config.is_file() {
-            fingerprint = None;
-            continue;
-        }
-        let next = workspace_fingerprint(workspace);
-        if fingerprint != Some(next) {
-            fingerprint = Some(next);
-            settled_since = Instant::now();
-            continue;
-        }
-        if settled_since.elapsed() >= RELOAD_DEBOUNCE {
-            return true;
-        }
-    }
-    false
-}
-
-/// Resolves the workspace, Bun, and managed SDK a host launch needs. `Ok(None)`
-/// means no `hex.config.ts` exists, so personal commands are not configured.
-fn prepare_host() -> Result<Option<HostPaths>> {
-    let workspace = crate::app_paths::personal_commands_workspace()?;
-    let config = workspace.join(CONFIG_FILE);
-    if !config.is_file() {
-        return Ok(None);
-    }
-    let bun = find_bun().ok_or_else(|| eyre!("Bun was not found"))?;
-    let sdk = crate::app_paths::personal_commands_sdk()
-        .wrap_err("personal command SDK is unavailable")?;
-    let workspace_changed = refresh_managed_sdk_at(&workspace, &sdk)
-        .wrap_err("could not refresh the managed personal command SDK")?;
-    let mut managed_host = managed_host_entrypoint(&workspace);
-    if workspace_changed || !managed_host.is_file() {
-        if workspace_changed {
-            remove_installed_managed_sdk(&workspace)
-                .wrap_err("could not activate the current personal command SDK")?;
-        }
-        install_workspace_dependencies(&workspace, &bun)
-            .wrap_err("could not activate the current personal command SDK")?;
-        tracing::info!(
-            workspace_changed,
-            "refreshed the managed personal command SDK"
-        );
-        managed_host = managed_host_entrypoint(&workspace);
-    }
-    if !managed_host.is_file() {
-        return Err(eyre!(
-            "personal command SDK is not installed; run `hex commands init`"
-        ));
-    }
-    Ok(Some(HostPaths {
-        workspace,
-        config,
-        bun,
-        host_entrypoint: managed_host,
-    }))
-}
-
-fn reload(
-    launch: &HostLaunch<'_>,
-    active: &RwLock<Arc<RuntimeSnapshot>>,
-    generation: &mut u64,
-    status: &mut StatusSnapshot,
-    requests: &SyncSender<Request>,
-    transformations: &TransformationClient,
-) -> Option<HostProcess> {
-    *generation += 1;
-    match start_candidate(*generation, launch) {
-        Ok(candidate) => {
-            transformations.activate(&candidate.runtime, requests.clone());
-            *active.write().expect("command registry poisoned") = Arc::new(candidate.runtime);
-            status.active_generation = Some(*generation);
-            status.catalog = candidate.catalog;
-            status.dictation = candidate.dictation;
-            status.transformations = candidate.transformations;
-            status.host_state = HostState::Active;
-            status.last_reload_error = None;
-            persist_status(status);
-            tracing::info!(generation, "personal commands activated");
-            Some(candidate.host)
-        }
-        Err(error) => {
-            status.host_state = if status.active_generation.is_some() {
-                HostState::Active
-            } else {
-                HostState::Unavailable
-            };
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
-            persist_status(status);
-            tracing::error!(%error, "personal command reload rejected; preserving active registry");
-            None
-        }
-    }
-}
-
-fn start_candidate(generation: u64, launch: &HostLaunch<'_>) -> Result<Candidate> {
-    let mut child = spawn_host(
-        Command::new(launch.bun)
-            .arg(launch.host_entrypoint)
-            .arg(launch.config)
-            .current_dir(launch.workspace)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit()),
-    )
-    .wrap_err("could not start personal command host")?;
-    let Some(input) = child.stdin.take() else {
-        kill_and_wait(&mut child);
-        return Err(eyre!("host stdin unavailable"));
-    };
-    let Some(output) = child.stdout.take() else {
-        kill_and_wait(&mut child);
-        return Err(eyre!("host stdout unavailable"));
-    };
-    let (candidate_sender, candidate_events) = mpsc::sync_channel(64);
-    spawn_reader(generation, output, candidate_sender);
-    let deadline = Instant::now() + HOST_START_TIMEOUT;
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            kill_and_wait(&mut child);
-            return Err(eyre!("personal command host registration timed out"));
-        }
-        match candidate_events.recv_timeout(remaining) {
-            Ok(HostEvent::Frame(
-                event_generation,
-                HostOutput::Registration {
-                    protocol_version,
-                    dictation,
-                    transformations,
-                    commands,
-                },
-            )) if event_generation == generation => {
-                let catalog = status_catalog(&commands);
-                let status_dictation = dictation.clone();
-                let status_transformations = transformations.clone();
-                let runtime = match compile_registration(
-                    launch.base,
-                    generation,
-                    protocol_version,
-                    dictation,
-                    transformations,
-                    commands,
-                ) {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        kill_and_wait(&mut child);
-                        return Err(error);
-                    }
-                };
-                let active_sender = launch.event_sender.clone();
-                thread::spawn(move || {
-                    while let Ok(event) = candidate_events.recv() {
-                        if active_sender.send(event).is_err() {
-                            break;
-                        }
-                    }
-                });
-                let input = spawn_writer(generation, input, launch.event_sender.clone());
-                return Ok(Candidate {
-                    host: HostProcess {
-                        generation,
-                        child,
-                        input,
-                        retire_at: None,
-                    },
-                    runtime,
-                    catalog,
-                    dictation: status_dictation,
-                    transformations: status_transformations,
-                });
-            }
-            Ok(HostEvent::Closed(event_generation, error)) if event_generation == generation => {
-                kill_and_wait(&mut child);
-                return Err(eyre!(
-                    "personal command host stopped before registration: {error}"
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => {
-                kill_and_wait(&mut child);
-                return Err(eyre!("personal command host registration timed out"));
-            }
-        }
-    }
-}
-
 fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
     commands
         .iter()
@@ -1920,256 +1224,6 @@ fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
             },
         })
         .collect()
-}
-
-fn handle_host_event(
-    event: HostEvent,
-    generations: &mut Generations,
-    outcomes: &SyncSender<ActionOutcome>,
-    tool_sender: &SyncSender<ToolJob>,
-) -> bool {
-    match event {
-        HostEvent::Frame(
-            generation,
-            HostOutput::ToolCall {
-                invocation_id,
-                tool_call_id,
-                action,
-            },
-        ) => {
-            let valid = generations.hosts.contains_key(&generation)
-                && accept_tool_call(
-                    &mut generations.pending,
-                    &mut generations.pending_tools,
-                    generation,
-                    &invocation_id,
-                    &tool_call_id,
-                );
-            if !valid {
-                return generations.fail(
-                    generation,
-                    outcomes,
-                    "personal command host sent an invalid or excessive tool call",
-                );
-            }
-            let correlation = (generation, invocation_id.clone(), tool_call_id.clone());
-            if tool_sender
-                .try_send(ToolJob {
-                    generation,
-                    invocation_id,
-                    tool_call_id,
-                    action,
-                })
-                .is_err()
-            {
-                generations.pending_tools.remove(&correlation);
-                return generations.fail(
-                    generation,
-                    outcomes,
-                    "personal command native tool queue is unavailable",
-                );
-            }
-            false
-        }
-        HostEvent::Frame(
-            generation,
-            HostOutput::InvocationResult {
-                invocation_id,
-                result,
-            },
-        ) => {
-            let valid = generations
-                .pending
-                .get(&invocation_id)
-                .is_some_and(|invocation| invocation.generation == generation)
-                && !generations.pending_tools.iter().any(
-                    |(tool_generation, tool_invocation, _)| {
-                        *tool_generation == generation && tool_invocation == &invocation_id
-                    },
-                );
-            if !valid {
-                return generations.fail(
-                    generation,
-                    outcomes,
-                    "personal command host sent an invalid invocation result",
-                );
-            }
-            let invocation = generations
-                .pending
-                .remove(&invocation_id)
-                .expect("invocation checked");
-            let result = match result {
-                WireResult::Success => Ok(()),
-                WireResult::Failure { message } => Err(bounded_error(&message)),
-            };
-            tracing::info!(
-                generation,
-                invocation_id,
-                command_id = invocation.command_id,
-                execution_kind = "handler",
-                status = if result.is_ok() {
-                    "completed"
-                } else {
-                    "failed"
-                },
-                duration_ms = invocation.started.elapsed().as_millis(),
-                "personal command invocation"
-            );
-            let _ = outcomes.send(invocation.into_outcome(result));
-            false
-        }
-        HostEvent::Frame(
-            generation,
-            HostOutput::TransformationResult {
-                invocation_id,
-                result,
-            },
-        ) => {
-            let valid = generations
-                .pending_transformations
-                .get(&invocation_id)
-                .is_some_and(|invocation| invocation.generation == generation);
-            if !valid {
-                return generations.fail(
-                    generation,
-                    outcomes,
-                    "personal command host sent an invalid transformation result",
-                );
-            }
-            let invocation = generations
-                .pending_transformations
-                .remove(&invocation_id)
-                .expect("transformation invocation checked");
-            let result = match result {
-                TransformationWireResult::Success { text }
-                    if text.len() <= MAX_TRANSFORMATION_TEXT_BYTES =>
-                {
-                    Ok(text)
-                }
-                TransformationWireResult::Success { .. } => {
-                    Err("custom transformation output is too large".into())
-                }
-                TransformationWireResult::Failure { message } => Err(bounded_error(&message)),
-            };
-            tracing::info!(
-                generation,
-                invocation_id,
-                status = if result.is_ok() {
-                    "completed"
-                } else {
-                    "failed"
-                },
-                duration_ms = invocation.started.elapsed().as_millis(),
-                "custom transformation invocation"
-            );
-            let _ = invocation.response.send(result);
-            false
-        }
-        HostEvent::ToolResult(generation, result) => {
-            let correlation = (
-                generation,
-                result.invocation_id.clone(),
-                result.tool_call_id.clone(),
-            );
-            if generations.pending_tools.remove(&correlation)
-                && let Some(host) = generations.hosts.get(&generation)
-            {
-                let frame = HostInput::ToolResult {
-                    invocation_id: result.invocation_id,
-                    tool_call_id: result.tool_call_id,
-                    result: result.result,
-                };
-                if host.input.try_send(frame).is_err() {
-                    return generations.fail(
-                        generation,
-                        outcomes,
-                        "personal command host writer is unavailable",
-                    );
-                }
-            }
-            false
-        }
-        HostEvent::Closed(generation, error) if generations.hosts.contains_key(&generation) => {
-            tracing::error!(generation, %error, "personal command host stopped");
-            generations.fail(generation, outcomes, "personal command host stopped")
-        }
-        HostEvent::Frame(generation, HostOutput::Registration { .. }) => generations.fail(
-            generation,
-            outcomes,
-            "personal command host sent an unexpected registration",
-        ),
-        _ => false,
-    }
-}
-
-impl Generations {
-    fn is_active(&self, generation: u64) -> bool {
-        self.hosts
-            .get(&generation)
-            .is_some_and(|host| host.retire_at.is_none())
-    }
-
-    /// Drops one generation's host and fails every invocation still waiting on
-    /// it. Returns whether that generation was the active (unretired) host, so
-    /// the caller can count the failure toward restart backoff.
-    fn fail(&mut self, generation: u64, outcomes: &SyncSender<ActionOutcome>, error: &str) -> bool {
-        let was_active = self.is_active(generation);
-        self.hosts.remove(&generation);
-        self.pending_tools
-            .retain(|(tool_generation, _, _)| *tool_generation != generation);
-        for (id, invocation) in self
-            .pending
-            .extract_if(|_, invocation| invocation.generation == generation)
-        {
-            tracing::warn!(
-                generation,
-                invocation_id = id,
-                command_id = invocation.command_id,
-                execution_kind = "handler",
-                status = "failed",
-                duration_ms = invocation.started.elapsed().as_millis(),
-                error,
-                "personal command invocation"
-            );
-            let _ = outcomes.send(invocation.into_outcome(Err(error.into())));
-        }
-        for (_, invocation) in self
-            .pending_transformations
-            .extract_if(|_, invocation| invocation.generation == generation)
-        {
-            let _ = invocation.response.send(Err(error.into()));
-        }
-        was_active
-    }
-}
-
-fn should_retire(retire_at: Option<Instant>, has_pending: bool, now: Instant) -> bool {
-    retire_at.is_some_and(|deadline| !has_pending || now >= deadline)
-}
-
-fn accept_tool_call(
-    pending: &mut HashMap<String, PendingInvocation>,
-    pending_tools: &mut HashSet<(u64, String, String)>,
-    generation: u64,
-    invocation_id: &str,
-    tool_call_id: &str,
-) -> bool {
-    if pending_tools.len() >= MAX_PENDING_TOOL_CALLS {
-        return false;
-    }
-    let Some(invocation) = pending.get_mut(invocation_id) else {
-        return false;
-    };
-    if invocation.generation != generation
-        || invocation.tool_call_count >= MAX_TOOL_CALLS_PER_INVOCATION
-    {
-        return false;
-    }
-    if !pending_tools.insert((generation, invocation_id.into(), tool_call_id.into())) {
-        return false;
-    }
-    invocation.tool_call_count += 1;
-    true
 }
 
 fn compile_capture_descriptor(
@@ -2271,16 +1325,10 @@ fn compile_capture_descriptor(
 fn compile_registration(
     base: &CommandConfig,
     generation: u64,
-    protocol_version: u8,
     dictation: Option<StatusDictationProtocol>,
     transformations: Vec<StatusTransformation>,
     commands: Vec<RegistrationCommand>,
 ) -> Result<RuntimeSnapshot> {
-    if protocol_version != 2 {
-        return Err(eyre!(
-            "unsupported personal command protocol version {protocol_version}"
-        ));
-    }
     if commands.len() > MAX_COMMANDS {
         return Err(eyre!("personal registry exceeds {MAX_COMMANDS} commands"));
     }
@@ -2496,212 +1544,6 @@ fn parse_modifiers(values: &[String]) -> Result<Modifiers> {
     })
 }
 
-fn spawn_writer(
-    generation: u64,
-    mut input: ChildStdin,
-    events: SyncSender<HostEvent>,
-) -> SyncSender<HostInput> {
-    let (sender, frames) = mpsc::sync_channel(HOST_WRITE_QUEUE);
-    thread::spawn(move || {
-        while let Ok(frame) = frames.recv() {
-            let shutdown = matches!(frame, HostInput::Shutdown);
-            if let Err(error) = write_frame(&mut input, &frame) {
-                let _ = events.send(HostEvent::Closed(
-                    generation,
-                    format!("host input failed: {error}"),
-                ));
-                break;
-            }
-            if shutdown {
-                break;
-            }
-        }
-    });
-    sender
-}
-
-fn spawn_tool_workers(jobs: Receiver<ToolJob>, events: SyncSender<HostEvent>) {
-    let jobs = Arc::new(Mutex::new(jobs));
-    for _ in 0..TOOL_WORKERS {
-        let jobs = jobs.clone();
-        let events = events.clone();
-        thread::spawn(move || {
-            loop {
-                let job = jobs.lock().expect("tool queue poisoned").recv();
-                let Ok(job) = job else {
-                    break;
-                };
-                let result = job
-                    .action
-                    .into_action()
-                    .and_then(crate::commands::execute)
-                    .map(|()| WireResult::Success)
-                    .unwrap_or_else(|error| WireResult::Failure {
-                        message: bounded_error(&error.to_string()),
-                    });
-                if events
-                    .send(HostEvent::ToolResult(
-                        job.generation,
-                        ToolResult {
-                            invocation_id: job.invocation_id,
-                            tool_call_id: job.tool_call_id,
-                            result,
-                        },
-                    ))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-    }
-}
-
-fn writer_queue_error(error: TrySendError<HostInput>) -> &'static str {
-    match error {
-        TrySendError::Full(_) => "personal command host writer queue is full",
-        TrySendError::Disconnected(_) => "personal command host writer is unavailable",
-    }
-}
-
-/// Bun hosts not yet reaped. Quitting ends Hex with `_exit` without waiting
-/// for a host worker that misses its shutdown deadline, so
-/// [`kill_live_hosts`] stops whichever hosts are still running then.
-static LIVE_HOSTS: Mutex<std::collections::BTreeSet<u32>> =
-    Mutex::new(std::collections::BTreeSet::new());
-
-fn live_hosts() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32>> {
-    LIVE_HOSTS.lock().unwrap_or_else(|error| error.into_inner())
-}
-
-fn spawn_host(command: &mut Command) -> std::io::Result<Child> {
-    let mut hosts = live_hosts();
-    let child = command.spawn()?;
-    hosts.insert(child.id());
-    Ok(child)
-}
-
-/// Kills every Bun host still running. A registered host is never reaped
-/// before it leaves the set, so its pid cannot have been reused.
-#[cfg(unix)]
-pub fn kill_live_hosts() {
-    for &pid in live_hosts().iter() {
-        if let Ok(pid) = libc::pid_t::try_from(pid) {
-            // SAFETY: `kill` takes plain integers and has no memory effects.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-        }
-    }
-}
-
-fn kill_and_wait(child: &mut Child) {
-    let _ = child.kill();
-    live_hosts().remove(&child.id());
-    let _ = child.wait();
-}
-
-fn spawn_reader(
-    generation: u64,
-    output: impl Read + Send + 'static,
-    sender: SyncSender<HostEvent>,
-) {
-    thread::spawn(move || {
-        let mut reader = BufReader::new(output);
-        loop {
-            match read_frame(&mut reader) {
-                Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
-                    Ok(frame) => {
-                        if sender.send(HostEvent::Frame(generation, frame)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.send(HostEvent::Closed(
-                            generation,
-                            format!("invalid host frame: {error}"),
-                        ));
-                        break;
-                    }
-                },
-                Ok(None) => {
-                    let _ = sender.send(HostEvent::Closed(generation, "end of output".into()));
-                    break;
-                }
-                Err(error) => {
-                    let _ = sender.send(HostEvent::Closed(generation, error.to_string()));
-                    break;
-                }
-            }
-        }
-    });
-}
-
-fn read_frame(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>> {
-    let mut frame = Vec::new();
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            return if frame.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(frame))
-            };
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let consumed = match newline {
-            Some(newline) => {
-                frame.extend_from_slice(&available[..newline]);
-                newline + 1
-            }
-            None => {
-                frame.extend_from_slice(available);
-                available.len()
-            }
-        };
-        reader.consume(consumed);
-        if frame.len() > MAX_FRAME_BYTES {
-            return Err(eyre!(
-                "personal command host frame exceeds {MAX_FRAME_BYTES} bytes"
-            ));
-        }
-        if newline.is_some() {
-            return Ok(Some(frame));
-        }
-    }
-}
-
-fn write_frame(output: &mut impl Write, frame: &HostInput) -> Result<()> {
-    let encoded = serde_json::to_vec(frame)?;
-    if encoded.len() > MAX_INPUT_FRAME_BYTES {
-        return Err(eyre!(
-            "personal command input frame exceeds {MAX_INPUT_FRAME_BYTES} bytes"
-        ));
-    }
-    output.write_all(&encoded)?;
-    output.write_all(b"\n")?;
-    output.flush()?;
-    Ok(())
-}
-
-fn watch_workspace(workspace: PathBuf, requests: SyncSender<Request>, stop: Arc<AtomicBool>) {
-    let mut fingerprint = workspace_fingerprint(&workspace);
-    let mut changed_at = None;
-    while !stop.load(Ordering::Acquire) {
-        thread::sleep(POLL_INTERVAL);
-        let next = workspace_fingerprint(&workspace);
-        if next != fingerprint {
-            fingerprint = next;
-            changed_at = Some(Instant::now());
-        }
-        if changed_at.is_some_and(|changed| changed.elapsed() >= RELOAD_DEBOUNCE) {
-            match requests.try_send(Request::Reload) {
-                Ok(()) => changed_at = None,
-                Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => break,
-            }
-        }
-    }
-}
-
 fn workspace_fingerprint(root: &Path) -> u64 {
     let mut hash = 1469598103934665603;
     let mut queue = VecDeque::from([(root.to_path_buf(), 0_usize)]);
@@ -2757,36 +1599,6 @@ fn workspace_fingerprint(root: &Path) -> u64 {
     hash
 }
 
-#[cfg(not(target_os = "windows"))]
-fn find_bun() -> Option<PathBuf> {
-    let candidates = std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .map(|path| path.join("bun"))
-        .chain([
-            dirs::home_dir().unwrap_or_default().join(".bun/bin/bun"),
-            PathBuf::from("/opt/homebrew/bin/bun"),
-            PathBuf::from("/usr/local/bin/bun"),
-        ]);
-    find_bun_candidate(candidates)
-}
-
-#[cfg(target_os = "windows")]
-fn find_bun() -> Option<PathBuf> {
-    let candidates = std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .map(|path| path.join("bun.exe"))
-        .chain([dirs::home_dir()
-            .unwrap_or_default()
-            .join(".bun/bin/bun.exe")]);
-    find_bun_candidate(candidates)
-}
-
-fn find_bun_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
-    candidates.into_iter().find(|path| path.is_file())
-}
-
 fn validate_text(value: &str, label: &str, max_bytes: usize) -> Result<()> {
     if value.trim().is_empty() || value.len() > max_bytes {
         Err(eyre!(
@@ -2823,12 +1635,6 @@ fn emit_failure(invocation: Invocation, outcomes: &SyncSender<ActionOutcome>, er
     });
 }
 
-impl Drop for HostProcess {
-    fn drop(&mut self) {
-        kill_and_wait(&mut self.child);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2836,7 +1642,7 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     fn compile_commands(commands: Vec<RegistrationCommand>) -> Result<RuntimeSnapshot> {
-        compile_registration(&CommandConfig::new(), 1, 2, None, vec![], commands)
+        compile_registration(&CommandConfig::new(), 1, None, vec![], commands)
     }
 
     fn compile_one(command: RegistrationCommand) -> Result<RuntimeSnapshot> {
@@ -2844,22 +1650,13 @@ mod tests {
     }
 
     fn compile_registration_json(json: &str) -> Result<RuntimeSnapshot> {
-        let registration: HostOutput = serde_json::from_str(json).unwrap();
-        let HostOutput::Registration {
-            protocol_version,
-            commands,
-            ..
-        } = registration
-        else {
-            panic!("expected registration")
-        };
+        let registration: Registration = serde_json::from_str(json).unwrap();
         compile_registration(
             &CommandConfig::new(),
             7,
-            protocol_version,
             None,
             vec![],
-            commands,
+            registration.commands,
         )
     }
 
@@ -2923,7 +1720,7 @@ mod tests {
     #[test]
     fn registration_compiles_native_and_handler_commands() {
         let compiled = compile_registration_json(
-            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
+            r#"{"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
         )
         .unwrap();
 
@@ -2970,7 +1767,7 @@ mod tests {
     #[test]
     fn capture_phrases_compile_for_handlers_and_carry_the_spoken_remainder() {
         let compiled = compile_registration_json(
-            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
+            r#"{"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
         )
         .unwrap();
 
@@ -3369,48 +2166,13 @@ mod tests {
     #[test]
     fn capture_phrases_are_rejected_for_native_commands() {
         let result = compile_registration_json(
-            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
+            r#"{"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
         );
 
         match result {
             Ok(_) => panic!("native capture phrases are invalid"),
             Err(error) => assert!(error.to_string().contains("handler")),
         }
-    }
-
-    #[test]
-    fn invoke_frames_serialize_captures_only_when_present() {
-        let context = InvocationContext {
-            application: None,
-            browser_host: None,
-            browser_url: None,
-            window_title: None,
-        };
-        let with_capture = HostInput::Invoke {
-            invocation_id: "7-1".into(),
-            command_id: "search".into(),
-            context,
-            captures: BTreeMap::from([(
-                "query".to_string(),
-                WireCaptureValue::Text("wool socks".to_string()),
-            )]),
-        };
-        let json = serde_json::to_string(&with_capture).unwrap();
-        assert!(json.contains(r#""captures":{"query":"wool socks"}"#));
-
-        let without_capture = HostInput::Invoke {
-            invocation_id: "7-2".into(),
-            command_id: "search".into(),
-            context: InvocationContext {
-                application: None,
-                browser_host: None,
-                browser_url: None,
-                window_title: None,
-            },
-            captures: BTreeMap::new(),
-        };
-        let json = serde_json::to_string(&without_capture).unwrap();
-        assert!(!json.contains("captures"));
     }
 
     #[test]
@@ -3613,7 +2375,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(compile_registration(&base, 1, 2, None, vec![], vec![command]).is_err());
+        assert!(compile_registration(&base, 1, None, vec![], vec![command]).is_err());
         assert!(matches!(
             base.resolve(
                 Mode::Listening,
@@ -3629,7 +2391,6 @@ mod tests {
         let configured = compile_registration(
             &CommandConfig::new(),
             1,
-            2,
             Some(StatusDictationProtocol {
                 start: vec!["begin note".into()],
                 stop: vec!["finish note".into()],
@@ -3679,7 +2440,6 @@ mod tests {
             compile_registration(
                 &CommandConfig::new(),
                 1,
-                2,
                 Some(protocol),
                 vec![],
                 vec![command]
@@ -3699,7 +2459,7 @@ mod tests {
             r#"{"id":"personal","phrases":["go to sleep"],"execution":{"type":"handler"}}"#,
         ] {
             let command = serde_json::from_str(input).unwrap();
-            assert!(compile_registration(&base, 1, 2, None, vec![], vec![command]).is_err());
+            assert!(compile_registration(&base, 1, None, vec![], vec![command]).is_err());
         }
     }
 
@@ -3729,101 +2489,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn tool_calls_are_unique_while_pending_and_cumulatively_bounded() {
-        let mut pending = HashMap::from([(
-            "1-1".into(),
-            PendingInvocation {
-                generation: 1,
-                command_id: "handled".into(),
-                heard: "do work".into(),
-                context: "test".into(),
-                tool_call_count: 0,
-                started: Instant::now(),
-            },
-        )]);
-        let mut tools = HashSet::new();
-
-        assert!(accept_tool_call(
-            &mut pending,
-            &mut tools,
-            1,
-            "1-1",
-            "tool-1"
-        ));
-        assert!(!accept_tool_call(
-            &mut pending,
-            &mut tools,
-            1,
-            "1-1",
-            "tool-1"
-        ));
-        tools.clear();
-        for index in 1..MAX_TOOL_CALLS_PER_INVOCATION {
-            assert!(accept_tool_call(
-                &mut pending,
-                &mut tools,
-                1,
-                "1-1",
-                &format!("tool-{index}")
-            ));
-            tools.clear();
-        }
-        assert!(!accept_tool_call(
-            &mut pending,
-            &mut tools,
-            1,
-            "1-1",
-            "one-too-many"
-        ));
-        assert!(!accept_tool_call(
-            &mut pending,
-            &mut tools,
-            2,
-            "1-1",
-            "tool-2"
-        ));
-    }
-
-    #[test]
-    fn superseded_hosts_retire_when_idle_or_at_the_deadline() {
-        let now = Instant::now();
-        let deadline = now + RETIRE_TIMEOUT;
-
-        assert!(should_retire(Some(deadline), false, now));
-        assert!(!should_retire(Some(deadline), true, now));
-        assert!(should_retire(Some(deadline), true, deadline));
-        assert!(!should_retire(None, false, deadline));
-    }
-
-    #[test]
-    fn automatic_restarts_back_off_stop_and_reset() {
-        let mut backoff = RestartBackoff::default();
-        let mut now = Instant::now();
-
-        for failure in 1..=MAX_AUTOMATIC_RESTARTS {
-            backoff.host_failed(now);
-            let retry_at = backoff.retry_at.expect("retry should remain in budget");
-            let expected = RESTART_BASE_DELAY
-                .saturating_mul(1_u32 << u32::from(failure - 1))
-                .min(RESTART_MAX_DELAY);
-            assert_eq!(retry_at.duration_since(now), expected);
-            assert!(!backoff.ready(now));
-            assert!(backoff.ready(retry_at));
-            now = retry_at;
-        }
-        backoff.host_failed(now);
-        assert!(backoff.retry_at.is_none());
-
-        backoff.reset();
-        assert_eq!(backoff.failures, 0);
-        backoff.host_failed(now);
-        backoff.host_started(now);
-        backoff.reset_if_healthy(now + RESTART_HEALTHY_PERIOD);
-        assert_eq!(backoff.failures, 0);
-        assert!(backoff.retry_at.is_none());
-    }
-
     #[cfg(unix)]
     #[test]
     fn workspace_fingerprint_does_not_follow_symlinks_or_excessive_depth() {
@@ -3850,616 +2515,6 @@ mod tests {
         assert_eq!(workspace_fingerprint(&root), initial);
         fs::remove_dir_all(root).unwrap();
         fs::remove_file(outside).unwrap();
-    }
-
-    #[test]
-    fn bun_discovery_does_not_execute_candidates() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("hex-bun-{unique}"));
-        let candidate = root.join("bun");
-        let marker = root.join("executed");
-        fs::create_dir(&root).unwrap();
-        fs::write(
-            &candidate,
-            format!("#!/bin/sh\ntouch {}\n", marker.display()),
-        )
-        .unwrap();
-
-        assert_eq!(find_bun_candidate([candidate.clone()]), Some(candidate));
-        assert!(!marker.exists());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_children_are_reaped() {
-        let mut child = Command::new("/bin/sh")
-            .args(["-c", "sleep 30"])
-            .spawn()
-            .unwrap();
-        kill_and_wait(&mut child);
-        assert!(child.try_wait().unwrap().is_some());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn quitting_kills_hosts_whose_worker_never_stopped_them() {
-        use std::os::unix::process::ExitStatusExt;
-        let mut child = spawn_host(Command::new("/bin/sh").args(["-c", "sleep 30"])).unwrap();
-        kill_live_hosts();
-        let status = child.wait().unwrap();
-        assert_eq!(status.signal(), Some(libc::SIGKILL));
-        kill_and_wait(&mut child);
-        assert!(!live_hosts().contains(&child.id()));
-    }
-
-    fn spawn_config_wait(
-        workspace: PathBuf,
-        stop: Arc<AtomicBool>,
-    ) -> (SyncSender<Request>, thread::JoinHandle<bool>) {
-        let (request_sender, requests) = mpsc::sync_channel(4);
-        let (outcome_sender, _outcomes) = mpsc::sync_channel(4);
-        let handle =
-            thread::spawn(move || wait_for_config(&workspace, &requests, &outcome_sender, &stop));
-        (request_sender, handle)
-    }
-
-    fn finishes_within(handle: &thread::JoinHandle<bool>, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while !handle.is_finished() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(20));
-        }
-        handle.is_finished()
-    }
-
-    #[test]
-    fn unconfigured_host_starts_when_config_appears_without_restart() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("hex-config-wait-{unique}"));
-        let workspace = root.join("hex");
-        let (_requests, handle) =
-            spawn_config_wait(workspace.clone(), Arc::new(AtomicBool::new(false)));
-
-        assert!(!finishes_within(&handle, POLL_INTERVAL * 2));
-        let entrypoint = workspace.join("node_modules/@hex/commands/src/bin.ts");
-        fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
-        fs::write(&entrypoint, "// host\n").unwrap();
-        assert!(!finishes_within(&handle, POLL_INTERVAL * 2));
-        fs::write(workspace.join("hex.config.ts"), "// config\n").unwrap();
-
-        assert!(finishes_within(&handle, Duration::from_secs(5)));
-        assert!(handle.join().unwrap());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn initialization_publishes_config_only_after_install() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        let config = workspace.join(CONFIG_FILE);
-        let installed = initialize_workspace_at(&workspace, &sdk, |_| {
-            assert!(workspace.join("package.json").is_file());
-            assert!(!config.exists());
-            Ok(())
-        });
-        assert!(installed.is_ok());
-        assert_eq!(
-            fs::read_to_string(&config).unwrap(),
-            fs::read_to_string(sdk.join("workspace-template").join(CONFIG_FILE)).unwrap()
-        );
-
-        fs::remove_file(&config).unwrap();
-        let failed = initialize_workspace_at(&workspace, &sdk, |_| Err(eyre!("install failed")));
-        assert!(failed.is_err());
-        assert!(!config.exists());
-        assert!(
-            fs::read_dir(&workspace)
-                .unwrap()
-                .flatten()
-                .all(|entry| { !entry.file_name().to_string_lossy().ends_with(".tmp") })
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn deactivation_forgets_the_removed_host() {
-        let base = CommandConfig::new();
-        let mut runtime = RuntimeSnapshot::native(base.clone());
-        runtime.generation = 3;
-        let active = RwLock::new(Arc::new(runtime));
-        let transformations = TransformationClient::default();
-        let mut status = StatusSnapshot {
-            active_generation: Some(3),
-            catalog: vec![StatusCommand {
-                id: "open-notes".into(),
-                phrases: vec!["open notes".into()],
-                group: "Personal".into(),
-                description: String::new(),
-                context: StatusContext::Global,
-                execution: StatusExecution::Handler,
-            }],
-            host_state: HostState::Active,
-            last_reload_error: Some("old".into()),
-            ..StatusSnapshot::default()
-        };
-
-        deactivate(&mut status, &active, &base, &transformations);
-
-        assert_eq!(
-            status,
-            StatusSnapshot {
-                host_state: HostState::NotConfigured,
-                ..StatusSnapshot::default()
-            }
-        );
-        assert_eq!(active.read().unwrap().generation, 0);
-    }
-
-    #[test]
-    fn unconfigured_host_wait_stops_on_shutdown() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("hex-config-stop-{unique}"));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (requests, handle) = spawn_config_wait(workspace, stop.clone());
-        stop.store(true, Ordering::Release);
-        let _ = requests.try_send(Request::Reload);
-
-        assert!(finishes_within(&handle, Duration::from_secs(2)));
-        assert!(!handle.join().unwrap());
-    }
-
-    #[test]
-    fn workspace_effect_migration_preserves_user_fields_and_is_idempotent() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        let required = "4.0.0-rc.999";
-        for old in [
-            None,
-            Some("4.0.0-beta.97"),
-            Some("4.0.0-beta.107"),
-            Some("4.0.0-rc.112"),
-        ] {
-            let mut manifest = serde_json::json!({
-                "name": "my-commands", "private": true, "custom": { "keep": [1, 2] },
-                "scripts": { "check": "custom-check", "start": "custom-start" },
-                "dependencies": { "user-library": "^1.2.3" },
-                "devDependencies": { "typescript": "7.0.2" }
-            });
-            if let Some(old) = old {
-                manifest["dependencies"]["effect"] = old.into();
-            }
-            fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
-            fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
-            assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-            manifest["dependencies"]["effect"] = required.into();
-            let bytes = fs::read(workspace.join("package.json")).unwrap();
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
-                manifest
-            );
-            assert_eq!(
-                fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-                "// user config\n"
-            );
-            assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-            assert_eq!(fs::read(workspace.join("package.json")).unwrap(), bytes);
-        }
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn unchanged_sdk_with_stale_effect_requires_install_on_startup() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        let sdk_before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
-        fs::write(
-            workspace.join("package.json"),
-            r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#,
-        )
-        .unwrap();
-        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        assert_eq!(
-            directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
-            sdk_before
-        );
-        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        // A compatible manifest is not even reformatted.
-        let current = r#"{ "dependencies": { "effect": "4.0.0-rc.999" } }"#;
-        fs::write(workspace.join("package.json"), current).unwrap();
-        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        assert_eq!(
-            fs::read_to_string(workspace.join("package.json")).unwrap(),
-            current
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_effect_migration_reconciles_duplicate_pins() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        let mut manifest = serde_json::json!({});
-        for section in [
-            "dependencies",
-            "devDependencies",
-            "optionalDependencies",
-            "peerDependencies",
-            "overrides",
-            "resolutions",
-        ] {
-            manifest[section] = serde_json::json!({"effect": "4.0.0-beta.107", "other": "1.0.0"});
-        }
-        fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
-        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        for entries in manifest.as_object_mut().unwrap().values_mut() {
-            entries["effect"] = "4.0.0-rc.999".into();
-        }
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &fs::read(workspace.join("package.json")).unwrap()
-            )
-            .unwrap(),
-            manifest
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_effect_conflicts_leave_manifest_config_and_sdk_untouched() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
-        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
-        for invalid in [
-            "{",
-            "[]",
-            r#"{"dependencies":null}"#,
-            r#"{"devDependencies":[]}"#,
-        ] {
-            fs::write(workspace.join("package.json"), invalid).unwrap();
-            assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).is_err());
-            assert_eq!(
-                fs::read_to_string(workspace.join("package.json")).unwrap(),
-                invalid
-            );
-            assert_eq!(
-                directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
-                before
-            );
-        }
-        for section in [
-            "dependencies",
-            "devDependencies",
-            "optionalDependencies",
-            "peerDependencies",
-            "overrides",
-            "resolutions",
-        ] {
-            for custom in [
-                serde_json::json!("^4.0.0-beta.97"),
-                serde_json::json!("4.0.0-beta.108"),
-                serde_json::json!("file:../effect"),
-                serde_json::json!({".": "4.0.0-beta.97"}),
-                serde_json::Value::Null,
-            ] {
-                let mut manifest = serde_json::json!({"dependencies": {"effect": "4.0.0-beta.97"}});
-                manifest[section] = serde_json::json!({"effect": custom});
-                let original = manifest.to_string();
-                fs::write(workspace.join("package.json"), &original).unwrap();
-                let error = refresh_managed_sdk_at(&workspace, &sdk)
-                    .unwrap_err()
-                    .to_string();
-                assert!(error.contains(&format!("{section}.effect")), "{error}");
-                assert!(error.contains("set it to \"4.0.0-rc.999\""), "{error}");
-                assert_eq!(
-                    fs::read_to_string(workspace.join("package.json")).unwrap(),
-                    original
-                );
-                assert_eq!(
-                    directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
-                    before
-                );
-            }
-        }
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// template config\n"
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_rejects_indirect_effect_selectors_but_preserves_scoped_packages() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
-        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
-        for section in ["overrides", "resolutions"] {
-            for selectors in [
-                serde_json::json!({"**/effect": "4.0.0-beta.97"}),
-                serde_json::json!({"@hex/commands>effect": "4.0.0-beta.97"}),
-                serde_json::json!({"effect@4.0.0-beta.97": "4.0.0-beta.97"}),
-                serde_json::json!({"@hex/commands/effect": "4.0.0-beta.97"}),
-                serde_json::json!({"@hex/commands": {"effect": "4.0.0-beta.97"}}),
-                serde_json::json!({"other": {"@hex/commands": {"**/effect": "4.0.0-rc.999"}}}),
-            ] {
-                let mut manifest = serde_json::json!({"dependencies": {"effect": "4.0.0-beta.97"}});
-                manifest[section] = selectors;
-                let original = manifest.to_string();
-                fs::write(workspace.join("package.json"), &original).unwrap();
-                let error = initialize_workspace_at(&workspace, &sdk, |_| Ok(()))
-                    .unwrap_err()
-                    .to_string();
-                assert!(
-                    error.contains(&format!("unsupported Effect selector {section}[")),
-                    "{error}"
-                );
-                assert!(error.contains("remove this selector"), "{error}");
-                assert!(error.contains("4.0.0-rc.999"), "{error}");
-                assert_eq!(
-                    fs::read_to_string(workspace.join("package.json")).unwrap(),
-                    original
-                );
-                assert_eq!(
-                    directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
-                    before
-                );
-            }
-        }
-        let unrelated = serde_json::json!({
-            "@effect/platform": "1.0.0", "@other/effect": "2.0.0",
-            "**/@other/effect": "2.0.0", "@hex/commands>@other/effect": "2.0.0",
-            "@scope/package": {"@effect/platform": "1.0.0", "unrelated": "1.0.0"}
-        });
-        let mut manifest = serde_json::json!({
-            "dependencies": {"effect": "4.0.0-beta.97"},
-            "overrides": unrelated, "resolutions": unrelated
-        });
-        fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        manifest["dependencies"]["effect"] = "4.0.0-rc.999".into();
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &fs::read(workspace.join("package.json")).unwrap()
-            )
-            .unwrap(),
-            manifest
-        );
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// template config\n"
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn workspace_only_rejects_manifest_symlinks_that_need_migration() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
-        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
-        let path = workspace.join("package.json");
-        let target = workspace.parent().unwrap().join("user-package.json");
-        let original = r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#;
-        fs::remove_file(&path).unwrap();
-        for present in [true, false] {
-            if present {
-                fs::write(&target, original).unwrap();
-            } else {
-                fs::remove_file(&target).unwrap();
-            }
-            std::os::unix::fs::symlink(&target, &path).unwrap();
-            let error = initialize_workspace_at(&workspace, &sdk, |_| Ok(()))
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("is a symlink"), "{error}");
-            assert!(
-                error.contains("update the linked manifest to Effect"),
-                "{error}"
-            );
-            assert_eq!(fs::read_link(&path).unwrap(), target);
-            if present {
-                assert_eq!(fs::read_to_string(&target).unwrap(), original);
-            } else {
-                assert!(!target.exists());
-            }
-            assert_eq!(
-                directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
-                before
-            );
-            fs::remove_file(&path).unwrap();
-        }
-        let current = r#"{"dependencies":{"effect":"4.0.0-rc.999"}}"#;
-        fs::write(&target, current).unwrap();
-        std::os::unix::fs::symlink(&target, &path).unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        assert_eq!(fs::read_link(&path).unwrap(), target);
-        assert_eq!(fs::read_to_string(&target).unwrap(), current);
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// template config\n"
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn workspace_effect_migration_preserves_manifest_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        let path = workspace.join("package.json");
-        for mode in [0o600, 0o640] {
-            fs::write(&path, r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#).unwrap();
-            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
-            assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-            assert_eq!(
-                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                mode
-            );
-        }
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_effect_write_failure_is_retryable_after_sdk_refresh() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
-        let path = workspace.join("package.json");
-        let original = r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#;
-        fs::write(&path, original).unwrap();
-        let obstruction = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::create_dir(&obstruction).unwrap();
-        let error = refresh_managed_sdk_at(&workspace, &sdk)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("SDK may already be refreshed"), "{error}");
-        assert!(error.contains("rerun `hex commands init`"), "{error}");
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
-        assert_eq!(
-            fs::read_to_string(workspace.join(".hex-sdk/dist/bin.js")).unwrap(),
-            "// new SDK\n"
-        );
-        fs::remove_dir(&obstruction).unwrap();
-        // Reconciliation still requests installation, even though the SDK is current.
-        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// template config\n"
-        );
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_manifest_write_cleans_up_after_rename_failure() {
-        let (workspace, _) = workspace_upgrade_fixture();
-        let path = workspace.join("package.json");
-        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::create_dir(&path).unwrap();
-
-        assert!(write_workspace_manifest(&path, b"{}").is_err());
-        assert!(path.is_dir());
-        assert!(!temporary.exists());
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn workspace_manifest_write_preserves_preexisting_temporary_file() {
-        let (workspace, _) = workspace_upgrade_fixture();
-        let path = workspace.join("package.json");
-        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::write(&path, b"original manifest").unwrap();
-        fs::write(&temporary, b"existing temporary file").unwrap();
-
-        assert!(write_workspace_manifest(&path, b"{}").is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"original manifest");
-        assert_eq!(fs::read(&temporary).unwrap(), b"existing temporary file");
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn invalid_sdk_effect_requirement_does_not_mutate_workspace() {
-        let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        let before = directory_manifest(&workspace).unwrap();
-        for invalid in [
-            "{",
-            "[]",
-            "{}",
-            r#"{"peerDependencies":{"effect":"^4.0.0-rc.999"}}"#,
-            r#"{"peerDependencies":{"effect":"4.0.0-rc.999+build"}}"#,
-            r#"{"peerDependencies":{"effect":"04.0.0"}}"#,
-            r#"{"peerDependencies":{"effect":"4.0.0-01"}}"#,
-        ] {
-            fs::write(sdk.join("package.json"), invalid).unwrap();
-            assert!(refresh_managed_sdk_at(&workspace, &sdk).is_err());
-            assert_eq!(directory_manifest(&workspace).unwrap(), before);
-        }
-        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
-    }
-
-    fn workspace_upgrade_fixture() -> (PathBuf, PathBuf) {
-        static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "hex-workspace-upgrade-{}-{unique}-{sequence}",
-            std::process::id()
-        ));
-        let workspace = root.join("workspace");
-        let sdk = root.join("sdk");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(sdk.join("dist")).unwrap();
-        fs::create_dir_all(sdk.join("workspace-template")).unwrap();
-        fs::write(sdk.join("dist/bin.js"), "// SDK\n").unwrap();
-        fs::write(
-            sdk.join("package.json"),
-            r#"{"peerDependencies":{"effect":"4.0.0-rc.999"}}"#,
-        )
-        .unwrap();
-        fs::write(sdk.join("workspace-template/package.json"), "{}").unwrap();
-        fs::write(
-            sdk.join("workspace-template/hex.config.ts"),
-            "// template config\n",
-        )
-        .unwrap();
-        (workspace, sdk)
-    }
-
-    #[test]
-    fn clean_workspace_provisioning_preserves_user_config_on_refresh() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("hex-workspace-{unique}"));
-        let sdk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sdk/commands");
-        // A built checkout installs `dist`; an unbuilt one installs `src`.
-        let (bin, index) = match sdk_code_directory(&sdk).unwrap() {
-            "dist" => ("dist/bin.js", "dist/index.js"),
-            _ => ("src/bin.ts", "src/index.ts"),
-        };
-
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        assert!(workspace.join(".hex-sdk").join(bin).is_file());
-        assert!(workspace.join("package.json").is_file());
-        assert!(workspace.join("tsconfig.json").is_file());
-        assert!(workspace.join("AGENTS.md").is_file());
-        assert!(
-            workspace
-                .join(".agents/skills/personal-commands/SKILL.md")
-                .is_file()
-        );
-        fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
-        assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// user config\n"
-        );
-        fs::write(workspace.join(".hex-sdk").join(index), "stale SDK\n").unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
-        assert_eq!(
-            fs::read(workspace.join(".hex-sdk").join(index)).unwrap(),
-            fs::read(sdk.join(index)).unwrap()
-        );
-        assert_eq!(
-            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
-            "// user config\n"
-        );
-        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -4522,5 +2577,454 @@ mod tests {
         status.catalog.clear();
         status.last_reload_error = Some("x".repeat(MAX_STATUS_ERROR_BYTES + 1));
         assert!(validate_status(&status).is_err());
+    }
+
+    /// A worker over a fresh config folder, without threads: tests drive it
+    /// directly and read the actions it hands off.
+    struct Harness {
+        root: PathBuf,
+        worker: Worker,
+        actions: Receiver<ActionJob>,
+        outcomes: Receiver<ActionOutcome>,
+        _requests: Receiver<Request>,
+    }
+
+    impl Harness {
+        fn new(config: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("hex-scripts-{unique}"));
+            let workspace = root.join("hex");
+            fs::create_dir_all(&workspace).unwrap();
+            fs::write(workspace.join("hex.config.ts"), config).unwrap();
+            let (requests, request_receiver) = mpsc::sync_channel(4);
+            let (outcome_sender, outcomes) = mpsc::sync_channel(8);
+            let (action_sender, actions) = mpsc::sync_channel(8);
+            let mut worker = Worker {
+                base: CommandConfig::new(),
+                active: Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(
+                    CommandConfig::new(),
+                )))),
+                transformations: Arc::new(TransformationClient::default()),
+                requests,
+                outcomes: outcome_sender,
+                actions: action_sender,
+                workspace,
+                status_file: Some(root.join("personal-commands.json")),
+                generation: 0,
+                script: None,
+                status: StatusSnapshot::default(),
+            };
+            worker.reload();
+            Self {
+                root,
+                worker,
+                actions,
+                outcomes,
+                _requests: request_receiver,
+            }
+        }
+
+        fn write(&mut self, config: &str) {
+            fs::write(self.worker.workspace.join("hex.config.ts"), config).unwrap();
+            self.worker.reload();
+        }
+
+        fn snapshot(&self) -> Arc<RuntimeSnapshot> {
+            self.worker.active.read().unwrap().clone()
+        }
+
+        fn error(&self) -> String {
+            self.worker
+                .status
+                .last_reload_error
+                .clone()
+                .unwrap_or_default()
+        }
+
+        /// Says `heard` and runs the handler it resolves to.
+        fn say(&self, heard: &str) -> std::result::Result<Vec<Action>, String> {
+            let snapshot = self.snapshot();
+            let Decision::Execute {
+                id,
+                action:
+                    Action::InvokeHandler {
+                        generation,
+                        captures,
+                    },
+            } = snapshot
+                .commands
+                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
+            else {
+                panic!("{heard:?} did not resolve to a handler");
+            };
+            self.worker.invoke(Invocation {
+                generation,
+                command_id: id.into(),
+                heard: heard.into(),
+                context: ContextSnapshot::default(),
+                captures,
+            });
+            match self.actions.try_recv() {
+                Ok(job) => Ok(job.actions),
+                Err(_) => match self.outcomes.try_recv().unwrap().result {
+                    Ok(()) => Ok(Vec::new()),
+                    Err(error) => Err(error),
+                },
+            }
+        }
+
+        fn transform(&self, ids: &[&str], text: &str) -> std::result::Result<String, String> {
+            let (response, result) = mpsc::sync_channel(1);
+            self.worker.transform(TransformationRequest {
+                generation: self.snapshot().generation,
+                ids: ids.iter().map(ToString::to_string).collect(),
+                text: text.into(),
+                context: ContextSnapshot::default(),
+                response,
+            });
+            result.recv().unwrap()
+        }
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn the_starter_config_registers_and_its_handlers_return_actions() {
+        let harness = Harness::new(TEMPLATE_CONFIG);
+        assert_eq!(
+            harness.worker.status.host_state,
+            HostState::Active,
+            "{}",
+            harness.error()
+        );
+        assert_eq!(
+            harness
+                .worker
+                .status
+                .catalog
+                .iter()
+                .map(|command| (command.id.as_str(), command.execution))
+                .collect::<Vec<_>>(),
+            [
+                ("open-example", StatusExecution::Native),
+                ("search-amazon", StatusExecution::Handler),
+                ("control-key", StatusExecution::Handler),
+            ]
+        );
+        assert!(matches!(
+            harness.say("search amazon for wool socks").unwrap().as_slice(),
+            [Action::OpenUrl(url)] if url == "https://www.amazon.com/s?k=wool%20socks"
+        ));
+        assert!(matches!(
+            harness.say("control five").unwrap().as_slice(),
+            [Action::Keystroke { key: Key::Character('5'), modifiers }]
+                if *modifiers == Modifiers::CONTROL
+        ));
+        assert!(matches!(
+            harness.say("control bravo").unwrap().as_slice(),
+            [Action::Keystroke {
+                key: Key::Character('b'),
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn handlers_queue_and_return_actions_in_order_and_fail_on_bad_ones() {
+        let harness = Harness::new(
+            r#"import { defineHexConfig, openApplication, press, typeText } from "@hex/commands"
+export default defineHexConfig({
+  commands: {
+    both: {
+      phrases: ["do both"],
+      run: async ({ hex }) => {
+        await hex.openApplication("Slack")
+        return [press({ key: "k", modifiers: ["command"] }), typeText("hi")]
+      },
+    },
+    nothing: { phrases: ["do nothing"], run: () => {} },
+    broken: { phrases: ["do broken"], run: () => press({ key: "nope" }) },
+    throws: { phrases: ["do throws"], run: () => { throw new Error("no thanks") } },
+    odd: { phrases: ["do odd"], run: () => 42 },
+  },
+})
+"#,
+        );
+        assert!(matches!(
+            harness.say("do both").unwrap().as_slice(),
+            [
+                Action::OpenApplication(application),
+                Action::Keystroke { key: Key::Character('k'), .. },
+                Action::TypeText(text),
+            ] if application == "Slack" && text == "hi"
+        ));
+        assert!(harness.say("do nothing").unwrap().is_empty());
+        assert!(harness.say("do broken").unwrap_err().contains("press key"));
+        let error = harness.say("do throws").unwrap_err();
+        assert!(error.starts_with("Error: no thanks"), "{error}");
+        assert!(error.contains("hex.config.ts:"), "{error}");
+        assert!(
+            harness
+                .say("do odd")
+                .unwrap_err()
+                .contains("must return an action")
+        );
+    }
+
+    #[test]
+    fn transformations_chain_with_built_ins_and_failures_keep_nothing() {
+        let harness = Harness::new(
+            r#"import { defineHexConfig } from "@hex/commands"
+export default defineHexConfig({
+  transformations: {
+    exclaim: { name: "Exclaim", transform: (text: string): string => `${text}!` },
+    later: { name: "Later", transform: async (text) => text.toUpperCase() },
+    broken: { name: "Broken", transform: () => { throw new TypeError("bad input") } },
+    number: { name: "Number", transform: () => 7 },
+  },
+  commands: {},
+})
+"#,
+        );
+        assert_eq!(
+            harness.transform(&["exclaim", "later"], "hi").unwrap(),
+            "HI!"
+        );
+        let error = harness.transform(&["exclaim", "broken"], "hi").unwrap_err();
+        assert!(error.starts_with("TypeError: bad input"), "{error}");
+        assert!(
+            harness
+                .transform(&["number"], "hi")
+                .unwrap_err()
+                .contains("did not return a string")
+        );
+        assert_eq!(
+            harness
+                .worker
+                .status
+                .transformations
+                .iter()
+                .map(|transformation| transformation.id.as_str())
+                .collect::<Vec<_>>(),
+            ["exclaim", "later", "broken", "number"]
+        );
+    }
+
+    #[test]
+    fn runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working() {
+        let harness = Harness::new(
+            r#"export default {
+  transformations: {
+    spin: { name: "Spin", transform: () => { for (;;) {} } },
+    wait: { name: "Wait", transform: () => new Promise(() => {}) },
+    grow: { name: "Grow", transform: () => { const a = []; for (;;) a.push("x".repeat(1024)) } },
+    echo: { name: "Echo", transform: (text) => text },
+  },
+  commands: {},
+}
+"#,
+        );
+        let started = Instant::now();
+        assert_eq!(
+            harness.transform(&["spin"], "hi").unwrap_err(),
+            "timed out after 1000 ms"
+        );
+        assert!(started.elapsed() < script::CALL_TIME_LIMIT * 2);
+        assert!(
+            harness
+                .transform(&["wait"], "hi")
+                .unwrap_err()
+                .contains("never settled")
+        );
+        let error = harness.transform(&["grow"], "hi").unwrap_err();
+        assert!(
+            error.contains("out of memory") || error.contains("timed out"),
+            "{error}"
+        );
+        assert_eq!(
+            harness.transform(&["echo"], "still here").unwrap(),
+            "still here"
+        );
+    }
+
+    #[test]
+    fn load_errors_name_the_file_line_and_column_and_keep_the_last_good_config() {
+        let mut harness = Harness::new(
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } }, commands: {} }"#,
+        );
+        let generation = harness.snapshot().generation;
+
+        harness.write("const a = 1\nenum Color { Red }\nexport default { commands: {} }\n");
+        assert!(
+            harness
+                .error()
+                .contains("SyntaxError: hex.config.ts:2:1: TypeScript enums"),
+            "{}",
+            harness.error()
+        );
+        assert_eq!(harness.worker.status.host_state, HostState::Active);
+        assert_eq!(harness.snapshot().generation, generation);
+        assert_eq!(harness.transform(&["echo"], "kept").unwrap(), "kept");
+
+        harness.write("export default {\n  commands: {\n    a: { phrases: [\"x\"], run: () => {} },,\n  },\n}\n");
+        assert!(
+            harness.error().starts_with("SyntaxError"),
+            "{}",
+            harness.error()
+        );
+        assert!(
+            harness.error().contains("hex.config.ts:3:"),
+            "{}",
+            harness.error()
+        );
+
+        fs::remove_file(harness.worker.workspace.join("hex.config.ts")).unwrap();
+        fs::write(
+            harness.worker.workspace.join("hex.config.js"),
+            "export default {\n  commands: {\n    a: { phrases: [\"x\"] run: () => {} },\n  },\n}\n",
+        )
+        .unwrap();
+        harness.worker.reload();
+        assert!(
+            harness.error().starts_with("SyntaxError"),
+            "{}",
+            harness.error()
+        );
+        assert!(
+            harness.error().contains("hex.config.js:3:"),
+            "{}",
+            harness.error()
+        );
+        fs::remove_file(harness.worker.workspace.join("hex.config.js")).unwrap();
+
+        harness.write("throw new Error(\"top level\")\nexport default { commands: {} }\n");
+        assert!(
+            harness.error().starts_with("Error: top level"),
+            "{}",
+            harness.error()
+        );
+
+        harness.write("export default { commands: { a: { phrases: [\"open notes\"], run: () => {} }, b: { phrases: [\"open notes\"], run: () => {} } } }\n");
+        assert_eq!(harness.error(), "command patterns overlap: a and b");
+        assert_eq!(harness.snapshot().generation, generation);
+
+        harness.write("export default { transformations: { echo: { name: \"Echo\", transform: (t) => t + \"?\" } }, commands: {} }\n");
+        assert!(harness.worker.status.last_reload_error.is_none());
+        assert!(harness.snapshot().generation > generation);
+        assert_eq!(harness.transform(&["echo"], "new").unwrap(), "new?");
+
+        fs::remove_file(harness.worker.workspace.join("hex.config.ts")).unwrap();
+        harness.worker.reload();
+        assert_eq!(harness.worker.status.host_state, HostState::NotConfigured);
+        assert!(harness.worker.script.is_none());
+    }
+
+    #[test]
+    fn stale_generations_never_reach_a_newer_config() {
+        let mut harness = Harness::new(
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } }, commands: {} }"#,
+        );
+        let (response, result) = mpsc::sync_channel(1);
+        let stale = harness.snapshot().generation;
+        harness.write(
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t + t } }, commands: {} }"#,
+        );
+        harness.worker.transform(TransformationRequest {
+            generation: stale,
+            ids: vec!["echo".into()],
+            text: "a".into(),
+            context: ContextSnapshot::default(),
+            response,
+        });
+        assert!(result.recv().unwrap().is_err());
+        assert_eq!(harness.transform(&["echo"], "a").unwrap(), "aa");
+    }
+
+    #[test]
+    fn scripts_import_only_hex_commands_and_files_in_the_folder() {
+        let mut harness = Harness::new("export default { commands: {} }");
+        let workspace = harness.worker.workspace.clone();
+        fs::create_dir_all(workspace.join("lib")).unwrap();
+        fs::write(
+            workspace.join("lib/words.ts"),
+            "import data from \"../data.json\"\nexport const shout = (text: string): string => text.toUpperCase() + data.mark\n",
+        )
+        .unwrap();
+        fs::write(workspace.join("data.json"), "{\"mark\": \"!\"}").unwrap();
+        harness.write(
+            "import { shout } from \"./lib/words\"\nexport default { transformations: { shout: { name: \"Shout\", transform: shout } }, commands: {} }\n",
+        );
+        assert_eq!(harness.transform(&["shout"], "hi").unwrap(), "HI!");
+
+        for import in [
+            "node:fs",
+            "effect",
+            "@hex/commands/effect",
+            "../outside.ts",
+            "hex:host",
+        ] {
+            harness.write(&format!(
+                "import {{ x }} from {import:?}\nexport default {{ commands: {{}} }}\n"
+            ));
+            assert!(!harness.error().is_empty(), "{import} was importable");
+        }
+        harness.write(
+            "export default { transformations: { probe: { name: \"Probe\", transform: () => [typeof fetch, typeof setTimeout, typeof require, typeof process, typeof console.log].join(\" \") } }, commands: {} }\n",
+        );
+        assert_eq!(
+            harness.transform(&["probe"], "").unwrap(),
+            "undefined undefined undefined undefined function"
+        );
+    }
+
+    #[test]
+    fn initialization_writes_typings_and_a_starter_config_but_keeps_the_users() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("hex-init-{unique}"));
+        initialize_workspace_at(&workspace).unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            TEMPLATE_CONFIG
+        );
+        for name in ["hex.d.ts", "AGENTS.md", "tsconfig.json"] {
+            assert!(workspace.join(name).is_file(), "{name}");
+        }
+        fs::write(workspace.join("hex.config.ts"), "// mine\n").unwrap();
+        fs::write(workspace.join("hex.d.ts"), "// stale\n").unwrap();
+        initialize_workspace_at(&workspace).unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// mine\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.d.ts")).unwrap(),
+            MANAGED_FILES[0].1
+        );
+        fs::write(
+            workspace.join("hex.config.js"),
+            "export default { commands: {} }\n",
+        )
+        .unwrap();
+        assert!(find_config(&workspace).is_err());
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn check_reports_what_the_config_registers() {
+        let harness = Harness::new(TEMPLATE_CONFIG);
+        assert_eq!(
+            check_workspace_at(&harness.worker.workspace, &CommandConfig::new()).unwrap(),
+            "hex.config.ts: 3 commands, 0 transformations"
+        );
     }
 }

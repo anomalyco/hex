@@ -188,7 +188,7 @@ POST /streams { priority: "dictation" | "stream" }
 ## 10. Linux and Windows Counterparts
 
 - **Linux:** The existing `hex.service` per-user `systemd` unit (`Type=notify`, `PartOf=graphical-session.target`, `Restart=on-failure`) already runs a single long-lived process per user and data root (`docs/plans/single-process.md`). Sharing `TranscriptionEngine` in `LocalApi` on Linux exposes the exact same `local-api.json` + `/streams` + `/transcriptions` contract on `127.0.0.1`, with non-systemd desktops using the same `engine.lock` + detached `hex engine` spawn.
-- **Windows:** `WindowsDesktopHost` (or a headless `hex.exe engine` spawned with `CREATE_NO_WINDOW | DETACHED_PROCESS` and coordinated by a named mutex + `%APPDATA%\voice-control\local-api.json` with owner-only DACL) serves the same loopback HTTP API, using `SetProcessInformation(..., ProcessPowerThrottling)` to disable EcoQoS throttling so Vulkan/CPU inference stays at full speed.
+- **Windows:** `WindowsDesktopHost` (or a headless `hex.exe engine` spawned with `CREATE_NO_WINDOW | DETACHED_PROCESS` and coordinated by a named mutex + `%APPDATA%\hex\local-api.json` with owner-only DACL) serves the same loopback HTTP API, using `SetProcessInformation(..., ProcessPowerThrottling)` to disable EcoQoS throttling so Vulkan/CPU inference stays at full speed.
 
 ## What the Spike Did Not Prove
 

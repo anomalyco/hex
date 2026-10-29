@@ -17,7 +17,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 packages=(--workspace)
 if [[ "$(uname -s)" == Darwin ]]; then
-    packages=(-p voice-control -p scrawl-router -p scrawl-capture -p capture-core)
+    # zbus depends on the crates.io `hex`, so the root package is named by its ID.
+    packages=(-p "$(cargo pkgid)" -p scrawl-router -p scrawl-capture -p capture-core)
 fi
 
 stage() {
@@ -29,15 +30,15 @@ cargo fmt --all --check || exit 10
 
 if [[ $# -eq 0 ]]; then
     stage "clippy"
-    cargo clippy --locked "${packages[@]}" --all-targets --features capture,onnx-benchmark -- -D warnings || exit 11
+    cargo clippy --locked "${packages[@]}" --all-targets --features onnx-benchmark -- -D warnings || exit 11
 fi
 
 if command -v cargo-nextest >/dev/null 2>&1; then
     stage "test (nextest${1:+: $*})"
-    cargo nextest run --locked "${packages[@]}" --features capture --no-tests=warn "$@" || exit 12
+    cargo nextest run --locked "${packages[@]}" --no-tests=warn "$@" || exit 12
 else
     stage "test (cargo test${1:+: $*})"
     echo "cargo-nextest is not installed, so a hung test stalls the run without" >&2
     echo "a name. Install it with: brew install cargo-nextest" >&2
-    cargo test --locked "${packages[@]}" --features capture -- "$@" || exit 12
+    cargo test --locked "${packages[@]}" -- "$@" || exit 12
 fi

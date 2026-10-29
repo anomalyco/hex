@@ -39,7 +39,9 @@ Agent or terminal                                  // control.cli; macOS release
 ├── hex commands enable [--yes] | disable | retry
 ├── hex window show [pane] | hide
 │   ├── settings -> the General pane (status window.pane stays "settings")
-│   └── meetings pane with Meetings off -> the pane's opt-in card
+│   ├── meetings pane with Meetings off -> the pane's opt-in card
+│   └── story <story> [--variant V] [--play] -> a playground story, as a
+│       hex://story link opens (experiments.md); experiment off -> feature-off
 ├── hex history clear --yes -> without --yes refused before Hex is asked
 ├── hex check-for-updates -> The updater checks now
 ├── hex launch-at-login [on|off] -> SMAppService; changes need Hex.app
@@ -49,7 +51,7 @@ Agent or terminal                                  // control.cli; macOS release
 Every command except `start`, `restart`, and `logs` talks only to the running
 Hex through the owner-only discovery file and the bearer-authenticated
 `POST /control` route; none of them launch Hex. Commands dispatch in `main`
-before folder migration, logging, and the instance lock, so they never compete
+before logging, and the instance lock, so they never compete
 with the running app for its files. Opt-ins stay explicit settings: no command
 turns Voice Action, Commands, or Meetings on as a side effect.
 

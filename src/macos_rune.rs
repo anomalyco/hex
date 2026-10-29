@@ -44,10 +44,11 @@ use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorUi};
+use crate::dictation_indicator::DictationIndicatorEvent;
 use crate::meeting::MeetingRequest;
 use crate::meeting_watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
 use crate::recognition::RecognitionControl;
+use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
 use crate::status_item::StatusItemAction;
 use crate::transcription_models::{
@@ -56,6 +57,9 @@ use crate::transcription_models::{
 use crate::transcription_preparation::TranscriptionPreparation;
 
 mod control;
+
+#[cfg(test)]
+mod tests;
 
 /// How often the runtime refreshes while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
@@ -95,6 +99,8 @@ pub(crate) enum Request {
     SelectInstalledModel(TranscriptionModelId),
     /// `hex model use`: this exact selection, installed only, never a download.
     UseInstalledSelection(TranscriptionSelection),
+    /// Snapshot from the main-thread TIS observer, not a shortcut event.
+    InputSourceChanged(Option<String>),
     CancelModel,
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
@@ -160,6 +166,22 @@ impl RuntimeHandle {
     }
 
     pub(crate) fn send(&self, request: Request) -> Result<()> {
+        if matches!(
+            &request,
+            Request::ChooseModel { .. }
+                | Request::SelectInstalledModel(_)
+                | Request::UseInstalledSelection(_)
+                | Request::CancelModel
+                | Request::ReloadSettings
+        ) && let Some(mtm) = MainThreadMarker::new()
+            && let Some(source) = crate::keyboard_input_sources::take_change(mtm)
+        {
+            // Deliver a source change not yet pumped before this UI/control
+            // choice, so it cannot later undo the newer manual choice.
+            self.requests
+                .send(Request::InputSourceChanged(source))
+                .map_err(|_| eyre!("Hex's runtime stopped"))?;
+        }
         self.requests
             .send(request)
             .map_err(|_| eyre!("Hex's runtime stopped"))
@@ -196,16 +218,13 @@ pub(crate) fn runtime() -> Option<RuntimeHandle> {
     RUNTIME.get().cloned()
 }
 
-/// Carries out an update control from the window, a menu, or `hex`;
-/// switching to a staged update quits so it can start.
+/// Carries out an update control from the window, a menu, or `hex`. Restart
+/// to update finishes on the updater's worker; the pump then quits.
 pub(crate) fn update_action(action: &crate::desktop_host::DesktopAction) -> Result<()> {
-    let updater = UPDATER
+    UPDATER
         .get()
-        .ok_or_else(|| eyre!("the updater is not running"))?;
-    if updater.act(action)? {
-        quit();
-    }
-    Ok(())
+        .ok_or_else(|| eyre!("the updater is not running"))?
+        .act(action)
 }
 
 pub(crate) fn update_status() -> DesktopUpdateStatus {
@@ -233,8 +252,28 @@ pub(crate) fn window_closed() {
     ));
 }
 
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let detail = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown cause");
+    format!("the listener panicked: {detail}")
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Samples footprint and CPU for the life of the app (every 10 s in release, 2 s in debug
+/// builds) and logs a warning on a large footprint, steady growth, or a busy core.
+fn watch_process() {
+    let config = if cfg!(debug_assertions) {
+        procwatch::Config::dev("hex")
+    } else {
+        procwatch::Config::release("hex")
+    };
+    procwatch::watch_with(config, |event, _| tracing::warn!(%event, "process watch"));
 }
 
 pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()> {
@@ -242,10 +281,18 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         return Err(eyre!("desktop startup requires the main thread"));
     };
     shutdown.store(false, Ordering::Relaxed);
+    watch_process();
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
     let settings = AppSettings::load()?;
+    // Known before the observer's first report, so launching keeps the saved
+    // model instead of applying the current source's mapping.
+    let initial_input_source = settings
+        .keyboard_model_switching
+        .enabled
+        .then(|| crate::keyboard_input_sources::current(mtm))
+        .flatten();
     let setup_ready = crate::onboarding::status(&settings.transcription).ready();
     let onboarding_completed = crate::onboarding::completion_recorded();
     let history = match crate::history::History::open_default(settings.history_retention) {
@@ -299,6 +346,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let recognition_indicator = indicator.clone();
     let recognition_meetings = meeting_requests.clone();
     let recognition_history = history.clone();
+    let listener_failure = Arc::new(Mutex::new(None::<String>));
+    let recognition_failure = listener_failure.clone();
     let recognition = thread::Builder::new()
         .name("hex-listener".into())
         .spawn(move || {
@@ -314,23 +363,34 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     }
                 }
             }
-            if let Err(error) = crate::recognition::listen(
-                &listener.project_root,
-                event_log,
-                listener.device.as_deref(),
-                crate::config::voice_control(),
-                shutdown,
-                Some(recognition_indicator.clone()),
-                Some(recognition_meetings),
-                recognition_history,
-                Some(recognition_control_receiver),
-            ) {
-                tracing::error!(%error, "desktop recognition stopped");
-                if format!("{error:#}").contains("event tap") {
-                    crate::onboarding::note_listener_failure();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::recognition::listen(
+                    &listener.project_root,
+                    event_log,
+                    listener.device.as_deref(),
+                    crate::config::voice_control(),
+                    shutdown,
+                    Some(recognition_indicator.clone()),
+                    Some(recognition_meetings),
+                    recognition_history,
+                    Some(recognition_control_receiver),
+                )
+            }));
+            let failure = match result {
+                Ok(Ok(())) => return,
+                Ok(Err(error)) => {
+                    tracing::error!(%error, "desktop recognition stopped");
+                    let message = format!("{error:#}");
+                    if message.contains("event tap") {
+                        crate::onboarding::note_listener_failure();
+                    }
+                    message
                 }
-                recognition_indicator.send(DictationIndicatorEvent::Failed);
-            }
+                // The panic hook has already logged it.
+                Err(payload) => panic_message(payload.as_ref()),
+            };
+            *lock(&recognition_failure) = Some(failure);
+            recognition_indicator.send(DictationIndicatorEvent::Failed);
         })?;
 
     let (requests, request_receiver) = mpsc::channel();
@@ -353,10 +413,12 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         .spawn(move || {
             run_runtime(
                 runtime_settings,
+                initial_input_source,
                 request_receiver,
                 &shared,
                 shutdown,
                 (!setup_ready).then_some(recognition_start),
+                listener_failure,
             )
         })?;
     let mut app = crate::rune_ui::app(Default::default())
@@ -400,6 +462,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
             },
         )
     };
+    let hud = crate::rune_hud::install(&mut app);
+    crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
     #[cfg(hex_capture)]
     let capture_overlays = crate::app_settings::capture_available()
@@ -412,6 +476,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         runtime: handle,
         shutdown,
         indicator_events,
+        hud,
         status_actions: None,
         controller_events,
         developer_calls: developer_receiver,
@@ -494,15 +559,23 @@ static DRAIN: crate::process_exit::Drain = crate::process_exit::Drain::new();
 
 fn run_runtime(
     settings: AppSettings,
+    initial_input_source: Option<String>,
     requests: Receiver<Request>,
     shared: &Shared,
     shutdown: &AtomicBool,
     recognition_start: Option<SyncSender<()>>,
+    listener_failure: Arc<Mutex<Option<String>>>,
 ) {
     let mut runtime = Runtime {
+        keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+            settings.keyboard_model_switching.clone(),
+            initial_input_source,
+        ),
+        automatic_preparation: false,
         settings,
         preparation: TranscriptionPreparation::default(),
         recognition_start,
+        listener_failure,
     };
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
@@ -536,17 +609,27 @@ fn run_runtime(
     runtime.preparation.cancel();
 }
 
+/// Two selections that load the same thing; recognition hints aside.
+fn same_model_and_language(left: &TranscriptionSelection, right: &TranscriptionSelection) -> bool {
+    left.model == right.model && left.language == right.language
+}
+
 struct Runtime {
     settings: AppSettings,
     preparation: TranscriptionPreparation,
+    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    automatic_preparation: bool,
     /// Starts the listener once setup is ready; `None` once started.
     recognition_start: Option<SyncSender<()>>,
+    /// Why the listener stopped, once it has.
+    listener_failure: Arc<Mutex<Option<String>>>,
 }
 
 impl Runtime {
     fn handle(&mut self, request: Request) {
         match request {
             Request::ChooseModel { model, language } => {
+                self.manual_choice();
                 let definition = crate::transcription_models::definition(model);
                 let selection = TranscriptionSelection {
                     model,
@@ -562,11 +645,29 @@ impl Runtime {
             }
             Request::SelectInstalledModel(model) => {
                 self.reload_settings();
+                self.manual_choice();
                 self.preparation
                     .start(self.settings.transcription_for_model(model), true);
             }
-            Request::UseInstalledSelection(selection) => self.preparation.start(selection, true),
-            Request::CancelModel => self.preparation.cancel(),
+            Request::UseInstalledSelection(selection) => {
+                self.manual_choice();
+                // `hex model use` replies "already in use" on the same test.
+                if !same_model_and_language(&selection, &self.settings.transcription) {
+                    self.preparation.start(selection, true);
+                }
+            }
+            Request::InputSourceChanged(source) => {
+                if self
+                    .keyboard_switcher
+                    .source_changed(source, Instant::now())
+                {
+                    self.supersede_automatic();
+                }
+            }
+            Request::CancelModel => {
+                self.manual_choice();
+                self.preparation.cancel();
+            }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
             | Request::CaptureShortcutFor(_)
@@ -577,14 +678,59 @@ impl Runtime {
 
     fn reload_settings(&mut self) {
         match AppSettings::load() {
-            Ok(settings) => self.settings = settings,
+            Ok(settings) => {
+                if self
+                    .keyboard_switcher
+                    .configure(settings.keyboard_model_switching.clone(), Instant::now())
+                {
+                    self.supersede_automatic();
+                }
+                self.settings = settings;
+            }
             Err(error) => tracing::warn!(%error, "could not reload settings"),
+        }
+    }
+
+    fn manual_choice(&mut self) {
+        self.keyboard_switcher.manual_choice();
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
+    }
+
+    fn supersede_automatic(&mut self) {
+        // A source being cycled through must not cancel a manual operation.
+        // Manual work is superseded only when the debounced choice is due.
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
         }
     }
 
     /// Commits a prepared model and starts a listener that waited for setup.
     fn tick(&mut self) {
+        self.tick_at(Instant::now());
+    }
+
+    fn tick_at(&mut self, now: Instant) {
+        if let Some(choice) = self.keyboard_switcher.take_due(now) {
+            let selection = TranscriptionSelection {
+                language: choice.language,
+                ..self.settings.transcription_for_model(choice.model)
+            };
+            if !same_model_and_language(&selection, &self.settings.transcription) {
+                self.preparation.start(selection, true);
+                self.automatic_preparation = true;
+            } else {
+                // The debounced choice keeps the current model, but must
+                // still prevent an older manual preparation replacing it.
+                self.preparation.cancel();
+                self.automatic_preparation = false;
+            }
+        }
         if let Some(result) = self.preparation.poll() {
+            self.automatic_preparation = false;
             let result = result.and_then(|selection| {
                 crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut settings = AppSettings::load().map_err(|e| format!("{e:#}"))?;
@@ -612,17 +758,20 @@ impl Runtime {
 
     fn publish(&self) -> Published {
         let preparation = self.preparation.status();
-        let running = self.recognition_start.is_none();
+        let failure = lock(&self.listener_failure).clone();
+        let running = self.recognition_start.is_none() && failure.is_none();
         Published {
             listener: DesktopListenerSnapshot {
                 running,
-                status: if running {
+                status: if failure.is_some() {
+                    "Stopped"
+                } else if running {
                     "Enabled"
                 } else {
                     "Waiting for setup"
                 }
                 .into(),
-                warning: None,
+                warning: failure,
                 shortcuts: DesktopShortcuts::Registered,
             },
             transcription: DesktopTranscriptionSnapshot {
@@ -652,6 +801,7 @@ struct Pump {
     runtime: RuntimeHandle,
     shutdown: &'static AtomicBool,
     indicator_events: Receiver<DictationIndicatorEvent>,
+    hud: crate::rune_hud::HudSender,
     status_actions: Option<Receiver<StatusItemAction>>,
     controller_events: Receiver<ControllerEvent>,
     developer_calls: Receiver<crate::developer_control::DeveloperCall>,
@@ -735,7 +885,7 @@ fn start_main_thread() {
                 pump.status_actions.is_some(),
             ),
     );
-    let indicator = DictationIndicatorUi::new();
+    let indicator = DictationIndicatorUi::new(pump.hud.clone());
     install_main_menu(&target, mtm);
     // Inside the loop, once AppKit has started, so its own Apple event setup
     // can't replace this handler.
@@ -753,6 +903,15 @@ fn start_main_thread() {
     let block = RcBlock::new(|_: std::ptr::NonNull<NSTimer>| {
         PUMP.with(|slot| {
             if let Some(state) = slot.borrow_mut().as_mut() {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    let switching = state.pump.runtime.published().is_some_and(|published| {
+                        published.settings.keyboard_model_switching.enabled
+                    });
+                    crate::keyboard_input_sources::observe(mtm, switching);
+                    if let Some(source) = crate::keyboard_input_sources::take_change(mtm) {
+                        let _ = state.pump.runtime.send(Request::InputSourceChanged(source));
+                    }
+                }
                 state.pump.tick(&mut state.indicator);
             }
         });
@@ -785,6 +944,15 @@ fn window_visible() -> bool {
 /// Opens the window at `destination`, in front of the app that was active.
 fn show(window: &rune::AppHandle<Ui>, destination: Destination) {
     window.update(move |ui, tx| crate::rune_ui::show(ui, destination, tx));
+    bring_forward(window);
+}
+
+/// Opens the window in front, from the main thread.
+pub(crate) fn bring_window_forward() {
+    with_window(bring_forward);
+}
+
+fn bring_forward(window: &rune::AppHandle<Ui>) {
     // An open window always shows the Dock icon: hiding it
     // would deactivate Hex and drop the window behind other apps.
     crate::app_settings::set_dock_icon_visible(true);
@@ -800,6 +968,20 @@ impl Pump {
             self.runtime_cancel();
             self.window.quit();
             return;
+        }
+        // Restart to update swapped in the new version after its final check.
+        match UPDATER
+            .get()
+            .and_then(crate::updater::Updater::take_restart)
+        {
+            Some(Ok(())) => {
+                self.window.quit();
+                return;
+            }
+            Some(Err(error)) => {
+                tracing::warn!(error = %format!("{error:#}"), "could not restart into the update");
+            }
+            None => {}
         }
         while let Ok(event) = self.indicator_events.try_recv() {
             indicator.handle(event);

@@ -276,6 +276,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
     })
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// The capsule, its picker, and the ink, installed together.
 pub(crate) struct CaptureOverlays {
     capsule: CaptureCapsule,
@@ -303,6 +304,7 @@ impl CaptureOverlays {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Follows `capture.show_overlays_in_recordings` on windows already
     /// made; returns the new value when it changed.
     pub(crate) fn follow_recordings(&mut self) -> Option<bool> {
@@ -346,6 +348,7 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                     capsule.input(match input {
                         // The common first-capture failure: the engine's
                         // own reason for it is a ScreenCaptureKit error.
+                        #[cfg(target_os = "macos")]
                         Input::Failed(what @ (Failure::Start | Failure::Save), _)
                             if !crate::meeting::screen_recording_permitted() =>
                         {
@@ -381,10 +384,12 @@ fn first_frame(images: &rune::ImageCache, bundle: &std::path::Path) -> Option<ru
 /// shortcut) without a pick records the display under the pointer. Runs on the
 /// main thread, so it only queues the commands.
 pub(crate) fn act(action: Action) {
+    use crate::capture_host::CaptureControl;
     use crate::control::ScrawlCaptureAction;
-    use crate::recognition::RecognitionControl;
+    let scrawl = CaptureControl::Scrawl;
+    let command = CaptureControl::Command;
     let screen = || CaptureCommand::Start(CaptureTarget::Display { at: pointer() });
-    let controls: Vec<RecognitionControl> = match action {
+    let controls: Vec<CaptureControl> = match action {
         Action::Finish => vec![scrawl(ScrawlCaptureAction::Stop)],
         Action::Cancel => vec![scrawl(ScrawlCaptureAction::Cancel)],
         // The picker opens: look for a phone cabled since the recording
@@ -396,6 +401,12 @@ pub(crate) fn act(action: Action) {
         Action::Start(target) => vec![command(CaptureCommand::Start(target))],
         // What the picker would record, when it has nothing to record yet
         // (its windows still load): the pointer's display.
+        // Wayland lists no windows: the portal's own picker chooses one.
+        Action::Record(Mode::Window) if cfg!(target_os = "linux") => {
+            vec![command(CaptureCommand::Start(CaptureTarget::Window {
+                id: 0,
+            }))]
+        }
         Action::Record(Mode::Screen | Mode::Window | Mode::Area) => vec![command(screen())],
         Action::Record(Mode::Iphone) => vec![command(CaptureCommand::Start(CaptureTarget::Phone))],
         Action::Switch(Mode::Iphone) => {
@@ -411,30 +422,26 @@ pub(crate) fn act(action: Action) {
         Action::Paste => vec![command(CaptureCommand::Paste)],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
     };
-    let Some(runtime) = crate::macos_rune::runtime() else {
-        return;
-    };
     for control in controls {
-        if let Err(error) = runtime.recognition(control) {
+        if let Err(error) = crate::capture_host::send_to_listener(control) {
             tracing::warn!(%error, "the capture capsule could not reach the listener");
         }
     }
 }
 
-fn scrawl(action: crate::control::ScrawlCaptureAction) -> crate::recognition::RecognitionControl {
-    let (reply, _) = std::sync::mpsc::sync_channel(1);
-    crate::recognition::RecognitionControl::ScrawlCapture { action, reply }
-}
-
-fn command(command: CaptureCommand) -> crate::recognition::RecognitionControl {
-    let (reply, _) = std::sync::mpsc::sync_channel(1);
-    crate::recognition::RecognitionControl::CaptureCommand { command, reply }
-}
-
 /// Why a capture failed when Screen Recording isn't granted.
+#[cfg(target_os = "macos")]
 const SCREEN_RECORDING_OFF: &str = "Screen Recording is off";
 
+/// The pointer, in global top-left points. Wayland tells Hex nothing of it:
+/// the portal picks the screen.
+#[cfg(not(target_os = "macos"))]
+fn pointer() -> [f64; 2] {
+    [0.0, 0.0]
+}
+
 /// The pointer, in global top-left points.
+#[cfg(target_os = "macos")]
 fn pointer() -> [f64; 2] {
     use core_graphics_types::geometry::CGPoint;
     use std::ffi::c_void;

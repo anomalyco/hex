@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export VOICE_CONTROL_TEAM_ID=TESTTEAM00
+export HEX_TEAM_ID=TESTTEAM00
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/hex-app-identity.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 bundle="$temporary/Hex.app"
@@ -25,43 +25,34 @@ expect_rejection() {
 
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.Hex' "$plist"
 expect_rejection 'wrong bundle identifier'
-/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.voice-control.agent' "$plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.hex.agent' "$plist"
 expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier ly.anoma.Hex' "$plist"
 expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.hex2' "$plist"
 expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier anomaly.hex' "$plist"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable voice-control-watch' "$plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable hex-watch' "$plist"
 expect_rejection 'wrong executable name'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable hex' "$plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 2.1.0' "$plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 20100' "$plist"
 mkdir -p "$bundle/Contents/MacOS"
-printf 'stub' >"$bundle/Contents/MacOS/scrawl-helper"
-expect_rejection 'built with the capture build option: scrawl-helper is bundled'
-rm "$bundle/Contents/MacOS/scrawl-helper"
-printf '#!/bin/sh\n# capture experiment on: `hex capture` is available\n' >"$bundle/Contents/MacOS/hex"
+printf '#!/bin/sh\n' >"$bundle/Contents/MacOS/hex"
 chmod +x "$bundle/Contents/MacOS/hex"
-expect_rejection 'built with the capture build option: hex has the capture engine'
-
-if output=$(HEX_CAPTURE=1 sh "$root/scripts/release-app.sh" 2>&1); then
-  echo "Unexpectedly allowed release-app.sh with HEX_CAPTURE." >&2
-  exit 1
-fi
-printf '%s\n' "$output" | grep -Fq 'the capture build option is never released'
+expect_rejection 'scrawl-helper is missing'
 
 for script in build-app.sh build-service-app.sh release-app.sh; do
-  if output=$(env -u VOICE_CONTROL_TEAM_ID sh "$root/scripts/$script" 2>&1); then
+  if output=$(env -u HEX_TEAM_ID sh "$root/scripts/$script" 2>&1); then
     echo "Unexpectedly allowed $script without an explicit signing team." >&2
     exit 1
   fi
-  printf '%s\n' "$output" | grep -Fq 'Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team'
+  printf '%s\n' "$output" | grep -Fq 'Set HEX_TEAM_ID to the Apple Developer signing team'
 done
 
 for script in build-app.sh build-service-app.sh; do
   for identity in 'Developer ID Application: Fixture (WRONGTEAM0)' 'Apple Development: Fixture (TESTTEAM00)'; do
-    if output=$(VOICE_CONTROL_CODESIGN_IDENTITY="$identity" sh "$root/scripts/$script" 2>&1); then
+    if output=$(HEX_CODESIGN_IDENTITY="$identity" sh "$root/scripts/$script" 2>&1); then
       echo "Unexpectedly allowed an incompatible signing identity in $script." >&2
       exit 1
     fi

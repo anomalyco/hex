@@ -33,7 +33,6 @@ pub enum PermissionState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PermissionKind {
     Microphone,
-    InputMonitoring,
     Accessibility,
     /// System Audio Recording, asked only when Meetings is on.
     SystemAudio,
@@ -61,7 +60,6 @@ pub struct PermissionWarning {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SetupStatus {
     pub microphone: PermissionState,
-    pub input_monitoring: PermissionState,
     pub accessibility: PermissionState,
     pub transcription_model: bool,
 }
@@ -69,14 +67,13 @@ pub struct SetupStatus {
 impl SetupStatus {
     pub fn ready(self) -> bool {
         self.microphone == PermissionState::Ready
-            && self.input_monitoring == PermissionState::Ready
             && self.accessibility == PermissionState::Ready
             && self.transcription_model
     }
 }
 
 pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
-    let mut warnings = Vec::with_capacity(3);
+    let mut warnings = Vec::with_capacity(2);
     match status.microphone {
         PermissionState::Ready => {}
         PermissionState::NeedsRequest => warnings.push(PermissionWarning {
@@ -92,21 +89,16 @@ pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
             action: PermissionAction::Restart,
         }),
     }
-    for (kind, state) in [
-        (PermissionKind::InputMonitoring, status.input_monitoring),
-        (PermissionKind::Accessibility, status.accessibility),
-    ] {
-        match state {
-            PermissionState::Ready => {}
-            PermissionState::NeedsRestart => warnings.push(PermissionWarning {
-                kind,
-                action: PermissionAction::Restart,
-            }),
-            _ => warnings.push(PermissionWarning {
-                kind,
-                action: PermissionAction::ShowGuide(kind),
-            }),
-        }
+    match status.accessibility {
+        PermissionState::Ready => {}
+        PermissionState::NeedsRestart => warnings.push(PermissionWarning {
+            kind: PermissionKind::Accessibility,
+            action: PermissionAction::Restart,
+        }),
+        _ => warnings.push(PermissionWarning {
+            kind: PermissionKind::Accessibility,
+            action: PermissionAction::ShowGuide(PermissionKind::Accessibility),
+        }),
     }
     warnings
 }
@@ -137,7 +129,6 @@ impl Step {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SetupItem {
     Microphone,
-    InputMonitoring,
     Accessibility,
     Model,
 }
@@ -265,7 +256,8 @@ pub struct Flow {
     model: ModelProgress,
     permissions: bool,
     practice_step: bool,
-    asked: [bool; 3],
+    /// Microphone, then Accessibility.
+    asked: [bool; 2],
     /// A refused microphone's System Settings guide is up.
     microphone_guide: bool,
     practice: Practice,
@@ -290,7 +282,7 @@ impl Flow {
             },
             permissions,
             practice_step: practice,
-            asked: [false; 3],
+            asked: [false; 2],
             microphone_guide: false,
             practice: Practice::Waiting,
             setup_needed: false,
@@ -299,10 +291,12 @@ impl Flow {
             reopen: false,
             relaunching: false,
         };
-        flow.setup_needed = !flow.setup_ready();
-        flow.step = if start == Step::Setup
-            || start.position() > Step::Setup.position() && !flow.setup_ready()
-        {
+        // A tour resumed at setup keeps its page dot: the person was there.
+        flow.setup_needed = !flow.setup_ready() || start == Step::Setup;
+        // `status` is read fresh at launch, so a tour resumed after macOS's
+        // Quit & Reopen passes a setup whose grants are now real, and one
+        // resumed past setup waits there until they are.
+        flow.step = if start.position() > Step::Setup.position() && !flow.setup_ready() {
             Step::Setup
         } else {
             flow.forward_from(start)
@@ -377,11 +371,7 @@ impl Flow {
     }
 
     fn restart_needed(&self) -> bool {
-        let states = [
-            self.status.microphone,
-            self.status.input_monitoring,
-            self.status.accessibility,
-        ];
+        let states = [self.status.microphone, self.status.accessibility];
         !self.relaunching
             && states.contains(&PermissionState::NeedsRestart)
             && states.iter().all(|state| {
@@ -400,7 +390,6 @@ impl Flow {
 
     fn permissions_ready(&self) -> bool {
         self.status.microphone == PermissionState::Ready
-            && self.status.input_monitoring == PermissionState::Ready
             && self.status.accessibility == PermissionState::Ready
     }
 
@@ -460,24 +449,16 @@ impl Flow {
                 },
                 next: false,
             });
-            for (index, item, state) in [
-                (1, SetupItem::InputMonitoring, self.status.input_monitoring),
-                (2, SetupItem::Accessibility, self.status.accessibility),
-            ] {
-                rows.push(Row {
-                    item,
-                    status: if state == PermissionState::Ready {
-                        ItemStatus::Ready
-                    } else if state == PermissionState::NeedsRestart {
-                        ItemStatus::Restart
-                    } else if self.asked[index] {
-                        ItemStatus::Waiting
-                    } else {
-                        ItemStatus::Todo
-                    },
-                    next: false,
-                });
-            }
+            rows.push(Row {
+                item: SetupItem::Accessibility,
+                status: match self.status.accessibility {
+                    PermissionState::Ready => ItemStatus::Ready,
+                    PermissionState::NeedsRestart => ItemStatus::Restart,
+                    _ if self.asked[1] => ItemStatus::Waiting,
+                    _ => ItemStatus::Todo,
+                },
+                next: false,
+            });
         }
         if self.model_in_setup() {
             rows.push(Row {
@@ -573,12 +554,8 @@ impl Flow {
                     }
                 }
             }
-            SetupItem::InputMonitoring if grantable(self.status.input_monitoring) => {
-                self.asked[1] = true;
-                Effect::ShowGuide(PermissionKind::InputMonitoring)
-            }
             SetupItem::Accessibility if grantable(self.status.accessibility) => {
-                self.asked[2] = true;
+                self.asked[1] = true;
                 Effect::ShowGuide(PermissionKind::Accessibility)
             }
             _ => Effect::None,
@@ -793,11 +770,9 @@ pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
 pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus {
     SetupStatus {
         microphone: microphone_state(),
-        input_monitoring: grant_state(
-            CGPreflightListenEventAccess(),
-            IOHIDCheckAccess(IOHID_REQUEST_LISTEN_EVENT) == IOHID_ACCESS_GRANTED,
-        ),
-        accessibility: grant_state(CGPreflightPostEventAccess(), AXIsProcessTrusted()),
+        // Accessibility also grants the listen-event access Hex's shortcut
+        // taps need, so Input Monitoring is never asked for.
+        accessibility: accessibility_state(CGPreflightPostEventAccess(), AXIsProcessTrusted()),
         transcription_model,
     }
 }
@@ -806,7 +781,6 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
 pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus {
     SetupStatus {
         microphone: PermissionState::Ready,
-        input_monitoring: PermissionState::Ready,
         accessibility: PermissionState::Ready,
         transcription_model,
     }
@@ -916,15 +890,18 @@ fn microphone_state() -> PermissionState {
     microphone_authorization_state(status)
 }
 
-/// `usable` is what this process can use; `granted` is what System
-/// Settings shows now. macOS caches the first for the life of the process,
-/// so a switch turned on after launch reaches Hex only after a restart.
+/// Accessibility reaches a running Hex: `AXIsProcessTrusted` follows the
+/// switch, and the listener's event taps, created only once setup is ready,
+/// are allowed (macOS offers no "Quit & Reopen" for it, as it does for Input
+/// Monitoring). Only `CGPreflightPostEventAccess` keeps its launch-time answer,
+/// so it must not hold setup at a restart. If macOS still refuses the taps,
+/// the listener-failure relaunch takes over.
 #[cfg(any(target_os = "macos", test))]
-const fn grant_state(usable: bool, granted: bool) -> PermissionState {
-    match (usable, granted) {
-        (true, _) => PermissionState::Ready,
-        (false, true) => PermissionState::NeedsRestart,
-        (false, false) => PermissionState::NeedsSettings,
+const fn accessibility_state(post_event_preflight: bool, trusted: bool) -> PermissionState {
+    if post_event_preflight || trusted {
+        PermissionState::Ready
+    } else {
+        PermissionState::NeedsSettings
     }
 }
 
@@ -946,19 +923,7 @@ unsafe extern "C" {
 #[cfg(target_os = "macos")]
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
-    safe fn CGPreflightListenEventAccess() -> bool;
     safe fn CGPreflightPostEventAccess() -> bool;
-}
-
-#[cfg(target_os = "macos")]
-const IOHID_REQUEST_LISTEN_EVENT: u32 = 1;
-#[cfg(target_os = "macos")]
-const IOHID_ACCESS_GRANTED: u32 = 0;
-
-#[cfg(target_os = "macos")]
-#[link(name = "IOKit", kind = "framework")]
-unsafe extern "C" {
-    safe fn IOHIDCheckAccess(request: u32) -> u32;
 }
 
 #[cfg(target_os = "macos")]
@@ -1009,7 +974,6 @@ mod tests {
     fn missing_commands_model_does_not_block_dictation_setup() {
         let mut status = SetupStatus {
             microphone: PermissionState::Ready,
-            input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: true,
         };
@@ -1020,9 +984,6 @@ mod tests {
         status.microphone = PermissionState::NeedsRequest;
         assert!(!status.ready());
         status.microphone = PermissionState::Ready;
-        status.input_monitoring = PermissionState::NeedsSettings;
-        assert!(!status.ready());
-        status.input_monitoring = PermissionState::Ready;
         status.accessibility = PermissionState::NeedsSettings;
         assert!(!status.ready());
     }
@@ -1049,7 +1010,6 @@ mod tests {
     fn warning_projection_preserves_permission_order_and_actions() {
         let warnings = permission_warnings(SetupStatus {
             microphone: PermissionState::NeedsRequest,
-            input_monitoring: PermissionState::NeedsSettings,
             accessibility: PermissionState::NeedsSettings,
             ..ready_status()
         });
@@ -1059,10 +1019,6 @@ mod tests {
                 PermissionWarning {
                     kind: PermissionKind::Microphone,
                     action: PermissionAction::RequestMicrophone,
-                },
-                PermissionWarning {
-                    kind: PermissionKind::InputMonitoring,
-                    action: PermissionAction::ShowGuide(PermissionKind::InputMonitoring),
                 },
                 PermissionWarning {
                     kind: PermissionKind::Accessibility,
@@ -1120,7 +1076,6 @@ mod tests {
     fn ready_status() -> SetupStatus {
         SetupStatus {
             microphone: PermissionState::Ready,
-            input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: true,
         }
@@ -1129,7 +1084,6 @@ mod tests {
     fn fresh_status() -> SetupStatus {
         SetupStatus {
             microphone: PermissionState::NeedsRequest,
-            input_monitoring: PermissionState::NeedsSettings,
             accessibility: PermissionState::NeedsSettings,
             transcription_model: false,
         }
@@ -1253,7 +1207,6 @@ mod tests {
             statuses(&flow),
             [
                 (SetupItem::Microphone, ItemStatus::Todo, true),
-                (SetupItem::InputMonitoring, ItemStatus::Todo, false),
                 (SetupItem::Accessibility, ItemStatus::Todo, false),
             ]
         );
@@ -1283,12 +1236,13 @@ mod tests {
         status.microphone = PermissionState::Ready;
         flow.on(Input::Status(status, downloading(0.4)));
         assert_eq!(flow.view().rows[0].status, ItemStatus::Ready);
+        assert!(flow.view().rows[1].next);
         assert_eq!(
-            flow.on(Input::Grant(SetupItem::InputMonitoring)),
-            Effect::ShowGuide(PermissionKind::InputMonitoring)
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility)
         );
         assert_eq!(flow.view().rows[1].status, ItemStatus::Waiting);
-        assert!(flow.view().rows[2].next);
+        assert!(!flow.view().rows[1].next, "a waiting row has no accent");
     }
 
     #[test]
@@ -1363,8 +1317,9 @@ mod tests {
 
     #[test]
     fn without_practice_setup_continues_to_done() {
-        let mut flow = Flow::new(Step::Setup, ready_status(), false, false);
+        let mut flow = Flow::new(Step::Setup, permissions_only(), false, false);
         assert_eq!(flow.step(), Step::Setup);
+        flow.on(Input::Status(ready_status(), installed()));
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Done);
         assert!(!flow.view().can_go_back);
@@ -1414,6 +1369,39 @@ mod tests {
         assert_eq!(flow.step(), Step::TryIt);
         flow.on(Input::Back);
         assert_eq!(flow.step(), Step::Welcome, "a ready setup is passed");
+    }
+
+    #[test]
+    fn resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real() {
+        // macOS's Quit & Reopen after the last grant: setup is finished.
+        let flow = Flow::new(Step::Setup, permissions_only(), true, true);
+        assert_eq!(flow.step(), Step::TryIt, "the model can finish in practice");
+        assert_eq!(flow.view().count, 3, "setup keeps its page dot");
+        assert_eq!(flow.view().index, 2);
+        let flow = Flow::new(Step::Setup, ready_status(), false, false);
+        assert_eq!(flow.step(), Step::Done);
+
+        // A grant still waiting (or a saved step alone) is not trusted.
+        for status in [
+            SetupStatus {
+                accessibility: PermissionState::NeedsRestart,
+                ..ready_status()
+            },
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+        ] {
+            assert_eq!(
+                Flow::new(Step::Setup, status, true, true).step(),
+                Step::Setup
+            );
+        }
+        assert_eq!(
+            Flow::new(Step::Setup, permissions_only(), false, false).step(),
+            Step::Setup,
+            "without practice the model is a setup row"
+        );
     }
 
     #[test]
@@ -1483,23 +1471,58 @@ mod tests {
 
     #[test]
     fn a_grant_the_process_cannot_use_yet_waits_for_a_restart() {
-        assert_eq!(grant_state(true, true), PermissionState::Ready);
-        assert_eq!(grant_state(true, false), PermissionState::Ready);
-        assert_eq!(grant_state(false, true), PermissionState::NeedsRestart);
-        assert_eq!(grant_state(false, false), PermissionState::NeedsSettings);
-
         let waiting = SetupStatus {
-            input_monitoring: PermissionState::NeedsRestart,
+            accessibility: PermissionState::NeedsRestart,
             ..ready_status()
         };
         assert!(!waiting.ready(), "the listener waits for the restart");
         assert_eq!(
             permission_warnings(waiting),
             [PermissionWarning {
-                kind: PermissionKind::InputMonitoring,
+                kind: PermissionKind::Accessibility,
                 action: PermissionAction::Restart,
             }]
         );
+    }
+
+    #[test]
+    fn an_accessibility_grant_applies_without_a_restart() {
+        assert_eq!(accessibility_state(true, true), PermissionState::Ready);
+        assert_eq!(accessibility_state(true, false), PermissionState::Ready);
+        assert_eq!(
+            accessibility_state(false, true),
+            PermissionState::Ready,
+            "the launch-time preflight is stale; trust is live"
+        );
+        assert_eq!(
+            accessibility_state(false, false),
+            PermissionState::NeedsSettings
+        );
+
+        let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
+        flow.on(Input::Status(
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+            downloading(0.5),
+        ));
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Accessibility)),
+            Effect::ShowGuide(PermissionKind::Accessibility)
+        );
+        assert_eq!(
+            flow.on(Input::Status(
+                SetupStatus {
+                    accessibility: accessibility_state(false, true),
+                    ..ready_status()
+                },
+                downloading(0.5),
+            )),
+            Effect::AdvanceSoon
+        );
+        assert!(!flow.view().restart);
+        assert!(flow.view().ready);
     }
 
     #[test]
@@ -1507,20 +1530,19 @@ mod tests {
         let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
         flow.on(Input::Status(
             SetupStatus {
-                microphone: PermissionState::Ready,
-                input_monitoring: PermissionState::NeedsRestart,
+                accessibility: PermissionState::NeedsRestart,
                 ..fresh_status()
             },
             downloading(0.5),
         ));
         assert_eq!(
             statuses(&flow)[1],
-            (SetupItem::InputMonitoring, ItemStatus::Restart, false)
+            (SetupItem::Accessibility, ItemStatus::Restart, false)
         );
-        assert!(!flow.view().restart, "Accessibility is still off");
+        assert!(!flow.view().restart, "the microphone is still off");
         assert_eq!(flow.on(Input::Restart), Effect::None);
         assert_eq!(
-            flow.on(Input::Grant(SetupItem::InputMonitoring)),
+            flow.on(Input::Grant(SetupItem::Accessibility)),
             Effect::None,
             "nothing left to switch on"
         );

@@ -5,7 +5,7 @@ name: Release
 # docs/plans/release-service.md), split the way OpenCode's release is:
 #
 # - build jobs (Build desktop, build-macos, Windows installers, the AUR and
-#   Homebrew staging) run repository code: cargo, build.rs, bun, makepkg,
+#   Homebrew staging) run repository code: cargo, build.rs, makepkg,
 #   brew. They have no environment, no secrets, and no id-token, and they
 #   produce unsigned files.
 # - sign and publish jobs run in the release environment. They check out only
@@ -29,7 +29,8 @@ name: Release
 # Channels (.github/release/plan.sh):
 # - dev: every push to dev (except docs/site/Markdown-only) publishes
 #   0.0.0-dev-<run number> on the dev channel, as OpenCode numbers dev builds;
-#   a newer push cancels a dev run in progress. Only signed platforms are
+#   a running release finishes and only the newest push waits behind it
+#   (the ones between are skipped). Only signed platforms are
 #   published. Versions are display text: installs follow the channel's
 #   current release and never compare versions.
 # - check: a dispatch from dev builds, signs, and verifies the same and
@@ -61,8 +62,10 @@ permissions:
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'dev' }}
-  # Only the dev channel: a newer push supersedes a dev build in progress.
-  cancel-in-progress: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel || 'dev') == 'dev' }}
+  # Releases never cancel each other: the running one finishes, and of the
+  # pushes that land meanwhile only the newest waits (GitHub replaces an
+  # older pending run in the group), so a busy dev branch still publishes.
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -132,7 +135,6 @@ jobs:
         with:
           toolchain: stable
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Build Hex.app
@@ -142,6 +144,9 @@ jobs:
           bundle=$(HEX_RELEASE_UNSIGNED=1 scripts/build-app.sh)
           mkdir -p "$RUNNER_TEMP/macos"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$RUNNER_TEMP/macos/Hex.app.zip"
+          # The DMG window's background and Finder layout: data for sign-macos.sh.
+          cp packaging/macos/dmg/background.tiff "$RUNNER_TEMP/macos/dmg-background.tiff"
+          cp packaging/macos/dmg/DS_Store "$RUNNER_TEMP/macos/dmg-DS_Store"
       - id: upload
         uses: ./.github/release/upload
         with:
@@ -382,7 +387,6 @@ jobs:
     timeout-minutes: 30
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
-      VOICE_CONTROL_TEAM_ID: 5NZ4Q7NXJ4
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -557,12 +561,18 @@ jobs:
             build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
       - name: Stage and test hex-bin
         run: |
-          stage="$RUNNER_TEMP/aur"
           x64="$RUNNER_TEMP/in/build-linux-x86_64/hex-$HEX_VERSION-linux-x64"
           arm64="$RUNNER_TEMP/in/build-linux-aarch64/hex-$HEX_VERSION-linux-arm64"
-          chown -R builder: "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
-          runuser -u builder -- scripts/release-aur.sh stage "$HEX_VERSION" "$x64" "$LINUX_X64_URL" "$arm64" "$LINUX_ARM64_URL" "$stage"
-          runuser -u builder -- scripts/release-aur.sh test "$stage"
+          # makepkg refuses root, so builder stages and builds in its own home from
+          # copies; the runner's files in the workspace and RUNNER_TEMP keep their owner.
+          src=/home/builder/src
+          stage=/home/builder/aur
+          mkdir "$src"
+          cp -R scripts packaging LICENSE "$x64" "$arm64" "$src/"
+          chown -R builder: "$src"
+          runuser -u builder -- "$src/scripts/release-aur.sh" stage "$HEX_VERSION" \
+            "$src/${x64##*/}" "$LINUX_X64_URL" "$src/${arm64##*/}" "$LINUX_ARM64_URL" "$stage"
+          runuser -u builder -- "$src/scripts/release-aur.sh" test "$stage"
           pacman -U --noconfirm "$stage"/hex-bin-*.pkg.tar.zst
           test "$(hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
           # The PKGBUILD's sources are the published files.

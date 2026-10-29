@@ -17,7 +17,7 @@ Step 2: `crates/capture` is Scrawl's `crates/capture` at `kitlangton/scrawl`
 path. It sits in `[workspace] exclude`, so `cargo build`, `cargo test`, and
 `--workspace` never build it; it compiles only as the `capture` feature's
 macOS dependency, sharing the root `Cargo.lock` and `target/`. On macOS
-`scripts/check` and CI name it (`-p voice-control -p scrawl-capture
+`scripts/check` and CI name it (`-p "$(cargo pkgid)" -p scrawl-capture
 --features capture`) to lint and test it. Scrawl's own changes now come over
 by hand.
 
@@ -193,7 +193,7 @@ skipped while a capture is unfinished or Scrawl.app runs
 
 ```ts
 Hex.app (one process, macOS only for captures)
-├─ hex (voice-control package, root of a new workspace)
+├─ hex (root package of a new workspace)
 │  ├─ capture_host            ← new: the experiment's one owner
 │  │  ├─ Host impl            logs → tracing, metrics, own windows, clipboard
 │  │  ├─ Transcriber impl     Parakeet words on the transcription engine
@@ -217,8 +217,7 @@ own inside Hex.
 ## Workspace and builds
 
 - The root `Cargo.toml` lists `crates/capture` in `[workspace] exclude`
-  (built). The root stays the `voice-control` package; the rename to `hex`
-  is a separate decision.
+  (built). The root is the `hex` package.
 - Hex depends on `scrawl-capture` only under
   `[target.'cfg(target_os = "macos")'.dependencies]`, with
   `default-features = false, features = ["screen", "helper"]` today (`phone`

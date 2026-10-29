@@ -1,13 +1,15 @@
 //! The shared vocabulary: names Hex should know (people, projects,
 //! products), each with spellings a transcript may show instead ("sounds
-//! like"). Search uses it to find a term's likely mis-transcriptions, and
-//! prompts can read it through [`terms`].
+//! like"). Search uses it to find a term's likely mis-transcriptions,
+//! prompts can read it through [`terms`], and Parakeet rescores its
+//! transcripts toward it through [`transcription_bias`].
 //!
 //! Dormant behind the `vocabulary` experiment: while it is off, nothing reads
 //! the saved list and every accessor here returns nothing.
 
 use std::io::Read as _;
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,10 @@ const MAX_TERM_CHARS: usize = 64;
 /// Most entries in the list, and most "sounds like" spellings per entry.
 pub const MAX_ENTRIES: usize = 500;
 const MAX_SOUNDS_LIKE: usize = 16;
+/// Most terms one transcription rescores toward, first in list order: the
+/// engine's own cap (`k_vocab_max_terms` in transcribe.cpp), which keeps the
+/// rescoring pass a bounded cost after each decode.
+const MAX_BIASED_TERMS: usize = 64;
 /// Read limit for settings.json when reading it without loading `AppSettings`.
 const SETTINGS_READ_LIMIT: u64 = 4 * 1024 * 1024;
 
@@ -49,7 +55,44 @@ pub struct VocabularyEntry {
     pub sounds_like: Vec<String>,
 }
 
+/// How readily transcription swaps heard words for a vocabulary term that
+/// sounds like them. Measured on real recordings in
+/// `docs/research/vocabulary-boost-results.md`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VocabularyBoost {
+    /// Transcripts are left as the model heard them.
+    Off,
+    Light,
+    #[default]
+    Normal,
+    Strong,
+}
+
+impl VocabularyBoost {
+    pub const ALL: [Self; 4] = [Self::Off, Self::Light, Self::Normal, Self::Strong];
+
+    /// How much less likely than the heard words, in nats per term piece, a
+    /// term may score and still replace them.
+    fn nats(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Light => 2.0,
+            Self::Normal => 2.5,
+            Self::Strong => 4.0,
+        }
+    }
+
+    fn from_index(index: u8) -> Self {
+        Self::ALL
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
 static SAVED: OnceLock<RwLock<Vec<VocabularyEntry>>> = OnceLock::new();
+static BOOST: AtomicU8 = AtomicU8::new(VocabularyBoost::Normal as u8);
 
 /// Whether the `vocabulary` experiment is on for this process.
 pub fn enabled() -> bool {
@@ -75,12 +118,53 @@ pub fn entries() -> Vec<VocabularyEntry> {
         .clone()
 }
 
+/// The terms and options a Parakeet run rescores its transcript with, read
+/// at the start of each run and live stream so settings changes apply to the
+/// next one. `None` while the experiment is off, the list is empty, or the
+/// boost is off.
+pub(crate) fn transcription_bias()
+-> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
+    let boost = VocabularyBoost::from_index(BOOST.load(Ordering::Relaxed));
+    if boost == VocabularyBoost::Off {
+        return None;
+    }
+    bias_for(&entries(), boost)
+}
+
+fn bias_for(
+    entries: &[VocabularyEntry],
+    boost: VocabularyBoost,
+) -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
+    let entries = &entries[..entries.len().min(MAX_BIASED_TERMS)];
+    if entries.is_empty() {
+        return None;
+    }
+    let sounds_like = entries
+        .iter()
+        .enumerate()
+        .flat_map(|(index, entry)| {
+            entry
+                .sounds_like
+                .iter()
+                .map(move |spelling| (index, spelling.clone()))
+        })
+        .collect();
+    Some((
+        entries.iter().map(|entry| entry.term.clone()).collect(),
+        transcribe_cpp::ParakeetVocabularyOptions {
+            boost: Some(boost.nats()),
+            sounds_like,
+        },
+    ))
+}
+
 /// Called by `AppSettings` whenever settings load or save.
-pub(crate) fn apply(entries: &[VocabularyEntry]) {
+pub(crate) fn apply(entries: &[VocabularyEntry], boost: VocabularyBoost) {
     *SAVED
         .get_or_init(Default::default)
         .write()
         .unwrap_or_else(|error| error.into_inner()) = entries.to_vec();
+    BOOST.store(boost as u8, Ordering::Relaxed);
 }
 
 /// The entries saved in `root/settings.json`, read without loading
@@ -309,6 +393,43 @@ mod tests {
         assert_eq!(list[0], entry("rune", &["rooney"]));
         assert!(has_every_suggestion(&list));
         assert_eq!(add_suggested(&mut list), 0);
+    }
+
+    #[test]
+    fn transcription_bias_keeps_the_first_terms_and_their_spellings() {
+        assert!(bias_for(&[], VocabularyBoost::Normal).is_none());
+        let mut list = vec![
+            entry("Abattoir", &["avatar", "a bat war"]),
+            entry("Rune", &[]),
+        ];
+        list.extend((0..70).map(|index| entry(&format!("term {index}"), &["x"])));
+        let (terms, options) = bias_for(&list, VocabularyBoost::Strong).unwrap();
+        assert_eq!(terms.len(), MAX_BIASED_TERMS);
+        assert_eq!(terms[..2], ["Abattoir", "Rune"]);
+        assert_eq!(options.boost, Some(4.0));
+        assert_eq!(
+            options.sounds_like[..2],
+            [(0, "avatar".into()), (0, "a bat war".into())]
+        );
+        assert_eq!(options.sounds_like[2], (2, "x".into()));
+        assert!(
+            options
+                .sounds_like
+                .iter()
+                .all(|(index, _)| *index < MAX_BIASED_TERMS)
+        );
+    }
+
+    #[test]
+    fn boost_reads_and_writes_as_its_name() {
+        for boost in VocabularyBoost::ALL {
+            assert_eq!(VocabularyBoost::from_index(boost as u8), boost);
+        }
+        assert_eq!(
+            serde_json::to_value(VocabularyBoost::Strong).unwrap(),
+            serde_json::json!("strong")
+        );
+        assert_eq!(VocabularyBoost::default().nats(), 2.5);
     }
 
     #[test]

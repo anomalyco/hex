@@ -36,8 +36,11 @@ pub struct Parakeet {
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
+    _weights: procwatch::Lease,
 }
 
+/// Loaded model weights, estimated from the model file size (they live in Metal buffers).
+static MODEL_WEIGHTS: procwatch::Gauge = procwatch::Gauge::new("speech.model_weights");
 static TRANSCRIBE_LOGGING: Once = Once::new();
 const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
 const MAX_PENDING_OUTPUTS: usize = 16;
@@ -1328,6 +1331,7 @@ impl Parakeet {
             language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
+        let weights_bytes = std::fs::metadata(model_path).map_or(0, |meta| meta.len() as usize);
         Ok(Self {
             session,
             options: RunOptions {
@@ -1347,6 +1351,7 @@ impl Parakeet {
                 capabilities.max_audio_ms,
             ),
             stream: None,
+            _weights: MODEL_WEIGHTS.track(weights_bytes),
         })
     }
 
@@ -1949,6 +1954,12 @@ mod tests {
             Box::new(model),
         )))
         .unwrap();
+        // `HEX_STREAM_LIVE_TEXT=0` replays without reading live text.
+        let engine = if std::env::var("HEX_STREAM_LIVE_TEXT").is_ok_and(|value| value == "0") {
+            engine
+        } else {
+            engine.with_live_text()
+        };
         let speed = std::env::var("HEX_STREAM_SPEED")
             .ok()
             .and_then(|speed| speed.parse::<f64>().ok())
@@ -2006,10 +2017,27 @@ mod tests {
             let mut stream = engine.begin().expect("the model streams");
             let held = samples.len().saturating_sub(3_200);
             let feeding = Instant::now();
+            // Live text as a HUD would read it: (audio fed in ms, stable
+            // words, tentative words), and how often the stable text was
+            // rewritten instead of extended.
+            let mut timeline = Vec::new();
+            let mut stable = String::new();
+            let mut rewrites = 0;
             for (index, block) in samples[..held].chunks(2_560).enumerate() {
                 let due = std::time::Duration::from_secs_f64(index as f64 * 0.16 / speed);
                 thread::sleep(due.saturating_sub(feeding.elapsed()));
                 stream.feed(block);
+                if let Some(partial) = stream.take_partial() {
+                    if !partial.stable.starts_with(stable.as_str()) {
+                        rewrites += 1;
+                    }
+                    stable = partial.stable.clone();
+                    timeline.push((
+                        stream.fed() / 16,
+                        words(&partial.stable).len(),
+                        words(&partial.tentative).len(),
+                    ));
+                }
             }
             thread::sleep(std::time::Duration::from_secs_f64(0.2 / speed));
             let streamed = engine
@@ -2040,6 +2068,19 @@ mod tests {
             );
             println!("  offline {}", whole.text);
             println!("  stream  {}", streamed.text);
+            let first_text_ms = timeline
+                .iter()
+                .find(|(_, stable, tentative)| stable + tentative > 0)
+                .map(|(fed_ms, ..)| *fed_ms);
+            println!(
+                "  live text: updates={} first_text_at_audio_ms={first_text_ms:?} stable_rewrites={rewrites} last_stable_words={}/{}",
+                timeline.len(),
+                timeline.last().map_or(0, |(_, stable, _)| *stable),
+                reference.len()
+            );
+            for (fed_ms, stable, tentative) in &timeline {
+                println!("    audio_ms={fed_ms} stable_words={stable} tentative_words={tentative}");
+            }
             assert_eq!(streamed.source, Source::Stream);
             assert!(differences * 20 <= reference.len().max(20));
         }
@@ -2209,10 +2250,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
+    #[ignore = "requires HEX_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
     fn dictation_protocol_audio() {
-        let directory =
-            PathBuf::from(std::env::var("VOICE_CONTROL_DICTATION_FIXTURE_DIR").unwrap());
+        let directory = PathBuf::from(std::env::var("HEX_DICTATION_FIXTURE_DIR").unwrap());
         let protocol = DictationProtocol::try_new(
             vec!["say".into()],
             vec!["say paste".into(), "say stop".into()],
@@ -2254,9 +2294,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_STUTTER_FIXTURE and the installed Parakeet model"]
+    #[ignore = "requires HEX_STUTTER_FIXTURE and the installed Parakeet model"]
     fn tdt_decoder_does_not_repeat_single_letter_tokens() {
-        let path = PathBuf::from(std::env::var("VOICE_CONTROL_STUTTER_FIXTURE").unwrap());
+        let path = PathBuf::from(std::env::var("HEX_STUTTER_FIXTURE").unwrap());
         let mut reader = WavReader::open(path).unwrap();
         let sample_rate = reader.spec().sample_rate;
         let samples = reader

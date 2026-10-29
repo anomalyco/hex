@@ -24,6 +24,7 @@ const FINAL_PENDING_FILE: &str = "final.pending";
 mod capture;
 #[path = "meeting_chapters.rs"]
 mod chapters;
+pub(crate) use capture::create_tap_aggregate;
 pub use capture::{
     SystemAudioAuthorization, request_system_audio_access, system_audio_authorization,
 };
@@ -114,7 +115,7 @@ pub fn screen_recording_permitted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
 }
 
-/// Asks macOS to list HEX under Screen & System Audio Recording. The system
+/// Asks macOS to list Hex under Screen & System Audio Recording. The system
 /// prompts at most once; later requests return the current state.
 pub fn request_screen_recording() -> bool {
     // SAFETY: A CoreGraphics request without arguments.

@@ -1,50 +1,57 @@
 ---
 name: hex-personal-commands
-description: Configure HEX personal voice commands, voice-dictation control phrases, and deterministic transcript transformations. Use when the user wants to add or change commands or transformations for the HEX macOS voice app.
+description: Configure Hex personal voice commands, voice-dictation control phrases, and deterministic transcript transformations. Use when the user wants to add or change commands or transformations for the Hex voice app.
 license: MIT
 ---
 
-# HEX Personal Commands
+# Hex Personal Commands
 
-Use HEX's managed command workspace rather than creating an independent package.
+This skill targets current Hex (dev builds now, and the next stable release).
+Hex 2.3.1 uses an older runtime; its matching skill installs with
+`npx skills add anomalyco/hex#app-v2.3.1 --skill hex-personal-commands`.
 
-1. Check for `~/.config/hex/hex.config.ts`. If it is missing, ask the user to
-   open HEX's Commands pane and choose Create Config. If the `hex` CLI is
-   available, `hex commands init` performs the same provisioning. Bun must be
-   installed separately.
-2. Read `~/.config/hex/AGENTS.md` and
-   `~/.config/hex/.agents/skills/personal-commands/SKILL.md`. Check
-   `.hex-sdk/package.json` and its exported declarations for the installed API
-   and exact Effect requirement; scaffolded instructions are not overwritten
-   on upgrades and may be older than the SDK.
-3. Edit only user-owned workspace files, normally `hex.config.ts`. Never edit
-   `.hex-sdk`; HEX refreshes that managed SDK from the app bundle.
-4. Use `defineHexConfig` from `@hex/commands` for Promise handlers, dictation
-   controls, and transformations. For Effect handlers, import `defineHexConfig`
-   and `Hex` from `@hex/commands/effect`, and Effect APIs from `effect`.
-5. Keep command phrases unambiguous and use only the capabilities required by
-   the request. Treat config and dependencies as trusted executable code with
-   the user's filesystem, network, environment, and subprocess authority.
-   Use `digit()` for zero through nine, `digit({ min, max })` for a restricted
-   range, `choice(["left", "right"] as const)` for exact choices, an object-form
-   `choice()` to normalize one-word aliases to canonical keys,
-   `union(letter(), digit(), choice(["home", "end"] as const))` for disjoint
-   bounded one-token alternatives, and trailing `text()` for explicit text
-   captures. `letter()` accepts literal, common spoken, and one-word NATO letter
-   names and returns lowercase `"a" | ... | "z"`. With a `captures` schema,
-   every phrase alias must bind every declared name exactly once.
+Hex runs `~/.config/hex/hex.config.ts` itself, in an embedded JavaScript
+engine. There is no package to install and no build step.
+
+1. Check for `~/.config/hex/hex.config.ts` (or `hex.config.js`). If it is
+   missing, ask the user to open Hex's Commands pane and choose Create Config,
+   or run `hex commands init` if the `hex` CLI is available.
+2. Read `~/.config/hex/AGENTS.md` for the current API and limits, and
+   `hex.d.ts` for exact types. Hex owns both and rewrites them; do not edit
+   them.
+3. Edit only the config and files it imports. Scripts are plain TypeScript or
+   JavaScript: they can import `@hex/commands` and files in the folder, not
+   npm packages, Effect, or Node APIs, and they have no filesystem, network,
+   or timer access. Enums, namespaces, and constructor parameter properties are
+   rejected.
+4. Use `defineHexConfig` from `@hex/commands`. A command has `phrases` and
+   either a fixed `action` (such as `openUrl(...)`) or a `run` handler that
+   returns an action, a list of actions, or nothing (it may also queue actions
+   through its `hex` argument). Hex runs the actions after the handler returns.
+5. Keep command phrases unambiguous. Use `digit()` for zero through nine,
+   `digit({ min, max })` for a restricted range, `choice(["left", "right"] as const)`
+   for exact choices, an object-form `choice()` to normalize one-word aliases to
+   canonical keys, `union(letter(), digit(), choice(["home", "end"] as const))`
+   for disjoint bounded one-token alternatives, and trailing `text()` for
+   explicit text captures. `letter()` accepts literal, common spoken, and
+   one-word NATO letter names and returns lowercase `"a" | ... | "z"`. With a
+   `captures` schema, every phrase alias must bind every declared name exactly
+   once.
 6. Spoken commands and dictation controls need the Commands opt-in, which
    defaults off; creating a config does not enable it. Transformations must be
    selected in the mode's Transformations section and can run with Commands off.
    They run after mode corrections and optional AI rewriting, not for Voice
    Action or meetings. Do not enable voice commands merely to run a transformation.
-7. Run `bun run check` in `~/.config/hex`. Do not finish until it passes. This
-   checks TypeScript; runtime validation can still reject phrase overlaps.
-   A running host watches workspace `.ts` and `.json` files and reports reload
-   failures in the Commands pane. If startup stopped because the config, Bun,
-   or dependencies were unavailable, restart HEX after repairing them. Confirm
-   runtime activation when the host is enabled, or report that it was not tested.
+7. Run `hex commands check` (macOS) after editing. It loads the config as Hex
+   does and prints what it registers or the error with file, line, and column,
+   including phrase overlaps. Optionally type-check with
+   `npx -y -p typescript tsc` in `~/.config/hex`. A running Hex reloads the
+   config on save and shows load errors in Modes' Transformations section.
+   If `hex` reports `commands check` as an unrecognized subcommand, stop: the
+   user is on an older Hex (such as 2.3.1). Tell them to install the matching
+   skill with `npx skills add anomalyco/hex#app-v2.3.1 --skill hex-personal-commands`,
+   or to switch to the dev build (https://github.com/anomalyco/hex#install-hex).
 
-Completion criterion: the requested behavior is represented in
-`hex.config.ts`, the managed SDK was not modified, `bun run check` passes, and
-runtime activation is confirmed or its verification gap is reported.
+Completion criterion: the requested behavior is represented in the config,
+`hex commands check` succeeds (or, without the CLI, the reload succeeded in
+Hex), and any verification gap is reported.

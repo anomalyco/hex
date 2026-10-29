@@ -1,60 +1,23 @@
+//! The dictation HUD's lifecycle and animation, the same on every OS: the
+//! event vocabulary the listener reports, the phase and job bookkeeping, the
+//! springs, and Dot scope's simulation (experiment `dot-scope`). Each step
+//! yields what to draw; `rune_hud` draws it with `rune_hud.wgsl` through a
+//! Rune overlay.
+//!
+//! Time is passed in, never read, so a recorded schedule replays exactly
+//! (`rune_hud`'s frame captures).
+
 use std::collections::BTreeMap;
-use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use core_graphics_types::geometry::CGSize;
-use core_video::base::{CVOptionFlags, CVTimeStamp, CVTimeStampFlags};
-use core_video::display_link::{CVDisplayLink, CVDisplayLinkRef};
-use core_video::r#return::CVReturn;
-use metal::{
-    CommandQueue, Device, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLStoreAction,
-    MetalLayer, RenderPassDescriptor, RenderPipelineDescriptor, RenderPipelineState,
-};
-use objc2::MainThreadMarker;
-use objc2::rc::Retained;
-use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusWindowLevel, NSView,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
-};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-use objc2_quartz_core::CALayer;
+use crate::dot_scope::{self, Pose, Scope, Stage, Tuning};
+use crate::hud_placement::Island;
+use crate::spring::{REDUCED_FADE, Spec, Spring};
 
-use crate::app_settings::IndicatorPosition;
-use crate::dot_scope::{self, Stage};
-use crate::spring::{REDUCED_FADE, Spec, Spring, reduced_motion};
-
-mod dot_scope_view;
-use dot_scope_view::DotScopeView;
-
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" {
-    static kCGColorSpaceSRGB: *const c_void;
-    fn CGColorSpaceCreateWithName(name: *const c_void) -> *mut c_void;
-    fn CGColorSpaceRelease(space: *mut c_void);
-    fn CGMainDisplayID() -> u32;
-}
-
-/// A `CGColorSpaceRef` as Objective-C encodes it, so `setColorspace:` passes
-/// the method-signature check debug builds of objc2 run.
-#[repr(transparent)]
-struct ColorSpaceRef(*mut c_void);
-
-// SAFETY: a transparent CGColorSpace pointer, encoded as one.
-unsafe impl objc2::Encode for ColorSpaceRef {
-    const ENCODING: objc2::Encoding =
-        objc2::Encoding::Pointer(&objc2::Encoding::Struct("CGColorSpace", &[]));
-}
-
-const WINDOW_WIDTH: f32 = 112.0;
-const WINDOW_HEIGHT: f32 = 64.0;
+pub const WINDOW_WIDTH: f32 = 112.0;
+pub const WINDOW_HEIGHT: f32 = 64.0;
 const CAPSULE_WIDTH: f32 = 56.0;
-const CAPSULE_HEIGHT: f32 = 16.0;
-const TOP_OFFSET: f64 = 12.0;
-/// The capsule's gap above the Dock or the screen's bottom edge.
-const BOTTOM_OFFSET: f64 = 24.0;
+pub(crate) const CAPSULE_HEIGHT: f32 = 16.0;
 const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
 const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
 const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
@@ -63,55 +26,16 @@ const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
+/// Dot scope's loudness before any meter arrives, dBFS.
+const SILENT: f32 = -120.0;
 /// Dot scope's done wipe (0.3 s) and a beat of the dark plate after it.
 const DOT_SCOPE_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
 
-/// The HUD window and the capsule it centres.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Geometry {
-    width: f32,
-    height: f32,
-    capsule_height: f32,
-}
-
-impl Geometry {
-    const CAPSULE: Self = Self {
-        width: WINDOW_WIDTH,
-        height: WINDOW_HEIGHT,
-        capsule_height: CAPSULE_HEIGHT,
-    };
-    /// Room for Dot scope's widest plate and its drop shadow.
-    const DOT_SCOPE: Self = Self {
-        width: 176.0,
-        height: 84.0,
-        capsule_height: dot_scope::PLATE_HEIGHT,
-    };
-
-    /// The window's top edge for the top position: the capsule sits under
-    /// the menu bar, or under the notch where a fullscreen space hides the
-    /// menu bar and `visibleFrame` reaches the top of a notched screen.
-    fn top_window_edge(self, screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
-        visible_top.min(screen_top - safe_area_top) + self.capsule_margin() - TOP_OFFSET
-    }
-
-    fn capsule_margin(self) -> f64 {
-        f64::from((self.height - self.capsule_height) / 2.0)
-    }
-}
-
-/// Dot scope's window while its experiment is on, else the capsule's.
-fn geometry() -> Geometry {
-    if dot_scope_enabled() {
-        Geometry::DOT_SCOPE
-    } else {
-        Geometry::CAPSULE
-    }
-}
-
-fn dot_scope_enabled() -> bool {
+pub fn dot_scope_enabled() -> bool {
     crate::experiments::enabled(crate::experiments::Experiment::DotScope)
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
@@ -151,6 +75,26 @@ pub enum DictationIndicatorEvent {
     Failed,
 }
 
+impl DictationIndicatorEvent {
+    /// A `Meter` event from captured samples: their RMS and absolute peak;
+    /// `None` for no samples.
+    pub fn meter(samples: &[f32]) -> Option<Self> {
+        if samples.is_empty() {
+            return None;
+        }
+        let mut sum_of_squares = 0.0;
+        let mut peak = 0.0_f32;
+        for sample in samples {
+            sum_of_squares += sample * sample;
+            peak = peak.max(sample.abs());
+        }
+        Some(Self::Meter {
+            average: (sum_of_squares / samples.len() as f32).sqrt(),
+            peak,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct HudTuning {
     pub style: f32,
@@ -180,430 +124,89 @@ impl Default for HudTuning {
     }
 }
 
-#[derive(Clone)]
-pub struct DictationIndicatorSender(Sender<DictationIndicatorEvent>);
+#[cfg(target_os = "macos")]
+pub use macos::*;
 
-impl DictationIndicatorSender {
-    pub fn send(&self, event: DictationIndicatorEvent) {
-        let _ = self.0.send(event);
-    }
+/// macOS reports through a channel the main thread's pump drains into the
+/// HUD (`rune_hud::macos`); the window's practice dictation reads the meter.
+#[cfg(target_os = "macos")]
+mod macos {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::time::Instant;
 
-    pub fn meter(&self, samples: &[f32]) {
-        if samples.is_empty() {
-            return;
+    use super::DictationIndicatorEvent;
+
+    #[derive(Clone)]
+    pub struct DictationIndicatorSender(Sender<DictationIndicatorEvent>);
+
+    impl DictationIndicatorSender {
+        pub fn send(&self, event: DictationIndicatorEvent) {
+            let _ = self.0.send(event);
         }
-        let mut sum_of_squares = 0.0;
-        let mut peak = 0.0_f32;
-        for sample in samples {
-            sum_of_squares += sample * sample;
-            peak = peak.max(sample.abs());
-        }
-        self.send(DictationIndicatorEvent::Meter {
-            average: (sum_of_squares / samples.len() as f32).sqrt(),
-            peak,
-        });
-    }
-}
 
-pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
-    let (sender, receiver) = mpsc::channel();
-    (DictationIndicatorSender(sender), receiver)
-}
-
-pub struct DictationIndicatorUi {
-    indicator: Option<MetalIndicator>,
-}
-
-impl DictationIndicatorUi {
-    pub fn new() -> Self {
-        let started = Instant::now();
-        let indicator = match MetalIndicator::new() {
-            Ok(indicator) => {
-                tracing::info!(
-                    initialization_ms = started.elapsed().as_millis(),
-                    "Metal dictation indicator prewarmed"
-                );
-                Some(indicator)
-            }
-            Err(error) => {
-                tracing::error!(%error, "could not prewarm Metal dictation indicator");
-                None
-            }
-        };
-        Self { indicator }
-    }
-
-    pub fn handle(&mut self, event: DictationIndicatorEvent) {
-        if self.indicator.is_none()
-            && matches!(
-                event,
-                DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
-            )
-        {
-            match MetalIndicator::new() {
-                Ok(indicator) => self.indicator = Some(indicator),
-                Err(error) => {
-                    tracing::error!(%error, "could not create Metal dictation indicator");
-                    return;
+        pub fn meter(&self, samples: &[f32]) {
+            if let Some(event) = DictationIndicatorEvent::meter(samples) {
+                if let DictationIndicatorEvent::Meter { peak, .. } = event {
+                    record_peak(peak);
                 }
-            }
-        }
-        if let Some(indicator) = &mut self.indicator {
-            indicator.handle(event);
-        }
-    }
-
-    pub fn follow_pointer(&mut self) {
-        if let Some(indicator) = &mut self.indicator {
-            indicator.maintain();
-        }
-    }
-}
-
-const DISPLAY_LINK_RETRY_INITIAL: Duration = Duration::from_millis(100);
-const DISPLAY_LINK_RETRY_MAX: Duration = Duration::from_millis(2000);
-
-struct AttachedDisplayLink {
-    display_link: CVDisplayLink,
-    context: *const SharedRenderer,
-}
-
-impl AttachedDisplayLink {
-    fn create(renderer: &Arc<SharedRenderer>) -> Result<Self, CVReturn> {
-        let display_link = CVDisplayLink::from_active_cg_displays()
-            .or_else(|_| CVDisplayLink::from_cg_display(unsafe { CGMainDisplayID() }))?;
-        let context = Arc::into_raw(renderer.clone());
-        let configured = unsafe {
-            display_link
-                .set_output_callback(display_link_callback, context.cast_mut().cast::<c_void>())
-        };
-        if let Err(status) = configured {
-            unsafe { drop(Arc::from_raw(context)) };
-            return Err(status);
-        }
-        Ok(Self {
-            display_link,
-            context,
-        })
-    }
-
-    fn is_running(&self) -> bool {
-        self.display_link.is_running()
-    }
-
-    fn start(&mut self) -> Result<(), CVReturn> {
-        self.display_link.start()
-    }
-
-    fn stop(&mut self) {
-        let _ = self.display_link.stop();
-    }
-}
-
-impl Drop for AttachedDisplayLink {
-    fn drop(&mut self) {
-        let _ = self.display_link.stop();
-        unsafe { drop(Arc::from_raw(self.context)) };
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct DisplayOutputTime {
-    video_seconds: f64,
-    refresh_period: Option<f32>,
-}
-
-fn output_timestamp(output_time: *const CVTimeStamp) -> Option<DisplayOutputTime> {
-    if output_time.is_null() {
-        return None;
-    }
-    let ts = unsafe { &*output_time };
-    let video_valid = (ts.flags & (CVTimeStampFlags::kCVTimeStampVideoTimeValid as u64)) != 0;
-    if !video_valid || ts.videoTimeScale <= 0 {
-        return None;
-    }
-    let scale = f64::from(ts.videoTimeScale);
-    let video_seconds = (ts.videoTime as f64) / scale;
-    let refresh_valid =
-        (ts.flags & (CVTimeStampFlags::kCVTimeStampVideoRefreshPeriodValid as u64)) != 0;
-    let refresh_period = (refresh_valid && ts.videoRefreshPeriod > 0)
-        .then(|| ((ts.videoRefreshPeriod as f64) / scale) as f32);
-    Some(DisplayOutputTime {
-        video_seconds,
-        refresh_period,
-    })
-}
-
-struct MetalIndicator {
-    window: Retained<NSPanel>,
-    geometry: Geometry,
-    renderer: Arc<SharedRenderer>,
-    display_link: Option<AttachedDisplayLink>,
-    display_link_retry_delay: Duration,
-    display_link_next_retry: Instant,
-    ordered: bool,
-}
-
-impl MetalIndicator {
-    fn new() -> Result<Self, String> {
-        let mtm = MainThreadMarker::new().ok_or("indicator must be created on the main thread")?;
-        let geometry = geometry();
-        let renderer = Arc::new(SharedRenderer::new(geometry)?);
-        let frame = NSRect::new(
-            NSPoint::new(0.0, 0.0),
-            NSSize::new(f64::from(geometry.width), f64::from(geometry.height)),
-        );
-        let window = NSPanel::initWithContentRect_styleMask_backing_defer(
-            mtm.alloc(),
-            frame,
-            NSWindowStyleMask::Borderless
-                | NSWindowStyleMask::UtilityWindow
-                | NSWindowStyleMask::NonactivatingPanel
-                | NSWindowStyleMask::FullSizeContentView,
-            NSBackingStoreType::Buffered,
-            false,
-        );
-        let view = NSView::initWithFrame(mtm.alloc(), frame);
-        view.setWantsLayer(true);
-        let metal_layer = renderer.layer();
-        let cocoa_layer = unsafe { &*metal_layer.cast::<CALayer>() };
-        cocoa_layer.setOpaque(false);
-        view.setLayer(Some(cocoa_layer));
-        window.setContentView(Some(&view));
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
-        window.setIgnoresMouseEvents(true);
-        window.setHasShadow(false);
-        window.setHidesOnDeactivate(false);
-        window.setCanHide(false);
-        window.setLevel(NSStatusWindowLevel);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::CanJoinAllApplications
-                | NSWindowCollectionBehavior::FullScreenAuxiliary
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        unsafe { window.setReleasedWhenClosed(false) };
-
-        let now = Instant::now();
-        let mut indicator = Self {
-            window,
-            geometry,
-            renderer,
-            display_link: None,
-            display_link_retry_delay: DISPLAY_LINK_RETRY_INITIAL,
-            display_link_next_retry: now,
-            ordered: false,
-        };
-        indicator.ensure_display_link(true);
-        indicator.position_on_pointer_screen();
-        Ok(indicator)
-    }
-
-    fn ensure_display_link(&mut self, force: bool) {
-        if self.display_link.is_some() {
-            return;
-        }
-        let now = Instant::now();
-        if !force && now < self.display_link_next_retry {
-            return;
-        }
-        match AttachedDisplayLink::create(&self.renderer) {
-            Ok(link) => {
-                self.display_link = Some(link);
-                self.display_link_retry_delay = DISPLAY_LINK_RETRY_INITIAL;
-                self.display_link_next_retry = now;
-            }
-            Err(status) => {
-                tracing::warn!(
-                    status,
-                    retry_ms = self.display_link_retry_delay.as_millis(),
-                    "could not attach indicator display link yet; Metal pipeline and panel remain prewarmed"
-                );
-                self.display_link_next_retry = now + self.display_link_retry_delay;
-                self.display_link_retry_delay =
-                    (self.display_link_retry_delay * 2).min(DISPLAY_LINK_RETRY_MAX);
+                self.send(event);
             }
         }
     }
 
-    fn handle(&mut self, event: DictationIndicatorEvent) {
-        if matches!(
-            event,
-            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
-        ) {
-            self.renderer.set_dark(dot_scope_view::system_is_dark());
+    /// The latest metered peak (high 32 bits) and when, in milliseconds since
+    /// `meter_epoch` plus one (low 32 bits, zero before any meter), for the
+    /// window's practice dictation.
+    static LATEST_METER: AtomicU64 = AtomicU64::new(0);
+    /// How long a metered peak stays current.
+    const METER_FRESH_MS: u32 = 250;
+
+    fn meter_epoch() -> Instant {
+        static EPOCH: OnceLock<Instant> = OnceLock::new();
+        *EPOCH.get_or_init(Instant::now)
+    }
+
+    fn meter_clock() -> u32 {
+        (meter_epoch().elapsed().as_millis() as u32).wrapping_add(1)
+    }
+
+    fn record_peak(peak: f32) {
+        let packed = (u64::from(peak.to_bits()) << 32) | u64::from(meter_clock());
+        LATEST_METER.store(packed, Ordering::Relaxed);
+    }
+
+    /// The peak of the dictation audio metered in the last quarter second, 0 to
+    /// 1, or silence when none arrived.
+    pub fn recent_peak() -> f32 {
+        let packed = LATEST_METER.load(Ordering::Relaxed);
+        let at = packed as u32;
+        if at == 0 || meter_clock().wrapping_sub(at) > METER_FRESH_MS {
+            return 0.0;
         }
-        self.renderer.handle(event);
-        if matches!(
-            event,
-            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
-        ) && crate::app_settings::indicator_position() != IndicatorPosition::Hidden
-        {
-            self.show_on_pointer_screen();
-            tracing::info!("Metal dictation indicator shown");
+        f32::from_bits((packed >> 32) as u32).clamp(0.0, 1.0)
+    }
+
+    pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
+        let (sender, receiver) = mpsc::channel();
+        (DictationIndicatorSender(sender), receiver)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn meter_reports_rms_and_peak() {
+            let (sender, receiver) = channel();
+            sender.meter(&[-0.5, 0.5]);
+            let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
+                panic!("expected meter event");
+            };
+            assert!((average - 0.5).abs() < f32::EPSILON);
+            assert!((peak - 0.5).abs() < f32::EPSILON);
         }
-        self.drive_frames(true);
-    }
-
-    fn maintain(&mut self) {
-        let hidden = crate::app_settings::indicator_position() == IndicatorPosition::Hidden;
-        if self.renderer.is_active() && !hidden {
-            self.show_on_pointer_screen();
-            self.drive_frames(false);
-        } else {
-            if let Some(display_link) = &mut self.display_link
-                && display_link.is_running()
-            {
-                display_link.stop();
-            }
-            if self.ordered {
-                self.window.orderOut(None);
-                self.ordered = false;
-            }
-        }
-    }
-
-    fn show_on_pointer_screen(&mut self) {
-        self.position_on_pointer_screen();
-        if !self.ordered {
-            self.window.orderFrontRegardless();
-            self.ordered = true;
-        }
-    }
-
-    fn drive_frames(&mut self, force: bool) {
-        self.ensure_display_link(force);
-        if let Some(display_link) = &mut self.display_link {
-            if !display_link.is_running()
-                && let Err(status) = display_link.start()
-                && force
-            {
-                tracing::error!(status, "could not start indicator display link");
-            }
-        } else {
-            self.renderer.draw(None);
-        }
-    }
-
-    fn position_on_pointer_screen(&mut self) {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        let pointer = NSEvent::mouseLocation();
-        let screens = NSScreen::screens(mtm);
-        let Some(screen) = screens
-            .iter()
-            .find(|screen| {
-                let frame = screen.frame();
-                pointer.x >= frame.origin.x
-                    && pointer.x < frame.origin.x + frame.size.width
-                    && pointer.y >= frame.origin.y
-                    && pointer.y < frame.origin.y + frame.size.height
-            })
-            .or_else(|| NSScreen::mainScreen(mtm))
-        else {
-            return;
-        };
-        let screen_frame = screen.frame();
-        let visible = screen.visibleFrame();
-        let geometry = self.geometry;
-        let top = match crate::app_settings::indicator_position() {
-            IndicatorPosition::Bottom => {
-                visible.origin.y + BOTTOM_OFFSET - geometry.capsule_margin()
-                    + f64::from(geometry.height)
-            }
-            IndicatorPosition::Top | IndicatorPosition::Hidden => geometry.top_window_edge(
-                screen_frame.origin.y + screen_frame.size.height,
-                visible.origin.y + visible.size.height,
-                screen.safeAreaInsets().top,
-            ),
-        };
-        let top_left = NSPoint::new(
-            screen_frame.origin.x + (screen_frame.size.width - f64::from(geometry.width)) / 2.0,
-            top,
-        );
-        let frame = self.window.frame();
-        if (frame.origin.x - top_left.x).abs() > 0.5
-            || (frame.origin.y + frame.size.height - top_left.y).abs() > 0.5
-        {
-            self.window.setFrameTopLeftPoint(top_left);
-        }
-        self.renderer.set_scale(screen.backingScaleFactor() as f32);
-    }
-}
-
-impl Drop for MetalIndicator {
-    fn drop(&mut self) {
-        self.display_link.take();
-        self.window.close();
-    }
-}
-
-extern "C" fn display_link_callback(
-    _display_link: CVDisplayLinkRef,
-    _now: *const CVTimeStamp,
-    output_time: *const CVTimeStamp,
-    _flags_in: CVOptionFlags,
-    _flags_out: *mut CVOptionFlags,
-    context: *mut c_void,
-) -> CVReturn {
-    let renderer = unsafe { &*context.cast::<SharedRenderer>() };
-    renderer.draw(output_timestamp(output_time));
-    0
-}
-
-struct SharedRenderer {
-    renderer: Mutex<MetalRenderer>,
-    active: AtomicBool,
-}
-
-// Metal command queues and layers are designed for cross-thread submission. Access to mutable
-// renderer state is serialized, and AppKit objects never leave the main thread.
-unsafe impl Send for SharedRenderer {}
-unsafe impl Sync for SharedRenderer {}
-
-impl SharedRenderer {
-    fn new(geometry: Geometry) -> Result<Self, String> {
-        Ok(Self {
-            renderer: Mutex::new(MetalRenderer::new(geometry)?),
-            active: AtomicBool::new(false),
-        })
-    }
-
-    fn layer(&self) -> *const metal::MetalLayerRef {
-        self.renderer.lock().unwrap().layer.as_ref()
-    }
-
-    fn handle(&self, event: DictationIndicatorEvent) {
-        let mut renderer = self.renderer.lock().unwrap();
-        renderer.handle(event);
-        self.active.store(true, Ordering::Release);
-    }
-
-    fn set_scale(&self, scale: f32) {
-        self.renderer.lock().unwrap().set_scale(scale);
-    }
-
-    fn set_dark(&self, dark: bool) {
-        if let Some(view) = &mut self.renderer.lock().unwrap().dot_scope {
-            view.set_dark(dark);
-        }
-    }
-
-    fn draw(&self, output_time: Option<DisplayOutputTime>) {
-        if !self.active.load(Ordering::Acquire) {
-            return;
-        }
-        let mut renderer = self.renderer.lock().unwrap();
-        if !renderer.draw(output_time) {
-            self.active.store(false, Ordering::Release);
-        }
-    }
-
-    fn is_active(&self) -> bool {
-        self.active.load(Ordering::Acquire)
     }
 }
 
@@ -645,38 +248,58 @@ impl Phase {
     }
 }
 
+/// The capsule's shader inputs, `Uniforms` in `rune_hud.wgsl`.
 #[repr(C, align(8))]
-#[derive(Clone, Copy)]
-struct Uniforms {
-    resolution: [f32; 2],
-    time: f32,
-    width: f32,
-    height: f32,
-    opacity: f32,
-    scale: f32,
-    softness: f32,
-    average: f32,
-    peak: f32,
-    processing: f32,
-    post_processing: f32,
-    capturing: f32,
-    editing: f32,
-    queued_count: f32,
-    line_style: f32,
-    line_count: f32,
-    line_curvature: f32,
-    line_speed: f32,
-    line_sharpness: f32,
-    line_glow: f32,
-    sphere_depth: f32,
-    light_angle: f32,
-    sphere_outline: f32,
-    completion: f32,
-    recording_flash: f32,
-    _padding: f32,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Uniforms {
+    /// Set by the renderer to the target's size in pixels.
+    pub resolution: [f32; 2],
+    pub time: f32,
+    pub width: f32,
+    pub height: f32,
+    pub opacity: f32,
+    pub scale: f32,
+    pub softness: f32,
+    pub average: f32,
+    pub peak: f32,
+    pub processing: f32,
+    pub post_processing: f32,
+    pub capturing: f32,
+    pub editing: f32,
+    pub queued_count: f32,
+    pub line_style: f32,
+    pub line_count: f32,
+    pub line_curvature: f32,
+    pub line_speed: f32,
+    pub line_sharpness: f32,
+    pub line_glow: f32,
+    pub sphere_depth: f32,
+    pub light_angle: f32,
+    pub sphere_outline: f32,
+    pub completion: f32,
+    pub recording_flash: f32,
+    pub _padding: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<Uniforms>() == 112);
+
+/// One Dot scope frame: the plate's pose and every dot's light.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DotFrame {
+    pub pose: Pose,
+    pub tuning: Tuning,
+    pub columns: usize,
+    pub rows: usize,
+    /// (brightness, freshness) per dot, row by row, as normalized u16s.
+    pub dots: Vec<[u16; 2]>,
+}
+
+/// What one step draws.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Drawn {
+    Capsule(Uniforms),
+    Dots(DotFrame),
+}
 
 fn recording_flash(elapsed: Duration) -> f32 {
     2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
@@ -690,21 +313,42 @@ fn recording_flash_for(phase: Phase, editing: bool, elapsed: Duration) -> f32 {
     }
 }
 
-struct MetalRenderer {
-    layer: MetalLayer,
-    command_queue: CommandQueue,
-    pipeline: RenderPipelineState,
+/// Dot scope's simulation and the stage it last showed.
+struct DotScope {
+    scope: Scope,
+    stage: Stage,
+    /// The tuning as set, before [`fill_island`].
+    tuning: Tuning,
+    /// The notch island the HUD sits in, if any.
+    island: Option<Island>,
+}
+
+/// The tuning that fills an island: the field as wide as the island minus
+/// its corners, recording and processing alike, with as many more columns
+/// as keep the dot spacing.
+fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
+    let Some(island) = island else {
+        return tuning;
+    };
+    let width = island.plate_width();
+    Tuning {
+        columns: (tuning.columns * width / tuning.width).round(),
+        width,
+        processing_width: width,
+        ..tuning
+    }
+}
+
+/// The HUD's state: what the listener reported and every spring.
+pub struct IndicatorModel {
     phase: Phase,
     capturing: bool,
     editing: bool,
     jobs: BTreeMap<u64, JobPhase>,
     phase_started: Instant,
-    last_frame: Instant,
-    last_output_seconds: Option<f64>,
     shader_time: f32,
     exiting: bool,
     completion_pending: bool,
-    scale: f32,
     target_average: f32,
     target_peak: f32,
     average: Spring,
@@ -716,91 +360,28 @@ struct MetalRenderer {
     processing: Spring,
     post_processing: Spring,
     tuning: HudTuning,
-    geometry: Geometry,
     /// Drawn instead of the capsule while the `dot-scope` experiment is on.
-    dot_scope: Option<DotScopeView>,
-    /// The microphone level for Dot scope (`dot_scope::level_from_rms`).
-    level: f32,
+    dot_scope: Option<DotScope>,
+    /// The microphone's loudness for Dot scope, dBFS.
+    loudness: f32,
     /// HUD Lab's synthetic voice and how far into it Dot scope is.
     demo_voice: Option<f32>,
+    /// Since an event, until a step finds everything settled out of sight.
+    active: bool,
 }
 
-impl MetalRenderer {
-    fn new(geometry: Geometry) -> Result<Self, String> {
-        let device = Device::system_default().ok_or("Metal is unavailable")?;
-        let layer = MetalLayer::new();
-        layer.set_device(&device);
-        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        unsafe {
-            let color_space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-            if !color_space.is_null() {
-                let any_layer = &*(layer.as_ref() as *const metal::MetalLayerRef)
-                    .cast::<objc2::runtime::AnyObject>();
-                let _: () = objc2::msg_send![any_layer, setColorspace: ColorSpaceRef(color_space)];
-                CGColorSpaceRelease(color_space);
-            }
-        }
-        layer.set_opaque(false);
-        layer.set_presents_with_transaction(false);
-        layer.set_display_sync_enabled(true);
-        layer.set_contents_scale(2.0);
-        layer.set_drawable_size(CGSize::new(
-            f64::from(geometry.width * 2.0),
-            f64::from(geometry.height * 2.0),
-        ));
-
-        let library = device
-            .new_library_with_data(include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/dictation_indicator.metallib"
-            )))
-            .map_err(|error| format!("could not load indicator shader: {error}"))?;
-        let vertex = library
-            .get_function("indicator_vertex", None)
-            .map_err(|error| format!("could not load indicator vertex shader: {error}"))?;
-        let fragment = library
-            .get_function("indicator_fragment", None)
-            .map_err(|error| format!("could not load indicator fragment shader: {error}"))?;
-        let descriptor = RenderPipelineDescriptor::new();
-        descriptor.set_vertex_function(Some(&vertex));
-        descriptor.set_fragment_function(Some(&fragment));
-        descriptor
-            .color_attachments()
-            .object_at(0)
-            .ok_or("indicator pipeline has no color attachment")?
-            .set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        let pipeline = device
-            .new_render_pipeline_state(&descriptor)
-            .map_err(|error| format!("could not create indicator pipeline: {error}"))?;
-        let dot_scope = if geometry == Geometry::DOT_SCOPE {
-            Some(DotScopeView::new(
-                &device,
-                &library,
-                dot_scope::Tuning::load(),
-            )?)
-        } else {
-            None
-        };
-        let command_queue = device.new_command_queue();
-        // Prewarm the command queue so the first keypress never pays driver submission setup.
-        let prewarm = command_queue.new_command_buffer();
-        prewarm.commit();
-        let now = Instant::now();
-        Ok(Self {
-            command_queue,
-            layer,
-            pipeline,
+impl IndicatorModel {
+    /// `dot_scope` draws Dot scope with `tuning` instead of the capsule.
+    pub fn new(dot_scope: Option<Tuning>, now: Instant) -> Self {
+        Self {
             phase: Phase::Hidden,
             capturing: false,
             editing: false,
             jobs: BTreeMap::new(),
             phase_started: now,
-            last_frame: now,
-            last_output_seconds: None,
             shader_time: 0.0,
             exiting: true,
             completion_pending: false,
-            scale: 2.0,
             target_average: 0.0,
             target_peak: 0.0,
             average: Spring::at(0.0),
@@ -812,15 +393,43 @@ impl MetalRenderer {
             processing: Spring::at(0.0),
             post_processing: Spring::at(0.0),
             tuning: HudTuning::default(),
-            geometry,
-            dot_scope,
-            level: 0.0,
+            dot_scope: dot_scope.map(|tuning| DotScope {
+                scope: Scope::new(tuning),
+                stage: Stage::Recording,
+                tuning,
+                island: None,
+            }),
+            loudness: SILENT,
             demo_voice: None,
-        })
+            active: false,
+        }
     }
 
-    fn handle(&mut self, event: DictationIndicatorEvent) {
-        let now = Instant::now();
+    /// Whether the HUD wants frames: from an event until a step finds it
+    /// settled out of sight.
+    pub fn active(&self) -> bool {
+        self.active
+    }
+
+    /// Dot scope's tuning, when it draws Dot scope.
+    #[cfg(target_os = "macos")]
+    pub fn dot_scope_tuning(&self) -> Option<Tuning> {
+        self.dot_scope.as_ref().map(|dots| dots.tuning)
+    }
+
+    /// Spreads Dot scope's field across the notch island it now sits in.
+    #[cfg(target_os = "macos")]
+    pub fn set_island(&mut self, island: Option<Island>) {
+        if let Some(dots) = &mut self.dot_scope
+            && dots.island != island
+        {
+            dots.island = island;
+            dots.scope.tune(fill_island(dots.tuning, island));
+        }
+    }
+
+    pub fn handle(&mut self, event: DictationIndicatorEvent, now: Instant, reduce: bool) {
+        self.active = true;
         let editing_started = matches!(event, DictationIndicatorEvent::EditingStarted);
         match event {
             DictationIndicatorEvent::Reset => {
@@ -829,8 +438,7 @@ impl MetalRenderer {
                 self.jobs.clear();
                 self.phase = Phase::Hidden;
                 self.completion_pending = false;
-                self.last_output_seconds = None;
-                self.level = 0.0;
+                self.loudness = SILENT;
                 self.demo_voice = None;
                 self.freeze_visual_state();
             }
@@ -838,26 +446,26 @@ impl MetalRenderer {
                 self.tuning = tuning;
             }
             DictationIndicatorEvent::ConfigureDotScope(tuning) => {
-                if let Some(view) = &mut self.dot_scope {
-                    view.tune(tuning);
+                if let Some(dots) = &mut self.dot_scope {
+                    dots.tuning = tuning;
+                    dots.scope.tune(fill_island(tuning, dots.island));
                 }
             }
             DictationIndicatorEvent::DemoVoice => {
                 self.demo_voice = Some(0.0);
             }
             DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted => {
+                // HUD Lab and the playground send `DemoVoice` after this.
+                self.demo_voice = None;
                 self.capturing = true;
                 self.editing = editing_started;
                 self.phase = Phase::Recording;
                 self.phase_started = now;
-                self.last_frame = now;
-                self.last_output_seconds = None;
                 self.shader_time = 0.0;
                 self.exiting = false;
                 self.completion_pending = false;
                 self.target_average = 0.0;
                 self.target_peak = 0.0;
-                let reduce = reduced_motion();
                 self.average.jump(0.0);
                 self.peak.jump(0.0);
                 self.width.jump(CAPSULE_WIDTH);
@@ -868,9 +476,10 @@ impl MetalRenderer {
                     .jump(if reduce { 0.0 } else { HIDDEN_SOFTNESS });
                 self.processing.jump(0.0);
                 self.post_processing.jump(0.0);
-                self.level = 0.0;
-                if let Some(view) = &mut self.dot_scope {
-                    view.restart(reduce);
+                self.loudness = SILENT;
+                if let Some(dots) = &mut self.dot_scope {
+                    dots.stage = Stage::Recording;
+                    dots.scope.restart(reduce);
                 }
             }
             DictationIndicatorEvent::PromotedToVoiceAction => {
@@ -879,7 +488,7 @@ impl MetalRenderer {
             DictationIndicatorEvent::Meter { average, peak } => {
                 self.target_average = (average * 9.0).clamp(0.0, 1.0);
                 self.target_peak = (peak * 3.0).clamp(0.0, 1.0);
-                self.level = dot_scope::level_from_rms(average);
+                self.loudness = dot_scope::loudness(average);
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -979,81 +588,10 @@ impl MetalRenderer {
         self.post_processing.v = 0.0;
     }
 
-    fn set_scale(&mut self, scale: f32) {
-        if (self.scale - scale).abs() < f32::EPSILON {
-            return;
-        }
-        self.scale = scale;
-        self.layer.set_contents_scale(f64::from(scale));
-        self.layer.set_drawable_size(CGSize::new(
-            f64::from(self.geometry.width * scale),
-            f64::from(self.geometry.height * scale),
-        ));
-    }
-
-    fn frame_dt(&mut self, now: Instant, output_time: Option<DisplayOutputTime>) -> f32 {
-        let dt = if let Some(out) = output_time {
-            let delta = self
-                .last_output_seconds
-                .map(|prev| (out.video_seconds - prev) as f32)
-                .filter(|&d| d > 0.0 && d <= 0.25)
-                .or(out.refresh_period)
-                .unwrap_or(1.0 / 60.0);
-            self.last_output_seconds = Some(out.video_seconds);
-            delta
-        } else {
-            now.duration_since(self.last_frame).as_secs_f32()
-        };
-        self.last_frame = now;
-        dt.clamp(1.0 / 240.0, 1.0 / 20.0)
-    }
-
-    /// Steps and draws Dot scope; true while it still needs frames.
-    fn draw_dot_scope(&mut self, dt: f32, visible: bool, reduce: bool) -> bool {
-        let stage = match self.phase {
-            Phase::Recording => Some(Stage::Recording),
-            Phase::Transcribing => Some(Stage::Processing),
-            Phase::Completed => Some(Stage::Done),
-            Phase::Failed => Some(Stage::Failed),
-            Phase::Hidden | Phase::Cancelled => None,
-        };
-        let level = match &mut self.demo_voice {
-            Some(time) => {
-                *time += dt;
-                dot_scope::demo_level(*time)
-            }
-            None => self.level,
-        };
-        let resolution = [
-            self.geometry.width * self.scale,
-            self.geometry.height * self.scale,
-        ];
-        let scale = self.scale;
-        let Some(view) = &mut self.dot_scope else {
-            return false;
-        };
-        view.advance(dt, stage, visible, level, reduce);
-        let needs_frames = visible || !view.settled();
-        let Some(drawable) = self.layer.next_drawable() else {
-            return needs_frames;
-        };
-        let descriptor = RenderPassDescriptor::new();
-        let attachment = descriptor.color_attachments().object_at(0).unwrap();
-        attachment.set_texture(Some(drawable.texture()));
-        attachment.set_load_action(MTLLoadAction::Clear);
-        attachment.set_clear_color(metal::MTLClearColor::new(0.0, 0.0, 0.0, 0.0));
-        attachment.set_store_action(MTLStoreAction::Store);
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_render_command_encoder(descriptor);
-        view.encode(encoder, resolution, scale);
-        encoder.end_encoding();
-        command_buffer.present_drawable(drawable);
-        command_buffer.commit();
-        needs_frames
-    }
-
-    fn draw(&mut self, output_time: Option<DisplayOutputTime>) -> bool {
-        let now = Instant::now();
+    /// Advances `dt` seconds to `now` and returns what to draw. Once
+    /// everything has settled out of sight, [`Self::active`] turns false.
+    pub fn step(&mut self, now: Instant, dt: f32, reduce: bool) -> Drawn {
+        let dt = dt.clamp(1.0 / 240.0, 1.0 / 20.0);
         if self.completion_pending
             && now.duration_since(self.phase_started) >= PROCESSING_MORPH_DURATION
         {
@@ -1064,8 +602,6 @@ impl MetalRenderer {
             self.completion_pending = false;
             self.freeze_visual_state();
         }
-        let dt = self.frame_dt(now, output_time);
-        let reduce = reduced_motion();
         if !reduce {
             self.shader_time += dt;
         }
@@ -1079,7 +615,7 @@ impl MetalRenderer {
         let terminal_finished = visible_duration.is_some_and(|duration| elapsed >= duration);
         let visible = !matches!(self.phase, Phase::Hidden) && !terminal_finished;
         if self.dot_scope.is_some() {
-            return self.draw_dot_scope(dt, visible, reduce);
+            return self.step_dot_scope(dt, visible, reduce);
         }
         if !visible && !self.exiting {
             // Reversing an in-flight entrance velocity would briefly grow or sharpen the HUD.
@@ -1147,24 +683,8 @@ impl MetalRenderer {
         }
         self.target_peak *= 0.91_f32.powf(dt * 60.0);
 
-        let Some(drawable) = self.layer.next_drawable() else {
-            return true;
-        };
-        let descriptor = RenderPassDescriptor::new();
-        let attachment = descriptor.color_attachments().object_at(0).unwrap();
-        attachment.set_texture(Some(drawable.texture()));
-        attachment.set_load_action(MTLLoadAction::Clear);
-        attachment.set_clear_color(metal::MTLClearColor::new(0.0, 0.0, 0.0, 0.0));
-        attachment.set_store_action(MTLStoreAction::Store);
-
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_render_command_encoder(descriptor);
-        encoder.set_render_pipeline_state(&self.pipeline);
         let uniforms = Uniforms {
-            resolution: [
-                self.geometry.width * self.scale,
-                self.geometry.height * self.scale,
-            ],
+            resolution: [WINDOW_WIDTH, WINDOW_HEIGHT],
             time: self.shader_time,
             width: self.width.x,
             height: CAPSULE_HEIGHT,
@@ -1199,25 +719,60 @@ impl MetalRenderer {
             recording_flash: recording_flash_for(self.phase, self.editing, elapsed),
             _padding: 0.0,
         };
-        encoder.set_fragment_bytes(
-            0,
-            std::mem::size_of::<Uniforms>() as u64,
-            (&raw const uniforms).cast::<c_void>(),
-        );
-        encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 3);
-        encoder.end_encoding();
-        command_buffer.present_drawable(drawable);
-        command_buffer.commit();
 
         let exit_spec = if reduce {
             REDUCED_FADE
         } else {
             Spec::from_omega(EXIT_ANGULAR_FREQUENCY)
         };
-        visible
+        self.active = visible
             || !self.opacity.settled(exit_spec, 0.002)
             || (!reduce && !self.visual_scale.settled(exit_spec, 0.002))
-            || (!reduce && !self.softness.settled(exit_spec, 0.02))
+            || (!reduce && !self.softness.settled(exit_spec, 0.02));
+        Drawn::Capsule(uniforms)
+    }
+
+    fn step_dot_scope(&mut self, dt: f32, visible: bool, reduce: bool) -> Drawn {
+        let stage = match self.phase {
+            Phase::Recording => Some(Stage::Recording),
+            Phase::Transcribing => Some(Stage::Processing),
+            Phase::Completed => Some(Stage::Done),
+            Phase::Failed => Some(Stage::Failed),
+            Phase::Hidden | Phase::Cancelled => None,
+        };
+        let loudness = match &mut self.demo_voice {
+            Some(time) => {
+                *time += dt;
+                dot_scope::demo_loudness(*time)
+            }
+            None => self.loudness,
+        };
+        let dots = self.dot_scope.as_mut().expect("drawing Dot scope");
+        if let Some(stage) = stage {
+            dots.stage = stage;
+        }
+        dots.scope.advance(
+            dt,
+            dot_scope::Frame {
+                stage: dots.stage,
+                visible,
+                loudness,
+                reduce_motion: reduce,
+            },
+        );
+        self.active = visible || !dots.scope.settled();
+        Drawn::Dots(DotFrame {
+            pose: dots.scope.pose(),
+            tuning: dots.scope.tuning(),
+            columns: dots.scope.columns(),
+            rows: dots.scope.rows(),
+            dots: dots
+                .scope
+                .dots()
+                .iter()
+                .map(|value| value.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))
+                .collect(),
+        })
     }
 }
 
@@ -1226,64 +781,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn meter_reports_rms_and_peak() {
-        let (sender, receiver) = channel();
-        sender.meter(&[-0.5, 0.5]);
-        let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
+    fn an_island_spreads_the_field_across_it_at_the_same_spacing() {
+        let tuning = Tuning::default();
+        assert_eq!(fill_island(tuning, None), tuning);
+        let island = Island {
+            notch: [185.0, 32.0],
+            width: 241.0,
+            top: -64.0,
+        };
+        let filled = fill_island(tuning, Some(island)).clamped();
+        assert_eq!((filled.width, filled.processing_width), (209.0, 209.0));
+        assert_eq!((filled.columns, filled.rows), (80.0, tuning.rows));
+    }
+
+    #[test]
+    fn meter_helper_reports_rms_and_peak() {
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[-0.5, 0.5])
+        else {
             panic!("expected meter event");
         };
         assert!((average - 0.5).abs() < f32::EPSILON);
         assert!((peak - 0.5).abs() < f32::EPSILON);
+        assert!(DictationIndicatorEvent::meter(&[]).is_none());
     }
 
-    /// The capsule's top edge for a window whose top edge is `window_top`.
-    fn capsule_top(window_top: f64) -> f64 {
-        window_top - Geometry::CAPSULE.capsule_margin()
-    }
-
-    fn top_window_edge(screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
-        Geometry::CAPSULE.top_window_edge(screen_top, visible_top, safe_area_top)
-    }
-
-    #[test]
-    fn dot_scope_plate_sits_where_the_capsule_did() {
-        let capsule = Geometry::CAPSULE.top_window_edge(956.0, 923.0, 32.0)
-            - Geometry::CAPSULE.capsule_margin();
-        let plate = Geometry::DOT_SCOPE.top_window_edge(956.0, 923.0, 32.0)
-            - Geometry::DOT_SCOPE.capsule_margin();
-        assert_eq!(capsule, plate);
-        let widest = dot_scope::KNOBS
-            .iter()
-            .find(|knob| knob.key == "dot-width")
-            .unwrap()
-            .max;
-        assert!(widest + 24.0 <= Geometry::DOT_SCOPE.width);
-    }
-
-    // Geometry measured on a 14" MacBook Air: frame height 956, menu bar
-    // bottom 923, 32 pt notch.
-    #[test]
-    fn top_capsule_clears_the_notch_in_a_fullscreen_space() {
-        let edge = top_window_edge(956.0, 956.0, 32.0);
-        assert_eq!(capsule_top(edge), 924.0 - TOP_OFFSET);
+    fn run(model: &mut IndicatorModel, start: Instant, from: f32, seconds: f32) -> Vec<Drawn> {
+        (0..(seconds * 60.0) as usize)
+            .map(|n| {
+                let at = start + Duration::from_secs_f32(from + n as f32 / 60.0);
+                model.step(at, 1.0 / 60.0, false)
+            })
+            .collect()
     }
 
     #[test]
-    fn top_capsule_stays_under_the_menu_bar_on_a_notched_screen() {
-        let edge = top_window_edge(956.0, 923.0, 32.0);
-        assert_eq!(capsule_top(edge), 923.0 - TOP_OFFSET);
-    }
-
-    #[test]
-    fn top_capsule_is_unchanged_on_a_screen_without_a_notch() {
-        assert_eq!(
-            capsule_top(top_window_edge(1080.0, 1055.0, 0.0)),
-            1055.0 - TOP_OFFSET
+    fn a_dictation_records_morphs_blooms_and_settles() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(None, start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        let recording = run(&mut model, start, 0.0, 0.5);
+        let Drawn::Capsule(last) = recording.last().unwrap() else {
+            panic!("capsule");
+        };
+        assert!(last.opacity > 0.98 && last.processing == 0.0 && last.capturing == 1.0);
+        let at = start + Duration::from_millis(500);
+        model.handle(DictationIndicatorEvent::Submitted { job_id: 1 }, at, false);
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at,
+            false,
         );
-        assert_eq!(
-            capsule_top(top_window_edge(1080.0, 1080.0, 0.0)),
-            1080.0 - TOP_OFFSET
+        let rest = run(&mut model, start, 0.5, 2.0);
+        assert!(
+            rest.iter()
+                .any(|drawn| matches!(drawn, Drawn::Capsule(u) if u.completion > 0.0))
         );
+        assert!(!model.active(), "settled out of sight");
+    }
+
+    #[test]
+    fn dot_scope_records_and_settles() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(Some(Tuning::default()), start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        model.handle(DictationIndicatorEvent::DemoVoice, start, false);
+        let frames = run(&mut model, start, 0.0, 1.0);
+        let Drawn::Dots(frame) = frames.last().unwrap() else {
+            panic!("dots");
+        };
+        assert_eq!(frame.dots.len(), frame.columns * frame.rows);
+        assert!(frame.dots.iter().any(|[power, _]| *power > 30_000));
+        let at = start + Duration::from_secs(1);
+        model.handle(DictationIndicatorEvent::Cancelled, at, false);
+        run(&mut model, start, 1.0, 2.0);
+        assert!(!model.active());
     }
 
     #[test]
@@ -1371,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn rust_uniform_layout_matches_metal() {
+    fn uniform_layout_matches_the_shader() {
         assert_eq!(std::mem::size_of::<Uniforms>(), 112);
         assert_eq!(std::mem::align_of::<Uniforms>(), 8);
         assert_eq!(std::mem::offset_of!(Uniforms, sphere_outline), 92);
@@ -1399,35 +971,5 @@ mod tests {
         }
         assert!(width.x < CAPSULE_HEIGHT + 0.7);
         assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
-    }
-
-    #[test]
-    fn output_timestamp_extracts_video_seconds_and_refresh_period() {
-        use core_video::base::CVSMPTETime;
-        let ts = CVTimeStamp {
-            version: 0,
-            videoTimeScale: 24_000,
-            videoTime: 48_000,
-            hostTime: 0,
-            rateScalar: 1.0,
-            videoRefreshPeriod: 200,
-            smpteTime: CVSMPTETime {
-                subframes: 0,
-                subframeDivisor: 0,
-                counter: 0,
-                type_: 0,
-                flags: 0,
-                hours: 0,
-                minutes: 0,
-                seconds: 0,
-                frames: 0,
-            },
-            flags: (CVTimeStampFlags::kCVTimeStampVideoTimeValid as u64)
-                | (CVTimeStampFlags::kCVTimeStampVideoRefreshPeriodValid as u64),
-            reserved: 0,
-        };
-        let parsed = output_timestamp(&raw const ts).expect("valid timestamp");
-        assert!((parsed.video_seconds - 2.0).abs() < 1e-9);
-        assert!((parsed.refresh_period.unwrap() - (1.0 / 120.0)).abs() < 1e-6);
     }
 }

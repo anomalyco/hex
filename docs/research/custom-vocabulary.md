@@ -1,8 +1,10 @@
 # Custom vocabulary for Parakeet
 
-**Status:** Research, 2026-10-22. Nothing here is implemented or measured in
-Hex. Effort figures are my estimates. Claims that come from a vendor's own
-benchmark or a third party's write-up are labeled as such.
+**Status:** Research, 2026-10-22. Effort figures are my estimates. Claims that
+come from a vendor's own benchmark or a third party's write-up are labeled as
+such. **Update 2026-10-28:** a vocabulary boost is now implemented as
+post-decode rescoring rather than a decode-loop bonus; see
+[`vocabulary-boost-results.md`](vocabulary-boost-results.md).
 
 **Question (Kit):** People want voice replacements and vocabulary, and Hex's
 default model, Parakeet, has no hints. Can we build something ourselves,

@@ -1,23 +1,19 @@
-# Contributing To HEX
+# Contributing To Hex
 
-HEX is a native Rust macOS application with explicit Windows (x64 and ARM64) and
+Hex is a native Rust macOS application with explicit Windows (x64 and ARM64) and
 x86_64 Linux (X11 and compatible wlroots Wayland) betas. Read [`AGENTS.md`](AGENTS.md)
 and [`docs/design-system.md`](docs/design-system.md) before changing behavior or
 UI; they define the architecture, invariants, and Rune component rules.
 
 ## Set Up
 
-On macOS, install Rust, Xcode 26 with the Metal toolchain, [uv](https://docs.astral.sh/uv/),
-and [Bun](https://bun.sh/), then run:
+On macOS, install Rust, Xcode 26 with the Metal toolchain, and
+[uv](https://docs.astral.sh/uv/), then run:
 
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
-bun run --cwd sdk/commands build
 ```
-
-The command SDK build supplies `sdk/commands/dist`, which workspace-provisioning
-tests and source-run personal commands need. Repeat it after changing that SDK.
 
 Windows setup and cross-checks are documented in
 [`docs/windows.md`](docs/windows.md). Linux dependencies and installation are
@@ -40,7 +36,7 @@ cargo run -- app -- --snap /tmp/hex-modes.png --scene modes
 git diff --check
 ```
 
-For TypeScript SDK changes:
+For TypeScript SDK changes (`sdk/typescript`, which needs [Bun](https://bun.sh/)):
 
 ```sh
 cd sdk

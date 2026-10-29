@@ -45,7 +45,7 @@ fn transcript_entries_coalesce_into_source_turns_without_hiding_long_pauses() {
 #[test]
 fn final_transcript_replaces_the_rolling_transcript_atomically() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-transcript-{}-{}",
+        "hex-meeting-transcript-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -100,7 +100,7 @@ fn final_transcript_replaces_the_rolling_transcript_atomically() {
 #[test]
 fn reading_a_transcript_ignores_an_in_flight_trailing_write() {
     let path = std::env::temp_dir().join(format!(
-        "voice-control-transcript-tail-{}-{}.ndjson",
+        "hex-transcript-tail-{}-{}.ndjson",
         std::process::id(),
         now_ms()
     ));
@@ -134,7 +134,7 @@ fn reading_a_transcript_ignores_an_in_flight_trailing_write() {
 #[test]
 fn capture_failures_are_persisted_instead_of_looking_interrupted() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-failure-{}-{}",
+        "hex-meeting-failure-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -178,7 +178,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
 #[test]
 fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-capture-loss-{}-{}",
+        "hex-meeting-capture-loss-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -280,7 +280,7 @@ fn abandoned_recording_and_finalization_are_recovered_as_interrupted() {
 #[test]
 fn meeting_lock_reports_liveness_across_file_descriptors() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-lock-{}-{}",
+        "hex-meeting-lock-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -295,11 +295,7 @@ fn meeting_lock_reports_liveness_across_file_descriptors() {
 }
 
 fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
-    let base = std::env::temp_dir().join(format!(
-        "voice-control-{name}-{}-{}",
-        std::process::id(),
-        now_ms()
-    ));
+    let base = std::env::temp_dir().join(format!("hex-{name}-{}-{}", std::process::id(), now_ms()));
     let directory = base.join("1760000000000-1");
     fs::create_dir_all(&directory).unwrap();
     let export = base.join("2026-10-15 1418 Meeting.md");

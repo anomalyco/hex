@@ -29,7 +29,7 @@ pub(super) const QUIT_IN_WINDOW: bool = true;
 pub(crate) type Connect = Option<HostHandle>;
 
 pub(super) enum Backend {
-    Host(HostHandle),
+    Host(HostHandle, Option<Box<crate::linux_input::MouseCapture>>),
     /// `--snap --scene live` from a separate process.
     Status(Option<Box<crate::linux_service::Status>>, Option<String>),
 }
@@ -42,12 +42,30 @@ impl Backend {
             return backend;
         };
         host.set_waker(wake);
-        Self::Host(host)
+        Self::Host(host, None)
     }
 
     pub(super) fn send(&mut self, request: Request) -> Result<()> {
         match self {
-            Self::Host(host) => host.request(request),
+            Self::Host(host, capture) => {
+                match &request {
+                    Request::CaptureShortcutFor(_)
+                        if !crate::linux_session::LinuxSession::detect().is_wayland() =>
+                    {
+                        *capture = crate::linux_input::MouseCapture::start()
+                            .map(Box::new)
+                            .inspect_err(|error| tracing::warn!(%error, "mouse shortcut capture unavailable"))
+                            .ok();
+                    }
+                    Request::CancelShortcut | Request::SetShortcut { .. } => *capture = None,
+                    _ => {}
+                }
+                if let Err(error) = host.request(request) {
+                    *capture = None;
+                    return Err(error);
+                }
+                Ok(())
+            }
             Self::Status(..) => Err(eyre!("This window only shows `hex status`")),
         }
     }
@@ -55,27 +73,29 @@ impl Backend {
     /// Saves through the host, which adopts the settings at once.
     pub(super) fn save(&mut self, settings: &AppSettings) -> Result<()> {
         match self {
-            Self::Host(host) => host.save_settings(settings.clone()),
+            Self::Host(host, _) => host.save_settings(settings.clone()),
             Self::Status(..) => Err(eyre!("This window only shows `hex status`")),
         }
     }
 
     /// The host drains its work, then asks the app to quit.
     pub(super) fn quit(&mut self) {
-        if let Self::Host(host) = self {
+        if let Self::Host(host, capture) = self {
+            *capture = None;
             host.quit();
         }
     }
 
     pub(super) fn closed(&mut self) {
-        if let Self::Host(host) = self {
+        if let Self::Host(host, capture) = self {
+            *capture = None;
             host.window_closed();
         }
     }
 
     pub(super) fn refresh(&mut self) {
         match self {
-            Self::Host(_) => {}
+            Self::Host(..) => {}
             Self::Status(status, error) => {
                 match crate::linux_service::request(crate::linux_service::Request::Status) {
                     Ok(state) => (*status, *error) = (Some(Box::new(state)), None),
@@ -87,14 +107,14 @@ impl Backend {
 
     pub(super) fn error(&self) -> Option<String> {
         match self {
-            Self::Host(_) => None,
+            Self::Host(..) => None,
             Self::Status(_, error) => error.clone(),
         }
     }
 
     pub(super) fn state(&self) -> Option<HostState> {
         let (desktop, settings, editing) = match self {
-            Self::Host(host) => {
+            Self::Host(host, _) => {
                 let snapshot = host.snapshot();
                 (snapshot.desktop, snapshot.settings, snapshot.editing)
             }
@@ -115,9 +135,25 @@ impl Backend {
         })
     }
 
-    /// Linux records shortcuts from the window's key events.
+    /// Keyboard capture remains in Rune; X11 supplies mouse button edges.
     pub(super) fn take_chord(&mut self) -> Option<super::settings::Chord> {
-        None
+        let Self::Host(_, capture) = self else {
+            return None;
+        };
+        let result = capture.as_mut()?.poll();
+        match result {
+            Ok(None) => None,
+            // Keep listening after a rejected/conflicting candidate. A saved
+            // binding ends the grab through SetShortcut above.
+            Ok(Some(binding)) => Some(super::settings::Chord::Captured(Ok(HotkeyBinding::from(
+                &binding,
+            )))),
+            Err(error) => {
+                tracing::debug!(%error, "mouse shortcut capture ended");
+                *capture = None;
+                Some(super::settings::Chord::Cancelled)
+            }
+        }
     }
 }
 
@@ -133,6 +169,13 @@ pub(super) fn validate_hotkey(
     _: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
+    if binding.key.as_ref().is_some_and(|key| key.is_mouse())
+        && crate::linux_session::LinuxSession::detect().is_wayland()
+    {
+        return Err(tr(
+            "Configure mouse shortcuts in your Wayland desktop using the hex commands",
+        ));
+    }
     LinuxHotkey::from(binding)
         .validate()
         .map_err(|_| tr("Add a key Linux can register"))

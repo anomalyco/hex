@@ -82,7 +82,7 @@ Only begin this slice when command parity is a product priority. Add:
 - Moonshine command recognition and wake/sleep behavior;
 - X11 foreground application and title through EWMH;
 - platform-appropriate command shortcuts and application launch;
-- MPRIS pause/resume for players HEX actually paused;
+- MPRIS pause/resume for players Hex actually paused;
 - logind or XDG idle-sleep inhibition;
 - visible context age and failure.
 
@@ -103,7 +103,7 @@ writers, live drafts, gap accounting, manifests, recovery, and atomic final
 publication.
 
 Handle route replacement, Bluetooth profile changes, clock alignment, queue
-pressure, and HEX feedback appearing in the output monitor. Route loss must
+pressure, and Hex feedback appearing in the output monitor. Route loss must
 produce a visible gap or failure rather than silent corruption.
 
 ### 4. Add Metadata-Only Meeting Offers
@@ -205,7 +205,7 @@ implementation assumptions.
 | Generic Wayland parity is not a stable contract | Critical | Publish one constrained contract |
 | Native Wayland insertion is compositor-controlled | High | Validate `wl-copy`/`wtype` on compatible compositors; broader portal/libei or approved-helper support needs separate validation |
 | Foreground and browser context lack universal APIs | High | EWMH first; add a real browser adapter later |
-| PipeWire output monitoring includes HEX feedback | High | Suppress feedback or construct a filtered capture graph |
+| PipeWire output monitoring includes Hex feedback | High | Suppress feedback or construct a filtered capture graph |
 | PipeWire metadata varies by package format | Medium | Build identity rules from observed fixtures |
 | Packaging multiplies native dependencies | Medium | Keep one distro and channel until validated |
 

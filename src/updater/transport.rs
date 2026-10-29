@@ -1,18 +1,25 @@
 //! HTTPS through the platform's curl: the polled manifest with
 //! `If-None-Match`, and resumable downloads checked against the manifest's
 //! size and SHA-256 before any byte is used. Requests carry nothing about
-//! the install beyond `User-Agent: hex-updater`.
+//! the install beyond `User-Agent: hex/<channel>/<version>`.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, WrapErr, bail};
 
 use super::protocol::Target;
 
 pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+
+/// What every request names itself to the release service: the app, the
+/// channel this build belongs to and its version, e.g. `hex/dev/0.0.0-dev-171`.
+pub fn user_agent(channel: &str, version: &str) -> String {
+    format!("hex/{channel}/{version}")
+}
 
 /// The last manifest the service sent, revalidated with its ETag.
 #[derive(Default)]
@@ -23,8 +30,9 @@ pub struct ManifestCache {
     body: Option<String>,
 }
 
-fn curl() -> Command {
-    let mut command = Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
+fn curl(user_agent: &str) -> Command {
+    let mut command =
+        crate::background_process::command(if cfg!(windows) { "curl.exe" } else { "curl" });
     command.args([
         "--silent",
         "--show-error",
@@ -36,14 +44,8 @@ fn curl() -> Command {
         "--connect-timeout",
         "15",
         "--user-agent",
-        "hex-updater",
+        user_agent,
     ]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     command.stdin(Stdio::null());
     command
 }
@@ -51,7 +53,13 @@ fn curl() -> Command {
 impl ManifestCache {
     /// Fetches `url` into `scratch`, returning the manifest text: the cached
     /// one when the service answers 304.
-    pub fn fetch(&mut self, url: &str, scratch: &Path) -> Result<String> {
+    pub fn fetch(
+        &mut self,
+        url: &str,
+        user_agent: &str,
+        scratch: &Path,
+        max_time: Duration,
+    ) -> Result<String> {
         let body = scratch.join("manifest.json.partial");
         let headers = scratch.join("manifest.headers");
         let _ = fs::remove_file(&body);
@@ -61,8 +69,11 @@ impl ManifestCache {
                 ..Self::default()
             };
         }
-        let mut command = curl();
-        command.args(["--max-time", "60", "--max-filesize"]);
+        let mut command = curl(user_agent);
+        command
+            .arg("--max-time")
+            .arg(max_time.as_secs().max(1).to_string())
+            .arg("--max-filesize");
         command.arg(MAX_MANIFEST_BYTES.to_string());
         if let (Some(etag), Some(_)) = (&self.etag, &self.body) {
             command
@@ -132,7 +143,7 @@ fn read_bounded(path: &Path, max_bytes: u64) -> Result<String> {
 /// Downloads `target` from `url` into `directory`, resuming an earlier
 /// partial download of the same bytes, and returns the verified file. The
 /// file is named after the target URL's last segment.
-pub fn download(url: &str, target: &Target, directory: &Path) -> Result<PathBuf> {
+pub fn download(url: &str, user_agent: &str, target: &Target, directory: &Path) -> Result<PathBuf> {
     let name = url
         .rsplit('/')
         .next()
@@ -158,7 +169,7 @@ pub fn download(url: &str, target: &Target, directory: &Path) -> Result<PathBuf>
     drop(options.open(&partial)?);
     let complete = fs::metadata(&partial)?.len() == target.size;
     if !complete {
-        let output = curl()
+        let output = curl(user_agent)
             .args(["--fail", "--max-time", "1800", "--continue-at", "-"])
             .arg("--max-filesize")
             .arg(target.size.to_string())
@@ -227,6 +238,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn requests_name_the_app_channel_and_version() {
+        assert_eq!(user_agent("dev", "0.0.0-dev-171"), "hex/dev/0.0.0-dev-171");
+        assert_eq!(user_agent("stable", "2.3.1"), "hex/stable/2.3.1");
+    }
+
+    #[test]
     fn the_final_responses_etag_wins() {
         let headers =
             "HTTP/2 302\r\nlocation: x\r\netag: \"old\"\r\n\r\nHTTP/2 200\r\nETag: \"new\"\r\n\r\n";
@@ -272,10 +289,22 @@ mod tests {
         // A complete partial download needs no request.
         fs::create_dir_all(directory.join(&sha256)).unwrap();
         fs::copy(&source, directory.join(&sha256).join("Hex.zip.partial")).unwrap();
-        let file = download("https://invalid.invalid/Hex.zip", &target, &directory).unwrap();
+        let file = download(
+            "https://invalid.invalid/Hex.zip",
+            "hex/dev/0.0.0-dev-1",
+            &target,
+            &directory,
+        )
+        .unwrap();
         assert_eq!(fs::read(&file).unwrap(), b"bytes");
         assert_eq!(
-            download("https://invalid.invalid/Hex.zip", &target, &directory).unwrap(),
+            download(
+                "https://invalid.invalid/Hex.zip",
+                "hex/dev/0.0.0-dev-1",
+                &target,
+                &directory
+            )
+            .unwrap(),
             file
         );
         prune(&directory, None);

@@ -18,9 +18,10 @@ use crate::meeting::MeetingRequest;
 use crate::meeting_watcher::{ControllerEvent, MeetingMenuState};
 use crate::onboarding::PermissionState;
 use crate::recognition::{CommandModelStatus, RecognitionControl};
+use crate::rune_ui::story_link::{self, StoryLink};
 use crate::rune_ui::{Destination, Ui};
 
-use super::{Pump, Request, RuntimeHandle, show, window_visible};
+use super::{Pump, Request, RuntimeHandle, bring_window_forward, show, window_visible};
 
 /// How long a command waits for the listener's answer.
 const LISTENER_TIMEOUT: Duration = Duration::from_secs(3);
@@ -226,8 +227,7 @@ impl Pump {
                         ),
                     ));
                 }
-                background(reply, move || use_model(&runtime, selection));
-                None
+                start_model_use(runtime, selection, reply)
             }
             ControlCommand::ModelInstall { model, language } => {
                 let selection = match load().and_then(|settings| {
@@ -238,8 +238,7 @@ impl Pump {
                 };
                 let definition = crate::transcription_models::definition(selection.model);
                 if crate::transcription_models::is_installed(definition, &selection.language) {
-                    background(reply, move || use_model(&runtime, selection));
-                    return None;
+                    return start_model_use(runtime, selection, reply);
                 }
                 Some(reply_with(
                     runtime
@@ -280,6 +279,11 @@ impl Pump {
             } else {
                 ControlReply::unchanged("The window isn't open")
             }),
+            ControlCommand::WindowStory {
+                story,
+                variant,
+                play,
+            } => Some(self.show_story(StoryLink::new(&story, variant, play))),
             ControlCommand::HistoryClear => Some(reply_with(clear_history(&runtime))),
             ControlCommand::LaunchAtLogin { enabled } => {
                 background(reply, move || launch_at_login(enabled));
@@ -474,6 +478,32 @@ impl Pump {
         show(&self.window, destination);
         Ok(ControlReply::done("Opened the window"))
     }
+
+    /// `hex window story`: what a `hex://story/…` link does.
+    fn show_story(&mut self, link: StoryLink) -> ControlReply {
+        let enabled = crate::rune_ui::playground::enabled();
+        let mut message = format!("Opened the playground at {}", link.story);
+        if let Some(variant) = &link.variant {
+            message.push_str(&format!(", variant {variant}"));
+        }
+        if link.play {
+            message.push_str(", and played it");
+        }
+        self.window.update(move |_, tx| {
+            if let Err(why) = story_link::open(&link, tx) {
+                tracing::warn!(story = %link.story, %why, "hex window story opened only the window");
+            }
+        });
+        bring_window_forward();
+        if enabled {
+            ControlReply::done(message)
+        } else {
+            ControlReply::error(
+                "feature-off",
+                format!("{}; opened the window", story_link::PLAYGROUND_OFF),
+            )
+        }
+    }
 }
 
 fn reply_with(result: Result<ControlReply, ControlError>) -> ControlReply {
@@ -520,11 +550,16 @@ fn captures_on() -> Result<(), ControlError> {
 }
 
 fn listener_ready(runtime: &RuntimeHandle) -> Result<(), ControlError> {
-    if runtime
-        .published()
-        .is_some_and(|published| published.listener.running)
-    {
+    let published = runtime.published();
+    let listener = published.as_ref().map(|published| &published.listener);
+    if listener.is_some_and(|listener| listener.running) {
         return Ok(());
+    }
+    if let Some(failure) = listener.and_then(|listener| listener.warning.as_ref()) {
+        return Err(ControlError::new(
+            "listener-stopped",
+            format!("the listener stopped ({failure}); restart Hex"),
+        ));
     }
     Err(ControlError::new(
         "not-ready",
@@ -646,15 +681,28 @@ fn use_request(selection: crate::transcription_models::TranscriptionSelection) -
     Request::UseInstalledSelection(selection)
 }
 
-/// Switches to an installed model and waits until it's loaded.
-fn use_model(
+/// Admit on the main thread, even for an unchanged selection, before spawning
+/// the waiter. An idempotent manual choice still cancels automatic work.
+fn start_model_use(
+    runtime: RuntimeHandle,
+    selection: crate::transcription_models::TranscriptionSelection,
+    reply: &SyncSender<ControlResponse>,
+) -> Option<ControlReply> {
+    if let Err(error) = runtime.send(use_request(selection.clone())) {
+        return Some(ControlReply::error("unavailable", error.to_string()));
+    }
+    background(reply, move || wait_for_model(&runtime, selection));
+    None
+}
+
+/// Waits for an already-admitted installed-model choice without blocking AppKit.
+fn wait_for_model(
     runtime: &RuntimeHandle,
     selection: crate::transcription_models::TranscriptionSelection,
 ) -> Result<ControlReply, ControlError> {
     let name = crate::transcription_models::definition(selection.model).name;
     let matches = |settings: &AppSettings| {
-        settings.transcription.model == selection.model
-            && settings.transcription.language == selection.language
+        super::same_model_and_language(&settings.transcription, &selection)
     };
     if load().is_ok_and(|settings| matches(&settings)) {
         return Ok(ControlReply::unchanged(format!(
@@ -662,9 +710,6 @@ fn use_model(
             selection.language
         )));
     }
-    runtime
-        .send(use_request(selection.clone()))
-        .map_err(|error| ControlError::new("unavailable", error.to_string()))?;
     let started = Instant::now();
     let mut seen_preparing = false;
     while started.elapsed() < CONFIRM_WAIT {
@@ -746,7 +791,15 @@ fn status(
     let published = runtime
         .published()
         .ok_or_else(|| ControlError::new("not-ready", "Hex is still starting; try again"))?;
-    let capture = match capture_snapshot(runtime) {
+    // A stopped listener cannot say what it was doing.
+    let snapshot = match &published.listener.warning {
+        Some(failure) => Err(ControlError::new("listener-stopped", failure.clone())),
+        None => capture_snapshot(runtime),
+    };
+    let microphone_unavailable = snapshot
+        .as_ref()
+        .is_ok_and(|snapshot| snapshot.microphone_unavailable);
+    let capture = match snapshot {
         Ok(snapshot) => CaptureReport::from(snapshot),
         Err(_) => CaptureReport {
             state: CaptureState::Unknown,
@@ -759,12 +812,16 @@ fn status(
     let definition = crate::transcription_models::definition(selection.model);
     let setup = crate::onboarding::status(selection);
     Ok(ControlReply::Status(Box::new(StatusReport {
-        app_version: env!("CARGO_PKG_VERSION").into(),
+        app_version: crate::VERSION.into(),
         pid: std::process::id(),
         memory_footprint_bytes: control::memory_footprint(),
         listener: ListenerReport {
             running: published.listener.running,
-            status: published.listener.status.clone(),
+            status: if microphone_unavailable {
+                "No microphone".into()
+            } else {
+                published.listener.status.clone()
+            },
         },
         capture,
         meeting,
@@ -800,7 +857,6 @@ fn status(
         permissions: PermissionReport {
             ready: setup.ready(),
             microphone: permission(setup.microphone),
-            input_monitoring: permission(setup.input_monitoring),
             accessibility: permission(setup.accessibility),
             transcription_model: setup.transcription_model,
         },
@@ -849,6 +905,11 @@ mod tests {
         ));
         let mut runtime = super::super::Runtime {
             settings: Default::default(),
+            keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+                Default::default(),
+                None,
+            ),
+            automatic_preparation: false,
             preparation,
             recognition_start: None,
         };

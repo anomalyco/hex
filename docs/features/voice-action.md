@@ -1,7 +1,7 @@
 # Voice Action
 
 Hold a separate shortcut and speak an instruction, optionally with text selected.
-HEX transcribes locally, asks Voice Action's OpenCode model for paste-ready text,
+Hex transcribes locally, asks Voice Action's OpenCode model for paste-ready text,
 and pastes at the current focus. This is not
 [Voice Commands](commands.md) or ordinary [Dictation](dictation.md).
 
@@ -25,12 +25,12 @@ with an available text model. Commands and its Moonshine model are not required.
 [rune_ui/voice_action.rs](../../src/rune_ui/voice_action.rs) keeps the toggle
 reachable when OpenCode is unavailable, says why beside it ("Requires OpenCode",
 "Requires OpenCode V2"), and the Processing section offers setup/retry actions.
-HEX discovers the OpenCode V2 CLI and its managed service through
+Hex discovers the OpenCode V2 CLI and its managed service through
 [dictation_processor.rs](../../src/dictation_processor.rs), not a separate
-HEX-owned provider service.
+Hex-owned provider service.
 
 ```ts
-VOICE_CONTROL_OPENCODE_CLI set -> Use it as is
+HEX_OPENCODE_CLI set -> Use it as is
 Otherwise PATH, home install folders, Node version managers, Homebrew
 ├── An `opencode` whose `--version` is 2.x -> Use it  // macOS/Linux: before any `opencode2`
 ├── Else an `opencode` printing `0.0.0-…` that answers `api get /api/info` -> Use it
@@ -171,7 +171,7 @@ Sources: the `TranscriptionTarget::VoiceAction` processing branch in
 [parakeet.rs](../../src/parakeet.rs), `process_voice_action_cancellable` and
 `voice_action_failure` in [dictation_processor.rs](../../src/dictation_processor.rs).
 Voice Action uses its own model/variant and persisted deadline (60 seconds by
-default); when no explicit model is selected, HEX ranks available fast models
+default); when no explicit model is selected, Hex ranks available fast models
 from `RECOMMENDED_OPENCODE_MODELS` (starting with `gemini-3.1-flash-lite` on
 `minimal` thinking, `claude-haiku-4-5`, and `gpt-5.4-nano` on `none`) and walks
 those candidates in order before falling back to OpenCode's default.

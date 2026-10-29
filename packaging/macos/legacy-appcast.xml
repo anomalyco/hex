@@ -29,8 +29,8 @@
         <p>The new Hex is a separate app that updates itself. Download it from
         <a href="https://anoma.ly/hex">anoma.ly/hex</a> and drag it to Applications,
         replacing this one. Your settings, history, and models carry over.</p>
-        <p>macOS treats it as a new app: grant Microphone, Input Monitoring,
-        Accessibility, and (for meetings) Screen &amp; System Audio Recording once
+        <p>macOS treats it as a new app: grant Microphone, Accessibility,
+        and (for meetings) Screen &amp; System Audio Recording once
         more. If System Settings still lists the old Hex, remove it with −
         first. Turn Launch at login on again in Hex's settings.</p>
         <p>This version of Hex will not receive further updates.</p>

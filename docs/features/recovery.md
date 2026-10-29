@@ -15,7 +15,6 @@ platforms, and dependencies.
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
-- [Move the macOS data folder once](#move-the-macos-data-folder-once).
 
 ## How To Get To It
 
@@ -179,6 +178,11 @@ initial open fails OR stream interrupts
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+no input device at all (macOS)
+  -> devices whose name can't be read are skipped     // audio::device_name, never Display
+  -> bounded recovery; `hex status` listener: "No microphone"
+listener worker returns an error or panics (macOS)
+  -> status: running false, "Stopped", capture unknown // never "Enabled"
 saved microphone missing or will not open
   -> system default stands in, setting unchanged      // audio::Selection
   ├── listed but will not open -> look again with bounded backoff
@@ -201,6 +205,7 @@ programmatic dictation (local API) when the stream interrupts or gaps
         -> /finish answers 409 microphone-lost
 ```
 Checks in [audio.rs](../../src/audio.rs):
+`an_unreadable_device_name_is_skipped_instead_of_panicking`,
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
 `startup_retry_recovers_metadata_and_audio_without_restarting`,
 `a_missing_selection_uses_the_default_until_it_returns`,
@@ -257,7 +262,7 @@ Checks in [dictation_audio.rs](../../src/dictation_audio.rs):
 first hold after minutes of idle failed with the error tone. The reporter's logs
 show the cold stream reporting "A buffer underrun or overrun occurred" 20–76 ms
 after opening. cpal 0.18 reports that as `ErrorKind::Xrun` from CoreAudio's
-`kAudioDeviceProcessorOverload` listener; the stream keeps running, but HEX
+`kAudioDeviceProcessorOverload` listener; the stream keeps running, but Hex
 treated every error callback as fatal. In release-when-idle mode the owner then
 closed the device without retrying, and recognition suspended the held gesture.
 Overloads and refused real-time promotion are now logged and ignored; actual
@@ -334,8 +339,8 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
 Voice Action fails -> paste nothing                    // different contract, no fallback
 either path -> later request -> expected output         // recovery still needs observation
 ```
-Stage-specific sources, checks, and the known host failure are in the
-[index](README.md); late native replies are also covered below.
+Stage-specific sources and checks are in the [index](README.md); runaway
+scripts are covered below.
 Proof limit: fallback behavior alone does not establish that the next request
 succeeds.
 
@@ -587,26 +592,25 @@ issue [#23](https://github.com/anomalyco/hex/issues/23).
 Missing evidence: both modifier orders with a controlled opener, followed by
 native onset evidence.
 
-### Late Native Tool Reply
+### Runaway Script
 
 ```ts
-tool invocation interrupted -> host.ts removes correlation
-  -> late native reply -> unmatched -> rejected
-invocation completes with outstanding tools -> personal_commands.rs rejects completion
-
-timeout + late reply -> unaffected concurrent work -> later successful command
-                                                      // missing lifecycle regression
+handler or transformation runs past 1 s -> interrupted -> that call fails
+  -> transformation chain -> its input is kept           // ordered processing goes on
+  -> later call on the same config -> succeeds
+config load past 2 s or past 64 MiB -> rejected -> previous config stays active
 ```
-Sources: [host.ts](../../sdk/commands/src/host.ts),
+Sources: [script.rs](../../src/personal_commands/script.rs),
 [personal_commands.rs](../../src/personal_commands.rs);
-issue [#20](https://github.com/anomalyco/hex/issues/20).
-Proof limit: rejection paths do not prove host recovery. Retain a Rust/TypeScript
-regression covering that complete lifecycle.
+check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`.
+Handlers return actions instead of awaiting native results, so the old late
+native tool reply ([#20](https://github.com/anomalyco/hex/issues/20)) cannot
+occur.
 
 ### Slow Paste Consumer
 
 ```ts
-publish clipboard -> Chromium browser frontmost? wait 150 ms (#136) -> post Paste
+Chromium 155/156 frontmost? type instead (#212); else publish clipboard -> post Paste
   ├── settle for 100 ms -> allow next output
   └── schedule restore after 500 ms -> restore only if still owned
 target consumes later?                                // no consumption acknowledgment
@@ -623,24 +627,3 @@ Do not reset settings or loosen shortcut matching to make a recovery check pass.
 Keep automatic recovery, explicit retry, and defects that prevent recovery
 distinct. Test cleanup must preserve failure evidence.
 
-### Move The macOS Data Folder Once
-
-`recover.data-folder`: an upgrade renames `~/Library/Application Support/voice-control`
-to `hex` before logging, the instance lock, or any file there opens.
-
-```ts
-launch (not `hex mcp`, no HEX_APPLICATION_SUPPORT_DIR)
-  ├── no voice-control (fresh, or already a symlink to hex) -> use hex
-  │   └── hex exists, symlink missing -> re-create voice-control -> hex
-  ├── voice-control only -> renamex_np(RENAME_EXCL) to hex
-  │   ├── ok -> symlink voice-control -> hex; settings `migrations` +macos-data-folder-hex
-  │   └── fails (busy, cross-volume) -> keep voice-control, log, retry next launch
-  ├── both real folders -> touch neither, log, keep voice-control
-  └── concurrent launch renamed first -> use hex
-`hex mcp` -> resolves the folder read-only, never renames
-Windows (%APPDATA%\voice-control) and Linux -> unchanged
-```
-Checks in [app_paths.rs](../../src/app_paths.rs) `data_folder::tests`: fresh,
-legacy only, both, symlink present, symlink missing, rename failure, concurrent rename, and
-no-clobber rename. Proof limit: temp folders; the Studio upgrade is recorded in
-the change that introduced it.

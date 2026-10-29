@@ -181,12 +181,16 @@ const SECTION_LABEL_LINE: f32 = 16.0;
 
 /// A raised card of rows with hairline separators between them.
 pub(super) fn card(p: Paint, key: &str, rows: Vec<impl Into<CardRow>>) -> El {
-    let c = &p.k.c;
-    let mut card = col().key(key).fill(c.bg_base).radius(p.k.radius.lg);
+    raised(p, key).children(stack(p, rows.into_iter().map(Into::into).collect()))
+}
+
+/// The card's raised surface, empty.
+pub(super) fn raised(p: Paint, key: &str) -> El {
+    let mut surface = col().key(key).fill(p.k.c.bg_base).radius(p.k.radius.lg);
     for shadow in &p.k.elevation.raised {
-        card = card.box_shadow(*shadow);
+        surface = surface.box_shadow(*shadow);
     }
-    card.children(stack(p, rows.into_iter().map(Into::into).collect()))
+    surface
 }
 
 /// `rows` as a card's children, a separator between each pair.
@@ -755,18 +759,18 @@ pub(super) const TRAY_PADDING: f32 = 3.0;
 /// face (the warning cream warms the neutral layers) on a cap that shades
 /// to warm grey; in dark a space-black face on a cap that falls to the
 /// deepest background.
-struct KeyMaterial {
-    cap_top: Color,
-    cap_bottom: Color,
-    face: Color,
-    ink: Color,
+pub(super) struct KeyMaterial {
+    pub(super) cap_top: Color,
+    pub(super) cap_bottom: Color,
+    pub(super) face: Color,
+    pub(super) ink: Color,
     /// The tight shadow under the cap and the soft one it casts at rest.
-    contact: f32,
-    cast: f32,
+    pub(super) contact: f32,
+    pub(super) cast: f32,
 }
 
 impl KeyMaterial {
-    fn new(k: &Kit) -> Self {
+    pub(super) fn new(k: &Kit) -> Self {
         let c = &k.c;
         if k.dark {
             let face = c.bg_base.mix(c.layer_01, 0.6);

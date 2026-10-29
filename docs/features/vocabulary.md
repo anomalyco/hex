@@ -10,7 +10,7 @@ experiment) is refused, and Hex behaves as before. macOS only for now.
 Turn it on                               // vocabulary.gate
 ├── hex experiments enable vocabulary -> restart Hex
 └── Off -> no Settings card, `hex vocabulary` refused (feature-off),
-           prompts and search see an empty list   // vocabulary::entries / read_saved
+           transcription, prompts and search see an empty list   // vocabulary::entries / read_saved
 
 General › Vocabulary › Names and terms   // vocabulary.settings; after Dictation
 ├── Each row -> Term | Sounds like (comma-separated) | ×
@@ -19,8 +19,22 @@ General › Vocabulary › Names and terms   // vocabulary.settings; after Dicta
 │   └── Every suggestion present -> Button hidden     // never added without a click
 ├── Empty -> "No terms yet."
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
-└── Past the limits -> Keep the term (cut to 64 characters) and the spellings
-    that fit; inline danger note    // never drops the term
+├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
+│   that fit; inline danger note    // never drops the term
+└── Boost -> Off | Light | Normal (default) | Strong -> settings.json
+    `vocabulary_boost`, `hex settings set vocabulary_boost`  // vocabulary.boost
+
+Transcription (Parakeet: RNN-T and TDT)  // vocabulary.transcription; gguf_session::with_vocabulary
+├── Every run and live stream reads the list and the boost at its start:
+│   dictation, meetings, captures, the local API
+├── First 64 terms (the engine's cap) and their spellings; empty or Off -> unchanged
+├── After the greedy decode, spans of up to 4 words that look or sound like a
+│   term (or match a "sounds like" spelling) are rescored on the same audio
+│   frames from the same decoder state: the term replaces the span only when
+│   its score plus the boost per term piece beats the heard words'
+├── Left alone: case-only differences, inflections ("Abattoirs"), addresses and
+│   paths ("opencode.ai"), and terms under 5 letters without a spelling
+└── Whisper, Qwen3, SenseVoice, Cohere, Apple Speech -> no rescoring
 
 hex vocabulary                           // vocabulary.cli; marked as an experiment in --help
 ├── list [--json]
@@ -55,8 +69,12 @@ or migrate settings.
 
 Short names with few consonant sounds (Rune, Dax) would sound like too many
 words, so search finds their mis-transcriptions only through "sounds like"
-spellings. Transcription itself is unchanged: no model boosting or blind text
-replacement.
+spellings, and transcription rescores toward them only where a spelling
+matches. Transcription never replaces text blindly: a term goes in only when
+the model scores it close to what it heard on the same audio. The rescoring
+lives in Hex's transcribe.cpp fork (branch `hex/parakeet-vocabulary`,
+`src/arch/parakeet/vocabulary.cpp`); measurements are in
+[vocabulary-boost-results.md](../research/vocabulary-boost-results.md).
 
 Provisional defaults, each changed in one place:
 
@@ -66,6 +84,7 @@ Prompt wording                           // dictation_processor.rs: vocabulary_l
 Chapter prompt wording                   // meeting_chapters.rs: vocabulary_line
 Short-name rule                          // meeting_query.rs: SOUND_ALIKE_MIN_CONSONANTS
 Suggested terms                          // vocabulary.rs: SUGGESTED
+Boost strengths (nats per term piece)    // vocabulary.rs: VocabularyBoost::nats
 ```
 
 Sources: [vocabulary.rs](../../src/vocabulary.rs),
@@ -76,7 +95,8 @@ Sources: [vocabulary.rs](../../src/vocabulary.rs),
 (`check_vocabulary`, `edit_vocabulary`).
 
 Checks: `vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
-suggestions, comma splitting, reading the saved list without settings);
+suggestions, comma splitting, reading the saved list without settings, the
+first 64 terms and their spellings reaching transcription, boost names);
 `vocabulary_round_trips_and_stays_out_of_files_without_one` in
 [app_settings.rs](../../src/app_settings.rs);
 `a_vocabulary_term_finds_its_mis_transcriptions_below_exact_hits`,

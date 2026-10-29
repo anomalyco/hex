@@ -283,43 +283,6 @@ fn atomic_replace_read_never_observes_partial_history() {
 }
 
 #[test]
-fn legacy_and_symlink_paths_are_read_without_migration() {
-    use crate::app_paths::data_folder::{CURRENT, LEGACY, resolve};
-    let root = temp();
-    fs::create_dir(root.join(LEGACY)).unwrap();
-    fs::write(root.join(LEGACY).join("history.json"), FIXTURE).unwrap();
-    assert_eq!(
-        crate::history::read_snapshot(&resolve(&root).join("history.json"))
-            .unwrap()
-            .len(),
-        4
-    );
-    assert!(!root.join(CURRENT).exists());
-    assert!(
-        !root
-            .join(LEGACY)
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
-    fs::rename(root.join(LEGACY), root.join(CURRENT)).unwrap();
-    std::os::unix::fs::symlink(CURRENT, root.join(LEGACY)).unwrap();
-    assert_eq!(resolve(&root), root.join(CURRENT));
-    assert_eq!(
-        crate::history::read_snapshot(&resolve(&root).join("history.json"))
-            .unwrap()
-            .len(),
-        4
-    );
-    assert_eq!(
-        fs::read_link(root.join(LEGACY)).unwrap(),
-        Path::new(CURRENT)
-    );
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
 fn meeting_json_contract_snapshot() {
     let library =
         Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));

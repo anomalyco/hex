@@ -50,6 +50,8 @@ pub(crate) enum Request {
     },
     /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
     Shortcut(ShortcutCommand),
+    /// `hex capture start|stop|cancel` (the `capture` experiment).
+    Capture(crate::control::ScrawlCaptureAction),
     Status,
     /// Drain accepted work and exit.
     Quit,
@@ -302,6 +304,21 @@ fn connect() -> std::result::Result<UnixStream, RequestError> {
     Ok(stream)
 }
 
+/// `hex capture`'s recording commands, handed to the running listener.
+pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::control::ControlReply {
+    use crate::control::{ControlReply, ScrawlCaptureAction};
+    if action == ScrawlCaptureAction::Status {
+        return ControlReply::error(
+            "unsupported",
+            "`hex capture status` is macOS-only for now; the capsule shows a recording capture",
+        );
+    }
+    match request(Request::Capture(action)) {
+        Ok(_) => ControlReply::done("Sent to Hex"),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
 /// Sends one request to the running instance. Never starts one.
 pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestError> {
     let mut stream = connect()?;
@@ -463,6 +480,9 @@ fn serve_client(
             Request::Shortcut(command) => {
                 route_shortcut(published.shortcuts.lock().unwrap().as_ref(), command)
             }
+            Request::Capture(action) => crate::capture_host::send_to_listener(
+                crate::capture_host::CaptureControl::Scrawl(action),
+            ),
             Request::Status => Ok(()),
             Request::Quit => {
                 shutdown.store(true, Ordering::Release);
@@ -841,7 +861,7 @@ mod tests {
     #[test]
     fn version_one_replies_parse_as_outdated() {
         let reply: Reply = serde_json::from_str(
-            r#"{"version":1,"state":null,"error":"HEX service version mismatch; restart the service"}"#,
+            r#"{"version":1,"state":null,"error":"Hex service version mismatch; restart the service"}"#,
         )
         .unwrap();
         assert_eq!(reply.version, 1);

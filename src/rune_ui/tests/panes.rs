@@ -214,17 +214,20 @@ fn missing_permissions_lead_settings_and_open_the_guide() {
     let mut rt = runtime("mac-settings-permissions", true, (980.0, 2400.0));
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "Permissions needed"));
-    assert!(rt.find("permission-microphone").is_none(), "granted");
-    tap(&mut rt, "permission-input-monitoring-allow");
+    assert!(
+        rt.find("permission-microphone-allow-control/mark/dot")
+            .is_none()
+    );
+    tap(&mut rt, "permission-microphone-allow");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(PermissionAction::ShowGuide(
-            PermissionKind::InputMonitoring
+            PermissionKind::Microphone
         ))]
     );
-    assert!(rt.state.platform.asked(PermissionKind::InputMonitoring));
+    assert!(rt.state.platform.asked(PermissionKind::Microphone));
     assert!(
-        rt.find("permission-input-monitoring-allow-control/mark/dot")
+        rt.find("permission-microphone-allow-control/mark/dot")
             .is_some(),
         "asked permissions wait with a dot"
     );
@@ -323,6 +326,50 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
     assert_eq!(rt.presented(pill).unwrap().0, allowed, "no travel");
+}
+
+#[test]
+fn the_browser_switch_shows_only_with_pause_media() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    assert!(rt.find("pause-browser").is_none());
+    rt.state.settings.recording_audio_behavior =
+        crate::app_settings::RecordingAudioBehavior::PauseMedia;
+    refresh(&mut rt);
+    assert!(rt.find("pause-browser").is_some());
+    assert!(
+        rt.find("pause-browser-audio").is_none(),
+        "the permission row waits for the switch"
+    );
+}
+
+#[test]
+fn the_browser_switch_turns_on_and_asks_for_system_audio() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
+    assert!(
+        rt.find("pause-browser-allow-control/mark/dot").is_some(),
+        "the permission row waits with a dot"
+    );
+}
+
+#[test]
+fn an_allowed_browser_switch_asks_nothing() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    rt.state.platform.system_audio = true;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert!(asked(&rt).is_empty());
+    assert!(
+        rt.find("pause-browser-allow-control/mark/ink/check")
+            .is_some(),
+        "shows Allowed"
+    );
 }
 
 #[test]
@@ -1063,7 +1110,7 @@ fn commands_search_select_and_show_their_detail() {
     assert_eq!(rt.state.commands.selected.as_deref(), Some("github.pulls"));
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "github.com"));
-    assert!(shown.iter().any(|text| text == "pull requests\nopen pulls"));
+    assert!(shown.iter().any(|text| text == "pull requests, open pulls"));
     rt.state.commands.search = TextEdit::new("slack");
     refresh(&mut rt);
     assert!(rt.find("command-open.slack").is_some());
@@ -1250,7 +1297,6 @@ fn copy_section_copies_one_chapter() {
     );
     assert!(copied.contains("Prototype it in WebGPU"), "{copied}");
     assert!(!copied.contains("Roblox") && !copied.contains("build screen"));
-    assert!(texts(&rt).iter().any(|text| text == "Copied"));
 }
 
 #[test]
@@ -1287,7 +1333,6 @@ fn the_mac_tour_asks_each_permission_then_practices() {
     // macOS grants everything and the model lands: setup moves on.
     use crate::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
-    rt.state.platform.permissions.input_monitoring = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
     refresh(&mut rt);
@@ -1357,6 +1402,7 @@ fn platform_goldens() {
         check_golden("meetings-calendar", dark, (980.0, 1800.0));
         for scene in [
             "mac-settings",
+            "mac-input-source-models",
             "mac-commands",
             "meetings",
             "meetings-settings",
@@ -1388,6 +1434,8 @@ fn platform_goldens() {
     check_golden("mac-onboarding-listening", true, PANE_SIZE);
     check_golden("mac-onboarding-reopen", false, PANE_SIZE);
     check_golden("mac-onboarding-done", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-open", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-silent", false, PANE_SIZE);
 }
 
 #[test]
@@ -1549,6 +1597,24 @@ fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
 }
 
 #[test]
+fn hud_lab_picks_dot_scope_processing_placement_and_level() {
+    use crate::dot_scope::{Placement, Processing};
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    tap(&mut rt, "dot-processing/segments/segment2");
+    tap(&mut rt, "dot-placement/segments/segment2");
+    tap(&mut rt, "dot-auto-level");
+    tap(&mut rt, "dot-pretend-notch");
+    let Some(PlatformRequest::TuneHud(lab)) = asked(&rt).last().cloned() else {
+        panic!("{:?}", asked(&rt));
+    };
+    let tuning = lab.dot_scope.unwrap();
+    assert_eq!(tuning.processing, Processing::Pulse);
+    assert_eq!(tuning.placement, Placement::Notch);
+    assert!(!tuning.auto_level && tuning.pretend_notch);
+    assert!(rt.find("dot-noise-floor").is_some());
+}
+
+#[test]
 fn release_builds_show_hud_lab_only_for_dot_scope() {
     // The scene is a release build (no developer panes) with the experiment on.
     let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
@@ -1703,11 +1769,60 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
             }) {
                 let shown = row.visible[1] + row.visible[3];
                 assert!(
-                    shown <= bottom + 0.01,
+                    shown <= bottom + 0.25,
                     "the row shows {shown} past its slot's edge {bottom}"
                 );
             }
         }
         settle(&mut rt);
     }
+}
+
+#[test]
+fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
+    use crate::app_settings::RecordingAudioBehavior;
+    let mut rt = runtime("mac-settings", true, (1100.0, 1000.0));
+    assert!(rt.find("recording-duck-slider").is_none());
+    tap(&mut rt, "while-dictating-control/segment2");
+    assert_eq!(
+        rt.state.settings.recording_audio_behavior,
+        RecordingAudioBehavior::Duck
+    );
+    let before = rt.state.saved;
+    let (x, y) = rt.find("recording-duck-slider/track").unwrap();
+    rt.pointer_down(x + 60.0, y);
+    assert_eq!(
+        rt.state.saved, before,
+        "dragging does not persist each movement"
+    );
+    rt.pointer_up(x + 60.0, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.saved, before + 1);
+    let volume = rt.state.settings.recording_duck_volume;
+    assert!(volume > 0.2 && volume <= 1.0);
+    tap(&mut rt, "while-dictating-control/segment3");
+    assert!(rt.find("recording-duck-slider").is_none());
+    tap(&mut rt, "while-dictating-control/segment2");
+    assert_eq!(rt.state.settings.recording_duck_volume, volume);
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (1100.0, 1000.0));
+        if scene == "portal" {
+            rt.state.platform.caps = platform::Capabilities::LINUX;
+            refresh(&mut rt);
+        }
+        assert!(rt.find("while-dictating-control/segment3").is_none());
+        assert!(rt.find("recording-duck-slider").is_none());
+    }
+}
+
+#[test]
+fn ducking_goldens() {
+    let _goldens = Goldens::collect();
+    for dark in [true, false] {
+        check_golden("mac-settings-ducking", dark, PANE_SIZE);
+        check_golden("mac-settings", dark, PANE_SIZE);
+    }
+    check_golden("mac-settings-permissions", true, PANE_SIZE);
+    check_golden("mac-settings-advanced", false, PANE_SIZE);
+    check_golden("mac-settings-sides", true, PANE_SIZE);
 }

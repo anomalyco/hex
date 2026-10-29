@@ -1,4 +1,4 @@
-# HEX Feature Map
+# Hex Feature Map
 
 What can the user do, how do they reach it, and what would prove it works?
 This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
@@ -13,7 +13,7 @@ locators unless an executed result is explicitly recorded, as in the
 ## Product Map
 
 ```ts
-HEX                                      // macOS release
+Hex                                      // macOS release
 ├── Get ready                            // install, permissions, local model
 ├── Dictate                              // hold OR double-tap lock
 ├── Use the result                       // paste, Send, paste-last, History
@@ -30,8 +30,8 @@ have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Experiments](experiments.md) turn unfinished features on per person with a flag;
-the [vocabulary](vocabulary.md) is one, and macOS builds with the `capture`
-build option add [Captures](capture.md): Scrawl's capture engine hosted in Hex,
+the [vocabulary](vocabulary.md) is one, and macOS and Linux builds add
+[Captures](capture.md): Scrawl's capture engine hosted in Hex,
 with its shortcut, input, and Settings › Experiments › Scrawl pane.
 The other capabilities stay here until they need their own verification recipe.
 
@@ -40,7 +40,7 @@ The other capabilities stay here until they need their own verification recipe.
 Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
 [manual DMG](../../README.md#install-hex). The cask uses a versioned, checksum-pinned
 DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
-not require Bun or OpenCode, launch the app automatically, migrate the legacy
+not require OpenCode, launch the app automatically, migrate the legacy
 Swift app, or forcibly replace an existing app destination. Homebrew uninstall
 leaves runtime settings, models, and retained data intact.
 
@@ -121,21 +121,25 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── macOS: opens centred at one fixed size, so tiling managers float it
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
+│   └── Permissions are read again at launch: a setup they now finish (macOS's
+│       Quit & Reopen after a grant) is passed; past setup, it waits until they do
 ├── Welcome -> Get started                // setup.welcome-hero
 │   ├── The Hex glyph backlit by a cool corona, drawn live on the GPU
 │   │   (`rune_ui/hero.rs`); core, middle ring, outer ring light in turn,
 │   │   then the lamp breathes. Light theme: ink rings over a pale blue glow
 │   └── Reduce Motion -> the settled frame, lamp at rest
 ├── Setup: one screen, every permission   // setup.checklist; skipped when granted
-│   ├── Each row leads with its glyph: mic, keyboard, text cursor, sparkle (model)
+│   ├── Each row leads with its glyph: mic, text cursor, sparkle (model)
+│   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
 │   ├── Every row -> Allow; asked -> pulse + Allow; granted -> Allowed  // setup.permission-control
 │   │   └── Grant: the pill narrows into the green label, the dot shrinks into
 │   │       the check as it draws on (0.3 s, no bounce; Reduce Motion: no travel)
 │   ├── Microphone -> macOS prompt; refused -> Privacy pane + "switch Hex on" guide
-│   ├── Input Monitoring / Accessibility -> Privacy pane + drag guide
+│   ├── Accessibility -> Privacy pane + drag guide
 │   │   ├── The app tile lifts out of the row and flies, blurred, into the guide
 │   │   └── macOS 27 names the list "Device Control and Data Access"; row and guide follow
 │   ├── Rows re-read every 400 ms and flip to a check as macOS grants
+│   │   └── Accessibility flips live (`AXIsProcessTrusted`); its stale preflight never asks for a restart
 │   ├── On in System Settings, unusable until relaunch -> "Turns on when Hex restarts"
 │   │   └── Every permission on -> primary "Restart Hex" -> relaunch at setup  // setup.restart
 │   ├── The first unfinished row carries the screen's one accent
@@ -146,6 +150,10 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
 │   ├── Discarded before transcribing -> quick-tap hint
 │   ├── Discarded after transcribing -> nothing-heard hint (mic, distance)
+│   ├── Microphone line under the hint: input in use + live level while recording
+│   │   ├── Click -> General's microphone menu; a choice saves the same setting
+│   │   ├── 1.5 s of silence while recording -> "No sound. Pick another mic?"
+│   │   └── Lid closed, no other input -> "The lid is closed, so the built-in mic is off."
 │   ├── Pasted -> words land in the field + success -> Continue
 │   └── Skip -> Done                      // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
@@ -202,8 +210,22 @@ Language row is unexercised.
 ```ts
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
-└── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+│   └── Recognition hints -> initial prompt; output that only repeats them is dropped
+└── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
+
+Whisper reads the recognition hints as its initial prompt and, on silence or
+noise, often returns them verbatim. A segment whose text equals the hints after
+normalization (case, ASCII punctuation, spelled-out digits; commas, semicolons
+and line breaks separate words) is removed, in dictation, meetings, and the
+local API alike. The filter needs at least two hints, so dictating the one
+listed name still pastes it; speech that contains a hint among other words is
+kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
+`speech_containing_the_hints_is_kept`, `only_the_echo_segment_is_removed`,
+`single_hint_dictation_is_kept`, and
+`hints_without_spaces_after_commas_are_matched` in
+[gguf_session.rs](../../src/gguf_session.rs).
 
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
@@ -249,6 +271,14 @@ metadata inspection establish the prompting limitation, not the cause or repair
 of those transcripts. No v3 audio reproduction or transcription-quality fix has
 been demonstrated.
 
+Bangla (`bn`) is offered because Whisper large-v3-turbo was trained on it; no
+other catalog model supports it, so Whisper is its only, recommended choice and a
+Mac whose first preferred language is Bangla starts on Whisper. Auto is not a
+substitute: in a manual test, Whisper's per-clip detection labeled Bangla speech
+as Arabic, Turkish, and Spanish. `bangla_is_transcribed_by_whisper_with_its_language_hint`
+checks the recommendation, the `bn` hint, and that Qwen3-ASR rejects it. It
+runs no inference, and Bangla accuracy has not been measured.
+
 Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
 [transcription_models.rs](../../src/transcription_models.rs). Setup/picker previews
@@ -269,9 +299,13 @@ Unit tests (`onboarding::tests`) cover step order, the download starting on the
 welcome screen and retrying from any step, permissions-only setup with the
 model waiting for practice, the auto-advance beat, live row flips, a refused
 microphone, platforms without permissions or practice, practice hints, resume,
-the relaunch guard and resume marker, grants waiting for a restart
+the relaunch guard and resume marker, resuming past a setup the relaunch
+finished (`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
+grants waiting for a restart
 (`a_grant_the_process_cannot_use_yet_waits_for_a_restart`,
-`setup_offers_a_restart_once_every_permission_is_on`), and the saved step
+`setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
+advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
+and the saved step
 (`the_tour_step_is_saved_for_the_next_launch`). Rune tests drive the tour
 (`the_mac_tour_asks_each_permission_then_practices`,
 `a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen`,
@@ -325,13 +359,62 @@ and menu choice/tag projection. These do not establish a physical menu click or
 an installed-app switch. Remembering a language does not change the language
 conditioning limitations described above.
 
-**Observed September 4, 2026 (2.1.16):** all 455 Rust tests
+**Observed September 4, 2026 (2.1.16), existing model picker:** all 455 Rust tests
 passed in debug and release, with ten opt-in tests skipped per profile. All twelve
 keyboard-layout child scenarios passed per profile; formatting, strict
 all-target/all-feature Clippy in both profiles, and the release build passed.
 The Cohere fixture inference check was run separately; see
 [dictation model windows](dictation.md#ongoing-jobs-and-output). Native menu
 interaction, installed-app switching, and Linux runtime behavior were not exercised.
+
+### Switch models with keyboard language
+
+```ts
+General > Switch model with keyboard language   // setup.input-source-model; macOS only, off by default
+├── Each enabled keyboard input source -> Don't switch, or a downloaded model and language
+│   ├── New mapping -> The source's own language when the model has it
+│   ├── One-language model -> Its language shown fixed
+│   └── New/unmapped source -> Don't switch; keep the current model
+├── Source changes (shortcut, Input menu, automatic app/document switch)
+│   └── 300 ms after the last change -> Existing installed-only picker preparation
+│       ├── Same model and language already selected -> Nothing loads
+│       ├── Success -> Save the selection, keeping the model's remembered hints
+│       └── Failure -> Existing picker error; no download or guessed fallback
+├── Manual model choice -> Supersede pending automatic work; do not reapply at recording start
+├── Enable -> Apply the current source's mapping once it is observed
+├── Edit the active mapping -> Apply now
+├── Disable -> Cancel automatic work; stop observing; leave the selected model alone
+└── Relaunch -> Observe current source without applying it; preserve the manual choice
+```
+
+Mappings are keyed by macOS input-source IDs, not inferred speech languages or
+physical keyboard keys, and store a model with a language it supports. Only
+downloaded models from the picker are offered (Apple Speech is never mapped);
+downloads stay in the picker. A mapped model that is no longer downloaded is
+labeled Not installed and can be cleared; a mapping to a model or language Hex no
+longer offers is dropped when settings load. Removing a source hides its row
+without erasing its saved mapping.
+
+Hex reads input sources only while the setting is on: the main-thread TIS
+distributed-notification observer exists only then, works without a Settings
+window, and the window lists enabled sources only then. Source changes cancel
+obsolete automatic work but keep manual preparation until a mapped choice is
+due. An unmapped source cancels only automatic work. This reuses the shared model
+selection, recording/stream fallback, and meeting-engine behavior; it adds no
+recording-time routing, model cache, or notifications.
+
+Sources: [observer](../../src/keyboard_input_sources.rs),
+[switch policy](../../src/keyboard_model_switching.rs),
+[runtime](../../src/macos_rune.rs), and
+[settings UI](../../src/rune_ui/settings.rs).
+Checks: the switch policy and settings/CLI validation tests, the runtime
+scheduling tests in [macos_rune/tests.rs](../../src/macos_rune/tests.rs) (macOS),
+the settings interaction tests in
+[keyboard_model_tests.rs](../../src/rune_ui/keyboard_model_tests.rs), and the
+`mac-input-source-models` golden. No check delivers native input-source
+notifications or switches sources through the Input menu or a shortcut.
+
+### Delete downloaded models
 
 ```ts
 Settings picker > Downloaded model card   // setup.delete-model; macOS
@@ -361,7 +444,7 @@ worker readiness; a later worker-load failure does not roll back saved selection
 ## Dictate
 
 ```ts
-Saved shortcut                           // dictation; Option by default
+Saved shortcut                           // dictation; Option by default; macOS, Windows and X11 also accept mouse buttons
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
 └── Escape
@@ -388,8 +471,8 @@ Completed output                         // output
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   └── Last completed dictation, not Voice Action
 └── History
-    ├── Inspect / search / copy / delete
-    ├── Retention -> Seven days by default, always hard-capped
+    ├── Inspect / search / copy (row hover or the card) / delete
+    ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
     ├── Off -> Stop new entries; preserve existing entries
     └── Clear all -> Explicit deletion
 ```
@@ -397,8 +480,8 @@ Completed output                         // output
 Checks in [paste.rs](../../src/paste.rs), [parakeet.rs](../../src/parakeet.rs), and
 [history.rs](../../src/history.rs) cover output and retention boundaries.
 They do not prove that an arbitrary target consumed its clipboard contents.
-Send is not an atomic target-app transaction. Chromium browsers get a 150 ms
-pause before ⌘V for a [Chrome 155 paste bug](dictation.md#ongoing-jobs-and-output).
+Send is not an atomic target-app transaction. Chromium 155 and 156 get the text
+typed instead of pasted for a [Chrome paste bug](dictation.md#ongoing-jobs-and-output).
 
 **Easy to misread:** History Off does not stop diagnostic logging. Diagnostic
 logs are separate and currently unbounded on disk. See the
@@ -444,18 +527,44 @@ General                                  // settings
 │   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Advanced ▸ (Dictation header) -> rows at the end of the Dictation card
-│   ├── Open while Release when idle or Double-tap only (Hold) is on
+│   ├── Open while Release when idle, Double-tap only (Hold), or sharing is on
 │   └── Collapse -> drops a pending release confirmation
+├── Share dictation shortcut with other apps (Advanced, Windows, off)
+│   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Open on press; no pre-roll; startup delay
 │       └── Commands enabled? -> Confirm turning Commands off
 ├── Output card -> Paste last shortcut, While dictating, Dictation HUD
-├── While dictating -> Mute / Pause media / Do nothing
+├── While dictating -> Mute / Pause media / Lower audio (macOS) / Do nothing
+│   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
-│   └── Pause/resume only players already reported running by macOS
+│   ├── Pause/resume only players already reported running by macOS
+│   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
+│   └── Also pause the browser (macOS, Pause media only; off by default)
+│       ├── Turning it on without System Audio Recording -> ask now, never while dictating
+│       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
+│       └── Dictation -> browser_media sequence below
 ├── Application card -> Sound volume: immediate feedback; zero suppresses tones
+├── Application card -> Sounds: Signature (default) / Classic; previews start
 └── Voice Action shortcut -> Voice Action pane; Meetings -> Meetings › Settings
+
+Pause media + Also pause the browser     // browser_media
+├── A browser uses the microphone (a call) -> leave it alone
+├── No browser process has its audio output open -> leave it alone (no tap)
+├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
+│   └── Any window at or below -60 dBFS, or no level -> leave it alone
+├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Poll 5 windows of 100 ms
+│   ├── 2 windows in a row below -90 dBFS -> Hex paused it
+│   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
+└── Dictation ends and Hex paused it -> first, before the players: listen 300 ms to every browser process
+    ├── Above -60 dBFS (you started it again) -> no play
+    ├── No level (browser quit, tap failed) -> no play
+    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+        ├── A window above -60 dBFS -> resumed
+        ├── No level -> stop listening
+        └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 
 Intentional recording                    // recording.environment
 ├── Acquire native macOS no-idle-sleep assertion
@@ -463,6 +572,39 @@ Intentional recording                    // recording.environment
 └── Finish/cancel -> Release the assertion
     // no caffeinate child process or executable-policy dialog
 ```
+
+On macOS, **Lower audio** (`recording.environment.duck`) is an explicit fourth
+choice, off by default. The slider appears only while selected and saves on
+release. It remembers its value across behavior changes. Intentional captures
+(including Voice Action) ramp the original output channels to that fraction over
+one second, preserving balance and silent channels, then restore on finish,
+cancel, or orderly shutdown. Changes apply to the next capture. The stop tone
+waits for restoration. A manually changed volume after settling is left alone;
+a newly selected output device is not lowered. Fixed-volume devices and outputs
+whose channel balance cannot be safely restored are left unchanged. Meetings do
+not acquire this dictation environment. Linux and Windows do not offer ducking.
+
+HEX snapshots the output channels and applies a smooth volume ramp in
+[ducking.rs](../../src/recording_environment/ducking.rs), managed by the recording
+environment. The worker runs inside the app and cannot restore volume after a
+hard process crash or SIGKILL. Changes during the ramp itself cannot be
+distinguished from delayed Bluetooth acknowledgements.
+Fake-device tests cover relative volume, balance, silence, interrupted ramps,
+manual changes after settling, and partial-write rollback; settings/UI tests
+cover defaults, bounds, persistence, conditional visibility and platform gating.
+On 2026-10-25, the macOS logic/settings checks and strict Clippy passed.
+The seven reference images were regenerated on Ubuntu 24.04 ARM64 with Mesa
+lavapipe, using the unmodified Linux-only Rune test module and
+`HEX_UPDATE_GOLDENS=1 scripts/check ducking`. A subsequent
+`scripts/check rune_ui --nocapture` without the update flag passed all 113 tests,
+including the unchanged control goldens; no golden skipped for lack of a GPU
+adapter. The five existing images differ from the base branch above the existing
+12-level channel tolerance only within the While dictating control; the sidebar,
+Quit Hex, and shortcut layouts remain unchanged. Dark and light ducking previews
+were visually inspected. The earlier macOS-generated references were replaced
+because these fixtures retain build-OS-dependent layout and defaults. This
+verifies headless Linux rendering, not audible playback, physical devices,
+crash recovery, or native Windows execution.
 
 Successful settings saves persist and project changes at safe runtime boundaries.
 Immediate settings controls commit a candidate before changing the saved UI
@@ -481,7 +623,20 @@ not a managed-device policy or native power assertion. The pause-script regressi
 checks that inactive players are absent before AppleScript application resolution;
 when no supported player is running, acquisition skips AppleScript entirely.
 The script check does not prove subprocess avoidance or exercise Music, Spotify,
-or VLC through Automation. An opt-in native
+or VLC through Automation.
+The browser pause runs after the AppleScript players and only when System Audio
+Recording is reported granted (an unknown answer skips it, because the tap would
+open the macOS dialog mid-dictation). macOS 15.4 and later no longer tell other apps
+what is playing, so Hex hears the browsers through a private process tap
+(aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
+play only after it saw the browser go silent right after its own pause. The
+sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
+`a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
+`a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
+`no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`; the ignored `native_tap_hears_a_playing_browser`
+heard Brave at -25.4 dBFS on macOS 27.0.1 (2026-10-28). Which app receives the
+system command is macOS's Now Playing choice; Safari is heard only when its
+WebKit process reports Safari's name. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
 
 **Changed after 2.3.1:** Automatic was a compiled preference list (Universal
@@ -519,7 +674,7 @@ Experiment `modes` off (the default)     // experiments.md; modes.experiment
 ├── `window show --pane modes` -> Stays on the current pane
 ├── Processing -> Global replacements only    // literal, cheap, still applied
 │   └── No per-app mode, corrections, OpenCode rewrite, or transformations
-├── Transformations host -> Not started for modes; a hex.config.ts workspace still starts it
+├── Custom transformations -> Not loaded for modes; a hex.config.ts still loads them
 ├── Voice Action and the OpenCode catalog -> Unchanged // the catalog is Voice Action's too
 ├── History -> No processing profile, since nothing processed
 └── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
@@ -541,8 +696,9 @@ Selected mode                            // replaces Global, does not layer over
 Stage fails -> Preserve its input        // failed chain discards partial results
 ```
 
-Built-in text transformations run natively. Custom transformations require the
-managed Bun workspace, not Commands enabled. OpenCode rewriting sends documented
+Built-in text transformations run natively. Custom transformations come from
+`~/.config/hex/hex.config.ts`, run in Hex's embedded script engine with a 1 s
+limit per call; they need neither Commands enabled nor anything installed. OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
@@ -552,7 +708,9 @@ closing quotes/brackets. Punctuation inside a final closing quote is preserved.
 Select it after Lowercase for lowercase messages without the final period.
 The `no_trailing_punctuation_*` and `built_in_transformations_chain_in_selected_order`
 tests in [personal_commands.rs](../../src/personal_commands.rs) cover text behavior
-and native dispatch, not a live custom-host or target-app paste.
+and native dispatch; `transformations_chain_with_built_ins_and_failures_keep_nothing`
+and `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working` run
+real scripts. None is a live target-app paste.
 
 Selection and stage checks start in
 [dictation_processor.rs](../../src/dictation_processor.rs),
@@ -595,7 +753,7 @@ rewrites already persisted activations on load, checked by
 **Fixed in 2.1.14:** through 2.1.13, a mode saved with that Finder
 preference enabled never activates and every dictation falls back to Global.
 Update to repair saved selections automatically. For older builds, the workaround
-is to quit HEX, remove the `.app` suffix from
+is to quit Hex, remove the `.app` suffix from
 `dictation_processing.modes[].applications` in `settings.json`, then relaunch.
 
 ## Use Voice Action
@@ -701,7 +859,7 @@ Launch Hex                               // maintain.startup
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 
 Show Dock icon off                       // maintain.dock-policy
-├── Settings window open -> Dock icon stays // hiding it would deactivate HEX
+├── Settings window open -> Dock icon stays // hiding it would deactivate Hex
 └── Settings window closes -> Menu-bar only
 ```
 
@@ -754,7 +912,7 @@ not an input-to-frame latency measurement or a signed-release smoke test.
 
 Closing Settings left the app process alive with zero `login-item` threads;
 reopening produced one new worker. An earlier apparent surviving worker came
-from computer-use observation reopening the window. Cmd+Q and Quit HEX each
+from computer-use observation reopening the window. Cmd+Q and Quit Hex each
 terminated the process. Local profiles are `/tmp/hex-login-worker-current.sample.txt`
 and `/tmp/hex-login-cycle-{before,closed-no-observe,reobserved}.sample.txt`.
 The tested temporary executable's SHA-256 is
@@ -786,6 +944,8 @@ failed; no visual or installed-app startup verification is claimed.
 ```ts
 Hex checks the release service            // maintain.updates
 ├── 10 s after launch, hourly (Dev channel: every 10 min and on window focus), and Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
+│   ├── User-Agent: hex/<build channel>/<version> (hex/dev/0.0.0-dev-171, hex/stable/2.3.1); nothing else about the install
+│   ├── Failed check -> backs off, never past hourly
 │   └── <channel> -> updates.channel (General › Application › Update channel: Stable | Dev,
 │       or `hex settings set updates.channel`), else the channel the build was published on
 │       (HEX_BUILD_CHANNEL; older builds: dev for a dev version, else the receipt's);
@@ -801,7 +961,12 @@ Hex checks the release service            // maintain.updates
 │   ├── macOS -> unpack beside Hex.app -> Developer ID 5NZ4Q7NXJ4, anomaly.hex, notarized
 │   ├── Windows -> Authenticode valid, signer AUTHENTICODE_SIGNER -> new version directory
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
+│   ├── Staged -> checks continue; Restart to update stays offered meanwhile
+│   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
+│   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update
+│       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
+│       │   └── A release published after the relaunch -> the next launch's check
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
@@ -830,7 +995,14 @@ per-OS modules have tests for activation, the macOS bundle swap and
 signature checks (ad-hoc fixtures against the real requirement), the rollout
 bucket, receipts, the channel choice, never comparing versions (a legacy
 2.3.2-dev.29 follows 0.0.0-dev-N; dev to stable is a switch), the switch
-waiting for confirmation, and Windows Authenticode (a Microsoft-signed system file). The
+waiting for confirmation, only a different self-taken release replacing a staged
+update (`only_a_different_release_this_install_takes_replaces_a_staged_update`),
+Restart to update's final check and one-time report
+(`restart_to_update_checks_once_more_and_reports_once`), Linux re-staging keeping
+the running version (`replacing_a_staged_update_keeps_the_running_version`), and
+Windows Authenticode (a Microsoft-signed system file). No test drives the worker
+through a real re-stage and restart; a channel rolled back while an update is
+staged still restarts into the staged release. The
 Update channel row shows only while this install updates itself (not test,
 source, managed, or package-manager installs); the `mac-settings-dev-channel`
 scene renders it, and `rune_ui` tests cover saving and hiding it.
@@ -894,14 +1066,15 @@ Linux beta                               // not macOS feature parity
 │   └── X11 grab conflict / portal refusal -> Warn without stopping dictation
 ├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
 │   └── Selected text from the primary selection -> OpenCode -> Paste the reply
-├── Recording HUD -> "Recording" pill on the top or bottom edge, "Transcribing"
+├── Recording HUD -> The macOS capsule (or Dot scope with `dot-scope` on) on the
+│   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
-│   └── Rune overlay in Hex's process (linux_rune_hud)
+│   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
 │       ├── Wayland -> layer-shell overlay layer, no keyboard, empty input region
 │       ├── X11 -> override-redirect window, empty input shape
 │       ├── No layer-shell -> `hex status` reports the HUD limitation
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray)
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
@@ -913,7 +1086,7 @@ Linux beta                               // not macOS feature parity
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> Setup.exe or install-windows.ps1 -> hex.exe + install.json receipt
-├── HEX app -> General, tray, HUD; Enabled = shortcut works in every app
+├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
@@ -978,8 +1151,11 @@ physical keyboard press has not been recorded.
 
 `linux.hud`: [linux_rune_hud.rs](../../src/linux_rune_hud.rs) keeps the
 listener's generation slot (an old listener cannot hide a restarted HUD) and
-accepts reports before the window's app exists. The GTK HUD it replaced is
-deleted. Observed on
+turns its reports into [rune_hud.rs](../../src/rune_hud.rs)'s events;
+reports before the window's app exists are dropped. The shaders render
+offscreen with `cargo test --bin hex rune_hud_frames -- --ignored`
+(2026-10-28 on apollo: capsule and Dot scope frames match the Metal look).
+The GTK HUD it replaced is deleted. The text pill was observed on
 2026-10-22 in a headless sway on apollo (isolated data root, real microphone,
 `hex service`): `hex dictation start` showed the pill at the top edge and it
 was gone after `hex dictation stop` and transcription. The Rune overlay itself
@@ -993,7 +1169,7 @@ See the [Linux guide](../linux.md), [linux_app.rs](../../src/linux_app.rs),
 The [direct installer/updater](../../src/updater/linux.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
 a published, supported-host-validated signed release. [Nix](../nix.md) owns its
-package updates; HEX updates only managed direct installs.
+package updates; Hex updates only managed direct installs.
 
 ```ts
 Linux process                            // maintain.linux-service
@@ -1085,13 +1261,16 @@ Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayla
 ├── Default / older settings -> 50%
 ├── Off -> No recording tones
 └── 25% / 50% / 75% / 100% -> Save and apply live; preview the start sound
+Linux General > Sounds                    // dictate.sound-theme
+└── Signature / Classic -> Save and apply live; preview the start sound
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
 ├── Hold passes 300 ms -> While dictating mute/pause begins, never at the press
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
-│   └── Clip turns out near-silent -> Stop sound already played, nothing pasted
+│   └── Clip turns out near-silent or speechless -> Stop sound already played,
+│       nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
 ├── Dictation or Voice Action pasted -> Done sound; failures stay silent
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
@@ -1113,11 +1292,7 @@ during a release tail. Until 2026-10-22 the service muted at the press. This
 ordering is checked by reading the loop, not by a test or a muted device.
 
 Checks: `bundled_sounds_decode_without_an_audio_device` and
-`feedback_admission_never_waits_for_playback` in the player, plus
-`files_that_predate_a_setting_keep_the_beta_defaults` and
-`a_muted_beta_keeps_the_remembered_volume` in
-[linux_migration.rs](../../src/linux_migration.rs) for settings that predate
-`settings.json`.
+`feedback_admission_never_waits_for_playback` in the player.
 `start_sound_precedes_audio_and_does_not_change_short_tap_discard` in
 [linux_dictation.rs](../../src/linux_dictation.rs) exercises the production start
 path with a sound spy: immediate feedback without any audio, while a 100 ms tap
@@ -1140,7 +1315,8 @@ TypeScript SDK + macOS local service
 ├── Caller streams audio -> Running app's /streams -> Partials, segments, final
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running desktop capture API -> Separate microphone ownership protocol
-│   └── No silence gate                  // raw model output, unlike hotkey dictation
+│   └── No silence gate                  // model output, unlike hotkey dictation;
+│                                         // only Whisper hint echoes are dropped
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished
@@ -1198,14 +1374,14 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
     sides, the full tour
 macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── rune::App on the main thread: accessory, windowless unless setup/onboarding/Dock icon open it
-├── Same AppKit loop: status item, updater, Hex/File/Window menu, Dock reopen event, Metal HUD (16 ms timer)
+├── Same AppKit loop: status item, updater, Hex/File/Window menu, Dock reopen event, the HUD pump (16 ms timer; the HUD itself is a Rune overlay)
 ├── Runtime thread: model preparation (menu bar: installed only), starts the listener once setup is ready
 ├── Listener, meeting controller, local API: their own threads
 ├── macos_host: AppKit event monitor records chords (Option, Fn); NativeHost does permissions,
 │   login item, Hex Microphone, meeting start/stop/rename/trash/reveal, commands workspace, relaunch
 ├── Meetings pane lists the store through meeting::query (1 s rescan, sent only when changed);
-│   a controller failure shows in the pane; NSOpenPanel (file_dialog) chooses the meetings
-│   folder and Modes' "Choose a file…" .app, modeless on the main thread
+│   a controller failure shows in the pane; rune::FileDialogs (file_dialog) chooses the
+│   meetings folder and Modes' "Choose a file…" .app
 ├── Tour: practice dictations from the listener's event log; a listener that failed to start
 ├── Sidebar and pane header move the window (Rune El::window_drag; the title bar is transparent)
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
@@ -1220,7 +1396,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── rune::App: --hidden starts windowless, close hides (keep_running); Quit or no tray ends it
 ├── General adds Launch at login; no terminal paste; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
-├── Modes: "Choose a file…" opens IFileOpenDialog (file_dialog) on its own STA thread, no owner window
+├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
 ├── Modes app icons: the executable's first icon (PrivateExtractIconsW)
 └── Not yet: custom caption
 iOS prototype -> Record/transcribe/copy and keyboard handoff

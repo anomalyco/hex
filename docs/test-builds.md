@@ -40,10 +40,10 @@ time.
 
    Alternatively, open it once, then choose **Open Anyway** in System Settings →
    Privacy & Security.
-4. Open Hex Test and grant Microphone, Input Monitoring, and Accessibility
-   again. Ad-hoc signatures change with every build, so each new test build
-   needs these grants again: remove the old **Hex Test** entries in System
-   Settings and add the new app.
+4. Open Hex Test and grant Microphone and Accessibility again. Ad-hoc
+   signatures change with every build, so each new test build needs these
+   grants again: remove the old **Hex Test** entries in System Settings and
+   add the new app.
 
 To go back, quit Hex Test, delete it, and open Hex.
 
@@ -79,5 +79,5 @@ After Ctrl-C, `hex` starts the installed Hex again.
 
 Include the commit from the artifact name, the OS and architecture, and the
 logs: `~/Library/Application Support/hex/logs/` on macOS,
-`%APPDATA%\voice-control\logs\` on Windows, and
-`~/.local/share/voice-control/logs/` on Linux.
+`%APPDATA%\hex\logs\` on Windows, and
+`~/.local/share/hex/logs/` on Linux.

@@ -23,25 +23,15 @@ elif [ "${HEX_TEST_BUILD:-}" = 1 ]; then
   app_name="Hex Test"
   bundle_id=anomaly.hex.test
 else
-  team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+  team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
   identity=$(hex_codesign_identity "$team_id")
   app_name=Hex
   bundle_id=anomaly.hex
 fi
-# HEX_CAPTURE=1 builds the `capture` experiment in (`--features capture`)
-# with Scrawl's `scrawl-helper` beside `hex`, where the engine looks for
-# it. crates/capture/build.rs compiles the helper from crates/capture/helper
-# into target/release. Never for a public build: release-app.sh and
-# validate-app.sh refuse it.
-capture=${HEX_CAPTURE:-}
-case "$capture" in
-  '' | 0) capture= ;;
-  1) ;;
-  *)
-    echo "HEX_CAPTURE must be 1 or unset" >&2
-    exit 1
-    ;;
-esac
+# Every build carries the `capture` experiment (dormant until enabled), with
+# Scrawl's `scrawl-helper` beside `hex`, where the engine looks for it.
+# crates/capture/build.rs compiles the helper from crates/capture/helper into
+# target/release.
 icon_output="$root/target/AppIcon.assets"
 icon_info="$root/target/AppIcon-info.plist"
 version=$(hex_version "$root")
@@ -77,38 +67,31 @@ for name in HEX_LOCAL_BUILD HEX_TEST_BUILD HEX_COMMIT HEX_BUILD_CHANNEL; do
     env_args+=(--config "env.$name='$value'")
   fi
 done
-if [ -n "$capture" ]; then
-  # The helper's embedded Info.plist names Hex, not Scrawl.
-  SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
-    cargo build --locked --release --features capture ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
-else
+# The helper's embedded Info.plist names Hex, not Scrawl.
+SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
   cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
-fi
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library" "$frameworks"
-cp "$root/target/release/voice-control" "$executable"
-if [ -n "$capture" ]; then
-  cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
-fi
+cp "$root/target/release/hex" "$executable"
+cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$bundle/Contents/Resources/"
-HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number" VOICE_CONTROL_TEAM_ID="$team_id" VOICE_CONTROL_CODESIGN_IDENTITY="${identity#-}" HEX_SKIP_INSTALL_SCRIPT=1 \
+HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number" HEX_TEAM_ID="$team_id" HEX_CODESIGN_IDENTITY="${identity#-}" HEX_SKIP_INSTALL_SCRIPT=1 \
   "$root/scripts/build-hex-microphone-driver.sh" "$bundle/Contents/Library" >&2
-(cd "$root/sdk/commands" && bun run build)
-mkdir -p "$bundle/Contents/Resources/commands-sdk"
-cp "$root/sdk/commands/package.json" "$bundle/Contents/Resources/commands-sdk/"
-/usr/bin/ditto "$root/sdk/commands/dist" "$bundle/Contents/Resources/commands-sdk/dist"
-/usr/bin/ditto "$root/sdk/commands/workspace-template" "$bundle/Contents/Resources/commands-sdk/workspace-template"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $executable_name" "$bundle/Contents/Info.plist"
 plutil -replace CFBundleName -string "$app_name" "$bundle/Contents/Info.plist"
 plutil -replace CFBundleDisplayName -string "$app_name" "$bundle/Contents/Info.plist"
-if [ -n "$capture" ]; then
-  # The helper mirrors a cabled iPhone as a camera; macOS asks on Hex's behalf.
-  plutil -replace NSCameraUsageDescription -string "Hex mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
-fi
+# Links into the playground (src/rune_ui/story_link.rs); a test build's own
+# scheme never opens the installed Hex.
+url_scheme=hex
+[ "${HEX_TEST_BUILD:-}" = 1 ] && url_scheme=hex-test
+/usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLName $bundle_id" "$bundle/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 $url_scheme" "$bundle/Contents/Info.plist"
+# The helper mirrors a cabled iPhone as a camera; macOS asks on Hex's behalf.
+plutil -replace NSCameraUsageDescription -string "Hex mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
 rm -rf "$icon_output"
 mkdir -p "$icon_output"
 xcrun actool "$root/app/AppIcon.icon" \
@@ -134,12 +117,10 @@ cp "$moonshine_dir/libonnxruntime.1.23.2.dylib" "$frameworks/"
 sign "$frameworks/libonnxruntime.1.23.2.dylib"
 sign "$frameworks/libmoonshine.dylib"
 sign "$bundle/Contents/Library/HexMicrophone.driver"
-if [ -n "$capture" ]; then
-  # Hex runs it only to decode the capture's movie, which needs no
-  # entitlement; anything it touches is attributed to Hex, its responsible
-  # process.
-  sign --identifier "$bundle_id.scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
-fi
+# Hex runs it only to decode the capture's movie, which needs no
+# entitlement; anything it touches is attributed to Hex, its responsible
+# process.
+sign --identifier "$bundle_id.scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 sign --entitlements "$root/.github/release/hex.entitlements" "$bundle"
 codesign --verify --deep --strict --verbose=2 "$bundle"
 echo "$bundle"

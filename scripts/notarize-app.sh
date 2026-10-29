@@ -2,7 +2,8 @@
 set -eu
 
 # Notarize and staple a Developer ID signed app, then wrap it in a signed,
-# notarized, and stapled DMG with an Applications link.
+# notarized, and stapled DMG with an Applications link, laid out by
+# packaging/macos/dmg (the background and Finder's .DS_Store).
 if [ "$#" -ne 3 ]; then
   echo "Usage: $0 <app path> <dmg path> <volume name>" >&2
   exit 1
@@ -13,7 +14,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bundle=$1
 dmg=$2
 volume=$3
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
 identity=$(hex_codesign_identity "$team_id")
 work=$(mktemp -d "${TMPDIR:-/tmp}/hex-notarize.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
@@ -27,6 +28,8 @@ xcrun stapler validate "$bundle"
 mkdir "$work/staging"
 /usr/bin/ditto "$bundle" "$work/staging/$(basename "$bundle")"
 ln -s /Applications "$work/staging/Applications"
+cp "$root/packaging/macos/dmg/background.tiff" "$work/staging/.background.tiff"
+cp "$root/packaging/macos/dmg/DS_Store" "$work/staging/.DS_Store"
 rm -f "$dmg"
 hdiutil create -quiet -fs APFS -format ULFO -volname "$volume" -srcfolder "$work/staging" "$dmg"
 codesign --force --timestamp --sign "$identity" "$dmg"

@@ -7,12 +7,12 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export MACOSX_DEPLOYMENT_TARGET=15.0
-cargo build --locked --release --features capture --bin voice-control --manifest-path "$root/Cargo.toml"
+cargo build --locked --release --bin hex --manifest-path "$root/Cargo.toml"
 target=${CARGO_TARGET_DIR:-$root/target}
 bundle="${HEX_PLAYGROUND_OUT:-$root/target/app}/Hex Playground.app"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-cp "$target/release/voice-control" "$bundle/Contents/MacOS/hex"
+cp "$target/release/hex" "$bundle/Contents/MacOS/hex"
 cat > "$bundle/Contents/MacOS/playground" <<'SH'
 #!/bin/sh
 exec "$(dirname "$0")/hex" capsule-playground

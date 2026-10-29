@@ -63,10 +63,10 @@ The installers write `install.json`
 at the root of the user-owned install, and the client self-updates only when
 it is present and the root is writable by this user alone:
 
-- Linux: `~/.local/share/voice-control/install.json` (`install-linux.sh`;
+- Linux: `~/.local/share/hex/install.json` (`install-linux.sh`;
   `scripts/install-linux.sh` source builds write none and keep their
   `source-build` marker).
-- Windows: `%APPDATA%\voice-control\install.json` (`install-windows.ps1` and
+- Windows: `%APPDATA%\hex\install.json` (`install-windows.ps1` and
   the Setup.exe).
 - macOS: the client decides from the bundle's location (a writable,
   non-translocated `Hex.app` is direct).
@@ -85,7 +85,10 @@ https://anoma.ly/hex (see `docs/releasing.md`).
 ## Client
 
 `src/updater.rs` (all three OSes) polls `<origin>/hex/desktop/<channel>.json`
-10 seconds after launch, hourly (the Dev channel every 10 minutes and when the window gains focus, at most once a minute), and on Check now, with `If-None-Match`, and
+10 seconds after launch, hourly (the Dev channel every 10 minutes and when the window gains focus, at most once a minute), and on Check now, with `If-None-Match` and
+`User-Agent: hex/<channel>/<version>` (the build's own channel and version,
+e.g. `hex/dev/0.0.0-dev-171`, `hex/stable/2.3.1`), which the service counts as
+a running install; failed checks back off but never past hourly. It
 decides with the protocol's client rules (`updater/protocol.rs`, which passes
 the service's `test-vectors/` copied to `tests/fixtures/release-protocol`).
 Versions are never compared: Hex takes the channel's current release whenever

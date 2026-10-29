@@ -22,9 +22,8 @@ Agent or terminal                                // transcripts.cli; macOS relea
 ```
 
 Commands work beside the running app and independently of feature opt-ins.
-`transcript_cli` dispatches before migration, logging, instance locking, local
-API, GUI, permissions, and Hex Microphone. Read-only path resolution supports
-both `hex` and legacy `voice-control` folders. Nothing is created or repaired.
+`transcript_cli` dispatches before logging, instance locking, local
+API, GUI, permissions, and Hex Microphone. Nothing is created or repaired.
 Debug `meeting list/show` shares this path; recording remains debug-only.
 
 History uses one open-file snapshot and the saved retention, so concurrent atomic
@@ -43,7 +42,7 @@ and early dispatch in [main.rs](../../src/main.rs).
 Checks in [transcript_cli_tests.rs](../../src/transcript_cli_tests.rs) cover
 filters/order, ranked `--search` within retention, one document per entry
 (`history_search_counts_raw_and_final_text_as_one_document`), retention and malformed settings, JSON snapshots, atomic-replace
-reads, legacy/symlink paths, parsing, and `show --from/--to` JSON, Markdown,
+reads, parsing, and `show --from/--to` JSON, Markdown,
 and errors, including `--to 0` (`meeting_show_ranges_filter_json_entries_and_markdown`),
 and `chapters` / `show --chapter` JSON and Markdown on the synthetic
 `tests/fixtures/meetings-chapters` meeting

@@ -23,7 +23,11 @@ mod history;
 #[cfg_attr(target_os = "macos", path = "rune_ui/macos_host.rs")]
 mod host;
 mod hud_lab;
+#[cfg(target_os = "macos")]
+mod hud_stories;
+mod list_detail;
 mod lists;
+pub(crate) mod live_text;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
 mod meetings;
@@ -38,6 +42,8 @@ pub(crate) mod playground;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+#[cfg(target_os = "macos")]
+pub(crate) mod story_link;
 mod vocabulary;
 mod voice_action;
 
@@ -67,53 +73,53 @@ const WINDOW_TICK: Duration = Duration::from_millis(250);
 
 static SETTINGS_ICON: Icon = Icon {
     name: "hex-settings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/settings.svg"),
 };
 static MODES_ICON: Icon = Icon {
     name: "hex-modes",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/modes.svg"),
 };
 static VOICE_ACTION_ICON: Icon = Icon {
     name: "hex-voice-action",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-action.svg"),
 };
 static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/history.svg"),
 };
 static COMMANDS_ICON: Icon = Icon {
     name: "hex-commands",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/commands.svg"),
 };
 static ACTIVITY_ICON: Icon = Icon {
     name: "hex-activity",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/activity.svg"),
 };
 static HUD_LAB_ICON: Icon = Icon {
     name: "hex-hud-lab",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/hud-lab.svg"),
 };
 static VOICE_FILTER_ICON: Icon = Icon {
     name: "hex-voice-filter",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-filter.svg"),
 };
 static MEETINGS_ICON: Icon = Icon {
     name: "hex-meetings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/meetings.svg"),
 };
 #[cfg(hex_capture)]
 static SCRAWL_ICON: Icon = Icon {
     name: "hex-scrawl",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/scrawl.svg"),
 };
 
@@ -134,6 +140,10 @@ pub(crate) fn run_app(
         .windowless()
         .window_options(fixed_window());
     crate::linux_rune_hud::install(&mut app);
+    live_text::install(&mut app, crate::rune_hud::live_text_place);
+    // The capture capsule, picker, and ink, with the `capture` experiment on.
+    let _capture_overlays = crate::app_settings::capture_available()
+        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let handle = app.handle();
     host.set_window_visible({
         let handle = handle.clone();
@@ -167,7 +177,27 @@ pub(crate) fn run_app(
 /// The window as a Rune app whose lifetime the caller chooses, connected to
 /// its host through `connect`, with the playground when its experiment is on.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
-    build(connect, playground::enabled())
+    let app = build(connect, playground::enabled());
+    #[cfg(target_os = "macos")]
+    let app = app.on_open_url(on_open_url);
+    app
+}
+
+/// A `hex://` link the system opened with Hex: a story link opens the window
+/// on that playground story; anything else is ignored.
+#[cfg(target_os = "macos")]
+fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
+    let link = match story_link::parse(link, story_link::scheme()) {
+        Ok(link) => link,
+        Err(why) => {
+            tracing::warn!(%why, "ignored a link opened with Hex");
+            return;
+        }
+    };
+    if let Err(why) = story_link::open(&link, tx) {
+        tracing::warn!(story = %link.story, %why, "a story link opened only the window");
+    }
+    crate::macos_rune::bring_window_forward();
 }
 
 /// `hex app -- --snap …`: a headless render of a fixture scene. With the
@@ -546,6 +576,12 @@ impl Pane {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     Microphone,
+    /// An input source's model in keyboard model switching.
+    InputSourceModel(usize),
+    /// An input source's language in keyboard model switching.
+    InputSourceLanguage(usize),
+    /// The microphone under the tour's practice field.
+    TourMicrophone,
     Language,
     /// The speech model's language.
     TranscriptionLanguage,
@@ -556,6 +592,8 @@ enum Menu {
     MeetingActions,
     /// The calendars meeting reminders read.
     Calendars,
+    /// The transformations a mode can add (the Modes pane).
+    Transformations,
     /// How long captures are kept (the Scrawl pane).
     #[cfg(hex_capture)]
     CaptureRetention,
@@ -600,6 +638,7 @@ pub(crate) struct Ui {
     preparing: Option<(TranscriptionModelId, Instant)>,
     /// When a text field last changed without being saved.
     draft_since: Option<Instant>,
+    duck_volume_drag: Option<f32>,
     models: models::Models,
     voice_action_error: Option<String>,
     history: history::HistoryPane,
@@ -656,7 +695,7 @@ impl Ui {
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
         if crate::experiments::enabled(crate::experiments::Experiment::DotScope) {
-            ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::load());
+            ui.platform.hud.dot_scope = Some(crate::dot_scope::lab());
         }
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
@@ -688,6 +727,7 @@ impl Ui {
             vocabulary,
             preparing: None,
             draft_since: None,
+            duck_volume_drag: None,
             models: models::Models::default(),
             voice_action_error: None,
             history: history::HistoryPane::default(),
@@ -1070,7 +1110,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     // General names the input in use; list again when the OS reports an
     // input change. Windows reports a default change only to an open
     // default stream, so there the list is also refreshed every few seconds.
-    if ui.pane == Pane::General
+    if (ui.pane == Pane::General || onboarding::shows_microphone(ui))
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
@@ -1194,8 +1234,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(modal) = explainer::modal(ui, cx, p) {
         layer.extend(modal);
     }
-    if let Some(tour) = onboarding::overlay(ui, p) {
+    let mut tour_layer = Vec::new();
+    if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
         layer.push(tour);
+        layer.extend(tour_layer);
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
@@ -1474,7 +1516,8 @@ const FOOTER_LINE: f32 = 20.0;
 /// Test and local builds also name their commit: main moves past a release without
 /// changing the version.
 fn version_label() -> String {
-    let version = env!("CARGO_PKG_VERSION");
+    // Goldens render a fixed version: a local build's names its commit.
+    let version = if cfg!(test) { "0.0.0" } else { crate::VERSION };
     match option_env!("HEX_COMMIT") {
         Some(commit) => {
             let kind = if crate::app_paths::is_local_build() {
@@ -1612,7 +1655,11 @@ const SCROLL_FADE: (f32, f32) = (4.0, 24.0);
 /// are never cut; content needing room beside the edges (bordered cards)
 /// pads itself horizontally.
 fn scroll_body(key: &str, content: El) -> El {
-    let (top, bottom) = SCROLL_FADE;
+    faded_body(key, content, SCROLL_FADE)
+}
+
+/// A [`scroll_body`] with its own top and bottom fades.
+fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
     col()
         .key(key)
         .grow(1.0)
@@ -1646,6 +1693,20 @@ const SCENES: &[Scene] = &[
         poll(ui, 0.0, &mut Tx::default());
     }),
     ("portal", |ui| *ui = portal_fixture()),
+    ("portal-mouse", |ui| {
+        *ui = portal_fixture();
+        ui.settings.dictation_hotkey = HotkeyBinding {
+            modifiers: Default::default(),
+            key: crate::app_settings::HotkeyKey::mouse(3),
+        };
+        if let Some(view) = &mut ui.view {
+            view.listener.shortcuts =
+                DesktopShortcuts::Portal(vec![crate::desktop_host::DesktopGrantedShortcut {
+                    name: "Dictation".into(),
+                    trigger: None,
+                }]);
+        }
+    }),
     ("commands", |ui| *ui = fixture(DesktopShortcuts::Commands)),
     ("disabled", |ui| {
         *ui = portal_fixture();
@@ -1744,8 +1805,13 @@ const SCENES: &[Scene] = &[
     ("modes-picker", |ui| {
         *ui = portal_fixture();
         modes::fixture(ui);
-        ui.modes.transformation_picker_open = true;
         ui.modes.application_picker_open = true;
+        ui.pane = Pane::Modes;
+    }),
+    ("modes-transformation-menu", |ui| {
+        *ui = portal_fixture();
+        modes::fixture(ui);
+        ui.open = Some(Menu::Transformations);
         ui.pane = Pane::Modes;
     }),
     ("picker", |ui| {
@@ -1844,6 +1910,56 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-settings-ducking", |ui| {
+        *ui = mac_fixture();
+        ui.settings.recording_audio_behavior = crate::app_settings::RecordingAudioBehavior::Duck;
+    }),
+    ("mac-input-source-models", |ui| {
+        use crate::app_settings::KeyboardModelChoice;
+        *ui = mac_fixture();
+        ui.settings.keyboard_model_switching.enabled = true;
+        ui.settings.keyboard_model_switching.mappings = [
+            (
+                "com.apple.keylayout.ABC",
+                TranscriptionModelId::ParakeetUnifiedEnglish,
+                "en",
+            ),
+            (
+                "com.apple.keylayout.RussianWin",
+                TranscriptionModelId::ParakeetV3,
+                "ru",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, model, language)| {
+            (
+                id.into(),
+                KeyboardModelChoice {
+                    model,
+                    language: language.into(),
+                },
+            )
+        })
+        .collect();
+        ui.platform.input_sources = [
+            ("com.apple.keylayout.ABC", "ABC", "en"),
+            ("com.apple.keylayout.RussianWin", "Russian - PC", "ru"),
+            ("com.apple.keylayout.Spanish", "Spanish", "es"),
+        ]
+        .into_iter()
+        .map(
+            |(id, name, language)| crate::keyboard_model_switching::InputSource {
+                id: id.into(),
+                name: name.into(),
+                languages: vec![language.into()],
+            },
+        )
+        .collect();
+        ui.picker.installed = Some(vec![
+            TranscriptionModelId::ParakeetUnifiedEnglish,
+            TranscriptionModelId::ParakeetV3,
+        ]);
+    }),
     ("mac-microphone-missing", |ui| {
         *ui = mac_fixture();
         ui.settings.microphone = Some("Shure MV7".into());
@@ -1882,13 +1998,20 @@ const SCENES: &[Scene] = &[
     ("mac-settings-permissions", |ui| {
         *ui = mac_fixture();
         use crate::onboarding::PermissionState;
-        ui.platform.permissions.input_monitoring = PermissionState::NeedsSettings;
+        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
         ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
         ui.platform
             .permissions_asked
             .push(crate::onboarding::PermissionKind::Accessibility);
         ui.platform.login_item = Some(crate::login_item::LoginItemStatus::RequiresApproval);
         ui.platform.accessibility_renamed = true;
+    }),
+    ("mac-settings-pause-browser", |ui| {
+        *ui = mac_fixture();
+        ui.settings.recording_audio_behavior =
+            crate::app_settings::RecordingAudioBehavior::PauseMedia;
+        ui.settings.pause_browser_media = true;
+        ui.platform.system_audio = false;
     }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
@@ -2121,6 +2244,14 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
+    ("mac-onboarding-mic", |ui| mic_tour(ui, MicScene::Hearing)),
+    ("mac-onboarding-mic-open", |ui| mic_tour(ui, MicScene::Open)),
+    ("mac-onboarding-mic-silent", |ui| {
+        mic_tour(ui, MicScene::Silent)
+    }),
+    ("mac-onboarding-mic-lid", |ui| {
+        mic_tour(ui, MicScene::LidClosed)
+    }),
     // The welcome hero animating (`--video`, or a live window), and settled as
     // Reduce Motion shows it.
     ("onboarding-hero", |ui| hero_tour(ui, false)),
@@ -2208,6 +2339,62 @@ fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
     onboarding::mac_fixture(ui, step);
 }
 
+/// What the tour's practice microphone shows in a scene.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MicScene {
+    /// Recording, and Hex hears the person.
+    Hearing,
+    /// Its menu of inputs open.
+    Open,
+    /// Recording, and Hex hears nothing.
+    Silent,
+    /// The lid closed and no other input.
+    LidClosed,
+}
+
+fn mic_tour(ui: &mut Ui, scene: MicScene) {
+    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
+    mac_tour(
+        ui,
+        if recording {
+            onboarding::MacStep::TryItListening
+        } else {
+            onboarding::MacStep::TryIt
+        },
+    );
+    let built_in = "MacBook Pro Microphone".to_owned();
+    ui.microphones = Ok(if scene == MicScene::LidClosed {
+        crate::audio::InputDevices {
+            names: vec![built_in.clone()],
+            system_default: None,
+            off_with_lid_closed: Some(built_in),
+            default_is_off_with_lid_closed: true,
+            ..Default::default()
+        }
+    } else {
+        crate::audio::InputDevices {
+            names: vec![
+                "Kit Pods".into(),
+                built_in.clone(),
+                "Studio Display Microphone".into(),
+            ],
+            system_default: Some(built_in),
+            ..Default::default()
+        }
+    });
+    if scene == MicScene::Open {
+        ui.open = Some(Menu::TourMicrophone);
+    }
+    let microphone = ui.settings.microphone.clone();
+    if let Some(tour) = &mut ui.tour {
+        match scene {
+            MicScene::Hearing => tour.mic.level = 0.6,
+            MicScene::Silent => tour.mic.silent = Some(microphone),
+            _ => {}
+        }
+    }
+}
+
 fn portal_fixture() -> Ui {
     fixture(DesktopShortcuts::Portal(vec![
         DesktopGrantedShortcut {
@@ -2264,3 +2451,9 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+#[cfg(test)]
+mod keyboard_model_tests;
+
+#[cfg(test)]
+mod dmg_keycap;

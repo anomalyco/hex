@@ -3,6 +3,7 @@
 //! every live stream) so retained scheduler scratch never outlives the
 //! inference that sized it.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -102,6 +103,9 @@ pub(crate) struct OfflineGgufSession {
     options: transcribe_cpp::SessionOptions,
     /// When the last run or live stream completed; `None` until the first.
     last_run: Option<Instant>,
+    /// Whether runs rescore toward the vocabulary: Parakeet's transducer
+    /// heads (TDT, RNN-T), which take it as a run extension.
+    takes_vocabulary: bool,
 }
 
 impl OfflineGgufSession {
@@ -116,12 +120,39 @@ impl OfflineGgufSession {
     pub(crate) fn new(model: transcribe_cpp::Model) -> transcribe_cpp::Result<Self> {
         let options = session_options(model.device()?.device_type);
         let session = model.session_with(&options)?;
+        let takes_vocabulary = model.arch() == "parakeet"
+            && model.accepts_ext(
+                transcribe_cpp::ExtSlot::Run,
+                transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_VOCABULARY,
+            );
         Ok(Self {
             model,
             session: Some(session),
             options,
             last_run: None,
+            takes_vocabulary,
         })
+    }
+
+    /// `options` with the vocabulary (`crate::vocabulary::transcription_bias`)
+    /// added, read now so a settings change applies from the next run. The
+    /// engine rescores spans of the greedy transcript that resemble a term
+    /// and swaps the term in only when the audio supports it.
+    fn with_vocabulary<'a>(
+        &self,
+        options: &'a transcribe_cpp::RunOptions,
+    ) -> Cow<'a, transcribe_cpp::RunOptions> {
+        if !self.takes_vocabulary || options.family.is_some() {
+            return Cow::Borrowed(options);
+        }
+        match crate::vocabulary::transcription_bias() {
+            Some((terms, bias)) => Cow::Owned(transcribe_cpp::RunOptions {
+                vocabulary: terms,
+                family: Some(transcribe_cpp::RunExtension::ParakeetVocabulary(bias)),
+                ..options.clone()
+            }),
+            None => Cow::Borrowed(options),
+        }
     }
 
     /// Whether a run or live stream completed within [`RECENT_RUN`].
@@ -218,8 +249,9 @@ impl OfflineGgufSession {
             None => self.model.session_with(&self.options)?,
         };
         session.set_cancel_token(cancel);
+        let options = self.with_vocabulary(options);
         let result = session
-            .stream(options, stream_options)
+            .stream(&options, stream_options)
             .map(|mut stream| drive(&mut stream));
         drop(session);
         if result.is_ok() {
@@ -245,7 +277,15 @@ impl OfflineGgufSession {
         if let Some(cancel) = job_cancel() {
             session.set_cancel_token(&cancel);
         }
-        let result = keep_repetition_partial(session.run(samples, options));
+        let result = keep_repetition_partial(session.run(samples, &self.with_vocabulary(options)))
+            .map(|mut transcript| {
+                if let Some(transcribe_cpp::RunExtension::Whisper(whisper)) = &options.family
+                    && let Some(prompt) = &whisper.initial_prompt
+                {
+                    drop_prompt_echo(&mut transcript, prompt);
+                }
+                transcript
+            });
         drop(session);
         if result.is_ok() {
             self.last_run = Some(Instant::now());
@@ -312,6 +352,63 @@ fn ran_within(last_run: Option<Instant>, now: Instant, window: Duration) -> bool
     last_run.is_some_and(|last_run| now.saturating_duration_since(last_run) < window)
 }
 
+/// Drops Whisper segments that only repeat the recognition hints. Whisper
+/// reads the hints as its initial prompt and, on silence or noise, often
+/// returns them verbatim. Speech that merely contains a hint is kept, and so
+/// is a single hint: dictating the one listed name must still paste it.
+fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
+    let is_separator = |character: char| matches!(character, ',' | ';' | '\n');
+    let hints = prompt
+        .split(is_separator)
+        .filter(|hint| !hint.trim().is_empty())
+        .count();
+    if hints < 2 {
+        return;
+    }
+    let normalize = |text: &str| crate::spoken_text::normalize(&text.replace(is_separator, " "));
+    let prompt = normalize(prompt);
+    let echoes = |text: &str| normalize(text) == prompt;
+    if transcript.segments.is_empty() {
+        if echoes(&transcript.text) {
+            transcript.text.clear();
+            transcript.words.clear();
+        }
+        return;
+    }
+    if !transcript
+        .segments
+        .iter()
+        .any(|segment| echoes(&segment.text))
+    {
+        return;
+    }
+    let words = std::mem::take(&mut transcript.words);
+    let mut segments = Vec::new();
+    for mut segment in std::mem::take(&mut transcript.segments) {
+        if echoes(&segment.text) {
+            continue;
+        }
+        let first = (segment.first_word.max(0) as usize).min(words.len());
+        let last = (first + segment.n_words.max(0) as usize).min(words.len());
+        segment.first_word = transcript.words.len() as i32;
+        let index = segments.len() as i32;
+        transcript
+            .words
+            .extend(words[first..last].iter().cloned().map(|mut word| {
+                word.seg_index = index;
+                word
+            }));
+        segments.push(segment);
+    }
+    transcript.text = segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    transcript.segments = segments;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +457,114 @@ mod tests {
         assert_eq!(session_options(DeviceType::Igpu).n_threads, 1);
         assert_eq!(session_options(DeviceType::Cpu).n_threads, 0);
         assert_eq!(session_options(DeviceType::Accel).n_threads, 0);
+    }
+
+    fn segment(text: &str, first_word: i32, n_words: i32) -> transcribe_cpp::Segment {
+        transcribe_cpp::Segment {
+            text: text.into(),
+            first_word,
+            n_words,
+            ..Default::default()
+        }
+    }
+
+    fn transcript(segments: &[&str]) -> transcribe_cpp::Transcript {
+        let mut transcript = transcribe_cpp::Transcript::default();
+        let mut first_word = 0;
+        for text in segments {
+            let n_words = text.split_whitespace().count() as i32;
+            transcript.segments.push(segment(text, first_word, n_words));
+            for word in text.split_whitespace() {
+                transcript.words.push(transcribe_cpp::Word {
+                    text: word.into(),
+                    ..Default::default()
+                });
+            }
+            first_word += n_words;
+        }
+        transcript.text = segments.join(" ");
+        transcript
+    }
+
+    fn words(transcript: &transcribe_cpp::Transcript) -> Vec<&str> {
+        transcript
+            .words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn prompt_echo_is_dropped() {
+        let mut echo = transcript(&["T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut echo, "t3 code, ottobit");
+        assert_eq!(echo.text, "");
+        assert!(echo.segments.is_empty());
+        assert!(echo.words.is_empty());
+
+        let mut unsegmented = transcribe_cpp::Transcript {
+            text: " T3 Code, Ottobit. ".into(),
+            ..Default::default()
+        };
+        drop_prompt_echo(&mut unsegmented, "T3 Code, Ottobit");
+        assert_eq!(unsegmented.text, "");
+    }
+
+    #[test]
+    fn speech_containing_the_hints_is_kept() {
+        let mut speech = transcript(&["We shipped T3 Code today"]);
+        let before = speech.clone();
+        drop_prompt_echo(&mut speech, "T3 Code");
+        assert_eq!(speech, before);
+    }
+
+    #[test]
+    fn only_the_echo_segment_is_removed() {
+        let mut mixed = transcript(&["Let's ship it.", "T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut mixed, "T3 Code, Ottobit");
+        assert_eq!(mixed.text, "Let's ship it.");
+        assert_eq!(mixed.segments.len(), 1);
+        assert_eq!(words(&mixed), ["Let's", "ship", "it."]);
+
+        let mut leading = transcript(&["T3 Code, Ottobit.", "Let's ship it."]);
+        drop_prompt_echo(&mut leading, "T3 Code, Ottobit");
+        assert_eq!(leading.text, "Let's ship it.");
+        assert_eq!(words(&leading), ["Let's", "ship", "it."]);
+        assert_eq!(
+            (leading.segments[0].first_word, leading.segments[0].n_words),
+            (0, 3)
+        );
+    }
+
+    #[test]
+    fn single_hint_dictation_is_kept() {
+        let mut dictation = transcript(&["Ottobit."]);
+        let before = dictation.clone();
+        drop_prompt_echo(&mut dictation, "Ottobit");
+        assert_eq!(dictation, before);
+
+        let mut spaced = transcript(&["T3 Code Ottobit"]);
+        let before = spaced.clone();
+        drop_prompt_echo(&mut spaced, "T3 Code Ottobit");
+        assert_eq!(spaced, before);
+    }
+
+    #[test]
+    fn hints_without_spaces_after_commas_are_matched() {
+        let mut echo = transcript(&["T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut echo, "T3 Code,Ottobit");
+        assert_eq!(echo.text, "");
+
+        let mut joined = transcript(&["T3 Code;Ottobit"]);
+        drop_prompt_echo(&mut joined, "T3 Code\nOttobit");
+        assert_eq!(joined.text, "");
+    }
+
+    #[test]
+    fn an_empty_prompt_drops_nothing() {
+        let mut silence = transcribe_cpp::Transcript::default();
+        drop_prompt_echo(&mut silence, "  ");
+        assert_eq!(silence, transcribe_cpp::Transcript::default());
     }
 
     #[test]

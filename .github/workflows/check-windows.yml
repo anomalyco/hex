@@ -53,13 +53,13 @@ jobs:
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
-          $imports = & $dumpbin.FullName /dependents target\release\voice-control.exe
+          $imports = & $dumpbin.FullName /dependents target\release\hex.exe
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-x86_64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe
 
   arm64:
     name: ARM64 (CPU)
@@ -92,4 +92,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-aarch64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe

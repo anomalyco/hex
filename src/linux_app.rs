@@ -44,6 +44,9 @@ pub(crate) enum ShortcutTarget {
     Dictation,
     PasteLast,
     VoiceAction,
+    Capture,
+    /// The capsule's send-to list (`capture.list_hotkey`).
+    CaptureList,
 }
 
 struct PreparedTranscription {
@@ -337,9 +340,7 @@ pub(crate) fn run(
     run_window(&host, requests, first, shutdown);
     shutdown.store(true, Ordering::Release);
     let _ = worker.join();
-    if let Some(tray) = tray {
-        let _ = tray.join();
-    }
+    drop(tray);
     Ok(())
 }
 
@@ -481,6 +482,7 @@ impl LinuxDesktopHost {
     fn apply_output_settings(&mut self) {
         crate::feedback::set_enabled(self.settings.sound_effects);
         crate::feedback::set_volume(self.settings.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(self.settings.sound_theme);
         *self
             .output
             .modes
@@ -585,6 +587,11 @@ impl LinuxDesktopHost {
     }
 
     fn refresh(&mut self) {
+        // Restart to update asks systemd to restart Hex after the updater's
+        // final check; only a failure needs showing.
+        if let Some(Err(error)) = self.updater.take_restart() {
+            self.error = Some(format!("Could not restart Hex: {error:#}"));
+        }
         // Settings may set up the transformations workspace at any time.
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
             self.personal_commands_checked_at = Instant::now();
@@ -813,6 +820,8 @@ impl LinuxDesktopHost {
                         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
                         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
                         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
+                        ShortcutTarget::Capture => settings.capture.hotkey = binding,
+                        ShortcutTarget::CaptureList => settings.capture.list_hotkey = binding,
                     }
                 })
             }));

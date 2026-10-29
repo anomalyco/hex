@@ -576,6 +576,7 @@ pub fn listen(
                         let _ = reply.send(CaptureSnapshot {
                             recording,
                             pending_jobs: dictation_worker.pending_count(),
+                            microphone_unavailable: input.is_recovering(),
                         });
                     }
                     RecognitionControl::Capture {
@@ -2904,7 +2905,7 @@ fn handle_command(
                 _ => unreachable!(),
             };
             let outcome = meeting_requests
-                .ok_or("meeting controls require the HEX app")
+                .ok_or("meeting controls require the Hex app")
                 .and_then(|requests| {
                     requests.try_send(request).map_err(|error| match error {
                         TrySendError::Full(_) => "meeting controller is busy",
@@ -2922,7 +2923,7 @@ fn handle_command(
                 },
         } => {
             let outcome = personal_commands
-                .ok_or("personal command host is unavailable")
+                .ok_or("personal commands are unavailable")
                 .and_then(|runtime| {
                     runtime.invoke(generation, id, heard, context.clone(), captures)
                 });

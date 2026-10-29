@@ -31,36 +31,63 @@ hex experiments                          // experiments.cli; macOS, Windows, Lin
 The known experiments are compiled into
 [experiments.rs](../../src/experiments.rs):
 
-- `capture`: Scrawl's capture engine hosted in Hex (macOS; see
-  [Captures](capture.md)). It is a build option, off in every public build:
-  only a build with `--features capture` (`HEX_CAPTURE=1
-  scripts/build-app.sh` for an app) knows the name. Any other build's `list`
-  omits it, `enable` rejects it, and a source naming it is ignored. The
+- `capture`: Scrawl's capture engine hosted in Hex (macOS and Linux; see
+  [Captures](capture.md)). Every macOS and Linux build knows the name; on
+  Windows `list` omits it, `enable` rejects it, and a source naming it is
+  ignored. The
   gate is where the work starts: the listener builds no capture host, so there
   is no sink, thread, or bundle folder while it is off. On, it adds
   Settings › Experiments › Scrawl, whose own opt-in (`capture.enabled`,
   default off) is the second gate. Check:
-  `capture_exists_only_with_its_build_option` in
+  `capture_exists_only_where_it_has_a_host` in
   [experiments.rs](../../src/experiments.rs).
-- `dot-scope`: the macOS recording HUD as Dot scope, a plate of dots lit
-  by a braided pair of oscilloscope traces that follow the microphone level,
-  ironed flat into a blue processing beam, and wiped dark when done (see
+- `dot-scope`: the recording HUD (macOS, Linux, and Windows) as Dot scope, a plate of dots lit
+  by a braided pair of oscilloscope traces that follow the microphone level
+  (auto-levelled), with a choice of processing looks and of placement below
+  the menu bar, in it, or out of the notch (see
   [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
   where the work starts: the HUD builds no Dot scope pipeline or simulation
   and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
   instead of the capsule's styles, and release builds show HUD Lab too
-  (only its Dot scope section).
+  (only its Dot scope section); with `playground` on, ⇧⌘D lists HUD stories.
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
   gate is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
+- `live-text`: a streaming dictation shows what you have said so far while
+  you dictate, as one click-through line just past the recording HUD (every
+  OS; see [Streaming Finish](dictation.md#streaming-finish)). The gate is
+  where the work starts: with it off, the engine gives a hotkey capture's
+  live stream no partial slot and never reads the model's text between
+  feeds, and no host adds the line's overlay. Each dictation's `finished
+  live stream` line in process.log counts its text changes (`partials`);
+  `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
+  fed and the word counts, never the words. Checks:
+  `a_dictation_stream_publishes_its_text_after_each_feed_with_live_text`,
+  `without_live_text_a_dictation_stream_publishes_nothing`,
+  `each_dictation_stream_has_its_own_text`, and
+  `a_failed_feed_clears_the_text_and_stops_publishing` in
+  [transcription_engine.rs](../../src/transcription_engine.rs);
+  `live_text_follows_the_recording_and_never_outlives_it` in
+  [dictation.rs](../../src/dictation.rs); the three tests in
+  [live_text.rs](../../src/live_text.rs) (a recording's end clears only its
+  own text); `a_spot_places_the_plate_just_past_the_hud`,
+  `a_short_line_hugs_its_words_in_the_middle`,
+  `a_long_line_stays_inside_the_overlay_on_one_line`, and
+  `no_words_draw_nothing` in
+  [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), whose opt-in
+  `snapshots` renders the line in light and dark; and
+  `live_text_hangs_just_past_the_plate_wherever_it_sits` in
+  [hud_placement.rs](../../src/hud_placement.rs). The line has no golden
+  and no `--snap` scene (overlays have none), and nothing headless checks
+  how it appears and hides on screen.
 - `modes`: Modes ([Process Text With Modes](README.md#process-text-with-modes)),
   every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,
   OpenCode rewrite, mode correction, or transformation ever touches a
-  transcript, and the transformations host starts only for the user's own
-  `hex.config.ts` workspace. The gate is where the work starts:
+  transcript, and custom transformations load only for the user's own
+  `hex.config.ts`. The gate is where the work starts:
   `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
   (macOS), and `app_settings::transformations_used`. Saved modes stay in
   `settings.json` and keep their `hex settings` keys; turning the experiment
@@ -81,6 +108,22 @@ The known experiments are compiled into
   `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
   "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
   in [playground.rs](../../src/rune_ui/playground.rs).
+  On macOS a story opens from a link or the CLI:
+
+  ```ts
+  open 'hex://story/hud/recording-your-voice?play=1'   // hex-test:// in Hex Test.app
+  hex window story HUD/Processing [--variant 2] [--play]
+  ├── the window opens on the story: its path, name, or slug, `/` or `-` between group and name
+  ├── variant=<n|name> → that variant
+  ├── play=1 → its `r` trigger runs, as pressing R does
+  ├── experiment off → only the window opens; process.log says why, the CLI answers feature-off
+  └── another link, or longer than 2 KiB → ignored and logged
+  ```
+
+  An unknown story opens the list and an unknown variant the story; Rune
+  logs which to stderr. Checks: `reads_story_links`, `ignores_other_links`
+  in [story_link.rs](../../src/rune_ui/story_link.rs); the URL handler and
+  the replay have no automated end-to-end check.
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The
@@ -89,7 +132,7 @@ The known experiments are compiled into
   Until the model is ready, and if it fails, dictation behaves as if it were
   off.
 - `vocabulary`: a shared list of names and their likely mis-transcriptions,
-  for rewriting and search ([Vocabulary](vocabulary.md)). It adds a Settings
+  for transcription, rewriting and search ([Vocabulary](vocabulary.md)). It adds a Settings
   card and the `hex vocabulary` commands, which appear only while it is on.
 - `voice-filter`: the Voice Filter pane (macOS), the only home of the Hex
   Microphone driver, its filter modes, and Try it

@@ -12,9 +12,8 @@ use serde_json::{Value, json};
 #[test]
 fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
-    let support =
-        std::env::temp_dir().join(format!("voice-control-mcp-support-{}", std::process::id()));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_voice-control"))
+    let support = std::env::temp_dir().join(format!("hex-mcp-support-{}", std::process::id()));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hex"))
         .arg("mcp")
         .arg("--meetings-dir")
         .arg(&fixtures)

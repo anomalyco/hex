@@ -47,133 +47,8 @@ impl Drop for RecognitionAudio {
     }
 }
 
-/// Audio for the `capture` experiment's sink, on the dictation timeline.
 #[cfg(hex_capture)]
-#[derive(Debug)]
-pub enum CaptureAudio {
-    Samples {
-        samples: Vec<f32>,
-        sample_rate: u32,
-        captured_through: CaptureInstant,
-    },
-    /// Audio the sink never received: dropped because the sink was full, or
-    /// missing from the microphone stream (a gap, failure, or reopen).
-    Gap {
-        from: CaptureInstant,
-        through: CaptureInstant,
-    },
-}
-
-/// What a closed capture sink could not deliver.
-#[cfg(hex_capture)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct CaptureSinkClosed {
-    /// A gap still waiting for room in the sink when it closed.
-    pub pending_gap: Option<(CaptureInstant, CaptureInstant)>,
-    /// The end of the audio the sink accounted for, delivered or as a gap.
-    pub accounted_through: CaptureInstant,
-}
-
-/// A gap shorter than this is jitter between chunks, not missing audio.
-#[cfg(hex_capture)]
-const GAP_TOLERANCE: Duration = Duration::from_millis(50);
-
-/// The capture sink inside the owner. It never blocks the timeline: a full
-/// sink drops audio and records the span as a gap to send once it has room.
-#[cfg(hex_capture)]
-struct CaptureSink {
-    sender: SyncSender<CaptureAudio>,
-    /// The capture's start: only audio before it is trimmed.
-    since: CaptureInstant,
-    accounted_through: CaptureInstant,
-    pending_gap: Option<(CaptureInstant, CaptureInstant)>,
-}
-
-#[cfg(hex_capture)]
-impl CaptureSink {
-    fn new(sender: SyncSender<CaptureAudio>, since: CaptureInstant) -> Self {
-        Self {
-            sender,
-            since,
-            accounted_through: since,
-            pending_gap: None,
-        }
-    }
-
-    /// Offers one microphone chunk; false once the receiver is gone.
-    fn offer(
-        &mut self,
-        samples: &[f32],
-        sample_rate: u32,
-        captured_through: CaptureInstant,
-    ) -> bool {
-        if captured_through <= self.since || sample_rate == 0 {
-            return true;
-        }
-        let mut from = captured_through.sub_frames(samples.len(), sample_rate);
-        let mut samples = samples;
-        if from < self.since {
-            // The first chunk starts before the capture: keep only its part.
-            let overlap = self.since.duration_since(from);
-            let frames = (overlap.as_nanos() * u128::from(sample_rate) / 1_000_000_000) as usize;
-            samples = &samples[frames.min(samples.len())..];
-            from = self.since;
-        } else if from > self.accounted_through
-            && from.duration_since(self.accounted_through) > GAP_TOLERANCE
-        {
-            self.extend_gap(self.accounted_through, from);
-        }
-        // Timestamp jitter can make a chunk overlap the last one; every frame
-        // is still real audio, so none is dropped.
-        from = from.max(self.accounted_through);
-        self.accounted_through = self.accounted_through.max(captured_through);
-        if let Some((gap_from, gap_through)) = self.pending_gap {
-            match self.sender.try_send(CaptureAudio::Gap {
-                from: gap_from,
-                through: gap_through,
-            }) {
-                Ok(()) => self.pending_gap = None,
-                Err(TrySendError::Full(_)) => {
-                    self.extend_gap(from, captured_through);
-                    return true;
-                }
-                Err(TrySendError::Disconnected(_)) => return false,
-            }
-        }
-        if samples.is_empty() {
-            return true;
-        }
-        match self.sender.try_send(CaptureAudio::Samples {
-            samples: samples.to_vec(),
-            sample_rate,
-            captured_through,
-        }) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => {
-                if self.pending_gap.is_none() {
-                    tracing::warn!("capture sink is full; dropping its audio as a gap");
-                }
-                self.extend_gap(from, captured_through);
-                true
-            }
-            Err(TrySendError::Disconnected(_)) => false,
-        }
-    }
-
-    fn extend_gap(&mut self, from: CaptureInstant, through: CaptureInstant) {
-        self.pending_gap = Some(match self.pending_gap {
-            Some((start, _)) => (start, through),
-            None => (from, through),
-        });
-    }
-
-    fn close(self) -> CaptureSinkClosed {
-        CaptureSinkClosed {
-            pending_gap: self.pending_gap,
-            accounted_through: self.accounted_through,
-        }
-    }
-}
+use crate::capture_host::{CaptureAudio, CaptureSink, CaptureSinkClosed};
 
 pub enum DictationAudioEvent {
     OpenFailed {
@@ -981,6 +856,7 @@ impl Owner {
                 {
                     self.capture.begin_stream(engine);
                 }
+                self.capture.report_live_text();
                 #[cfg(hex_capture)]
                 {
                     let sample_rate = self.sample_rate();
@@ -1870,7 +1746,7 @@ mod tests {
 
     #[test]
     fn startup_microphone_failure_keeps_audio_owner_alive() {
-        let device = "HEX nonexistent microphone for startup recovery test";
+        let device = "Hex nonexistent microphone for startup recovery test";
         let input = DictationAudio::with_input(
             RecoveringAudioInput::failed_for_test(device),
             device.into(),

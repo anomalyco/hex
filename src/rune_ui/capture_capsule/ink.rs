@@ -169,12 +169,12 @@ pub(crate) struct InkState {
 }
 
 impl InkState {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn scene(&self) -> &Scene {
         &self.scene
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn set_scene(&mut self, scene: Scene) {
         self.scene = scene;
     }
@@ -286,6 +286,7 @@ impl InkOverlay {
         Self { overlay }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the ink, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
         self.overlay.set_exclude_from_capture(!shown);

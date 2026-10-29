@@ -146,6 +146,19 @@ impl CaptureInstant {
         Self::from_mach_ticks(unsafe { mach_absolute_time() })
     }
 
+    /// The monotonic clock. Linux's microphone streams count from when they
+    /// opened, so the capture timeline anchors them to this.
+    #[cfg(target_os = "linux")]
+    pub fn now() -> Self {
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `now` is a valid timespec to fill.
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+        Self(now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64)
+    }
+
     #[cfg(target_os = "macos")]
     pub fn from_mach_ticks(ticks: u64) -> Self {
         let Some((numerator, denominator)) = mach_timebase() else {
@@ -466,35 +479,34 @@ impl AudioInput {
 
     pub fn open_named(name: &str) -> Result<Self> {
         let host = cpal::default_host();
-        let devices = input_devices_of(&host)?;
-        let names = device_names(&devices);
+        let (devices, names) = input_devices_of(&host)?;
         let plan = resolve_input(Some(name), None, &names, None, |_| false, false)
             .map_err(|e| eyre!(e))?;
         let InputTarget::Named(index) = plan.target else {
             unreachable!("an override resolves by name");
         };
-        Self::open_device(devices[index].clone(), false)
+        Self::open_device(devices[index].clone(), names[index].clone(), false)
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub fn open_matching(query: &str) -> Result<Self> {
         let host = cpal::default_host();
-        let device = host
-            .input_devices()
-            .wrap_err("could not enumerate input devices")?
-            .find(|device| device_matches(device, query))
+        let (devices, names) = input_devices_of(&host)?;
+        let query_lower = query.to_lowercase();
+        let index = names
+            .iter()
+            .position(|name| name.to_lowercase().contains(&query_lower))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-        Self::open_device(device, false)
+        Self::open_device(devices[index].clone(), names[index].clone(), false)
     }
 
     /// Opens `device`. `follows_default` marks cpal's default-input handle,
     /// whose Windows stream reports a default change as invalidation while
     /// it keeps running on the old device.
-    fn open_device(device: Device, follows_default: bool) -> Result<Self> {
+    fn open_device(device: Device, device_name: String, follows_default: bool) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
         let restart_generation = audio_service_restart_generation();
-        let device_name = device.to_string();
         let supported = device
             .default_input_config()
             .wrap_err("could not read the input device configuration")?;
@@ -677,7 +689,7 @@ impl RecoveringAudioInput {
     #[cfg(test)]
     pub fn pending_for_test() -> (Self, Sender<InputOpenResult>) {
         let mut input = Self::closed(
-            Some("HEX nonexistent microphone for pending open test"),
+            Some("Hex nonexistent microphone for pending open test"),
             0,
             None,
         );
@@ -1154,15 +1166,42 @@ mod lid {
     }
 }
 
-fn input_devices_of(host: &cpal::Host) -> Result<Vec<Device>> {
+/// The input devices whose names can be read, with those names. A device
+/// without a readable name, such as CoreAudio's placeholder when no input
+/// exists, cannot be selected or opened, so it is left out.
+fn input_devices_of(host: &cpal::Host) -> Result<(Vec<Device>, Vec<String>)> {
     Ok(host
         .input_devices()
         .wrap_err("could not enumerate input devices")?
-        .collect())
+        .filter_map(|device| device_name(&device).map(|name| (device, name)))
+        .unzip())
 }
 
-fn device_names(devices: &[Device]) -> Vec<String> {
-    devices.iter().map(ToString::to_string).collect()
+/// The system default input with its name, or `None` when there is none or
+/// its name cannot be read.
+fn default_input_of(host: &cpal::Host) -> Option<(Device, String)> {
+    let device = host.default_input_device()?;
+    let name = device_name(&device)?;
+    Some((device, name))
+}
+
+/// The device's name. cpal's `Display` for `Device` returns `fmt::Error`
+/// when the name cannot be read, which makes `to_string` panic, so read the
+/// description directly.
+fn device_name(device: &Device) -> Option<String> {
+    description_name(device.description())
+}
+
+fn description_name<E: std::fmt::Display>(
+    description: std::result::Result<cpal::DeviceDescription, E>,
+) -> Option<String> {
+    match description {
+        Ok(description) => Some(description.name().to_owned()),
+        Err(error) => {
+            tracing::debug!(%error, "skipping an input device whose name cannot be read");
+            None
+        }
+    }
 }
 
 /// Resolves and opens the input, or keeps the open one when it resolves to
@@ -1170,10 +1209,8 @@ fn device_names(devices: &[Device]) -> Vec<String> {
 /// to the system default.
 fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     let host = cpal::default_host();
-    let devices = input_devices_of(&host)?;
-    let names = device_names(&devices);
-    let default = host.default_input_device();
-    let default_name = default.as_ref().map(ToString::to_string);
+    let (devices, names) = input_devices_of(&host)?;
+    let (default, default_name) = default_input_of(&host).unzip();
     let lid_closed = lid_closed();
     let resolve = |selected: Option<&str>| {
         resolve_input(
@@ -1189,13 +1226,16 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     // Keeping the open device returns before logging, so a periodic look
     // for a missing microphone logs only when the input changes.
     let open = |plan: InputPlan| -> Result<Opened> {
-        let (device, follows_default) = match plan.target {
+        let (device, name, follows_default) = match plan.target {
             InputTarget::Named(index) | InputTarget::StandIn(index) => {
-                (devices[index].clone(), false)
+                (devices[index].clone(), names[index].clone(), false)
             }
-            InputTarget::SystemDefault => (default.clone().expect("resolved default"), true),
+            InputTarget::SystemDefault => (
+                default.clone().expect("resolved default"),
+                default_name.clone().expect("resolved default"),
+                true,
+            ),
         };
-        let name = device.to_string();
         if request.keep.as_deref() == Some(name.as_str()) {
             return Ok(Opened::Unchanged {
                 selection: plan.selection,
@@ -1224,7 +1264,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 "the saved microphone is off while the lid is closed; using the system default"
             ),
         }
-        let mut input = AudioInput::open_device(device, follows_default)?;
+        let mut input = AudioInput::open_device(device, name, follows_default)?;
         input.selection = plan.selection;
         Ok(Opened::Input(Box::new(input)))
     };
@@ -1309,9 +1349,8 @@ pub fn input_devices() -> Result<InputDevices> {
     #[cfg(target_os = "macos")]
     watch_input_devices();
     let host = cpal::default_host();
-    let devices = input_devices_of(&host)?;
-    let listed = device_names(&devices);
-    let default = host.default_input_device().map(|device| device.to_string());
+    let (devices, listed) = input_devices_of(&host)?;
+    let default = default_input_of(&host).map(|(_, name)| name);
     let default_is_hex_microphone = default
         .as_deref()
         .is_some_and(crate::hex_microphone::is_hex_virtual_device_name);
@@ -1353,14 +1392,6 @@ pub fn input_devices() -> Result<InputDevices> {
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub fn input_device_names() -> Result<Vec<String>> {
     input_devices().map(|devices| devices.names)
-}
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-fn device_matches(device: &Device, query: &str) -> bool {
-    device
-        .to_string()
-        .to_lowercase()
-        .contains(&query.to_lowercase())
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1453,7 +1484,8 @@ impl StreamErrorReporter {
             && let Some(name) = &self.default_name
             && cpal::default_host()
                 .default_input_device()
-                .is_some_and(|device| device.to_string() != *name)
+                .and_then(|device| device_name(&device))
+                .is_some_and(|current| current != *name)
         {
             tracing::info!(from = %name, "the default microphone changed");
             notify_input_route_changed();
@@ -1524,6 +1556,22 @@ mod tests {
 
     fn listed(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn an_unreadable_device_name_is_skipped_instead_of_panicking() {
+        let unreadable: std::result::Result<cpal::DeviceDescription, cpal::Error> =
+            Err(cpal::ErrorKind::DeviceNotAvailable.into());
+        assert_eq!(description_name(unreadable), None);
+        let readable: std::result::Result<_, cpal::Error> = Ok(
+            cpal::DeviceDescriptionBuilder::new("MacBook Pro Microphone")
+                .manufacturer("Apple Inc.")
+                .build(),
+        );
+        assert_eq!(
+            description_name(readable).as_deref(),
+            Some("MacBook Pro Microphone")
+        );
     }
 
     #[test]
@@ -2083,7 +2131,7 @@ mod tests {
     #[test]
     fn startup_recovery_opens_even_when_a_capture_is_pending() {
         let mut input = RecoveringAudioInput::closed(
-            Some("HEX nonexistent microphone for pending recovery test"),
+            Some("Hex nonexistent microphone for pending recovery test"),
             3,
             None,
         );

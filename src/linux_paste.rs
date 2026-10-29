@@ -78,6 +78,26 @@ impl LinuxPaster {
         (!text.trim().is_empty()).then_some(text)
     }
 
+    /// Puts `text` on the clipboard without pasting it. On X11 the clipboard
+    /// is served for as long as this paster lives.
+    pub(crate) fn copy(&mut self, text: &str) -> Result<()> {
+        match &mut self.backend {
+            Backend::X11(paster) => {
+                let atoms = &paster.clipboard.getter.atoms;
+                paster
+                    .clipboard
+                    .store(atoms.clipboard, atoms.utf8_string, text.as_bytes())
+                    .wrap_err("could not own the X11 clipboard")
+            }
+            Backend::Wayland => {
+                let mut copy = Command::new("wl-copy");
+                copy.args(["--type", "text/plain;charset=utf-8"]);
+                run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
+                    .wrap_err("could not own the Wayland clipboard; install wl-clipboard")
+            }
+        }
+    }
+
     pub(crate) fn paste(&mut self, text: &str) -> Result<()> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
