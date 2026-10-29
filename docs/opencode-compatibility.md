@@ -18,23 +18,27 @@ the already-running server `0.0.0-dev-18329`, without creating a session or
 restarting the service.
 
 This is a dated validation snapshot, not a claim about the newest CLI available
-today. The integration contract below describes HEX's current implementation;
+today. The integration contract below describes Hex's current implementation;
 new provider-backed validation must record its own CLI and server versions.
 
 ## Integration Contract
 
-HEX discovers a separately installed `opencode2`, optionally overridden by
-`VOICE_CONTROL_OPENCODE_CLI`. It does not bundle or pin the runtime CLI, own the
+Hex discovers a separately installed `opencode2`, optionally overridden by
+`HEX_OPENCODE_CLI`. It does not bundle or pin the runtime CLI, own the
 managed service, or restart or update it. `opencode2 api` discovers or starts
 the service through OpenCode's own lifecycle.
 
 Catalog loading and generation use `opencode2 api get /api/info` to identify
-the authenticated active server, starting it through the CLI when needed. An
-exact CLI `HTTP 404 Not Found` falls back to the older `/api/status`, then
-`/api/health`, names within the same deadline; any other failure is final.
-`opencode2 debug paths` locates its state directory. HEX reads endpoint and
-password together from the bounded, owner-only service registration matching
-that server's PID and version.
+the authenticated active server, starting it through the CLI when needed. A
+CLI `HTTP 404 Not Found` as the last stderr line (earlier lines may be warnings,
+such as a client/server version mismatch) falls back to the older
+`/api/status`, then `/api/health`, names within the same deadline; any other
+failure is final. Hex reads endpoint and password together from the bounded,
+owner-only service registration matching that server's PID and version, in the
+state directory `opencode2 debug paths` reports and in OpenCode's default one
+(`$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`). A wrapper that
+rejects `debug paths` or redirects the CLI's own state still finds the default
+service's registration.
 It never reads or regenerates the configured password, changes service settings,
 or includes credentials in diagnostics.
 
@@ -45,7 +49,7 @@ used. Wildcard bind addresses (`0.0.0.0` and `::`) and `localhost` are normalize
 to loopback; other non-loopback endpoints are rejected. Discovery, request writing,
 and response waiting share the generation deadline and cancellation signal.
 
-HEX reads `/api/model` and `/api/model/default` through authenticated HTTP, avoiding
+Hex reads `/api/model` and `/api/model/default` through authenticated HTTP, avoiding
 large piped CLI responses. It supplies `x-opencode-directory` for its Application
 Support workspace. Model selections use the catalog's `id`, not the upstream
 provider's `modelID`. Available text-output models remain selectable regardless
@@ -54,14 +58,14 @@ floating default saves the resolved catalog model alongside it; existing explici
 model selections are preserved.
 
 One-shot generation accepts a prompt and optional model reference and returns
-`data.text`. Current OpenCode serves it at `/api/experimental/generate`; HEX
+`data.text`. Current OpenCode serves it at `/api/experimental/generate`; Hex
 falls back to the older `/api/generate` only when the server answers the new
 route with HTTP 404, within the same generation deadline. curl reports the
 status on a trailing line so a missing route is distinguished from a served
 error body. It is stateless and uses the server's base configuration, not the
 catalog request's directory header. Existing saved selections whose catalog and
 upstream IDs match need no migration. Previously broken alias selections can be
-fixed by reselecting the model; HEX does not guess an ID migration.
+fixed by reselecting the model; Hex does not guess an ID migration.
 
 ## Updating The Baseline
 

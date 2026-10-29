@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-#[cfg(not(target_os = "windows"))]
 use std::ffi::OsStr;
 #[cfg(not(target_os = "windows"))]
 use std::fs;
@@ -23,6 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::{ContextSelector, ContextSnapshot};
 use crate::text_replacements::ReplacementSet;
+use crate::vocabulary::VocabularyEntry;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
@@ -95,6 +95,12 @@ impl Profile {
     pub fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
+    }
+
+    /// The global profile without the `modes` experiment: the default
+    /// mode's replacements only, no rewriting or transformations.
+    pub(crate) fn global_replacements(mode: &crate::app_settings::DictationMode) -> Self {
+        Self::new("Global", "").replacements(ReplacementSet::new(&mode.replacements))
     }
 
     pub(crate) fn from_mode(mode: &crate::app_settings::DictationMode) -> Self {
@@ -295,7 +301,7 @@ impl Profiles {
                 transformations: profile.transformations.clone(),
             };
         }
-        let prompt = prompt(profile, &corrected, context);
+        let prompt = prompt(profile, &corrected, context, &crate::vocabulary::entries());
         let (text, observation) = generate_observed(
             &prompt,
             profile.model.as_ref(),
@@ -668,14 +674,14 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
     }
 }
 
+/// Whether Hex can likely run OpenCode, without running anything: an
+/// `opencode` not yet probed counts until a probe proves it V1. Callers on
+/// the UI or hotkey path use this; [`find_opencode_install`] decides.
 pub fn opencode_installed() -> bool {
-    let executable = opencode_executable();
-    if executable.components().count() > 1 {
-        return is_executable(&executable);
-    }
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|directory| is_executable(&directory.join(&executable)))
-    })
+    matches!(
+        discover_opencode(|executable| cached_opencode_verdict(executable).unwrap_or(true)),
+        OpenCodeInstall::Ready(_)
+    )
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -801,13 +807,40 @@ impl Processed {
     }
 }
 
-fn prompt(profile: &Profile, transcript: &str, context: &ContextSnapshot) -> String {
+fn prompt(
+    profile: &Profile,
+    transcript: &str,
+    context: &ContextSnapshot,
+    vocabulary: &[VocabularyEntry],
+) -> String {
     let application = context.application.as_deref().unwrap_or("unknown");
     let host = context.browser_host().unwrap_or("none");
     format!(
-        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\nForeground application: {application}\nBrowser host: {host}\n\nRaw transcript:\n<transcript>\n{transcript}\n</transcript>",
-        profile.prompt
+        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\n{}Foreground application: {application}\nBrowser host: {host}\n\nRaw transcript:\n<transcript>\n{transcript}\n</transcript>",
+        profile.prompt,
+        vocabulary_lines(vocabulary)
     )
+}
+
+/// The vocabulary as prompt lines, so a rewrite spells its terms right;
+/// nothing when it is empty (or its experiment is off).
+fn vocabulary_lines(vocabulary: &[VocabularyEntry]) -> String {
+    if vocabulary.is_empty() {
+        return String::new();
+    }
+    let terms = vocabulary
+        .iter()
+        .map(|entry| match entry.sounds_like.as_slice() {
+            [] => entry.term.clone(),
+            spellings => format!(
+                "{} (may be transcribed as {})",
+                entry.term,
+                spellings.join(", ")
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("Vocabulary (spell these exactly when the speaker means them): {terms}\n\n")
 }
 
 fn voice_action_prompt(
@@ -1035,15 +1068,34 @@ fn discover_opencode_service(
     discover_opencode_service_with(
         &opencode_executable(),
         &workspace,
+        default_opencode_state_dir().as_deref(),
         deadline.saturating_sub(started.elapsed()),
         cancelled,
     )
 }
 
+/// OpenCode's own state directory for Hex's environment: `$XDG_STATE_HOME`
+/// when absolute, else `~/.local/state`, then `opencode`.
+#[cfg(not(target_os = "windows"))]
+fn default_opencode_state_dir() -> Option<PathBuf> {
+    let root = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/state")))?;
+    Some(root.join("opencode"))
+}
+
+/// Asks the CLI which service it reaches, then reads that service's private
+/// registration for the URL and password. The registration is looked up in
+/// the state directory the CLI reports and in OpenCode's default one: a
+/// wrapper can reject `debug paths` or point the CLI's own state elsewhere
+/// while it still reaches the default service. Only a registration matching
+/// the live server's pid and version counts.
 #[cfg(not(target_os = "windows"))]
 fn discover_opencode_service_with(
     executable: &Path,
     workspace: &Path,
+    default_state: Option<&Path>,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<(String, String)> {
@@ -1083,7 +1135,7 @@ fn discover_opencode_service_with(
     let (newest, older) = SERVICE_INFO_ENDPOINTS.split_first().expect("endpoints");
     let mut output = run(&["api", "get", newest])?;
     // Older OpenCode versions expose the service info under an earlier name.
-    // Only an exact CLI 404 diagnostic tries the next name; other failures are final.
+    // Only a CLI 404 diagnostic tries the next name; other failures are final.
     for endpoint in older {
         if !endpoint_is_missing(&output) {
             break;
@@ -1092,21 +1144,39 @@ fn discover_opencode_service_with(
     }
     let info: ServiceInfo = serde_json::from_str(&decode(output)?)
         .map_err(|_| eyre!("OpenCode returned an invalid service info response"))?;
-    let paths = decode(run(&["debug", "paths"])?)?;
-    let state = paths
-        .lines()
-        .find_map(|line| {
+    // A failed `debug paths` is not final: the default state directory remains.
+    let reported_state = decode(run(&["debug", "paths"])?).ok().and_then(|paths| {
+        paths.lines().find_map(|line| {
             let (key, value) = line.split_once(char::is_whitespace)?;
-            (key == "state").then(|| Path::new(value.trim_start()))
+            let path = PathBuf::from(value.trim_start());
+            (key == "state" && path.is_absolute()).then_some(path)
         })
-        .filter(|path| path.is_absolute())
-        .ok_or_else(|| eyre!("OpenCode did not report its state directory"))?;
-    read_service_registration(state, info.pid, &info.version)
+    });
+    let mut states: Vec<&Path> = reported_state.as_deref().into_iter().collect();
+    if let Some(default_state) = default_state
+        && !states.contains(&default_state)
+    {
+        states.push(default_state);
+    }
+    let mut last_error = eyre!("OpenCode did not report its state directory");
+    for state in states {
+        match read_service_registration(state, info.pid, &info.version) {
+            Ok(endpoint) => return Ok(endpoint),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
+/// The CLI reports a missing route as a final `HTTP 404 Not Found` stderr
+/// line; earlier lines may carry warnings such as a client/server version skew.
 fn endpoint_is_missing(output: &CommandOutput) -> bool {
     !output.status.success()
-        && String::from_utf8_lossy(&output.stderr).trim() == "HTTP 404 Not Found"
+        && String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            == Some("HTTP 404 Not Found")
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1431,56 +1501,214 @@ fn read_bounded_output(mut output: impl Read, max_bytes: u64) -> Result<Vec<u8>>
 }
 
 fn opencode_executable() -> PathBuf {
+    installed_opencode_executable().unwrap_or_else(|| "opencode2".into())
+}
+
+/// The OpenCode V2 CLI Hex runs; see [`find_opencode_install`].
+pub(crate) fn installed_opencode_executable() -> Option<PathBuf> {
+    match find_opencode_install() {
+        OpenCodeInstall::Ready(executable) => Some(executable),
+        OpenCodeInstall::V1Only | OpenCodeInstall::Missing => None,
+    }
+}
+
+/// What looking for the OpenCode CLI found.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum OpenCodeInstall {
+    /// A V2 CLI: an `opencode2`, or an `opencode` that proved to be V2.
+    Ready(PathBuf),
+    /// Only a V1 `opencode`, which Hex never runs.
+    V1Only,
+    Missing,
+}
+
+/// The names the V2 CLI ships under, preferred first: any `opencode2` beats
+/// every `opencode`, and an `opencode` counts only once it proves to be V2.
+const OPENCODE_BINARY_NAMES: [&str; 2] = ["opencode2", "opencode"];
+const OPENCODE_PROBE_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Finds the CLI as a GUI app must: launchd's `PATH` lacks the usual install
+/// folders, so they are searched too. An `opencode` may run a bounded probe,
+/// so call this off the UI thread; verdicts are kept until the file changes.
+pub(crate) fn find_opencode_install() -> OpenCodeInstall {
+    discover_opencode(opencode_is_v2)
+}
+
+fn discover_opencode(is_v2: impl FnMut(&Path) -> bool) -> OpenCodeInstall {
     let current_directory = std::env::current_dir().ok();
     find_opencode_executable(
-        std::env::var_os("VOICE_CONTROL_OPENCODE_CLI").map(PathBuf::from),
+        std::env::var_os("HEX_OPENCODE_CLI").map(PathBuf::from),
         std::env::var_os("PATH").as_deref(),
         dirs::home_dir().as_deref(),
         current_directory.as_deref(),
+        is_v2,
     )
-    .unwrap_or_else(|| "opencode2".into())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// The configured override is trusted as is; otherwise every location is
+/// searched for `opencode2` before any `opencode` is considered.
 fn find_opencode_executable(
     configured: Option<PathBuf>,
     path: Option<&OsStr>,
     home: Option<&Path>,
     current_directory: Option<&Path>,
-) -> Option<PathBuf> {
+    mut is_v2: impl FnMut(&Path) -> bool,
+) -> OpenCodeInstall {
     if let Some(configured) = configured {
-        return Some(absolute_path(configured, current_directory));
+        return OpenCodeInstall::Ready(absolute_path(configured, current_directory));
     }
+    let mut found_v1 = false;
+    for name in OPENCODE_BINARY_NAMES {
+        for candidate in opencode_candidates(name, path, home, current_directory) {
+            if !is_executable(&candidate) {
+                continue;
+            }
+            if name == "opencode2" || is_v2(&candidate) {
+                return OpenCodeInstall::Ready(candidate);
+            }
+            found_v1 = true;
+        }
+    }
+    if found_v1 {
+        OpenCodeInstall::V1Only
+    } else {
+        OpenCodeInstall::Missing
+    }
+}
+
+/// When an executable changed, so a kept verdict no longer applies.
+type OpenCodeFingerprint = (Option<std::time::SystemTime>, u64);
+
+static OPENCODE_VERDICTS: std::sync::Mutex<
+    Option<std::collections::HashMap<PathBuf, (OpenCodeFingerprint, bool)>>,
+> = std::sync::Mutex::new(None);
+
+fn opencode_fingerprint(executable: &Path) -> Option<OpenCodeFingerprint> {
+    let metadata = std::fs::metadata(executable).ok()?;
+    Some((metadata.modified().ok(), metadata.len()))
+}
+
+fn cached_opencode_verdict(executable: &Path) -> Option<bool> {
+    let fingerprint = opencode_fingerprint(executable)?;
+    let verdicts = OPENCODE_VERDICTS.lock().ok()?;
+    let (kept, is_v2) = verdicts.as_ref()?.get(executable)?;
+    (*kept == fingerprint).then_some(*is_v2)
+}
+
+/// Whether an `opencode` is OpenCode V2. Only a definite answer is kept, so
+/// a probe that timed out runs again at the next (coarse) catalog check.
+fn opencode_is_v2(executable: &Path) -> bool {
+    if let Some(is_v2) = cached_opencode_verdict(executable) {
+        return is_v2;
+    }
+    let fingerprint = opencode_fingerprint(executable);
+    let verdict = probe_opencode_generation(executable);
+    if let (Some(is_v2), Some(fingerprint)) = (verdict, fingerprint)
+        && let Ok(mut verdicts) = OPENCODE_VERDICTS.lock()
+    {
+        verdicts
+            .get_or_insert_with(Default::default)
+            .insert(executable.to_owned(), (fingerprint, is_v2));
+    }
+    if verdict == Some(false) {
+        tracing::info!(executable = %executable.display(), "ignoring OpenCode V1");
+    }
+    verdict.unwrap_or(false)
+}
+
+/// `--version` decides a release. Prerelease builds of both generations
+/// print `0.0.0-…`, so those must answer `api get /api/info`, a command V1
+/// rejects; a served 404 still proves the V2 CLI.
+fn probe_opencode_generation(executable: &Path) -> Option<bool> {
+    let version = run_opencode_probe(executable, &["--version"]).ok()?;
+    if version.status.success()
+        && let Some(is_v2) = release_is_v2(&String::from_utf8_lossy(&version.stdout))
+    {
+        return Some(is_v2);
+    }
+    let info = run_opencode_probe(executable, &["api", "get", "/api/info"]).ok()?;
+    (info.status.success() || endpoint_is_missing(&info)).then_some(true)
+}
+
+/// Whether `--version` output names a V2 release (`opencode v2.2.0`,
+/// `2.2.0`); `None` when it can't tell.
+fn release_is_v2(output: &str) -> Option<bool> {
+    let version = output.split_whitespace().last()?;
+    let version = version.strip_prefix('v').unwrap_or(version);
+    let (core, prerelease) = match version.split_once('-') {
+        Some((core, prerelease)) => (core, Some(prerelease)),
+        None => (version, None),
+    };
+    let major: u64 = core.split('.').next()?.parse().ok()?;
+    if core == "0.0.0" && prerelease.is_some() {
+        return None;
+    }
+    Some(major >= 2)
+}
+
+fn run_opencode_probe(executable: &Path, args: &[&str]) -> Result<CommandOutput> {
+    let mut command = crate::background_process::command(executable);
+    command.args(args);
+    #[cfg(not(target_os = "windows"))]
+    let output = run_command(
+        command,
+        None,
+        OPENCODE_PROBE_DEADLINE,
+        "version check",
+        &AtomicBool::new(false),
+    );
+    #[cfg(target_os = "windows")]
+    let output = cli::run_command(
+        command,
+        OPENCODE_PROBE_DEADLINE,
+        "version check",
+        &AtomicBool::new(false),
+    );
+    output
+}
+
+#[cfg(not(target_os = "windows"))]
+const HOME_INSTALL_DIRECTORIES: [&str; 14] = [
+    ".opencode/bin",
+    ".vite-plus/bin",
+    ".bun/bin",
+    "Library/pnpm",
+    "Library/pnpm/bin",
+    ".yarn/bin",
+    ".config/yarn/global/node_modules/.bin",
+    ".npm-global/bin",
+    ".local/bin",
+    "bin",
+    ".volta/bin",
+    ".asdf/shims",
+    ".local/share/mise/shims",
+    ".nodenv/shims",
+];
+
+/// Where `name` may be installed, in search order: `PATH`, the usual home
+/// install folders, Node version managers, then Homebrew.
+#[cfg(not(target_os = "windows"))]
+fn opencode_candidates(
+    name: &str,
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    current_directory: Option<&Path>,
+) -> Vec<PathBuf> {
     let path_candidates = path
         .into_iter()
         .flat_map(std::env::split_paths)
-        .map(|directory| absolute_path(directory.join("opencode2"), current_directory));
-    let home_candidates = home.into_iter().flat_map(|home| {
-        [
-            home.join(".opencode/bin/opencode2"),
-            home.join(".vite-plus/bin/opencode2"),
-            home.join(".bun/bin/opencode2"),
-            home.join("Library/pnpm/opencode2"),
-            home.join("Library/pnpm/bin/opencode2"),
-            home.join(".yarn/bin/opencode2"),
-            home.join(".config/yarn/global/node_modules/.bin/opencode2"),
-            home.join(".npm-global/bin/opencode2"),
-            home.join(".local/bin/opencode2"),
-            home.join("bin/opencode2"),
-            home.join(".volta/bin/opencode2"),
-            home.join(".asdf/shims/opencode2"),
-            home.join(".local/share/mise/shims/opencode2"),
-            home.join(".nodenv/shims/opencode2"),
-        ]
-    });
+        .map(|directory| absolute_path(directory.join(name), current_directory));
+    let home_candidates = home
+        .into_iter()
+        .flat_map(|home| HOME_INSTALL_DIRECTORIES.map(|directory| home.join(directory).join(name)));
     path_candidates
         .chain(home_candidates)
-        .chain(version_manager_candidates(home))
-        .chain([
-            PathBuf::from("/opt/homebrew/bin/opencode2"),
-            PathBuf::from("/usr/local/bin/opencode2"),
-        ])
-        .find(|path| is_executable(path))
+        .chain(version_manager_candidates(home, name))
+        .chain(
+            ["/opt/homebrew/bin", "/usr/local/bin"]
+                .map(|directory| Path::new(directory).join(name)),
+        )
+        .collect()
 }
 
 fn absolute_path(path: PathBuf, current_directory: Option<&Path>) -> PathBuf {
@@ -1494,34 +1722,31 @@ fn absolute_path(path: PathBuf, current_directory: Option<&Path>) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn version_manager_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+fn version_manager_candidates(home: Option<&Path>, name: &str) -> Vec<PathBuf> {
     let Some(home) = home else {
         return Vec::new();
     };
     let roots = [
-        (home.join(".nvm/versions/node"), "bin/opencode2"),
+        (home.join(".nvm/versions/node"), "bin"),
         (
             home.join("Library/Application Support/fnm/node-versions"),
-            "installation/bin/opencode2",
+            "installation/bin",
         ),
         (
             home.join(".local/share/fnm/node-versions"),
-            "installation/bin/opencode2",
+            "installation/bin",
         ),
-        (
-            home.join(".fnm/node-versions"),
-            "installation/bin/opencode2",
-        ),
+        (home.join(".fnm/node-versions"), "installation/bin"),
     ];
     roots
         .into_iter()
-        .flat_map(|(root, suffix)| {
+        .flat_map(|(root, bin)| {
             fs::read_dir(root)
                 .into_iter()
                 .flatten()
                 .flatten()
                 .take(64)
-                .map(move |entry| entry.path().join(suffix))
+                .map(move |entry| entry.path().join(bin).join(name))
         })
         .collect()
 }
@@ -1546,12 +1771,11 @@ fn encode_uri_component(value: &str) -> String {
 #[cfg(target_os = "windows")]
 pub use cli::load_model_catalog;
 #[cfg(target_os = "windows")]
-use cli::{find_opencode_executable, generate_cancellable, is_executable};
+use cli::{generate_cancellable, is_executable, opencode_candidates};
 
 #[cfg(target_os = "windows")]
 mod cli {
     use std::ffi::OsStr;
-    use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1567,9 +1791,6 @@ mod cli {
         encode_uri_component, endpoint_is_missing, generate_with_candidates, read_output,
     };
 
-    /// Binary names the CLI ships under, newest first; any `opencode2` beats
-    /// every `opencode`.
-    const OPENCODE_BINARY_NAMES: [&str; 2] = ["opencode2", "opencode"];
     const CATALOG_DEADLINE: Duration = Duration::from_secs(10);
 
     static CACHED_RANKED_CANDIDATES: std::sync::Mutex<Option<Vec<Model>>> =
@@ -1673,7 +1894,7 @@ mod cli {
         opencode_command_in(&crate::app_paths::opencode_workspace()?)
     }
 
-    /// An `opencode2 api` command scoped to the HEX OpenCode workspace.
+    /// An `opencode2 api` command scoped to the Hex OpenCode workspace.
     fn opencode_command_in(workspace: &Path) -> Result<Command> {
         std::fs::create_dir_all(workspace).wrap_err_with(|| {
             format!(
@@ -1692,7 +1913,7 @@ mod cli {
             .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
         // canonicalize returns a verbatim path; OpenCode wants the drive form.
         let directory = directory.strip_prefix(r"\\?\").unwrap_or(directory);
-        let mut command = Command::new(super::opencode_executable());
+        let mut command = crate::background_process::command(super::opencode_executable());
         command.current_dir(&workspace).args([
             "api",
             "--header",
@@ -1701,7 +1922,7 @@ mod cli {
         Ok(command)
     }
 
-    fn run_command(
+    pub(super) fn run_command(
         mut command: Command,
         deadline: Duration,
         operation: &str,
@@ -1713,10 +1934,8 @@ mod cli {
         if deadline.is_zero() {
             return Err(eyre!("opencode2 {operation} deadline expired"));
         }
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut job = job::Job::kill_on_close();
         let mut child = command
-            .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1786,29 +2005,26 @@ mod cli {
             && path.is_file()
     }
 
-    pub(super) fn find_opencode_executable(
-        configured: Option<PathBuf>,
+    /// Where `name` may be installed: each `PATH` folder in order, the real
+    /// binary npm shims wrap first. JSON request bodies survive .exe argv
+    /// quoting but are shredded by cmd shims.
+    pub(super) fn opencode_candidates(
+        name: &str,
         path: Option<&OsStr>,
         _home: Option<&Path>,
         current_directory: Option<&Path>,
-    ) -> Option<PathBuf> {
-        if let Some(configured) = configured {
-            return Some(absolute_path(configured, current_directory));
-        }
-        OPENCODE_BINARY_NAMES.into_iter().find_map(|name| {
-            // Prefer the real binary npm shims wrap: JSON request bodies
-            // survive .exe argv quoting but are shredded by cmd shims.
-            path.into_iter()
-                .flat_map(std::env::split_paths)
-                .flat_map(|directory| {
-                    [
-                        directory.join(format!(r"node_modules\@opencode-ai\cli\bin\{name}.exe")),
-                        directory.join(format!("{name}.exe")),
-                    ]
-                })
-                .map(|candidate| absolute_path(candidate, current_directory))
-                .find(|candidate| is_executable(candidate))
-        })
+    ) -> Vec<PathBuf> {
+        path.into_iter()
+            .flat_map(std::env::split_paths)
+            .flat_map(|directory| {
+                [
+                    directory.join(format!(r"node_modules\@opencode\cli\bin\{name}.exe")),
+                    directory.join(format!(r"node_modules\@opencode-ai\cli\bin\{name}.exe")),
+                    directory.join(format!("{name}.exe")),
+                ]
+            })
+            .map(|candidate| absolute_path(candidate, current_directory))
+            .collect()
     }
 
     mod job {
@@ -1871,6 +2087,7 @@ mod cli {
 
     #[cfg(test)]
     mod tests {
+        use super::super::{OpenCodeInstall, find_opencode_executable};
         use super::*;
 
         fn discovery_root(label: &str) -> PathBuf {
@@ -1920,9 +2137,9 @@ mod cli {
             write_fake_executable(&new);
             let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
 
-            let found = find_opencode_executable(None, Some(&path), None, Some(&root));
+            let found = find_opencode_executable(None, Some(&path), None, Some(&root), |_| true);
 
-            assert_eq!(found, Some(new));
+            assert_eq!(found, OpenCodeInstall::Ready(new));
             std::fs::remove_dir_all(root).unwrap();
         }
 
@@ -1935,20 +2152,22 @@ mod cli {
             write_fake_executable(&real);
             let path = std::env::join_paths([root.join("bin")]).unwrap();
 
+            let find = |is_v2: bool| {
+                find_opencode_executable(None, Some(&path), None, Some(&root), |_| is_v2)
+            };
             // The real npm-installed binary beats the shim exe alongside it.
-            let found = find_opencode_executable(None, Some(&path), None, Some(&root));
-            assert_eq!(found, Some(real.clone()));
+            assert_eq!(find(true), OpenCodeInstall::Ready(real.clone()));
+            assert_eq!(find(false), OpenCodeInstall::V1Only);
 
             std::fs::remove_file(&real).unwrap();
-            let found = find_opencode_executable(None, Some(&path), None, Some(&root));
-            assert_eq!(found, Some(shim));
+            assert_eq!(find(true), OpenCodeInstall::Ready(shim));
 
             std::fs::remove_dir_all(root).unwrap();
         }
 
         #[test]
         fn cancelled_generation_process_is_killed_promptly() {
-            let mut command = Command::new("cmd");
+            let mut command = crate::background_process::command("cmd");
             command.args(["/C", "ping -n 6 127.0.0.1 > NUL"]);
             let started = Instant::now();
 
@@ -1967,7 +2186,7 @@ mod cli {
 
         #[test]
         fn descendant_holding_output_cannot_outlive_the_deadline() {
-            let mut command = Command::new("cmd");
+            let mut command = crate::background_process::command("cmd");
             command.args(["/C", "ping -n 6 127.0.0.1"]);
             let started = Instant::now();
 
@@ -2030,6 +2249,27 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, "#!/bin/sh\n").unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Accepts one connection, failing instead of hanging when the client
+    /// under test never connects.
+    #[cfg(not(target_os = "windows"))]
+    fn accept_within(listener: &std::net::TcpListener) -> std::net::TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    return stream;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "the client never connected");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
     }
 
     /// Reads one authenticated request and returns its headers and body.
@@ -2097,9 +2337,10 @@ mod tests {
                 Some(OsStr::new("/usr/bin:/bin")),
                 Some(&root),
                 Some(&root),
+                |_| unreachable!("opencode2 is never probed"),
             );
 
-            assert_eq!(found, Some(executable));
+            assert_eq!(found, OpenCodeInstall::Ready(executable));
             std::fs::remove_dir_all(&root).unwrap();
         }
     }
@@ -2154,7 +2395,7 @@ mod tests {
         assert!(models.len() > 256 * 1024);
         let server = thread::spawn(move || {
             for (path, response) in [("/api/model", models), ("/api/model/default", default)] {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = accept_within(&listener);
                 stream
                     .set_write_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -2199,9 +2440,10 @@ mod tests {
             None,
             None,
             Some(current),
+            |_| unreachable!("the override is never probed"),
         );
 
-        assert_eq!(found, Some(current.join("bin/opencode2")));
+        assert_eq!(found, OpenCodeInstall::Ready(current.join("bin/opencode2")));
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -2219,19 +2461,23 @@ mod tests {
             fake_executable(executable);
         }
         let path = root.join("path");
-        let find =
-            |configured, path| find_opencode_executable(configured, path, Some(&root), Some(&root));
+        let find = |configured, path| {
+            find_opencode_executable(configured, path, Some(&root), Some(&root), |_| true)
+        };
         assert_eq!(
             find(Some("override/opencode2".into()), Some(path.as_os_str())),
-            Some(root.join("override/opencode2"))
+            OpenCodeInstall::Ready(root.join("override/opencode2"))
         );
-        assert_eq!(find(None, Some(path.as_os_str())), Some(path_executable));
-        assert_eq!(find(None, None), Some(official.clone()));
+        assert_eq!(
+            find(None, Some(path.as_os_str())),
+            OpenCodeInstall::Ready(path_executable)
+        );
+        assert_eq!(find(None, None), OpenCodeInstall::Ready(official.clone()));
         fs::set_permissions(&official, fs::Permissions::from_mode(0o644)).unwrap();
-        assert_eq!(find(None, None), Some(fallback.clone()));
+        assert_eq!(find(None, None), OpenCodeInstall::Ready(fallback.clone()));
         fs::remove_file(&official).unwrap();
         fs::create_dir(&official).unwrap();
-        assert_eq!(find(None, None), Some(fallback));
+        assert_eq!(find(None, None), OpenCodeInstall::Ready(fallback));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2246,10 +2492,75 @@ mod tests {
         let executable = root.join(".nvm/versions/node/v24.4.1/bin/opencode2");
         fake_executable(&executable);
 
-        let found = find_opencode_executable(None, None, Some(&root), Some(&root));
+        let found = find_opencode_executable(None, None, Some(&root), Some(&root), |_| true);
 
-        assert_eq!(found, Some(executable));
+        assert_eq!(found, OpenCodeInstall::Ready(executable));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An `opencode` answering `--version` with `version`, and `api get
+    /// /api/info` only when `serves_api`.
+    #[cfg(not(target_os = "windows"))]
+    fn fake_opencode(path: &Path, version: &str, serves_api: bool) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let api = if serves_api {
+            "echo '{\"pid\":42,\"version\":\"fixture\"}'"
+        } else {
+            "echo 'Commands:' >&2; exit 1"
+        };
+        fs::write(
+            path,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in\n'--version') echo '{version}' ;;\n'api get /api/info') {api} ;;\n*) exit 2 ;;\nesac\n"
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn opencode2_is_preferred_and_only_a_v2_opencode_is_accepted() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-generation-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let first = root.join("first/opencode");
+        let second = root.join("second/opencode");
+        let shim = root.join(".opencode/bin/opencode2");
+        let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
+        let find = || {
+            find_opencode_executable(None, Some(&path), Some(&root), Some(&root), opencode_is_v2)
+        };
+
+        fake_opencode(&first, "1.19.5", false);
+        assert_eq!(find(), OpenCodeInstall::V1Only);
+        // A V1 snapshot build prints a prerelease version and rejects `api`.
+        fake_opencode(&second, "0.0.0-dev-202610280534", false);
+        assert_eq!(find(), OpenCodeInstall::V1Only);
+
+        fake_opencode(&second, "opencode v2.2.0", false);
+        assert_eq!(find(), OpenCodeInstall::Ready(second.clone()));
+        fake_opencode(&second, "opencode v0.0.0-dev-88", true);
+        assert_eq!(find(), OpenCodeInstall::Ready(second.clone()));
+
+        // Any `opencode2` beats an `opencode` earlier in the search.
+        fake_executable(&shim);
+        assert_eq!(find(), OpenCodeInstall::Ready(shim));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn release_versions_tell_the_generations_apart() {
+        assert_eq!(release_is_v2("opencode v2.2.0\n"), Some(true));
+        assert_eq!(release_is_v2("2.10.1"), Some(true));
+        assert_eq!(release_is_v2("1.19.5\n"), Some(false));
+        assert_eq!(release_is_v2("0.15.31"), Some(false));
+        assert_eq!(release_is_v2("opencode v0.0.0-dev-88"), None);
+        assert_eq!(release_is_v2("0.0.0-snapshot-pnpm-202511302105"), None);
+        assert_eq!(release_is_v2("local"), None);
+        assert_eq!(release_is_v2(""), None);
     }
 
     #[test]
@@ -2437,10 +2748,36 @@ mod tests {
             &profile,
             "This is the current transcript.",
             &context("Slack", None),
+            &[],
         );
         assert!(prompt.contains("Rewrite freely."));
         assert!(prompt.contains("Foreground application: Slack"));
         assert!(prompt.contains("This is the current transcript."));
+        assert!(!prompt.contains("Vocabulary"));
+    }
+
+    #[test]
+    fn prompt_names_vocabulary_terms_and_their_mistranscriptions() {
+        let vocabulary = [
+            VocabularyEntry {
+                term: "abattoir".into(),
+                sounds_like: vec!["avatar".into(), "a bat war".into()],
+            },
+            VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: vec![],
+            },
+        ];
+        let prompt = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "Ship the avatar change.",
+            &context("Slack", None),
+            &vocabulary,
+        );
+        assert!(prompt.contains(
+            "Vocabulary (spell these exactly when the speaker means them): abattoir (may be \
+             transcribed as avatar, a bat war); Rune\n\nForeground application: Slack"
+        ));
     }
 
     #[test]
@@ -2591,7 +2928,22 @@ mod tests {
         let executable = root.join("opencode2");
         const INFO: &str = "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'";
         const MISSING: &str = "echo 'HTTP 404 Not Found' >&2; exit 1";
+        const SKEWED_MISSING: &str = "echo 'Warning: Server at http://127.0.0.1:4096 has version a; this client is b. Continuing anyway.' >&2; echo 'HTTP 404 Not Found' >&2; echo >&2; exit 1";
         for (info, status, health, succeeds, expected_calls) in [
+            (
+                SKEWED_MISSING,
+                SKEWED_MISSING,
+                INFO,
+                true,
+                "api get /api/info\napi get /api/status\napi get /api/health\ndebug paths\n",
+            ),
+            (
+                "echo 'HTTP 404 Not Found' >&2; echo 'private trailing diagnostic' >&2; exit 1",
+                INFO,
+                INFO,
+                false,
+                "api get /api/info\n",
+            ),
             (
                 INFO,
                 MISSING,
@@ -2666,6 +3018,7 @@ mod tests {
             let result = discover_opencode_service_with(
                 &executable,
                 &root,
+                None,
                 Duration::from_secs(20),
                 &AtomicBool::new(false),
             );
@@ -2690,6 +3043,83 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// A wrapper like Kit's Studio guard appends `--server` to every
+    /// subcommand, so `debug paths` prints help and exits 1, and it points the
+    /// CLI's own state elsewhere while the service registers in the default one.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn service_discovery_finds_the_default_registration_behind_a_wrapper() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-service-wrapper-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let reported = root.join("wrapper-state");
+        let default_state = root.join("default-state");
+        fs::create_dir_all(&reported).unwrap();
+        fs::create_dir_all(&default_state).unwrap();
+        let registration = default_state.join("service.json");
+        fs::write(
+            &registration,
+            br#"{"id":"x","version":"fixture-version","url":"http://127.0.0.1:1234","pid":42,"password":"registered-password"}"#,
+        )
+        .unwrap();
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
+        let executable = root.join("opencode2");
+        const INFO: &str = "echo 'Warning: Server at http://127.0.0.1:4096 has version a; this client is b. Continuing anyway.' >&2; printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\",\"urls\":[\"http://127.0.0.1:4096\"]}'";
+        let guard_paths = "printf 'DESCRIPTION\\n  Show global paths (data, config, cache, state)\\n'; printf '\\nERROR\\n  Unrecognized flag: --server in command opencode debug paths\\n' >&2; exit 1";
+        let reporting_paths = format!("printf 'state      %s\\n' '{}'", reported.display());
+        for (paths, default, succeeds) in [
+            (guard_paths, Some(default_state.as_path()), true),
+            (
+                reporting_paths.as_str(),
+                Some(default_state.as_path()),
+                true,
+            ),
+            (guard_paths, None, false),
+            (reporting_paths.as_str(), None, false),
+        ] {
+            write_script(
+                &executable,
+                &format!(
+                    "#!/bin/sh\ncase \"$*\" in\n'api get /api/info') {INFO} ;;\n'debug paths') {paths} ;;\n*) exit 2 ;;\nesac\n"
+                ),
+            );
+            let result = discover_opencode_service_with(
+                &executable,
+                &root,
+                default,
+                Duration::from_secs(20),
+                &AtomicBool::new(false),
+            );
+            if succeeds {
+                assert_eq!(
+                    result.unwrap(),
+                    ("http://127.0.0.1:1234".into(), "registered-password".into())
+                );
+            } else {
+                let error = format!("{:#}", result.unwrap_err());
+                assert!(!error.contains("registered-password"), "{error}");
+            }
+        }
+        // A registration for another server process never counts.
+        fs::write(
+            &registration,
+            br#"{"version":"fixture-version","url":"http://127.0.0.1:1234","pid":43,"password":"stale-password"}"#,
+        )
+        .unwrap();
+        let error = discover_opencode_service_with(
+            &executable,
+            &root,
+            Some(&default_state),
+            Duration::from_secs(20),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(!format!("{error:#}").contains("stale-password"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn service_discovery_fallback_shares_deadline_and_observes_cancellation() {
@@ -2707,6 +3137,7 @@ mod tests {
         let error = discover_opencode_service_with(
             &executable,
             &root,
+            None,
             // Leaves the health probe ~4 s to start on a busy machine.
             Duration::from_secs(6),
             &AtomicBool::new(false),
@@ -2721,6 +3152,7 @@ mod tests {
         let error = discover_opencode_service_with(
             &executable,
             &root,
+            None,
             Duration::from_secs(2),
             &AtomicBool::new(true),
         )
@@ -2791,7 +3223,7 @@ mod tests {
             routes
                 .into_iter()
                 .map(|(path, status, response)| {
-                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut stream = accept_within(&listener);
                     let (_, body) = receive_request(&mut stream, &format!("POST {path}"));
                     write!(
                         stream,
@@ -2967,7 +3399,7 @@ mod tests {
             let cancelled = std::sync::Arc::new(AtomicBool::new(false));
             let flag = cancelled.clone();
             let server = thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = accept_within(&listener);
                 receive_request(&mut stream, "POST /api/generate");
                 flag.store(cancel, Ordering::Release);
                 let mut byte = [0];

@@ -1,17 +1,28 @@
-# HEX Agent Guide
+# Hex Agent Guide
 
 ## Private Kit Tool
 
-Commit and push straight to `main`, no PRs. Merge any open PR without asking.
-After pushing, update the installed copy. See `~/code/control/AGENTS.md`.
+`dev` and `production` take changes only through pull requests (Dax's
+ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
+`dev`, and merge it yourself once its checks pass; merge any open PR without
+asking. After merging, update the installed copy. See
+`~/code/control/AGENTS.md`. `production` holds what was released and moves
+only by a fast-forward from `dev` when Kit releases; never commit to it.
+There is no `main`.
 
-`main` is canonical and contains the Rune front end on every OS; GPUI is
+Any change to what the window draws regenerates the goldens in the same PR:
+run `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin hex rune_ui`
+on Linux (the golden tests only run there; from a Mac, dispatch
+`check-linux.yml` on the branch and take its `golden-actual` artifact),
+look at every changed image, and commit them with the change.
+
+`dev` is canonical and contains the Rune front end on every OS; GPUI is
 removed. The `rune-ui` integration branch is merged and kept only for history:
-branch from and push to `main`.
+branch from and push to `dev`.
 
 ## Purpose
 
-Build HEX as a local, observable macOS voice appliance with explicit Linux
+Build Hex as a local, observable macOS voice appliance with explicit Linux
 X11, wlroots-compatible Wayland, and Windows (x64 and ARM64) beta contracts. Keep the engine native Rust
 and keep consequential behavior explicit. Protected commands and typed captures
 remain compiled Rust; ordinary literal commands live in the explicit TypeScript user config. User-facing
@@ -24,7 +35,9 @@ existing settings without an explicit enabled flag. Meetings (beta) is a third
 persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
 Meetings pane, menu-bar recording controls, and meeting paste in release builds.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
-keeps the meeting CLI, Activity, and HUD Lab debug-only.
+keeps the meeting CLI, Activity, and HUD Lab debug-only. One exception: while
+the `dot-scope` experiment is on, release builds show HUD Lab with only its
+Dot scope section.
 
 ## Feature Map
 
@@ -52,8 +65,10 @@ substitute for source inspection or a second roadmap.
 
 ## Architecture
 
-- `audio`: `cpal` device enumeration and timestamped mono float PCM delivery,
-  live selection, and bounded stream recovery.
+- `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
+  microphone, else the system default, never Hex Microphone), the CoreAudio
+  default-input and device-list listeners, timestamped mono float PCM
+  delivery, live selection, and bounded stream recovery.
 - `moonshine`, `moonshine_lab`: the only Moonshine C adapter, the streaming
   recognizer, and the debug interactive/batch command-fixture evaluator.
 - `suppression`: the macOS event taps, shortcut suppression, and the
@@ -65,16 +80,20 @@ substitute for source inspection or a second roadmap.
 - `pause_segmenter`: pure 16 kHz pause detection that cuts meeting audio into
   rolling transcription chunks.
 - `dictation_audio`: the authoritative microphone timeline, lazy stream
-  lifecycle, recording owner, exact shortcut boundaries, recovery handoff, and
-  disposable bounded command audio projection.
+  lifecycle, recording owner, exact shortcut boundaries, recovery handoff,
+  disposable bounded command audio projection, and the bounded capture sink
+  (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
+  a Scrawl capture.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior.
+  output muting, and supported media-player pause/resume behavior, each held
+  from the first dictation or capture session that wants it to the last.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
   model catalog, Voice Action generation, and the transformation stage. Every
-  OS discovers the `opencode2` beta executable and links missing installs to
-  `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
+  OS discovers the OpenCode V2 CLI (any `opencode2` first, else an `opencode`
+  that proves to be V2; a V1 `opencode` is never run) and links missing installs
+  to `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
   or starts the managed service, and generation uses the matching owner-only
   service registration and authenticated loopback HTTP through the system curl;
   request bodies and credentials use stdin, never argv or new temporary files.
@@ -82,7 +101,9 @@ substitute for source inspection or a second roadmap.
   object.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus the dictation
   worker that hands clips to the transcription engine and runs bounded,
-  ordered processing, output, paste, last-result, and meeting-delta work.
+  ordered processing, output, paste, last-result, and meeting-delta work, plus
+  `transcribe_with_words`, the capture path's word-timestamped foreground
+  requests on the same engine.
 - `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
   checks, asset reservation, and batch transcription.
 - `transcription`, `transcription_benchmark`: runtime selection, transactional
@@ -92,6 +113,9 @@ substitute for source inspection or a second roadmap.
   `local_transcriber`; it recreates the native session around each run (and
   each live stream) so inference scratch stays bounded, and owns chunked
   long-audio transcription.
+- `speech_detector`: the optional Silero voice activity detector, loaded once on
+  the CPU and downloaded in the background, that keeps speechless dictation
+  captures and meeting chunks away from the transcription models.
 - `local_transcriber`: the Linux and Windows GGUF loader, prewarm, whole-clip
   transcription, and stream entry point.
 - `transcription_engine`: the thread that owns the loaded model on every OS and
@@ -111,9 +135,24 @@ substitute for source inspection or a second roadmap.
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
   service loads its own, released after a long clip when the engine holds it.
+- `transcription_stream`: live `/streams` transcription of another app's
+  pushed audio on the engine's loaded model: pause-cut windows fed through
+  yielding engine streams that any dictation request closes, a bounded
+  backlog held while dictation is busy, offline fallback windows, the lease,
+  and one live stream at a time.
 - `local_api`: authenticated loopback discovery or direct-child endpoint
   handoff, bounded HTTP parsing, model preparation progress, and raw
-  transcription routes.
+  transcription routes, the `/streams` routes (contract:
+  [`docs/streams.md`](docs/streams.md)), plus the always-on authenticated
+  `POST /control`, and `GET /profile/vitals` (process footprint and CPU from
+  Rune's `procwatch`, sampled by `macos_rune`; debug builds also count the heap
+  and report the `speech.model_weights` gauge from `parakeet`).
+- `control`: the release `hex` control surface: the versioned
+  `ControlRequest`/`ControlReply` protocol, the settings registry behind
+  `hex settings` (one dotted key per persisted setting, with the window's
+  rules), and the CLI client (`control::cli`). `macos_rune::control` is the
+  one host that carries the commands out on macOS; Linux and Windows report
+  "not supported on this OS" for now. Contract: `docs/cli.md`.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `developer_control`: the typed debug-only command/reply protocol the local
@@ -132,15 +171,21 @@ substitute for source inspection or a second roadmap.
 - `commands`: pure contextual resolution plus bounded asynchronous action
   execution (`open` and CoreGraphics keystrokes on macOS; shell-opened URLs,
   paths, and applications on Windows).
-- `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
-  managed SDK provisioning (built `dist` on macOS, the embedded TypeScript
-  `src` on Windows and Linux), the watch-reloaded user command and
-  transformation host, bounded invocation dispatch, and status snapshots.
-  macOS, Windows, and Linux share it; Windows and Linux host transformations
-  only.
+- `personal_commands`: the user's `hex.config.ts` (or `.js`) in
+  `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
+  worker thread: TypeScript erased to same-position JavaScript by
+  `personal_commands/typescript` (oxc's parser), the `@hex/commands` module
+  and managed `hex.d.ts` typings, the watch-reloaded registration compiled
+  into the command registry, handler calls whose returned actions run on
+  Hex's native executor, transformation calls, per-call time and runtime
+  memory limits, status snapshots, and `hex commands init|check`. macOS,
+  Windows, and Linux share it; Windows and Linux use transformations only.
+- `background_process`: the one constructor for child processes Hex starts for
+  its own work (OpenCode CLI, curl, PowerShell); on Windows they
+  never open a console window.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
-- `config`: compiled commands, preferred input devices, and dictation profiles.
+- `config`: compiled commands and dictation profiles.
 - `context`: the foreground context snapshot and selectors shared by commands
   and modes, plus native macOS capture. Browser host is the domain concept;
   Brave AppleScript is the first macOS adapter and `windows_context` reads any
@@ -152,70 +197,71 @@ substitute for source inspection or a second roadmap.
   runtime projection for commands, hotkeys, microphone and transcription
   selection, recording behavior, processing, sound volume, indicator position,
   interface language, and Dock policy. It records one-time changes in
-  `migrations` and migrates the Windows and Linux beta files once.
+  `migrations`.
 - `login_item`: the native `SMAppService.mainAppService` adapter and its worker
   thread. macOS owns registration state; it is deliberately not duplicated in
   `settings.json`.
-- `app_paths`: the Application Support owner for runtime logs and shared state,
-  including the one-time macOS `voice-control` to `hex` folder rename, which runs
-  in `main` before logging, the instance lock, or any file in the folder opens.
+- `app_paths`: the Application Support owner (`hex` on every OS) for runtime
+  logs and shared state.
 - `onboarding`, `permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
-- `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `hex_microphone`, `voice_filter`: the experimental macOS CoreAudio virtual
   microphone (`Hex Microphone`), lock-free capture-to-sink ring buffer,
   real-time voice-filter DSP presets, and the offline WAV renderer behind
   `hex dev voice-filter render`.
-- `linux`, `linux_app`, `linux_dictation`, `linux_paste`, `linux_migration`:
+- `linux`, `linux_app`, `linux_dictation`, `linux_paste`:
   the Linux beta CLI (including the `hex dictation`, `hex voice-action`, and
   `hex paste-last` keybinding commands and launch forwarding), the one Linux
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last and Voice Action,
-  paste and primary-selection reads, and the one-time `linux-settings.json`
-  migration.
+  and paste and primary-selection reads.
 - `linux_input`: the one shortcut state machine (hold, double-tap lock, toggle,
   double-tap only, Escape, Paste Last, Voice Action, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
   or, without the portal, the `hex` commands alone.
-- `linux_portal`: the GlobalShortcuts portal client on a private bus
+- `linux_portal`: the GlobalShortcuts portal client on a private zbus
   connection: `Register("hex")`, one session for Hex's shortcuts, a second
   session binding Escape only while recording, granted-trigger descriptions,
   and session-closed reporting.
-- `linux_file_chooser`: one blocking `OpenFile` call on the FileChooser
-  portal over a private bus connection, for the Modes picker's
-  "Choose a file…".
 - `linux_context`: the frontmost X11 application for modes; Wayland has none.
 - `linux_audio_control`: While-dictating mute through `wpctl`/`pactl` and
-  MPRIS pause over D-Bus, restoring only what it changed.
+  MPRIS pause over D-Bus (zbus), restoring only what it changed.
 - `linux_session`: display-backend selection matching winit's (Rune's)
   nonempty `WAYLAND_DISPLAY` rule, independent of persisted preferences.
 - `linux_service`: the single-instance lock and owner-only, same-user Unix
   socket that forwards `Activate` (with the activation token), shortcut
   commands, `Status`, and `Quit` to the one Hex process, plus the per-user
   systemd lifecycle (`Type=notify` readiness, `session.env`, start/restart).
-- `linux_rune_hud`: the focus-free, click-through recording/processing HUD as
-  a Rune overlay in the Hex process: layer-shell on Wayland, override-redirect
-  on X11, at the top or bottom. The listener reports through `LinuxIndicator`
-  and never waits on it; it shows once the window's app runs, whether or not
-  the window is open. Linux has no tray icon.
-- `self_update`: the signed-feed core the Linux and Windows updaters share:
-  ed25519 feed verification, per-target manifest validation, bounded HTTPS
-  downloads, and size and checksum verification.
-- `linux_updater`: signed direct-install updates, atomic version activation,
-  and restart handoff for user-local Linux installs.
+- `linux_rune_hud`: the Linux side of `rune_hud`: `LinuxIndicator` turns the
+  listener's capture, meter, and pending-output reports into HUD events and
+  never waits on the HUD; it shows once the window's app runs, whether or not
+  the window is open (layer-shell on Wayland, override-redirect on X11).
+- `rune_hud`: the dictation HUD on every OS: a click-through Rune overlay
+  whose compositor steps `dictation_indicator`'s model on Rune's frame clock
+  (the display's refresh) and draws the capsule or Dot scope on the GPU with
+  `rune_hud.wgsl`. `rune_hud/macos` places it on the pointer's screen
+  through `hud_placement` (below the menu bar, in it, or out of the notch);
+  Linux and Windows place it at the top or bottom edge.
+  `rune_hud_frames` renders a fixed dictation through the shaders offscreen.
+- `linux_tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
+  with a dbusmenu: Show Hex, Quit Hex). It registers whenever a tray host
+  (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
+- `updater`: the in-app updater on every OS, a client of the Anomaly release
+  service (`docs/plans/release-service.md`). `updater/protocol` is the
+  protocol's strict SemVer, lenient manifest parsing, and client rules (the
+  service's shared test vectors in `tests/fixtures/release-protocol`);
+  `updater/transport` is curl with `If-None-Match` and resumable,
+  size- and SHA-256-checked downloads; `updater/{linux,macos,windows}` detect
+  the install method, verify (OS code signature on macOS and Windows), stage,
+  and restart into an update.
 - `windows`, `windows_app`, `windows_rune`, `windows_dictation`,
-  `windows_input`, `windows_paste`, `windows_migration`, `windows_rune_hud`,
-  `desktop_indicator_model`, `desktop_indicator_shader`, `windows_updater`,
-  `windows_context`, `windows_audio_control`, `windows_login_item`: the Windows
+  `windows_input`, `windows_paste`, `windows_context`, `windows_audio_control`, `windows_login_item`: the Windows
   beta CLI, the runtime host (`WindowsDesktopHost`: listener, model
   preparation, OpenCode catalog, transformations, updater) and single-instance
   claim, the tray app on `rune::App` (tray, window icon, and runtime thread;
   `rune_ui/windows_host.rs` is the window's host), the WASAPI dictation loop,
-  low-level keyboard hook, clipboard paste, the one-time
-  `windows-settings.json` migration, the HUD (`desktop_indicator_model` springs
-  and `desktop_indicator_shader` CPU fragment shader drawn into a Rune
-  overlay), signed self-update, UI Automation context, audio ducking, and the
+  low-level keyboard hook, clipboard paste, UI Automation context, audio ducking, and the
   login item.
 - `dictation_modes`: the mode runtime the Windows and Linux listeners share:
   mode selection by application and website, then global replacements, mode
@@ -239,11 +285,14 @@ substitute for source inspection or a second roadmap.
   snapshot-and-action types shared by the Linux and Windows hosts, the window,
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
-  `rune-kit` and the OpenCode theme: Settings, Modes with mode-owned
-  corrections and processing, Voice Action, History, opt-in Commands, Meetings,
-  experimental Fun, developer-only Activity and HUD Lab, the transcription
-  picker, the onboarding tour, the macOS meeting capsules, and the `--snap`
-  fixture scenes. `platform::Capabilities` decides which panes and rows exist;
+  `rune-kit` and the OpenCode theme: General, Modes with mode-owned
+  corrections and processing, Voice Action, opt-in Commands, Meetings (each
+  feature owns its settings), History, and under Experiments the Voice Filter
+  and developer-only HUD Lab (release too while `dot-scope` is on, Dot scope
+  only) and Activity, the transcription
+  picker, the onboarding tour, the macOS meeting capsules, the `--snap`
+  fixture scenes, and the macOS `hex://story/…` playground links
+  (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist;
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to
   each OS's host. Keep shared UI in the pane modules and only OS behavior in
   the hosts.
@@ -254,14 +303,16 @@ substitute for source inspection or a second roadmap.
   Dictation, meeting recording state and Stop & Transcribe, update checks, and
   orderly application shutdown.
 - `macos_rune`: the macOS app as one menu-bar process on
-  `rune::App`: the status item, Sparkle, main menu, Dock reopen Apple event,
+  `rune::App`: the status item, the updater, main menu, Dock reopen Apple event,
   and HUD on the main AppKit loop, and a runtime thread for model
   preparation and the window's state. `rune_ui/macos_host.rs` is the
   window's host and the panes' `NativeHost`.
-- `dictation_indicator`, `spring`: the click-through native Metal/AppKit
-  capture and processing HUD (an `NSPanel` driven from `macos_rune`'s main-loop
-  timer), with `spring` for its frame-rate-independent springs and Reduce
-  Motion.
+- `hud_placement`: pure geometry for where a HUD sits on its screen (below
+  the menu bar, in it, or as an island grown out of the notch), shared by
+  the dictation HUD and, later, the capture capsule.
+- `dictation_indicator`, `spring`: the HUD's events, phases, jobs, springs,
+  and Dot scope stepping, the same on every OS and drawn by `rune_hud`;
+  `spring` holds the frame-rate-independent springs.
 - `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
   artifacts, Screen Recording permission checks, final local-model publication,
   the user-facing Markdown copy, and recovery.
@@ -279,6 +330,11 @@ substitute for source inspection or a second roadmap.
   post-publication call over a bounded transcript excerpt for the final title
   and a two-sentence summary, with deadline, manifest storage, and
   marker-delimited in-place Markdown updates.
+- `meeting_chapters`: live chapters (experiment `live-chapters`): one
+  on-device pass per ~3 minutes of rolling transcript while recording, with
+  Rust deciding topic changes, the per-boundary fix-up after publication,
+  chapter-extended titles that never touch a user-typed one, and section
+  Markdown for Copy section.
 - `meeting_query`: read-only meeting queries for agents (`meeting::query`):
   lock-aware listing, in-memory BM25 full-text search with stemming and fuzzy
   matching, transcript paging, stored notes, and Markdown rendering. It never
@@ -290,11 +346,72 @@ substitute for source inspection or a second roadmap.
 - `microphone_activity`: permission-light CoreAudio process input observation.
 - `meeting_detection`: pure provider classification, debounce, per-call snooze,
   and call-ended presence.
+- `calendar`: calendar meetings on every OS as a pure model (which events
+  count as meetings, call-link parsing, the wall-clock reminder scheduler),
+  plus the macOS EventKit bridge (`calendar.swift`): access, the change
+  counter, bounded event reads, and the Settings snapshot.
 - `meeting_watcher`: the meeting controller loop: call detection, offers,
-  recording workers, call-ended presence, notes, and the menu-bar meeting
-  state. The capsules that show its events are `rune_ui::meeting_capsules`.
+  calendar reminders, recording workers, call-ended presence, notes, and the
+  menu-bar meeting state. The capsules that show its events are
+  `rune_ui::meeting_capsules`.
+- `file_dialog`: the one native open dialog for a file or folder (Modes'
+  "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
+  its own thread. Answers on a channel; cancel and a dialog that never opened
+  read as nothing chosen.
+- `experiments`: the compiled list of unsupported experiments and the
+  launch snapshot of `HEX_EXPERIMENTS` and `~/.config/hex/experiments`
+  behind `experiments::enabled` and `hex experiments`. `capture` exists
+  on macOS and Linux, not Windows.
+- `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
+  `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
+  kept out of the workspace; `scripts/check` names it on macOS) hosted in
+  Hex for the `capture` experiment (`docs/plans/capture-in-hex.md`),
+  compiled as `cfg(hex_capture)` into every macOS and Linux build
+  (`scripts/build-app.sh` bundles and signs `scrawl-helper` beside `hex`).
+  Everything here is shared by both OSes; the engine's own platform
+  adapter (`crates/capture/src/capture/{macos,linux}.rs`) is the seam for
+  the screen, window and area source, cursor, permission flow, and encoder.
+  The Linux adapter (`crates/capture/src/linux/`) asks the ScreenCast
+  portal over `zbus` (a screen keeps the portal's restore token at
+  `<support>/screencast-token`; a window is picked each time), reads the
+  PipeWire stream with `libpipewire-0.3` loaded at run time, imports each
+  frame as a linear DMA-BUF into VA-API (`libva`, also loaded at run time),
+  scales and encodes H.264 on the GPU with Hex-written SPS/PPS/slice
+  headers, and muxes and reads movies with the `ffmpeg`/`ffprobe`
+  executables; without VA-API it copies frames and encodes with x264.
+  Host-side, Linux differs only in where the audio comes from
+  (`capture_host::ListenerTimeline`, fed by `linux_dictation`'s
+  microphone), "While dictating" (`Environment`: an `AudioSuppressor` per
+  capture), words (`LocalTranscriber::transcribe_words` as one foreground
+  job on the listener's engine), the clipboard and paste (`linux_paste`),
+  and the shortcut (`linux_input`'s `Shortcut::Capture`). Hex's `Host`,
+  `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
+  listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
+  its 16 kHz gap-padded timeline handed to the engine as `AudioIn::External`,
+  the tap's pointer input forwarded to `Capture::input()`, Scrawl.app
+  coexistence, the retention thread, and the `CaptureSnapshot` every view
+  reads (`capture_host::snapshot`/`watch`, published on each change, so a
+  capsule never reaches into the host), with `last.route` from
+  `capture_host::routing` (Scrawl's `crates/router` in-process: look, decide,
+  undo window, send, Undo and Redirect) and `phone` from a `capture-phone`
+  look for a cabled iPhone. The engine records the screen on macOS through
+  `crates/capture-core` (`Recorder`, one source per target, also outside the
+  workspace), which writes `recording.mp4` and its `capture.json` manifest
+  and changes what a recording leaves out with `Recording::set_exclusions`.
+  `capture_host::library` reads the captures
+  folder for `hex capture list|show|send|route`. `rune_ui/scrawl.rs` is its pane
+  (Experiments › Scrawl) and `CaptureSettings` its `capture.*` settings;
+  `hex capture` is `control::cli::capture` (macOS through the running app;
+  Linux reads the folder itself and hands start/stop/cancel to the
+  listener over `linux_service`).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
+- `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
+  and `hex restart`, Ctrl-C, and AppKit's terminate) stops and joins Hex's
+  workers, bounded by a 5 s deadline, then calls `_exit`, so C++ static
+  destructors (ggml's Metal device, Moonshine's transcriber map) never run
+  under live threads. A restart
+  schedules its relaunch first; the new copy waits for the old pid to exit.
 - `feedback`: bounded volume-controlled mode, capture, cancellation, and
   failure tones.
 
@@ -307,8 +424,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   executor unless the persisted command opt-in is enabled. Enabling commands
   loads Moonshine off the audio-consumption loop; disabling them unloads the
   recognizer and executor.
-- On a new Mac, release dictation starts only after Microphone, Input Monitoring,
-  Accessibility, and the selected dictation model are ready. Opt-in command
+- On a new Mac, release dictation starts only after Microphone, Accessibility,
+  and the selected dictation model are ready. Hex never asks for Input
+  Monitoring: Accessibility also grants the listen-event access its shortcut
+  taps need (measured on macOS 26 and 27). Opt-in command
   recognition additionally requires Moonshine, but its background preparation or
   failure must never block hotkey dictation. Failed preparation exposes explicit
   retry and disable actions without silently changing the command opt-in.
@@ -323,6 +442,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
   Uncached headless lookups retain live-layout resolution, with all native
   lookup and snapshot construction serialized by the same lock.
+- macOS launch order: `main` calls `rune::prewarm_gpu()` right after parsing
+  the command line, only when it will run the app (`hex app` without Rune's
+  headless flags, or the bundled executable with no command), never for a CLI
+  command. A hidden or login launch prewarms too and Rune drops it: whether
+  the window opens depends on settings, which load after the keyboard layout.
+  `macos_rune` observes AppKit's will-terminate before the loop runs, so a
+  terminate at any point drains workers. It sets up the status item, Dock
+  policy, HUD, main menu, reopen handler, and pump timer once, after the
+  window's first frame (`App::on_ready` queues it as a frameless `update_if`),
+  or at most 1 s after the loop starts if no frame comes; a launch without a
+  window sets them up in the loop's first turn. Nothing the window's first
+  frame needs may wait on them.
 - Another app's global shortcut (Carbon hotkeys, such as Spaceman's Option-1)
   consumes its key before the session taps. A listen-only HID tap reports key
   presses as chord evidence only: it discards an early hold or pending gesture
@@ -332,6 +463,19 @@ CoreAudio formats, AppleScript details, or event serialization.
   no pending input, and no hold or pending gesture. A lock is repaired only when
   it tracks a held key, and it stays locked so a fresh press can still finish it.
   It emits no capture actions.
+  One exception skips the 100 ms wait: when tracked keys alone block a press of
+  the binding itself (Idle or Locked for a modifier-only binding, or Dirty for
+  any binding; never a pending gesture), the press resynchronizes and counts
+  as a fresh press (a lock stays locked, so the press finishes it) only if a
+  modifier-change event reported no modifiers after each tracked key's own
+  press (typing in between is fine), only the binding's modifiers went down
+  since, and every tracked key and every other modifier reads up in
+  combined-session state (Fn metadata as below). It fences input stamped
+  before the press, not at it, so a same-tick chord still discards, and keeps
+  the binding's key safe from an older delayed release. Fenced edges, edges
+  from before a disabled tap, and a suspension leave no modifier evidence.
+  Any other press stays ignored and logs `shortcut press ignored` with its
+  reason and key codes.
   Native `SecondaryFn` navigation metadata may be ignored only with timestamped
   modifier-change evidence that Fn is up; the full key scan and delayed-event
   fences remain required. Never strip Fn globally from shortcut matching.
@@ -346,6 +490,14 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Recording audio behavior and idle-sleep prevention begin only after the
   intentional-hold threshold. Ordinary shortcut chords must not mute output,
   pause media, or prevent sleep.
+- A modifier-only shortcut (not Globe/Fn) passes through, so once Hex owns
+  the press (hold past the threshold, Toggle start after the 40 ms chord
+  grace, lock-finishing press) it posts one marked press of unassigned key
+  code 0x44 at HID while exactly its modifiers are still down, so other
+  apps' modifier-tap hotkeys read a chord. Hex's annotated-session key tap
+  drops it, so the focused app never receives it (and never beeps). Short
+  taps, chords, and presses during voice-delimited dictation never get one,
+  and it never reaches Hex's state machines.
 - The start tone confirms the shortcut press itself, not the hold threshold: it
   is provisional, sounds after a 40 ms chord grace, and a chord, short tap,
   cancel, or Voice Action takeover retracts it (silently inside the grace, else
@@ -402,6 +554,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   fabricate a release timestamp from later physical state.
 - Escape cancels the active capture first, then the newest unfinished dictation.
   Cancelled jobs never paste, update the last result, or block later output.
+- Escape never cancels a programmatic dictation; its owner cancels through the
+  API, and the lease ends an abandoned one. While one records, Hex claims no
+  Escape at all, even with other jobs queued.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
   model and persisted selection.
@@ -413,16 +568,31 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.
-- A selected microphone switches live only while capture is idle. Opening the
-  replacement must succeed before the old stream is dropped. If the persisted
-  device is unavailable at startup, log the failure and fall back through the
-  compiled preferred-device order to the macOS default. An explicit CLI
-  `--device` remains authoritative for that listener process. A runtime stream
-  failure cancels an incomplete capture, discards stale chunks, and retries the
-  same selection with bounded backoff; it must not require a settings change or
-  process restart. An initial open failure uses the same bounded recovery without
-  stopping the listener. Cancellation does not stop warm-microphone retries;
-  enabling release-while-idle stops them once capture is idle.
+- The microphone is either System default (`microphone` unset) or one saved
+  device. System default follows the OS default input live: macOS through
+  CoreAudio listeners on the default input and the device list (their callbacks
+  only bump a counter, never on the audio callback), Windows through the
+  default-input stream's change report, and Linux at the next stream open
+  (ALSA's default resolves when it opens). Hex never captures from Hex
+  Microphone: a Hex Microphone default stands in with the built-in microphone,
+  else the first real input, logged and shown in Settings. With a MacBook's
+  lid closed (`AppleClamshellState`), the built-in microphone is off in
+  hardware but still listed, so it is passed over the same way, and with no
+  other input Hex reports why instead of recording silence. A saved microphone
+  that is missing or will not open falls back to the system default without
+  changing the setting, and Hex switches back when it returns. Any switch
+  (selection, default, device list, or lid) happens only while capture is idle,
+  after the current capture, and opening the replacement must succeed before
+  the old stream is dropped; a device that resolves to the one already open is
+  kept. An explicit CLI `--device` remains authoritative for that listener
+  process and never falls back. A runtime stream failure cancels an incomplete
+  capture (a programmatic one keeps the audio delivered before the failure for
+  its owner's `/finish`, which answers `microphone-lost` when there is none),
+  discards stale chunks, and retries with bounded backoff; it must not
+  require a settings change or process restart. An initial open failure uses
+  the same bounded recovery without stopping the listener. Cancellation does
+  not stop warm-microphone retries; enabling release-while-idle stops them once
+  capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
@@ -446,12 +616,23 @@ CoreAudio formats, AppleScript details, or event serialization.
 - OpenCode availability checks stay off the UI thread. When the app finds the
   `opencode2` executable, `opencode2 api` discovers or starts the managed service;
   the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
-  HEX never invokes
+  Hex never invokes
   `opencode2 serve --service` or owns that service's lifecycle directly. A
-  missing beta install is retried at a coarse interval so installing
-  `opencode2` while Settings is open refreshes the model catalog without
-  restarting HEX. Catalog failures require an explicit retry rather than
+  missing or V1-only install is retried at a coarse interval so installing
+  OpenCode V2 while Settings is open refreshes the model catalog without
+  restarting Hex. Catalog failures require an explicit retry rather than
   spawning clients in a tight loop.
+- Personal commands and transformations run in-process: no child process,
+  no Node or Bun, and no filesystem, network, process, or timer API in the
+  script engine; scripts import only `@hex/commands` and files inside the
+  config folder. One worker thread owns the QuickJS runtime; each handler or
+  transformation call is interrupted after 1 s and a load after 2 s, and the
+  runtime is capped at 64 MiB. A config that fails to load or compile keeps
+  the previous registry and reports its error with file, line, and column;
+  a removed config unregisters everything. Handlers only return or queue
+  actions, which Hex validates as a whole and runs in order on its native
+  executor after the handler returns. The built-in transformations stay
+  native Rust and never touch the script engine.
 - Ordinary resolver commands execute only from completed Moonshine lines.
   Voice-delimited activation and stable control phrases are deliberate exceptions.
 - Contextual commands enter the candidate set only when their predicate matches.
@@ -461,6 +642,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   tones; execution failures use an error tone.
 - Clipboard insertion is the fixed text-insertion path. Restore the previous
   clipboard only if no newer paste or external clipboard change superseded it.
+  The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
+  (read from its bundle's framework version) gets the text typed, because
+  those versions can drop a ⌘V that races their pasteboard notification.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
 - Do not persist captured audio by default. Explicit foreground meeting
@@ -476,9 +660,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   The hard caps are 10,000 entries and 16 MiB of raw + final text (oldest evicted
   first), with existing per-entry metadata and text limits. There is no archive.
 - `hex history` and `hex meetings` are read-only, release-available on macOS,
-  independent of feature opt-ins. Dispatch before folder migration, process
+  independent of feature opt-ins. Dispatch before process
   logging, the instance lock, local API, GUI, permissions, or Hex Microphone.
-  Resolve the existing data folder without renaming it. History reads one open
+  History reads one open
   file through concurrent atomic replacements, applies the saved retention at
   query time, and reports malformed files/settings without repairing them.
   JSON contracts are documented in `docs/transcript-cli.md`; incompatible
@@ -487,8 +671,8 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Meeting detection may inspect process audio metadata but must not capture
   samples. Detection offers recording, and starts it automatically only for a
   provider (website or app) the user explicitly set to Always record in
-  Settings › Meetings › Detected calls or an offer's "…"; every provider
-  defaults to Ask. An automatic start passes the same stability count and
+  Meetings › Settings › Detected calls or an offer's "…"; every provider
+  defaults to Ask. An automatic start passes the same stability time and
   snooze as an offer, so a stopped or dismissed call never restarts until its
   app leaves the microphone, and it shows as visibly as a manual recording. An
   offer that times out only closes. Release builds keep the meeting controller
@@ -496,6 +680,19 @@ CoreAudio formats, AppleScript details, or event serialization.
   detected call app leaves the microphone, offer `Keep Recording` or
   `Stop & Transcribe`; never stop automatically. An active recording stays
   visible and stoppable from the menu bar without the Settings window.
+- Calendar access is asked for only by Meetings › Settings' Connect calendar, never at
+  launch, and only with Meetings on; Meetings off means no EventKit reads and
+  no reminders. `meetings.calendar.connected` defaults off. A meeting has other
+  attendees or a call link and is not all-day, declined, free, or cancelled.
+  Reminders are Hex capsules, not notifications, shown once per occurrence at
+  the lead time (or on a wake within 5 min of the start) and withdrawn when the
+  meeting is cancelled or moved. One reminder shows at a time, never over a
+  recording. EventKit is read on the controller thread on store changes or once
+  a minute and on Settings' reader thread, bounded, with no network, never on
+  the audio or UI thread; nothing touches the store before Connect. A reminder
+  never records without a click; Always record still needs the detected call.
+  Recording or dismissing a reminder snoozes the same call's offer and
+  automatic start; without a call link, only the next call near the start.
 - Meeting transcription defers to dictation and never loads a second copy of
   the model: each chunk runs on the dictation engine's loaded model at utility
   QoS, starts only while no dictation capture (from the shortcut press) or
@@ -510,6 +707,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   (one-second audio blocks) and chunk backlog stay bounded; a source that
   falls behind skips its oldest audio, keeps going, and is rebuilt from its
   WAV after Stop. A capture gap restarts that source's chunks after the gap.
+- Quitting while a meeting records stops capture and saves its WAVs and
+  manifest (`Interrupted`, `final.pending`) without transcribing; once
+  quitting begins, no meeting work starts a chunk or loads a model. The next
+  launch with Meetings on runs the final pass on the dictation engine's model
+  (or its own after 30 s without an engine).
 - Meetings run no Moonshine. Every in-call view and copy (the Meetings pane,
   Option-Control-V, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
@@ -524,13 +726,96 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Apple Intelligence meeting notes run only after final publication, on a
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
-  untouched. Notes never rename the file and rewrite only the heading HEX wrote
+  untouched. Notes never rename the file and rewrite only the heading Hex wrote
   and the `<!-- hex:notes -->` block.
+- Captures (the `capture` experiment) are compiled into every macOS and
+  Linux build and dormant by default; Windows does not know the experiment
+  and never compiles `scrawl-capture`. `validate-app.sh` requires
+  `scrawl-helper` and the camera description in a macOS bundle. Linux
+  never links PipeWire, VA-API, or FFmpeg: the first two load when a
+  capture starts and `ffmpeg` runs as a child, so a missing one fails that
+  capture with a reason and nothing else. With the experiment
+  off, the listener builds no capture host: no engine, sink, thread, bundle
+  folder, or work, and the same holds with the experiment on while
+  `capture.enabled` (the Scrawl pane's opt-in, default off) is off. Scrawl's engine
+  records the screen, runs with `SharedResources::none()` (Hex never calls
+  `install_shared_resources`: no ingest server, ingest token, or global
+  shortcuts), logs to tracing, and writes only to the captures folder
+  (`capture.folder`, Scrawl's own by default) and Scrawl's router folders. A
+  written capture is copied to the clipboard (never pasted) and, with
+  `capture.routing`'s autoSend on, routed by Scrawl's router in Hex's process
+  (`capture_host::routing`): one `capture-look` thread per stop, one
+  `capture-route` thread with a bounded queue, a rule's send held 3 s for
+  Undo, guesses sent only when picked. Queued sends retry only while neither
+  Scrawl.app runs nor anything serves the ingest port, and never in tests.
+  `capture.routing` never holds a Jev key. A cabled iPhone records through
+  `scrawl-helper mirror --no-microphone`, narrated by the dictation timeline
+  (macOS only: Linux lists no phone, so it never shows). Hex's capture
+  shortcut (default ⌥⇧S, Ctrl+Alt+S on Linux, a key required, never
+  overlapping another binding) is, on Linux, a press from the portal or an
+  X11 grab: idle it starts, recording it stops (debounced). On macOS it is
+  a fresh press: idle, it starts once one of its modifiers comes up (Esc
+  before then records nothing); recording, it stops; with the capsule's
+  picker open, the picker records. A switch chip discards the recording
+  (no outcome) rather than retargeting it; while Scrawl.app
+  (`dev.kitlangton.scrawl`) runs, Hex registers no capture shortcut and runs
+  no retention, and only the pane's "Use Hex for captures" quits Scrawl.
+  Escape never ends a recording capture, and Hex's tap lets it through to
+  the app being recorded; discarding is the capsule's two-step ✕ (✕, then
+  Discard). Pointer
+  events and Shift reach the engine from the one session tap, only while a
+  capture records, through a bounded queue that drops rather than block; they
+  never reach the listener. Scrawl's settings are imported once, read-only;
+  Screen Recording is asked at the first capture or from the pane, never in
+  onboarding. The capsule, picker, and ink are left out of every screen
+  recording, and a capture leaves out all of Hex's chrome, unless
+  `capture.show_overlays_in_recordings` (default off; the pane's Show in
+  screen recordings or the menu bar's checkmark) is on; it applies at once
+  to open overlays and a recording capture, never recreating a window. A
+  capture never opens a
+  microphone, installs a tap of its own, or loads a model: it copies the dictation
+  timeline through a bounded sink that records a gap rather than block, so a
+  stalled capture never stalls dictation, and while a sink is open the
+  release-while-idle close waits for it. While a capture records it holds a
+  recording-environment session with the same "While dictating" policy
+  (`recording_audio_behavior`, read at each start; no capture setting),
+  released at stop, cancel, or quit; it composes with dictation's,
+  so neither restores what the other still holds. One capture engine per
+  process, one capture recording at a time. Its words are foreground requests on the
+  dictation engine's loaded model in 30 s chunks: after dictation already
+  sent, before meeting chunks, never a second model, and dictation output is
+  unchanged. A chunk waits while dictation captures or transcribes and never
+  interrupts a live stream; the engine holds it until the stream ends. `stop`
+  replies at once and the screen recording stops then (`Capture::stop`), not
+  when the capture is written. The movie finishes after the stop on the
+  core's own bounded thread (detached before its stream stops, its final
+  frame held to the stop); only the steps that read `recording.mp4` wait
+  for it, and a discarded capture's bundle is removed only once it is done.
+  One thread writes stopped captures one at a
+  time, at most two wait, and a start beyond that is refused `busy`. The
+  engine's log goes to tracing from before it is built, and its settings come
+  from Hex (`ConfigSource`), never `~/.config/scrawl` after the import. Bundles are
+  owner-only. Quitting
+  cancels a recording capture, stops transcription between chunks, and waits
+  at most 2 s for capture threads, leaving a movie still finishing behind.
 - `hex mcp` is read-only and available in release builds regardless of the
   Meetings opt-in. It dispatches before process logging, the instance lock,
   GUI, or permission setup; never writes, recovers, or indexes on disk inside
   the meetings folder; runs no model; and makes no network request. Stdout
   carries only MCP messages.
+- `hex` control commands (`status`, `quit`, `dictation`, `meetings record`,
+  `settings set`, `model use`, `window show`, …) are release-available and
+  drive only the one running Hex through the owner-only discovery file and
+  bearer-authenticated `POST /control` (64 KiB request, 1 MiB reply, 10 s
+  in-app deadline). They dispatch before process logging,
+  or the instance lock, and never launch Hex; only `hex start` and
+  `hex restart` open it. Every command is carried out by the app's own paths
+  (the menu bar's meeting request, the window's settings save followed by
+  `ReloadSettings`, the shortcut state machine), so CLI-started recordings
+  look and stop exactly like the UI's and opt-ins stay explicit settings.
+  Commands are idempotent (`changed: false`). `settings::every_persisted_setting_has_a_cli_key`
+  fails when a persisted setting has no `hex settings` key; a protocol change
+  that breaks either shape increments `CONTROL_VERSION` and `docs/cli.md`.
 - Meeting echo is judged on one timeline built from WAV sample positions, never
   from packet arrival. A `You` line or rolling entry is judged only once the
   system audio that could explain it has arrived (bounded when the system track
@@ -550,7 +835,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   `~/Documents/Hex Meetings`) without overwriting existing files; an export
   failure does not fail the meeting.
 - Meeting paste cursors advance only after successful insertion and reset when
-  HEX restarts. They track, per source, the end of the text already handed
+  Hex restarts. They track, per source, the end of the text already handed
   out, so rewrites near the live edge and the switch to the final transcript
   neither repeat nor drop turns.
 - Deleting a meeting moves its exported Markdown and then its recording folder
@@ -573,10 +858,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   parallel helper, and verify visual changes with `--snap` scenes in light and
   dark.
 - Neither Hex nor Rune (`anomalyco/rune`, public MIT) is published to
-  crates.io; never run `cargo publish`. Hex depends on `rune`, `rune-kit`, and
-  `rune-theme-opencode` at one pinned Git rev in `Cargo.toml`; every pin bump
+  crates.io; never run `cargo publish`. Hex depends on `rune`, `rune-kit`,
+  `rune-theme-opencode`, and (with `capture`) `rune-motion` at one pinned Git
+  rev in `Cargo.toml` and `Cargo.lock`; every pin bump
   must also update `cargoLock.outputHashes."rune-0.0.1"` in `nix/package.nix`
   and keep `windows` 0.62.2 for `gpu-allocator` in `Cargo.lock`.
+- At the start of each work round, bump Hex's Rune pin to Rune's `dev` head:
+  read the `## dev` section of Rune's `CHANGELOG.md` since the current pin,
+  adapt to its breaking changes, update `nix/package.nix`'s outputHash, and
+  run `scripts/check rune_ui`, goldens included. If Rune itself breaks, report
+  it to Rune rather than working around it.
 - Hex runs as one long-lived process per user and data root on every OS: a
   menu-bar process on macOS (`macos_rune`, native `NSStatusItem`, native Metal
   `NSPanel` HUD, Rune meeting-capsule overlays), a tray process on Windows
@@ -584,12 +875,44 @@ CoreAudio formats, AppleScript details, or event serialization.
   single-instance process on Linux (`linux_app`, socket + lock in the data
   root, Rune overlay HUD). Closing the window never stops the runtime, listener,
   HUD, or accepted work.
-- Public app updates are Developer ID signed, notarized, stapled, EdDSA signed,
-  published artifact-first/feed-last, and installed through Sparkle.
-- Linux direct-install updates accept only a strictly newer signed stable
-  x86_64 manifest, verify exact size and SHA-256 from a content-addressed
-  artifact, and atomically switch the user-local `current` version. Never
-  overwrite development, root, or package-manager-owned binaries.
+- Updates follow the release protocol's client rules exactly (the shared
+  vectors must pass). Versions are display text and never compared: each
+  channel has one current release, and Hex takes it whenever it is not the
+  running build (Linux and Windows: the executable's SHA-256 against the
+  target's; macOS: the exact version). A rollback is the service making an
+  earlier release current. `required` releases install without waiting for
+  the rollout; others wait for a rollout bucket drawn once from the OS's
+  secure random source, kept in `<support>/update-bucket`, and never sent.
+  Each build knows the channel it was published on (`HEX_BUILD_CHANNEL`,
+  stamped by Release); when the Update channel setting names another, Hex
+  offers that channel's current release as "Switch to Stable 2.3.1" and
+  installs it only once the user confirms, never by itself. Dev builds are
+  `0.0.0-dev-<run number>`, as OpenCode numbers them. Requests carry nothing about the install. Checks run 10 seconds
+  after launch, hourly (every 10 minutes and on window focus, at most once a minute, on the Dev channel), and on the sidebar footer's Check for updates, backing off on errors; manifests are
+  not signed, so nothing runs before the download's size and SHA-256 match
+  the manifest and, on macOS and Windows, its code signature passes: macOS
+  `app/update-requirement.txt` (Developer ID team `5NZ4Q7NXJ4`, `anomaly.hex`,
+  notarized), Windows a valid Authenticode signature whose signer is
+  `AUTHENTICODE_SIGNER`. Linux relies on HTTPS and the SHA-256 alone.
+- Only direct installs replace themselves: Linux and Windows with our
+  installer's receipt (`install.json` in the user-owned data root, which also
+  names the channel) and the version layout, macOS a `Hex.app` this user can
+  rename in a writable, non-translocated folder. A read-only macOS location
+  shows Download update (the DMG); package-managed installs (pacman, Nix) show
+  their manager's command once it serves another version; source and test
+  builds never check; `DisableUpdates` (macOS `anomaly.hex` defaults domain,
+  Windows `SOFTWARE\Policies\Anomaly\Hex` in HKLM or HKCU) turns checks off.
+  Never escalate privileges, and never overwrite development, root, or
+  package-manager-owned files.
+- A staged update waits for Restart to update, and checks continue while it
+  waits: another release this install would take by itself (update or
+  required) replaces it, and Restart to update runs one more bounded check
+  first, so the restart lands on the newest release. Staging never removes
+  the running version. Linux and Windows activate a
+  new version directory and switch `current`/`current-version` atomically at
+  staging; macOS unpacks beside the bundle and swaps it in with
+  `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes
+  the old bundle at launch.
 - The Wayland beta requires compatible clipboard, virtual-keyboard, and
   layer-shell protocols. Shortcuts come from the GlobalShortcuts portal when the
   desktop offers it; otherwise the user binds the `hex dictation`,
@@ -669,14 +992,16 @@ authorizes `anomalyco/hex` and that exact workflow filename for `npm publish`.
 The workflow uses npm trusted publishing without requesting a Sigstore
 provenance bundle.
 Use the configured Changesets release command (`cd sdk && bun run release`), not
-direct `npm publish`, after the bootstrap release.
+direct `npm publish`, after the bootstrap release. Pending changesets on `dev`
+keep a version pull request open into `dev`; the workflow publishes only when
+`production` is fast-forwarded to an unpublished SDK version.
 
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
-bun run --cwd sdk/commands build
 cargo run -- listen
-cargo run -- status
+cargo run -- status --json   # asks the running Hex (docs/cli.md)
+cargo run -- dev dashboard   # debug recognition TUI
 cargo run -- meeting record --title "Design sync"
 cargo run -- meeting probe
 cargo run -- mcp --meetings-dir tests/fixtures/meetings
@@ -685,14 +1010,27 @@ cargo run -- app -- --snap /tmp/hex-settings.png --scene mac-settings
 cargo run -- app -- --snap /tmp/hex-modes.png --scene modes --theme light
 cargo run -- app -- --snap /tmp/hex-onboarding.png --scene mac-onboarding
 ./scripts/install-app.sh
-cargo fmt --check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+scripts/check            # fmt, clippy, every test
+scripts/check meeting::query  # fmt, then only matching tests
 git diff --check
 ./scripts/test-app-identity.sh # macOS only
-./scripts/test-install-linux-release.sh # x86_64 Linux only
+./scripts/test-install-linux-release.sh # x86_64 or aarch64 Linux
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
+
+Unfinished features land on `dev` dormant behind an experiment
+([docs/features/experiments.md](docs/features/experiments.md)): add a variant to
+`Experiment` in `src/experiments.rs` and gate where the feature's work starts
+(worker, thread, capture), not just its UI. Turn one on for yourself with
+`hex experiments enable <name>` or `HEX_EXPERIMENTS=<name>`; it applies at the
+next launch. Experiments are unsupported and never on by default, in debug
+builds too; remove the variant when the feature ships or is dropped.
+
+Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
+tests through cargo-nextest (`brew install cargo-nextest`) with
+`.config/nextest.toml`, which kills a hung test and reports it by name; CI uses
+the same config's `ci` profile. Read its output whole rather than piping it
+through `grep | head`; failures are summarized at the end.
 
 Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 --snap <png> --scene <name>` draws one named fixture scene from `SCENES` in
@@ -701,19 +1039,20 @@ lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
 render). Scenes cover every pane and state the goldens check: the Linux and
 Windows panes (`modes`, `voice-action`, `history`, `picker`, `onboarding`,
 `windows-settings`, …) and the macOS ones (`mac-settings`, `mac-commands`,
-`meetings*`, `mac-fun*`, `mac-hud-lab`, `mac-activity`, `mac-onboarding*`).
+`meetings*`, `mac-voice-filter*`, `mac-hud-lab`, `mac-activity`, `mac-onboarding*`).
 `live` renders the running Linux Hex's real state. On a host without a GPU,
 render on lavapipe with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
 `cargo test rune_ui` compares the light and dark goldens in `tests/golden/`.
 A scene is a fixture, not native end-to-end proof; the meeting capsules and
 HUDs have no scene.
 
-The supported Linux beta and release host use x86_64 Arch Linux. Install its
+The supported Linux beta host is x86_64 Arch Linux; releases build on Ubuntu
+24.04 (x64 and ARM64) for a glibc 2.39 floor. Install its
 native build dependencies with:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux glib2 libxkbcommon libxkbcommon-x11 libx11 libxcb openblas \
+  util-linux libxkbcommon libxkbcommon-x11 libx11 libxcb openblas \
   vulkan-headers vulkan-icd-loader \
   shaderc spirv-headers clang cmake pkgconf wl-clipboard wtype
 rustup default stable
@@ -730,47 +1069,53 @@ optional Home Manager autostart. Native Linux PR checks do not replace real
 X11/Wayland, portal or keybinding shortcuts, microphone, and target-application
 smoke tests.
 
-Automatic microphone selection follows the compiled preference order in
-`src/config.rs`, then falls back to the macOS default. A saved microphone takes
-precedence while available; override everything with `--device`. The app bundle
-build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
-identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
-signed Sparkle appcast; run `scripts/release-app.sh publish` only after validating
-the prepared artifact. Public app downloads and update feeds use
-`https://downloads.hex.anoma.ly`, Anomaly's `hex-releases` R2 bucket through a
-Custom Domain; [`docs/releasing.md`](docs/releasing.md) owns the release
-workflow, channels, secrets, and the transition from Kit's
-`downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting to the new
-origin for installed clients. GitHub app releases use
-`app-v<VERSION>` tags with `--latest=false`, keeping them distinct from SDK
+Microphone selection is System default (the OS default input, live) unless a
+saved microphone is connected; override everything with `--device`. The app
+bundle build requires Xcode 26 for Icon Composer compilation and a Developer ID
+signing identity. `scripts/release-app.sh prepare` builds the notarized and stapled
+DMG and ZIP the Release workflow publishes. Hex publishes every platform to
+the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
+its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex
+never publishes to or reads from it) from the Release workflow with curl and its
+GitHub OIDC token, under app `hex`, artifact `desktop`;
+[`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
+target and file names and the direct-install receipt, and
+[`docs/releasing.md`](docs/releasing.md) owns the workflow, channels, secrets,
+and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
+(and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
+there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
+through 2.3.1) with `--latest=false`, keeping them distinct from SDK
 releases. Never overwrite a published artifact with different bytes.
-`https://hex.kitlangton.com` (in-repo `site/`, Worker `hex-voice-site`) is the
-only Hex website; its Worker 301s `hex.kitlangton.dev` and every other host to
-the same path there. After publishing a version, bump `MAC_VERSION` or
-`DESKTOP_VERSION` in `site/src/release.ts`, the explicit GitHub mirror/version
-link in `README.md`, and (macOS) the Homebrew cask. `bun run --cwd site
-check:downloads` fails until every download link serves a file; the Site
-workflow runs it and deploys from `main` when the repository has a
-`CLOUDFLARE_API_TOKEN` secret, otherwise deploy from `site` on the Pro with
-`bun run build && bunx wrangler deploy`. Verify the live links afterwards.
+`https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
+`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
+bucket `hex-production-files`) and the dev Worker `hex-dev-site` (dev.anoma.ly/hex,
+bucket `hex-dev-files`); `cf deploy --prebuilt --mode <mode>` picks one, and
+only CI deploys: a push to `dev` touching `site/` deploys dev, a stable
+Release deploys production. No subdomains. The site's download links come
+from the service's stable manifest when it builds. After publishing a version,
+bump the explicit GitHub mirror/version link in `README.md`; the Release
+workflow updates the Homebrew cask. `bun run --cwd site check:downloads` fails until every download link
+serves a file; every deploy runs it. Verify the live links afterwards.
 The Rust app is named `Hex`, packaged as `Hex.app`,
-with bundle identifier `com.kitlangton.hex2` and executable `hex`. Kit has approved
-his personal Developer ID signing team `QC99C9JE59` for this app. Signing requires
-an explicit `VOICE_CONTROL_TEAM_ID` and matching `HEX_NOTARY_PROFILE`; the build
+with bundle identifier `anomaly.hex` (deliberately not reverse-DNS) and executable
+`hex`; its SDK helper is `anomaly.hex.service` and the virtual microphone driver
+`anomaly.hex.microphone.driver`. Releases through 2.3.1 were `com.kitlangton.hex2`,
+signed by Kit's team `QC99C9JE59`; macOS treats `anomaly.hex` as a new app (fresh
+permissions, login item, and preferences domain), while the `hex` Application
+Support folder, and with it settings, history, and models, is shared. Signing requires
+an explicit `HEX_TEAM_ID` and matching `HEX_NOTARY_PROFILE`; the build
 and release scripts verify the selected team rather than assuming an Anomaly team.
 `scripts/validate-app.sh` checks this identity before preparation and publication.
 The move to Anomaly's team (`5NZ4Q7NXJ4`) is planned in
 `docs/plans/macos-signing.md`; the manual `macOS signed build` workflow signs
 and notarizes an unpublished candidate once the Apple secrets are in the
 `release` environment.
-The manual DMG contains `Hex.app`; the signed Sparkle ZIP preserves `HEX.app`
-as its archive root so existing Rust 2.0.x installations can discover the update
-despite the new bundle ID. Both artifacts contain the same signed, stapled app.
-Sparkle compares `CFBundleVersion`, not source changes or signing timestamps.
-Public releases must advance beyond distributed beta builds as well as the feed;
-the older local Rust 2.1.0 beta already used build 20100. Do not reuse a released
-version/build for changed code. Validate updates from both the public 2.0.x app
-and the older 2.1.0 beta when changing update identity or packaging.
+`scripts/release-app.sh prepare` leaves `Hex-<version>-macos-arm64.dmg` and
+`Hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
+contain the same signed, stapled app. Do not reuse a released version for
+changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
+one informational appcast item, `packaging/macos/legacy-appcast.xml`, that
+links to the new app; they never auto-update into it.
 There is no Swift migration: never import Swift preferences or data, adopt its
 bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
 delete, or replace the Swift app. Prefer a website-only informational item in
@@ -796,66 +1141,88 @@ the user's original login-item state after the test. Do not add release test
 hooks or persist a second launch-at-login flag.
 
 Every platform is built, signed, and published by one run of
-`.github/workflows/release-desktop.yml` ("Release"; see `docs/releasing.md`).
-Run it with `workflow_dispatch` (`ref`, `channel`: `staging` dry run under
-`staging/<run-id>/` with a draft GitHub release, or `stable`), or push an
-`app-v<VERSION>` tag, which must match the crate version. It builds Linux
-x86_64 in an Arch container and Windows x64 and ARM64 on native runners with
-each script's `build` mode, through the reusable
-`.github/workflows/build-desktop.yml`. `.github/workflows/test-builds.yml`
-calls the same workflow on every push to `main` with `test-build`, plus an
-ad-hoc signed `Hex Test.app` (`HEX_TEST_BUILD=1 scripts/build-app.sh`: bundle
-ID `com.kitlangton.hex2.test`, no Sparkle, its own `hex-test` data folder and
-`~/.config/hex-test`; it must never read the real `hex` data), as unsigned 14-day artifacts for
-teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` also compiles Windows
-builds that never check for updates. A job that compiles nothing then signs all three
-feeds with `scripts/release-feed.sh` and validates signatures, sizes, SHA-256,
-version order against the live feeds, the absence of Visual C++ runtime
-imports, and (stable) Authenticode signatures. The `release` environment is
-limited to `main` and `app-v*` tags. `scripts/publish-release.sh` then uploads
-through `scripts/r2-put.sh`: immutable downloads first (never replacing
-different bytes), the GitHub release mirror (verified byte for byte), the
-content-addressed artifacts, installers as committed at the release commit,
-and the feeds after rechecking that the version is newer, then
-`HEX-latest-arm64.dmg` and the appcast. The `aur` job builds, installs, and
-tests `hex-voice-bin` and pushes it to the AUR for stable releases.
-Rerunning after an interruption is safe.
+`.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
+Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
+verifies without publishing, `dev` publishes the dev channel, `stable` the
+public release; dispatched from `production` only). Tags never start a
+release: like OpenCode, the stable run tags `v<VERSION>` (the crate version)
+on the released commit only after every platform published, then creates the
+GitHub release with the built-in `GITHUB_TOKEN`, so a failed run leaves no
+tag; `v*` tags are unrestricted because nothing triggers on them. Like OpenCode's release, build jobs (Linux x64 and ARM64 on
+Ubuntu 24.04 runners with their `.deb` and `.rpm`, Windows x64 and ARM64 through `.github/workflows/build-desktop.yml`,
+macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, installers through
+`windows-installers.yml`, AUR and Homebrew staging) run repository code with
+no environment, secret, or id-token; sign and publish jobs run in `release`,
+check out only `.github/release/`, and run only those scripts and SHA-pinned
+actions on artifacts treated as data (macOS Developer ID signing,
+notarization, and stapling; Azure Authenticode; the release service through
+OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
+whose digest its job reports and every consumer checks. Site deploy follows
+the same split: its build job has no secret, and its `release` job runs only
+`.github/release/deploy-site.sh`, which deploys the verified Build Output only
+when it names exactly that mode's site Worker, routes, and bindings, with the
+cf CLI locked in `.github/release/cf/`; Legacy appcast checks out only
+`.github/release/` and the appcast. Keep that boundary:
+never add a step that builds, installs dependencies, or runs repository code
+to a job that holds a secret or an OIDC token, and pin every action by SHA.
+`.github/` changes need Dax (CODEOWNERS and the "release boundary" ruleset).
+`.github/workflows/test-builds.yml` calls the same desktop
+workflow on every push to `dev` with `test-build`, plus an ad-hoc signed
+`Hex Test.app` (`HEX_TEST_BUILD=1 scripts/build-app.sh`: bundle ID
+`anomaly.hex.test`, its own `hex-test` data folder and `~/.config/hex-test`;
+it must never read the real `hex` data), as unsigned 14-day artifacts for
+teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
+themselves, and neither do local builds (`HEX_LOCAL_BUILD=1`, the owner's own
+build from a checkout: footer "Local build · updates off", version label with its
+commit, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
+build (the service lets a run from `dev` publish only the `dev` channel, and
+only signed platforms are published). Stable runs only from `production`.
+Like OpenCode, every run uses the one `release` environment, with no
+required reviewer; its deployment policy admits `dev` and `production`. Rerunning
+after an interruption is safe: the service stores files by hash and accepts
+the same version again.
 
-`HEX-Setup-<version>-<x64|arm64>.exe` is a per-user Inno Setup installer
-(`packaging/windows/hex.iss`, built by `scripts/build-windows-installer.ps1`)
-that installs exactly the managed layout `install-windows.ps1` creates, so
-self-updates keep working: `%APPDATA%\voice-control\versions\<version>\hex.exe`,
-`current-version`, and a Start Menu shortcut carrying the managed mark. Its
-uninstaller lives in `voice-control\uninstall` because updates prune old version
-directories; it removes every version, the shortcut, and Launch at login, and
-keeps settings. It refuses to roll back a newer self-updated version. Keep its
-`AppId` forever: the updater rewrites that Apps & Features entry's version.
-Release desktop and the Windows installer workflow install, reinstall, refuse a
-downgrade with, and uninstall it silently on x64 and ARM64 runners
-(`scripts/test-windows-installer.ps1`). With `sign-windows` (Release desktop),
-Build desktop's `windows-package` job, the only one in the `release`
-environment, Authenticode-signs both `hex.exe` through Azure Artifact Signing
-(GitHub OIDC, SHA-256, RFC 3161 timestamp) before building the installers,
-signs the installers, and re-addresses the signed executables in their feed
-payloads (`scripts/windows-authenticode.ps1`). Compile jobs and test builds
-never hold signing credentials, and signing is skipped with a warning until
-the Azure values exist in `release`. See `docs/windows-signing.md`.
+`Hex-Setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
+installer (`packaging/windows/hex.iss`, built by
+`scripts/build-windows-installer.ps1`) that installs exactly the managed
+layout `install-windows.ps1` creates, so self-updates keep working:
+`%APPDATA%\hex\versions\<version>\hex.exe`, `current-version`, the
+`install.json` direct-install receipt, and a Start Menu shortcut carrying the
+managed mark. Its uninstaller lives in `hex\uninstall` because
+updates prune old version directories; it removes every version, the
+receipt, the shortcut, and Launch at login, and keeps settings. It installs
+its version over whatever is installed (versions are never compared). Keep
+its `AppId` forever: the updater rewrites that Apps & Features entry's
+version. Release and the Windows installer workflow install, reinstall,
+install over another version with, and uninstall
+it silently on x64 and ARM64 runners (`scripts/test-windows-installer.ps1`).
+Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
+Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
+are built around the signed bytes, and `sign-windows-installers` signs them
+(`.github/release/verify-authenticode.ps1` checks both). Compile jobs and test
+builds never hold signing credentials; until the Azure values exist in
+`release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 
-Both scripts still work locally: `prepare` builds and signs with the Ed25519
-private PEM in `HEX_RELEASE_SIGNING_KEY` (or `HEX_LINUX_SIGNING_KEY`), and
-`publish` uploads after validation with the R2 credentials in the environment. Run the Linux script on x86_64 Linux and the
-Windows script from Git Bash once per architecture with `HEX_WINDOWS_ARCH=x86_64`
-(the default; Vulkan SDK required) or `aarch64` (clang-cl and Ninja; best on an
-ARM64 host). The feeds are `linux-update.json`, `windows-update.json` for x64,
-and `windows-aarch64-update.json` for ARM64, all on the same key, bucket, and
-`downloads.hex.anoma.ly` origin. Signing refuses a key that does not match
-the public key compiled into HEX, and publishing refuses a non-monotonic stable
-release. Builds use `-DGGML_NATIVE=OFF` so the CPU kernels stay portable, and the
-static runtime in `.cargo/config.toml` keeps the Visual C++ Redistributable
-unnecessary; the release workflow asserts neither Windows executable imports it.
+Run `scripts/build-linux.sh` on x86_64 or aarch64 Linux (then
+`scripts/package-linux.sh` for the `.deb` and `.rpm`) and `scripts/build-windows.sh`
+from Git Bash once per architecture with `HEX_WINDOWS_ARCH=x86_64` (the
+default; Vulkan SDK required) or `aarch64` (clang-cl and Ninja; best on an
+ARM64 host). Builds use `-DGGML_NATIVE=OFF` so the CPU kernels stay portable,
+and the static runtime in `.cargo/config.toml` keeps the Visual C++
+Redistributable unnecessary; the release workflow asserts neither Windows
+executable imports it. Every build embeds Vulkan shaders only for f32, f16,
+and q8_0 tensors and no MUL_MAT_ID (`CMAKE_ARGS` in `.cargo/config.toml`,
+through the patched `transcribe-cpp-sys` in `Cargo.toml`): about 7 MB of
+SPIR-V instead of 44 MB. ggml aborts a Vulkan run whose weights use another
+type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog gains a non-Q8_0
+model. Release executables are stripped (`[profile.release]`). `scripts/install-linux-release.sh` and
+`scripts/install-windows.ps1` (served at `https://anoma.ly/hex/`) install from
+the service's stable manifest and check each file's size and SHA-256;
+`scripts/test-install-linux-release.sh` exercises the Linux one against a
+fixture service.
 
 Use `termctrl` to verify TUI changes at both wide and narrow dimensions. The
-dashboard keys are `1` for commands, `2` for the activity log, `3` for meetings,
+`hex dev dashboard` keys are `1` for commands, `2` for the activity log, `3` for meetings,
 Tab to cycle, and `q`/Escape to quit.
 
 ## Diagnostics
@@ -868,10 +1235,9 @@ Tab to cycle, and `q`/Escape to quit.
   tracks, the rolling in-call transcript, and atomically published final
   transcripts.
 
-Older macOS builds used `voice-control`; the first launch of a newer build
-renames it to `hex` and leaves a `voice-control -> hex` symlink. If the rename
-fails, Hex keeps using `voice-control` and logs why. Windows and Linux keep
-`voice-control`.
+Windows uses `%APPDATA%\hex` and Linux `~/.local/share/hex` (or under
+`XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
+folders or per-OS settings files.
 
 When diagnosing a missed command, inspect both logs and distinguish microphone
 capture, transcription, command mode/dictation, context matching, command resolution,
@@ -887,8 +1253,9 @@ seam once there are two real adapters or a current test requires substitution.
 `ROADMAP.md` is the authoritative work list. Keep these constraints visible:
 
 - Release freeze (Kit, 2026-10-22): publish no Hex release on any OS, stable or
-  staging-to-stable, until Kit lifts it after the Rune front end has been
-  tested thoroughly on real Macs and Windows PCs. Test builds are fine.
+  staging-to-stable, and don't move `production` (it stays at `app-v2.3.1`),
+  until Kit lifts it after the Rune front end has been tested thoroughly on
+  real Macs and Windows PCs. Test builds are fine.
 - Validate public onboarding from a clean macOS account and signed Linux updates
   on the supported Arch/i3 host.
 - Validate native Wayland on a real compatible compositor, including physical

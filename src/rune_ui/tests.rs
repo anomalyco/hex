@@ -1,10 +1,11 @@
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
+use crate::transcription_models::TranscriptionSelection;
 use rune::render::{Gpu, OFFSCREEN_FORMAT, Offscreen, Renderer};
 use rune::text::TextSystem;
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
-/// Tall enough to show every Settings section without scrolling.
+/// Tall enough to show every General section without scrolling.
 const GOLDEN_SIZE: (f32, f32) = (980.0, 1720.0);
 /// The window's own size, for the other panes.
 const PANE_SIZE: (f32, f32) = (980.0, 760.0);
@@ -25,6 +26,9 @@ fn runtime(scene: &str, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
     let mut rt = Runtime::with_text(state, view, size, env, text);
     rt.poll = Some(poll);
     rt.on_key = Some(on_key);
+    // Fixtures show the state at rest, so sequences that play on mount
+    // (a granted permission's Allowed) land before the first frame.
+    rt.settle_all();
     rt.frame(0.0);
     rt
 }
@@ -40,8 +44,13 @@ fn saved(rt: &Runtime<Ui>) -> usize {
     rt.state.saved
 }
 
+/// The text shown, without the recorder's invisible sizing faces.
 fn texts(rt: &Runtime<Ui>) -> Vec<String> {
-    rt.elements().into_iter().filter_map(|e| e.text).collect()
+    rt.elements()
+        .into_iter()
+        .filter(|e| !e.path.contains("/faces/size"))
+        .filter_map(|e| e.text)
+        .collect()
 }
 
 /// Presses an element by key and lets every animation settle.
@@ -62,7 +71,7 @@ fn portal_desktops_show_what_they_granted_beside_each_recorder() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     let shown = texts(&rt);
     for expected in [
-        "Shortcuts",
+        "Dictation",
         "Your desktop granted F12",
         "Your desktop granted Ctrl+Alt+V",
         "Change shortcut",
@@ -103,6 +112,67 @@ fn a_refused_portal_shortcut_says_how_to_free_it() {
     );
     assert!(shown.iter().any(|text| text.contains("config.kdl")));
     assert!(rt.find("dictation-hotkey").is_some());
+    assert!(rt.find("dictation/card/refused").is_some());
+    assert!(rt.find("output/card/refused").is_none());
+}
+
+#[test]
+fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    if let Some(view) = &mut rt.state.view {
+        view.listener.shortcuts = DesktopShortcuts::Portal(vec![
+            DesktopGrantedShortcut {
+                name: "Dictation".into(),
+                trigger: Some("F12".into()),
+            },
+            DesktopGrantedShortcut {
+                name: "Paste last dictation".into(),
+                trigger: None,
+            },
+        ]);
+    }
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(rt.find("output/card/refused").is_some());
+    assert!(rt.find("dictation/card/refused").is_none());
+}
+
+#[test]
+fn advanced_opens_while_in_use_and_always_closes() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    assert!(rt.find("microphone-mode").is_none());
+    tap(&mut rt, "advanced-toggle");
+    tap(&mut rt, "microphone-mode-control/segment1");
+    assert!(rt.state.confirm_release);
+    tap(&mut rt, "advanced-toggle");
+    assert!(!rt.state.confirm_release, "collapsing drops the question");
+    assert!(rt.find("microphone-mode").is_none());
+
+    rt.state.advanced = None;
+    rt.state.settings.release_microphone_while_idle = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("microphone-mode").is_some(), "in use opens it");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("microphone-mode").is_none(), "but it still closes");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("microphone-mode").is_some());
+
+    rt.state.advanced = None;
+
+    rt.state.settings.release_microphone_while_idle = false;
+    rt.state.settings.double_tap_lock = true;
+    rt.state.settings.double_tap_only = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("double-tap-only").is_some(),
+        "so does Double-tap only"
+    );
+    rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("microphone-mode").is_none(), "but not in Toggle");
 }
 
 #[test]
@@ -121,6 +191,76 @@ fn toggles_save_through_the_host() {
     assert!(!rt.state.settings.paste_with_shift);
     assert_eq!(saved(&rt), 1);
     assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn choosing_an_update_channel_saves_it_and_checks_now() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    let (other, segment) = other_update_channel();
+    tap(&mut rt, &segment);
+    assert_eq!(rt.state.settings.updates.channel, Some(other));
+    assert_eq!(saved(&rt), 1);
+    assert!(matches!(
+        sent(&rt),
+        [Request::Desktop(DesktopAction::CheckForUpdates)]
+    ));
+    tap(&mut rt, &segment);
+    assert_eq!(
+        saved(&rt),
+        1,
+        "choosing the same channel again saves nothing"
+    );
+}
+
+/// The channel this build does not follow, and its segment's id: the build's
+/// own channel depends on its version (a local build follows dev).
+fn other_update_channel() -> (crate::app_settings::UpdateChannel, String) {
+    let build = crate::updater::build_channel();
+    let index = crate::app_settings::UpdateChannel::ALL
+        .iter()
+        .position(|channel| *channel != build)
+        .unwrap();
+    (
+        crate::app_settings::UpdateChannel::ALL[index],
+        format!("update-channel-control/segment{index}"),
+    )
+}
+
+#[test]
+fn choosing_the_channel_in_effect_keeps_following_the_build() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    let build = crate::updater::build_channel();
+    let index = crate::app_settings::UpdateChannel::ALL
+        .iter()
+        .position(|channel| *channel == build)
+        .unwrap();
+    tap(&mut rt, &format!("update-channel-control/segment{index}"));
+    assert_eq!(rt.state.settings.updates.channel, None);
+    assert_eq!(saved(&rt), 0);
+    assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn installs_that_never_update_hide_the_update_channel() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("update-channel").is_some());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::PackageManager;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::SourceBuild;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
 }
 
 #[test]
@@ -143,6 +283,7 @@ fn enabling_sends_the_listener_action() {
 #[test]
 fn releasing_the_microphone_asks_first() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
     tap(&mut rt, "microphone-mode-control/segment1");
     assert!(rt.state.confirm_release);
     assert!(!rt.state.settings.release_microphone_while_idle);
@@ -192,6 +333,37 @@ fn escape_cancels_a_shortcut_recording() {
 }
 
 #[test]
+fn a_recorder_shows_the_modifiers_held_so_far() {
+    use crate::app_settings::{HotkeyModifiers, ModifierSide};
+    let mut rt = runtime("capturing", true, GOLDEN_SIZE);
+    let held = HotkeyModifiers {
+        option: Some(ModifierSide::Either),
+        command: Some(ModifierSide::Either),
+        ..HotkeyModifiers::default()
+    };
+    settings::hold(&mut rt.state, held);
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    let caps = HotkeyBinding {
+        modifiers: held,
+        key: None,
+    }
+    .keycaps();
+    for expected in caps.iter().map(String::as_str).chain(["…"]) {
+        assert!(
+            shown.iter().any(|text| text == expected),
+            "missing {expected:?} in {shown:?}"
+        );
+    }
+    assert!(!shown.iter().any(|text| text == "Press shortcut"));
+    settings::hold(&mut rt.state, HotkeyModifiers::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "Press shortcut"));
+}
+
+#[test]
 fn function_keys_and_super_record_as_linux_key_names() {
     let f12 = recorded_binding(&KeyEvent {
         key: Key::Function(12),
@@ -237,6 +409,61 @@ fn service_settings_are_adopted_only_when_the_service_changes_them() {
     assert!(!ui.settings.enable_on_launch);
 }
 
+#[test]
+fn a_draft_saves_over_what_another_writer_changed_meanwhile() {
+    let mut ui = portal_fixture();
+    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    let service = ui.settings.clone();
+    ui.adopt(service.clone());
+    ui.hints = TextEdit::new("OpenCode, Effect");
+    let start = std::time::Instant::now();
+    assert!(!ui.save_drafts(start), "waits for a pause");
+    // `hex settings set` (or a capture's saved rule) saves while it waits.
+    let mut elsewhere = service;
+    elsewhere.enable_on_launch = !elsewhere.enable_on_launch;
+    ui.adopt(elsewhere.clone());
+    assert_eq!(ui.hints.text, "OpenCode, Effect", "the typing stays");
+    assert!(ui.save_drafts(start + DRAFT_DELAY));
+    assert_eq!(ui.settings.enable_on_launch, elsewhere.enable_on_launch);
+    assert_eq!(
+        ui.settings.transcription.recognition_hints,
+        "OpenCode, Effect"
+    );
+}
+
+/// Typing in one editor keeps only that editor's text: the others take
+/// what another writer saved, so the draft's save doesn't undo it.
+#[test]
+fn a_draft_keeps_only_its_own_editor() {
+    let mut ui = portal_fixture();
+    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    let service = ui.settings.clone();
+    ui.adopt(service.clone());
+    ui.hints = TextEdit::new("OpenCode, Effect");
+    let start = std::time::Instant::now();
+    assert!(!ui.save_drafts(start), "waits for a pause");
+    let mut elsewhere = service;
+    elsewhere
+        .dictation_processing
+        .default_mode
+        .post_processing
+        .prompt = "Keep it short.".into();
+    ui.adopt(elsewhere);
+    assert!(ui.save_drafts(start + DRAFT_DELAY));
+    assert_eq!(
+        ui.settings.transcription.recognition_hints,
+        "OpenCode, Effect"
+    );
+    assert_eq!(
+        ui.settings
+            .dictation_processing
+            .default_mode
+            .post_processing
+            .prompt,
+        "Keep it short."
+    );
+}
+
 fn settle(rt: &mut Runtime<Ui>) {
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
@@ -249,6 +476,58 @@ fn flush(rt: &mut Runtime<Ui>) {
     settle(rt);
 }
 
+/// A shown window keeps drawing while its runtime animates, has input queued
+/// or has live values pending (Rune's `Host::redraw`). Five seconds after
+/// mounting, with nothing changing, the only motion left in any scene is the
+/// pulsing dot of something live or the shortcut explainer's looping demo,
+/// and under Reduce Motion, which stills both, no scene asks for another
+/// frame.
+#[test]
+fn every_scene_stops_asking_for_frames() {
+    const FRAME: f64 = 1.0 / 60.0;
+    let wants_frame =
+        |rt: &mut Runtime<Ui>| rt.frame(FRAME) || rt.has_pending_input() || rt.live_pending();
+    let mut moving = Vec::new();
+    let mut drawing = Vec::new();
+    for (scene, _) in SCENES.iter().filter(|(name, _)| *name != "live") {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        for _ in 0..150 {
+            rt.frame(1.0 / 30.0);
+        }
+        if *scene != "shortcut-explainer-motion" {
+            moving.extend(
+                rt.elements()
+                    .into_iter()
+                    .filter(|e| e.moving && e.key.as_deref() != Some("dot"))
+                    .map(|e| format!("{scene}: {}", e.path)),
+            );
+        }
+        // Stilling a loop may land a spring or two first.
+        rt.set_system_reduced_motion(true);
+        for _ in 0..30 {
+            rt.frame(1.0 / 30.0);
+        }
+        if (0..30).any(|_| wants_frame(&mut rt)) {
+            drawing.push(*scene);
+        }
+    }
+    assert!(moving.is_empty(), "still moving after 5 s: {moving:#?}");
+    assert!(
+        drawing.is_empty(),
+        "still asking for frames under Reduce Motion: {drawing:?}"
+    );
+}
+
+#[test]
+fn the_sidebar_has_no_modes_without_the_experiment() {
+    let rt = runtime("modes-off", true, PANE_SIZE);
+    assert!(rt.find("nav-modes").is_none());
+    assert!(rt.find("nav-voice-action").is_some());
+    assert!(!Pane::Modes.shown(&rt.state));
+    let rt = runtime("modes", true, PANE_SIZE);
+    assert!(rt.find("nav-modes").is_some());
+}
+
 #[test]
 fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);
@@ -256,7 +535,7 @@ fn the_sidebar_switches_panes_and_keeps_settings() {
         ("nav-modes", Pane::Modes),
         ("nav-voice-action", Pane::VoiceAction),
         ("nav-history", Pane::History),
-        ("nav-settings", Pane::Settings),
+        ("nav-general", Pane::General),
     ] {
         tap(&mut rt, key);
         assert_eq!(rt.state.pane, pane);
@@ -294,13 +573,179 @@ fn switching_panes_is_instant() {
         !panel
             .iter()
             .any(|e| e.key.as_deref() == Some("terminal-paste")),
-        "Settings left at once"
+        "General left at once"
     );
     for element in panel {
         assert!(
             element.opacity >= 0.999 && !element.moving,
             "{} is still animating",
             element.path
+        );
+    }
+}
+
+fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
+    let suffix = format!("/{key}");
+    rt.elements()
+        .into_iter()
+        .find(|e| !e.exiting && (e.key.as_deref() == Some(key) || e.path.ends_with(&suffix)))
+        .unwrap_or_else(|| panic!("no element {key}"))
+}
+
+/// The sidebar's items, top to bottom, with their drawn rects.
+fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
+    Pane::ALL
+        .iter()
+        .copied()
+        .filter_map(|pane| rt.presented(pane.key()).map(|(rect, _)| (pane, rect)))
+        .collect()
+}
+
+/// The items whose hover shows, after one short frame: hover is instant.
+fn hovered_items(rt: &mut Runtime<Ui>, x: f32, y: f32) -> Vec<Pane> {
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    nav_items(rt)
+        .into_iter()
+        .filter(|(pane, _)| {
+            let opacity = element(rt, &format!("{}/hover", pane.key())).opacity;
+            assert!(
+                opacity == 0.0 || opacity == 1.0,
+                "{pane:?}'s hover is fading: {opacity}"
+            );
+            opacity == 1.0
+        })
+        .map(|(pane, _)| pane)
+        .collect()
+}
+
+/// A sidebar with the Experiments group, as a developer sees it.
+fn grouped_sidebar() -> Runtime<Ui> {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    rt.state.platform.developer = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let items = nav_items(&rt);
+    assert!(items.iter().any(|(pane, _)| pane.experimental()));
+    assert!(items.iter().any(|(pane, _)| !pane.experimental()));
+    rt
+}
+
+#[test]
+fn the_nearest_sidebar_item_hovers_in_every_gap() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let (gap_top, gap_bottom) = (a[1] + a[3], b[1]);
+        let middle = (gap_top + gap_bottom) / 2.0;
+        assert_eq!(hovered_items(&mut rt, x, a[1] + a[3] / 2.0), [above]);
+        assert_eq!(hovered_items(&mut rt, x, gap_top + 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle - 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle + 0.5), [below]);
+        assert_eq!(hovered_items(&mut rt, x, gap_bottom - 0.5), [below]);
+    }
+    let (_, last) = items[items.len() - 1];
+    assert!(
+        hovered_items(&mut rt, x, last[1] + last[3] + 200.0).is_empty(),
+        "hover leaves at once"
+    );
+}
+
+#[test]
+fn a_press_in_a_sidebar_gap_selects_the_nearest_item() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let middle = (a[1] + a[3] + b[1]) / 2.0;
+        for (y, pane) in [(middle - 0.5, above), (middle + 0.5, below)] {
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.pane, pane, "a press at {y} selects {pane:?}");
+            rt.pointer_up(x, y);
+            settle(&mut rt);
+        }
+    }
+}
+
+#[test]
+fn a_settings_row_shows_no_hover_or_press_of_its_own() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let before = rt.state.settings.double_tap_lock;
+    let (x, y) = rt.find("double-tap/copy").expect("the row's title");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    let row = element(&rt, "double-tap");
+    assert_eq!((row.hover, row.fill), (0.0, rune::Color::TRANSPARENT));
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 120.0);
+    assert_eq!(element(&rt, "double-tap").press, 0.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_ne!(
+        rt.state.settings.double_tap_lock, before,
+        "pressing the row still flips it"
+    );
+}
+
+#[test]
+fn hover_leaves_at_once() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    for key in [
+        "update-status",
+        "dictation-hotkey",
+        "microphone-control-field-trigger",
+    ] {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 1.0, "{key} hovers at once");
+        rt.pointer_move(x, y + 400.0);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 0.0, "{key} stops hovering at once");
+    }
+}
+
+/// Every hover in the tree, kit controls' inner tracks included, is at rest
+/// or fully on one short frame after the pointer moves.
+fn assert_hover_is_binary(rt: &Runtime<Ui>, what: &str) {
+    for e in rt.elements().into_iter().filter(|e| !e.exiting) {
+        assert!(
+            e.hover == 0.0 || e.hover == 1.0,
+            "{what}: {} is fading: {}",
+            e.path,
+            e.hover
+        );
+    }
+}
+
+#[test]
+fn segments_and_switch_tracks_hover_at_once() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let targets = [
+        rt.find("shortcut-mode-control"),
+        rt.find("double-tap/switch"),
+    ];
+    for (target, name) in targets.into_iter().zip(["segment", "switch"]) {
+        let (x, y) = target.unwrap_or_else(|| panic!("no {name}"));
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 120.0);
+        assert_hover_is_binary(&rt, name);
+        assert!(
+            rt.elements().iter().any(|e| e.hover == 1.0),
+            "{name} hovers at once"
+        );
+        // Above the page, where nothing hovers.
+        rt.pointer_move(x, 2.0);
+        rt.frame(1.0 / 120.0);
+        assert_hover_is_binary(&rt, name);
+        assert!(
+            rt.elements().iter().all(|e| e.hover == 0.0),
+            "{name} stops hovering at once"
         );
     }
 }
@@ -324,15 +769,15 @@ fn voice_action_saves_its_opt_in_and_refuses_a_taken_shortcut() {
 #[test]
 fn choosing_an_opencode_model_saves_it() {
     let mut rt = runtime("voice-action-models", true, PANE_SIZE);
-    tap(&mut rt, "model1");
+    tap(&mut rt, "model-picker-option-1");
     assert_eq!(
         rt.state.settings.voice_action.model.as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
-    assert_eq!(rt.state.open, None);
+    assert!(!rt.state.models.picker.open);
     tap(&mut rt, "model-value");
-    assert_eq!(rt.state.open, Some(Menu::Model));
-    tap(&mut rt, "model0");
+    assert!(rt.state.models.picker.open && rt.state.models.picker.search.focused);
+    tap(&mut rt, "model-picker-option-0");
     assert_eq!(
         rt.state.settings.voice_action.model, None,
         "back to the OpenCode default"
@@ -340,9 +785,30 @@ fn choosing_an_opencode_model_saves_it() {
 }
 
 #[test]
+fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
+    let mut rt = runtime("voice-action-models-long", true, PANE_SIZE);
+    settle(&mut rt);
+    let [_, top, _, height] = rt.presented("viewport").unwrap().0;
+    assert!(
+        top + height <= PANE_SIZE.1 - 8.0,
+        "the list ends inside the window: {top} + {height}"
+    );
+    for _ in 0..40 {
+        key(&mut rt, Key::Down, Mods::default());
+    }
+    settle(&mut rt);
+    assert_eq!(rt.state.models.picker.active.as_deref(), Some("40"));
+    let [_, row_top, _, row_height] = rt.presented("model-picker-option-40").unwrap().0;
+    assert!(
+        row_top >= top && row_top + row_height <= top + height,
+        "the highlighted row scrolled into view: {row_top} in {top}..{}",
+        top + height
+    );
+}
+
+#[test]
 fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
     let mut rt = runtime("voice-action-models", true, PANE_SIZE);
-    tap(&mut rt, "model-search");
     key(&mut rt, Key::Down, Mods::default());
     key(&mut rt, Key::Down, Mods::default());
     key(&mut rt, Key::Up, Mods::default());
@@ -351,7 +817,7 @@ fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
         rt.state.settings.voice_action.model.as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
-    assert_eq!(rt.state.open, None);
+    assert!(!rt.state.models.picker.open);
 
     let mut rt = runtime("modes-picker", true, GOLDEN_SIZE);
     tap(&mut rt, "application-search");
@@ -373,6 +839,28 @@ fn opencode_missing_offers_setup_instead_of_models() {
     assert!(rt.find("opencode-unavailable").is_some());
     assert!(rt.find("open-opencode-setup").is_some());
     assert!(rt.find("opencode-model").is_none());
+}
+
+#[test]
+fn unavailable_opencode_is_explained_beside_each_switch() {
+    let beside = |rt: &Runtime<Ui>, row: &str| {
+        rt.elements()
+            .into_iter()
+            .filter(|e| e.path.contains(row) && e.path.ends_with("/description"))
+            .filter_map(|e| e.text)
+            .collect::<Vec<_>>()
+    };
+    let rt = runtime("modes-opencode-v1", true, PANE_SIZE);
+    assert!(rt.find("processing-toggle").is_some());
+    assert_eq!(beside(&rt, "processing-enabled"), ["Requires OpenCode V2"]);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Transformation requires OpenCode V2")
+    );
+
+    let rt = runtime("voice-action-unavailable", true, PANE_SIZE);
+    assert_eq!(beside(&rt, "voice-action-enabled"), ["Requires OpenCode"]);
 }
 
 #[test]
@@ -488,8 +976,14 @@ fn mode_corrections_and_names_save_from_their_fields() {
 
 #[test]
 fn mode_transformations_add_reorder_and_remove() {
-    let mut rt = runtime("modes-picker", true, GOLDEN_SIZE);
-    tap(&mut rt, "available-transformation0/add");
+    let mut rt = runtime("modes", true, GOLDEN_SIZE);
+    // The + opens a menu of only the transformations the mode lacks.
+    assert!(rt.find("transformation-option0").is_none());
+    tap(&mut rt, "add-transformation");
+    assert!(rt.find("transformation-option0").is_some());
+    assert!(rt.find("transformation-option1").is_none());
+    tap(&mut rt, "transformation-option0");
+    assert!(rt.find("transformation-option0").is_none());
     let ids = |rt: &Runtime<Ui>| {
         rt.state.settings.dictation_processing.modes[0]
             .transformations
@@ -520,6 +1014,69 @@ fn mode_transformations_add_reorder_and_remove() {
     assert_eq!(saved(&rt), saves + 1);
     tap(&mut rt, "transformation0/remove");
     assert_eq!(ids(&rt), ["smart-punctuation"]);
+}
+
+#[test]
+fn the_transformation_menu_offers_what_the_mode_lacks_and_escape_closes_it() {
+    let mut rt = runtime("modes-transformation-menu", true, GOLDEN_SIZE);
+    let offered: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.path.contains("transformation-option") && e.path.ends_with("/name"))
+        .filter_map(|e| e.text)
+        .collect();
+    assert_eq!(offered, ["Normalize links"]);
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.open.is_none());
+    assert!(rt.find("transformation-option0").is_none());
+}
+
+#[test]
+fn escape_cancels_a_transformation_reorder_without_saving() {
+    let mut rt = runtime("modes", true, GOLDEN_SIZE);
+    tap(&mut rt, "add-transformation");
+    tap(&mut rt, "transformation-option0");
+    let order = |rt: &Runtime<Ui>| {
+        rt.state.settings.dictation_processing.modes[0]
+            .transformations
+            .clone()
+    };
+    let before = order(&rt);
+    let saves = saved(&rt);
+    let (x, y) = rt.find("transformation1/handle").expect("a drag handle");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    for step in 1..=8 {
+        rt.pointer_move(x, y - step as f32 * 5.0);
+        rt.frame(1.0 / 60.0);
+    }
+    key(&mut rt, Key::Escape, Mods::default());
+    rt.pointer_up(x, y - 40.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(order(&rt), before);
+    assert_eq!(saved(&rt), saves);
+}
+
+#[test]
+fn escape_restores_a_slider_dragged_from_its_press() {
+    let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
+    let strength = |rt: &Runtime<Ui>| rt.state.platform.tuning.strength;
+    let before = strength(&rt);
+    let saves = saved(&rt);
+    let (x, y) = rt.find("fun-slider-strength/track").expect("a slider");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x + 60.0, y);
+    rt.frame(1.0 / 60.0);
+    assert_ne!(strength(&rt), before);
+    key(&mut rt, Key::Escape, Mods::default());
+    rt.frame(1.0 / 60.0);
+    assert_eq!(strength(&rt), before);
+    rt.pointer_up(x + 60.0, y);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(strength(&rt), before);
+    assert_eq!(saved(&rt), saves);
 }
 
 #[test]
@@ -572,10 +1129,118 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
             ..
         }]
     ));
-    tap(&mut rt, "language4");
-    assert_eq!(rt.state.picker.language.as_deref(), Some("ja"));
+    assert_eq!(
+        rt.state.picker.fallback, None,
+        "Whisper keeps the saved English"
+    );
     tap(&mut rt, "close-picker");
-    assert_eq!(rt.state.picker.language, None);
+    assert!(!rt.state.picker.open);
+}
+
+/// The card index of `model` in the picker over `language`.
+fn picker_card(language: &str, model: TranscriptionModelId) -> String {
+    let index = crate::transcription_models::picker_models(language)
+        .iter()
+        .position(|(candidate, _)| candidate.id == model)
+        .expect("every available model is listed");
+    format!("model{index}")
+}
+
+#[test]
+fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    rt.state.settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::WhisperLargeV3Turbo,
+        language: "ja".into(),
+        recognition_hints: String::new(),
+    };
+    rt.state.picker.installed = Some(Vec::new());
+    rt.invalidate();
+    settle(&mut rt);
+    let card = picker_card("ja", TranscriptionModelId::ParakeetUnifiedEnglish);
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(&"Doesn't support Japanese; switches the language to English".to_owned()),
+        "{shown:?}"
+    );
+    tap(&mut rt, &format!("{card}/top/actions/choose-model"));
+    assert_eq!(
+        sent(&rt),
+        [Request::ChooseModel {
+            model: TranscriptionModelId::ParakeetUnifiedEnglish,
+            language: "en".into(),
+        }]
+    );
+    // The service saves the pair; Settings names the change and fixes the
+    // language, since the model has only English.
+    rt.state.settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetUnifiedEnglish,
+        language: "en".into(),
+        recognition_hints: String::new(),
+    };
+    rt.invalidate();
+    tap(&mut rt, "close-picker");
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(
+            &"Parakeet Unified English doesn't support Japanese, so the language changed to English"
+                .to_owned()
+        ),
+        "{shown:?}"
+    );
+    assert!(rt.find("transcription-language-control-item0").is_none());
+    tap(&mut rt, "transcription-language-control");
+    assert_eq!(rt.state.open, None, "a single language opens no menu");
+}
+
+#[test]
+fn browsing_the_picker_never_changes_the_language() {
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    let before = rt.state.settings.transcription.clone();
+    for _ in 0..12 {
+        key(&mut rt, Key::Tab, Mods::default());
+    }
+    rt.pointer_move(400.0, 300.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.transcription, before);
+    assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn changing_only_the_language_prepares_the_same_model_again() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    rt.state.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    rt.state.picker.fallback = Some(picker::LanguageFallback {
+        model: TranscriptionModelId::WhisperLargeV3Turbo,
+        from: "xx".into(),
+    });
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "transcription-language-control-field-trigger");
+    assert_eq!(rt.state.open, Some(Menu::TranscriptionLanguage));
+    // Whisper lists every language in the catalog's order.
+    let japanese =
+        crate::transcription_models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .language_choices()
+            .iter()
+            .position(|code| *code == "ja")
+            .unwrap();
+    tap(
+        &mut rt,
+        &format!("transcription-language-control-item{japanese}"),
+    );
+    assert_eq!(rt.state.open, None);
+    assert_eq!(
+        sent(&rt),
+        [Request::ChooseModel {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "ja".into(),
+        }]
+    );
+    assert_eq!(
+        rt.state.picker.fallback, None,
+        "an explicit choice clears the note"
+    );
 }
 
 #[test]
@@ -585,11 +1250,121 @@ fn a_download_in_progress_can_be_cancelled() {
     assert!(matches!(sent(&rt), [Request::CancelModel]));
 }
 
+fn focused(rt: &Runtime<Ui>) -> String {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.focused)
+        .map(|e| e.path)
+        .unwrap_or_default()
+}
+
+fn tab_to(rt: &mut Runtime<Ui>, target: &str) {
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        if focused(rt).ends_with(target) {
+            return;
+        }
+        seen.push(focused(rt));
+        key(rt, Key::Tab, Mods::default());
+    }
+    panic!("Tab never reached {target}: {seen:?}");
+}
+
 #[test]
-fn settings_opens_the_picker_on_the_current_language() {
+fn the_sidebar_moves_with_arrows_and_command_numbers() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    key(&mut rt, Key::Tab, Mods::default());
+    assert!(
+        focused(&rt).ends_with("nav-general"),
+        "Tab enters at the current pane"
+    );
+    key(&mut rt, Key::Down, Mods::default());
+    assert_eq!(rt.state.pane, Pane::Modes, "selection follows the arrows");
+    let command = Mods {
+        cmd: true,
+        ..Mods::default()
+    };
+    let shown: Vec<_> = Pane::ALL
+        .iter()
+        .copied()
+        .filter(|pane| pane.shown(&rt.state))
+        .collect();
+    key(&mut rt, Key::Command('3'), command);
+    assert_eq!(rt.state.pane, shown[2]);
+    assert!(
+        focused(&rt).ends_with(shown[2].key()),
+        "focus follows the shortcut"
+    );
+    key(&mut rt, Key::Command('1'), command);
+    assert_eq!(rt.state.pane, Pane::General);
+    key(&mut rt, Key::Command('9'), command);
+    assert_eq!(rt.state.pane, Pane::General, "no ninth pane");
+    key(&mut rt, Key::Up, Mods::default());
+    assert_eq!(rt.state.pane, Pane::General, "Up stops at the first pane");
+    let last = *shown.last().unwrap();
+    key(
+        &mut rt,
+        Key::Command(char::from(b'0' + shown.len() as u8)),
+        command,
+    );
+    key(&mut rt, Key::Down, Mods::default());
+    assert_eq!(rt.state.pane, last, "Down stops at the last pane");
+}
+
+#[test]
+fn toggle_rows_take_focus_and_flip_on_space() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
-    tap(&mut rt, "transcription-control-trigger");
-    assert_eq!(rt.state.picker.language.as_deref(), Some("en"));
+    assert!(rt.state.settings.paste_with_shift);
+    tab_to(&mut rt, "terminal-paste");
+    key(&mut rt, Key::Text(" ".into()), Mods::default());
+    assert!(!rt.state.settings.paste_with_shift);
+}
+
+#[test]
+fn the_picker_keeps_focus_inside_and_escape_returns_it() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tab_to(&mut rt, "transcription-control");
+    key(&mut rt, Key::Text(" ".into()), Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.picker.open);
+    for _ in 0..12 {
+        key(&mut rt, Key::Tab, Mods::default());
+        assert!(
+            focused(&rt).contains("transcription-picker"),
+            "focus left the picker: {}",
+            focused(&rt)
+        );
+    }
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(!rt.state.picker.open);
+    assert!(focused(&rt).ends_with("transcription-control"));
+}
+
+#[test]
+fn history_rows_select_with_arrows() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    tap(&mut rt, "history-entry3");
+    key(&mut rt, Key::Down, Mods::default());
+    assert_ne!(rt.state.history.selected, Some(3));
+    key(&mut rt, Key::Up, Mods::default());
+    assert_eq!(rt.state.history.selected, Some(3));
+}
+
+#[test]
+fn settings_opens_the_picker_and_names_the_model_and_language_apart() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(&"Parakeet Unified English".to_owned()),
+        "{shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|text| text.contains(" · Parakeet")),
+        "{shown:?}"
+    );
+    tap(&mut rt, "transcription-control");
+    assert!(rt.state.picker.open);
 }
 
 #[test]
@@ -625,6 +1400,46 @@ fn recognition_hints_save_when_typing_pauses() {
         ui.settings.transcription.recognition_hints,
         "OpenCode, Effect"
     );
+}
+
+#[test]
+fn the_microphone_field_names_the_input_in_use() {
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let rt = runtime("mac-settings", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+
+    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+    let texts = texts(&rt);
+    assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
+    assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
+}
+
+#[test]
+fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
+    let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&note.to_owned()), "{shown:?}");
+    assert!(shown.contains(&"off while the lid is closed".to_owned()));
+
+    // A saved built-in microphone shows the default standing in, too.
+    rt.state.settings.microphone = Some("MacBook Pro Microphone".into());
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices.default_is_off_with_lid_closed = false;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    assert!(texts(&rt).contains(&note.to_owned()));
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +1478,7 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
         &rt.instances,
         (width, height),
     );
+    renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, rt.clear_color());
     target.copy(&mut encoder);
@@ -697,11 +1513,15 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
         rune::render::write_png(&path, width, height, &pixels).unwrap();
         return;
     }
-    assert!(
-        path.exists(),
-        "{} is missing; run with HEX_UPDATE_GOLDENS=1",
-        path.display()
-    );
+    if !path.exists() {
+        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
+        rune::render::write_png(&actual, width, height, &pixels).unwrap();
+        panic!(
+            "{} is missing; run with HEX_UPDATE_GOLDENS=1 (render at {})",
+            path.display(),
+            actual.display()
+        );
+    }
     let (golden_width, golden_height, golden) = read_png(&path);
     assert_eq!(
         (golden_width, golden_height),
@@ -762,7 +1582,7 @@ impl Drop for Goldens {
     }
 }
 
-/// Every pane in both appearances; Settings at its full height.
+/// Every pane in both appearances; General at its full height.
 #[test]
 fn goldens() {
     let _goldens = Goldens::collect();
@@ -783,6 +1603,7 @@ fn goldens() {
     check_golden("menus", false, GOLDEN_SIZE);
     check_golden("voice-action-models", true, PANE_SIZE);
     check_golden("voice-action-unavailable", false, PANE_SIZE);
+    check_golden("modes-opencode-v1", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
 }
 

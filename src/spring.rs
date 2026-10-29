@@ -1,8 +1,5 @@
-//! Frame-rate independent spring physics for the native macOS dictation HUD,
-//! and the system's Reduce Motion setting.
-
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+//! Frame-rate independent spring physics for the dictation HUD and Dot
+//! scope's simulation.
 
 const CRITICAL_DAMPING_TOLERANCE: f32 = 1e-4;
 
@@ -119,52 +116,6 @@ impl Spring {
     pub fn settled(&self, spec: Spec, eps: f32) -> bool {
         let omega = spec.omega();
         (self.x - self.target).abs() <= eps && self.v.abs() <= eps * omega
-    }
-}
-
-static REDUCE_MOTION_CACHED: AtomicBool = AtomicBool::new(false);
-static REDUCE_MOTION_LAST_CHECK_MS: AtomicU64 = AtomicU64::new(0);
-
-/// Returns whether the user has enabled Reduce Motion in system accessibility settings,
-/// or via `HEX_REDUCE_MOTION=1` for deterministic testing.
-pub fn reduced_motion() -> bool {
-    if let Some(override_val) = env_reduce_motion() {
-        return override_val;
-    }
-    let now_ms = monotonic_ms();
-    let last = REDUCE_MOTION_LAST_CHECK_MS.load(Ordering::Relaxed);
-    if last == 0 || now_ms.saturating_sub(last) >= 250 {
-        let current = query_platform_reduce_motion();
-        REDUCE_MOTION_CACHED.store(current, Ordering::Relaxed);
-        REDUCE_MOTION_LAST_CHECK_MS.store(now_ms.max(1), Ordering::Relaxed);
-        return current;
-    }
-    REDUCE_MOTION_CACHED.load(Ordering::Relaxed)
-}
-
-fn env_reduce_motion() -> Option<bool> {
-    let val = std::env::var("HEX_REDUCE_MOTION").ok()?;
-    match val.trim() {
-        "1" | "true" | "TRUE" | "yes" | "YES" => Some(true),
-        "0" | "false" | "FALSE" | "no" | "NO" => Some(false),
-        _ => None,
-    }
-}
-
-fn monotonic_ms() -> u64 {
-    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_millis() as u64
-}
-
-fn query_platform_reduce_motion() -> bool {
-    unsafe {
-        let workspace: *mut objc2::runtime::AnyObject =
-            objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
-        if workspace.is_null() {
-            return false;
-        }
-        let reduce: bool = objc2::msg_send![workspace, accessibilityDisplayShouldReduceMotion];
-        reduce
     }
 }
 

@@ -39,7 +39,7 @@ alternatives were rejected:
   `net.git-fetch-with-cli`.
 - CI fetches Rune like any other crate; Rune is an ordinary dependency (no
   cargo feature), so every check builds and tests it. The check workflows run
-  on pushes to `main` (and to the retired `rune-ui` branch).
+  on pushes to `dev`.
 - Nix: `nix/package.nix` lists Rune's hash under `cargoLock.outputHashes` as
   `rune-0.0.1`. One entry covers every crate from the repository. **Every
   Rune pin bump must update it.** To get the new hash, set it to

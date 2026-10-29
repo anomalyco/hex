@@ -1,0 +1,26 @@
+name: AUR key check
+
+# Confirms the AUR accepts the release environment's AUR_SSH_PRIVATE_KEY
+# (github-actions-hex-aur) by listing the account's packages. Run it after
+# adding or rotating the key.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: List the AUR account's packages with the key
+        shell: bash
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: bash .github/release/push-aur.sh check | tee -a "$GITHUB_STEP_SUMMARY"

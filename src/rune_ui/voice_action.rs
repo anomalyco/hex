@@ -2,13 +2,13 @@
 //! that turns spoken instructions into paste-ready text. Enabling checks the
 //! saved shortcut against the others first.
 
-use rune::{El, col, row};
+use rune::El;
 
 use super::ShortcutTarget;
 use super::Ui;
-use super::controls::{Paint, card, note, section, setting_row, toggle_row};
+use super::controls::{Paint, card, described_row, folding, note, page, section, toggle_row};
 use super::models::{self, Target};
-use super::settings::{cancel_capture, hotkey_control};
+use super::settings::{cancel_capture, shortcut_control};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::tr;
 use crate::opencode_catalog::OpenCodeFeature;
@@ -53,49 +53,56 @@ fn toggle(ui: &mut Ui) {
 
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let enabled = ui.settings.voice_action.enabled;
-    let mut content = col().key("content").px(24.0).pt(4.0).gap(24.0);
-    let mut enable = vec![toggle_row(
-        p,
-        "voice-action-enabled",
-        tr("Enable Voice Action"),
-        description(enabled),
-        enabled,
-        toggle,
-    )];
-    if let Some(error) = &ui.voice_action_error {
-        enable.push(note(
-            "voice-action-error",
-            &format!("{} {error}", tr("Could not update Voice Action:")),
-            p.danger(),
-        ));
-    }
+    // The switch stays reachable without OpenCode; it says why it won't work.
+    let reason = (!ui.models.checking())
+        .then(|| models::unavailable_reason(ui, OpenCodeFeature::VoiceAction))
+        .flatten();
+    let mut content = page("content");
+    let enable = vec![
+        toggle_row(
+            p,
+            "voice-action-enabled",
+            tr("Enable Voice Action"),
+            reason.unwrap_or_else(|| description(enabled)),
+            enabled,
+            toggle,
+        )
+        .into(),
+        folding(
+            "voice-action-error-fold",
+            ui.voice_action_error.as_ref().map(|error| {
+                note(
+                    "voice-action-error",
+                    &format!("{} {error}", tr("Could not update Voice Action:")),
+                    p.danger(),
+                )
+            }),
+        ),
+    ];
     content = content.child(card(p, "enable", enable));
     if ui.records_shortcuts() {
-        content = content.child(section(
+        let mut rows = vec![described_row(
             p,
-            "capture",
-            tr("Capture"),
-            vec![setting_row(
-                p,
-                "voice-action-shortcut",
-                tr("Shortcut"),
-                Some(if enabled {
-                    tr("Hold to speak; selected text is included automatically")
-                } else {
-                    tr("Saved for when Voice Action is enabled")
+            "voice-action-shortcut",
+            tr("Shortcut"),
+            Some(
+                super::settings::granted(ui, p, ShortcutTarget::VoiceAction).unwrap_or_else(|| {
+                    let purpose = if enabled {
+                        tr("Hold to speak; selected text is included automatically")
+                    } else {
+                        tr("Saved for when Voice Action is enabled")
+                    };
+                    (purpose.to_string(), p.muted())
                 }),
-                row()
-                    .key("voice-action-shortcut-control")
-                    .gap(8.0)
-                    .center_y()
-                    .children(super::platform_settings::side_selector(
-                        ui,
-                        p,
-                        ShortcutTarget::VoiceAction,
-                    ))
-                    .child(hotkey_control(ui, p, ShortcutTarget::VoiceAction)),
-            )],
+            ),
+            shortcut_control(ui, p, ShortcutTarget::VoiceAction),
+        )];
+        rows.extend(super::settings::refused_note(
+            ui,
+            p,
+            ShortcutTarget::VoiceAction,
         ));
+        content = content.child(section(p, "capture", tr("Capture"), rows));
     }
     if enabled {
         let rows = match models::unavailable(ui, p, OpenCodeFeature::VoiceAction) {

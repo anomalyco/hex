@@ -2,41 +2,41 @@
 
 Windows releases are Authenticode-signed with Anomaly's Azure Artifact Signing
 (formerly Trusted Signing) account from GitHub Actions. Signing is separate
-from the ed25519 update feed: Authenticode is what Windows and SmartScreen
-check, and the feed signature is what Hex's own updater checks.
+from the release service: Authenticode is what Windows and SmartScreen check,
+and Hex's updater checks it again (with the manifest's SHA-256) before
+installing an update.
 
 ## Pipeline
 
-`.github/workflows/build-desktop.yml`, called by Release desktop with
-`sign-windows: true`:
+`.github/workflows/release.yml`, split like OpenCode's release:
 
 ```ts
-windows (x64 runner, ARM64 runner)          // compiles; no credentials
-└── unsigned-windows-<arch>: hex.exe + <feed>.payload.json
-windows-package (one x64 runner, environment: release when signing)
+build (build-desktop.yml; x64 and ARM64 runners)   // compiles; no environment or secrets
+└── build-windows-<arch>: Hex-<v>-windows-<x64|arm64>.exe (+ SHA256SUMS, digest output)
+sign-windows (release env, .github/release only)
+├── verify the artifacts' digests
 ├── azure/login (OIDC, no client secret)
 ├── artifact-signing-action: both hex.exe     // SHA-256, RFC 3161 timestamp
+└── verify-authenticode.ps1                   // every exe Valid + timestamped
+installers (windows-installers.yml)            // no secrets
 ├── build-windows-installer.ps1 x64 + arm64   // Inno embeds the signed bytes
-├── artifact-signing-action: both HEX-Setup-*.exe
-├── scripts/windows-authenticode.ps1          // Valid + timestamped, then re-address
-│   └── signing changed the bytes -> new HEX-<v>-<sha256>-<arch>-windows.exe,
-│       payload.json gets the new artifact, bytes, sha256
-└── hex-windows-<arch>: payload.json, hex.exe, HEX-Setup-<v>-<x64|arm64>.exe
-windows-installer (native x64, ARM64)        // test-windows-installer.ps1
-Release desktop sign job                      // ed25519-signs the feeds over the signed exe
+└── test-windows-installer.ps1 on native x64 and ARM64
+sign-windows-installers (release env)          // signs and checks both Hex-Setup-*.exe
+publish                                       // stable requires the signatures
 ```
 
-- The compile jobs never hold signing credentials. Only `windows-package`
-  enters the `release` environment, and only when the caller sets
-  `sign-windows`. Test builds never set it, so they stay unsigned.
+- The compile jobs never hold signing credentials. Only the two signing
+  jobs enter the `release` environment, and they run no repository code.
+  Test builds never sign.
 - Signing is skipped while any Azure value is missing. The run then warns
   and writes "not Authenticode-signed" to its summary; everything else still
   runs, including the installer tests.
-- The Inno Setup uninstaller (`voice-control\uninstall\unins000.exe`) is
+- The Inno Setup uninstaller (`hex\uninstall\unins000.exe`) is
   written at install time and is not signed. It is created locally with no
   Mark of the Web, so SmartScreen does not check it.
 - Self-updates download `hex.exe` through Hex itself, so SmartScreen is not
-  involved there either. The feed's ed25519 signature and SHA-256 protect it.
+  involved there either. The manifest's SHA-256 and the Authenticode check
+  protect it.
 
 ## Configuration
 
@@ -61,7 +61,7 @@ self-service setup.
 
 - Artifact Signing issues a short-lived certificate (about three days) for
   each signing session. Without the timestamp, a signature would expire with
-  its certificate, so `windows-authenticode.ps1` rejects any signature that
+  its certificate, so `verify-authenticode.ps1` rejects any signature that
   lacks one.
 - SmartScreen builds reputation per publisher identity, not per certificate.
   The daily certificate rotation does not reset it. A new publisher can still

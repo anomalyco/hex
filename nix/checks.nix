@@ -84,7 +84,7 @@ in
     assert enabled.systemd.user.services.hex.Service.Restart == "on-failure";
     assert enabled.systemd.user.services.hex.Service.Type == "notify";
     assert enabled.systemd.user.services.hex.Service.NotifyAccess == "main";
-    assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/voice-control"
+    assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/hex"
       enabled.systemd.user.services.hex.Service.Environment;
     assert
       custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];

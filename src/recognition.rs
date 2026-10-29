@@ -10,11 +10,12 @@ use color_eyre::Result;
 use crate::audio::CaptureInstant;
 use crate::commands::{Action, ActionExecutor, ActionOutcome, CommandConfig, Decision, Mode};
 use crate::context::{ContextMonitor, ContextSnapshot};
+use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply};
 use crate::dictation::{
-    ControlStability, DictationControl, DictationProtocol, Finish, MINIMUM_HOLD_DURATION,
-    POST_RELEASE_TAIL,
+    ControlStability, DictationClip, DictationControl, DictationProtocol, Finish,
+    MINIMUM_HOLD_DURATION, POST_RELEASE_TAIL,
 };
-use crate::dictation_audio::{DictationAudio, DictationAudioEvent};
+use crate::dictation_audio::{DictationAudio, DictationAudioEvent, LostCapture};
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::events::{
     CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
@@ -23,16 +24,20 @@ use crate::feedback::{self, Tone};
 use crate::meeting::MeetingRequest;
 use crate::moonshine::Moonshine;
 use crate::parakeet::{
-    DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
+    DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
 use crate::recording_environment::RecordingEnvironmentController;
 use crate::spoken_text::normalize;
-use crate::suppression::{DictationHotkey, HotkeyAction, InputActivity, InputEvent, InputMonitor};
+use crate::suppression::{
+    DictationHotkey, DiscardCause, HotkeyAction, InputActivity, InputEvent, InputMonitor,
+};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const ACTIVATION_STABILITY_WINDOW: Duration = Duration::from_millis(750);
 const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);
 const PROGRAMMATIC_COMPLETION_LIMIT: usize = 16;
+/// `/finish` on a programmatic capture the microphone ended before any audio.
+const MICROPHONE_LOST: &str = "microphone-lost";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandModelStatus {
@@ -97,8 +102,35 @@ enum FinishResult {
 
 #[derive(Debug)]
 pub enum RecognitionControl {
-    PasteLast,
+    /// Pastes the last dictation once nothing records; `reply` answers
+    /// `hex paste-last`, and the menu bar sends none.
+    PasteLast {
+        reply: Option<SyncSender<ControlReply>>,
+    },
     RetryCommands,
+    /// `hex dictation` and `hex voice-action`: drives the shortcut machine
+    /// as a press would, so the shortcut and Escape still finish or cancel.
+    Capture {
+        voice_action: bool,
+        action: CaptureAction,
+        reply: SyncSender<ControlReply>,
+    },
+    /// What is recording, for `hex status`.
+    CaptureStatus {
+        reply: SyncSender<CaptureSnapshot>,
+    },
+    /// `hex capture` (the `capture` experiment; see `capture_host`).
+    #[cfg(hex_capture)]
+    ScrawlCapture {
+        action: crate::control::ScrawlCaptureAction,
+        reply: SyncSender<ControlReply>,
+    },
+    /// The capture capsule's switch chips and picker (`capture_host`).
+    #[cfg(hex_capture)]
+    CaptureCommand {
+        command: crate::capture_host::CaptureCommand,
+        reply: SyncSender<ControlReply>,
+    },
     StartDictation {
         source: String,
         owner_token: String,
@@ -167,8 +199,26 @@ impl ProgrammaticDictation {
     }
 }
 
+/// A programmatic capture the microphone cut short: the audio delivered
+/// before the loss, waiting for its owner's `/finish` or `/cancel` while
+/// heartbeats renew its lease.
+struct LostProgrammaticDictation {
+    id: u64,
+    owner_token: String,
+    source: String,
+    lease_deadline: Instant,
+    clip: DictationClip,
+}
+
+impl LostProgrammaticDictation {
+    fn matches_owner(&self, id: u64, owner_token: &str) -> bool {
+        self.id == id && self.owner_token == owner_token
+    }
+}
+
 struct FinishingProgrammaticDictation {
     id: u64,
+    source: String,
     owner_token: String,
     duration_ms: u64,
     replies: Vec<SyncSender<Result<ProgrammaticDictationResult, String>>>,
@@ -205,6 +255,8 @@ impl ProgrammaticCompletion {
 struct VoiceCapture {
     protocol: Arc<DictationProtocol>,
     stability: ControlStability,
+    /// Where the start phrase ended: Smart Turn listens from here.
+    started_at: CaptureInstant,
 }
 
 /// Where the current Moonshine stream's audio began. Every owner-side
@@ -281,6 +333,20 @@ impl Hotkeys {
             edit.recover_stale_keys();
         }
     }
+
+    fn break_chords(&mut self, now: CaptureInstant) {
+        self.dictation.break_chord(now);
+        if let Some(edit) = &mut self.edit {
+            edit.break_chord(now);
+        }
+    }
+
+    fn forgo_chord_breaks(&mut self) {
+        self.dictation.forgo_chord_break();
+        if let Some(edit) = &mut self.edit {
+            edit.forgo_chord_break();
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -339,6 +405,8 @@ pub fn listen(
     let mut last_update = Instant::now();
     let mut recognition_origin = None::<RecognitionOrigin>;
     let recording_environment = RecordingEnvironmentController::start();
+    #[cfg(hex_capture)]
+    let capture_environment = recording_environment.clone();
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
@@ -354,7 +422,13 @@ pub fn listen(
         microphone_policy.release_while_idle,
         dictation_worker.engine(),
     )?;
+    #[cfg(hex_capture)]
+    let mut capture_host =
+        crate::capture_host::CaptureHost::start(dictation_worker.engine(), &capture_environment);
+    #[cfg(hex_capture)]
+    let mut capture_shortcut = crate::capture_host::CaptureShortcut::default();
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
+    let mut smart_turn = crate::smart_turn::SmartTurn::start(project_root);
     let mut action_executor: Option<ActionExecutor> = None;
     let mut personal_host_enabled =
         commands_enabled || crate::app_settings::custom_transformations_enabled();
@@ -368,6 +442,7 @@ pub fn listen(
         .flatten();
     let mut next_programmatic_id = 1_u64;
     let mut programmatic = None::<ProgrammaticDictation>;
+    let mut programmatic_lost = None::<LostProgrammaticDictation>;
     let mut programmatic_results =
         BTreeMap::<crate::parakeet::DictationJobId, FinishingProgrammaticDictation>::new();
     let mut programmatic_completions = VecDeque::<ProgrammaticCompletion>::new();
@@ -420,6 +495,13 @@ pub fn listen(
     }
 
     while !shutdown.load(Ordering::Relaxed) {
+        #[cfg(hex_capture)]
+        crate::capture_host::CaptureHost::reconcile(
+            &mut capture_host,
+            dictation_worker.engine().as_ref(),
+            &capture_environment,
+            &input,
+        );
         if let Some(controls) = &controls {
             while let Ok(control) = controls.try_recv() {
                 match control {
@@ -432,22 +514,122 @@ pub fn listen(
                                 Some(load_command_recognizer(project_root.to_path_buf()));
                         }
                     }
-                    RecognitionControl::PasteLast if programmatic.is_none() => {
-                        handle_hotkey_action(
-                            HotkeyAction::PasteLast,
-                            CaptureInstant::now(),
-                            &mut recognizer,
-                            &input,
-                            &dictation_worker,
-                            mode,
-                            &context,
-                            &input.device_name(),
-                            &mut events,
-                            indicator.as_ref(),
-                            microphone_policy.release_while_idle,
-                        )?;
+                    RecognitionControl::PasteLast { reply } => {
+                        let capture_active = programmatic.is_some()
+                            || voice.is_some()
+                            || hotkeys.suppresses_recognition()
+                            || edit_context.is_some()
+                            || edit_pending_since.is_some()
+                            || input.is_recording();
+                        let answer = match paste_last_refusal(capture_active) {
+                            Some(refusal) => refusal,
+                            None => paste_last(
+                                &dictation_worker,
+                                mode,
+                                &input.device_name(),
+                                &mut events,
+                            )?,
+                        };
+                        if let Some(reply) = reply {
+                            let _ = reply.send(answer);
+                        }
                     }
-                    RecognitionControl::PasteLast => {}
+                    #[cfg(hex_capture)]
+                    RecognitionControl::ScrawlCapture { action, reply } => {
+                        let answer = match capture_host.as_mut() {
+                            Some(host) => host.control(action, &input),
+                            None if !crate::app_settings::capture_available() => {
+                                ControlReply::error(
+                                    "feature-off",
+                                    "captures need the `capture` experiment; \
+                                     run `hex experiments enable capture` and restart Hex",
+                                )
+                            }
+                            None => ControlReply::error(
+                                "feature-off",
+                                "captures are off; turn them on in Settings › Scrawl or \
+                                 run `hex settings set capture.enabled true`",
+                            ),
+                        };
+                        let _ = reply.send(answer);
+                    }
+                    #[cfg(hex_capture)]
+                    RecognitionControl::CaptureCommand { command, reply } => {
+                        let answer = match capture_host.as_mut() {
+                            Some(host) => host.command(command, &input),
+                            None => ControlReply::error("feature-off", "captures are off"),
+                        };
+                        let _ = reply.send(answer);
+                    }
+                    RecognitionControl::CaptureStatus { reply } => {
+                        let recording = if programmatic.is_some() {
+                            Some(CaptureKind::Service)
+                        } else if voice.is_some() {
+                            Some(CaptureKind::Voice)
+                        } else if hotkeys.edit_recording() || edit_context.is_some() {
+                            Some(CaptureKind::VoiceAction)
+                        } else if hotkeys.dictation.is_recording() {
+                            Some(CaptureKind::Dictation)
+                        } else {
+                            None
+                        };
+                        let _ = reply.send(CaptureSnapshot {
+                            recording,
+                            pending_jobs: dictation_worker.pending_count(),
+                        });
+                    }
+                    RecognitionControl::Capture {
+                        voice_action,
+                        action,
+                        reply,
+                    } => {
+                        let release_while_idle = microphone_policy.release_while_idle;
+                        let other_recording = programmatic.is_some()
+                            || voice.is_some()
+                            || if voice_action {
+                                hotkeys.dictation.is_recording()
+                            } else {
+                                hotkeys.edit_recording()
+                                    || edit_context.is_some()
+                                    || edit_pending_since.is_some()
+                            };
+                        let suspended =
+                            crate::app_settings::hotkey_capture_active() || input.is_recovering();
+                        let outcome = if voice_action {
+                            control_voice_action(
+                                action,
+                                other_recording,
+                                suspended,
+                                &mut hotkeys,
+                                &mut edit_pending_since,
+                                &mut edit_context,
+                                &mut recognizer,
+                                &input,
+                                &dictation_worker,
+                                mode,
+                                &context,
+                                &mut events,
+                                indicator.as_ref(),
+                                release_while_idle,
+                            )?
+                        } else {
+                            control_dictation(
+                                action,
+                                other_recording,
+                                suspended,
+                                &mut hotkeys,
+                                &mut recognizer,
+                                &input,
+                                &dictation_worker,
+                                mode,
+                                &context,
+                                &mut events,
+                                indicator.as_ref(),
+                                release_while_idle,
+                            )?
+                        };
+                        let _ = reply.send(outcome);
+                    }
                     RecognitionControl::StartDictation {
                         source,
                         owner_token,
@@ -484,7 +666,6 @@ pub fn listen(
                                     last_level: Instant::now() - Duration::from_millis(30),
                                     lease_deadline: Instant::now() + PROGRAMMATIC_LEASE,
                                 });
-                                input_monitor.set_escape_cancels(true);
                                 let _ = reply.send(Ok(ProgrammaticDictationStart {
                                     id,
                                     sample_rate: input.sample_rate(),
@@ -539,17 +720,47 @@ pub fn listen(
                             let _ = reply.send(result);
                             continue;
                         }
-                        if programmatic
-                            .as_ref()
-                            .is_none_or(|active| !active.matches_owner(id, &owner_token))
+                        let (source, finish, reset_recognizer) = if let Some(lost) =
+                            programmatic_lost.take_if(|lost| lost.matches_owner(id, &owner_token))
                         {
+                            // No recognizer reset: a capture started since
+                            // the microphone recovered may be using it.
+                            (lost.source, Finish::Transcribe(lost.clip), false)
+                        } else if programmatic
+                            .as_ref()
+                            .is_some_and(|active| active.matches_owner(id, &owner_token))
+                        {
+                            let active = programmatic.take().expect("active dictation was checked");
+                            let boundary =
+                                capture_boundary(&input, microphone_policy.release_while_idle);
+                            // The microphone may have failed before this
+                            // finish reached the audio owner, with its loss
+                            // still queued.
+                            let finish = match input.finish(boundary)? {
+                                Finish::Discard => match input.take_loss() {
+                                    Some(LostCapture::Kept(clip)) => Finish::Transcribe(clip),
+                                    Some(LostCapture::Empty) => {
+                                        log_programmatic_ended(Some(active), "mic-lost");
+                                        finish_programmatic_with_result(
+                                            id,
+                                            owner_token,
+                                            vec![reply],
+                                            Err(MICROPHONE_LOST.into()),
+                                            &mut programmatic_completions,
+                                        );
+                                        reset_command_recognizer(&input, &mut recognizer)?;
+                                        continue;
+                                    }
+                                    None => Finish::Discard,
+                                },
+                                finish => finish,
+                            };
+                            (active.source, finish, true)
+                        } else {
                             let _ = reply.send(Err("dictation-not-active".into()));
                             continue;
-                        }
-                        let active = programmatic.take().expect("active dictation was checked");
-                        let boundary =
-                            capture_boundary(&input, microphone_policy.release_while_idle);
-                        match input.finish(boundary)? {
+                        };
+                        match finish {
                             Finish::Transcribe(clip) => {
                                 let duration_ms = clip.duration_ms();
                                 match dictation_worker.transcribe(
@@ -563,6 +774,7 @@ pub fn listen(
                                             job_id,
                                             FinishingProgrammaticDictation {
                                                 id,
+                                                source: source.clone(),
                                                 owner_token,
                                                 duration_ms,
                                                 replies: vec![reply],
@@ -570,11 +782,18 @@ pub fn listen(
                                         );
                                         tracing::info!(
                                             dictation_id = id,
-                                            source = active.source,
+                                            source,
                                             "programmatic dictation submitted"
                                         );
                                     }
                                     Err(error) => {
+                                        tracing::warn!(
+                                            dictation_id = id,
+                                            source,
+                                            outcome = "worker-error",
+                                            error = %error,
+                                            "programmatic dictation ended"
+                                        );
                                         finish_programmatic_with_result(
                                             id,
                                             owner_token,
@@ -586,6 +805,12 @@ pub fn listen(
                                 }
                             }
                             Finish::Discard => {
+                                tracing::warn!(
+                                    dictation_id = id,
+                                    source,
+                                    outcome = "discarded",
+                                    "programmatic dictation ended"
+                                );
                                 finish_programmatic_with_result(
                                     id,
                                     owner_token,
@@ -595,7 +820,9 @@ pub fn listen(
                                 );
                             }
                         }
-                        reset_command_recognizer(&input, &mut recognizer)?;
+                        if reset_recognizer {
+                            reset_command_recognizer(&input, &mut recognizer)?;
+                        }
                     }
                     RecognitionControl::CancelDictation {
                         id,
@@ -616,6 +843,25 @@ pub fn listen(
                             .any(|finishing| finishing.matches_owner(id, &owner_token))
                         {
                             let _ = reply.send(Err("dictation-finishing".into()));
+                            continue;
+                        }
+                        if let Some(lost) =
+                            programmatic_lost.take_if(|lost| lost.matches_owner(id, &owner_token))
+                        {
+                            tracing::info!(
+                                dictation_id = id,
+                                source = lost.source,
+                                "programmatic dictation cancelled"
+                            );
+                            remember_programmatic_completion(
+                                &mut programmatic_completions,
+                                ProgrammaticCompletion {
+                                    id,
+                                    owner_token,
+                                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                                },
+                            );
+                            let _ = reply.send(Ok(()));
                             continue;
                         }
                         if programmatic
@@ -644,14 +890,21 @@ pub fn listen(
                         owner_token,
                         reply,
                     } => {
-                        let Some(active) = programmatic
+                        let lease_deadline = if let Some(active) = programmatic
                             .as_mut()
                             .filter(|active| active.matches_owner(id, &owner_token))
-                        else {
+                        {
+                            &mut active.lease_deadline
+                        } else if let Some(lost) = programmatic_lost
+                            .as_mut()
+                            .filter(|lost| lost.matches_owner(id, &owner_token))
+                        {
+                            &mut lost.lease_deadline
+                        } else {
                             let _ = reply.send(Err("dictation-not-active".into()));
                             continue;
                         };
-                        active.lease_deadline = Instant::now() + PROGRAMMATIC_LEASE;
+                        *lease_deadline = Instant::now() + PROGRAMMATIC_LEASE;
                         let _ = reply.send(Ok(()));
                     }
                 }
@@ -673,6 +926,23 @@ pub fn listen(
                 &mut recognizer,
                 &mut programmatic_completions,
             )?;
+        }
+        if let Some(expired) = programmatic_lost
+            .take_if(|lost| programmatic_lease_expired(lost.lease_deadline, Instant::now()))
+        {
+            tracing::warn!(
+                dictation_id = expired.id,
+                source = expired.source,
+                "programmatic dictation lease expired"
+            );
+            remember_programmatic_completion(
+                &mut programmatic_completions,
+                ProgrammaticCompletion {
+                    id: expired.id,
+                    owner_token: expired.owner_token,
+                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                },
+            );
         }
         while let Ok(next_context) = context_monitor.updates.try_recv() {
             if context != next_context {
@@ -839,30 +1109,53 @@ pub fn listen(
                 )?;
             }
         }
+        // The capture shortcut ignores keys while shortcuts are suspended or
+        // a programmatic dictation holds them, so their releases go unseen.
+        #[cfg(hex_capture)]
+        if hotkey_capture_suspended || programmatic.is_some() {
+            capture_shortcut.reset();
+        }
         while let Ok(observed) = input_monitor.events.try_recv() {
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
             let capture_at = observed.capture_at;
+            // Escape included: it belongs to the owner app (closing a
+            // picker while a note records), which cancels through the API.
             if programmatic.is_some() {
                 hotkeys.track_key_state(input_event, capture_at);
-            }
-            if programmatic.is_some() && input_event.is_escape_down() {
-                let cancelled = programmatic
-                    .take()
-                    .expect("programmatic dictation is active");
-                cancel_programmatic_capture(
-                    cancelled,
-                    &input,
-                    &mut recognizer,
-                    &mut programmatic_completions,
-                )?;
-                feedback::play(Tone::Cancel);
-                continue;
-            } else if programmatic.is_some() {
                 continue;
             }
             if hotkey_capture_suspended {
                 continue;
+            }
+            #[cfg(hex_capture)]
+            if let Some(host) = capture_host.as_mut() {
+                let activity = host.shortcut_activity(capture_at, &input);
+                let action = capture_shortcut.input(
+                    input_event,
+                    crate::app_settings::runtime_hotkeys(),
+                    activity,
+                );
+                if action == crate::capture_host::ShortcutAction::Cancel {
+                    // Escape before the shortcut's keys came up: nothing else
+                    // hears it.
+                    continue;
+                }
+                host.shortcut(action, &input);
+                // The send-to list shortcut, matched only while the capsule
+                // takes it; the dictation hotkey still sees the press as a
+                // chord.
+                if let crate::suppression::InputEvent::Key {
+                    code,
+                    down: true,
+                    flags,
+                } = input_event
+                    && crate::app_settings::runtime_hotkeys()
+                        .capture_list
+                        .is_some_and(|list| list.matches_key_press(code, flags))
+                {
+                    crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::OpenList);
+                }
             }
             if voice.is_some() && input_event.is_escape_down() {
                 voice = None;
@@ -877,17 +1170,22 @@ pub fn listen(
                 )?;
                 continue;
             }
+            // Escape ends a dictation or Voice Action hold first, then
+            // closes the capsule's picker or open list (never an Undo: that is a
+            // click), then cancels queued
+            // dictation. It never ends a recording capture: it may be meant
+            // for the app being recorded (the capsule's ✕ discards).
+            #[cfg(hex_capture)]
             if !hotkeys.any_recording()
                 && input_event.is_escape_down()
-                && let Some(job_id) = dictation_worker.cancel_latest()
+                && crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::Escape)
             {
-                feedback::play(Tone::Cancel);
-                events.dictation(DictationPhase::Cancelled, "")?;
-                if let Some(indicator) = &indicator {
-                    indicator.send(DictationIndicatorEvent::JobCancelled {
-                        job_id: job_id.value(),
-                    });
-                }
+                continue;
+            }
+            if !hotkeys.any_recording()
+                && input_event.is_escape_down()
+                && cancel_latest_job(&dictation_worker, &mut events, indicator.as_ref())?
+            {
                 continue;
             }
             let edit_action = hotkeys
@@ -996,7 +1294,7 @@ pub fn listen(
                     Some(_) => {
                         edit_context = None;
                         end_capture(
-                            CaptureEnd::Discarded,
+                            CaptureEnd::Discarded(action.discard_cause()),
                             &input,
                             &mut recognizer,
                             mode,
@@ -1006,6 +1304,10 @@ pub fn listen(
                         )?;
                     }
                 }
+            }
+            // A shortcut press during voice-delimited dictation starts nothing.
+            if voice.is_some() {
+                hotkeys.forgo_chord_breaks();
             }
         }
         if programmatic.is_none()
@@ -1052,6 +1354,15 @@ pub fn listen(
                 }
             }
         }
+        // Only once every queued edge is handled, so a release already seen
+        // ends the press first.
+        if voice.is_none()
+            && edit_pending_since.is_none()
+            && !hotkey_capture_suspended
+            && input_monitor.pending_events().oldest().is_none()
+        {
+            hotkeys.break_chords(CaptureInstant::now());
+        }
         let mut received_worker_event = false;
         while let Some(event) = dictation_worker.try_recv() {
             received_worker_event = true;
@@ -1063,6 +1374,24 @@ pub fn listen(
                     ..
                 } => {
                     if let Some(finishing) = programmatic_results.remove(&job_id) {
+                        match &result {
+                            Ok(transcript) => tracing::info!(
+                                dictation_id = finishing.id,
+                                source = finishing.source,
+                                outcome = "transcribed",
+                                transcript_chars = transcript.chars().count(),
+                                duration_ms = finishing.duration_ms,
+                                "programmatic dictation ended"
+                            ),
+                            Err(error) => tracing::warn!(
+                                dictation_id = finishing.id,
+                                source = finishing.source,
+                                outcome = "worker-error",
+                                duration_ms = finishing.duration_ms,
+                                error = %error,
+                                "programmatic dictation ended"
+                            ),
+                        }
                         let result = result.map(|transcript| ProgrammaticDictationResult {
                             transcript,
                             duration_ms: finishing.duration_ms,
@@ -1098,12 +1427,18 @@ pub fn listen(
                 event => handle_dictation_event(event, &mut events, indicator.as_ref())?,
             }
         }
-        input_monitor.set_escape_cancels(
-            hotkeys.any_recording()
-                || voice.is_some()
-                || programmatic.is_some()
-                || dictation_worker.pending_count() > 0,
-        );
+        // A recording capture never takes Escape: only the capture
+        // shortcut's press before it starts, and the capsule's picker.
+        #[cfg(hex_capture)]
+        let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
+        #[cfg(not(hex_capture))]
+        let capture_escape = false;
+        input_monitor.set_escape_cancels(claims_escape(
+            programmatic.is_some(),
+            hotkeys.any_recording() || voice.is_some(),
+            capture_escape,
+            || dictation_worker.has_escape_cancellable_job(),
+        ));
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1122,7 +1457,13 @@ pub fn listen(
                     }
                 }
                 DictationAudioEvent::OpenFailed { error, .. } => {
-                    programmatic = None;
+                    programmatic_microphone_lost(
+                        programmatic.take(),
+                        None,
+                        "mic-open-failed",
+                        &mut programmatic_lost,
+                        &mut programmatic_completions,
+                    );
                     abandon_capture(
                         &mut hotkeys,
                         &mut voice,
@@ -1150,11 +1491,18 @@ pub fn listen(
                 DictationAudioEvent::CaptureDiscontinuity {
                     was_recording,
                     gap_ms,
+                    kept,
                     ..
                 } => {
                     resync_recognizer(&input, recognizer.as_mut())?;
                     if was_recording {
-                        programmatic = None;
+                        programmatic_microphone_lost(
+                            programmatic.take(),
+                            kept,
+                            "mic-gap",
+                            &mut programmatic_lost,
+                            &mut programmatic_completions,
+                        );
                         abandon_capture(
                             &mut hotkeys,
                             &mut voice,
@@ -1177,9 +1525,19 @@ pub fn listen(
                         emit_state(&mut events, false, mode, &input.device_name())?;
                     }
                 }
-                DictationAudioEvent::Interrupted { was_recording, .. } => {
+                DictationAudioEvent::Interrupted {
+                    was_recording,
+                    kept,
+                    ..
+                } => {
                     if was_recording {
-                        programmatic = None;
+                        programmatic_microphone_lost(
+                            programmatic.take(),
+                            kept,
+                            "mic-interrupted",
+                            &mut programmatic_lost,
+                            &mut programmatic_completions,
+                        );
                     }
                     abandon_capture(
                         &mut hotkeys,
@@ -1203,6 +1561,87 @@ pub fn listen(
         }
 
         let audio = input.recv_timeout(Duration::from_millis(20))?;
+        if let Some(smart_turn) = &mut smart_turn {
+            // Follow a voice or shortcut dictation from its start, so speech
+            // while the shortcut is still down counts; only a hands-free one
+            // (voice, locked, or Toggle after its release) may stop.
+            let followed = input.is_recording()
+                && programmatic.is_none()
+                && !hotkey_capture_suspended
+                && edit_pending_since.is_none()
+                && edit_context.is_none()
+                && !hotkeys.edit_recording()
+                && (voice.is_some() || hotkeys.dictation.is_recording());
+            smart_turn.track(followed.then(|| crate::smart_turn::Capture {
+                generation: input.capture_generation(),
+                listen_from: voice.as_ref().map(|active| active.started_at),
+                armed: voice.is_some() || hotkeys.dictation.is_locked(),
+            }));
+            // Recognition generations only gate Moonshine; Smart Turn orders
+            // audio by capture time and skips anything it already heard.
+            if let Some(audio) = &audio {
+                smart_turn.push(&audio.samples, input.sample_rate(), audio.captured_from());
+            }
+            for report in smart_turn.poll() {
+                events.emit(&report.event(now_ms()))?;
+            }
+            // A queued Escape or shortcut press is handled first; the stop
+            // waits for a later turn of the loop.
+            if followed
+                && input_monitor.pending_events().oldest().is_none()
+                && smart_turn.take_stop()
+            {
+                smart_turn.track(None);
+                let boundary = capture_boundary(&input, microphone_policy.release_while_idle);
+                if let Some(active) = voice.take() {
+                    // As the spoken stop phrase does. Moonshine may not have
+                    // heard a control phrase yet, so one at the end of the
+                    // transcript still cancels or sends.
+                    finish_dictation_with(
+                        &input,
+                        boundary,
+                        Duration::ZERO,
+                        |clip| {
+                            dictation_worker.transcribe_voice_turn(
+                                clip,
+                                active.protocol,
+                                context.clone(),
+                            )
+                        },
+                        &input.device_name(),
+                        &mut events,
+                        indicator.as_ref(),
+                    )?;
+                    reset_command_recognizer(&input, &mut recognizer)?;
+                    emit_engine_state(
+                        &mut events,
+                        false,
+                        &dictation_worker,
+                        mode,
+                        &input.device_name(),
+                    )?;
+                } else {
+                    // As `hex dictation stop` does: a locked finish press.
+                    finish_hotkey_dictation(
+                        boundary,
+                        &mut recognizer,
+                        &input,
+                        &dictation_worker,
+                        mode,
+                        &context,
+                        &input.device_name(),
+                        &mut events,
+                        indicator.as_ref(),
+                        microphone_policy.release_while_idle,
+                    )?;
+                    // Unlock only now: a shortcut press during the stop's
+                    // tail meant to finish this capture, so it is ignored
+                    // instead of starting another.
+                    hotkeys.dictation.wait_for_release();
+                }
+                continue;
+            }
+        }
         if let (Some(active), Some(audio)) = (&mut programmatic, &audio) {
             if active.last_level.elapsed() >= Duration::from_millis(30) {
                 let _ = active.levels.try_send(level_for(&audio.samples));
@@ -1405,6 +1844,10 @@ pub fn listen(
         }
     }
 
+    #[cfg(hex_capture)]
+    if let Some(host) = &mut capture_host {
+        host.shutdown(&input);
+    }
     events.emit(&VoiceEvent::State {
         timestamp_ms: now_ms(),
         state: VoiceState::Stopping,
@@ -1435,6 +1878,76 @@ fn level_for(samples: &[f32]) -> DictationLevel {
     DictationLevel {
         rms_db: amplitude_db(rms),
         peak_db: amplitude_db(peak),
+    }
+}
+
+fn log_programmatic_ended(active: Option<ProgrammaticDictation>, outcome: &str) {
+    if let Some(active) = active {
+        tracing::warn!(
+            dictation_id = active.id,
+            source = active.source,
+            outcome,
+            "programmatic dictation ended"
+        );
+    }
+}
+
+/// Ends a programmatic capture the microphone cut short. The audio delivered
+/// before the loss waits for the owner's `/finish`; without any, `/finish`
+/// answers `microphone-lost`.
+fn programmatic_microphone_lost(
+    active: Option<ProgrammaticDictation>,
+    kept: Option<DictationClip>,
+    outcome: &str,
+    lost: &mut Option<LostProgrammaticDictation>,
+    completions: &mut VecDeque<ProgrammaticCompletion>,
+) {
+    let Some(active) = active else {
+        return;
+    };
+    let Some(mut clip) = kept else {
+        remember_programmatic_completion(
+            completions,
+            ProgrammaticCompletion {
+                id: active.id,
+                owner_token: active.owner_token.clone(),
+                outcome: ProgrammaticTerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
+            },
+        );
+        log_programmatic_ended(Some(active), outcome);
+        return;
+    };
+    // A held clip must not defer background work until the owner finishes.
+    drop(clip.take_capture_marker());
+    tracing::warn!(
+        dictation_id = active.id,
+        source = active.source,
+        outcome,
+        duration_ms = clip.duration_ms(),
+        "programmatic dictation kept its audio after a microphone loss"
+    );
+    let previous = lost.replace(LostProgrammaticDictation {
+        id: active.id,
+        owner_token: active.owner_token,
+        source: active.source,
+        lease_deadline: active.lease_deadline,
+        clip,
+    });
+    if let Some(previous) = previous {
+        tracing::warn!(
+            dictation_id = previous.id,
+            source = previous.source,
+            outcome = "superseded",
+            "programmatic dictation ended"
+        );
+        remember_programmatic_completion(
+            completions,
+            ProgrammaticCompletion {
+                id: previous.id,
+                owner_token: previous.owner_token,
+                outcome: ProgrammaticTerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
+            },
+        );
     }
 }
 
@@ -1534,6 +2047,7 @@ fn start_voice_capture(
     *voice = Some(VoiceCapture {
         protocol,
         stability: ControlStability::default(),
+        started_at: boundary,
     });
     feedback::play(Tone::DictationStart);
     events.dictation(DictationPhase::Started, "")?;
@@ -1578,35 +2092,26 @@ fn handle_hotkey_action(
             }
             emit_state(events, true, mode, device)
         }
-        HotkeyAction::Finish => {
-            if dictation.become_intentional(action_at)? && release_while_idle {
-                feedback::play(Tone::DictationStart);
-            }
-            let finished = finish_dictation(
-                dictation,
-                action_at,
-                POST_RELEASE_TAIL,
-                worker,
-                TranscriptionTarget::Paste,
-                None,
-                context,
-                device,
-                events,
-                indicator,
-            )?;
-            if matches!(finished, FinishResult::Discarded) {
-                feedback::retract_start();
-            }
-            reset_command_recognizer(dictation, recognizer)?;
-            emit_engine_state(events, false, worker, mode, device)
-        }
-        HotkeyAction::Discard | HotkeyAction::Cancel => {
+        HotkeyAction::Finish => finish_hotkey_dictation(
+            action_at,
+            recognizer,
+            dictation,
+            worker,
+            mode,
+            context,
+            device,
+            events,
+            indicator,
+            release_while_idle,
+        )
+        .map(drop),
+        HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
             feedback::retract_start();
             end_capture(
                 if matches!(action, HotkeyAction::Cancel) {
                     CaptureEnd::Cancelled
                 } else {
-                    CaptureEnd::Discarded
+                    CaptureEnd::Discarded(action.discard_cause())
                 },
                 dictation,
                 recognizer,
@@ -1634,6 +2139,437 @@ fn handle_hotkey_action(
         }
     }?;
     Ok(true)
+}
+
+/// Ends a shortcut dictation at `action_at` and hands it to transcription.
+#[allow(clippy::too_many_arguments)]
+fn finish_hotkey_dictation(
+    action_at: CaptureInstant,
+    recognizer: &mut Option<Moonshine>,
+    dictation: &DictationAudio,
+    worker: &DictationWorker,
+    mode: Mode,
+    context: &ContextSnapshot,
+    device: &str,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+    release_while_idle: bool,
+) -> Result<FinishResult> {
+    if dictation.become_intentional(action_at)? && release_while_idle {
+        feedback::play(Tone::DictationStart);
+    }
+    let finished = finish_dictation(
+        dictation,
+        action_at,
+        POST_RELEASE_TAIL,
+        worker,
+        TranscriptionTarget::Paste,
+        None,
+        context,
+        device,
+        events,
+        indicator,
+    )?;
+    if matches!(finished, FinishResult::Discarded) {
+        feedback::retract_start();
+    }
+    reset_command_recognizer(dictation, recognizer)?;
+    emit_engine_state(events, false, worker, mode, device)?;
+    Ok(finished)
+}
+
+/// Whether Hex takes Escape from the app in front. Never while a programmatic
+/// dictation records: the listener ignores every key then, so Escape stays
+/// with its owner app rather than being swallowed.
+fn claims_escape(
+    programmatic: bool,
+    recording: bool,
+    capture_escape: bool,
+    cancellable_job: impl FnOnce() -> bool,
+) -> bool {
+    !programmatic && (recording || capture_escape || cancellable_job())
+}
+
+/// Cancels the newest unfinished dictation, as Escape does while idle.
+fn cancel_latest_job(
+    worker: &DictationWorker,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+) -> Result<bool> {
+    let Some(job_id) = worker.cancel_latest() else {
+        return Ok(false);
+    };
+    feedback::play(Tone::Cancel);
+    events.dictation(DictationPhase::Cancelled, "")?;
+    if let Some(indicator) = indicator {
+        indicator.send(DictationIndicatorEvent::JobCancelled {
+            job_id: job_id.value(),
+        });
+    }
+    Ok(true)
+}
+
+/// Why a control can't start a capture now, if it can't.
+fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlReply> {
+    if other_recording {
+        Some(ControlReply::error(
+            "busy",
+            "another recording is in progress; finish or cancel it first",
+        ))
+    } else if suspended {
+        Some(ControlReply::error(
+            "busy",
+            "Hex is recording a shortcut in Settings or reopening the microphone; try again",
+        ))
+    } else {
+        None
+    }
+}
+
+/// A `cancel` with its own capture idle. Escape cancels the active capture
+/// before any unfinished job, so while another capture records this refuses
+/// rather than reach past it to a job.
+fn idle_cancel_refusal(other_recording: bool) -> Option<ControlReply> {
+    other_recording.then(|| {
+        ControlReply::error(
+            "busy",
+            "another recording is in progress; cancel it first (Escape cancels it)",
+        )
+    })
+}
+
+/// A control start has no press to judge, so its capture counts as
+/// intentional from its first sample: the recording environment starts and
+/// the live stream opens now. `tone_owed` plays the start tone for a capture
+/// that's already open; one still opening the microphone plays it on
+/// `ReadyIntentional`.
+fn make_control_capture_intentional(input: &DictationAudio, tone_owed: bool) -> Result<()> {
+    if input.mark_intentional()? && tone_owed {
+        feedback::play(Tone::DictationStart);
+    }
+    Ok(())
+}
+
+/// The reply to a control `stop`: only a submitted clip transcribes.
+fn finish_reply(finished: Option<FinishResult>, submitted: &str) -> ControlReply {
+    match finished {
+        Some(FinishResult::Submitted) => ControlReply::done(submitted),
+        Some(FinishResult::Discarded) | None => ControlReply::error(
+            "discarded",
+            "too short, discarded: no audio was recorded yet (the microphone may still have \
+             been opening)",
+        ),
+        Some(FinishResult::Silent) => ControlReply::error(
+            "discarded",
+            "the recording was silent, discarded; nothing to transcribe",
+        ),
+        Some(FinishResult::Rejected(error)) => {
+            ControlReply::error("failed", format!("couldn't transcribe it: {error}"))
+        }
+    }
+}
+
+/// `hex dictation`: a start locks the shortcut machine as a double tap
+/// does, so the next press or `stop` finishes it and Escape cancels it.
+#[allow(clippy::too_many_arguments)]
+fn control_dictation(
+    action: CaptureAction,
+    other_recording: bool,
+    suspended: bool,
+    hotkeys: &mut Hotkeys,
+    recognizer: &mut Option<Moonshine>,
+    input: &DictationAudio,
+    worker: &DictationWorker,
+    mode: Mode,
+    context: &ContextSnapshot,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+    release_while_idle: bool,
+) -> Result<ControlReply> {
+    let recording = hotkeys.dictation.is_recording();
+    let device = input.device_name();
+    let action = match action {
+        CaptureAction::Toggle if recording => CaptureAction::Stop,
+        CaptureAction::Toggle => CaptureAction::Start,
+        action => action,
+    };
+    Ok(match action {
+        CaptureAction::Start if recording => {
+            ControlReply::unchanged("Dictation is already recording")
+        }
+        CaptureAction::Start => {
+            if let Some(refusal) = capture_refusal(other_recording, suspended) {
+                return Ok(refusal);
+            }
+            if !hotkeys.dictation.lock() {
+                return Ok(ControlReply::error(
+                    "busy",
+                    "the dictation shortcut is held; release it and try again",
+                ));
+            }
+            let accepted = handle_hotkey_action(
+                HotkeyAction::Start,
+                capture_boundary(input, release_while_idle),
+                recognizer,
+                input,
+                worker,
+                mode,
+                context,
+                &device,
+                events,
+                indicator,
+                release_while_idle,
+            )?;
+            if accepted {
+                // A warm start already queued its provisional tone.
+                make_control_capture_intentional(input, release_while_idle)?;
+                ControlReply::done(
+                    "Recording; `hex dictation stop` or the shortcut finishes, Escape cancels",
+                )
+            } else {
+                hotkeys.dictation.suspend();
+                ControlReply::error("busy", "the microphone is busy; try again")
+            }
+        }
+        CaptureAction::Stop if !recording => ControlReply::unchanged("Dictation isn't recording"),
+        CaptureAction::Stop => {
+            hotkeys.dictation.suspend();
+            let finished = finish_hotkey_dictation(
+                capture_boundary(input, release_while_idle),
+                recognizer,
+                input,
+                worker,
+                mode,
+                context,
+                &device,
+                events,
+                indicator,
+                release_while_idle,
+            )?;
+            finish_reply(
+                Some(finished),
+                "Finished recording; Hex pastes the text when it's ready",
+            )
+        }
+        CaptureAction::Cancel if recording => {
+            hotkeys.dictation.suspend();
+            handle_hotkey_action(
+                HotkeyAction::Cancel,
+                input.captured_through(),
+                recognizer,
+                input,
+                worker,
+                mode,
+                context,
+                &device,
+                events,
+                indicator,
+                release_while_idle,
+            )?;
+            ControlReply::done("Cancelled the recording")
+        }
+        CaptureAction::Cancel | CaptureAction::Toggle => {
+            if let Some(refusal) = idle_cancel_refusal(other_recording) {
+                refusal
+            } else if cancel_latest_job(worker, events, indicator)? {
+                ControlReply::done("Cancelled the newest unfinished dictation")
+            } else {
+                ControlReply::unchanged("Nothing to cancel")
+            }
+        }
+    })
+}
+
+/// `hex voice-action`, only while Voice Action is on.
+#[allow(clippy::too_many_arguments)]
+fn control_voice_action(
+    action: CaptureAction,
+    other_recording: bool,
+    suspended: bool,
+    hotkeys: &mut Hotkeys,
+    edit_pending_since: &mut Option<CaptureInstant>,
+    edit_context: &mut Option<ContextSnapshot>,
+    recognizer: &mut Option<Moonshine>,
+    input: &DictationAudio,
+    worker: &DictationWorker,
+    mode: Mode,
+    context: &ContextSnapshot,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+    release_while_idle: bool,
+) -> Result<ControlReply> {
+    let Some(edit) = hotkeys.edit.as_mut() else {
+        return Ok(ControlReply::error(
+            "feature-off",
+            "Voice Action is off; turn it on with `hex settings set voice_action.enabled on`",
+        ));
+    };
+    let recording = edit.is_recording() || edit_context.is_some();
+    let device = input.device_name();
+    let action = match action {
+        CaptureAction::Toggle if recording => CaptureAction::Stop,
+        CaptureAction::Toggle => CaptureAction::Start,
+        action => action,
+    };
+    Ok(match action {
+        CaptureAction::Start if recording => {
+            ControlReply::unchanged("Voice Action is already recording")
+        }
+        CaptureAction::Start => {
+            if let Some(refusal) = capture_refusal(other_recording, suspended) {
+                return Ok(refusal);
+            }
+            if !edit.lock() {
+                return Ok(ControlReply::error(
+                    "busy",
+                    "the Voice Action shortcut is held; release it and try again",
+                ));
+            }
+            *edit_pending_since = None;
+            let accepted = handle_edit_hotkey_action(
+                HotkeyAction::Start,
+                capture_boundary(input, release_while_idle),
+                edit_context,
+                recognizer,
+                input,
+                worker,
+                mode,
+                context,
+                &device,
+                events,
+                indicator,
+            )?;
+            if accepted {
+                make_control_capture_intentional(input, true)?;
+                ControlReply::done(
+                    "Recording an instruction; `hex voice-action stop` or the shortcut finishes, \
+                     Escape cancels",
+                )
+            } else {
+                hotkeys.suspend_edit();
+                ControlReply::error(
+                    "unavailable",
+                    "Voice Action couldn't start; it needs OpenCode (`opencode2`) and a free \
+                     microphone",
+                )
+            }
+        }
+        CaptureAction::Stop if !recording => {
+            ControlReply::unchanged("Voice Action isn't recording")
+        }
+        CaptureAction::Stop => {
+            hotkeys.suspend_edit();
+            *edit_pending_since = None;
+            let finished = finish_voice_action(
+                capture_boundary(input, release_while_idle),
+                edit_context,
+                recognizer,
+                input,
+                worker,
+                mode,
+                &device,
+                events,
+                indicator,
+            )?;
+            finish_reply(
+                finished,
+                "Finished the instruction; Hex pastes the result when it's ready",
+            )
+        }
+        CaptureAction::Cancel if recording => {
+            hotkeys.suspend_edit();
+            *edit_pending_since = None;
+            handle_edit_hotkey_action(
+                HotkeyAction::Cancel,
+                capture_boundary(input, release_while_idle),
+                edit_context,
+                recognizer,
+                input,
+                worker,
+                mode,
+                context,
+                &device,
+                events,
+                indicator,
+            )?;
+            ControlReply::done("Cancelled Voice Action")
+        }
+        CaptureAction::Cancel | CaptureAction::Toggle => {
+            if let Some(refusal) = idle_cancel_refusal(other_recording) {
+                refusal
+            } else if cancel_latest_job(worker, events, indicator)? {
+                ControlReply::done("Cancelled the newest unfinished dictation")
+            } else {
+                ControlReply::unchanged("Nothing to cancel")
+            }
+        }
+    })
+}
+
+/// A `hex paste-last` (or the menu bar's Paste Last Dictation) waits for
+/// every capture and shortcut gesture to end: pasting cancels the audio
+/// owner's capture, which would strand the machine that started it.
+fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
+    capture_active.then(|| {
+        ControlReply::error(
+            "busy",
+            "a recording or shortcut is in progress; finish or cancel it first",
+        )
+    })
+}
+
+/// Pastes the last dictation at the current focus.
+fn paste_last(
+    worker: &DictationWorker,
+    mode: Mode,
+    device: &str,
+    events: &mut EventLog,
+) -> Result<ControlReply> {
+    let reply = match worker.paste_last() {
+        Ok(()) => ControlReply::done("Pasting the last dictation"),
+        Err(error) => {
+            feedback::play(Tone::Error);
+            events.dictation(DictationPhase::Failed(error.into()), "")?;
+            ControlReply::error("failed", format!("couldn't paste: {error}"))
+        }
+    };
+    emit_engine_state(events, false, worker, mode, device)?;
+    Ok(reply)
+}
+
+/// Ends a Voice Action capture and hands its instruction to OpenCode;
+/// `None` when no Voice Action was recording.
+#[allow(clippy::too_many_arguments)]
+fn finish_voice_action(
+    action_at: CaptureInstant,
+    edit_context: &mut Option<ContextSnapshot>,
+    recognizer: &mut Option<Moonshine>,
+    dictation: &DictationAudio,
+    worker: &DictationWorker,
+    mode: Mode,
+    device: &str,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+) -> Result<Option<FinishResult>> {
+    let Some(context) = edit_context.take() else {
+        dictation.cancel()?;
+        return Ok(None);
+    };
+    let finished = finish_dictation(
+        dictation,
+        action_at,
+        POST_RELEASE_TAIL,
+        worker,
+        TranscriptionTarget::VoiceAction,
+        None,
+        &context,
+        device,
+        events,
+        indicator,
+    )?;
+    reset_command_recognizer(dictation, recognizer)?;
+    emit_engine_state(events, false, worker, mode, device)?;
+    Ok(Some(finished))
 }
 
 fn voice_action_context_snapshot(fallback: &ContextSnapshot) -> ContextSnapshot {
@@ -1701,34 +2637,25 @@ fn handle_edit_hotkey_action(
             emit_state(events, true, mode, device)?;
             Ok(true)
         }
-        HotkeyAction::Finish => {
-            let Some(context) = edit_context.take() else {
-                dictation.cancel()?;
-                return Ok(false);
-            };
-            let _ = finish_dictation(
-                dictation,
-                action_at,
-                POST_RELEASE_TAIL,
-                worker,
-                TranscriptionTarget::VoiceAction,
-                None,
-                &context,
-                device,
-                events,
-                indicator,
-            )?;
-            reset_command_recognizer(dictation, recognizer)?;
-            emit_engine_state(events, false, worker, mode, device)?;
-            Ok(true)
-        }
-        HotkeyAction::Discard | HotkeyAction::Cancel => {
+        HotkeyAction::Finish => Ok(finish_voice_action(
+            action_at,
+            edit_context,
+            recognizer,
+            dictation,
+            worker,
+            mode,
+            device,
+            events,
+            indicator,
+        )?
+        .is_some()),
+        HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
             *edit_context = None;
             end_capture(
                 if matches!(action, HotkeyAction::Cancel) {
                     CaptureEnd::Cancelled
                 } else {
-                    CaptureEnd::Discarded
+                    CaptureEnd::Discarded(action.discard_cause())
                 },
                 dictation,
                 recognizer,
@@ -1823,7 +2750,7 @@ fn fail_capture(
 #[derive(Clone, Copy)]
 enum CaptureEnd {
     /// The capture never became a dictation; no feedback tone.
-    Discarded,
+    Discarded(Option<DiscardCause>),
     /// The user cancelled an intentional capture; plays the cancel tone.
     Cancelled,
 }
@@ -1851,20 +2778,17 @@ fn report_capture_end(
     events: &mut EventLog,
     indicator: Option<&DictationIndicatorSender>,
 ) -> Result<()> {
-    let (phase, indicator_event) = match end {
-        CaptureEnd::Discarded => (
-            DictationPhase::Discarded,
-            DictationIndicatorEvent::Discarded,
-        ),
+    let indicator_event = match end {
+        CaptureEnd::Discarded(cause) => {
+            events.discarded_dictation(cause.map(DiscardCause::as_str))?;
+            DictationIndicatorEvent::Discarded
+        }
         CaptureEnd::Cancelled => {
             feedback::play(Tone::Cancel);
-            (
-                DictationPhase::Cancelled,
-                DictationIndicatorEvent::Cancelled,
-            )
+            events.dictation(DictationPhase::Cancelled, "")?;
+            DictationIndicatorEvent::Cancelled
         }
     };
-    events.dictation(phase, "")?;
     if let Some(indicator) = indicator {
         indicator.send(indicator_event);
     }
@@ -1975,12 +2899,12 @@ fn handle_command(
             if matches!(action, Action::StartMeeting | Action::StopMeeting) =>
         {
             let request = match action {
-                Action::StartMeeting => MeetingRequest::Start,
+                Action::StartMeeting => MeetingRequest::Start { title: None },
                 Action::StopMeeting => MeetingRequest::Stop,
                 _ => unreachable!(),
             };
             let outcome = meeting_requests
-                .ok_or("meeting controls require the HEX app")
+                .ok_or("meeting controls require the Hex app")
                 .and_then(|requests| {
                     requests.try_send(request).map_err(|error| match error {
                         TrySendError::Full(_) => "meeting controller is busy",
@@ -1998,7 +2922,7 @@ fn handle_command(
                 },
         } => {
             let outcome = personal_commands
-                .ok_or("personal command host is unavailable")
+                .ok_or("personal commands are unavailable")
                 .and_then(|runtime| {
                     runtime.invoke(generation, id, heard, context.clone(), captures)
                 });
@@ -2106,6 +3030,27 @@ fn finish_dictation(
     events: &mut EventLog,
     indicator: Option<&DictationIndicatorSender>,
 ) -> Result<FinishResult> {
+    finish_dictation_with(
+        capture,
+        ended_at,
+        tail,
+        |clip| worker.transcribe(clip, target, protocol, context.clone()),
+        device,
+        events,
+        indicator,
+    )
+}
+
+/// Finishes the capture and hands its clip to `submit`.
+fn finish_dictation_with(
+    capture: &DictationAudio,
+    ended_at: CaptureInstant,
+    tail: Duration,
+    submit: impl FnOnce(DictationClip) -> Result<DictationJobId, &'static str>,
+    device: &str,
+    events: &mut EventLog,
+    indicator: Option<&DictationIndicatorSender>,
+) -> Result<FinishResult> {
     let clip = match capture.finish_with_tail(ended_at, tail)? {
         Finish::Transcribe(clip) if !clip.is_near_silent() => clip,
         finish => {
@@ -2115,7 +3060,12 @@ fn finish_dictation(
             }
             return Ok(match finish {
                 Finish::Discard => FinishResult::Discarded,
-                Finish::Transcribe(_) => FinishResult::Silent,
+                Finish::Transcribe(clip) => {
+                    crate::dictation_diagnostics::persist_near_silent(
+                        &clip.into_transcription_samples(),
+                    );
+                    FinishResult::Silent
+                }
             });
         }
     };
@@ -2129,7 +3079,7 @@ fn finish_dictation(
         device: device.into(),
     })?;
     events.dictation(DictationPhase::Transcribing, "")?;
-    match worker.transcribe(clip, target, protocol, context.clone()) {
+    match submit(clip) {
         Ok(job_id) => {
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::Submitted {
@@ -2306,6 +3256,7 @@ fn handle_dictation_event(
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
                 TranscriptionTarget::Service => return Ok(()),
             };
+            feedback::play(Tone::DictationDone);
             events.processed_dictation(phase, text, processing)?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::JobCompleted {
@@ -2340,6 +3291,15 @@ fn handle_dictation_event(
             }
         }
         WorkerEvent::Cancelled { .. } => {}
+        WorkerEvent::SpokenCancel { job_id } => {
+            feedback::play(Tone::Cancel);
+            events.dictation(DictationPhase::Cancelled, "")?;
+            if let Some(indicator) = indicator {
+                indicator.send(DictationIndicatorEvent::JobCancelled {
+                    job_id: job_id.value(),
+                });
+            }
+        }
         WorkerEvent::ModelFailed(error) => {
             tracing::error!(%error, "dictation failed");
             feedback::play(Tone::Error);
@@ -2418,6 +3378,31 @@ mod tests {
     }
 
     #[test]
+    fn control_stops_reply_from_what_the_finish_did() {
+        let code = |finished| match finish_reply(finished, "ok") {
+            ControlReply::Done { changed: true, .. } => "done".to_owned(),
+            ControlReply::Error { code, .. } => code,
+            reply => panic!("unexpected {reply:?}"),
+        };
+        assert_eq!(code(Some(FinishResult::Submitted)), "done");
+        assert_eq!(code(Some(FinishResult::Discarded)), "discarded");
+        assert_eq!(code(Some(FinishResult::Silent)), "discarded");
+        assert_eq!(code(None), "discarded");
+        assert_eq!(code(Some(FinishResult::Rejected("full".into()))), "failed");
+    }
+
+    #[test]
+    fn idle_controls_never_reach_past_an_active_capture() {
+        let busy = |reply: Option<ControlReply>| matches!(reply, Some(ControlReply::Error { code, .. }) if code == "busy");
+        // Escape cancels the recording before any job, so an idle cancel
+        // must not cancel a job while the other capture records.
+        assert!(busy(idle_cancel_refusal(true)));
+        assert!(idle_cancel_refusal(false).is_none());
+        assert!(busy(paste_last_refusal(true)));
+        assert!(paste_last_refusal(false).is_none());
+    }
+
+    #[test]
     fn programmatic_lease_expires_at_its_deadline() {
         let now = Instant::now();
         let deadline = now + PROGRAMMATIC_LEASE;
@@ -2443,6 +3428,87 @@ mod tests {
         }
         assert_eq!(completions.len(), PROGRAMMATIC_COMPLETION_LIMIT);
         assert_eq!(completions.front().map(|completion| completion.id), Some(2));
+    }
+
+    #[test]
+    fn a_programmatic_dictation_leaves_escape_with_its_owner() {
+        // A queued hotkey job or the capture picker would otherwise claim
+        // Escape that the listener then ignores.
+        assert!(!claims_escape(true, false, true, || true));
+        assert!(claims_escape(false, false, false, || true));
+        assert!(claims_escape(false, false, true, || false));
+        assert!(claims_escape(false, true, false, || false));
+        assert!(!claims_escape(false, false, false, || false));
+    }
+
+    #[test]
+    fn microphone_loss_keeps_a_programmatic_clip_for_finish() {
+        let (levels, _levels) = std::sync::mpsc::sync_channel(1);
+        let active = |id: u64| ProgrammaticDictation {
+            id,
+            owner_token: format!("owner-{id}"),
+            source: "seer".into(),
+            levels: levels.clone(),
+            audio: None,
+            last_level: Instant::now(),
+            lease_deadline: Instant::now() + PROGRAMMATIC_LEASE,
+        };
+        let finished_error = |completions: &VecDeque<ProgrammaticCompletion>, id: u64| {
+            completions
+                .iter()
+                .find(|completion| completion.matches_owner(id, &format!("owner-{id}")))
+                .and_then(|completion| match &completion.outcome {
+                    ProgrammaticTerminalOutcome::Finished(Err(code)) => Some(code.clone()),
+                    _ => None,
+                })
+        };
+        let mut lost = None;
+        let mut completions = VecDeque::new();
+
+        // Audio delivered before the loss waits for the owner's finish.
+        programmatic_microphone_lost(
+            Some(active(1)),
+            Some(DictationClip::for_test(vec![0.25; 16_000])),
+            "mic-interrupted",
+            &mut lost,
+            &mut completions,
+        );
+        let kept = lost.as_ref().expect("the clip is kept");
+        assert!(kept.matches_owner(1, "owner-1"));
+        assert_eq!(kept.clip.duration_ms(), 1_000);
+        assert!(completions.is_empty());
+
+        // No audio: finish answers microphone-lost, and the kept clip stays.
+        programmatic_microphone_lost(
+            Some(active(2)),
+            None,
+            "mic-open-failed",
+            &mut lost,
+            &mut completions,
+        );
+        assert_eq!(
+            finished_error(&completions, 2).as_deref(),
+            Some(MICROPHONE_LOST)
+        );
+        assert!(lost.as_ref().is_some_and(|lost| lost.id == 1));
+
+        // A later loss supersedes an unfinished kept clip.
+        programmatic_microphone_lost(
+            Some(active(3)),
+            Some(DictationClip::for_test(vec![0.25; 1_600])),
+            "mic-gap",
+            &mut lost,
+            &mut completions,
+        );
+        assert!(lost.as_ref().is_some_and(|lost| lost.id == 3));
+        assert_eq!(
+            finished_error(&completions, 1).as_deref(),
+            Some(MICROPHONE_LOST)
+        );
+
+        // Nothing was recording programmatically: nothing changes.
+        programmatic_microphone_lost(None, None, "mic-gap", &mut lost, &mut completions);
+        assert_eq!(completions.len(), 2);
     }
 
     #[test]
@@ -2714,7 +3780,7 @@ mod tests {
         assert!(!pending_voice_action_is_intentional(
             started_at,
             started_at + Duration::from_secs(1),
-            HotkeyAction::Discard,
+            HotkeyAction::Discard(DiscardCause::Key),
         ));
     }
 

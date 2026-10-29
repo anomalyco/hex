@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [[ ${1:-} != --inside ]]; then
   if [[ $# != 3 || $(id -u) == 0 ]]; then
-    echo "Usage: $0 /path/to/voice-control /path/to/model.gguf /path/to/jfk.wav (non-root)" >&2
+    echo "Usage: $0 /path/to/hex /path/to/model.gguf /path/to/jfk.wav (non-root)" >&2
     exit 1
   fi
   for command in cc pkg-config pulseaudio pactl paplay xdotool xvfb-run timeout; do
@@ -77,10 +77,10 @@ listener=$!
 echo 'Waiting for the model and virtual microphone...'
 for ((attempt = 0; attempt < 1200; attempt++)); do
   kill -0 "$listener"
-  if grep -q 'HEX dictation is ready' "$work/listener.log"; then break; fi
+  if grep -q 'Hex dictation is ready' "$work/listener.log"; then break; fi
   sleep 0.05
 done
-grep -q 'HEX dictation is ready' "$work/listener.log"
+grep -q 'Hex dictation is ready' "$work/listener.log"
 # A second launch forwards to the running Hex, which opens its window; the
 # complete dictation below runs beside it in the same process.
 "$binary" app >"$work/app.log" 2>&1
@@ -117,7 +117,7 @@ HEX_STREAMING=1 "$binary" service >"$work/stream.log" 2>&1 &
 listener=$!
 for ((attempt = 0; attempt < 1200; attempt++)); do
   kill -0 "$listener"
-  if grep -q 'HEX dictation is ready' "$work/stream.log"; then break; fi
+  if grep -q 'Hex dictation is ready' "$work/stream.log"; then break; fi
   sleep 0.05
 done
 grep -q 'streaming transcription is available' "$work/stream.log"

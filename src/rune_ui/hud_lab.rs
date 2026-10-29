@@ -1,16 +1,26 @@
-//! HUD Lab (macOS debug builds): tunes the dictation indicator live. Pick a
+//! HUD Lab (macOS debug builds, and release builds while the `dot-scope`
+//! experiment is on): tunes the dictation indicator live. Pick a
 //! style, the state it shows and how many dictations wait behind it, and
 //! drag the look's sliders; every change goes to the indicator as
 //! `PlatformRequest::ConfigureHud`. Copy preset copies the tuning as one
 //! line. Developer copy is English.
+//!
+//! With the `dot-scope` experiment on, the HUD draws Dot scope and HUD Lab
+//! tunes it instead: its sliders, Save (`dot-scope.json`, loaded at launch),
+//! Copy values (the same JSON), and Reset to the prototype's values. Only
+//! that section shows then, so a release build never shows the capsule's
+//! styles.
 
 use rune::{El, Tx, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, segmented};
-use super::lists::slider;
+use super::controls::{
+    ButtonKind, DESCRIPTION, Paint, bare_page, button, card, segmented, setting_row, toggle_row,
+};
+use super::lists::{group_label, slider};
 use super::platform::{HudDemo, HudLab, HudTuning, PlatformRequest};
 use crate::desktop_i18n::tr;
+use crate::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
 
 /// `dictation_indicator`'s fastest animation speed.
 const MAX_SPEED: f32 = 24.0;
@@ -122,39 +132,228 @@ fn preset(t: &HudTuning) -> String {
     )
 }
 
-/// Applies a change and shows it on the indicator.
+/// Applies a change and shows it on the indicator. A tuning-only change
+/// applies live to whatever the HUD shows; a new demo state restarts the
+/// demo.
 fn configure(ui: &mut Ui, change: impl FnOnce(&mut HudLab)) {
-    let mut lab = ui.platform.hud;
+    let old = ui.platform.hud;
+    let mut lab = old;
     change(&mut lab);
-    if lab != ui.platform.hud {
-        ui.hud_copied = false;
+    if lab == old {
+        return;
     }
+    ui.hud_copied = false;
+    ui.hud_saved = false;
     ui.platform.hud = lab;
-    ui.ask(PlatformRequest::ConfigureHud(lab));
+    if let Some(tuning) = lab.dot_scope {
+        dot_scope::set_lab(tuning);
+    }
+    ui.ask(if lab.demo == old.demo && lab.queued == old.queued {
+        PlatformRequest::TuneHud(lab)
+    } else {
+        PlatformRequest::ConfigureHud(lab)
+    });
+}
+
+/// Dot scope's sliders, grouped as HUD Lab shows them, by `KNOBS` key.
+const DOT_SCOPE_GROUPS: [(&str, &[&str]); 5] = [
+    (
+        "Field",
+        &[
+            "dot-columns",
+            "dot-rows",
+            "dot-spacing",
+            "dot-width",
+            "dot-processing-width",
+            "dot-height",
+            "dot-island-spread",
+        ],
+    ),
+    ("Braid", &["dot-braid-speed", "dot-helix"]),
+    (
+        "Response",
+        &[
+            "dot-gain",
+            "dot-auto-release",
+            "dot-noise-floor",
+            "dot-response",
+            "dot-release",
+            "dot-history",
+            "dot-phosphor",
+        ],
+    ),
+    (
+        "Light",
+        &[
+            "dot-glow",
+            "dot-saturation",
+            "dot-shimmer-pass",
+            "dot-shimmer",
+        ],
+    ),
+    ("Transition", &["dot-transition", "dot-bounce"]),
+];
+
+fn dot_scope_actions(p: Paint, ui: &Ui) -> Vec<El> {
+    vec![
+        button(
+            p,
+            "dot-scope-reset",
+            "Reset",
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _: &mut Tx| configure(ui, |lab| lab.dot_scope = Some(Tuning::default())),
+        ),
+        button(
+            p,
+            "dot-scope-copy",
+            if ui.hud_copied {
+                tr("Copied")
+            } else {
+                "Copy values"
+            },
+            ButtonKind::Secondary,
+            |ui: &mut Ui, tx: &mut Tx| {
+                if let Some(tuning) = ui.platform.hud.dot_scope {
+                    tx.copy(tuning.json());
+                    ui.hud_copied = true;
+                }
+            },
+        ),
+        button(
+            p,
+            "dot-scope-save",
+            if ui.hud_saved { "Saved" } else { "Save" },
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _: &mut Tx| {
+                if let Some(tuning) = ui.platform.hud.dot_scope {
+                    ui.ask(PlatformRequest::SaveDotScope(tuning));
+                    ui.hud_saved = true;
+                }
+            },
+        ),
+    ]
+}
+
+/// Changes Dot scope's tuning from HUD Lab.
+fn tune(ui: &mut Ui, change: impl FnOnce(&mut Tuning)) {
+    configure(ui, |lab| {
+        if let Some(tuning) = &mut lab.dot_scope {
+            change(tuning);
+        }
+    });
+}
+
+/// Dot scope's choices: how processing looks, where the HUD sits, and how
+/// the voice is levelled.
+fn dot_scope_choices(p: Paint, tuning: &Tuning) -> El {
+    let processing = Processing::ALL
+        .iter()
+        .position(|look| *look == tuning.processing)
+        .unwrap_or(0);
+    let placement = Placement::ALL
+        .iter()
+        .position(|place| *place == tuning.placement)
+        .unwrap_or(0);
+    let rows = vec![
+        setting_row(
+            p,
+            "dot-processing",
+            "Processing",
+            Some("How the HUD shows it is working. Done always clears from the middle out"),
+            segmented(
+                p,
+                "segments",
+                &Processing::ALL.map(Processing::label),
+                processing,
+                |ui, index| tune(ui, |tuning| tuning.processing = Processing::ALL[index]),
+            ),
+        ),
+        setting_row(
+            p,
+            "dot-placement",
+            "Placement",
+            Some(tuning.placement.label()),
+            segmented(
+                p,
+                "segments",
+                &["Below", "Menu bar", "Notch"],
+                placement,
+                |ui, index| tune(ui, |tuning| tuning.placement = Placement::ALL[index]),
+            ),
+        ),
+        toggle_row(
+            p,
+            "dot-pretend-notch",
+            "Pretend notch",
+            "Draws From the notch's island on a screen without one",
+            tuning.pretend_notch,
+            |ui: &mut Ui| tune(ui, |tuning| tuning.pretend_notch = !tuning.pretend_notch),
+        ),
+        toggle_row(
+            p,
+            "dot-auto-level",
+            "Auto level",
+            "Follows the voice's recent peak, so a quiet voice fills the field too",
+            tuning.auto_level,
+            |ui: &mut Ui| tune(ui, |tuning| tuning.auto_level = !tuning.auto_level),
+        ),
+    ];
+    card(p, "dot-scope-choices", rows)
+}
+
+fn dot_scope_sliders(p: Paint, tuning: &Tuning) -> El {
+    let mut sliders = col().key("dot-scope-sliders").gap(16.0);
+    for (index, (group, keys)) in DOT_SCOPE_GROUPS.into_iter().enumerate() {
+        sliders = sliders.child(group_label(
+            p,
+            &format!("dot-scope-group{index}"),
+            group,
+            index == 0,
+        ));
+        for key in keys {
+            let Some(knob) = KNOBS.iter().find(|knob| knob.key == *key).copied() else {
+                continue;
+            };
+            sliders = sliders.child(slider(
+                p,
+                knob.key,
+                knob.label,
+                knob.fraction(tuning),
+                knob.display(tuning),
+                SLIDER_WIDTH,
+                move |ui, value, _| tune(ui, |tuning| knob.set_fraction(tuning, value)),
+            ));
+        }
+    }
+    sliders
 }
 
 pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
     let lab = &ui.platform.hud;
-    let actions = vec![button(
-        p,
-        "copy-hud-preset",
-        if ui.hud_copied {
-            tr("Copied")
-        } else {
-            "Copy preset"
-        },
-        ButtonKind::Secondary,
-        |ui: &mut Ui, tx: &mut Tx| {
-            tx.copy(preset(&ui.platform.hud.tuning));
-            ui.hud_copied = true;
-        },
-    )];
+    let actions = if lab.dot_scope.is_some() {
+        dot_scope_actions(p, ui)
+    } else {
+        vec![button(
+            p,
+            "copy-hud-preset",
+            if ui.hud_copied {
+                tr("Copied")
+            } else {
+                "Copy preset"
+            },
+            ButtonKind::Secondary,
+            |ui: &mut Ui, tx: &mut Tx| {
+                tx.copy(preset(&ui.platform.hud.tuning));
+                ui.hud_copied = true;
+            },
+        )]
+    };
     let demo_index = match lab.demo {
         HudDemo::Recording => 0,
         HudDemo::Transcribing => 1,
         HudDemo::Processing => 2,
     };
-    let controls = row()
+    let demo = row()
         .key("hud-state")
         .gap(16.0)
         .center_y()
@@ -172,8 +371,12 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 ][index];
                 configure(ui, |lab| lab.demo = demo);
             },
-        ))
-        .child(
+        ));
+    let controls = if lab.dot_scope.is_some() {
+        // Dot scope draws no queue.
+        demo
+    } else {
+        demo.child(
             row()
                 .key("queued")
                 .gap(8.0)
@@ -193,7 +396,8 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                         configure(ui, |lab| lab.queued = index);
                     },
                 )),
-        );
+        )
+    };
     let c = &p.k.c;
     let styles = [
         (
@@ -212,14 +416,22 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             "Curved bands retained for comparison and tuning.",
         ),
     ];
-    let mut cards = row().key("hud-styles").gap(12.0).flex_wrap();
+    let mut cards = row()
+        .key("hud-styles")
+        .role("radiogroup")
+        .focus_group()
+        .gap(12.0)
+        .flex_wrap();
     for (index, (letter, name, description)) in styles.into_iter().enumerate() {
         let selected = lab.tuning.style as usize == index;
         cards = cards.child(
             col()
                 .key(format!("hud-style{index}"))
-                .role("button")
+                .role("radio")
                 .label(name)
+                .focusable(true)
+                .focus_selected(selected)
+                .focus_ring(2.0, 2.5, c.border_focus)
                 .w(190.0)
                 .padding(12.0)
                 .gap(4.0)
@@ -257,6 +469,22 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 ),
         );
     }
+    if let Some(tuning) = &lab.dot_scope {
+        let note = text(
+            "Recording follows a synthetic voice here. Save keeps these values for the next \
+             launch.",
+        )
+        .key("dot-scope-note")
+        .font(DESCRIPTION)
+        .color(p.muted())
+        .wrap();
+        let content = bare_page("content")
+            .child(controls)
+            .child(note)
+            .child(dot_scope_choices(p, tuning))
+            .child(dot_scope_sliders(p, tuning));
+        return (actions, super::scroll_body("hud-lab-scroll", content));
+    }
     let mut sliders = col().key("hud-sliders").gap(16.0);
     for (control, key, label) in Control::ALL {
         sliders = sliders.child(slider(
@@ -269,11 +497,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             move |ui, value, _| configure(ui, |lab| control.set(&mut lab.tuning, value)),
         ));
     }
-    let content = col()
-        .key("content")
-        .px(24.0)
-        .pt(4.0)
-        .gap(24.0)
+    let content = bare_page("content")
         .child(controls)
         .child(cards)
         .child(sliders)

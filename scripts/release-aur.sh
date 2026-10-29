@@ -1,23 +1,23 @@
 #!/bin/sh
-# Stage, test, and publish the AUR package hex-voice-bin from a release's
-# Linux executable. Runs on Arch (CI uses the archlinux container).
+# Stages and tests the AUR package hex-bin from a release's Linux executable,
+# without secrets. Runs on Arch (CI uses the archlinux container). The
+# Release workflow's AUR job pushes the staged files with
+# .github/release/push-aur.sh, which holds the AUR key.
 #
-#   release-aur.sh stage   <version> <executable> <dir>  # PKGBUILD, .SRCINFO, files
-#   release-aur.sh test    <dir>                         # makepkg and install it
-#   release-aur.sh publish <dir>                         # push to the AUR
+#   release-aur.sh stage <version> <x64 executable> <x64 url> <arm64 executable> <arm64 url> <dir>
+#   release-aur.sh test  <dir>    # makepkg and install it on this machine's architecture
 #
-# The package downloads the executable from the GitHub release app-v<version>,
-# so publish only after that release is public. `publish` reads the AUR SSH
-# private key from AUR_SSH_PRIVATE_KEY.
+# The package downloads the executable from the release service's linux-x64
+# or linux-arm64 file URL, so stage only after the release is published there.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-package=hex-voice-bin
+package=hex-bin
 usage() {
-  echo "Usage: $0 stage <version> <executable> <dir> | test <dir> | publish <dir>" >&2
+  echo "Usage: $0 stage <version> <x64 executable> <x64 url> <arm64 executable> <arm64 url> <dir> | test <dir>" >&2
   exit 1
 }
-[ $# -ge 2 ] || usage
+[ $# -ge 1 ] || usage
 mode=$1
 shift
 
@@ -27,19 +27,30 @@ sha256_of() {
 
 case "$mode" in
   stage)
-    [ $# -eq 3 ] || usage
-    version=$1 executable=$2 dir=$3
-    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-    test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
+    [ $# -eq 6 ] || usage
+    version=$1 x64=$2 x64_url=$3 arm64=$4 arm64_url=$5 dir=$6
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$'
+    for url in "$x64_url" "$arm64_url"; do
+      printf '%s\n' "$url" | grep -Eq '^https://anoma\.ly/release/hex/files/[0-9a-f]{64}/hex$'
+    done
+    # pkgver may not contain hyphens: 2.4.0-beta.3 is 2.4.0_beta.3.
+    pkgver=$(printf '%s' "$version" | tr - _)
+    for executable in "$x64" "$arm64"; do
+      test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
+    done
     mkdir -p "$dir"
     sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/hex.desktop" > "$dir/hex.desktop"
-    cp "$root/packaging/aur/hex.service" "$root/packaging/aur/$package.install" "$dir/"
+    cp "$root/packaging/hex.service" "$root/packaging/aur/$package.install" "$dir/"
     cp "$root/LICENSE" "$dir/LICENSE"
     # makepkg uses a source already present under its file name, so `test`
-    # needs no published GitHub release.
-    cp "$executable" "$dir/HEX-$version-x86_64-linux"
-    sed -e "s/@VERSION@/$version/" \
-      -e "s/@SHA256@/$(sha256_of "$executable")/" \
+    # downloads nothing.
+    cp "$x64" "$dir/hex-$pkgver-linux-x64"
+    cp "$arm64" "$dir/hex-$pkgver-linux-arm64"
+    sed -e "s/@VERSION@/$pkgver/" \
+      -e "s#@URL_X64@#$x64_url#" \
+      -e "s#@URL_ARM64@#$arm64_url#" \
+      -e "s/@SHA256_X64@/$(sha256_of "$x64")/" \
+      -e "s/@SHA256_ARM64@/$(sha256_of "$arm64")/" \
       -e "s/@DESKTOP_SHA256@/$(sha256_of "$dir/hex.desktop")/" \
       -e "s/@SERVICE_SHA256@/$(sha256_of "$dir/hex.service")/" \
       -e "s/@LICENSE_SHA256@/$(sha256_of "$dir/LICENSE")/" \
@@ -60,30 +71,6 @@ case "$mode" in
     bsdtar -tf "$built" | grep -qx usr/lib/systemd/user/hex.service
     bsdtar -tf "$built" | grep -qx usr/share/applications/hex.desktop
     echo "$built"
-    ;;
-  publish)
-    dir=$1
-    : "${AUR_SSH_PRIVATE_KEY:?Set AUR_SSH_PRIVATE_KEY to the AUR SSH private key}"
-    version=$(sed -n 's/^pkgver=//p' "$dir/PKGBUILD")
-    temporary=$(mktemp -d)
-    trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-    (umask 077 && printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$temporary/key")
-    # aur.archlinux.org's published ED25519 host key.
-    echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$temporary/known_hosts"
-    export GIT_SSH_COMMAND="ssh -i $temporary/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$temporary/known_hosts -o StrictHostKeyChecking=yes"
-    git clone -q "ssh://aur@aur.archlinux.org/$package.git" "$temporary/aur"
-    for file in PKGBUILD .SRCINFO hex.desktop hex.service LICENSE "$package.install"; do
-      cp "$dir/$file" "$temporary/aur/$file"
-    done
-    cd "$temporary/aur"
-    git add PKGBUILD .SRCINFO hex.desktop hex.service LICENSE "$package.install"
-    if git diff --cached --quiet; then
-      echo "The AUR already has $package $version." >&2
-      exit 0
-    fi
-    git -c user.name='Hex release' -c user.email='hex@anoma.ly' commit -qm "Update to $version"
-    git push -q origin HEAD:master
-    echo "https://aur.archlinux.org/packages/$package"
     ;;
   *) usage ;;
 esac

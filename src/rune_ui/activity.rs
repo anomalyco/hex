@@ -7,8 +7,11 @@ use std::path::PathBuf;
 use rune::{El, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, status_dot};
-use super::lists::{detail_header, detail_title, fact, message, placeholder, section_label, split};
+use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button, status_dot};
+use super::lists::{
+    detail_header, detail_title, fact, message, placeholder, section_label, source_item,
+    source_list, split,
+};
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_i18n::{event_age, tr};
 use crate::events::{EventReader, VoiceEvent, VoiceState};
@@ -79,12 +82,14 @@ impl ActivityPane {
                     latency_ms: 910,
                     fallback: None,
                 }),
+                reason: None,
             },
             VoiceEvent::Dictation {
                 timestamp_ms: at(6),
                 phase: DictationPhase::Transcribing,
                 text: String::new(),
                 processing: None,
+                reason: None,
             },
             VoiceEvent::Transcript {
                 timestamp_ms: at(6),
@@ -97,6 +102,7 @@ impl ActivityPane {
                 phase: DictationPhase::Started,
                 text: String::new(),
                 processing: None,
+                reason: None,
             },
             VoiceEvent::Context {
                 timestamp_ms: at(12),
@@ -161,7 +167,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             ui.activity.reload();
         },
     ));
-    let mut list = col().key("activity-list").gap(2.0);
+    let mut list = col().key("activity-list");
     if let Some(error) = &pane.activity.error {
         list = list.child(message(
             p,
@@ -176,9 +182,11 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
     for (index, event) in pane.events.iter().enumerate() {
         let selected = pane.selected == Some(index);
         let boundary = matches!(event, VoiceEvent::SessionStarted { .. });
+        let summary = crate::desktop_activity::event_summary(event);
         let mut item = row()
             .key(format!("activity-event{index}"))
             .role("button")
+            .label(summary.clone())
             .px(10.0)
             .py(8.0)
             .gap(12.0)
@@ -187,7 +195,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| ui.activity.selected = Some(index))
             .child(
-                text(crate::desktop_activity::event_summary(event))
+                text(summary)
                     .key("summary")
                     .font(if boundary {
                         p.k.ty.small_medium
@@ -208,9 +216,9 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         if selected {
             item = item.fill(c.layer_02);
         }
-        list = list.child(item);
+        list = list.child(source_item(item, selected));
     }
-    let list = super::scroll_body("activity-scroll", list);
+    let list = super::scroll_body("activity-scroll", source_list(list));
     let detail = match pane.selected.and_then(|index| pane.events.get(index)) {
         None => placeholder(p, "activity-detail", "Select an activity row."),
         Some(event) => {
@@ -219,7 +227,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 .key("activity-detail")
                 .grow(1.0)
                 .shrink()
-                .px(24.0)
+                .px(METRICS.gutter)
                 .child(detail_header(
                     detail_title(p, &crate::desktop_activity::event_summary(event)),
                     Vec::new(),

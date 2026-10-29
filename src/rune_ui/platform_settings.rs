@@ -1,29 +1,29 @@
-//! Settings rows only some OSes show, chosen by
+//! Rows only some OSes show, chosen by
 //! [`Capabilities`](super::platform::Capabilities): macOS's permission
-//! warnings, Meetings section, Show Dock icon, and the experimental Hex
-//! Microphone; Launch at login on macOS and Windows; and the voice command
-//! model notice. Their state is [`PlatformState`](super::platform::PlatformState)
+//! warnings, Meetings › Settings, Show Dock icon, and the Hex Microphone
+//! driver row Voice Filter shows; Launch at login on macOS and Windows. Their
+//! state is [`PlatformState`](super::platform::PlatformState)
 //! data and their actions are [`PlatformRequest`]s.
 
-use rune::{El, row, text};
-use rune_kit::Switch;
+use rune::{El, Icon, row, text};
 
-use super::ShortcutTarget;
-use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, note, section, segmented, setting_row, toggle_row,
+    ButtonKind, Choice, DESCRIPTION, Paint, button, note, pressable_row, row_switch, section,
+    segmented, select, setting_row, toggle_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
-use super::platform::{MeetingRequest, NotesAvailability, PlatformRequest};
+use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, PlatformRequest};
+use super::settings::toggle_menu;
+use super::{Menu, ShortcutTarget, Ui};
 use crate::app_settings::{
-    AppSettings, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy, MeetingProviderChoice,
-    ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy,
+    MeetingProviderChoice, ModifierSide,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::calendar::{CalendarAccess, CallProvider};
+use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::hex_microphone::DriverActionState;
 use crate::login_item::LoginItemStatus;
-use crate::onboarding::{PermissionKind, PermissionWarning};
-use crate::voice_filter::VoiceFilterMode;
+use crate::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
 
 /// A permission's row key, its name as System Settings lists it, and what
 /// Hex cannot do without it.
@@ -37,20 +37,20 @@ fn permission_copy(
             tr("Microphone"),
             tr("Hex cannot record dictation until microphone access is restored."),
         ),
-        PermissionKind::InputMonitoring => (
-            "permission-input-monitoring",
-            tr("Input Monitoring"),
-            tr("Hex cannot recognize the dictation shortcut in other apps."),
-        ),
         PermissionKind::Accessibility => (
             "permission-accessibility",
             accessibility_name(accessibility_renamed),
-            tr("Hex cannot paste completed dictation into the foreground app."),
+            tr("Hex cannot recognize the dictation shortcut or paste into other apps."),
         ),
         PermissionKind::SystemAudio => (
             "permission-system-audio",
             tr("Screen & System Audio Recording"),
             tr("Required to hear the other participants."),
+        ),
+        PermissionKind::ScreenRecording => (
+            "permission-screen-recording",
+            tr("Screen Recording"),
+            tr("Lets a capture record your screen"),
         ),
     }
 }
@@ -78,6 +78,23 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
         .map(|warning: PermissionWarning| {
             let (key, name, description) =
                 permission_copy(warning.kind, ui.platform.accessibility_renamed);
+            if warning.action == PermissionAction::Restart {
+                return setting_row(
+                    p,
+                    key,
+                    name,
+                    Some(tr("Turns on when Hex restarts")),
+                    button(
+                        p,
+                        &format!("{key}-restart"),
+                        tr("Restart Hex"),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| {
+                            ui.ask(PlatformRequest::Permission(PermissionAction::Restart))
+                        },
+                    ),
+                );
+            }
             let control = permission_control(
                 p,
                 &format!("{key}-allow"),
@@ -93,17 +110,6 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
         })
         .collect();
     Some(section(p, "permissions", tr("Permissions needed"), rows))
-}
-
-/// The voice command model's notice, when commands are on but not ready.
-pub(super) fn command_model_notice(ui: &Ui, p: Paint) -> Option<El> {
-    let (title, description) = super::commands::model_notice(ui)?;
-    Some(super::commands::model_notice_panel(
-        ui,
-        p,
-        title,
-        description,
-    ))
 }
 
 /// A save error where the OS has no listener card to show it in.
@@ -147,30 +153,28 @@ fn folder_label(ui: &Ui) -> String {
         .unwrap_or_else(|| folder.display().to_string())
 }
 
-/// Meetings (beta): the opt-in, then its permission, indicator, folder, and
-/// Apple Intelligence notes; once on, a second card with each detected call
-/// provider's Ask / Always record / Never offer choice.
-pub(super) fn meetings_section(ui: &Ui, p: Paint) -> Vec<El> {
-    if !ui.platform.caps.meetings {
-        return Vec::new();
-    }
-    let meetings = &ui.settings.meetings;
-    let mut rows = vec![toggle_row(
+/// The Meetings (beta) switch: the opt-in card's only row, and the first row
+/// of Meetings › Settings.
+pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
+    toggle_row(
         p,
         "meetings-enabled",
         tr("Meetings (beta)"),
         tr("Offer to record calls and save local transcripts"),
-        meetings.enabled,
+        ui.settings.meetings.enabled,
         |ui: &mut Ui| {
             let enabled = !ui.settings.meetings.enabled;
-            if ui.update(|settings| settings.meetings.enabled = enabled)
-                && !enabled
-                && ui.pane == super::Pane::Meetings
-            {
-                ui.pane = super::Pane::Settings;
-            }
+            ui.update(|settings| settings.meetings.enabled = enabled);
         },
-    )];
+    )
+}
+
+/// Meetings › Settings: the opt-in, then its permission, indicator, folder,
+/// and Apple Intelligence notes; once on, Calendar and each detected call
+/// provider's Ask / Always record / Never offer choice.
+pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+    let meetings = &ui.settings.meetings;
+    let mut rows = vec![meetings_toggle(ui, p)];
     if meetings.enabled {
         let permitted = ui.platform.system_audio;
         rows.push(setting_row(
@@ -250,11 +254,240 @@ pub(super) fn meetings_section(ui: &Ui, p: Paint) -> Vec<El> {
             rows.push(note("meeting-folder-error", error, p.danger()));
         }
     }
-    let mut sections = vec![section(p, "meetings", tr("Meetings"), rows)];
+    let mut sections = vec![section(p, "meetings", tr("Call recording"), rows)];
     if meetings.enabled {
+        sections.extend(calendar_section(ui, p, layer));
         sections.push(detected_calls_section(ui, p));
     }
     sections
+}
+
+static ZOOM_ICON: Icon = Icon {
+    name: "hex-provider-zoom",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/zoom.svg"),
+};
+static MEET_ICON: Icon = Icon {
+    name: "hex-provider-meet",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/meet.svg"),
+};
+static TEAMS_ICON: Icon = Icon {
+    name: "hex-provider-teams",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/teams.svg"),
+};
+static SLACK_ICON: Icon = Icon {
+    name: "hex-provider-slack",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/slack.svg"),
+};
+static WEBEX_ICON: Icon = Icon {
+    name: "hex-provider-webex",
+    view: 16.0,
+    body: include_str!("../../assets/icons/providers/webex.svg"),
+};
+
+fn provider_icon(provider: CallProvider) -> &'static Icon {
+    match provider {
+        CallProvider::Zoom => &ZOOM_ICON,
+        CallProvider::GoogleMeet => &MEET_ICON,
+        CallProvider::Teams => &TEAMS_ICON,
+        CallProvider::Slack => &SLACK_ICON,
+        CallProvider::Webex => &WEBEX_ICON,
+    }
+}
+
+/// Calendar reminders: Connect calendar (the only thing that asks macOS for
+/// access), then the reminder switch, lead time, included calendars, and
+/// the next few meetings.
+fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
+    if !ui.platform.caps.calendar {
+        return None;
+    }
+    let view = &ui.platform.calendar;
+    let calendar = &ui.settings.meetings.calendar;
+    let mut rows = Vec::new();
+    if view.access.blocked() {
+        rows.push(setting_row(
+            p,
+            "calendar-blocked",
+            tr("Calendar access is off"),
+            Some(tr(
+                "Allow Hex under Privacy & Security › Calendars to get meeting reminders",
+            )),
+            button(
+                p,
+                "calendar-privacy",
+                tr("Open settings"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| {
+                    ui.ask(PlatformRequest::Calendar(
+                        CalendarRequest::OpenPrivacySettings,
+                    ))
+                },
+            ),
+        ));
+    } else if !calendar.connected || view.access != CalendarAccess::FullAccess {
+        rows.push(setting_row(
+            p,
+            "calendar-connect",
+            tr("Remind me before meetings"),
+            Some(tr("Names each recording after its calendar event")),
+            button(
+                p,
+                "calendar-connect-button",
+                if view.connecting {
+                    tr("Connecting…")
+                } else {
+                    tr("Connect calendar")
+                },
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| {
+                    if !ui.platform.calendar.connecting {
+                        ui.ask(PlatformRequest::Calendar(CalendarRequest::Connect));
+                    }
+                },
+            ),
+        ));
+    } else {
+        rows.push(toggle_row(
+            p,
+            "calendar-remind",
+            tr("Remind me before meetings"),
+            tr("Shows a reminder with Record and Join buttons"),
+            calendar.remind,
+            |ui: &mut Ui| {
+                let remind = !ui.settings.meetings.calendar.remind;
+                ui.update(|settings| settings.meetings.calendar.remind = remind);
+            },
+        ));
+        if calendar.remind {
+            let labels = [tr("At start"), tr("1 min"), tr("2 min"), tr("5 min")];
+            let lead = calendar.lead().as_secs() / 60;
+            rows.push(setting_row(
+                p,
+                "calendar-lead",
+                tr("Remind me"),
+                None,
+                segmented(
+                    p,
+                    "lead",
+                    &labels,
+                    CALENDAR_LEAD_MINUTES
+                        .iter()
+                        .position(|minutes| u64::from(*minutes) == lead)
+                        .unwrap_or(1),
+                    |ui, index| {
+                        ui.update(|settings| {
+                            settings.meetings.calendar.lead_minutes = CALENDAR_LEAD_MINUTES[index];
+                        });
+                    },
+                ),
+            ));
+        }
+        rows.push(calendars_row(ui, p, layer));
+        if view.upcoming.is_empty() {
+            rows.push(note(
+                "calendar-none",
+                tr("No meetings in the next two days"),
+                p.muted(),
+            ));
+        }
+        rows.extend(view.upcoming.iter().enumerate().map(|(index, meeting)| {
+            let provider = meeting.provider.map(|provider| {
+                row()
+                    .key("provider")
+                    .gap(6.0)
+                    .center_y()
+                    .label(provider.label())
+                    .child(
+                        rune::icon(provider_icon(provider), 16.0)
+                            .key("icon")
+                            .color(p.muted()),
+                    )
+                    .child(
+                        text(provider.label())
+                            .key("name")
+                            .font(DESCRIPTION)
+                            .color(p.muted()),
+                    )
+            });
+            setting_row(
+                p,
+                &format!("upcoming{index}"),
+                &meeting.title,
+                Some(&meeting.when),
+                provider.unwrap_or_else(|| row().key("provider")),
+            )
+        }));
+    }
+    if let Some(error) = &view.error {
+        rows.push(note("calendar-error", error, p.danger()));
+    }
+    Some(section(p, "calendar", tr("Calendar"), rows))
+}
+
+/// Which calendars remind: all by default, each one switched in the menu.
+fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let calendar = &ui.settings.meetings.calendar;
+    let calendars = &ui.platform.calendar.calendars;
+    let included = calendars
+        .iter()
+        .filter(|info| calendar.includes(&info.id))
+        .count();
+    let label = if included == calendars.len() {
+        tr("All calendars").to_string()
+    } else {
+        tr_named(
+            "{included} of {total} calendars",
+            &[
+                ("included", &included.to_string()),
+                ("total", &calendars.len().to_string()),
+            ],
+        )
+    };
+    let choices = calendars
+        .iter()
+        .map(|info| {
+            let id = info.id.clone();
+            Choice {
+                label: if info.source.is_empty() {
+                    info.title.clone()
+                } else {
+                    format!("{} · {}", info.title, info.source)
+                },
+                detail: None,
+                selected: calendar.includes(&info.id),
+                choose: Box::new(move |ui: &mut Ui| {
+                    let id = id.clone();
+                    ui.update(|settings| {
+                        let excluded = &mut settings.meetings.calendar.excluded_calendars;
+                        if let Some(index) = excluded.iter().position(|known| *known == id) {
+                            excluded.remove(index);
+                        } else {
+                            excluded.push(id);
+                        }
+                    });
+                }),
+            }
+        })
+        .collect();
+    setting_row(
+        p,
+        "calendar-calendars",
+        tr("Calendars"),
+        None,
+        select(
+            p,
+            "calendar-calendars-control",
+            &label,
+            ui.open == Some(Menu::Calendars),
+            choices,
+            |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
+            layer,
+        ),
+    )
 }
 
 /// The known services, then every other website or app the user chose for,
@@ -348,29 +581,17 @@ pub(super) fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<El> {
             ButtonKind::Secondary,
             |ui: &mut Ui, _| ui.ask(PlatformRequest::OpenLoginItemSettings),
         ),
-        Some(status) => Switch::new(status == LoginItemStatus::Enabled)
-            .build(p.k)
-            .key("switch"),
+        Some(_) => row_switch(p, ui.platform.login_item_on()),
     };
-    let mut row = setting_row(
-        p,
-        "launch-at-login",
-        tr("Launch at login"),
-        Some(tr("Start Hex when you log in")),
-        control,
-    );
+    let mut row = setting_row(p, "launch-at-login", tr("Launch at login"), None, control);
     if matches!(
         status,
         Some(LoginItemStatus::Enabled | LoginItemStatus::Disabled)
     ) {
-        row = row
-            .role("toggle")
-            .hover(p.k.c.hover)
-            .press(p.k.c.pressed)
-            .on_press(|ui: &mut Ui| {
-                let enabled = ui.platform.login_item != Some(LoginItemStatus::Enabled);
-                ui.ask(PlatformRequest::SetLaunchAtLogin(enabled));
-            });
+        row = pressable_row(row).on_press(|ui: &mut Ui| {
+            let enabled = !ui.platform.login_item_on();
+            ui.ask(PlatformRequest::SetLaunchAtLogin(enabled));
+        });
     }
     let mut rows = vec![row];
     if let Some(error) = &ui.platform.login_item_error {
@@ -385,7 +606,7 @@ pub(super) fn dock_icon_row(ui: &Ui, p: Paint) -> Option<El> {
             p,
             "dock-icon",
             tr("Show Dock icon"),
-            tr("Keep Hex in the menu bar when Settings is closed"),
+            None,
             ui.settings.show_dock_icon,
             |ui: &mut Ui| {
                 let show = !ui.settings.show_dock_icon;
@@ -394,13 +615,6 @@ pub(super) fn dock_icon_row(ui: &Ui, p: Paint) -> Option<El> {
         )
     })
 }
-
-const HEX_MICROPHONE_MODES: [VoiceFilterMode; 4] = [
-    VoiceFilterMode::Muffled,
-    VoiceFilterMode::Muted,
-    VoiceFilterMode::Quiet,
-    VoiceFilterMode::Normal,
-];
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
@@ -522,71 +736,6 @@ pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
     setting_row(p, "hex-mic-driver", title, Some(&description), controls)
 }
 
-/// Experimental: Hex Microphone, while its experiment is on.
-pub(super) fn hex_microphone_section(ui: &Ui, p: Paint) -> Option<El> {
-    if !ui.platform.caps.hex_microphone || !ui.settings.experimental.hex_microphone_available() {
-        return None;
-    }
-    let experimental = &ui.settings.experimental;
-    let labels: Vec<&str> = HEX_MICROPHONE_MODES
-        .iter()
-        .map(|m| super::fun::mode_label(*m))
-        .collect();
-    let selected = HEX_MICROPHONE_MODES
-        .iter()
-        .position(|mode| *mode == experimental.hex_microphone_mode)
-        .unwrap_or(0);
-    let mut rows = vec![
-        driver_row(ui, p),
-        setting_row(
-            p,
-            "hex-mic-mode",
-            tr("Mode while dictating"),
-            Some(super::fun::mode_description(
-                experimental.hex_microphone_mode,
-            )),
-            segmented(p, "hex-mic-mode-control", &labels, selected, |ui, index| {
-                let mode = HEX_MICROPHONE_MODES[index];
-                super::fun::set_tuning(ui, |cfg| cfg.mode = mode, true);
-            }),
-        ),
-        toggle_row(
-            p,
-            "hex-mic-comfort-noise",
-            tr("Comfort noise"),
-            tr("Keeps a quiet room tone while muted so callers know the line is live"),
-            experimental.hex_microphone_comfort_noise,
-            |ui: &mut Ui| {
-                let enabled = !ui.settings.experimental.hex_microphone_comfort_noise;
-                super::fun::set_tuning(ui, |cfg| cfg.comfort_noise = enabled, true);
-            },
-        ),
-    ];
-    if ui.platform.caps.fun {
-        rows.push(setting_row(
-            p,
-            "hex-mic-try-it",
-            tr("Try it"),
-            Some(tr(
-                "Try Hex Microphone and preview how callers hear you while you dictate",
-            )),
-            button(
-                p,
-                "open-fun-pane",
-                tr("Open Fun"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, tx| ui.select_pane(super::Pane::Fun, tx),
-            ),
-        ));
-    }
-    Some(section(
-        p,
-        "hex-microphone",
-        tr("Experimental: Hex microphone"),
-        rows,
-    ))
-}
-
 /// `target`'s modifier-only shortcut moved to `side`, unless that collides
 /// with another shortcut.
 pub(super) fn side_binding(
@@ -606,22 +755,34 @@ const SIDES: [ModifierSide; 3] = [
     ModifierSide::Right,
 ];
 
-/// Left, Either, or Right for a modifier-only shortcut (macOS), before its
-/// recorder; sides that would collide with another shortcut are disabled.
-pub(super) fn side_selector(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
+/// The side [`side_selector`] shows for `target`, if it shows one: the
+/// keycaps beside it then leave the side to it.
+pub(super) fn picked_side(ui: &Ui, target: ShortcutTarget) -> Option<ModifierSide> {
     if !ui.platform.caps.modifier_sides {
         return None;
     }
-    let side = super::settings::binding(&ui.settings, target)?.standalone_side()?;
+    super::settings::binding(&ui.settings, target)?.standalone_side()
+}
+
+/// Left, Either, or Right for a modifier-only shortcut (macOS), before its
+/// recorder; sides that would collide with another shortcut are disabled.
+pub(super) const SIDE_PICKER_WIDTH: f32 = 180.0;
+
+pub(super) fn side_selector(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
+    let side = picked_side(ui, target)?;
     let key = match target {
         ShortcutTarget::Dictation => "dictation-side",
         ShortcutTarget::PasteLast => "paste-last-side",
         ShortcutTarget::VoiceAction => "voice-action-side",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "capture-side",
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => "capture-list-side",
     };
     let labels = [tr("Left"), tr("Either"), tr("Right")];
     let selected = SIDES.iter().position(|s| *s == side).unwrap_or(1);
     let mut control = rune_kit::SegmentedControl::new(&labels, Some(selected))
-        .width(Some(180.0))
+        .width(Some(SIDE_PICKER_WIDTH))
         .on_pick(move |ui: &mut Ui, index: usize, _: &mut rune::Tx| {
             if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
                 ui.update(|settings| super::settings::set_binding(settings, target, candidate));

@@ -412,7 +412,8 @@ fn draw_activity(
             | VoiceEvent::Context { .. }
             | VoiceEvent::ApiServerStarted { .. }
             | VoiceEvent::ApiServerStopped { .. }
-            | VoiceEvent::ApiAuthFailed { .. } => None,
+            | VoiceEvent::ApiAuthFailed { .. }
+            | VoiceEvent::SmartTurn { .. } => None,
         })
         .rev()
         .take(area.height.saturating_sub(2) as usize)

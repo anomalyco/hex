@@ -4,12 +4,12 @@
 # callers can capture it without mixing diagnostics into codesign arguments.
 hex_codesign_identity() {
   team_id=$1
-  identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
+  identity=${HEX_CODESIGN_IDENTITY:-}
   if [ -z "$identity" ]; then
     identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
   fi
   if [ -z "$identity" ]; then
-    echo "No Developer ID signing identity found for team $team_id. Set VOICE_CONTROL_CODESIGN_IDENTITY." >&2
+    echo "No Developer ID signing identity found for team $team_id. Set HEX_CODESIGN_IDENTITY." >&2
     return 1
   fi
   case "$identity" in
@@ -37,9 +37,19 @@ hex_notarize() {
 }
 
 hex_version() {
-  printf '%s\n' "${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$1/Cargo.toml" | jq -r '.packages[0].version')}"
+  printf '%s\n' "${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$1/Cargo.toml" | jq -r '.packages[] | select(.name == "hex") | .version')}"
 }
 
+# CFBundleVersion: the run number of a dev build (0.0.0-dev-N), else from
+# X.Y.Z (a prerelease shares its release's number). Hex's updater compares
+# neither; it follows the channel's current release.
 hex_build_number() {
-  printf '%s\n' "${HEX_BUILD_NUMBER:-$(printf '%s\n' "$1" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}"
+  if [ -n "${HEX_BUILD_NUMBER:-}" ]; then
+    printf '%s\n' "$HEX_BUILD_NUMBER"
+    return
+  fi
+  case "$1" in
+    0.0.0-dev-[0-9]*) printf '%s\n' "${1#0.0.0-dev-}" ;;
+    *) printf '%s\n' "${1%%-*}" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }' ;;
+  esac
 }

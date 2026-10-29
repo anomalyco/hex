@@ -10,11 +10,12 @@
 //! data on its own OS.
 
 use super::meetings::Meeting;
+use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
 use crate::commands::CommandScope;
 use crate::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
 };
-use crate::login_item::LoginItemStatus;
+use crate::login_item::{LoginItemResult, LoginItemStatus};
 use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState, SetupStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,8 +32,12 @@ pub(super) struct Capabilities {
     pub(super) os: Os,
     /// The voice command catalog and its opt-in (macOS).
     pub(super) commands: bool,
-    /// Meeting recording, its pane, and its Settings section (macOS beta).
+    /// Meeting recording and its pane, with the recordings and their
+    /// settings (macOS beta).
     pub(super) meetings: bool,
+    /// Calendar meeting reminders: the Calendar card under Meetings
+    /// (macOS, EventKit).
+    pub(super) calendar: bool,
     /// Privacy permissions gate dictation (macOS).
     pub(super) permissions: bool,
     pub(super) launch_at_login: bool,
@@ -46,15 +51,15 @@ pub(super) struct Capabilities {
     /// The window sees dictation events, so the tour can end with a
     /// practice dictation into its own field.
     pub(super) practice_dictation: bool,
-    /// Sparkle offers a manual "Check now".
-    pub(super) manual_update_check: bool,
-    /// The Fun pane: tuning and trying the Hex Microphone (macOS, while
-    /// its experiment is on).
+    /// The Voice Filter pane: the Hex Microphone's driver, tuning, and
+    /// try-it demo (macOS, under Experiments).
     pub(super) fun: bool,
     /// The HUD Lab developer pane drives the dictation indicator (macOS).
     pub(super) hud_lab: bool,
     /// Modifier-only shortcuts can require the left or right key (macOS).
     pub(super) modifier_sides: bool,
+    /// Input-source changes can operate the installed-model picker (macOS).
+    pub(super) keyboard_model_switching: bool,
 }
 
 impl Capabilities {
@@ -62,6 +67,7 @@ impl Capabilities {
         os: Os::Linux,
         commands: false,
         meetings: false,
+        calendar: false,
         permissions: false,
         launch_at_login: false,
         dock_icon: false,
@@ -69,16 +75,17 @@ impl Capabilities {
         terminal_paste: true,
         hex_microphone: false,
         practice_dictation: false,
-        manual_update_check: false,
         fun: false,
         hud_lab: false,
         modifier_sides: false,
+        keyboard_model_switching: false,
     };
 
     pub(super) const MACOS: Self = Self {
         os: Os::Macos,
         commands: true,
         meetings: true,
+        calendar: true,
         permissions: true,
         launch_at_login: true,
         dock_icon: true,
@@ -86,16 +93,17 @@ impl Capabilities {
         terminal_paste: false,
         hex_microphone: true,
         practice_dictation: true,
-        manual_update_check: true,
         fun: true,
         hud_lab: true,
         modifier_sides: true,
+        keyboard_model_switching: true,
     };
 
     pub(super) const WINDOWS: Self = Self {
         os: Os::Windows,
         commands: false,
         meetings: false,
+        calendar: false,
         permissions: false,
         launch_at_login: true,
         dock_icon: false,
@@ -103,10 +111,10 @@ impl Capabilities {
         terminal_paste: false,
         hex_microphone: false,
         practice_dictation: false,
-        manual_update_check: true,
         fun: false,
         hud_lab: false,
         modifier_sides: false,
+        keyboard_model_switching: false,
     };
 
     /// This OS's capabilities, with the rows its window host decides.
@@ -120,10 +128,74 @@ impl Capabilities {
         };
         Self {
             terminal_paste: super::host::TERMINAL_PASTE,
-            manual_update_check: super::host::MANUAL_UPDATE_CHECK,
             ..os
         }
     }
+}
+
+/// What the Calendar card shows; the host reads it off the main thread.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct CalendarView {
+    pub(super) access: CalendarAccess,
+    pub(super) calendars: Vec<CalendarInfo>,
+    /// The next meetings from the included calendars, once connected.
+    pub(super) upcoming: Vec<UpcomingMeeting>,
+    /// Connect calendar was pressed and macOS is asking.
+    pub(super) connecting: bool,
+    pub(super) error: Option<String>,
+}
+
+impl CalendarView {
+    /// A connected calendar with three meetings coming up, for scenes.
+    pub(super) fn preview() -> Self {
+        let calendar = |id: &str, title: &str, source: &str| CalendarInfo {
+            id: id.into(),
+            title: title.into(),
+            source: source.into(),
+        };
+        let meeting = |title: &str, when: &str, provider| UpcomingMeeting {
+            title: title.into(),
+            when: when.into(),
+            provider,
+        };
+        Self {
+            access: CalendarAccess::FullAccess,
+            calendars: vec![
+                calendar("work", "Work", "kit@anoma.ly"),
+                calendar("home", "Home", "iCloud"),
+                calendar("birthdays", "Birthdays", "Other"),
+            ],
+            upcoming: vec![
+                meeting(
+                    "Design sync",
+                    "Today · 2:30 PM",
+                    Some(CallProvider::GoogleMeet),
+                ),
+                meeting("Rune review", "Today · 4:00 PM", Some(CallProvider::Zoom)),
+                meeting("1:1 with Dax", "Tomorrow · 10:00 AM", None),
+            ],
+            connecting: false,
+            error: None,
+        }
+    }
+}
+
+/// One upcoming meeting as Settings lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct UpcomingMeeting {
+    pub(super) title: String,
+    /// "Today · 2:30 PM", already localized.
+    pub(super) when: String,
+    pub(super) provider: Option<CallProvider>,
+}
+
+/// What the Calendar card asks the host for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CalendarRequest {
+    /// Ask macOS for full calendar access, then mark the calendar connected.
+    Connect,
+    /// System Settings › Privacy & Security › Calendars.
+    OpenPrivacySettings,
 }
 
 /// The voice command model's state while commands are on (macOS).
@@ -183,11 +255,53 @@ pub(super) enum Workspace {
     Error,
 }
 
+/// What the Scrawl pane shows (the `capture` experiment).
+#[cfg(hex_capture)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct ScrawlView {
+    /// Screen Recording, which a capture needs to record the screen.
+    pub(super) screen_recording: bool,
+    /// Scrawl's own app runs, so it owns the capture shortcut.
+    pub(super) scrawl_running: bool,
+    /// Use Hex for captures was pressed and Scrawl has not quit yet.
+    pub(super) quitting_scrawl: bool,
+    /// A captures folder that could not be revealed or chosen.
+    pub(super) folder_error: Option<String>,
+    /// Turning captures on or off failed (the pane sets it).
+    pub(super) enable_error: Option<String>,
+}
+
+#[cfg(hex_capture)]
+impl ScrawlView {
+    /// Screen Recording allowed and Scrawl not running.
+    pub(super) fn preview() -> Self {
+        Self {
+            screen_recording: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// What the Scrawl pane asks the host for.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScrawlRequest {
+    /// Read Screen Recording and Scrawl's app again now (the pane opened
+    /// or the window became key), not at the next once-a-second refresh.
+    Refresh,
+    /// Use Hex for captures: ask Scrawl's own app to quit. Nothing else
+    /// ever quits it.
+    QuitScrawl,
+    RevealFolder,
+    ChooseFolder,
+}
+
 /// The OS-only state the panes show; the host keeps it current.
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
-    /// Microphone, Input Monitoring, Accessibility, and whether the selected
+    pub(super) input_sources: Vec<crate::keyboard_model_switching::InputSource>,
+    /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
     /// none.
     pub(super) permissions: SetupStatus,
@@ -199,6 +313,10 @@ pub(super) struct PlatformState {
     pub(super) login_item: Option<LoginItemStatus>,
     pub(super) login_item_checking: bool,
     pub(super) login_item_error: Option<String>,
+    /// The last Launch at login click while macOS registers or unregisters
+    /// the login item, so the switch moves at once. Memory only: macOS's
+    /// answer replaces it.
+    pub(super) login_item_requested: Option<bool>,
     pub(super) hex_microphone: Option<HexMicrophoneStatus>,
     pub(super) command_model: CommandModel,
     pub(super) commands: Vec<CatalogCommand>,
@@ -210,18 +328,30 @@ pub(super) struct PlatformState {
     pub(super) notes: NotesAvailability,
     /// A meeting folder that could not be revealed or chosen.
     pub(super) meeting_folder_error: Option<String>,
+    /// The Calendar card's access, calendars, and next meetings.
+    pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Developer builds: the Activity and HUD Lab panes
-    /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
+    /// Developer builds: the Activity pane, and HUD Lab without the
+    /// `dot-scope` experiment (`crate::DEVELOPER_FEATURES_ENABLED` on a
+    /// native host).
     pub(super) developer: bool,
+    /// The `vocabulary` experiment: the Vocabulary card under Dictation
+    /// (`crate::vocabulary::enabled` on a native host).
+    pub(super) vocabulary: bool,
+    /// The `modes` experiment: the Modes pane and its tour tip
+    /// (`crate::experiments::enabled` on a native host; on in fixtures).
+    pub(super) modes: bool,
+    /// The `voice-filter` experiment: the Voice Filter pane even before the
+    /// Hex Microphone is on (`crate::experiments::enabled` on a native host).
+    pub(super) voice_filter: bool,
     /// macOS 27 lists Accessibility as "Device Control and Data Access"
     /// (`permission_guide::list_name`); the permission rows use that name.
     pub(super) accessibility_renamed: bool,
     /// The Hex Microphone's live filter tuning
     /// (`hex_microphone::current_tuned_config`).
     pub(super) tuning: TunedFilterConfig,
-    /// The Fun pane's try-it demo (`hex_microphone::demo_snapshot`); `None`
+    /// The Voice Filter pane's try-it demo (`hex_microphone::demo_snapshot`); `None`
     /// until the host has one. Refresh it every frame while it records or
     /// plays (`DemoSnapshot::is_recording`, `playing`).
     pub(super) demo: Option<DemoSnapshot>,
@@ -231,6 +361,10 @@ pub(super) struct PlatformState {
     /// The dictation event log the Activity pane reads (`live.ndjson`);
     /// `None` where the host keeps none.
     pub(super) activity_log: Option<std::path::PathBuf>,
+    /// The Scrawl pane, while the `capture` experiment is on; `None` hides
+    /// it.
+    #[cfg(hex_capture)]
+    pub(super) scrawl: Option<ScrawlView>,
 }
 
 /// The dictation indicator's look, as `dictation_indicator::HudTuning`
@@ -282,9 +416,12 @@ pub(super) struct HudLab {
     pub(super) tuning: HudTuning,
     pub(super) demo: HudDemo,
     pub(super) queued: usize,
+    /// Dot scope's tuning while the `dot-scope` experiment is on, when HUD
+    /// Lab tunes Dot scope instead of the capsule's styles.
+    pub(super) dot_scope: Option<crate::dot_scope::Tuning>,
 }
 
-/// The Fun pane's demo controls (`hex_microphone`'s demo functions).
+/// The Voice Filter pane's demo controls (`hex_microphone`'s demo functions).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DemoRequest {
     /// `start_demo_recording` (five seconds of the microphone).
@@ -299,12 +436,14 @@ impl PlatformState {
     pub(super) fn new(caps: Capabilities) -> Self {
         Self {
             caps,
+            input_sources: Vec::new(),
             permissions: crate::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
             system_audio: false,
             login_item: None,
             login_item_checking: false,
             login_item_error: None,
+            login_item_requested: None,
             hex_microphone: None,
             command_model: CommandModel::Disabled,
             commands: Vec::new(),
@@ -314,13 +453,19 @@ impl PlatformState {
             context: None,
             notes: NotesAvailability::Available,
             meeting_folder_error: None,
+            calendar: CalendarView::default(),
             relaunch_failed: false,
             developer: false,
+            vocabulary: false,
+            modes: true,
+            voice_filter: false,
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,
             hud: HudLab::default(),
             activity_log: None,
+            #[cfg(hex_capture)]
+            scrawl: None,
         }
     }
 
@@ -357,6 +502,45 @@ impl PlatformState {
         }
     }
 
+    /// Whether the Launch at login switch shows on: the pending click, else
+    /// what macOS last reported.
+    pub(super) fn login_item_on(&self) -> bool {
+        self.login_item_requested
+            .unwrap_or(self.login_item == Some(LoginItemStatus::Enabled))
+    }
+
+    /// The switch was pressed: it shows `enabled` while the host asks macOS.
+    pub(super) fn request_login_item(&mut self, enabled: bool) {
+        self.login_item_requested = Some(enabled);
+        self.login_item_error = None;
+    }
+
+    /// Adopts the login item worker's answer. `settled` is false while a
+    /// later click still waits behind it: the switch keeps that click and
+    /// only the reported status is remembered. Once settled, the switch
+    /// shows macOS's state, springing back beside the error if the request
+    /// failed or macOS kept the other state.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn login_item_answered(&mut self, answer: LoginItemResult, settled: bool) {
+        let current = settled || self.login_item_requested.is_none();
+        let error = match answer {
+            Ok(status) => {
+                self.login_item = Some(status);
+                None
+            }
+            Err(failure) => {
+                if failure.status.is_some() {
+                    self.login_item = failure.status;
+                }
+                Some(failure.message)
+            }
+        };
+        if current {
+            self.login_item_requested = None;
+            self.login_item_error = error;
+        }
+    }
+
     pub(super) fn asked(&self, kind: PermissionKind) -> bool {
         self.permissions_asked.contains(&kind)
     }
@@ -374,7 +558,6 @@ impl PlatformState {
         let ready = PermissionState::Ready;
         state.permissions = SetupStatus {
             microphone: ready,
-            input_monitoring: ready,
             accessibility: ready,
             transcription_model: true,
         };
@@ -492,6 +675,7 @@ pub(super) enum PlatformRequest {
     InstallHexMicrophone,
     UninstallHexMicrophone,
     Meeting(MeetingRequest),
+    Calendar(CalendarRequest),
     CreateCommandsConfig,
     OpenCommandsConfig,
     RetryCommandModel,
@@ -506,6 +690,16 @@ pub(super) enum PlatformRequest {
     /// Configure` with the tuning, then `Reset` and the demonstrated state
     /// with `queued` jobs behind it.
     ConfigureHud(HudLab),
+    /// Only the tuning, live on whatever the indicator shows (a dictation
+    /// or the demo): `Configure` and `ConfigureDotScope`, no `Reset`.
+    TuneHud(HudLab),
+    /// Leaving HUD Lab: `Reset` hides its demo.
+    EndHudDemo,
+    /// Save Dot scope's tuning as `dot-scope.json`, which the HUD loads at
+    /// launch.
+    SaveDotScope(crate::dot_scope::Tuning),
+    #[cfg(hex_capture)]
+    Scrawl(ScrawlRequest),
 }
 
 /// The host that performs [`PlatformRequest`]s and refreshes
@@ -522,6 +716,11 @@ pub(super) trait NativeHost {
     /// What the tour hears from the runtime: practice dictation outcomes
     /// while `practicing`, and a shortcut listener that failed to start.
     fn tour_inputs(&mut self, practicing: bool) -> Vec<Input>;
+    /// The microphone's latest peak, 0 to 1, while a dictation records;
+    /// silence when no audio arrived lately.
+    fn practice_level(&self) -> f32 {
+        0.0
+    }
 }
 
 pub(super) enum PlatformHost {
@@ -536,6 +735,14 @@ pub(super) enum PlatformHost {
 impl PlatformHost {
     pub(super) fn send(&mut self, request: PlatformRequest) -> Result<(), String> {
         match self {
+            #[cfg(target_os = "linux")]
+            Self::None => {
+                if let PlatformRequest::Scrawl(request) = request {
+                    linux_scrawl_request(request);
+                }
+                Ok(())
+            }
+            #[cfg(not(target_os = "linux"))]
             Self::None => Ok(()),
             Self::Fixture(sent) => {
                 sent.push(request);
@@ -548,6 +755,8 @@ impl PlatformHost {
     pub(super) fn poll(&mut self, state: &mut PlatformState) -> bool {
         match self {
             Self::Native(host) => host.poll(state),
+            #[cfg(target_os = "linux")]
+            Self::None => linux_scrawl_poll(state),
             _ => false,
         }
     }
@@ -566,7 +775,46 @@ impl PlatformHost {
         }
     }
 
+    pub(super) fn practice_level(&self) -> f32 {
+        match self {
+            Self::Native(host) => host.practice_level(),
+            _ => 0.0,
+        }
+    }
+
     pub(super) fn is_fixture(&self) -> bool {
         matches!(self, Self::Fixture(_))
+    }
+}
+
+/// The Scrawl pane on Linux: it shows while the `capture` experiment is on.
+/// The desktop's portal asks for the screen at each capture, so nothing is
+/// granted ahead of time, and Scrawl's own app is macOS's.
+#[cfg(target_os = "linux")]
+fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
+    if !crate::app_settings::capture_available() {
+        return state.scrawl.take().is_some();
+    }
+    if state.scrawl.is_some() {
+        return false;
+    }
+    state.scrawl = Some(ScrawlView::preview());
+    true
+}
+
+/// Reveals the captures folder; choosing another is set in `settings.json`
+/// (`capture.folder`) for now.
+#[cfg(target_os = "linux")]
+fn linux_scrawl_request(request: ScrawlRequest) {
+    if request == ScrawlRequest::RevealFolder {
+        let folder = crate::app_settings::capture_settings().captures_dir();
+        if std::fs::create_dir_all(&folder).is_ok()
+            && let Err(error) = scrawl_capture::handoff::open_path(&folder)
+        {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not reveal the captures folder"
+            );
+        }
     }
 }

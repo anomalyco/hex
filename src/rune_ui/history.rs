@@ -5,8 +5,8 @@
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button};
-use super::lists::{message, placeholder, section_label, split};
+use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button};
+use super::lists::{message, placeholder, section_label, source_item, source_list, split};
 use super::{Menu, Ui};
 use crate::desktop_i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
@@ -223,7 +223,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let actions = vec![search, retention, clear_button];
 
     let c = &p.k.c;
-    let mut list = col().key("history-list").gap(2.0);
+    let mut list = col().key("history-list");
     let empty = if ui.settings.history_retention.is_off() {
         Some(tr("History is off. New dictations are not retained."))
     } else if pane.entries.is_empty() && pane.error.is_none() {
@@ -254,9 +254,11 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             meta.push_str(" · ");
             meta.push_str(application);
         }
+        let preview = entry.final_text.replace('\n', " ");
         let mut item = col()
             .key(format!("history-entry{id}"))
             .role("button")
+            .label(preview.clone())
             .px(10.0)
             .py(8.0)
             .gap(2.0)
@@ -272,7 +274,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                     .key("top")
                     .gap(8.0)
                     .child(
-                        text(entry.final_text.replace('\n', " "))
+                        text(preview)
                             .key("preview")
                             .font(p.k.ty.ui_medium)
                             .color(p.text())
@@ -296,12 +298,12 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         if selected {
             item = item.fill(c.layer_02);
         }
-        list = list.child(item);
+        list = list.child(source_item(item, selected));
     }
     let body = split(
         p,
         "history-body",
-        super::scroll_body("history-scroll", list),
+        super::scroll_body("history-scroll", source_list(list)),
         detail(ui, p),
     );
     (actions, body)
@@ -408,7 +410,7 @@ fn detail(ui: &Ui, p: Paint) -> El {
         .key("history-detail")
         .grow(1.0)
         .shrink()
-        .px(24.0)
+        .px(METRICS.gutter)
         .child(header)
         .child(super::scroll_body("detail-scroll", body))
 }

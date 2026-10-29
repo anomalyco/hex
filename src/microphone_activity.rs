@@ -650,7 +650,7 @@ mod tests {
                 Some("com.microsoft.edgemac"),
                 true,
             ),
-            ("com.kitlangton.hex2", "Hex", None, false),
+            ("anomaly.hex", "Hex", None, false),
         ] {
             let app = ActiveMicrophoneApplication {
                 pid: 100,

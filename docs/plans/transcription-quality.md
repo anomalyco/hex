@@ -69,7 +69,7 @@ Transcription quality plan (ordered by value / effort)
     - Add all five language translations in `src/desktop_i18n.rs` and update `--snap` scenes (`mac-settings`, `history`) in light and dark.
 - **Measurement & gate:**
   - Unit tests in `src/text_replacements.rs` covering CJK phrases (`#177`) and overlapping candidates (`#139`).
-  - Phase 1 benchmark: 100% recall on unambiguous aliases (`"open code" -> "OpenCode"`, `"scrawl"`, `"rune"`) and LLM-rewritten `"Hanks"` / `"Avatar"` sentences; `cargo test --bin voice-control rune_ui` green with updated light/dark goldens.
+  - Phase 1 benchmark: 100% recall on unambiguous aliases (`"open code" -> "OpenCode"`, `"scrawl"`, `"rune"`) and LLM-rewritten `"Hanks"` / `"Avatar"` sentences; `cargo test --bin hex rune_ui` green with updated light/dark goldens.
 - **Effort:** 4 days.
 - **Risk:** Low. Users could enter a common word as an unconditional alias (e.g. `"Hanks" -> "Hex"`); mitigate in Phase 4 by routing single-word real-word collisions through acoustic margin gating when Parakeet is active, or warning inline when an alias is a common dictionary word.
 - **Unblocks:** Feeds a single user vocabulary into Qwen3-ASR hints (Phase 3), Parakeet decoder boosting (Phase 4), and meeting transcripts (Phase 5).
@@ -78,6 +78,7 @@ Transcription quality plan (ordered by value / effort)
 
 ## Phase 3: `transcribe-cpp` Bump (`0.2.4` -> `0.4.1`) and Catalog Refresh
 
+- **Status (2026-10-26):** The dependency bump is done with behavior unchanged: same transcripts on the vocabulary corpus, weights now mmap'd (peak footprint about 0.9 GB to 0.15 GB on Metal). Hints, the catalog refresh, and Vulkan prewarm verification remain.
 - **Goal:** Upgrade `transcribe-cpp` to `0.4.1` to unlock generic `RunOptions::vocabulary` / `prompt`, enable Qwen3-ASR recognition hints (`#129`), and replace `ParakeetV3` with `parakeet-ultra`.
 - **Changes:**
   - **Dependency bump (`Cargo.toml`, `src/gguf_session.rs`, `src/parakeet.rs`, `src/local_transcriber.rs`):**

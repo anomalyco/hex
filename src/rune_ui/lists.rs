@@ -2,13 +2,26 @@
 //! Settings rows share: list rows and group labels, the detail header and
 //! facts, tinted status tags, and the permission control.
 
-use rune::{El, col, el, row, text};
+use std::sync::LazyLock;
+
+use rune::{
+    Beat, Color, Easing, Edge, El, Sequence, Shadow, Spring, SpringPair, Transition, col, el, row,
+    text,
+};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, status_dot};
+use super::controls::{
+    ButtonKind, DESCRIPTION, METRICS, Paint, PushSize, button, pulsing_dot, status_dot,
+};
 use crate::desktop_i18n::tr;
 
 const LIST_WIDTH: f32 = 320.0;
+/// A [`list_row`]'s text inset.
+const LIST_ROW_PX: f32 = 10.0;
+/// A list column's leading padding, which puts its rows' text on the pane
+/// title's edge.
+pub(super) const LIST_COLUMN_PL: f32 = METRICS.gutter - LIST_ROW_PX;
+static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Tone {
@@ -53,8 +66,32 @@ pub(super) fn group_label(p: Paint, key: &str, label: &str, first: bool) -> El {
         .font(p.k.ty.small_medium)
         .color(p.faint())
         .px(10.0)
-        .pt(if first { 4.0 } else { 16.0 })
-        .pb(4.0)
+        .pt(group_label_top(first))
+        .pb(GROUP_LABEL_BOTTOM)
+}
+
+const GROUP_LABEL_BOTTOM: f32 = 6.0;
+
+fn group_label_top(first: bool) -> f32 {
+    if first { 4.0 } else { 16.0 }
+}
+
+/// How tall a [`group_label`] is, for a list that lays it out by hand.
+pub(super) fn group_label_height(p: Paint, first: bool) -> f32 {
+    group_label_top(first) + p.k.ty.small_medium.line_px() + GROUP_LABEL_BOTTOM
+}
+
+/// A source list, as in a native sidebar: Tab enters at the selected row,
+/// Up and Down select as they move, and typing selects a row by its name.
+pub(super) fn source_list(list: El) -> El {
+    list.role("list").focus_group().focus_follows()
+}
+
+/// A row of a [`source_list`]. It draws no focus ring: focus follows the
+/// selection, so the selected fill shows where focus is, as in a native
+/// sidebar.
+pub(super) fn source_item(item: El, selected: bool) -> El {
+    item.focusable(true).focus_selected(selected)
 }
 
 /// A selectable list row: title (with trailing pieces) over a meta line.
@@ -72,7 +109,7 @@ pub(super) fn list_row(
         .key(key)
         .role("button")
         .label(title)
-        .px(10.0)
+        .px(LIST_ROW_PX)
         .py(8.0)
         .gap(2.0)
         .radius(p.k.radius.md)
@@ -105,7 +142,7 @@ pub(super) fn list_row(
     if selected {
         item = item.fill(c.layer_02);
     }
-    item
+    source_item(item, selected)
 }
 
 /// A quiet message in a list or detail (empty, no matches, failed load).
@@ -163,7 +200,7 @@ pub(super) fn split(p: Paint, key: &str, list: El, detail: El) -> El {
                 .key("list-column")
                 .w(LIST_WIDTH)
                 .h_full()
-                .pl(16.0)
+                .pl(LIST_COLUMN_PL)
                 .pr(8.0)
                 .child(list),
         )
@@ -251,9 +288,49 @@ pub(super) enum PermissionControl {
     Allowed,
 }
 
+/// A grant's first beat, the gather: the control dips to `DIP` while the
+/// pill's chrome drains and the waiting dot contracts to a point. Every
+/// layout move rides this spring and lands inside the beat, so nothing that
+/// snaps to pixels is still creeping when the control comes to rest.
+const GATHER: Spring = Spring::new(0.16, 0.0);
+const GATHER_SECS: f64 = 0.14;
+const DIP: f32 = 0.94;
+/// The second beat, the release: the control springs back to full size as
+/// the check draws on and "ed" wipes in.
+const RELEASE: Spring = Spring::new(0.3, 0.2);
+/// Long enough for `RELEASE` to come within a hundredth of a point of rest,
+/// so the sequence's last keyframe is no step.
+const RELEASE_SECS: f64 = 0.45;
+const DRAW: Spring = Spring::new(0.42, 0.0);
+const SUFFIX: Spring = Spring::new(0.4, 0.0);
+/// The label's colour, green by the time "ed" has arrived.
+const INK: Spring = Spring::new(0.3, 0.0);
+/// The check and "ed" stay hidden through the gather (masks can't wait, so
+/// their wipes start with it), then appear quickly: the dot has gone.
+const APPEAR: &[Beat] = &[
+    Beat::new(0.0).opacity(0.0),
+    Beat::new(0.1).opacity(0.0),
+    Beat::new(0.15).opacity(1.0).easing(Easing::EASE_OUT),
+];
+/// The Allow button's padding, which Allowed keeps on the left so "Allow"
+/// keeps its place in the pill and "ed" follows it.
+const PILL_PADDING: f32 = 11.0;
+/// The check's ink inside its 16-point icon: OpenCode's `check-small` path
+/// (6.5,6.5)–(13.5,13.5) of 20, scaled to 16, plus the stroke's half-width.
+const CHECK_INK: [f32; 4] = [4.6, 4.6, 6.8, 6.8];
+/// Where the stroke starts, the point the waiting dot contracts into.
+const CHECK_START: [f32; 2] = [5.2, 9.15];
+/// The icon's place in its 9-point mark; the ink overhangs into the gap.
+const CHECK_X: f32 = 4.0;
+
 /// The one control every permission uses, in the tour and in Settings:
-/// Allow, a dot while macOS is asked, then a green Allowed. The dot is
-/// steady until Rune has looping animation.
+/// Allow, a pulsing dot while macOS is asked, then a green Allowed.
+///
+/// Every state is the same keyed button, so a grant morphs instead of
+/// cross-fading, in two beats. The control gathers (dips, drains its
+/// chrome, contracts the dot to the start of the check), then releases:
+/// it springs back as the check draws on from that point and "ed" wipes in
+/// after "Allow", whose glyphs never change.
 pub(super) fn permission_control(
     p: Paint,
     key: &str,
@@ -261,23 +338,160 @@ pub(super) fn permission_control(
     kind: ButtonKind,
     allow: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    match control {
-        PermissionControl::Allowed => allowed(p, key, tr("Allowed")),
-        PermissionControl::Allow => {
-            button(p, key, tr("Allow"), kind, move |ui: &mut Ui, _| allow(ui))
-        }
-        PermissionControl::Waiting => row()
-            .key(format!("{key}-waiting"))
-            .gap(12.0)
-            .center_y()
-            .child(status_dot(p.accent()))
-            .child(button(
+    let (mark, gap, pill) = match control {
+        PermissionControl::Allow => (
+            None,
+            12.0,
+            button(p, key, tr("Allow"), kind, move |ui: &mut Ui, _| allow(ui)),
+        ),
+        PermissionControl::Waiting => (
+            Some(
+                el().key("mark")
+                    .size(8.0, 8.0)
+                    .child(pulsing_dot(p.accent()).absolute(0.0, 0.0)),
+            ),
+            12.0,
+            button(
                 p,
                 key,
                 tr("Allow"),
                 ButtonKind::Secondary,
                 move |ui: &mut Ui, _| allow(ui),
-            )),
+            ),
+        ),
+        PermissionControl::Allowed => (Some(check_mark(p)), 6.0, allowed_pill(p, key, kind)),
+    };
+    let control_row = row()
+        .key(format!("{key}-control"))
+        .gap(gap)
+        .center_y()
+        .motion(GATHER)
+        .children(mark)
+        .child(pill.motion(GATHER));
+    if control == PermissionControl::Allowed {
+        control_row.sequence(Sequence::new(grant_beats()))
+    } else {
+        control_row
+    }
+}
+
+/// The control's scale through a grant: an eased dip, then `RELEASE`
+/// baked into the sequence's last segment, which only takes easings.
+fn grant_beats() -> &'static [Beat] {
+    static BEATS: LazyLock<[Beat; 3]> = LazyLock::new(|| {
+        static CURVE: LazyLock<Vec<[f32; 2]>> = LazyLock::new(|| {
+            const STOPS: usize = 48;
+            (0..=STOPS)
+                .map(|i| {
+                    let x = i as f32 / STOPS as f32;
+                    let t = x * RELEASE_SECS as f32;
+                    let y = if i == STOPS {
+                        1.0
+                    } else {
+                        RELEASE.sample(0.0, 0.0, 1.0, t).0
+                    };
+                    [x, y]
+                })
+                .collect()
+        });
+        [
+            Beat::new(0.0),
+            Beat::new(GATHER_SECS).scale(DIP).easing(Easing::EASE_IN),
+            Beat::new(GATHER_SECS + RELEASE_SECS).easing(Easing::Piecewise(&CURVE)),
+        ]
+    });
+    &*BEATS
+}
+
+/// The check, drawn on left to right from the point the dot contracted to.
+fn check_mark(p: Paint) -> El {
+    let [x, y, w, h] = CHECK_INK;
+    el().key("mark")
+        .size(9.0, 16.0)
+        .child(
+            status_dot(p.success())
+                .absolute(CHECK_X + CHECK_START[0], CHECK_START[1])
+                .size(0.0, 0.0)
+                .radius(0.0)
+                .opacity(0.0)
+                .motion(GATHER),
+        )
+        .child(
+            el().key("ink")
+                .absolute(CHECK_X + x, y)
+                .size(w, h)
+                .transition(wipe(DRAW, 3.0))
+                .sequence(Sequence::new(APPEAR))
+                .child(
+                    rune::icon(p.k.glyph.check_small, 16.0)
+                        .key("check")
+                        .absolute(-x, -y)
+                        .color(p.success()),
+                ),
+        )
+}
+
+/// A left-to-right mask reveal with a soft edge.
+fn wipe(spring: Spring, feather: f32) -> Transition {
+    let mut wipe = Transition::reveal(Edge::Leading).springs(SpringPair::new(spring, spring));
+    for reveal in [&mut wipe.insertion.reveal, &mut wipe.removal.reveal]
+        .into_iter()
+        .flatten()
+    {
+        reveal.feather = feather;
+    }
+    wipe
+}
+
+/// The Allow button with its chrome faded out: the same pill, fill, and
+/// shadows at zero alpha, and the label in green. It keeps the button's
+/// left padding so "Allow" stays put inside it and "ed" lands right after,
+/// never over it.
+fn allowed_pill(p: Paint, key: &str, kind: ButtonKind) -> El {
+    let k = p.k;
+    let (fill, shadows) = match kind {
+        ButtonKind::Primary => (k.c.bg_contrast, &k.elevation.button_contrast),
+        ButtonKind::Secondary | ButtonKind::Danger => {
+            (k.c.bg_button_neutral, &k.elevation.button_neutral)
+        }
+    };
+    let font = k.ty.ui_medium;
+    let ink = p.success();
+    let (allow, allowed) = (tr("Allow"), tr("Allowed"));
+    let mut pill = row()
+        .key(key)
+        .label(allowed)
+        .h(28.0)
+        .pl(PILL_PADDING)
+        .center_y()
+        .radius(k.radius.md)
+        .fill(fill.alpha(0.0));
+    for shadow in k.shadow_layers(shadows) {
+        pill = pill.box_shadow(Shadow {
+            color: shadow.color.alpha(0.0),
+            ..shadow
+        });
+    }
+    if kind == ButtonKind::Primary {
+        pill = pill.gradient(Color::TRANSPARENT, Color::TRANSPARENT);
+    }
+    match allowed
+        .strip_prefix(allow)
+        .filter(|suffix| !suffix.is_empty())
+    {
+        // "Allow" stays and "ed" wipes in after it.
+        Some(suffix) => pill
+            .child(text(allow).key("label").font(font).color(ink).motion(INK))
+            .child(
+                text(suffix)
+                    .key("suffix")
+                    .font(font)
+                    .color(ink)
+                    .transition(wipe(SUFFIX, 2.0))
+                    .sequence(Sequence::new(APPEAR)),
+            ),
+        // Languages whose word changes cross-fade it.
+        None => pill.child(text(allowed).key("allowed").font(font).color(ink)),
     }
 }
 
@@ -309,15 +523,30 @@ pub(super) fn small_button(
 ) -> El {
     rune_kit::Button::new(label)
         .variant(rune_kit::ButtonVariant::Neutral)
-        .size(rune_kit::ButtonSize::Small)
         .on_press_tx(press)
-        .build(p.k)
+        .build_small_push(p.k)
         .key(key)
+}
+
+/// The × that removes one item of an editable list.
+pub(super) fn remove_button(
+    p: Paint,
+    size: rune_kit::ControlSize,
+    press: impl Fn(&mut Ui) + 'static,
+) -> El {
+    rune_kit::IconButton::new(CLOSE)
+        .variant(rune_kit::IconButtonVariant::Ghost)
+        .control_size(size)
+        .label(tr("Remove"))
+        .on_press(press)
+        .build(p.k)
+        .key("remove")
 }
 
 /// A horizontal slider: the label and value over a track you press or drag.
 /// `set` gets the position from zero through one and whether the gesture
-/// ended (save then, not on every move).
+/// ended (save then, not on every move). A cancelled drag (Escape, window
+/// blur) puts the value from the press back and never saves.
 pub(super) fn slider(
     p: Paint,
     key: &str,
@@ -326,6 +555,19 @@ pub(super) fn slider(
     display: String,
     width: f32,
     set: impl Fn(&mut Ui, f32, bool) + 'static,
+) -> El {
+    slider_in(p, key, label, value, display, width, set)
+}
+
+/// A [`slider`] for a window whose state isn't [`Ui`].
+pub(super) fn slider_in<S: 'static>(
+    p: Paint,
+    key: &str,
+    label: &str,
+    value: f32,
+    display: String,
+    width: f32,
+    set: impl Fn(&mut S, f32, bool) + 'static,
 ) -> El {
     let c = &p.k.c;
     let value = value.clamp(0.0, 1.0);
@@ -337,12 +579,17 @@ pub(super) fn slider(
         .w(width)
         .h(22.0)
         .center_y()
-        .on_drag(
-            move |ui: &mut Ui, drag: &mut rune::Drag, _: &mut rune::Tx| {
-                let position = ((drag.x - knob / 2.0) / (drag.w - knob).max(1.0)).clamp(0.0, 1.0);
-                set(ui, position, drag.phase == rune::Phase::Up);
-            },
-        )
+        .on_drag(move |ui: &mut S, drag: &mut rune::Drag, _: &mut rune::Tx| {
+            if drag.phase == rune::Phase::Down {
+                drag.data = value;
+            }
+            if drag.cancelled() {
+                set(ui, drag.data, false);
+                return;
+            }
+            let position = ((drag.x - knob / 2.0) / (drag.w - knob).max(1.0)).clamp(0.0, 1.0);
+            set(ui, position, drag.phase == rune::Phase::Up);
+        })
         .child(
             row()
                 .key("rail")

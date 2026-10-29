@@ -1,7 +1,7 @@
 # Voice Action
 
 Hold a separate shortcut and speak an instruction, optionally with text selected.
-HEX transcribes locally, asks Voice Action's OpenCode model for paste-ready text,
+Hex transcribes locally, asks Voice Action's OpenCode model for paste-ready text,
 and pastes at the current focus. This is not
 [Voice Commands](commands.md) or ordinary [Dictation](dictation.md).
 
@@ -23,10 +23,28 @@ Foreground text target -> Optional selection -> Hold shortcut -> Speak -> Releas
 Requires ordinary setup permissions, a local transcription model, and OpenCode
 with an available text model. Commands and its Moonshine model are not required.
 [rune_ui/voice_action.rs](../../src/rune_ui/voice_action.rs) keeps the toggle
-reachable when OpenCode is unavailable; the pane offers setup/retry actions.
-HEX discovers `opencode2` and its managed service through
+reachable when OpenCode is unavailable, says why beside it ("Requires OpenCode",
+"Requires OpenCode V2"), and the Processing section offers setup/retry actions.
+Hex discovers the OpenCode V2 CLI and its managed service through
 [dictation_processor.rs](../../src/dictation_processor.rs), not a separate
-HEX-owned provider service.
+Hex-owned provider service.
+
+```ts
+HEX_OPENCODE_CLI set -> Use it as is
+Otherwise PATH, home install folders, Node version managers, Homebrew
+├── Any `opencode2` -> Use it                        // beats every `opencode`
+├── Else an `opencode` whose `--version` is 2.x -> Use it
+├── Else an `opencode` printing `0.0.0-…` that answers `api get /api/info` -> Use it
+├── Only V1 `opencode` -> "Requires OpenCode V2"     // never run for generation
+└── Nothing -> "Requires OpenCode"                  // both rechecked every 60 s
+```
+
+The bounded probe runs only on the catalog, generation, and Capture threads and
+keeps each definite verdict until the executable changes; the hotkey and UI
+paths only read that verdict ([#281](https://github.com/anomalyco/hex/issues/281)).
+`opencode2_is_preferred_and_only_a_v2_opencode_is_accepted` and
+`release_versions_tell_the_generations_apart` cover precedence and V1 rejection
+with temporary executables, not installed CLIs.
 
 Discovery uses `opencode2 api get /api/info`; an exact CLI 404 falls back to
 `/api/status`, then `/api/health`, for older V2 services. All attempts share the
@@ -98,6 +116,13 @@ Checks there: `slow_chord_release_keeps_voice_action_ownership`,
 These cover synthetic edges and capture admission, not physical onset or
 sample-for-sample audio continuity through promotion.
 
+A modifier-only Voice Action shortcut, promoted or not, gets Dictation's
+[chord breaker](dictation.md#hold-and-short-taps) once its own hold is
+accepted, so a modifier-tap hotkey in another app does not fire on release.
+Hex drops the breaker before the focused app, which would otherwise beep at an
+unhandled key with ⌘ held, even in a text field.
+Check: `voice_action_promotion_breaks_its_own_chord_after_its_hold`.
+
 `voice_action_uses_separate_binding_after_dictation_is_rebound` in
 [suppression.rs](../../src/suppression.rs) checks independent bindings.
 `DictationHotkey::new_without_paste` disables locking for this target; ordinary
@@ -141,7 +166,7 @@ Sources: the `TranscriptionTarget::VoiceAction` processing branch in
 [parakeet.rs](../../src/parakeet.rs), `process_voice_action_cancellable` and
 `voice_action_failure` in [dictation_processor.rs](../../src/dictation_processor.rs).
 Voice Action uses its own model/variant and persisted deadline (60 seconds by
-default); when no explicit model is selected, HEX ranks available fast models
+default); when no explicit model is selected, Hex ranks available fast models
 from `RECOMMENDED_OPENCODE_MODELS` (starting with `gemini-3.1-flash-lite` on
 `minimal` thinking, `claude-haiku-4-5`, and `gpt-5.4-nano` on `none`) and walks
 those candidates in order before falling back to OpenCode's default.
@@ -208,7 +233,8 @@ with a controlled opener, then native audio-onset evidence. See
 establish equivalent audio onset.
 
 - **Scene limits:** the `voice-action`, `voice-action-off`,
-  `voice-action-unavailable`, and `voice-action-models` scenes are fixtures. They render states, not selection-to-provider-to-paste execution.
+  `voice-action-unavailable`, `voice-action-models`, and `modes-opencode-v1`
+  scenes are fixtures. They render states, not selection-to-provider-to-paste execution.
 - **Focus and provider limits:** the prompt asks for paste-ready text; tests do
   not guarantee a provider follows it. Moving focus while work is pending changes
   the eventual paste target. A failed action does not paste its local transcript.
@@ -219,7 +245,7 @@ establish equivalent audio onset.
 ## Linux
 
 ```ts
-Settings > Voice Action > Enable                      // voice-action.linux; off by default
+Voice Action > Enable                                 // voice-action.linux; off by default
 ├── X11 -> Hold the saved shortcut (Ctrl+Alt+I by default) -> Release -> Run
 ├── Wayland + GlobalShortcuts portal -> Hold the granted trigger -> Release -> Run
 ├── Wayland without the portal -> Desktop keybinding runs

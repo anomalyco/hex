@@ -2,17 +2,21 @@ name: Check Windows
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [main, rune-ui]
+    branches: [dev]
   workflow_dispatch:
 
+# A new push to a pull request cancels its stale run. Every push and manual run
+# keeps its own group, so each dev commit gets a result.
 concurrency:
-  group: check-windows-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   x64:
     name: x64 (Vulkan)
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -24,6 +28,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Install the Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
@@ -39,23 +46,24 @@ jobs:
           Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
       - run: cargo fmt --check
       - run: cargo clippy --release --all-targets -- -D warnings
-      - run: cargo test --release
+      - run: cargo nextest run --release --profile ci
       - run: cargo build --locked --release
       - name: Check the executable needs no Visual C++ Redistributable
         shell: pwsh
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
-          $imports = & $dumpbin.FullName /dependents target\release\voice-control.exe
+          $imports = & $dumpbin.FullName /dependents target\release\hex.exe
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-x86_64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe
 
   arm64:
     name: ARM64 (CPU)
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-11-arm
     timeout-minutes: 90
     env:
@@ -76,9 +84,12 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --release --profile ci
       - run: cargo build --locked --release
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-aarch64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe

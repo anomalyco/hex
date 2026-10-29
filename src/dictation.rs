@@ -135,15 +135,26 @@ impl DictationProtocol {
         self.stop.iter().chain(&self.send).chain(&self.cancel)
     }
 
-    pub fn control_suffix_word_count(&self, words: &[String]) -> Option<usize> {
+    /// The control phrase that ends `words`, and how many words it takes.
+    pub fn control_suffix_words(&self, words: &[String]) -> Option<(DictationControl, usize)> {
         let words = words.iter().map(|word| normalize(word)).collect::<Vec<_>>();
-        self.control_phrases().find_map(|phrase| {
-            let control = spoken_words(phrase)
+        self.controls().find_map(|(phrase, control)| {
+            let phrase = spoken_words(phrase)
                 .into_iter()
                 .map(|word| word.normalized)
                 .collect::<Vec<_>>();
-            words.ends_with(&control).then_some(control.len())
+            words.ends_with(&phrase).then_some((control, phrase.len()))
         })
+    }
+
+    fn controls(&self) -> impl Iterator<Item = (&String, DictationControl)> {
+        [
+            (&self.stop, DictationControl::Stop),
+            (&self.send, DictationControl::Send),
+            (&self.cancel, DictationControl::Cancel),
+        ]
+        .into_iter()
+        .flat_map(|(phrases, control)| phrases.iter().map(move |phrase| (phrase, control)))
     }
 
     pub fn start_prefix(&self, text: &str) -> Option<usize> {
@@ -220,6 +231,21 @@ pub enum DictationControl {
     Stop,
     Send,
     Cancel,
+}
+
+/// A voice-delimited transcript without its control phrase, and the control
+/// it ended with.
+pub struct VoiceTranscript {
+    pub text: String,
+    pub control: Option<DictationControl>,
+}
+
+impl VoiceTranscript {
+    /// `text` as transcribed, still carrying any control phrase.
+    pub fn heard(text: String, protocol: &DictationProtocol) -> Self {
+        let control = protocol.control_suffix(&text).map(|(control, _)| control);
+        Self { text, control }
+    }
 }
 
 #[derive(Default)]
@@ -348,11 +374,55 @@ pub enum ShortcutMode {
     Toggle,
 }
 
+/// Where a clip's audio came from, filled in by the audio owner so a
+/// discarded clip's log line can tell a dead stream from a quiet room.
+#[derive(Clone, Debug, Default)]
+pub struct ClipSource {
+    pub device: String,
+    /// Since the stream last opened or reopened.
+    pub stream_age: Option<Duration>,
+    /// Since the last timeline gap or stream failure.
+    pub since_discontinuity: Option<Duration>,
+    /// Since the last overload CoreAudio reported without stopping the stream.
+    pub since_glitch: Option<Duration>,
+}
+
+/// How the capture's audio lined up with its shortcut events.
+#[derive(Clone, Copy, Debug, Default)]
+struct ClipTimeline {
+    source_rate: u32,
+    /// How far the microphone timeline ran past the press when the capture
+    /// started; negative when audio had not yet reached the press.
+    press_lead_ms: Option<i64>,
+    /// How far the recorded audio ran past the release when it finished.
+    release_lead_ms: Option<i64>,
+    /// The largest step between consecutive chunks, including steps below
+    /// the gap that fails a capture.
+    max_chunk_gap: Duration,
+}
+
+/// Evidence logged when a clip is discarded as near-silent.
+struct SilenceEvidence {
+    zero_fraction: f32,
+    peak: f32,
+    pre_press_dbfs: f32,
+    post_press_dbfs: f32,
+}
+
+fn signed_ms(later: CaptureInstant, earlier: CaptureInstant) -> i64 {
+    let nanos = i128::from(later.as_nanos()) - i128::from(earlier.as_nanos());
+    (nanos / 1_000_000) as i64
+}
+
 pub struct DictationClip {
     samples: Vec<f32>,
     /// How many trailing samples were captured after the release. The stop
     /// tone sounds during them, so the silence gate ignores them.
     tail_samples: usize,
+    /// How many leading samples were captured before the press.
+    press_samples: usize,
+    timeline: ClipTimeline,
+    source: Option<Box<ClipSource>>,
     /// The live stream fed with this clip's audio during capture, if any.
     stream: Option<LiveStream>,
     /// Keeps background work deferring until the clip is submitted.
@@ -377,37 +447,114 @@ impl DictationClip {
         self.capture.take()
     }
 
+    pub fn set_source(&mut self, source: ClipSource) {
+        self.source = Some(Box::new(source));
+    }
+
+    #[cfg(test)]
+    pub fn source(&self) -> Option<&ClipSource> {
+        self.source.as_deref()
+    }
+
     #[cfg(test)]
     pub fn for_test(samples: Vec<f32>) -> Self {
         Self {
             samples,
             tail_samples: 0,
+            press_samples: 0,
+            timeline: ClipTimeline::default(),
+            source: None,
             stream: None,
             #[cfg(target_os = "macos")]
             capture: None,
         }
     }
 
-    /// The loudest 30 ms window's DC-removed RMS level in dBFS, over the
-    /// captured audio through the release (before the tail and any model
-    /// padding).
-    fn loudest_window_dbfs(&self) -> f32 {
-        let released = self.samples.len().saturating_sub(self.tail_samples);
-        loudest_window_dbfs(&self.samples[..released])
+    /// The captured audio through the release (before the tail and any
+    /// model padding).
+    fn released(&self) -> &[f32] {
+        &self.samples[..self.samples.len().saturating_sub(self.tail_samples)]
     }
 
+    /// The loudest 30 ms window's DC-removed RMS level in dBFS, over the
+    /// captured audio through the release.
+    fn loudest_window_dbfs(&self) -> f32 {
+        loudest_window_dbfs(self.released())
+    }
+
+    fn silence_evidence(&self) -> SilenceEvidence {
+        let released = self.released();
+        let (pre_press, post_press) = released.split_at(self.press_samples.min(released.len()));
+        let zeros = released.iter().filter(|&&sample| sample == 0.0).count();
+        SilenceEvidence {
+            zero_fraction: if released.is_empty() {
+                1.0
+            } else {
+                zeros as f32 / released.len() as f32
+            },
+            peak: released
+                .iter()
+                .fold(0.0, |peak: f32, sample| peak.max(sample.abs())),
+            pre_press_dbfs: loudest_window_dbfs(pre_press),
+            post_press_dbfs: loudest_window_dbfs(post_press),
+        }
+    }
+
+    /// Whether the capture holds no speech worth transcribing: its level stays
+    /// below the silence threshold or, once the speech detector is installed,
+    /// the detector finds no speech in it (a key click, the start tone, or a
+    /// noisy room).
     pub fn is_near_silent(&self) -> bool {
         let level_dbfs = self.loudest_window_dbfs();
         let silent = level_dbfs < SILENCE_THRESHOLD_DBFS;
         if silent {
+            let evidence = self.silence_evidence();
+            let source = self.source.as_deref();
+            let ms =
+                |duration: Option<Duration>| duration.map(|duration| duration.as_millis() as u64);
             tracing::info!(
                 level_dbfs,
                 threshold_dbfs = SILENCE_THRESHOLD_DBFS,
                 audio_ms = self.duration_ms(),
+                pre_press_ms = self.press_samples as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE),
+                pre_press_dbfs = evidence.pre_press_dbfs,
+                post_press_dbfs = evidence.post_press_dbfs,
+                zero_fraction = evidence.zero_fraction,
+                peak = evidence.peak,
+                device = source.map(|source| source.device.as_str()),
+                sample_rate = self.timeline.source_rate,
+                press_lead_ms = self.timeline.press_lead_ms,
+                release_lead_ms = self.timeline.release_lead_ms,
+                max_chunk_gap_ms = self.timeline.max_chunk_gap.as_millis() as u64,
+                stream_age_ms = ms(source.and_then(|source| source.stream_age)),
+                since_discontinuity_ms = ms(source.and_then(|source| source.since_discontinuity)),
+                since_glitch_ms = ms(source.and_then(|source| source.since_glitch)),
                 "discarded near-silent dictation without transcribing it"
             );
+            return true;
         }
-        silent
+        let released = self.samples.len().saturating_sub(self.tail_samples);
+        let started = std::time::Instant::now();
+        match crate::speech_detector::contains_speech(&self.samples[..released]) {
+            Some(false) => {
+                tracing::info!(
+                    level_dbfs,
+                    audio_ms = self.duration_ms(),
+                    vad_ms = started.elapsed().as_millis() as u64,
+                    "discarded dictation without detected speech"
+                );
+                true
+            }
+            Some(true) => {
+                tracing::debug!(
+                    audio_ms = self.duration_ms(),
+                    vad_ms = started.elapsed().as_millis() as u64,
+                    "speech detected in dictation"
+                );
+                false
+            }
+            None => false,
+        }
     }
 
     #[cfg(test)]
@@ -552,6 +699,10 @@ struct Recording {
     source_samples: usize,
     source_rate: u32,
     recorded_through: Option<CaptureInstant>,
+    /// How much of the recording precedes the press.
+    pre_press: Duration,
+    press_lead_ms: Option<i64>,
+    max_chunk_gap: Duration,
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
@@ -613,6 +764,9 @@ impl Recording {
             source_samples: 0,
             source_rate,
             recorded_through: None,
+            pre_press: Duration::ZERO,
+            press_lead_ms: None,
+            max_chunk_gap: Duration::ZERO,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
@@ -645,6 +799,12 @@ impl Recording {
     }
 
     fn push_through(&mut self, samples: &[f32], captured_through: CaptureInstant) {
+        if let Some(previous) = self.recorded_through {
+            let captured_from = captured_through.sub_frames(samples.len(), self.source_rate);
+            self.max_chunk_gap = self
+                .max_chunk_gap
+                .max(captured_from.duration_since(previous));
+        }
         self.push(samples);
         self.recorded_through = Some(captured_through);
     }
@@ -792,6 +952,8 @@ impl DictationCapture {
         if let (Some(recording), Some(through)) = (&mut self.recording, self.ring_captured_through)
         {
             recording.recorded_through = Some(through);
+            recording.pre_press = recording.pre_press.saturating_sub(delayed_audio);
+            recording.press_lead_ms = Some(signed_ms(through, occurred_at));
         }
     }
 
@@ -813,6 +975,7 @@ impl DictationCapture {
                 .is_some()
                 .then(crate::recording_environment::CaptureMarker::new);
         }
+        recording.pre_press = crate::audio::duration_for_frames(pre_roll, self.sample_rate);
         let skip = self.ring.len() - pre_roll;
         let (front, back) = self.ring.as_slices();
         if skip < front.len() {
@@ -874,6 +1037,18 @@ impl DictationCapture {
         became_intentional
     }
 
+    /// Counts the active recording as intentional now, whatever its length.
+    pub fn mark_intentional(&mut self) -> bool {
+        let Some(started_at) = self
+            .recording
+            .as_ref()
+            .map(|recording| recording.started_at)
+        else {
+            return false;
+        };
+        self.become_intentional(started_at + MINIMUM_HOLD_DURATION)
+    }
+
     /// Ends the active recording's environment (mute, paused media, idle-sleep
     /// prevention) before the capture finishes, and runs `then` once a muted
     /// output is audible again. A recording that never became intentional
@@ -907,6 +1082,13 @@ impl DictationCapture {
 
     pub fn cancel(&mut self) {
         self.recording = None;
+    }
+
+    /// When the active recording started, without its pre-roll.
+    pub fn started_at(&self) -> Option<CaptureInstant> {
+        self.recording
+            .as_ref()
+            .map(|recording| recording.started_at)
     }
 
     /// 16 kHz audio recorded so far, from `start` in final-clip coordinates.
@@ -981,11 +1163,23 @@ impl DictationCapture {
             .recorded_through
             .and_then(|through| through.checked_duration_since(ended_at))
             .map_or(Duration::ZERO, |after| after.min(tail));
+        let timeline = ClipTimeline {
+            source_rate: recording.source_rate,
+            press_lead_ms: recording.press_lead_ms,
+            release_lead_ms: recording
+                .recorded_through
+                .map(|through| signed_ms(through, ended_at)),
+            max_chunk_gap: recording.max_chunk_gap,
+        };
+        let pre_press = recording.pre_press;
         #[cfg(target_os = "macos")]
         let capture = recording.capture.take();
         let samples = recording.finish(Some(ended_at + tail));
         Finish::Transcribe(DictationClip {
             tail_samples: samples_for(kept_tail, PARAKEET_SAMPLE_RATE).min(samples.len()),
+            press_samples: samples_for(pre_press, PARAKEET_SAMPLE_RATE).min(samples.len()),
+            timeline,
+            source: None,
             samples,
             stream,
             #[cfg(target_os = "macos")]
@@ -1077,6 +1271,52 @@ mod tests {
         assert!(!quiet_speech.is_near_silent());
         assert!((quiet_speech.loudest_window_dbfs() - -43.0).abs() < 0.5);
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+    }
+
+    #[test]
+    fn speech_detector_discards_loud_captures_without_speech() {
+        let clip = |samples: Vec<f32>| DictationClip::for_test(samples);
+        {
+            let _detector = crate::speech_detector::override_for_test(Some(false));
+            assert!(clip(tone(0.1, 16_000).collect()).is_near_silent());
+        }
+        let _detector = crate::speech_detector::override_for_test(Some(true));
+        assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+        // The level gate runs first: a silent capture never reaches the
+        // detector.
+        assert!(clip(vec![0.0; 16_000]).is_near_silent());
+    }
+
+    #[test]
+    fn silence_evidence_separates_the_pre_roll_from_audio_after_the_press() {
+        let silent = DictationClip::for_test(vec![0.0; 16_000]).silence_evidence();
+        assert_eq!(silent.zero_fraction, 1.0);
+        assert_eq!(silent.peak, 0.0);
+
+        // The press is handled 200 ms after it happened: the pre-roll still
+        // covers 450 ms before it, and the timeline ran 200 ms past it.
+        let origin = CaptureInstant::from_nanos(10_000_000_000);
+        let press = origin.checked_sub(Duration::from_millis(200)).unwrap();
+        let mut capture = DictationCapture::new(16_000);
+        capture.ingest(&tone(0.1, 16_000).collect::<Vec<_>>(), origin);
+        capture.start_at(press);
+        capture.ingest(&[0.0; 8_000], origin + Duration::from_millis(500));
+        // 30 ms of audio never arrived: below a capture discontinuity.
+        capture.ingest(&[0.0; 8_000], origin + Duration::from_millis(1_030));
+        let Finish::Transcribe(clip) = capture.finish(origin + Duration::from_millis(1_000)) else {
+            panic!("a held capture transcribes");
+        };
+
+        assert_eq!(clip.press_samples, 7_200);
+        assert_eq!(clip.timeline.press_lead_ms, Some(200));
+        assert_eq!(clip.timeline.release_lead_ms, Some(30));
+        assert_eq!(clip.timeline.max_chunk_gap, Duration::from_millis(30));
+        let evidence = clip.silence_evidence();
+        // A 0.1 sine is -23 dBFS RMS; the 200 ms after the press still carry it.
+        assert!((evidence.pre_press_dbfs - -23.0).abs() < 0.5);
+        assert!((evidence.post_press_dbfs - -23.0).abs() < 0.5);
+        assert!(evidence.zero_fraction > 0.5);
+        assert!((evidence.peak - 0.1).abs() < 1e-3);
     }
 
     fn capture_time() -> CaptureInstant {
@@ -1636,13 +1876,21 @@ mod tests {
         );
         assert!(protocol.control_suffix("Essay stop").is_none());
         assert_eq!(
-            protocol.control_suffix_word_count(&[
+            protocol.control_suffix_words(&[
                 "Meet".into(),
                 "me".into(),
                 "Say,".into(),
                 "stop.".into(),
             ]),
-            Some(2)
+            Some((DictationControl::Stop, 2))
+        );
+        assert_eq!(
+            DictationProtocol::default().control_suffix_words(&[
+                "Hello".into(),
+                "dictate".into(),
+                "cancel.".into(),
+            ]),
+            Some((DictationControl::Cancel, 2))
         );
     }
 

@@ -11,6 +11,9 @@ hex history --since 7d --search 'problems board' --json
 hex meetings list --since 7d --json
 hex meetings show latest --md
 hex meetings show 1790000500000-1002 --json
+hex meetings show 1790000500000-1002 --from 113:03 --to 120:43 --md
+hex meetings chapters latest --json
+hex meetings show 1790003000000-1005 --chapter 2
 hex meetings search 'release schedule'
 ```
 
@@ -56,10 +59,58 @@ The default and `--md` return full Markdown with metadata, stored notes, and
 speaker turns. `--json` returns transcript entries with relative millisecond
 offsets. No notes or transcripts are generated.
 
+`--from` and `--to` limit `show` to part of the meeting, with either output.
+They take offsets into the meeting as `mm:ss` (minutes may exceed 59, as in
+`113:03`), `h:mm:ss`, or seconds (`90`, `1.14`, `90s`, `1.5m`), rounded to the
+millisecond; either may be omitted. Minutes and hours are whole numbers,
+seconds stay below 60, and so do `h:mm:ss` minutes; negative, infinite, or
+overflowing offsets are rejected. Every entry overlapping the range is included
+whole, so the first and last entries may start before `--from` or end after
+`--to`. Markdown adds a `- Range:` line; JSON adds `range`. A `--from` at or
+after `--to` (an omitted `--from` is 0, so `--to 0` fails), or at or after the
+meeting's end, is an error. A recording in progress runs until now, so a range
+past its rolling transcript so far is empty rather than an error, and one past
+now fails with "so far". The MCP `get_transcript` tool takes the same range as
+`start`/`end` or, as separate schema fields, `from`/`to`; giving both names for
+one bound is an error.
+
+`meetings chapters` lists the chapters a meeting recorded with the
+`live-chapters` experiment: number, `mm:ss–mm:ss` span, model-written name, and
+one line, and whether the boundaries were corrected after Stop. It takes the
+same IDs as `show`. A meeting without chapters says so (text) or returns an empty
+`chapters` list (JSON); nothing is generated. `show --chapter N` returns only
+chapter N's entries (counting from 1), with a `## <name>` section in Markdown
+and `chapter` in JSON; it cannot be combined with `--from`/`--to`, and a number
+outside the list is an error. Plain `show` Markdown adds a `## Chapters` list
+when there are any.
+
 `meetings search QUERY` uses the MCP query's stemmed, fuzzy BM25 ranking over
 transcripts and stored notes. Quoted phrases constrain the search. `--since`,
 `--until`, and `--limit` (default 10, maximum 50) are supported; output is text.
-Use `hex mcp` for bounded transcript paging around a search hit.
+Search for a timestamp, then read around it with `show --from/--to`.
+
+Exact stems clearly outrank fuzzy matches. Passages matching every unquoted
+term exactly come first, whatever their scores. Within each tier a prefix
+counts half as much as an exact stem, one or two edits 0.35, and a Soundex
+sound-alike 0.2, also for the share of terms a passage covers. Spelling
+fallbacks (edits and sound-alikes) are tried only for a term found exactly in
+fewer than three passages, and never reach a word in more than 0.5% of the
+passages searched (and at least five), except that a term with no exact match
+still reaches a common word one edit away (never two). So `blob` does not pull
+in `blog`, `Bob`, or `believe` once three passages say `blob`, and `media` does
+not pull in a word as common as `made`. When several words in a passage could
+stand for one term, the exact stem wins, then the higher score, the more
+trusted match, and the alphabetically first word, so results never vary between
+runs. `hex history --search` uses the same ranking, with an entry's raw and
+final text counted as one document (so a word in both counts once) and its
+better text as the hit.
+
+With the `vocabulary` experiment on, both searches (and MCP
+`search_transcripts`) also read the saved [vocabulary](features/vocabulary.md)
+from `settings.json` without loading or migrating it. A query word that is a
+one-word vocabulary term also finds its "sounds like" spellings and the term
+split into two adjacent words (0.5, like a prefix), and words that sound like
+it (0.3) unless they are common. Neither ever counts as an exact match.
 
 Debug builds retain `meeting record`, `watch`, `probe`, `transcribe`, and other
 developer commands. Their `meeting list/show` commands use the read-only query
@@ -70,8 +121,10 @@ path too. The plural `meetings` commands are available in release builds.
 Every JSON response has integer `version: 1`. Consumers should ignore unknown
 fields; incompatible field changes require a new version. All `*_ms` fields are
 integer milliseconds. Absolute timestamps use Unix time. Nullable fields are
-present as `null`, except `raw_text`, which is omitted without `--raw`, and
-`score` and `snippet`, which are omitted without `--search`.
+present as `null`, except `raw_text`, which is omitted without `--raw`,
+`score` and `snippet`, which are omitted without `--search`, `range`, which
+is omitted without `--from` or `--to`, `chapters`, which is omitted when a
+meeting has none, and `chapter`, which is omitted without `--chapter`.
 JSON goes to stdout; errors go to stderr with a nonzero exit status. Empty
 results are successful responses. `truncated` reports the query's output limit,
 not data already expired or evicted from the store.
@@ -115,26 +168,40 @@ type MeetingShow = {
   version: 1
   meeting: Meeting
   notes: { title: string; summary: string; generated_at_ms: number } | null
-  entries: {
+  range?: { from_ms: number; to_ms: number | null } // only with --from or --to
+  chapters?: Chapter[] // only when the meeting has chapters
+  chapter?: Chapter // only with --chapter
+  entries: { // with a range or chapter, only the entries in it
     source: "microphone" | "system" // You / Them; remote speakers aren't separated
     start_ms: number // relative to the meeting start
     end_ms: number
     text: string
   }[]
 }
+type Chapter = {
+  number: number // counting from 1
+  title: string // model-written
+  summary: string // one line; may be empty
+  start_ms: number // relative to the meeting start
+  end_ms: number // the next chapter's start, or the meeting's end (now while recording)
+}
+type MeetingChapters = {
+  version: 1
+  meeting: Meeting
+  chapters: Chapter[] // empty when none are stored
+  refined: boolean // boundaries corrected over the whole transcript after Stop
+}
 ```
 
 ## Reads never start or change the app
 
-These commands dispatch before data-folder migration, logging, instance locking,
+These commands dispatch before logging, instance locking,
 local API startup, permissions, GUI, and Hex Microphone. They open no microphone,
 load no model, make no network request, and create no files or directories.
 History reads one file descriptor, so an atomic replacement yields a complete
 old or new snapshot. Malformed history produces an error without recovery writes.
 
-Data comes from `~/Library/Application Support/hex`. Read-only resolution also
-supports the `voice-control` legacy folder and compatibility symlink, using the
-same conflict policy as the app. `HEX_APPLICATION_SUPPORT_DIR` overrides the
+Data comes from `~/Library/Application Support/hex`. `HEX_APPLICATION_SUPPORT_DIR` overrides the
 root for fixtures or a mirrored copy. These CLI commands currently target macOS;
 Linux and Windows retain their existing command surfaces.
 

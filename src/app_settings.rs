@@ -23,6 +23,7 @@ static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
+static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
@@ -34,6 +35,19 @@ static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
 static VOICE_ACTION_SETTINGS: OnceLock<RwLock<VoiceActionSettings>> = OnceLock::new();
+#[cfg(hex_capture)]
+static CAPTURE_SETTINGS: OnceLock<RwLock<CaptureSettings>> = OnceLock::new();
+#[cfg(hex_capture)]
+static SCRAWL_APP_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(hex_capture)]
+static CAPTURE_ON: AtomicBool = AtomicBool::new(false);
+/// [`CaptureSettings::capsule_flow`] for the capsule, without a lock.
+#[cfg(hex_capture)]
+static CAPSULE_FLOW: AtomicU8 = AtomicU8::new(0);
+/// The send-to list shortcut's keycaps once settings are applied; empty
+/// while it has none.
+#[cfg(hex_capture)]
+static LIST_KEYCAPS: OnceLock<RwLock<Option<Vec<String>>>> = OnceLock::new();
 
 #[derive(Default)]
 struct RuntimeTranscriptionSelection {
@@ -187,15 +201,28 @@ impl HotkeyModifiers {
 
     #[cfg(target_os = "macos")]
     fn keycaps(self) -> impl Iterator<Item = &'static str> {
+        self.sided_keycaps()
+            .map(|(label, side)| side_keycap(side, label))
+    }
+
+    /// Each modifier's keycap and the side it must be pressed on.
+    #[cfg(target_os = "macos")]
+    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
         [
-            (self.function, "fn"),
-            (self.control.is_some(), side_keycap(self.control, "⌃")),
-            (self.option.is_some(), side_keycap(self.option, "⌥")),
-            (self.shift.is_some(), side_keycap(self.shift, "⇧")),
-            (self.command.is_some(), side_keycap(self.command, "⌘")),
+            (self.function.then_some(ModifierSide::Either), "fn"),
+            (self.control, "⌃"),
+            (self.option, "⌥"),
+            (self.shift, "⇧"),
+            (self.command, "⌘"),
         ]
         .into_iter()
-        .filter_map(|(enabled, label)| enabled.then_some(label))
+        .filter_map(|(side, label)| Some((label, side?)))
+    }
+
+    /// Windows and Linux keycaps never name a side.
+    #[cfg(not(target_os = "macos"))]
+    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+        self.keycaps().map(|label| (label, ModifierSide::Either))
     }
 
     /// Windows names Command the Windows key and Option Alt.
@@ -242,16 +269,16 @@ fn modifier_contains(candidate: Option<ModifierSide>, required: Option<ModifierS
 }
 
 #[cfg(target_os = "macos")]
-fn side_keycap(side: Option<ModifierSide>, symbol: &'static str) -> &'static str {
+fn side_keycap(side: ModifierSide, symbol: &'static str) -> &'static str {
     match (side, symbol) {
-        (Some(ModifierSide::Left), "⌃") => "L⌃",
-        (Some(ModifierSide::Right), "⌃") => "R⌃",
-        (Some(ModifierSide::Left), "⌥") => "L⌥",
-        (Some(ModifierSide::Right), "⌥") => "R⌥",
-        (Some(ModifierSide::Left), "⇧") => "L⇧",
-        (Some(ModifierSide::Right), "⇧") => "R⇧",
-        (Some(ModifierSide::Left), "⌘") => "L⌘",
-        (Some(ModifierSide::Right), "⌘") => "R⌘",
+        (ModifierSide::Left, "⌃") => "L⌃",
+        (ModifierSide::Right, "⌃") => "R⌃",
+        (ModifierSide::Left, "⌥") => "L⌥",
+        (ModifierSide::Right, "⌥") => "R⌥",
+        (ModifierSide::Left, "⇧") => "L⇧",
+        (ModifierSide::Right, "⇧") => "R⇧",
+        (ModifierSide::Left, "⌘") => "L⌘",
+        (ModifierSide::Right, "⌘") => "R⌘",
         _ => symbol,
     }
 }
@@ -370,6 +397,54 @@ impl HotkeyBinding {
         binding
     }
 
+    /// Option-Shift-S, Scrawl's capture shortcut; Ctrl+Alt+S on Linux, beside
+    /// its other Ctrl+Alt defaults.
+    #[cfg(hex_capture)]
+    pub fn capture_default() -> Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: layout_key_code('s').unwrap_or(1),
+                label: "S".into(),
+            }),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(HotkeyModifiers::control_option(), "s");
+        binding
+    }
+
+    /// Option-Shift-V, Scrawl's key for the send-to list; Ctrl+Alt+Shift+V on
+    /// Linux.
+    #[cfg(hex_capture)]
+    pub fn capture_list_default() -> Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: paste_key_code(),
+                label: "V".into(),
+            }),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(
+            HotkeyModifiers {
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::control_option()
+            },
+            "v",
+        );
+        binding
+    }
+
     pub fn paste_meeting_default() -> Self {
         Self {
             modifiers: HotkeyModifiers {
@@ -385,9 +460,62 @@ impl HotkeyBinding {
     }
 }
 
+/// Scrawl's record shortcut from its app's `{key_code, carbon_modifiers,
+/// label}` file; a shortcut without a modifier is not Scrawl's.
+#[cfg(hex_capture)]
+fn scrawl_shortcut(bytes: &[u8]) -> Option<HotkeyBinding> {
+    #[derive(Deserialize)]
+    struct Shortcut {
+        key_code: u16,
+        carbon_modifiers: u32,
+        label: String,
+    }
+    const COMMAND: u32 = 1 << 8;
+    const SHIFT: u32 = 1 << 9;
+    const OPTION: u32 = 1 << 11;
+    const CONTROL: u32 = 1 << 12;
+    let shortcut: Shortcut = serde_json::from_slice(bytes).ok()?;
+    let held = |mask: u32| (shortcut.carbon_modifiers & mask != 0).then_some(ModifierSide::Either);
+    let modifiers = HotkeyModifiers {
+        control: held(CONTROL),
+        option: held(OPTION),
+        shift: held(SHIFT),
+        command: held(COMMAND),
+        function: false,
+    };
+    let label: String = shortcut
+        .label
+        .chars()
+        .filter(|c| !matches!(c, '⌃' | '⌥' | '⇧' | '⌘'))
+        .collect();
+    (!modifiers.is_empty() && !label.is_empty()).then_some(HotkeyBinding {
+        modifiers,
+        key: Some(HotkeyKey {
+            code: shortcut.key_code,
+            label,
+        }),
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn paste_key_code() -> u16 {
-    *PASTE_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('v').unwrap_or(9))
+    *PASTE_KEY_CODE.get_or_init(|| layout_key_code('v').unwrap_or(9))
+}
+
+/// The active layout's key for `character`. GUI startup snapshots the layout
+/// on the main thread; unit tests run on worker threads, where reaching TIS is
+/// unsupported, so they resolve against the ANSI layout instead.
+#[cfg(target_os = "macos")]
+fn layout_key_code(character: char) -> Option<u16> {
+    if cfg!(test) {
+        return match character {
+            'e' => Some(14),
+            's' => Some(1),
+            'v' => Some(9),
+            _ => None,
+        };
+    }
+    crate::keyboard::key_code_for(character).ok()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -401,6 +529,20 @@ impl HotkeyBinding {
             .keycaps()
             .map(str::to_string)
             .chain(self.key.iter().map(|key| key.label.clone()))
+            .collect()
+    }
+
+    /// Each keycap with the side it must be pressed on: `Either` for the
+    /// key, and for every modifier but on macOS.
+    pub fn sided_keycaps(&self) -> Vec<(String, ModifierSide)> {
+        self.modifiers
+            .sided_keycaps()
+            .map(|(label, side)| (label.to_string(), side))
+            .chain(
+                self.key
+                    .iter()
+                    .map(|key| (key.label.clone(), ModifierSide::Either)),
+            )
             .collect()
     }
 
@@ -564,6 +706,26 @@ pub struct RuntimeHotkeys {
     pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
+    /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
+    pub capture: Option<RuntimeHotkey>,
+    /// The capsule's send-to list, while captures are on; [`runtime_hotkeys`]
+    /// has it only while the capsule takes it (`capture_host::list_key_wanted`),
+    /// so it reaches other apps the rest of the time.
+    pub capture_list: Option<RuntimeHotkey>,
+}
+
+impl RuntimeHotkeys {
+    /// Every shortcut Hex matches, for suppression and chord evidence.
+    pub fn all(self) -> [Option<RuntimeHotkey>; 6] {
+        [
+            Some(self.dictation),
+            self.edit,
+            self.paste_last,
+            self.paste_meeting,
+            self.capture,
+            self.capture_list,
+        ]
+    }
 }
 
 impl Default for RuntimeHotkeys {
@@ -574,6 +736,8 @@ impl Default for RuntimeHotkeys {
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+            capture: None,
+            capture_list: None,
         }
     }
 }
@@ -629,6 +793,64 @@ pub struct MeetingSettings {
     /// and so read as Never offer.
     #[serde(alias = "never_offer")]
     pub providers: Vec<MeetingProviderChoice>,
+    /// Reminders before calendar meetings (macOS). Off until the user
+    /// connects a calendar.
+    pub calendar: CalendarSettings,
+}
+
+/// The connected calendar and its meeting reminders.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct CalendarSettings {
+    /// Set once the user clicks Connect calendar and macOS grants access;
+    /// Hex never asks for calendar access before that.
+    pub connected: bool,
+    /// Calendars left out of reminders, by EventKit identifier. Every
+    /// calendar is included by default, so new ones are too.
+    pub excluded_calendars: Vec<String>,
+    /// Show a reminder capsule before each meeting.
+    pub remind: bool,
+    /// How many minutes before a meeting starts the reminder shows; zero
+    /// shows it at the start.
+    pub lead_minutes: u8,
+}
+
+/// The reminder lead times Settings offers, in minutes.
+pub const CALENDAR_LEAD_MINUTES: [u8; 4] = [0, 1, 2, 5];
+
+impl Default for CalendarSettings {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            excluded_calendars: Vec::new(),
+            remind: true,
+            lead_minutes: 1,
+        }
+    }
+}
+
+impl CalendarSettings {
+    /// Whether reminders should run: connected, and wanted.
+    pub fn reminders_active(&self) -> bool {
+        self.connected && self.remind
+    }
+
+    /// The lead time, snapped to an offered choice.
+    pub fn lead(&self) -> std::time::Duration {
+        let minutes = if CALENDAR_LEAD_MINUTES.contains(&self.lead_minutes) {
+            self.lead_minutes
+        } else {
+            1
+        };
+        std::time::Duration::from_secs(u64::from(minutes) * 60)
+    }
+
+    pub fn includes(&self, calendar: &str) -> bool {
+        !self
+            .excluded_calendars
+            .iter()
+            .any(|excluded| excluded == calendar)
+    }
 }
 
 /// The call services Settings always lists, by provider key (the app's
@@ -679,6 +901,7 @@ impl Default for MeetingSettings {
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
+            calendar: CalendarSettings::default(),
         }
     }
 }
@@ -718,9 +941,18 @@ impl Default for ExperimentalSettings {
 }
 
 impl ExperimentalSettings {
-    pub fn hex_microphone_available(&self) -> bool {
-        self.hex_microphone || env_hex_experimental_mic()
+    /// [`voice_filter_enabled`] with this setting.
+    pub fn voice_filter_enabled(&self, experiment: bool, driver_installed: bool) -> bool {
+        voice_filter_enabled(self.hex_microphone, experiment, driver_installed)
     }
+}
+
+/// Whether the Voice Filter is on: its pane shows and the listener streams
+/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), the
+/// `voice-filter` experiment, or an installed driver each turn it on, so a
+/// driver apps already use keeps receiving audio.
+pub fn voice_filter_enabled(setting: bool, experiment: bool, driver_installed: bool) -> bool {
+    setting || env_hex_experimental_mic() || experiment || driver_installed
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -749,6 +981,42 @@ pub enum IndicatorPosition {
     Top = 0,
     Bottom = 1,
     Hidden = 2,
+}
+
+/// Which release-service channel a direct install updates from
+/// (`crate::updater`).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    Stable,
+    Dev,
+}
+
+impl UpdateChannel {
+    pub const ALL: [Self; 2] = [Self::Stable, Self::Dev];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Dev => "dev",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Stable => "Stable",
+            Self::Dev => "Dev",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// `None` follows the build: the channel it was published on (stamped at
+    /// build time), else `dev` for a dev version, else its install's channel.
+    /// Another channel than the build's is a switch the user confirms.
+    pub channel: Option<UpdateChannel>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -834,6 +1102,165 @@ impl Default for VoiceActionSettings {
     }
 }
 
+/// Scrawl captures inside Hex: the `capture` experiment on macOS and Linux
+/// (`capture_host`). Off by default; off means no capture work at all.
+#[cfg(hex_capture)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct CaptureSettings {
+    pub enabled: bool,
+    /// Press once to start a capture and again to finish it.
+    pub hotkey: HotkeyBinding,
+    /// Opens the capsule's send-to list, only while a capsule shows or the
+    /// latest capture waits for a pick.
+    pub list_hotkey: HotkeyBinding,
+    pub transcriber: CaptureTranscriber,
+    /// Where new captures go; `None` is Scrawl's own captures folder.
+    pub folder: Option<PathBuf>,
+    /// Days a capture keeps its video, audio, and full-size frames; `None`
+    /// keeps them.
+    pub media_days: Option<u32>,
+    /// Days a capture is kept at all; `None` keeps it.
+    pub bundle_days: Option<u32>,
+    /// Where a written capture is sent among OpenCode sessions: Scrawl's
+    /// router settings, imported once from Scrawl.
+    pub routing: CaptureRouting,
+    /// Lets screen recordings, Hex's own captures included, show Hex's
+    /// overlays: the capture capsule, picker, and ink, the dictation HUD,
+    /// and the meeting capsules. Off keeps them out (`capture_host`).
+    pub show_overlays_in_recordings: bool,
+    /// How the capsule offers where to send a finished capture, while Kit
+    /// compares the directions.
+    pub capsule_flow: CapsuleFlow,
+}
+
+/// The capsule's flow after a capture stops, one of five prototypes.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapsuleFlow {
+    /// (a) "Copied", and the suggestions in a list under the capsule.
+    #[default]
+    List,
+    /// (b) One quiet line, "Send to SEER ⏎"; ⇥ moves to the next guess.
+    Toast,
+    /// (c) A short hint of the guesses in the capsule, which then folds
+    /// into Hex's menu-bar item.
+    MenuBar,
+    /// (d) The guesses in a small card at the pointer.
+    Cursor,
+    /// (e) A pill hanging from the top edge that grows down into the
+    /// guesses.
+    Notch,
+}
+
+#[cfg(hex_capture)]
+impl CapsuleFlow {
+    pub const ALL: [Self; 5] = [
+        Self::List,
+        Self::Toast,
+        Self::MenuBar,
+        Self::Cursor,
+        Self::Notch,
+    ];
+}
+
+#[cfg(hex_capture)]
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        let week = scrawl_capture::retention::Preset::Week.policy();
+        Self {
+            enabled: false,
+            hotkey: HotkeyBinding::capture_default(),
+            list_hotkey: HotkeyBinding::capture_list_default(),
+            transcriber: CaptureTranscriber::default(),
+            folder: None,
+            media_days: week.media_days,
+            bundle_days: week.bundle_days,
+            routing: CaptureRouting::default(),
+            show_overlays_in_recordings: false,
+            capsule_flow: CapsuleFlow::default(),
+        }
+    }
+}
+
+/// Scrawl's router settings (`scrawl_capture::RouterConfig`, its
+/// camelCase JSON). Never holds a Jev key: Jev is called with
+/// `$OPENCODE_API_KEY` or OpenCode's own credential, so `hex settings`
+/// never shows one.
+#[cfg(hex_capture)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(
+    from = "scrawl_capture::RouterConfig",
+    into = "scrawl_capture::RouterConfig"
+)]
+pub struct CaptureRouting(scrawl_capture::RouterConfig);
+
+// The config's only non-`Eq` field is a JSON value, which compares totally.
+#[cfg(hex_capture)]
+impl Eq for CaptureRouting {}
+
+#[cfg(hex_capture)]
+impl From<scrawl_capture::RouterConfig> for CaptureRouting {
+    fn from(mut config: scrawl_capture::RouterConfig) -> Self {
+        config.jev_api_key = None;
+        Self(config)
+    }
+}
+
+#[cfg(hex_capture)]
+impl From<CaptureRouting> for scrawl_capture::RouterConfig {
+    fn from(routing: CaptureRouting) -> Self {
+        routing.0
+    }
+}
+
+#[cfg(hex_capture)]
+impl CaptureRouting {
+    pub fn config(&self) -> &scrawl_capture::RouterConfig {
+        &self.0
+    }
+}
+
+#[cfg(hex_capture)]
+impl CaptureSettings {
+    /// The folder new captures go to.
+    pub fn captures_dir(&self) -> PathBuf {
+        self.folder
+            .clone()
+            .unwrap_or_else(scrawl_capture::handoff::builtin_captures_dir)
+    }
+
+    pub fn retention(&self) -> scrawl_capture::retention::Policy {
+        scrawl_capture::retention::Policy {
+            media_days: self.media_days,
+            bundle_days: self.bundle_days,
+        }
+    }
+
+    pub fn set_retention(&mut self, policy: scrawl_capture::retention::Policy) {
+        self.media_days = policy.media_days;
+        self.bundle_days = policy.bundle_days;
+    }
+}
+
+/// What turns a capture's narration into words.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureTranscriber {
+    /// The dictation model Hex already has loaded, with word times.
+    #[default]
+    Parakeet,
+    /// Apple's speech recognizer, as Scrawl uses by default.
+    Apple,
+}
+
+#[cfg(hex_capture)]
+impl CaptureTranscriber {
+    pub const ALL: [Self; 2] = [Self::Parakeet, Self::Apple];
+}
+
 pub use crate::text_replacements::TextReplacement;
 
 impl RecordingAudioBehavior {
@@ -871,6 +1298,7 @@ pub struct AppSettings {
     pub release_microphone_while_idle: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
+    pub sound_theme: crate::feedback::SoundTheme,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
     pub double_tap_lock: bool,
@@ -886,10 +1314,17 @@ pub struct AppSettings {
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
+    pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
     pub history_retention: crate::history::HistoryRetention,
     pub meetings: MeetingSettings,
+    #[cfg(hex_capture)]
+    pub capture: CaptureSettings,
+    /// Capture settings from a build with captures, kept as they were.
+    #[cfg(not(hex_capture))]
+    #[serde(rename = "capture", skip_serializing_if = "Option::is_none")]
+    pub capture_from_other_build: Option<serde_json::Value>,
     #[serde(default)]
     pub experimental: ExperimentalSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
@@ -900,6 +1335,11 @@ pub struct AppSettings {
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
+    pub updates: UpdateSettings,
+    /// The shared vocabulary (`crate::vocabulary`). Left out of the file
+    /// while empty, so settings without one stay as they were.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary: Vec<crate::vocabulary::VocabularyEntry>,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -911,14 +1351,15 @@ pub struct AppSettings {
 
 /// Moves English dictation to the streaming English model once.
 const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
-/// Hex's macOS data folder moved from `voice-control` to `hex`; recorded once
-/// Hex runs from the new folder. The rename itself is `app_paths`'s.
-#[cfg(target_os = "macos")]
-const DATA_FOLDER_MIGRATION: &str = "macos-data-folder-hex";
-#[cfg(target_os = "macos")]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, DATA_FOLDER_MIGRATION];
-#[cfg(not(target_os = "macos"))]
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
+/// Scrawl's settings were read into `capture` once. Left out of
+/// `MIGRATIONS` so new settings import them too.
+#[cfg(hex_capture)]
+const SCRAWL_IMPORT_MIGRATION: &str = "scrawl-capture-settings";
+/// Scrawl's router settings were read into `capture.routing` once: its own
+/// migration, as it came after the first import.
+#[cfg(hex_capture)]
+const SCRAWL_ROUTING_IMPORT_MIGRATION: &str = "scrawl-routing-settings";
 
 fn deserialize_edit_hotkey<'de, D>(deserializer: D) -> std::result::Result<HotkeyBinding, D::Error>
 where
@@ -935,6 +1376,7 @@ impl Default for AppSettings {
             release_microphone_while_idle: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
+            sound_theme: crate::feedback::SoundTheme::default(),
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             double_tap_lock: true,
@@ -946,17 +1388,58 @@ impl Default for AppSettings {
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
+            keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
             history_retention: crate::history::HistoryRetention::default(),
             meetings: MeetingSettings::default(),
+            #[cfg(hex_capture)]
+            capture: CaptureSettings::default(),
+            #[cfg(not(hex_capture))]
+            capture_from_other_build: None,
             experimental: ExperimentalSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
+            updates: UpdateSettings::default(),
+            vocabulary: Vec::new(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
+        }
+    }
+}
+
+/// macOS input-source IDs mapped to the model and language they select. An
+/// absent entry means "Don't switch"; this never changes the model merely
+/// because dictation starts.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct KeyboardModelSwitching {
+    pub enabled: bool,
+    pub mappings: std::collections::BTreeMap<String, KeyboardModelChoice>,
+}
+
+/// What one input source selects: a model and a language it supports.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KeyboardModelChoice {
+    pub model: TranscriptionModelId,
+    pub language: String,
+}
+
+impl KeyboardModelChoice {
+    /// The picker's downloadable models only; Apple Speech is never mapped.
+    pub fn validate(&self) -> Result<()> {
+        let model = crate::transcription_models::validate(&TranscriptionSelection {
+            model: self.model,
+            language: self.language.clone(),
+            recognition_hints: String::new(),
+        })?;
+        match model.runtime {
+            crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
+            crate::transcription_models::ModelRuntime::AppleSpeech => {
+                Err(eyre!("{} can't be switched to by input source", model.name))
+            }
         }
     }
 }
@@ -978,16 +1461,9 @@ impl AppSettings {
             return selection.clone();
         }
         let model = crate::transcription_models::definition(id);
-        let language = if model.supports_language(&self.transcription.language) {
-            self.transcription.language.clone()
-        } else if model.supports_language("en") {
-            "en".into()
-        } else {
-            model.languages[0].into()
-        };
         TranscriptionSelection {
             model: id,
-            language,
+            language: model.language_for(&self.transcription.language).into(),
             recognition_hints: String::new(),
         }
     }
@@ -1090,22 +1566,119 @@ impl AppSettings {
 
     pub fn load() -> Result<Self> {
         let path = path()?;
-        migrate_legacy_settings(&path)?;
-        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        #[cfg_attr(not(hex_capture), allow(unused_mut))]
         let mut settings = Self::load_from(&path)?;
-        #[cfg(target_os = "macos")]
-        if !settings.has_migration(DATA_FOLDER_MIGRATION)
-            && crate::app_paths::uses_hex_data_folder()
-        {
-            settings.migrations.push(DATA_FOLDER_MIGRATION.into());
-            if path.exists()
+        #[cfg(hex_capture)]
+        if capture_available() {
+            let read = |path: PathBuf| fs::read(path).ok();
+            let engine = read(scrawl_capture::handoff::default_config_path());
+            let mut imported = false;
+            if !settings.has_migration(SCRAWL_IMPORT_MIGRATION) {
+                settings.import_scrawl_settings(
+                    engine.as_deref(),
+                    dirs::data_dir()
+                        .and_then(|data| read(data.join("scrawl/config.json")))
+                        .as_deref(),
+                );
+                settings.migrations.push(SCRAWL_IMPORT_MIGRATION.into());
+                imported = true;
+            }
+            if !settings.has_migration(SCRAWL_ROUTING_IMPORT_MIGRATION) {
+                settings.import_scrawl_routing(engine.as_deref());
+                settings
+                    .migrations
+                    .push(SCRAWL_ROUTING_IMPORT_MIGRATION.into());
+                imported = true;
+            }
+            if imported
+                && path.exists()
                 && let Err(error) = settings.write_to(&path)
             {
-                tracing::warn!(%error, "could not record the data folder migration");
+                tracing::warn!(%error, "could not record the Scrawl settings import");
             }
         }
         settings.apply_runtime();
         Ok(settings)
+    }
+
+    /// Reads Scrawl's settings into `capture`, never writing Scrawl's
+    /// files: `engine` is `~/.config/scrawl/config.json` (transcriber,
+    /// captures folder, retention) and `app` is the app's shortcut file.
+    /// Missing or unreadable values keep Hex's defaults.
+    #[cfg(hex_capture)]
+    fn import_scrawl_settings(&mut self, engine: Option<&[u8]>, app: Option<&[u8]>) {
+        if let Some(config) = engine.and_then(|bytes| {
+            serde_json::from_slice::<serde_json::Value>(bytes)
+                .ok()
+                .filter(serde_json::Value::is_object)
+        }) {
+            if config
+                .get("transcriber")
+                .and_then(serde_json::Value::as_str)
+                == Some("apple")
+            {
+                self.capture.transcriber = CaptureTranscriber::Apple;
+            }
+            let home = dirs::home_dir();
+            if let Some(folder) = config
+                .get("capturesDir")
+                .or_else(|| config.get("captures_dir"))
+                .and_then(serde_json::Value::as_str)
+                .map(|dir| match (dir.strip_prefix("~/"), &home) {
+                    (Some(rest), Some(home)) => home.join(rest),
+                    _ => PathBuf::from(dir),
+                })
+                .filter(|dir| dir.is_absolute())
+            {
+                self.capture.folder = Some(folder);
+            }
+            if let Some(policy) = config
+                .get("retention")
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+            {
+                self.capture.set_retention(policy);
+            }
+        }
+        if let Some(binding) = app.and_then(scrawl_shortcut)
+            && !self.hotkey_in_use(HotkeySlot::Capture, &binding)
+        {
+            self.capture.hotkey = binding;
+        }
+    }
+
+    /// Reads the router's settings from Scrawl's `config.json` (`engine`):
+    /// its rules, `autoSend`, and the `smartRouting` and `jevRouting`
+    /// experiments, leniently as Scrawl reads them, leaving out the Jev key.
+    /// A missing or unreadable file keeps the defaults.
+    #[cfg(hex_capture)]
+    fn import_scrawl_routing(&mut self, engine: Option<&[u8]>) {
+        let Some(serde_json::Value::Object(root)) =
+            engine.and_then(|bytes| serde_json::from_slice(bytes).ok())
+        else {
+            return;
+        };
+        let mut warnings = Vec::new();
+        self.capture.routing =
+            scrawl_capture::router_config_from_scrawl(&root, &mut warnings).into();
+        // A warning quotes the value it dropped, which may be the Jev key.
+        if !warnings.is_empty() {
+            tracing::info!(
+                count = warnings.len(),
+                "Scrawl routing settings were left out"
+            );
+        }
+    }
+
+    /// The saved `updates.channel`, read without loading, normalizing, or
+    /// writing anything else, so the updater thread never races a save.
+    pub fn saved_update_channel() -> Option<UpdateChannel> {
+        #[derive(Deserialize)]
+        struct File {
+            #[serde(default)]
+            updates: UpdateSettings,
+        }
+        let data = fs::read(path().ok()?).ok()?;
+        serde_json::from_slice::<File>(&data).ok()?.updates.channel
     }
 
     pub(crate) fn load_from(path: &std::path::Path) -> Result<Self> {
@@ -1121,6 +1694,11 @@ impl AppSettings {
                 settings.migrate_disabled_transcription_model();
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
+                // A model that is gone, or a language it lost, maps to nothing.
+                settings
+                    .keyboard_model_switching
+                    .mappings
+                    .retain(|_, choice| choice.validate().is_ok());
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 if serde_json::to_value(&settings)? != loaded
@@ -1169,6 +1747,7 @@ impl AppSettings {
         );
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(self.sound_theme);
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
@@ -1182,10 +1761,21 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
-        HEX_MICROPHONE_ENABLED.store(
-            self.experimental.hex_microphone_available(),
-            Ordering::Release,
-        );
+        #[cfg(hex_capture)]
+        {
+            *CAPTURE_SETTINGS
+                .get_or_init(Default::default)
+                .write()
+                .unwrap_or_else(|error| error.into_inner()) = self.capture.clone();
+            CAPTURE_ON.store(self.capture_on(), Ordering::Release);
+            crate::capture_host::record_own_windows(self.capture.show_overlays_in_recordings);
+            let flow = CapsuleFlow::ALL
+                .iter()
+                .position(|flow| *flow == self.capture.capsule_flow)
+                .unwrap_or_default();
+            CAPSULE_FLOW.store(flow as u8, Ordering::Release);
+        }
+        HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::hex_microphone::sync_from_settings(
             self.experimental.hex_microphone_mode,
             self.experimental.hex_microphone_comfort_noise,
@@ -1209,10 +1799,16 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.meetings.providers.clone();
+        *CALENDAR_SETTINGS
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = self.meetings.calendar.clone();
         *HOTKEYS
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.runtime_hotkeys();
+        #[cfg(hex_capture)]
+        publish_list_keycaps(self.capture_list_hotkey());
         set_transcription_selection(&self.transcription);
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
@@ -1221,6 +1817,7 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
+        crate::vocabulary::apply(&self.vocabulary);
     }
 
     /// Mode activations saved while Finder showed filename extensions carry a
@@ -1352,7 +1949,22 @@ impl AppSettings {
                 .meetings
                 .available()
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+            #[cfg(hex_capture)]
+            capture: self.capture_on().then(|| self.capture.hotkey.runtime()),
+            #[cfg(not(hex_capture))]
+            capture: None,
+            #[cfg(hex_capture)]
+            capture_list: self.capture_list_hotkey().map(HotkeyBinding::runtime),
+            #[cfg(not(hex_capture))]
+            capture_list: None,
         }
+    }
+
+    /// Captures are on: the build has them, the `capture` experiment is on,
+    /// and the person turned them on.
+    #[cfg(hex_capture)]
+    pub fn capture_on(&self) -> bool {
+        self.capture.enabled && capture_available()
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -1360,15 +1972,13 @@ impl AppSettings {
             return;
         }
         #[cfg(target_os = "macos")]
-        let edit_with_key = crate::keyboard::key_code_for('e')
-            .ok()
-            .map(|code| HotkeyBinding {
-                modifiers: HotkeyModifiers::option_command(),
-                key: Some(HotkeyKey {
-                    code,
-                    label: "E".into(),
-                }),
-            });
+        let edit_with_key = layout_key_code('e').map(|code| HotkeyBinding {
+            modifiers: HotkeyModifiers::option_command(),
+            key: Some(HotkeyKey {
+                code,
+                label: "E".into(),
+            }),
+        });
         #[cfg(not(target_os = "macos"))]
         let edit_with_key = Some(HotkeyBinding::chord(HotkeyModifiers::option_command(), "e"));
         let control_command = HotkeyBinding {
@@ -1406,6 +2016,63 @@ pub fn hotkey_conflicts(
     others
         .into_iter()
         .any(|binding| candidate.overlaps(&binding))
+}
+
+/// A shortcut Settings and `hex settings` record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HotkeySlot {
+    Dictation,
+    VoiceAction,
+    PasteLast,
+    #[cfg(hex_capture)]
+    Capture,
+    #[cfg(hex_capture)]
+    CaptureList,
+}
+
+impl AppSettings {
+    /// Whether `binding` overlaps a shortcut `slot` must not share: the other
+    /// active shortcuts and, where meetings exist (macOS), meeting paste. The
+    /// two capture shortcuts never share a key, on or off, since turning
+    /// captures on can't pull them apart.
+    pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
+        let mut others = Vec::new();
+        if slot != HotkeySlot::Dictation {
+            others.push(self.dictation_hotkey.clone());
+        }
+        if slot != HotkeySlot::VoiceAction && self.voice_action.enabled {
+            others.push(self.edit_hotkey.clone());
+        }
+        if slot != HotkeySlot::PasteLast
+            && let Some(paste) = &self.paste_last_hotkey
+        {
+            others.push(paste.clone());
+        }
+        if cfg!(target_os = "macos") && self.meetings.available() {
+            others.push(HotkeyBinding::paste_meeting_default());
+        }
+        #[cfg(hex_capture)]
+        if slot == HotkeySlot::CaptureList || (slot != HotkeySlot::Capture && self.capture_on()) {
+            others.push(self.capture.hotkey.clone());
+        }
+        #[cfg(hex_capture)]
+        if slot == HotkeySlot::Capture || (slot != HotkeySlot::CaptureList && self.capture_on()) {
+            others.push(self.capture.list_hotkey.clone());
+        }
+        hotkey_conflicts(binding, others)
+    }
+
+    /// The send-to list's shortcut while captures are on, unless it lost its
+    /// key or overlaps another shortcut (a settings file edited by hand):
+    /// then the other shortcut keeps working and the list has none.
+    #[cfg(hex_capture)]
+    pub fn capture_list_hotkey(&self) -> Option<&HotkeyBinding> {
+        let list = &self.capture.list_hotkey;
+        (self.capture_on()
+            && list.key.is_some()
+            && !self.hotkey_in_use(HotkeySlot::CaptureList, list))
+        .then_some(list)
+    }
 }
 
 fn set_microphone_selection(device: Option<&str>) {
@@ -1466,11 +2133,12 @@ pub fn microphone_policy() -> MicrophonePolicy {
 
 /// Whether the global mode or any mode runs a transformation.
 pub fn transformations_used(processing: &DictationProcessingSettings) -> bool {
-    !processing.default_mode.transformations.is_empty()
-        || processing
-            .modes
-            .iter()
-            .any(|mode| !mode.transformations.is_empty())
+    crate::experiments::enabled(crate::experiments::Experiment::Modes)
+        && (!processing.default_mode.transformations.is_empty()
+            || processing
+                .modes
+                .iter()
+                .any(|mode| !mode.transformations.is_empty()))
 }
 
 /// Where the recording HUD appears, as last saved.
@@ -1505,8 +2173,13 @@ pub fn meetings_enabled() -> bool {
     MEETINGS_ENABLED.load(Ordering::Acquire)
 }
 
+/// [`voice_filter_enabled`] for the running listener.
 pub fn hex_microphone_enabled() -> bool {
-    HEX_MICROPHONE_ENABLED.load(Ordering::Acquire) || env_hex_experimental_mic()
+    voice_filter_enabled(
+        HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
+        crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter),
+        crate::hex_microphone::driver_bundle_installed(),
+    )
 }
 
 pub fn meeting_notes_enabled() -> bool {
@@ -1527,6 +2200,16 @@ pub fn meeting_indicator_corner() -> MeetingIndicatorCorner {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
     MEETING_PROVIDERS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// The connected calendar's reminder settings, as last applied.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn calendar_settings() -> CalendarSettings {
+    CALENDAR_SETTINGS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -1569,6 +2252,23 @@ pub fn save_meeting_provider(choice: MeetingProviderChoice) {
     }
 }
 
+/// Saves the corner the recording capsule was dragged to.
+#[cfg(target_os = "macos")]
+pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
+    match AppSettings::load() {
+        Ok(mut settings) => {
+            if settings.meetings.recording_indicator_corner == corner {
+                return;
+            }
+            settings.meetings.recording_indicator_corner = corner;
+            if let Err(error) = settings.save() {
+                tracing::warn!(%error, "could not save the recording capsule's corner");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not load settings to save the capsule corner"),
+    }
+}
+
 pub fn meeting_output_folder() -> PathBuf {
     MEETING_OUTPUT_FOLDER
         .get_or_init(Default::default)
@@ -1579,10 +2279,47 @@ pub fn meeting_output_folder() -> PathBuf {
 }
 
 pub fn runtime_hotkeys() -> RuntimeHotkeys {
-    *HOTKEYS
+    #[cfg_attr(not(hex_capture), allow(unused_mut))]
+    let mut hotkeys = *HOTKEYS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner());
+    #[cfg(hex_capture)]
+    if scrawl_app_running() {
+        hotkeys.capture = None;
+    }
+    #[cfg(hex_capture)]
+    if !crate::capture_host::list_key_wanted() {
+        hotkeys.capture_list = None;
+    }
+    hotkeys
+}
+
+#[cfg(hex_capture)]
+pub(crate) fn publish_list_keycaps(binding: Option<&HotkeyBinding>) {
+    *LIST_KEYCAPS
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = Some(
+        binding
+            .filter(|binding| binding.key.is_some())
+            .map(HotkeyBinding::keycaps)
+            .unwrap_or_default(),
+    );
+}
+
+/// The send-to list shortcut's keycaps (`["⌥", "⇧", "V"]`) for the
+/// capsule's ask chip and footer hint; empty while the list has no shortcut
+/// ([`AppSettings::capture_list_hotkey`]), and the default's before settings
+/// are applied (scenes and tests).
+#[cfg(hex_capture)]
+pub fn list_keycaps() -> Vec<String> {
+    LIST_KEYCAPS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
+        .clone()
+        .unwrap_or_else(|| HotkeyBinding::capture_list_default().keycaps())
 }
 
 pub fn dictation_hotkey() -> RuntimeHotkey {
@@ -1601,6 +2338,49 @@ pub fn voice_action_settings() -> VoiceActionSettings {
         .clone()
 }
 
+/// The saved capture settings (`cfg(hex_capture)` builds).
+#[cfg(hex_capture)]
+pub fn capture_settings() -> CaptureSettings {
+    CAPTURE_SETTINGS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// The saved [`CapsuleFlow`], without cloning the capture settings.
+#[cfg(hex_capture)]
+pub fn capsule_flow() -> CapsuleFlow {
+    CapsuleFlow::ALL
+        .get(usize::from(CAPSULE_FLOW.load(Ordering::Acquire)))
+        .copied()
+        .unwrap_or_default()
+}
+
+/// Captures are on: [`capture_available`] and `capture.enabled`.
+#[cfg(hex_capture)]
+pub fn capture_on() -> bool {
+    CAPTURE_ON.load(Ordering::Acquire)
+}
+
+/// Whether this build can capture at all: the `capture` experiment is on.
+#[cfg(hex_capture)]
+pub fn capture_available() -> bool {
+    crate::experiments::enabled(crate::experiments::Experiment::Capture)
+}
+
+/// Scrawl's own app is running, so it owns the capture shortcut and Hex
+/// doesn't match it.
+#[cfg(hex_capture)]
+pub fn scrawl_app_running() -> bool {
+    SCRAWL_APP_RUNNING.load(Ordering::Acquire)
+}
+
+#[cfg(hex_capture)]
+pub fn set_scrawl_app_running(running: bool) {
+    SCRAWL_APP_RUNNING.store(running, Ordering::Release);
+}
+
 pub fn hotkey_capture_active() -> bool {
     HOTKEY_CAPTURE_ACTIVE.load(Ordering::Acquire)
 }
@@ -1610,7 +2390,7 @@ pub fn set_hotkey_capture_active(active: bool) {
 }
 
 /// The Dock policy while no Settings window is open. An open window always
-/// shows the icon: hiding it deactivates HEX asynchronously, which would drop
+/// shows the icon: hiding it deactivates Hex asynchronously, which would drop
 /// that window behind other applications.
 pub fn dock_icon_visible(show_dock_icon: bool, status_item_available: bool) -> bool {
     show_dock_icon || !status_item_available
@@ -1636,7 +2416,7 @@ pub fn set_dock_icon_visible(visible: bool) {
 #[cfg(target_os = "macos")]
 pub fn hide_application() {
     let Some(marker) = MainThreadMarker::new() else {
-        tracing::warn!("cannot hide HEX outside the main thread");
+        tracing::warn!("cannot hide Hex outside the main thread");
         return;
     };
     NSApplication::sharedApplication(marker).hide(None);
@@ -1646,62 +2426,146 @@ fn path() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("settings.json"))
 }
 
-/// The per-OS settings file that predates `settings.json`.
-const LEGACY_SETTINGS_FILE: Option<&str> = if cfg!(target_os = "windows") {
-    Some("windows-settings.json")
-} else if cfg!(target_os = "linux") {
-    Some("linux-settings.json")
-} else {
-    None
-};
-
-/// Whether settings were ever saved, including a legacy file that the next
-/// load migrates; a first run has neither and onboards.
+/// Whether settings were ever saved; a first run has none and onboards.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn exists() -> bool {
-    path().is_ok_and(|path| saved_at(&path))
-}
-
-fn saved_at(path: &std::path::Path) -> bool {
-    path.exists()
-        || LEGACY_SETTINGS_FILE
-            .zip(path.parent())
-            .is_some_and(|(legacy, directory)| directory.join(legacy).exists())
-}
-
-/// Before the first `settings.json`, adopt a legacy per-OS settings file
-/// once: write `settings.json`, then keep the old file as `*.migrated`.
-pub(crate) fn migrate_legacy_settings(path: &std::path::Path) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    let Some(directory) = path.parent() else {
-        return Ok(());
-    };
-    #[cfg(target_os = "windows")]
-    let legacy = crate::windows_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "linux")]
-    let legacy = crate::linux_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "macos")]
-    let legacy: Option<(PathBuf, AppSettings)> = {
-        let _ = directory;
-        None
-    };
-    let Some((legacy_path, mut settings)) = legacy else {
-        return Ok(());
-    };
-    settings.migrations.clear();
-    settings.write_to(path)?;
-    let mut migrated = legacy_path.clone().into_os_string();
-    migrated.push(".migrated");
-    fs::rename(&legacy_path, migrated)?;
-    tracing::info!(from = %legacy_path.display(), "migrated legacy settings into settings.json");
-    Ok(())
+    path().is_ok_and(|path| path.exists())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    /// The capsule's ask chip and footer hint show the send-to list's own shortcut,
+    /// ⌥⇧V unless rebound, and no keys while the list has none.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_capsule_shows_the_list_shortcuts_own_keys() {
+        assert_eq!(list_keycaps(), ["⌥", "⇧", "V"]);
+        let rebound = HotkeyBinding {
+            modifiers: HotkeyModifiers::option_command(),
+            key: Some(HotkeyKey::named("l")),
+        };
+        publish_list_keycaps(Some(&rebound));
+        assert_eq!(list_keycaps(), ["⌥", "⌘", "L"]);
+        publish_list_keycaps(None);
+        assert!(list_keycaps().is_empty());
+        *LIST_KEYCAPS.get().unwrap().write().unwrap() = None;
+    }
+
+    /// Hex matches the list shortcut only while the capsule takes it, so
+    /// ⌥⇧V reaches the app in front the rest of the time.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_list_shortcut_is_matched_only_while_the_capsule_takes_it() {
+        let list = HotkeyBinding::capture_list_default().runtime();
+        *HOTKEYS.get_or_init(Default::default).write().unwrap() = RuntimeHotkeys {
+            capture_list: Some(list),
+            ..RuntimeHotkeys::default()
+        };
+        assert_eq!(runtime_hotkeys().capture_list, None);
+        let grab = crate::capture_host::take_keys(crate::capture_host::CapsuleKeys::Route, |_| {});
+        assert_eq!(runtime_hotkeys().capture_list, Some(list));
+        grab.set(crate::capture_host::CapsuleKeys::Picker);
+        assert_eq!(runtime_hotkeys().capture_list, None);
+        drop(grab);
+        *HOTKEYS.get().unwrap().write().unwrap() = RuntimeHotkeys::default();
+    }
+
+    #[cfg(target_os = "macos")]
+    /// The list's ⌥⇧V never shares a key with another shortcut: Paste Last
+    /// left on its own ⌥⇧V default keeps it, and the list gets another.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_list_shortcut_never_overlaps_another() {
+        let mut settings = AppSettings::default();
+        let list = settings.capture.list_hotkey.clone();
+        assert_eq!(list, HotkeyBinding::capture_list_default());
+        assert!(settings.hotkey_in_use(HotkeySlot::CaptureList, &list));
+        settings.paste_last_hotkey = Some(HotkeyBinding {
+            modifiers: HotkeyModifiers::option_command(),
+            key: Some(HotkeyKey::named("v")),
+        });
+        assert!(!settings.hotkey_in_use(HotkeySlot::CaptureList, &list));
+        // Captures off, the list key never takes a shortcut from the others.
+        assert!(!settings.hotkey_in_use(HotkeySlot::PasteLast, &list));
+    }
+
+    /// The two capture shortcuts are kept apart even while captures are off:
+    /// otherwise one could be set to the other's key and captures could
+    /// never be turned on.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_capture_shortcuts_never_share_a_key_while_off() {
+        let settings = AppSettings::default();
+        assert!(!settings.capture.enabled);
+        let capture = settings.capture.hotkey.clone();
+        let list = settings.capture.list_hotkey.clone();
+        assert!(settings.hotkey_in_use(HotkeySlot::CaptureList, &capture));
+        assert!(settings.hotkey_in_use(HotkeySlot::Capture, &list));
+        // The others don't see them while off.
+        assert!(!settings.hotkey_in_use(HotkeySlot::VoiceAction, &capture));
+    }
+
+    #[test]
+    fn keyboard_model_switching_is_opt_in_and_source_mappings_round_trip() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.keyboard_model_switching.enabled);
+        assert!(settings.keyboard_model_switching.mappings.is_empty());
+        settings.keyboard_model_switching.enabled = true;
+        settings.keyboard_model_switching.mappings.insert(
+            "com.apple.keylayout.Spanish".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            },
+        );
+        let restored: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored.keyboard_model_switching,
+            settings.keyboard_model_switching
+        );
+    }
+
+    #[test]
+    fn loading_drops_keyboard_mappings_to_a_language_the_model_lacks() {
+        let dir = TestSettingsDir::new("keyboard-mappings");
+        let mut settings = AppSettings::default();
+        let russian = KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "ru".into(),
+        };
+        settings
+            .keyboard_model_switching
+            .mappings
+            .insert("Russian".into(), russian.clone());
+        settings.keyboard_model_switching.mappings.insert(
+            "Japanese".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                language: "ja".into(),
+            },
+        );
+        settings.write_to(&dir.path).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            loaded.keyboard_model_switching.mappings,
+            [("Russian".to_owned(), russian)].into()
+        );
+    }
+
+    #[test]
+    fn the_setting_the_experiment_or_an_installed_driver_turns_the_voice_filter_on() {
+        if env_hex_experimental_mic() {
+            return;
+        }
+        assert!(!voice_filter_enabled(false, false, false));
+        assert!(voice_filter_enabled(true, false, false));
+        assert!(voice_filter_enabled(false, true, false));
+        assert!(voice_filter_enabled(false, false, true));
+    }
 
     #[test]
     fn missing_fields_receive_defaults() {
@@ -1750,6 +2614,37 @@ mod tests {
                 .ends_with("Hex Meetings")
         );
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn calendar_reminders_stay_off_until_connected_and_survive_older_files() {
+        let older: AppSettings =
+            serde_json::from_str(r#"{"meetings":{"enabled":true,"providers":[]}}"#).unwrap();
+        assert_eq!(older.meetings.calendar, CalendarSettings::default());
+        assert!(!older.meetings.calendar.connected);
+        assert!(!older.meetings.calendar.reminders_active());
+        assert_eq!(
+            older.meetings.calendar.lead(),
+            std::time::Duration::from_secs(60)
+        );
+
+        let partial: AppSettings =
+            serde_json::from_str(r#"{"meetings":{"calendar":{"connected":true}}}"#).unwrap();
+        assert!(partial.meetings.calendar.reminders_active());
+        assert!(partial.meetings.calendar.includes("any-calendar"));
+
+        let mut calendar = partial.meetings.calendar.clone();
+        calendar.excluded_calendars.push("work".into());
+        calendar.lead_minutes = 5;
+        let written = serde_json::to_value(&calendar).unwrap();
+        let reread: CalendarSettings = serde_json::from_value(written).unwrap();
+        assert_eq!(reread, calendar);
+        assert!(!reread.includes("work"));
+        assert_eq!(reread.lead(), std::time::Duration::from_secs(300));
+
+        // A hand-edited lead time outside the choices falls back to a minute.
+        let odd: CalendarSettings = serde_json::from_str(r#"{"lead_minutes":7}"#).unwrap();
+        assert_eq!(odd.lead(), std::time::Duration::from_secs(60));
     }
 
     #[test]
@@ -1917,6 +2812,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn vocabulary_round_trips_and_stays_out_of_files_without_one() {
+        use crate::vocabulary::VocabularyEntry;
+        // A file from before the vocabulary loads with an empty one and is
+        // not rewritten to gain the field.
+        let dir = TestSettingsDir::new("vocabulary");
+        let older = r#"{"sound_effects": false}"#;
+        fs::write(&dir.path, older).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        assert!(settings.vocabulary.is_empty());
+        assert!(
+            !fs::read_to_string(&dir.path)
+                .unwrap()
+                .contains("vocabulary")
+        );
+        assert!(
+            serde_json::to_value(AppSettings::default())
+                .unwrap()
+                .get("vocabulary")
+                .is_none()
+        );
+
+        let filled = AppSettings {
+            vocabulary: vec![
+                VocabularyEntry {
+                    term: "Abattoir".into(),
+                    sounds_like: vec!["avatar".into(), "a bat war".into()],
+                },
+                VocabularyEntry {
+                    term: "Rune".into(),
+                    sounds_like: vec![],
+                },
+            ],
+            ..settings
+        };
+        filled.write_to(&dir.path).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&dir.path).unwrap()).unwrap();
+        assert_eq!(
+            json["vocabulary"],
+            serde_json::json!([
+                {"term": "Abattoir", "sounds_like": ["avatar", "a bat war"]},
+                {"term": "Rune"},
+            ])
+        );
+        let reloaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(reloaded.vocabulary, filled.vocabulary);
+    }
+
     struct TestSettingsDir {
         directory: PathBuf,
         path: PathBuf,
@@ -2058,25 +3002,26 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_settings_file_counts_as_saved_settings() {
-        let dir = TestSettingsDir::new("legacy-exists");
-        assert!(!saved_at(&dir.path));
-        if let Some(legacy) = LEGACY_SETTINGS_FILE {
-            fs::write(dir.directory.join(legacy), b"{}").unwrap();
-            assert!(saved_at(&dir.path));
-            fs::remove_file(dir.directory.join(legacy)).unwrap();
-        }
-        fs::write(&dir.path, b"{}").unwrap();
-        assert!(saved_at(&dir.path));
-    }
-
-    #[test]
     fn legacy_sleep_prevention_setting_is_ignored() {
         let settings: AppSettings =
             serde_json::from_str(r#"{"prevent_system_sleep":false}"#).unwrap();
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert!(serialized.get("prevent_system_sleep").is_none());
+    }
+
+    #[test]
+    fn an_unset_microphone_is_system_default_and_a_saved_one_is_kept() {
+        let automatic: AppSettings = serde_json::from_str(r#"{"microphone":null}"#).unwrap();
+        assert_eq!(automatic.microphone, None);
+        let absent: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.microphone, None);
+        let saved: AppSettings =
+            serde_json::from_str(r#"{"microphone":"Studio Display Microphone"}"#).unwrap();
+        assert_eq!(
+            saved.microphone.as_deref(),
+            Some("Studio Display Microphone")
+        );
     }
 
     #[test]
@@ -2648,5 +3593,50 @@ mod tests {
         assert_eq!(chord.standalone_side(), None);
         chord.set_standalone_side(ModifierSide::Right);
         assert_eq!(chord.modifiers.option, Some(ModifierSide::Left));
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn scrawls_routing_imports_without_its_jev_key() {
+        let engine = br#"{
+            "autoSend": false,
+            "jevApiKey": "not-a-real-key",
+            "experiments": { "smartRouting": true, "jevRouting": "on" },
+            "routing": {
+                "sites": { "http://localhost:5173": "~/code/site" },
+                "undoWindowSec": 120
+            }
+        }"#;
+        let mut settings = AppSettings::default();
+        settings.import_scrawl_routing(Some(engine));
+        let config = settings.capture.routing.config();
+        assert!(!config.send_captures);
+        assert!(config.smart_routing && config.jev_routing);
+        assert_eq!(config.undo_window_sec, Some(120));
+        assert_eq!(
+            config
+                .sites
+                .get("http://localhost:5173")
+                .map(String::as_str),
+            Some("~/code/site")
+        );
+        assert_eq!(config.jev_api_key, None);
+
+        let saved = serde_json::to_string(&settings).unwrap();
+        assert!(!saved.contains("not-a-real-key"));
+        let read: AppSettings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(read.capture.routing, settings.capture.routing);
+
+        // A key typed into settings.json is dropped on read.
+        let typed = saved.replace("\"jevApiKey\":null", "\"jevApiKey\":\"x\"");
+        assert_ne!(typed, saved);
+        let read: AppSettings = serde_json::from_str(&typed).unwrap();
+        assert_eq!(read.capture.routing.config().jev_api_key, None);
+
+        // Nothing to read keeps the defaults.
+        let mut settings = AppSettings::default();
+        settings.import_scrawl_routing(None);
+        settings.import_scrawl_routing(Some(b"not json"));
+        assert_eq!(settings.capture.routing, CaptureRouting::default());
     }
 }

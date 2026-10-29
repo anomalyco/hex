@@ -1,35 +1,43 @@
 //! The Modes pane: the Global mode and custom modes chosen by the frontmost
 //! application, each with corrections, optional OpenCode rewriting, and
-//! TypeScript transformations. Text fields are drafts saved when
+//! transformations, built in or from the user's config. Text fields are drafts saved when
 //! typing pauses; every other edit saves at once and asks the service to
 //! reload.
 
-use std::path::PathBuf;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rune::{Drag, El, Phase, TextEdit, Tx, Waker, col, edit_access, el, row, spacer, text};
-use rune_kit::{ButtonSize, IconButton, IconButtonVariant, Switch, TextArea, TextInput};
+use rune::{
+    Align, Drag, El, Phase, ScrollSpec, Side, TextEdit, Tx, Waker, col, edit_access, el, row,
+    spacer, text,
+};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Switch, TextArea, TextInput};
 
-use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, card, note, setting_row};
-use super::lists::list_row;
+use super::controls::{
+    ButtonKind, DESCRIPTION, Highlight, METRICS, Paint, button, card, note, page, section,
+    section_with, setting_row,
+};
+use super::lists::{LIST_COLUMN_PL, list_row, remove_button, source_list};
 use super::models::{self, Target};
+use super::{Menu, Ui};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
 use crate::opencode_catalog::OpenCodeFeature;
 use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};
 use crate::text_replacements::TextReplacement;
 
 const LIST_WIDTH: f32 = 240.0;
-const FIELD_WIDTH: f32 = 300.0;
+const FIELD_WIDTH: f32 = 280.0;
 /// How often the transformation host's status file is reread.
 const STATUS_INTERVAL: Duration = Duration::from_secs(1);
 
 static PLUS: &rune::Icon = &rune_theme_opencode::icons::PLUS;
-static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
 static GRIP: rune::Icon = rune::Icon {
     name: "hex-grip",
     view: 16.0,
@@ -37,6 +45,12 @@ static GRIP: rune::Icon = rune::Icon {
 };
 /// A transformation row's height; dragging moves one place per row.
 const TRANSFORMATION_ROW: f32 = 36.0;
+/// Application icons draw at 24 points in the picker and 16 beside names,
+/// from one raster per application.
+const ICON_SIZE: f32 = 24.0;
+/// Past this many icons (each about 12 KB with its mips), the held ones are
+/// dropped and those still shown load again.
+const MAX_ICONS: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Selection {
@@ -108,17 +122,21 @@ pub(super) struct ModesPane {
     pub(super) selected: Selection,
     editor: Editor,
     pub(super) delete_armed: bool,
-    pub(super) transformation_picker_open: bool,
     pub(super) application_picker_open: bool,
     application_search: TextEdit,
     application_highlight: Highlight,
     pub(super) application_error: Option<String>,
     applications: Applications,
-    /// The desktop's file chooser, while it is open.
-    chooser: Option<Receiver<ChosenApplication>>,
+    /// The native file dialog, while it is open.
+    chooser: Option<Pending>,
     drag: Option<TransformationDrag>,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(super) waker: Option<Waker>,
+    /// Rasterizes application icons off the UI thread; made in `setup`.
+    pub(super) icon_cache: Option<rune::ImageCache>,
+    /// Icons by catalog path, requested as the view first shows them. The
+    /// cache shares only handles kept alive here.
+    icons: RefCell<HashMap<PathBuf, rune::Image>>,
+    icons_ready: usize,
     /// Whether the listener can tell which app is frontmost (X11, not Wayland).
     focused_app_known: bool,
     status: StatusSnapshot,
@@ -137,7 +155,6 @@ impl ModesPane {
             selected: Selection::Default,
             editor: Editor::of(&settings.dictation_processing.default_mode),
             delete_armed: false,
-            transformation_picker_open: false,
             application_picker_open: false,
             application_search: TextEdit::default(),
             application_highlight: Highlight::default(),
@@ -146,6 +163,9 @@ impl ModesPane {
             chooser: None,
             drag: None,
             waker: None,
+            icon_cache: None,
+            icons: RefCell::default(),
+            icons_ready: 0,
             focused_app_known: true,
             status,
             status_read: None,
@@ -165,7 +185,7 @@ impl ModesPane {
 
     fn read_status(&mut self) -> bool {
         self.status_read = Some(Instant::now());
-        let exists = self.workspace.join("hex.config.ts").is_file();
+        let exists = crate::personal_commands::workspace_configured();
         let mut changed = exists != self.config_exists;
         self.config_exists = exists;
         let mut status =
@@ -226,7 +246,6 @@ impl ModesPane {
     pub(super) fn select(&mut self, selection: Selection) {
         self.selected = selection;
         self.delete_armed = false;
-        self.transformation_picker_open = false;
         self.application_picker_open = false;
         self.application_error = None;
         self.drag = None;
@@ -247,6 +266,16 @@ impl ModesPane {
             && let Ok(applications) = receiver.try_recv()
         {
             self.applications = Applications::Loaded(applications);
+            changed = true;
+        }
+        let ready = self
+            .icons
+            .get_mut()
+            .values()
+            .filter(|icon| icon.is_ready())
+            .count();
+        if ready != self.icons_ready {
+            self.icons_ready = ready;
             changed = true;
         }
         if let Some(receiver) = &self.workspace_receiver
@@ -272,7 +301,31 @@ impl ModesPane {
         changed
     }
 
-    fn ensure_applications(&mut self) {
+    /// The decoded icon for a catalog path, requesting it when first shown.
+    /// None while it loads, when it has none, or without a cache.
+    fn icon(&self, path: &Path) -> Option<rune::Pixels> {
+        let mut icons = self.icons.borrow_mut();
+        if !icons.contains_key(path) {
+            let cache = self.icon_cache.as_ref()?;
+            if icons.len() >= MAX_ICONS {
+                icons.clear();
+            }
+            icons.insert(path.to_path_buf(), cache.app_icon(path, ICON_SIZE));
+        }
+        let icon = &icons[path];
+        (icon.is_ready() && icon.error().is_none()).then(|| icon.pixels().clone())
+    }
+
+    /// The icon for an application a mode names, once the catalog lists it.
+    fn named_icon(&self, name: &str) -> Option<rune::Pixels> {
+        let Applications::Loaded(applications) = &self.applications else {
+            return None;
+        };
+        let application = applications.iter().find(|a| a.name == name)?;
+        self.icon(&application.path)
+    }
+
+    pub(super) fn ensure_applications(&mut self) {
         if matches!(self.applications, Applications::NotLoaded) {
             let (sender, receiver) = sync_channel(1);
             thread::spawn(move || {
@@ -417,50 +470,62 @@ fn move_application_highlight(ui: &mut Ui, event: &rune::KeyEvent) -> bool {
         .key(&event.key, &query, count)
 }
 
-/// Opens the desktop's file chooser for an application the catalog does
-/// not list: a `.desktop` entry or an executable.
-#[cfg(target_os = "linux")]
+/// Opens the native file dialog for an application the catalog does not
+/// list: a macOS bundle, a Windows executable, or a Linux `.desktop` entry
+/// or executable.
 fn choose_application(ui: &mut Ui) {
     if !ui.live() || ui.modes.chooser.is_some() {
         return;
     }
-    let (sender, receiver) = sync_channel(1);
     let waker = ui.modes.waker.clone();
-    let (title, accept) = (tr("Add Application").to_string(), tr("Add").to_string());
-    let filters = [
-        crate::linux_file_chooser::Filter {
-            label: tr("Applications").into(),
-            patterns: vec!["*.desktop"],
-        },
-        crate::linux_file_chooser::Filter {
-            label: tr("All files").into(),
-            patterns: vec!["*"],
-        },
-    ];
-    thread::spawn(move || {
-        let result = crate::linux_file_chooser::open_file(&title, &accept, &filters)
-            .and_then(|path| {
-                path.map(|path| crate::application_catalog::metadata(&path))
-                    .transpose()
-            })
-            .map_err(|error| format!("{error:#}"));
-        let _ = sender.send(result);
-        if let Some(waker) = waker {
+    ui.modes.chooser = Some(crate::file_dialog::open(application_dialog(), move || {
+        if let Some(waker) = &waker {
             waker();
         }
-    });
-    ui.modes.chooser = Some(receiver);
+    }));
 }
 
-/// Adds what the file chooser returned: the application joins
+fn application_dialog() -> Dialog {
+    let applications = |extensions| Filter {
+        label: tr("Applications").into(),
+        extensions,
+    };
+    let any_file = || Filter {
+        label: tr("All files").into(),
+        extensions: &["*"],
+    };
+    let (filters, directory) = if cfg!(target_os = "macos") {
+        (vec![applications(&["app"])], Some("/Applications".into()))
+    } else if cfg!(target_os = "windows") {
+        (vec![applications(&["exe"]), any_file()], None)
+    } else {
+        (vec![applications(&["desktop"]), any_file()], None)
+    };
+    Dialog {
+        title: tr("Add Application").into(),
+        target: DialogTarget::File(filters),
+        directory,
+    }
+}
+
+/// Adds what the file dialog returned: the application joins
 /// the catalog and the selected mode.
 pub(super) fn poll_chooser(ui: &mut Ui) -> bool {
-    let Some(result) = ui.modes.chooser.as_ref().and_then(|r| r.try_recv().ok()) else {
+    let Some(choice) = ui.modes.chooser.as_ref().and_then(Pending::poll) else {
         return false;
     };
     ui.modes.chooser = None;
-    chosen_application(ui, result);
+    chosen_application(ui, application_from(choice));
     true
+}
+
+fn application_from(choice: Choice) -> ChosenApplication {
+    choice.and_then(|path| {
+        path.map(|path| {
+            crate::application_catalog::metadata(&path).map_err(|error| format!("{error:#}"))
+        })
+        .transpose()
+    })
 }
 
 pub(super) fn chosen_application(ui: &mut Ui, result: ChosenApplication) {
@@ -483,7 +548,7 @@ pub(super) fn chosen_application(ui: &mut Ui, result: ChosenApplication) {
 
 /// Drags a transformation by its handle. Rows are keyed by position, so the
 /// pressed slot stays put while the rows reorder under it; the new order is
-/// saved once, on release.
+/// saved once, on release. A cancelled drag drops the pending order.
 fn drag_transformation(ui: &mut Ui, id: &str, start: usize, pitch: f32, d: &Drag) {
     match d.phase {
         Phase::Down => {
@@ -512,7 +577,7 @@ fn drag_transformation(ui: &mut Ui, id: &str, start: usize, pitch: f32, d: &Drag
             let Some(drag) = ui.modes.drag.take() else {
                 return;
             };
-            if drag.order != drag.committed {
+            if !d.cancelled() && drag.order != drag.committed {
                 update_mode(ui, |mode| mode.transformations = drag.order);
             }
         }
@@ -548,30 +613,21 @@ fn provision_workspace(ui: &mut Ui) {
 // ---------------------------------------------------------------------------
 // View
 
-fn remove_button(p: Paint, size: ButtonSize, press: impl Fn(&mut Ui) + 'static) -> El {
-    IconButton::new(CLOSE)
-        .variant(IconButtonVariant::Ghost)
-        .size(size)
-        .label(tr("Remove"))
-        .on_press(press)
-        .build(p.k)
-        .key("remove")
-}
-
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let add = IconButton::new(PLUS)
         .variant(IconButtonVariant::Neutral)
-        .size(ButtonSize::Normal)
+        .control_size(ControlSize::Regular)
         .label(tr("Add mode"))
         .on_press(add_mode)
         .build(p.k)
         .key("add-mode");
     let c = &p.k.c;
-    let mut list = col().key("modes-list").gap(2.0);
+    let mut list = col().key("modes-list");
     list = list.child(mode_row(
         p,
         "mode-global",
         tr("Global"),
+        Vec::new(),
         tr("Fallback for everything"),
         ui.modes.selected == Selection::Default,
         Selection::Default,
@@ -582,10 +638,20 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         } else {
             mode.applications.join(", ")
         };
+        // The first few applications' icons trail the name.
+        let icons = mode
+            .applications
+            .iter()
+            .filter_map(|name| ui.modes.named_icon(name))
+            .take(3)
+            .enumerate()
+            .map(|(index, icon)| application_icon(format!("icon{index}"), &icon, 16.0))
+            .collect();
         list = list.child(mode_row(
             p,
             &format!("mode{index}"),
             &mode.name,
+            icons,
             &summary,
             ui.modes.selected == Selection::Custom(index),
             Selection::Custom(index),
@@ -595,9 +661,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .key("modes-column")
         .w(LIST_WIDTH)
         .h_full()
-        .pl(16.0)
+        .pl(LIST_COLUMN_PL)
         .pr(8.0)
-        .child(super::scroll_body("modes-scroll", list));
+        .child(super::scroll_body("modes-scroll", source_list(list)));
     let body = row()
         .key("modes-body")
         .grow(1.0)
@@ -617,11 +683,12 @@ fn mode_row(
     p: Paint,
     key: &str,
     name: &str,
+    icons: Vec<El>,
     summary: &str,
     selected: bool,
     selection: Selection,
 ) -> El {
-    list_row(p, key, name, Vec::new(), summary, selected, move |ui| {
+    list_row(p, key, name, icons, summary, selected, move |ui| {
         select_mode(ui, selection)
     })
 }
@@ -629,19 +696,11 @@ fn mode_row(
 fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let selection = ui.modes.selected;
     let current = mode(&ui.settings, selection);
-    let mut content = col().key("mode-detail-content").px(24.0).gap(16.0);
+    let mut content = page("mode-detail-content");
     content = content.child(basics(ui, p, selection, current));
-    content = content.child(
-        text(tr("Text processing"))
-            .key("processing-label")
-            .font(p.k.ty.ui_medium)
-            .color(p.muted())
-            .ml(12.0)
-            .mt(8.0),
-    );
     content = content.child(corrections(ui, p));
     content = content.child(processing(ui, p, selection, current, layer));
-    content = content.child(transformations(ui, p, current));
+    content = content.child(transformations(ui, p, current, layer));
     if selection != Selection::Default {
         let action = if ui.modes.delete_armed {
             row()
@@ -707,22 +766,24 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
         .max_w(FIELD_WIDTH);
     for (index, name) in current.applications.iter().enumerate() {
         let remove = name.clone();
+        let icon = ui.modes.named_icon(name);
         chips = chips.child(
             row()
                 .key(format!("application{index}"))
                 .h(24.0)
-                .pl(8.0)
-                .gap(2.0)
+                .pl(if icon.is_some() { 4.0 } else { 8.0 })
+                .gap(if icon.is_some() { 4.0 } else { 2.0 })
                 .center_y()
                 .radius(p.k.radius.sm)
                 .fill(p.k.c.layer_02)
+                .children(icon.map(|icon| application_icon("icon", &icon, 16.0)))
                 .child(
                     text(name.clone())
                         .key("name")
                         .font(p.k.ty.small_medium)
                         .color(p.text()),
                 )
-                .child(remove_button(p, ButtonSize::Small, move |ui: &mut Ui| {
+                .child(remove_button(p, ControlSize::Small, move |ui: &mut Ui| {
                     let remove = remove.clone();
                     update_mode(ui, |mode| {
                         mode.applications
@@ -734,7 +795,7 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
     chips = chips.child(
         IconButton::new(PLUS)
             .variant(IconButtonVariant::Neutral)
-            .size(ButtonSize::Small)
+            .control_size(ControlSize::Small)
             .label(tr("Add application"))
             .on_press(|ui: &mut Ui| {
                 ui.modes.application_picker_open = !ui.modes.application_picker_open;
@@ -810,7 +871,7 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
         }
         Applications::Loaded(_) => None,
     };
-    let mut results = col().key("application-results").gap(1.0);
+    let mut results = col().key("application-results");
     for (index, application) in choices.into_iter().enumerate() {
         let name = application.name.clone();
         let location = application
@@ -836,7 +897,10 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
                 .hover(c.hover)
                 .press(c.pressed)
                 .on_press(move |ui: &mut Ui| add_application(ui, name.clone()))
-                .child(monogram(p, &application.name))
+                .child(match ui.modes.icon(&application.path) {
+                    Some(icon) => application_icon("icon", &icon, ICON_SIZE),
+                    None => monogram(p, &application.name),
+                })
                 .child(
                     col()
                         .key("copy")
@@ -861,8 +925,8 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
     }
     col()
         .key("application-picker")
-        .ml(12.0)
-        .mr(12.0)
+        .ml(METRICS.row_px)
+        .mr(METRICS.row_px)
         .mb(8.0)
         .padding(8.0)
         .gap(6.0)
@@ -882,7 +946,7 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
             row()
                 .key("picker-actions")
                 .justify_between()
-                .children(choose_file_button(p))
+                .child(choose_file_button(p))
                 .child(spacer())
                 .child(button(
                     p,
@@ -897,26 +961,25 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
         )
 }
 
-/// "Choose a file…": Linux asks the desktop's file chooser portal; Windows
-/// has no native dialog under Rune yet.
-fn choose_file_button(p: Paint) -> Option<El> {
-    #[cfg(target_os = "linux")]
-    return Some(button(
+/// "Choose a file…" opens the native file dialog.
+fn choose_file_button(p: Paint) -> El {
+    button(
         p,
         "choose-application-file",
         tr("Choose a file…"),
         ButtonKind::Secondary,
         |ui: &mut Ui, _| choose_application(ui),
-    ));
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = p;
-        None
-    }
+    )
 }
 
-/// An app's initial on a tinted square: Rune has no raster images yet, so
-/// the catalog's icons are not drawn.
+fn application_icon(key: impl Into<String>, icon: &rune::Pixels, size: f32) -> El {
+    el().key(key)
+        .size(size, size)
+        .pixels_fit(icon, rune::SurfaceFit::Fit)
+}
+
+/// An app's initial on a tinted square, while its icon loads or when it has
+/// none.
 fn monogram(p: Paint, name: &str) -> El {
     let letter = name
         .chars()
@@ -936,37 +999,15 @@ fn monogram(p: Paint, name: &str) -> El {
         )
 }
 
-fn card_header(p: Paint, key: &str, title: &str, action: Option<El>) -> El {
-    row()
-        .key(key)
-        .min_h(40.0)
-        .px(12.0)
-        .gap(8.0)
-        .center_y()
-        .child(
-            text(title)
-                .key("title")
-                .font(p.k.ty.ui_medium)
-                .color(p.text())
-                .grow(1.0),
-        )
-        .children(action)
-}
-
 fn corrections(ui: &Ui, p: Paint) -> El {
     let add = IconButton::new(PLUS)
         .variant(IconButtonVariant::Ghost)
-        .size(ButtonSize::Normal)
+        .control_size(ControlSize::Regular)
         .label(tr("Add correction"))
         .on_press(add_replacement)
         .build(p.k)
         .key("add-correction");
-    let mut rows = vec![card_header(
-        p,
-        "corrections-header",
-        tr("Corrections"),
-        Some(add),
-    )];
+    let mut rows = Vec::new();
     if ui.modes.editor.replacements.is_empty() {
         rows.push(note(
             "no-corrections",
@@ -978,7 +1019,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
         rows.push(
             row()
                 .key(format!("correction{index}"))
-                .px(12.0)
+                .px(METRICS.row_px)
                 .py(6.0)
                 .gap(8.0)
                 .center_y()
@@ -1007,12 +1048,14 @@ fn corrections(ui: &Ui, p: Paint) -> El {
                         .grow(1.0)
                         .shrink(),
                 )
-                .child(remove_button(p, ButtonSize::Normal, move |ui: &mut Ui| {
-                    remove_replacement(ui, index)
-                })),
+                .child(remove_button(
+                    p,
+                    ControlSize::Regular,
+                    move |ui: &mut Ui| remove_replacement(ui, index),
+                )),
         );
     }
-    card(p, "corrections-card", rows)
+    section_with(p, "corrections", tr("Corrections"), add.mr(-4.0), rows)
 }
 
 fn processing(
@@ -1034,11 +1077,15 @@ fn processing(
         })
         .build(p.k)
         .key("processing-toggle");
-    let mut rows = vec![card_header(
+    let reason = (!can_toggle)
+        .then(|| models::unavailable_reason(ui, OpenCodeFeature::Transformation))
+        .flatten();
+    let mut rows = vec![setting_row(
         p,
-        "processing-header",
+        "processing-enabled",
         tr("OpenCode transformation"),
-        Some(toggle),
+        reason,
+        toggle,
     )];
     if enabled {
         rows.extend(models::rows(ui, p, Target::Mode(selection), layer));
@@ -1057,7 +1104,7 @@ fn processing(
         rows.push(
             col()
                 .key("instructions")
-                .px(12.0)
+                .px(METRICS.row_px)
                 .py(8.0)
                 .gap(6.0)
                 .child(
@@ -1088,37 +1135,15 @@ fn processing(
     if let Some(notice) = models::unavailable(ui, p, OpenCodeFeature::Transformation) {
         rows.push(notice);
     }
-    card(p, "processing-card", rows)
+    section(p, "processing", tr("Processing"), rows)
 }
 
-fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
+/// The mode's transformations, in the order they run; the + menu adds a
+/// registered one it does not use yet.
+fn transformations(ui: &Ui, p: Paint, current: &DictationMode, layer: &mut Vec<El>) -> El {
     let catalog = &ui.modes.status.transformations;
-    let picker_open = ui.modes.transformation_picker_open;
-    let action = (!catalog.is_empty()).then(|| {
-        if picker_open {
-            button(
-                p,
-                "toggle-transformation-picker",
-                tr("Done"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| ui.modes.transformation_picker_open = false,
-            )
-        } else {
-            IconButton::new(PLUS)
-                .variant(IconButtonVariant::Ghost)
-                .size(ButtonSize::Normal)
-                .label(tr("Add transformation"))
-                .on_press(|ui: &mut Ui| ui.modes.transformation_picker_open = true)
-                .build(p.k)
-                .key("toggle-transformation-picker")
-        }
-    });
-    let mut rows = vec![card_header(
-        p,
-        "transformations-header",
-        tr("Transformations"),
-        action,
-    )];
+    let action = (!catalog.is_empty()).then(|| transformation_menu(ui, p, current, layer));
+    let mut rows = Vec::new();
     let dragging = ui.modes.drag.as_ref();
     let order = dragging.map_or(&current.transformations, |drag| &drag.order);
     let pitch = TRANSFORMATION_ROW + p.hair;
@@ -1143,8 +1168,8 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
         let mut item = row()
             .key(format!("transformation{index}"))
             .h(TRANSFORMATION_ROW)
-            .pl(6.0)
-            .pr(12.0)
+            .pl(METRICS.row_px - 6.0)
+            .pr(METRICS.row_px)
             .gap(6.0)
             .center_y()
             .radius(p.k.radius.md)
@@ -1157,92 +1182,179 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
                     .grow(1.0)
                     .truncate(),
             )
-            .child(remove_button(p, ButtonSize::Normal, move |ui: &mut Ui| {
-                let id = remove.clone();
-                update_mode(ui, |mode| {
-                    mode.transformations.retain(|candidate| *candidate != id)
-                });
-            }));
+            .child(remove_button(
+                p,
+                ControlSize::Regular,
+                move |ui: &mut Ui| {
+                    let id = remove.clone();
+                    update_mode(ui, |mode| {
+                        mode.transformations.retain(|candidate| *candidate != id)
+                    });
+                },
+            ));
         if held {
             item = item.fill(p.k.c.layer_02);
         }
         rows.push(item);
     }
-    if picker_open && !catalog.is_empty() {
-        let available: Vec<&StatusTransformation> = catalog
-            .iter()
-            .filter(|transformation| !current.transformations.contains(&transformation.id))
-            .collect();
-        if available.is_empty() {
-            rows.push(note(
-                "all-included",
-                tr("Every registered transformation is already included."),
-                p.muted(),
-            ));
-        }
-        for (index, transformation) in available.into_iter().enumerate() {
-            let id = transformation.id.clone();
-            rows.push(setting_row(
-                p,
-                &format!("available-transformation{index}"),
-                &transformation.name,
-                transformation.description.as_deref(),
-                button(
-                    p,
-                    "add",
-                    tr("Add"),
-                    ButtonKind::Secondary,
-                    move |ui: &mut Ui, _| {
-                        let id = id.clone();
-                        update_mode(ui, |mode| mode.transformations.push(id));
-                    },
-                ),
-            ));
-        }
-    }
     if let Some(workspace) = workspace_status(ui, p) {
         rows.push(workspace);
     }
-    card(p, "transformations-card", rows)
+    if rows.is_empty() {
+        rows.push(note(
+            "no-transformations",
+            tr("No transformations in this mode."),
+            p.muted(),
+        ));
+    }
+    let title = tr("Transformations");
+    match action {
+        Some(action) => section_with(p, "transformations", title, action, rows),
+        None => section(p, "transformations", title, rows),
+    }
 }
 
-/// The TypeScript workspace behind custom transformations: setup, loading,
-/// and failures with the action that recovers. Hidden once it is loaded.
+const TRANSFORMATION_MENU: &str = "transformation-menu-trigger";
+
+/// The + and its menu of the registered transformations the mode does not
+/// use, each name with its description below; choosing one appends it.
+/// The kit's menus draw one line per item, so this one is drawn here.
+fn transformation_menu(ui: &Ui, p: Paint, current: &DictationMode, layer: &mut Vec<El>) -> El {
+    let trigger = row().key(TRANSFORMATION_MENU).child(
+        IconButton::new(PLUS)
+            .variant(IconButtonVariant::Ghost)
+            .control_size(ControlSize::Regular)
+            .label(tr("Add transformation"))
+            .on_press(|ui: &mut Ui| {
+                ui.open = (ui.open != Some(Menu::Transformations)).then_some(Menu::Transformations);
+            })
+            .build(p.k)
+            .key("add-transformation"),
+    );
+    if ui.open != Some(Menu::Transformations) {
+        return trigger.mr(-4.0);
+    }
+    let c = &p.k.c;
+    let close = |ui: &mut Ui| ui.open = None;
+    let available = ui
+        .modes
+        .status
+        .transformations
+        .iter()
+        .filter(|transformation| !current.transformations.contains(&transformation.id));
+    let mut options = col().key("options").items_stretch().padding(4.0);
+    let mut empty = true;
+    for (index, transformation) in available.enumerate() {
+        empty = false;
+        let id = transformation.id.clone();
+        options = options.child(
+            col()
+                .key(format!("transformation-option{index}"))
+                .role("menuitem")
+                .label(transformation.name.clone())
+                .focusable(true)
+                .focus_highlight(c.hover)
+                .px(8.0)
+                .py(6.0)
+                .gap(2.0)
+                .radius(4.0)
+                .on_press(move |ui: &mut Ui| {
+                    ui.open = None;
+                    let id = id.clone();
+                    update_mode(ui, |mode| mode.transformations.push(id));
+                })
+                .child(
+                    text(transformation.name.clone())
+                        .key("name")
+                        .font(p.k.ty.ui_compact)
+                        .color(c.text_base)
+                        .truncate(),
+                )
+                .children(transformation.description.clone().map(|description| {
+                    text(description)
+                        .key("description")
+                        .font(p.k.ty.small)
+                        .color(c.text_weak)
+                        .wrap()
+                })),
+        );
+    }
+    if empty {
+        options = options.child(
+            text(tr("Every registered transformation is already included."))
+                .key("all-included")
+                .font(p.k.ty.small)
+                .color(c.text_weak)
+                .px(8.0)
+                .py(6.0)
+                .wrap(),
+        );
+    }
+    let mut menu = col()
+        .key("transformation-menu")
+        .role("menu")
+        .focus_group()
+        .focus_return(TRANSFORMATION_MENU)
+        .modal(true, close)
+        .w(320.0)
+        .radius(6.0)
+        .fill(c.layer_01)
+        .child(
+            col()
+                .key("viewport")
+                .shrink()
+                .min_h(0.0)
+                .max_h(400.0)
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .child(options),
+        )
+        .anchored_fit(TRANSFORMATION_MENU, Side::Bottom, Align::End, 4.0);
+    for shadow in &p.k.elevation.floating {
+        menu = menu.box_shadow(*shadow);
+    }
+    layer.push(
+        el().key("transformation-menu-scrim")
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+            .on_press(close),
+    );
+    layer.push(menu);
+    trigger.mr(-4.0)
+}
+
+/// The config behind custom transformations: setup, loading, and load
+/// failures, which clear when a saved fix reloads. Hidden once it is loaded.
 fn workspace_status(ui: &Ui, p: Paint) -> Option<El> {
     if !ui.live() {
         return None;
     }
     let pane = &ui.modes;
     let (description, error, action) = if pane.workspace_receiver.is_some() {
-        (
-            tr("Preparing the TypeScript workspace and installing its dependencies…"),
-            None,
-            None,
-        )
+        (tr("Creating config…"), None, None)
     } else if let Some(error) = pane.workspace_error.clone() {
         (
-            tr("The TypeScript workspace could not be prepared."),
+            tr("The config could not be created."),
             Some(error),
             Some(tr("Retry setup")),
         )
     } else if !pane.config_exists {
         (
-            tr("Create a TypeScript workspace to define reusable transformations."),
+            tr("Create a config file to define reusable transformations."),
             None,
             Some(tr("Set up")),
         )
     } else {
         match pane.status.host_state {
             HostState::Active if pane.status.last_reload_error.is_none() => return None,
-            HostState::Starting => (
-                tr("Loading registered TypeScript transformations…"),
-                None,
-                None,
-            ),
+            HostState::Starting => (tr("Loading custom transformations…"), None, None),
             _ => (
-                tr("Registered TypeScript transformations are unavailable."),
+                tr("Custom transformations are unavailable."),
                 pane.status.last_reload_error.clone(),
-                Some(tr("Retry")),
+                None,
             ),
         }
     };
@@ -1329,7 +1441,50 @@ pub(super) fn fixture(ui: &mut Ui) {
         ),
         app("Zed", "/usr/share/applications/dev.zed.Zed.desktop"),
     ]);
+    // Stand-in icons, so renders never depend on the host's installed apps.
+    // Zed has none and keeps its monogram.
+    let cache = ui
+        .modes
+        .icon_cache
+        .get_or_insert_with(|| rune::ImageCache::new(std::sync::Arc::new(|| {})));
+    let icons = [
+        ("firefox", [255, 113, 57]),
+        ("slack", [74, 21, 75]),
+        ("code", [0, 122, 204]),
+        ("org.wezfurlong.wezterm", [52, 58, 64]),
+    ]
+    .map(|(id, rgb)| {
+        let icon = cache.rgba(FIXTURE_ICON, FIXTURE_ICON, fixture_icon(rgb));
+        let _ = icon.wait();
+        (
+            PathBuf::from(format!("/usr/share/applications/{id}.desktop")),
+            icon,
+        )
+    });
+    ui.modes.icons.get_mut().extend(icons);
     ui.modes.select_in(&ui.settings, Selection::Custom(0));
+}
+
+const FIXTURE_ICON: u32 = 48;
+
+/// A rounded square in `rgb` with a lighter disc, as straight-alpha RGBA.
+fn fixture_icon(rgb: [u8; 3]) -> Vec<u8> {
+    let centre = FIXTURE_ICON as f32 / 2.0;
+    let (half, corner) = (centre - 2.0, 10.0);
+    let mut pixels = Vec::with_capacity((FIXTURE_ICON * FIXTURE_ICON * 4) as usize);
+    for y in 0..FIXTURE_ICON {
+        for x in 0..FIXTURE_ICON {
+            let (dx, dy) = (x as f32 + 0.5 - centre, y as f32 + 0.5 - centre);
+            let (qx, qy) = (dx.abs() - half + corner, dy.abs() - half + corner);
+            let outside = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - corner;
+            let alpha = (0.5 - outside).clamp(0.0, 1.0);
+            let disc = (0.5 - (dx.hypot(dy) - 9.0)).clamp(0.0, 1.0) * 0.55;
+            let [r, g, b] =
+                rgb.map(|v| (f32::from(v) + (255.0 - f32::from(v)) * disc).round() as u8);
+            pixels.extend_from_slice(&[r, g, b, (alpha * 255.0).round() as u8]);
+        }
+    }
+    pixels
 }
 
 #[cfg(test)]

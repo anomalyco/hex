@@ -1,30 +1,18 @@
-// The published release every download link names. After a release, bump the
-// versions here; `bun run check:downloads` (also run by CI) fails until every
-// URL below serves a file.
-export const MAC_VERSION = "2.3.1"
-export const DESKTOP_VERSION = "2.3.1"
+// The release every download link names. scripts/release-data.ts writes
+// release-data.json from the Anomaly release service's stable manifest at
+// build time, so a deploy after a release picks up its version and files;
+// `bun run check:downloads` fails unless every URL below serves a file.
+import data from "./release-data.json"
 
-const DOWNLOADS = "https://downloads.hex.anoma.ly"
+export const MAC_VERSION = data.version
+export const DESKTOP_VERSION = data.version
 
 export const RELEASE = {
-  mac: {
-    version: MAC_VERSION,
-    url: `${DOWNLOADS}/releases/HEX-${MAC_VERSION}-arm64.dmg`,
-  },
-  windowsX64: {
-    version: DESKTOP_VERSION,
-    url: `${DOWNLOADS}/releases/HEX-Setup-${DESKTOP_VERSION}-x64.exe`,
-  },
-  windowsArm64: {
-    version: DESKTOP_VERSION,
-    url: `${DOWNLOADS}/releases/HEX-Setup-${DESKTOP_VERSION}-arm64.exe`,
-  },
-  linux: {
-    version: DESKTOP_VERSION,
-    installer: `${DOWNLOADS}/install-linux.sh`,
-    command: `curl -fsSL ${DOWNLOADS}/install-linux.sh | sh`,
-  },
-  github: `https://github.com/anomalyco/hex/releases/tag/app-v${DESKTOP_VERSION}`,
+  mac: { version: data.version, url: data.mac },
+  windowsX64: { version: data.version, url: data.windowsX64 },
+  windowsArm64: { version: data.version, url: data.windowsArm64 },
+  linux: { version: data.version, installer: data.linuxInstaller, command: data.linuxCommand },
+  github: data.github,
   homebrew: "brew install --cask anomalyco/tap/hex",
 } as const
 
@@ -33,6 +21,6 @@ export const DOWNLOAD_URLS = [
   RELEASE.windowsX64.url,
   RELEASE.windowsArm64.url,
   RELEASE.linux.installer,
-  `${DOWNLOADS}/linux-update.json`,
+  data.manifest,
   RELEASE.github,
 ]

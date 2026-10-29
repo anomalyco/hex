@@ -2,7 +2,7 @@
 
 Report vulnerabilities through
 [GitHub private vulnerability reporting](https://github.com/anomalyco/hex/security/advisories/new).
-Do not include secrets, private transcripts, browsing history, or unredacted HEX
+Do not include secrets, private transcripts, browsing history, or unredacted Hex
 diagnostic logs in a public issue.
 
 Custom command handlers and npm dependencies execute locally with the user's

@@ -1,6 +1,6 @@
 # Meetings (beta)
 
-Record a call locally: HEX captures the other participants (system audio) and
+Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls from a website or app set to Always record, and never stops
@@ -11,20 +11,25 @@ Linked checks are locators unless an executed result is recorded below.
 ## How To Get To It
 
 ```ts
-Settings > Meetings > Meetings (beta)               // meetings.opt-in; off by default
-├── On -> Meetings pane, menu-bar items, call detection, Option-Control-V
+Sidebar > Meetings (always listed on macOS)          // meetings.opt-in; off by default
+├── Off -> opt-in card "Meetings (beta)" -> Turn on -> meetings.enabled = true
+├── On -> header switch Recordings | Settings; menu-bar items, call detection,
+│   Option-Control-V
+│   Settings view: Call recording, Calendar, Detected calls
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
 │   │   ├── Decided before -> Privacy pane + drag guide ("System Audio Recording Only")
 │   │   ├── Asked -> pulse; TCC preflight re-read on each poll, no reopen needed
-│   │   └── Granted -> Allowed
+│   │   └── Granted -> the Allow pill morphs into a green Allowed
 │   ├── Show recording indicator -> on by default; corner-snapping floating capsule
 │   ├── Transcript folder -> ~/Documents/Hex Meetings by default; Reveal / choose
 │   ├── Summarize with Apple Intelligence -> on by default; one-line availability
+│   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime (always listed)
 │       └── then each website or app chosen for from an offer's "…"
-└── Off -> Controller idles; no microphone-activity inspection, pane, or shortcut
+└── Off -> Controller idles; no microphone-activity inspection or shortcut;
+           the pane shows only the opt-in card
 
 Debug builds -> Always available (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
@@ -46,8 +51,10 @@ refuses to start without either grant and asks macOS for System Audio Recording.
 ```ts
 Zoom / Teams / Slack huddle / FaceTime / browser call uses the microphone
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
-  -> 4 stable observations (about 2 s)              // meetings.detect
-     └── Browser on a page that is not a known call site -> 40 (about 20 s),
+  -> On the microphone for 2 s by the monotonic clock // meetings.detect
+     │   Google Meet and Banshee (banshee.app) in a browser count as known
+     │   services; a slow watcher loop never stretches the time
+     └── Browser on a page that is not a known call site -> 20 s,
          so voice notes and dictation fields are not offered
   -> Provider = the website when known, else the app; the website's choice
      when it has one, else the app's (a browser's choice covers its other
@@ -67,8 +74,14 @@ Zoom / Teams / Slack huddle / FaceTime / browser call uses the microphone
          │   │   └── not offered for a browser on an unknown page
          │   └── Cancel
          └── 20 s timeout -> Close                     // never records on timeout
-  -> Same call is snoozed by key and app until off the microphone for about 60 s,
+  -> Same call is snoozed by key and app until off the microphone for 60 s,
      offered or recorded; stopping an automatic recording does not restart it
+     └── Absence counts from the last time the call app was on the microphone,
+         a gap included (sleep, Meetings off, a recording): an app that left
+         the microphone during a recording is not snoozed for another minute
+  -> "Left the call" prompt after the call app is off the microphone for 3 s
+  -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
+     stalled loop) start a stability run again instead of counting the gap
 
 Choices persist as `meetings.providers` (`key`, `label`, `policy`:
 `ask` / `always_record` / `never_offer`) in `settings.json`. Missing means Ask.
@@ -85,16 +98,59 @@ Graphics and Media`), and FaceTime uses `com.apple.avconferenced`.
 process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
 microphone and is not snoozed, `ContextSnapshot::capture_for_meeting` in
-[context.rs](../../src/context.rs) inspects Brave's active and open tabs for a
-`meet.google.com` call even if Brave is behind another window or tab.
+[context.rs](../../src/context.rs) reads the active tab of Brave's front window,
+even if Brave is behind another window. Background tabs are not searched: a
+call open in one says nothing about which tab holds the microphone, and a
+voice note elsewhere would otherwise get a known service's 2 s threshold or
+trigger Always record. (A call in a background tab is therefore judged by the
+active tab's page, which is the unknown-page 20 s for a new site.) That query is
+an AppleScript round trip, so the watcher starts it on its own
+thread (at most one at a time, about once a second) and reads the newest answer,
+at most 5 s after it finished; a slow or timed-out query (the existing 2 s
+limit) never holds up the loop. Answers and the remembered page are dropped
+while Hex records, Meetings is off, the browser is snoozed, or no browser holds
+the microphone; a query in flight at that moment is not repeated beside itself,
+and its answer is discarded. When a browser's page is found for a run already
+under way (the first pass had no answer yet), the run keeps counting, now
+toward the known service's 2 s. When no answer names a page, the last page a browser showed while
+it held the microphone names the call for 60 s (`BrowserPageMemory`), so the
+site survives a failed query or Hex being in front. Safari, Chrome, Firefox and
+Edge expose no URL, so their calls are unnamed unless the foreground context
+says otherwise. Banshee has no recognised room path, so any `banshee.app` page
+counts; it is not in Settings' always-listed providers, but appears under
+Detected calls once its choice is set from an offer's "…". Not observed: the
+new tab query against a live Brave with a Banshee call (the script compiles, and
+the thread and memory are unit-tested with fake queries); the Banshee URL shape
+was not available, so the host rule is a guess at "any page".
 
 On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
 problems.kitlangton.com (board voice notes) and each burst got a "Browser call
 call detected" offer; that is what the 20 s browser threshold prevents.
-Checks: `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
+A second Banshee call on 2026-10-26 got no offer in the 30 s before Kit started
+recording by hand: the "about 20 s" threshold was 40 loop observations, and each
+loop took about 0.9 s (500 ms sleep plus the browser inspection), so an unknown
+browser page needed about 37 s. The thresholds are now clock time.
+Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds`,
+`a_slow_loop_still_ends_a_snooze_after_a_minute`,
+`a_stalled_loop_does_not_count_the_gap_as_time_on_the_microphone`,
+`banshee_is_offered_after_about_two_seconds`,
+`the_site_is_resolved_while_hex_is_in_front`,
+`a_page_seen_minutes_ago_no_longer_names_the_call`,
+`a_remembered_page_belongs_to_its_browser_and_its_call`,
+`finding_the_page_keeps_the_run_toward_the_known_threshold`,
+`a_voice_note_on_another_site_is_not_a_banshee_call`,
+`a_gap_with_the_app_absent_counts_as_absence`,
+`a_recorded_call_that_left_the_microphone_is_not_snoozed_for_another_minute`,
+`a_slow_tab_query_never_holds_up_the_loop`,
+`a_reset_drops_the_answer_in_flight_without_starting_a_second_query`,
+`an_answer_is_dated_by_when_its_query_finished`,
+`a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer` and
+`a_snoozed_or_non_browser_application_is_not_queried` (meeting_watcher.rs),
+`the_meeting_tab_query_reads_only_the_active_tab` (context.rs),
+`a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
 `offer_titles_name_the_service_site_or_browser_without_repeating_call`,
 `choices_apply_to_the_site_when_known_and_the_app_otherwise`,
-`always_record_starts_after_the_same_stability_count_as_an_offer`, and
+`always_record_starts_after_the_same_stability_time_as_an_offer`, and
 `never_offer_and_snoozed_calls_never_start` in
 [meeting_detection.rs](../../src/meeting_detection.rs);
 `meeting_providers_ask_by_default_and_legacy_never_offer_entries_stay_never` in
@@ -133,8 +189,123 @@ Brave WebRTC `getUserMedia({audio: true})` reproduction on Pro confirmed
 `com.brave.Browser` and `com.tinyspeck.slackmacgap` afterward.
 
 The capsules have no `--snap` scene. `HEX_CAPSULE_SNAPS=<folder> cargo test
---bin voice-control capsule_snapshots` renders the offer, its choices, and the
-automatic-recording states in light and dark on a Mac with a GPU.
+--bin hex capsule_snapshots` renders the offer, its choices, the
+calendar reminders, and the automatic-recording states in light and dark on a
+Mac with a GPU.
+
+### Calendar Reminders
+
+```ts
+Meetings > Settings > Calendar                       // meetings.calendar (macOS)
+├── Connect calendar -> macOS full-access prompt, on this click only
+│   ├── Granted -> meetings.calendar.connected = true; reminders on, 1 min lead
+│   │   └── trusts the prompt's answer: macOS keeps reporting "not determined"
+│   │       to the asking process until it relaunches
+│   └── Denied / Restricted / write-only -> "Calendar access is off"
+│       └── Open settings -> Privacy & Security › Calendars
+└── Connected
+    ├── Remind me before meetings -> on by default
+    ├── Remind me -> At start / 1 / 2 / 5 min
+    ├── Calendars -> All calendars, or "2 of 3 calendars"; each switched in the menu
+    └── Next 3 meetings: title, "Today · 2:30 PM", provider icon when it has a call link
+
+Meeting = not all-day, declined, free, or cancelled, AND has other attendees or a
+          Zoom / Google Meet / Teams / Slack huddle / Webex link (URL, location, notes)
+
+Lead time reached (or Mac wakes within 5 min of the start)   // meetings.reminder
+  -> Reminder capsule, offer-capsule placement, focus-free
+     ├── "Design sync" · "Starts in 1 min · Zoom"
+     │   ├── Not now -> close; this call is not offered when detected
+     │   ├── Join & record (only with a link) -> open the link, then record
+     │   └── Record -> recording titled "Design sync" with its attendees
+     └── Service set to Always record: "Starts in 1 min · Hex records automatically"
+         ├── Don't record -> close; the detected call neither offers nor auto-records
+         └── Join (only with a link) -> open the link; Always record starts on detection
+  -> Closes 60 s after the start (at least 30 s after showing); withdrawn if the
+     meeting is cancelled, moved, or reminders are turned off. One at a time: an
+     overlapping meeting's reminder waits until this one is answered or closes.
+     Waits while Hex records; a recording that starts closes it.
+Detected call during a calendar meeting on the same service
+  -> recording takes the calendar title and attendees
+```
+
+Settings persist as `meetings.calendar` (`connected`, `excluded_calendars`,
+`remind`, `lead_minutes`) in `settings.json`; missing means not connected, so
+files from older builds stay off. Every calendar is included unless excluded.
+Hex never asks for calendar access at launch: only Connect calendar calls
+`requestFullAccessToEvents` (`NSCalendarsFullAccessUsageDescription`). With
+Meetings off there is no Calendar card, no EventKit read, and no reminder.
+
+The controller thread reads EventKit (one bounded query, 48 hours ahead, at most
+200 events) when the store's change notification bumps its counter or once a
+minute by the wall clock, so a wake rereads; each loop is then a cheap
+scheduler pass. Reminders key each occurrence by event ID and start, so a moved
+meeting reminds again and each occurrence reminds once. Settings reads its own
+snapshot on a reader thread while the window shows, rereading when the
+settings, access, or (once connected) the store change, and every 30 s; the
+window's thread never calls EventKit. No network, never on the audio or UI
+thread. Recording from a reminder (or dismissing it) snoozes detected calls
+from the link's service until the meeting ends; without a link it covers only
+the next detected call, and only until 5 min after the start (or the end, if
+sooner). The manifest's `calendar` field and the
+Markdown's Attendees line carry the calendar title and attendees, and the notes
+prompt gets them as context.
+
+Checks: `meetings_need_other_people_or_a_call_link`,
+`all_day_declined_free_and_cancelled_events_are_skipped`,
+`excluded_calendars_are_left_out_and_meetings_sort_by_start`,
+`call_links_are_found_in_the_url_location_or_notes`,
+`other_links_and_lookalikes_are_not_calls`,
+`a_link_after_a_bare_http_in_the_same_word_is_found`,
+`the_url_field_wins_over_the_notes`,
+`an_overlapping_meeting_waits_for_the_showing_reminder`,
+`a_late_reminder_stays_up_at_least_half_a_minute`,
+`a_reminder_shows_once_at_the_lead_time`, `at_start_reminds_when_the_meeting_begins`,
+`waking_shortly_after_the_start_still_reminds_but_not_much_later`,
+`a_showing_reminder_closes_when_its_meeting_is_cancelled_or_long_started`,
+`a_moved_meeting_is_reminded_at_its_new_time`, `back_to_back_meetings_each_remind`,
+`reminded_occurrences_are_forgotten_after_they_end`,
+`turning_reminders_off_withdraws_the_showing_one`, and
+`a_detected_call_belongs_to_the_current_meeting_on_its_service` in
+[calendar.rs](../../src/calendar.rs);
+`a_call_answered_from_its_calendar_reminder_is_not_offered_again` and
+`a_reminder_without_a_call_link_covers_only_the_next_call` in
+[meeting_detection.rs](../../src/meeting_detection.rs);
+`no_reminder_shows_over_a_recording` and
+`a_dismissed_reminder_without_a_link_snoozes_only_around_its_start` in
+[meeting_watcher.rs](../../src/meeting_watcher.rs);
+`calendar_reminders_stay_off_until_connected_and_survive_older_files` in
+[app_settings.rs](../../src/app_settings.rs);
+`a_calendar_meeting_gives_its_title_and_attendees_as_context` and
+`markdown_lists_the_calendar_attendees`; the reminder capsule checks in
+[meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)
+(`a_reminder_with_a_link_joins_and_records_on_one_click`,
+`a_reminder_without_a_link_only_records`,
+`dismissing_a_reminder_tells_the_controller`,
+`an_always_record_reminder_says_so_and_never_offers_record`,
+`the_reminder_counts_down_to_the_start`); and the Linux pane tests
+`the_calendar_asks_for_access_only_when_connect_is_pressed`,
+`a_connected_calendar_saves_reminders_and_lists_meetings`, and
+`denied_calendar_access_links_to_privacy_settings`; the answer checks
+`a_grant_is_full_access_even_while_the_status_is_stale` and
+`a_refusal_is_a_denial_unless_the_request_failed` in
+[calendar.rs](../../src/calendar.rs), and
+`a_granted_calendar_is_saved_connected_and_stays_connected`,
+`a_failed_save_shows_its_error`, `a_denied_calendar_is_not_saved_and_stays_blocked`,
+and `a_failed_request_keeps_connect_and_shows_the_error` in
+[macos_host.rs](../../src/rune_ui/macos_host.rs). Each step of Connect calendar
+logs a `calendar:` line to `process.log`. Scenes:
+`meetings-settings` (disconnected), `meetings-calendar`, and
+`meetings-calendar-denied`.
+
+Not yet observed: the EventKit bridge against a real calendar, the macOS
+permission prompt, and a reminder on screen. The controller loop that turns a
+reminder click into a recording has no automated test; it shares the manual
+Record path. Sources: [calendar.rs](../../src/calendar.rs),
+[calendar.swift](../../src/calendar.swift), `Reminders` in
+[meeting_watcher.rs](../../src/meeting_watcher.rs), `CalendarFeed` in
+[macos_host.rs](../../src/rune_ui/macos_host.rs), and
+[platform_settings.rs](../../src/rune_ui/platform_settings.rs).
 
 ### Record
 
@@ -151,18 +322,24 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
      ├── In the saved recording_indicator_corner
-     ├── Red dot · title · mm:ss
-     ├── Copy new (N) -> copies the in-call turns not yet copied or pasted
+     ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
+     ├── Hover -> widens toward the screen with the actions below; pointer
+     │   leaving -> eases back to compact (a held press keeps it open)
+     ├── Drag -> follows the pointer; release -> snaps to the corner nearest
+     │   its centre and saves recording_indicator_corner (window settings too)
+     ├── Copy new (N) -> copies the turns not yet copied or pasted, through
+     │   the click (see meetings.copy-through-now)
      │   ├── Shares Option-Control-V's cursor: either one advances both
-     │   ├── N = speaker turns waiting; disabled at 0; "Copied" for 1.5 s
-     │   └── Copies exactly the turns counted (the ticker's last read)
+     │   ├── N = speaker turns the ticker has seen; always enabled while
+     │   │   recording, since the latest speech may not be counted yet
+     │   ├── "Transcribing…" (disabled) while it waits, then copies; "Copied" for 1.5 s
+     │   └── The wait runs on its own thread, never on the main thread
      ├── Copy all -> the in-call transcript so far as speaker-turn Markdown;
      │   disabled until there is text
      │   └── Both read the Parakeet in-call transcript (TranscriptReader) once a
      │       second on the ticker thread, never on the main thread
      ├── Open -> activates Hex, then opens the active meeting in the Meetings pane
-     ├── Stop -> Stop & Transcribe
-     └── Not built on Rune: dragging to a corner, hover expansion
+     └── Stop -> Stop & Transcribe
   -> Settings window may stay closed
 
 Detected app leaves the microphone for about 3 s     // meetings.call-ended
@@ -170,7 +347,13 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> No timeout; nothing stops automatically
 
 Capture sources (meeting_capture.rs)                // meetings.capture
-├── Microphone -> selected input via cpal, resampled to 16 kHz
+├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
+│   ├── System default changes, the Settings microphone changes, or a missing
+│   │   saved device returns, mid-meeting
+│   │   -> New input opens before the old drops; same track, no retry gap
+│   │      // macOS only (meetings are macOS); a failed open keeps the old input
+│   └── Saved device listed but would not open -> System default stands in
+│       -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
 └── System audio -> Core Audio process tap (global, excluding Hex) on a private
     aggregate device; no display dependency
     └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback
@@ -206,11 +389,16 @@ fed by the controller events the menu-bar pump receives
 ([macos_rune.rs](../../src/macos_rune.rs)). The offer (20 s), "left the
 call", ready (15 s, Copy / Reveal, notes refresh) and a recording capsule
 (title, elapsed time, Copy new, Copy all, Open, Stop, in the configured
-corner) are ported. Not ported yet: hover expansion and dragging the
-recording capsule. Copy new and Copy all are checked by
-`the_recording_capsule_copies_the_in_call_transcript` and rendered by
-`capsule_snapshots` (`recording-empty`, `-live`, `-copied`); they have not
-been clicked on a real Mac. A "Never offer" or "Always record" choice is saved and
+corner, compact until hovered, dragged between corners) are ported. Copy new
+and Copy all are checked by
+`the_recording_capsule_copies_the_in_call_transcript` and
+`copy_new_copies_the_transcript_read_through_the_click`, and rendered by
+`capsule_snapshots` (`recording-empty`, `-live`, `-transcribing`, `-copied`,
+`-open`, `-left`); they have not been clicked on a real Mac. Hover and the corner snap
+are checked by `the_recording_capsule_rests_compact_and_opens_under_the_pointer`,
+`dragging_the_recording_capsule_moves_it_and_snaps_to_a_corner`, and
+`a_released_capsule_snaps_to_the_corner_nearest_its_centre`; neither has been
+tried with a real pointer. A "Never offer" or "Always record" choice is saved and
 also written into the window's live settings. On 2026-10-22 a signed build on a MacBook Pro
 showed the recording capsule (Open opened the meeting while it kept
 recording; Stop transcribed) and the ready capsule (Copy copied the
@@ -230,6 +418,8 @@ While recording                                      // meetings.rolling
      │   (so a chunk is at most 12 s of audio)
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
+     ├── No speech detected (Silero, once installed) -> empty transcript, no
+     │   inference; coverage still advances
      └── A dictation request or live stream came first -> retried once idle
   -> Timed words joined word by word at a shared word near each overlap's middle
      -> sentences (punctuation or a 600 ms pause)
@@ -243,13 +433,50 @@ While recording                                      // meetings.rolling
      │   incomplete; rebuilt from its WAV after Stop
      └── Model failure -> transcript.rolling.error.txt -> "Live transcript unavailable."
   -> Every in-call view reads it: Meetings pane, `hex meetings show`, MCP,
-     provisional titles, Option-Control-V (TranscriptReader)
+     provisional titles (TranscriptReader)
+
+Copy new or Option-Control-V while recording       // meetings.copy-through-now
+  -> The capture writer sends its partial blocks, then the request, in
+     capture order, so the request covers every sample received
+  -> The rolling worker answers it before any later audio:
+     ├── Queued chunks as usual (published to the snapshot)
+     ├── Each track's audio not yet in a chunk (no 6 s minimum), into a copy
+     │   of its transcript: the snapshot and later chunks are unaffected
+     ├── Waits for dictation like every meeting chunk; never a second model
+     └── The same echo and You-waits-for-Them rules as the snapshot
+     ├── Every sample up to the request, even 100 ms past a hard cut; the
+     │   system track counts as transcribed through all its audio
+  -> Each track remembers where the copy ended; its sentence ends there
+     (between the words whose middles lie either side, as boundaries move
+     when a later chunk hears more), so the copied part and the rest of it
+     publish as separate entries and the paste cursor neither repeats nor
+     drops either. A track rebuilt from its WAV after Stop keeps the cuts
+  -> A copy pressed as capture ends is still answered; quitting ends the wait
+  -> Up to 3 s (COPY_TRANSCRIBE_WAIT): usually under 1 s; past that, or with
+     dictation holding the model, copies the in-call transcript as it is and
+     logs a warning
+  -> After Stop, or in another process: the in-call or final transcript
 
 Stop & Transcribe
   -> Flush tails -> finish pending chunks           // usually seconds
   -> Any track that fell behind or failed -> stream its WAV in 1 s blocks
   -> Join on one timeline -> Echo suppression -> Final publication
+
+Hex quits while recording                           // meetings.quit
+  -> Capture stops; WAVs and manifest finalized; no chunk starts, no model loads
+  -> Interrupted with its rolling draft + final.pending beside the manifest
+  -> Next launch, Meetings on, no recording, once the dictation engine is up
+     (or 30 s without one) -> full-WAV final pass -> Complete + Markdown + notes
+     ├── Quit again or model not installed -> stays pending
+     └── Other failure -> stays Interrupted with the error and its draft
 ```
+
+Quitting gives its workers 5 s before `_exit`, and the final pass of a long
+meeting can take longer, or load a model once the dictation engine is gone.
+Sources: `record`, `finish_pending` in [meeting.rs](../../src/meeting.rs),
+`PendingFinals` in [meeting_watcher.rs](../../src/meeting_watcher.rs). Check:
+`quitting_mid_meeting_loads_no_model_and_finishes_in_time`. No repeatable
+driver quits a real recording and relaunches.
 
 Design choice: chunks are background jobs on the dictation transcription engine
 (`TranscriptionEngine::background`), using whatever model dictation has loaded,
@@ -278,13 +505,28 @@ words still waiting on a seam. Joining
 words rather than sentences keeps a sentence that runs across a hard cut whole;
 joining sentences lost its words on one side (10% word error on `You` lines).
 
+Speechless chunks: models invent text for silence and noise ("Thank you",
+"Grazie a tutti", or the recognition hints), and room or keyboard noise passes
+the -60 dB silent-chunk check, so every chunk that passes it also goes through
+the Silero speech detector used by dictation (see
+[dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
+least 160 ms becomes an empty transcript without inference, in rolling
+transcription, the Stop & Transcribe fallback, and `meeting echo`. In a probe
+outside the tree, run on each microphone entry of one 63-minute Italian call,
+the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
+and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
+scanned the call in 1.6 s on the CPU. Invented text inside a
+chunk that also holds speech is not addressed. Without the detector only the
+-60 dB check applies, as before. A Whisper chunk that returns only the recognition
+hints is emptied too ([models](README.md#get-ready)).
+
 In-call text was a Moonshine draft until 2026-10-22: the pane showed Parakeet
 only for time rolling had covered, and Option-Control-V and the GPUI capsule's
 Copy new pasted the Moonshine draft alone, which garbled names and jargon. The
 meeting now loads no Moonshine; short Parakeet chunks replace it. Always-on
 streaming Parakeet was rejected because one loaded model cannot serve it:
-transcribe-cpp 0.2.4 allows one active stream per model across all sessions,
-and refuses any other run or stream with `Busy` while it is open
+transcribe-cpp (0.2.4, and still 0.4.1) allows one active stream per model
+across all sessions, and refuses any other run or stream with `Busy` while it is open
 (`Session::stream`). Two tracks would need a mixed track (losing You/Them and
 echo suppression) or a model copy per track (about 0.7 GB each), and every
 dictation would have to close the meeting stream and lose its 5.6 s left
@@ -394,9 +636,23 @@ Other checks:
 `chunks_end_at_the_first_pause_after_the_target_length`,
 `short_recordings_become_one_chunk_and_silence_tails_are_dropped`,
 `overlapping_chunks_join_at_the_middle_of_the_overlap`, `seam_drops_repeated_words`,
+`speechless_chunks_skip_the_model_and_still_advance_coverage`,
+`a_speechless_chunk_after_an_overlap_keeps_earlier_entries`,
 `a_sentence_across_a_hard_cut_keeps_every_word`,
 `rolling_publishes_only_entries_a_later_seam_cannot_replace`,
 `a_capture_gap_restarts_the_track_after_it_instead_of_dropping_it`,
+`a_copy_includes_speech_up_to_the_click`,
+`repeated_copies_neither_repeat_nor_drop_words_as_later_chunks_overlap_them`,
+`repeated_copies_cut_tracks_that_start_at_different_capture_times`,
+`a_copy_just_after_a_hard_cut_keeps_you_while_them_is_silent`,
+`a_copy_cut_holds_when_a_later_chunk_moves_the_words_slightly`,
+`a_track_rebuilt_from_its_wav_after_stop_keeps_the_copies_cuts`,
+`a_copy_waiting_when_capture_ends_is_still_answered`,
+`a_copy_stops_waiting_when_hex_quits`,
+`a_copy_that_runs_out_of_time_gets_no_reply`,
+`a_copy_waits_out_dictation_and_a_preempted_chunk`,
+`a_copy_reaches_only_the_recording_this_process_runs`,
+`the_feed_forwards_a_copy_after_the_audio_before_it`,
 `a_backlog_skips_the_oldest_audio_and_marks_the_track_for_rebuilding`,
 `silent_chunks_are_not_transcribed`,
 `speaker_echo_of_remote_speech_is_dropped`, `word_level_echo_is_dropped_as_one_utterance`,
@@ -429,8 +685,11 @@ Final publication                                   // meetings.output
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal
 Meetings pane -> Row Copy (completed rows), detail Copy transcript, Reveal Markdown (or Reveal Files when none)
 Menu bar (idle) -> Copy Last Meeting Transcript
-Option-Control-V -> `MeetingPasteCursor` in `meeting.rs` over the rolling transcript
-├── Pastes settled turns added since the last successful paste
+Option-Control-V -> `MeetingPasteCursor` in `meeting.rs` over the transcript
+│   through the press (meetings.copy-through-now)
+├── Pastes turns added since the last successful paste
+├── Runs in order with dictation output: a dictation finished during its
+│   wait (at most 3 s) pastes after it
 ├── Remembers, per source, the capture time spans it pasted (spans within 1.5 s
 │   merge); an entry is new when its midpoint is outside them, so nothing
 │   repeats or drops when the final transcript replaces rolling after Stop, and
@@ -513,7 +772,7 @@ Final publication complete                               // meetings.notes
   -> Manifest: notes { title ≤8 words, summary ≤2 sentences / 400 chars,
      excerpt_chars, transcript_chars }
   -> Markdown copy, same file name, atomic replace
-     ├── Heading -> final title, only while it still reads HEX's last title
+     ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
@@ -572,10 +831,97 @@ Final title + summary, one call, 11,151-char excerpt     3.4–3.5 s (3 runs)
 Before: map-reduce over 8 chunks, 9 calls, 51-minute call  96 s
 ```
 
+### Live Chapters (experiment `live-chapters`)
+
+Off by default and unsupported: `hex experiments enable live-chapters`, then
+relaunch. Off, nothing below starts, and meetings behave as without it.
+
+```ts
+Recording starts, experiment on                        // meetings.chapters.live
+  -> meeting-chapters thread, utility QoS; checks the rolling transcript every 5 s
+     (nothing read while Apple Intelligence is unavailable or titles are off)
+  -> ≥ 3 min of new meeting time and ≥ 40 new words -> waits (≤30 s) for dictation
+  -> ONE call over only the new lines (≤3,600 chars, newest kept, "[…]" before)
+     ├── Prompt: vocabulary terms (≤30, vocabulary experiment) -> new lines ->
+     │   "Current chapter: X"
+     └── Answer: a 2–5 word name, one line, and "same topic or not"
+  -> Rust decides, not the model's flag alone
+     ├── First name -> chapter 1 at 00:00
+     ├── Name sharing > half its words with this chapter's last 3 names, or any
+     │   word when the model says "same" -> stays (clears a pending departure)
+     ├── Otherwise a departure; it opens a chapter, dated at its window's first
+     │   line, only when the next pass departs too and the current chapter has
+     │   lasted ≥ 90 s. A second departure naming yet another topic waits for
+     │   its own confirmation
+     └── Refused passage -> counted as read; failure -> retry after 1, 2 … 5 min
+  -> Recorder stores chapters in the manifest -> title, menu bar, pane
+Stop
+  -> A departure still waiting for its second pass opens (≥ 90 s rule applies)
+  -> A pass finishing after Stop is discarded
+After final publication, inside the notes thread       // meetings.chapters.refine
+  -> One call per boundary, all within 30 s: lines (not merged turns) within
+     3 min of the live boundary, "Chapter before/after: name (line)"
+  -> Model lists the L numbers about the chapter after; Rust moves the boundary
+     to the split that disagrees with the fewest labels, only if the labels
+     cover at least half the lines after the live boundary and the new start
+     stays after the previous chapter's
+  -> chapters_refined = true; a failed call keeps its boundary
+  -> Each call first waits (≤30 s) for dictation; a stop or quit ends the pass
+     with nothing saved, so the next notes run redoes it
+Copy section (pane, per chapter; menu bar "Copy Section" while recording;
+`hex meetings show --chapter N`)
+  -> "## <name>\n\n<line>\n\n" + the transcript lines that start inside the
+     chapter, joined into turns only within it (one shared function)
+```
+
+Titles: with the experiment on, the manifest records `title_source` (`default`,
+`call`, `calendar`, `user`); off, it is written only to a manifest that already
+has it or has chapters. Unless it is `user`, the shown title is the base title
+plus up to three of the longest chapters in meeting order, once there are two:
+"Team sync: image storage, motion lint, chat app name" (≤100 chars; a name that
+would pass that is left out). While recording, the last chapter runs until now.
+A title the user typed, including a rename while recording or transcribing, is
+never extended. Manifests without the field read as `user` when their title is
+not the default.
+
+Read surfaces: `hex meetings chapters <id> [--json]`, `hex meetings show <id>
+--chapter N`, a `## Chapters` list in `show`, `chapters` in `show --json`
+(JSON stays version 1), and MCP `get_chapters`.
+
+Sources: [meeting_chapters.rs](../../src/meeting_chapters.rs) (worker, decisions,
+boundary pass, title), `GeneratedChapter` / `GeneratedChapterLines` in
+[apple_intelligence.swift](../../src/apple_intelligence.swift), the record loop
+and `TitleSource` in [meeting.rs](../../src/meeting.rs). Checks in
+`meeting::chapters::tests` (fake model): pass plan and back-off, first chapter,
+two-passes-away, minimum length, name overlap and the model's flag, refusals,
+prompt order, pass window, confirming on another topic, Stop opening a waiting
+departure, the boundary pass (one call per boundary, unsupported answers kept,
+partial failures, a stopped pass saving nothing), title building and the
+recording title, section Markdown, and the worker;
+`meeting::tests::chapters_extend_every_title_but_one_the_user_typed`;
+`copy_section_matches_the_menu_bar_and_the_cli` (macOS host: pane, menu bar,
+and CLI give the same section when one speaker's turn crosses a boundary);
+`copy_section_copies_one_chapter` (Linux-only Rune tests). The menu bar
+submenu, the recorder writing chapters during a real recording, and the
+`meetings-chapters` scene on a Mac screen are unexercised.
+
+Real model (debug CLI): `hex meeting chapters <file.md>` runs the live passes
+as a recording would, then the boundary pass, without saving.
+
+Observed (2026-10-23, Mac mini, debug build) on a synthetic 15-minute, three
+topic transcript (true changes at 05:32 and 11:02), 5 runs: passes 1.0–2.4 s;
+boundary pass 1.8–3.4 s (2–3 calls, ~1,500 prompt chars each). All runs found
+all three topics; 2 of 5 added a spurious "cdn cache headers" chapter at 03:42.
+The second change landed at 11:02 in 3 runs and one line late (11:24) in 2; the
+first at 05:32 in 2 runs and stayed at the live 06:38 in 3. The model's
+same-topic flag was close to random ("same" for unrelated names, "new" for the
+current one), which is why Rust's name overlap decides.
+
 ### Agent Access (MCP)
 
-The release CLI also supports `hex meetings list`, `show <id|latest>`, and
-`search <query>` through this query layer. See the [transcript CLI map](transcript-cli.md)
+The release CLI also supports `hex meetings list`, `show <id|latest>` (with
+`--from`/`--to` offsets or `--chapter N`), `chapters <id>`, and `search <query>`
+through this query layer. See the [transcript CLI map](transcript-cli.md)
 and [versioned JSON contract](../transcript-cli.md).
 
 ```ts
@@ -583,7 +929,7 @@ hex mcp [--meetings-dir <path>]                     // meetings.mcp; release bui
 ├── MCP over stdio; independent of the Meetings opt-in (read-only)
 ├── Dispatches before process logging, the instance lock, GUI, and permissions
 │   └── Safe beside the running app; logs only to stderr (HEX_MCP_LOG)
-├── Default folder: Application Support/hex/meetings (voice-control on older builds)
+├── Default folder: Application Support/hex/meetings (hex on older builds)
 │   └── --meetings-dir -> any mirrored copy (rsync of that folder)
 ├── A copy named hex-meetings-mcp -> always `hex mcp` with the same flags
 │   (no subcommand never falls back to listening)
@@ -595,11 +941,18 @@ hex mcp [--meetings-dir <path>]                     // meetings.mcp; release bui
     │   └── per-meeting counts + ranked passages: id, title, speaker,
     │       mm:ss @ ISO time, snippet with **matches**, before/after lines
     ├── get_transcript(meeting_id, start?, end?, speaker?, max_chars?, cursor?)
-    │   └── merged You/Them turns "[mm:ss · HH:MM:SS] Them: …" + next_cursor
-    └── get_meeting_notes(meeting_id)
-        └── stored title + two-sentence summary + "read the transcript for
-            details, decisions, and action items", or an explicit
-            "No Apple Intelligence notes are stored" + get_transcript hint
+    │   ├── merged You/Them turns "[mm:ss · HH:MM:SS] Them: …" + next_cursor
+    │   └── start/end, or the same as from/to (own schema fields; not both):
+    │       entries overlapping the range; a start not before the end (an
+    │       omitted start is 0) or past the meeting's end is an error
+    ├── get_meeting_notes(meeting_id)
+    │   └── stored title + two-sentence summary + "read the transcript for
+    │       details, decisions, and action items", or an explicit
+    │       "No Apple Intelligence notes are stored" + get_transcript hint
+    └── get_chapters(meeting_id)                      // experiment live-chapters
+        └── "N. mm:ss–mm:ss · name" + line each, whether boundaries were
+            corrected, a get_transcript start/end hint; or "No chapters are
+            stored" ("No chapters yet" while recording); never generates any
 Resources: hex-meeting://<id> -> Markdown (metadata, notes, transcript)
 ```
 
@@ -625,28 +978,55 @@ Search: in-memory, rebuilt per meeting when its files' sizes or times change.
 Passages are same-speaker runs of up to 60 words (3 s turn gap) plus one per
 stored notes block. Text is NFKD-folded (case and diacritics), tokenized, and
 lightly stemmed (`scheduled`/`scheduling` -> `schedul`). BM25 (k1 1.2, b 0.75)
-over expanded terms: exact 1.0, prefix 0.8, edit distance 1 (2 from 8 letters)
-0.7, Soundex 0.45 for 3-5 letter words (`Dacks` -> `Dax`); partial-term
-coverage and adjacent-term bonuses. `"Quoted words"` are required exact
-(stemmed) phrases; `fuzzy: false` keeps only exact stems.
+over expanded terms: exact 1.0, prefix 0.5, edit distance 1 (2 from 8 letters)
+0.35, Soundex 0.2 for 3-5 letter words (`Dacks` -> `Dax`); partial-term
+coverage weighted the same way, and adjacent-term bonuses. Passages matching
+every term exactly rank above all others. Edit and Soundex fallbacks apply only
+to a term with fewer than three exact passages, and skip words in more than
+0.5% of the passages searched (at least five) unless the term has no exact hit
+and the word is exactly one edit away. This keeps `made`, `blog`, `Bob`, and
+`believe` out of a `media`/`blob` search once those words appear exactly in
+three passages, while a typo of a rare word still finds it. A term's match in a
+passage is its exact stem when present, then the best score, kind, and
+alphabetically first stem, so ties are deterministic. `"Quoted words"` are
+required exact (stemmed) phrases; `fuzzy: false` keeps only exact stems.
+`hex history --search` shares this ranker, counting an entry's raw and final
+text as one document.
 
 Semantic search is not shipped. On-device candidates are Apple NaturalLanguage
 `NLContextualEmbedding` (asset download, macOS 14+) or the older static
 `NLEmbedding` sentence model, through a Swift bridge like `apple_speech`, with a
-cache under `~/Library/Caches/voice-control/meeting-index` keyed by meeting
+cache under `~/Library/Caches/hex/meeting-index` keyed by meeting
 fingerprints. Full-text with stemming and fuzzy matching answered the real
 queries below; embeddings wait until a query fails for lack of paraphrase.
 
 Sources: [meeting_query.rs](../../src/meeting_query.rs) (`meeting::query`,
 queries and rendering) and [meeting_mcp.rs](../../src/meeting_mcp.rs) (`rmcp`
 3.5 adapter); `run_mcp` in [main.rs](../../src/main.rs). Checks (synthetic
-fixtures in `tests/fixtures/meetings`): `meeting::query::tests::*` (listing and
-skipped folders, filters, misspelling tolerance and ranking, stemming, accents,
-required phrases, context, drafts, cursor paging, notes, held lock,
-`queries_never_write_to_the_meetings_folder`, time parsing) and
+fixtures in `tests/fixtures/meetings` and `tests/fixtures/meetings-ranking`):
+`meeting::query::tests::*` (listing and skipped folders, filters, misspelling
+tolerance and ranking, stemming, accents, required phrases, context, drafts,
+cursor paging, notes, held lock, `queries_never_write_to_the_meetings_folder`,
+time and strict offset parsing, offset ranges on final, rolling, and
+in-progress transcripts (including the "so far" error),
+`exact_stems_outrank_loose_matches_to_common_words`,
+`passages_matching_every_term_exactly_rank_first`,
+`an_all_exact_passage_outranks_a_higher_scoring_partial_one`,
+`a_term_found_in_fewer_passages_still_reaches_its_neighbours`,
+`a_misspelled_rare_word_still_finds_its_passage`, and
+`spelling_fallbacks_need_rare_terms_and_uncommon_candidates`) and
 `tests/meetings_mcp.rs` (initialize with protocol 2025-06-18, tools/list with
-schemas and read-only annotations, tools/call, resources/read, stdout carries
-only JSON-RPC, no Application Support state created).
+schemas (including `from`/`to`) and read-only annotations, tools/call including
+`from`/`to` ranges beside null `start`/`end` and their errors, resources/read,
+stdout carries only JSON-RPC, no Application Support state created).
+
+Observed (2026-10-23, Mac Studio, debug build, live meetings folder, read-only):
+`hex meetings search "images database blob storage media"` dropped from 315 to
+140 matching passages, with no fuzzy-only hit in the top 25 (before: four,
+through `blog`, `blow`, `believe`, `made`, and `motto`); the top hit remains the
+in-progress meeting's 115:02 passage, and 6 of the top 10 fall in its
+113:03–120:43 storage discussion. `show <id> --from 113:03 --to 120:43` returned
+that section's 168 rolling entries as Markdown and JSON.
 
 Observed (2026-10-15, Mac Studio, release build, read-only copy of the Pro's 8
 meetings without WAVs): first launch of a freshly signed binary 440 ms to
@@ -663,7 +1043,7 @@ Do: one periodic pull, then local servers               // meetings.mcp.mirror
 scripts/sync-meetings-mirror.sh (LaunchAgent template, every 120 s,
   ProcessType Background, Nice 10, LowPriorityIO)
 ├── ONE rsync over ssh (BatchMode, ConnectTimeout 5, --timeout 60)
-│   pro:Library/Application Support/voice-control/meetings/ (symlink to hex/ once migrated)
+│   pro:Library/Application Support/hex/meetings/
 │   -> ~/Library/Caches/hex-meetings-mirror/ (0700)
 ├── Skips *.wav, *.lock, *.tmp; --delay-updates (files land together at the
 │   end); --delete-delay (meetings trashed on the Pro disappear)
@@ -705,6 +1085,12 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
   falls more than 120 s behind skips audio until Stop rebuilds it.
 - The recording capsule's Copy new / Copy all are unverified on a real Mac
   screen; its count can trail the transcript by up to a second.
+- Copying through the click is checked with a fake model only; its real-Mac
+  latency and how often the 3 s wait runs out are unmeasured. Handing a
+  copy's cuts from the rolling worker to the WAV rebuild in `transcribe` has
+  no test of its own; the rebuild with cuts does. The copy waits
+  for the next audio packet to arrive, so with both sources stopped it runs
+  out of time and copies the in-call transcript.
 - The Meetings pane is verified by Rune goldens rendered offscreen (on Linux
   and on hailmary's Metal), not on a Mac screen; the capsules have no golden.
 - Echo thresholds are tuned on two speaker-mode calls (2026-10-15 and
@@ -720,3 +1106,10 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
+- Live chapters (experiment) have not run in a real recording: the worker,
+  manifest writes, title updates, menu bar Copy Section, and the boundary pass
+  after publication ran only in unit tests and the debug CLI over one synthetic
+  transcript. The thresholds (3 min passes, 90 s minimum, name overlap) are
+  tuned on that transcript; the model's same-topic flag is unreliable, and a
+  short detour can still become its own chapter. The boundary pass runs only
+  when meeting notes run, after publication.

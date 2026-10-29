@@ -16,9 +16,14 @@ use crate::events::now_ms;
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
+/// Beside the manifest of a meeting Hex quit while recording: its audio is
+/// saved and its final transcript runs at the next launch.
+const FINAL_PENDING_FILE: &str = "final.pending";
 
 #[path = "meeting_capture.rs"]
 mod capture;
+#[path = "meeting_chapters.rs"]
+mod chapters;
 pub use capture::{
     SystemAudioAuthorization, request_system_audio_access, system_audio_authorization,
 };
@@ -30,6 +35,9 @@ mod notes;
 pub mod query;
 #[path = "meeting_transcript.rs"]
 mod transcript;
+#[cfg(debug_assertions)]
+pub use chapters::chapters_file;
+pub use chapters::{Chapter, chapter_entries, section_for_id, section_markdown};
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(debug_assertions)]
 pub use notes::{summarize, summarize_file};
@@ -42,6 +50,35 @@ pub struct MeetingStart {
     pub title: Option<String>,
     /// The detected call application, such as `Zoom`.
     pub app: Option<String>,
+    /// The calendar event the recording was started for.
+    pub calendar: Option<MeetingCalendar>,
+    /// Where `title` came from; ignored without a title.
+    pub title_source: TitleSource,
+}
+
+/// Where a meeting's title came from. Only a title the user typed is never
+/// extended or replaced by generated ones.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleSource {
+    /// The app-and-time title Hex made up.
+    #[default]
+    Default,
+    /// The detected call's own name, such as a browser tab's.
+    Call,
+    /// The calendar event the recording was started for.
+    Calendar,
+    /// Typed by the user when recording started or in a rename.
+    User,
+}
+
+/// The calendar event behind a meeting: its title and the other attendees,
+/// kept as context for the transcript and its notes.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MeetingCalendar {
+    pub title: String,
+    #[serde(default)]
+    pub attendees: Vec<String>,
 }
 
 /// What the recorder reports to its owner while it runs.
@@ -51,6 +88,8 @@ pub enum RecordingUpdate {
     Started { id: String, title: String },
     /// A provisional title from the transcript so far.
     Retitled { title: String },
+    /// The live chapters so far (experiment `live-chapters`).
+    Chapters(Vec<Chapter>),
     /// Capture stopped; final transcription is running.
     Transcribing,
 }
@@ -75,7 +114,7 @@ pub fn screen_recording_permitted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
 }
 
-/// Asks macOS to list HEX under Screen & System Audio Recording. The system
+/// Asks macOS to list Hex under Screen & System Audio Recording. The system
 /// prompts at most once; later requests return the current state.
 pub fn request_screen_recording() -> bool {
     // SAFETY: A CoreGraphics request without arguments.
@@ -109,7 +148,10 @@ pub fn reveal(path: &Path) {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingRequest {
-    Start,
+    /// Record a meeting now; `title` names it instead of the default.
+    Start {
+        title: Option<String>,
+    },
     Stop,
     /// Regenerate Apple Intelligence notes for a completed meeting.
     Summarize(String),
@@ -149,6 +191,32 @@ pub struct MeetingManifest {
     pub notes: Option<MeetingNotes>,
     #[serde(default)]
     pub notes_error: Option<String>,
+    /// The calendar event the recording was started for, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar: Option<MeetingCalendar>,
+    /// Where `title` came from. Older manifests have none: a title other
+    /// than the default one counts as the user's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_source: Option<TitleSource>,
+    /// Topic chapters in time order (experiment `live-chapters`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chapters: Vec<Chapter>,
+    /// The chapter boundaries were corrected over the whole transcript.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chapters_refined: bool,
+}
+
+impl MeetingManifest {
+    /// Where `title` came from, inferred for manifests that predate the field.
+    pub fn title_source(&self) -> TitleSource {
+        self.title_source.unwrap_or_else(|| {
+            if self.title == default_title(self.app.as_deref(), self.created_at_ms) {
+                TitleSource::Default
+            } else {
+                TitleSource::User
+            }
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -289,6 +357,21 @@ struct ActiveMeeting {
 }
 
 impl ActiveMeeting {
+    /// `None` while another process holds the meeting.
+    fn try_acquire(directory: &Path) -> Result<Option<Self>> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(directory.join("active.lock"))?;
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     fn acquire(directory: &Path) -> Result<Self> {
         let path = directory.join("active.lock");
         let file = OpenOptions::new()
@@ -335,13 +418,17 @@ pub fn record(
     set_owner_only(&meeting_dir, true)?;
     let _active = ActiveMeeting::acquire(&meeting_dir)?;
 
+    let given_title = start.title.filter(|title| !title.trim().is_empty());
+    let title_source = match (&given_title, start.title_source) {
+        (None, _) => TitleSource::Default,
+        // A title without a known source is treated as the user's.
+        (Some(_), TitleSource::Default) => TitleSource::User,
+        (Some(_), source) => source,
+    };
     let mut manifest = MeetingManifest {
         schema_version: 1,
         id,
-        title: start
-            .title
-            .filter(|title| !title.trim().is_empty())
-            .unwrap_or_else(|| default_title(start.app.as_deref(), created_at_ms)),
+        title: given_title.unwrap_or_else(|| default_title(start.app.as_deref(), created_at_ms)),
         status: MeetingStatus::Starting,
         created_at_ms,
         ended_at_ms: None,
@@ -363,7 +450,12 @@ pub fn record(
         provisional_title: None,
         notes: None,
         notes_error: None,
+        calendar: start.calendar,
+        title_source: None,
+        chapters: Vec::new(),
+        chapters_refined: false,
     };
+    set_title_source(&mut manifest, title_source);
     write_manifest(&meeting_dir, &manifest)?;
 
     let result = (|| -> Result<MeetingManifest> {
@@ -376,6 +468,7 @@ pub fn record(
         let mut rolling =
             transcript::Rolling::start(meeting_dir.clone(), transcription_selection.clone());
         let rolling_feed = rolling.feed();
+        let flush_registration = transcript::register_flusher(&manifest.id, rolling.flusher());
         let writer_dir = meeting_dir.clone();
         let writer = thread::spawn(move || write_tracks(&writer_dir, receiver, rolling_feed));
         let cleanup_failed_setup =
@@ -417,17 +510,30 @@ pub fn record(
 
         let started = Instant::now();
         let titles = notes::ProvisionalTitles::start(manifest.id.clone());
+        let live_chapters =
+            crate::experiments::enabled(crate::experiments::Experiment::LiveChapters)
+                .then(|| chapters::LiveChapters::start(manifest.id.clone()));
         println!("Recording '{}' (Ctrl-C to stop)", manifest.title);
-        while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
+        let take_updates = |manifest: &mut MeetingManifest| {
             if let Some(title) = titles.take() {
-                record_provisional_title(&meeting_dir, &mut manifest, title, updates.as_ref());
+                record_provisional_title(&meeting_dir, manifest, title, updates.as_ref());
             }
+            if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.take()) {
+                record_chapters(&meeting_dir, manifest, chapters, updates.as_ref());
+            }
+        };
+        while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
+            take_updates(&mut manifest);
             thread::sleep(Duration::from_millis(100));
         }
-        if let Some(title) = titles.take() {
-            record_provisional_title(&meeting_dir, &mut manifest, title, updates.as_ref());
+        take_updates(&mut manifest);
+        if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.finish()) {
+            record_chapters(&meeting_dir, &mut manifest, chapters, updates.as_ref());
         }
         drop(titles);
+        drop(live_chapters);
+        keep_rename(&meeting_dir, &mut manifest);
+        drop(flush_registration);
         drop(system_capture);
         drop(microphone_capture);
         drop(sender);
@@ -440,6 +546,18 @@ pub fn record(
         stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
+        if crate::process_exit::quitting() && has_recorded_audio(&manifest) {
+            // Final transcription would outlast quitting's drain.
+            drop(rolling.finish());
+            fs::write(meeting_dir.join(FINAL_PENDING_FILE), b"")?;
+            manifest.status = MeetingStatus::Interrupted;
+            write_manifest(&meeting_dir, &manifest)?;
+            tracing::info!(
+                meeting = manifest.id,
+                "Hex quit while recording; the transcript finishes at the next launch"
+            );
+            return Ok(manifest);
+        }
         let capture_error =
             (!has_recorded_audio(&manifest)).then(|| "no meeting audio was captured".to_string());
         prepare_for_transcription(
@@ -459,12 +577,14 @@ pub fn record(
         ) {
             Ok(()) => manifest.status = MeetingStatus::Complete,
             Err(error) => {
+                keep_rename(&meeting_dir, &mut manifest);
                 manifest.status = MeetingStatus::Failed;
                 manifest.error = Some(error.to_string());
                 write_manifest(&meeting_dir, &manifest)?;
                 return Err(error);
             }
         }
+        keep_rename(&meeting_dir, &mut manifest);
         write_manifest(&meeting_dir, &manifest)?;
         println!("Saved meeting {}", meeting_dir.display());
         Ok(manifest)
@@ -481,6 +601,7 @@ fn record_provisional_title(
     title: String,
     updates: Option<&SyncSender<RecordingUpdate>>,
 ) {
+    keep_rename(directory, manifest);
     manifest.provisional_title = Some(title);
     if let Err(error) = write_manifest(directory, manifest) {
         tracing::warn!(%error, meeting = manifest.id, "could not record provisional meeting title");
@@ -490,6 +611,58 @@ fn record_provisional_title(
         let _ = updates.try_send(RecordingUpdate::Retitled {
             title: display_title(manifest),
         });
+    }
+}
+
+fn record_chapters(
+    directory: &Path,
+    manifest: &mut MeetingManifest,
+    chapters: Vec<Chapter>,
+    updates: Option<&SyncSender<RecordingUpdate>>,
+) {
+    keep_rename(directory, manifest);
+    let previous_title = display_title(manifest);
+    manifest.chapters = chapters;
+    if let Err(error) = write_manifest(directory, manifest) {
+        tracing::warn!(%error, meeting = manifest.id, "could not record meeting chapters");
+        return;
+    }
+    if let Some(updates) = updates {
+        let _ = updates.try_send(RecordingUpdate::Chapters(manifest.chapters.clone()));
+        let title = display_title(manifest);
+        if title != previous_title {
+            let _ = updates.try_send(RecordingUpdate::Retitled { title });
+        }
+    }
+}
+
+/// Records where the title came from, which only live chapters read; with
+/// the experiment off, a manifest that has neither stays as it was.
+fn set_title_source(manifest: &mut MeetingManifest, source: TitleSource) {
+    if manifest.title_source.is_some()
+        || !manifest.chapters.is_empty()
+        || crate::experiments::enabled(crate::experiments::Experiment::LiveChapters)
+    {
+        manifest.title_source = Some(source);
+    }
+}
+
+/// Keeps a rename made while recording (experiment `live-chapters`).
+fn keep_rename(directory: &Path, manifest: &mut MeetingManifest) {
+    if crate::experiments::enabled(crate::experiments::Experiment::LiveChapters) {
+        adopt_rename(directory, manifest);
+    }
+}
+
+/// The recorder rewrites the manifest from memory, so it adopts a user
+/// title written meanwhile.
+fn adopt_rename(directory: &Path, manifest: &mut MeetingManifest) {
+    if let Ok(stored) = read_manifest(directory)
+        && stored.title_source() == TitleSource::User
+        && (stored.title != manifest.title || manifest.title_source() != TitleSource::User)
+    {
+        manifest.title = stored.title;
+        manifest.title_source = Some(TitleSource::User);
     }
 }
 
@@ -560,7 +733,8 @@ fn prepare_for_transcription(
         }
     }
     if let Some(updates) = updates {
-        let _ = updates.try_send(RecordingUpdate::Transcribing);
+        // Never dropped: the controller drains until the recorder finishes.
+        let _ = updates.send(RecordingUpdate::Transcribing);
     }
     manifest.status = MeetingStatus::Transcribing;
     manifest.error = None;
@@ -789,6 +963,8 @@ fn transcribe(
     let (transcript, echo_suppressed) =
         transcript::transcribe(directory, manifest, selection, rolling)?;
     manifest.echo_suppressed_utterances = echo_suppressed;
+    // Transcription takes a while; the headings use a rename made meanwhile.
+    keep_rename(directory, manifest);
 
     let ndjson_temporary = directory.join("transcript.ndjson.tmp");
     let markdown_temporary = directory.join("transcript.md.tmp");
@@ -825,7 +1001,63 @@ fn transcribe(
             manifest.export_error = Some(error.to_string());
         }
     }
+    let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
     Ok(())
+}
+
+/// Meetings Hex quit while recording, oldest first.
+pub fn pending_final_transcripts() -> Vec<String> {
+    let Ok(entries) = root().and_then(|root| Ok(fs::read_dir(root)?)) else {
+        return Vec::new();
+    };
+    let mut ids = entries
+        .flatten()
+        .filter(|entry| entry.path().join(FINAL_PENDING_FILE).exists())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
+/// Transcribes and publishes a meeting Hex quit while recording, as Stop
+/// would have. `None` when it is no longer pending or another process holds
+/// it. Quitting again, or a missing model, leaves it pending for the next
+/// launch; any other failure keeps it Interrupted with its draft.
+pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
+    let directory = root()?.join(id);
+    let Some(_active) = ActiveMeeting::try_acquire(&directory)? else {
+        return Ok(None);
+    };
+    let pending = directory.join(FINAL_PENDING_FILE);
+    if !pending.exists() {
+        return Ok(None);
+    }
+    let (_, selection) = crate::app_settings::transcription_selection();
+    let model = crate::transcription_models::validate(&selection)?;
+    if !crate::transcription_models::is_installed(model, &selection.language) {
+        return Err(eyre!("{} is not installed", model.name));
+    }
+    let mut manifest = read_manifest(&directory)?;
+    tracing::info!(
+        meeting = id,
+        "finishing the transcript of a meeting Hex quit while recording"
+    );
+    match transcribe(&directory, &mut manifest, &selection, None) {
+        Ok(()) => {
+            manifest.status = MeetingStatus::Complete;
+            manifest.error = None;
+            write_manifest(&directory, &manifest)?;
+            Ok(Some(manifest))
+        }
+        Err(error) if crate::process_exit::quitting() => Err(error),
+        Err(error) => {
+            manifest.status = MeetingStatus::Interrupted;
+            manifest.error = Some(error.to_string());
+            write_manifest(&directory, &manifest)?;
+            let _ = fs::remove_file(&pending);
+            Err(error)
+        }
+    }
 }
 
 pub fn list() -> Result<Vec<MeetingManifest>> {
@@ -1021,6 +1253,7 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
     let mut manifest = read_manifest(directory)?;
     let previous = display_title(&manifest);
     manifest.title = title;
+    set_title_source(&mut manifest, TitleSource::User);
     let next = display_title(&manifest);
     let mut markdown_error = None;
     if previous != next
@@ -1228,14 +1461,40 @@ pub fn format_meeting_delta(entries: &[TranscriptEntry]) -> Result<String> {
         .join("\n\n"))
 }
 
+/// How long a copy of new turns waits for the recording's audio up to the
+/// click to be transcribed. That is the next audio packet (milliseconds), a
+/// meeting chunk already running (well under a second on Metal), and each
+/// source's last few seconds (a few hundred milliseconds each), so it
+/// usually takes under a second; three seconds leaves room for a slower Mac
+/// or a short backlog while still feeling like a response to the click. A
+/// dictation in progress keeps the model, so the copy may run out of time
+/// instead.
+pub const COPY_TRANSCRIBE_WAIT: Duration = Duration::from_secs(3);
+
+/// What a copy of new turns reads for meeting `id`: while this process
+/// records it, the transcript through the click, waiting up to
+/// [`COPY_TRANSCRIBE_WAIT`] for it; past that, or otherwise, the in-call
+/// or final transcript as it is.
+pub fn entries_for_copy(id: &str) -> Result<Vec<TranscriptEntry>> {
+    match transcript::transcribe_up_to_now(id, COPY_TRANSCRIBE_WAIT) {
+        transcript::Flushed::Fresh(entries) => return Ok(entries),
+        transcript::Flushed::TimedOut => tracing::warn!(
+            meeting = id,
+            "the latest audio was not transcribed in time; copying what is ready"
+        ),
+        transcript::Flushed::NotRecording => {}
+    }
+    TranscriptReader::default().read(id)
+}
+
 /// Consumes new turns for `id` using the shared cursor, advancing only if
-/// `commit_output` succeeds. While recording they come from the rolling
-/// transcript, afterwards from the final one.
+/// `commit_output` succeeds. While recording they come from the transcript
+/// through now ([`entries_for_copy`]), afterwards from the final one.
 pub fn consume_delta_for_id(
     id: &str,
     commit_output: impl FnOnce(&str) -> Result<()>,
 ) -> Result<String> {
-    let entries = TranscriptReader::default().read(id)?;
+    let entries = entries_for_copy(id)?;
     shared_paste_cursor()
         .lock()
         .unwrap_or_else(|error| error.into_inner())

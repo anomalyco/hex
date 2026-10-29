@@ -27,6 +27,11 @@ pub(super) fn applications() -> Vec<InstalledApplication> {
         .collect()
 }
 
+pub(super) fn metadata(path: &Path) -> color_eyre::Result<InstalledApplication> {
+    executable_entry(path.to_owned())
+        .ok_or_else(|| color_eyre::eyre::eyre!("select a Windows .exe application"))
+}
+
 fn executable_entry(path: PathBuf) -> Option<InstalledApplication> {
     if !path
         .extension()

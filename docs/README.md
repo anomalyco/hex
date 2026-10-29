@@ -5,7 +5,7 @@ override shipped behavior.
 
 ## User Guides
 
-- [`../README.md`](../README.md): install and use HEX on macOS, Windows, and Linux.
+- [`../README.md`](../README.md): install and use Hex on macOS, Windows, and Linux.
 - [`windows.md`](windows.md): Windows x64 and ARM64 beta requirements, installation, and source builds.
 - [`linux.md`](linux.md): Linux X11 and native Wayland beta requirements and installation.
 - [`nix.md`](nix.md): Nix packaging, development, and per-user autostart.
@@ -28,6 +28,8 @@ override shipped behavior.
   source and CLI baseline, integration contract, and validation limits.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal
   command contract and remaining lifecycle work.
+- [`plans/quickjs.md`](plans/quickjs.md): why and how configs run in embedded
+  QuickJS instead of Bun, with size and latency measurements.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
   implemented macOS local-service protocol and lifecycle guarantees.
 
@@ -63,8 +65,7 @@ When a plan disagrees with `AGENTS.md` about shipped behavior, update the plan.
 
 ## Releases
 
-`releases/` contains version-specific Markdown inputs for signed Sparkle updates
-and draft release notes. `../release-notes/` contains legacy inputs from versions
+`releases/` contains version-specific release notes and drafts. `../release-notes/` contains legacy inputs from versions
 2.0.0 through 2.0.9. Published notes and the SDK changelog describe their release,
 not current behavior; preserve them as historical records. A draft note is not
 evidence that its release has been published.

@@ -18,12 +18,12 @@ let
 in
 {
   options.programs.hex = {
-    enable = lib.mkEnableOption "HEX local voice dictation";
+    enable = lib.mkEnableOption "Hex local voice dictation";
     package = lib.mkOption {
       type = lib.types.package;
-      description = "HEX package to install.";
+      description = "Hex package to install.";
     };
-    autostart = lib.mkEnableOption "HEX startup with the graphical session";
+    autostart = lib.mkEnableOption "Hex startup with the graphical session";
     systemdTarget = lib.mkOption {
       type = lib.types.str;
       default = "graphical-session.target";
@@ -40,13 +40,13 @@ in
     assertions = [
       {
         assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux";
-        message = "The HEX Nix package supports x86_64-linux only.";
+        message = "The Hex Nix package supports x86_64-linux only.";
       }
     ];
     home.packages = [ cfg.package ];
     systemd.user.services.hex = {
       Unit = {
-        Description = "HEX local voice dictation";
+        Description = "Hex local voice dictation";
         After = [ cfg.systemdTarget ];
         PartOf = [ cfg.systemdTarget ];
       };
@@ -55,8 +55,8 @@ in
         NotifyAccess = "main";
         ExecStartPre = lib.getExe waitForSession;
         ExecStart = "${lib.getExe cfg.package} service";
-        Environment = [ "HEX_APPLICATION_SUPPORT_DIR=${config.xdg.dataHome}/voice-control" ];
-        EnvironmentFile = "-${config.xdg.dataHome}/voice-control/session.env";
+        Environment = [ "HEX_APPLICATION_SUPPORT_DIR=${config.xdg.dataHome}/hex" ];
+        EnvironmentFile = "-${config.xdg.dataHome}/hex/session.env";
         TimeoutStartSec = 35;
         Restart = "on-failure";
         RestartSec = 5;

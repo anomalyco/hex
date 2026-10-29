@@ -2,7 +2,7 @@
 set -eu
 
 # Launches a packaged Hex.app with throwaway Application Support for a few
-# seconds and fails if it exits early, or if a bundled Sparkle cannot start.
+# seconds and fails if it exits early.
 # Permission prompts and onboarding may appear; nothing is granted or kept.
 if [ "$#" -ne 1 ]; then
   echo "Usage: $0 <Hex.app path>" >&2
@@ -31,10 +31,6 @@ if ! kill -0 "$pid" 2>/dev/null; then
   fail "exited with status $status within $seconds seconds"
 fi
 [ -s "$support/logs/process.log" ] || fail "wrote no process log"
-if [ -d "$bundle/Contents/Frameworks/Sparkle.framework" ] \
-  && grep -Fq 'could not start Sparkle updater' "$support/logs/process.log"; then
-  fail "Sparkle did not start"
-fi
 
 kill -INT "$pid"
 waited=0

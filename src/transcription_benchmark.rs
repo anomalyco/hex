@@ -18,7 +18,7 @@ pub enum Backend {
 }
 
 enum LoadedBackend {
-    TranscribeCpp(Parakeet),
+    TranscribeCpp(Box<Parakeet>),
     #[cfg(feature = "onnx-benchmark")]
     Onnx(transcribe_rs::onnx::parakeet::ParakeetModel),
 }
@@ -27,9 +27,9 @@ impl LoadedBackend {
     fn load(backend: Backend) -> Result<Self> {
         match backend {
             Backend::Onnx => load_onnx(),
-            Backend::TranscribeCpp { model } => {
-                Ok(Self::TranscribeCpp(Parakeet::load_for_benchmark(&model)?))
-            }
+            Backend::TranscribeCpp { model } => Ok(Self::TranscribeCpp(Box::new(
+                Parakeet::load_for_benchmark(&model)?,
+            ))),
         }
     }
 
@@ -572,7 +572,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let directory = std::env::temp_dir().join(format!(
-            "voice-control-transcription-benchmark-{}-{unique}",
+            "hex-transcription-benchmark-{}-{unique}",
             std::process::id()
         ));
         fs::create_dir(&directory).unwrap();

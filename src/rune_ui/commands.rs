@@ -1,17 +1,19 @@
 //! The Commands pane (macOS): the voice command catalog grouped by task,
 //! search, a detail with the phrase's task, context, and aliases, the
-//! personal `hex.config.ts` workspace, and the commands opt-in with its
-//! microphone confirmation. The catalog and workspace come from the host as
+//! personal `hex.config.ts` workspace, and the commands opt-in card with its
+//! microphone confirmation and the command model's notice. The catalog and workspace come from the host as
 //! [`PlatformState`](super::platform::PlatformState) data.
 
-use rune::{El, TextEdit, Tx, col, el, row, text};
-use rune_kit::{Switch, TextInput};
+use rune::{El, TextEdit, Tx, col, row, text};
+use rune_kit::TextInput;
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, setting_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, setting_row, toggle_row,
+};
 use super::lists::{
     detail_header, detail_title, error_panel, fact, group_label, list_row, message, placeholder,
-    split,
+    source_list, split,
 };
 use super::platform::{CatalogCommand, CommandModel, PlatformRequest, Workspace};
 use crate::commands::CommandScope;
@@ -98,14 +100,15 @@ fn agent_prompt(workspace: &str) -> String {
         "Help me configure my Hex custom voice commands.\n\n\
          Workspace: {workspace}\n\
          Config: {workspace}/hex.config.ts\n\n\
-         Read AGENTS.md and .agents/skills/personal-commands/SKILL.md in the workspace \
-         before editing. Ask me what commands or dictation phrases I want, update \
-         hex.config.ts, and run `bun run check` from the workspace when finished. You \
-         may add npm packages when a command needs them."
+         Read AGENTS.md in the workspace before editing. Ask me what commands or \
+         dictation phrases I want, update hex.config.ts, and run `hex commands check` \
+         when finished. Hex runs the config itself: no npm packages, filesystem, or \
+         network."
     )
 }
 
-/// The header actions (workspace, prompt, opt-in) and the list + detail body.
+/// The header actions (workspace, prompt), the opt-in card and notices, and
+/// the list + detail body.
 pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
     let state = &ui.platform;
     let mut actions = Vec::new();
@@ -145,46 +148,6 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             },
         ));
     }
-    actions.push(
-        el().key("commands-divider")
-            .w(p.hair)
-            .h(20.0)
-            .ml(4.0)
-            .mr(4.0)
-            .fill(p.k.c.border_base),
-    );
-    actions.push(if ui.commands.confirm_enable {
-        button(
-            p,
-            "confirm-enable-commands",
-            tr("Keep microphone ready & enable commands"),
-            ButtonKind::Primary,
-            |ui: &mut Ui, _| keep_ready_and_enable(ui),
-        )
-    } else {
-        row()
-            .key("commands-enabled")
-            .role("toggle")
-            .label(tr("Voice commands"))
-            .gap(8.0)
-            .center_y()
-            .on_press(|ui: &mut Ui| {
-                let enabled = !ui.settings.commands_enabled;
-                set_enabled(ui, enabled);
-            })
-            .child(
-                text(tr("Voice commands"))
-                    .key("label")
-                    .font(DESCRIPTION)
-                    .color(p.muted()),
-            )
-            .child(
-                Switch::new(ui.settings.commands_enabled)
-                    .build(p.k)
-                    .key("switch"),
-            )
-    });
-
     let query = ui.commands.search.text.trim().to_lowercase();
     let visible: Vec<&CatalogCommand> = state
         .commands
@@ -203,7 +166,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             tasks.push(&command.task);
         }
     }
-    let mut list = col().key("commands-list").gap(2.0);
+    let mut list = col().key("commands-list");
     if visible.is_empty() {
         list = list.child(message(
             p,
@@ -247,7 +210,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         .h_full()
         .gap(8.0)
         .child(search)
-        .child(super::scroll_body("commands-scroll", list));
+        .child(super::scroll_body("commands-scroll", source_list(list)));
     let detail = detail(
         ui,
         p,
@@ -255,13 +218,13 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
     );
     let body = split(p, "commands-body", column, detail);
 
-    let mut notices = Vec::new();
+    let mut top = vec![enable_card(ui, p)];
     if let Some(error) = state
         .workspace_error
         .as_deref()
         .filter(|_| state.workspace == Workspace::Error)
     {
-        notices.push(error_panel(
+        top.push(error_panel(
             p,
             "commands-error",
             tr("Personal commands are not loading."),
@@ -269,10 +232,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         ));
     }
     if let Some((title, description)) = model_notice(ui) {
-        notices.push(model_notice_panel(ui, p, title, description));
-    }
-    if notices.is_empty() {
-        return (actions, body);
+        top.push(model_notice_panel(ui, p, title, description));
     }
     (
         actions,
@@ -283,18 +243,68 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             .child(
                 col()
                     .key("notices")
-                    .px(24.0)
+                    .px(METRICS.gutter)
                     .pb(12.0)
                     .gap(8.0)
-                    .children(notices),
+                    .children(top),
             )
             .child(body),
     )
 }
 
+/// The opt-in, and the confirmation that keeps the released microphone
+/// ready for it.
+fn enable_card(ui: &Ui, p: Paint) -> El {
+    let mut rows = vec![toggle_row(
+        p,
+        "commands-enabled",
+        tr("Voice commands"),
+        tr("Say a phrase to open apps and websites or press keys"),
+        ui.settings.commands_enabled,
+        |ui: &mut Ui| {
+            let enabled = !ui.settings.commands_enabled;
+            set_enabled(ui, enabled);
+        },
+    )];
+    if ui.commands.confirm_enable {
+        rows.push(
+            setting_row(
+                p,
+                "confirm-enable",
+                tr("Keep the microphone ready?"),
+                Some(tr(
+                    "Commands listen all the time, so Hex stops releasing the microphone when idle",
+                )),
+                row()
+                    .key("actions")
+                    .gap(8.0)
+                    .child(button(
+                        p,
+                        "cancel-enable-commands",
+                        tr("Cancel"),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| ui.commands.confirm_enable = false,
+                    ))
+                    .child(
+                        button(
+                            p,
+                            "confirm-enable-commands",
+                            tr("Keep microphone ready & enable commands"),
+                            ButtonKind::Primary,
+                            |ui: &mut Ui, _| keep_ready_and_enable(ui),
+                        )
+                        .default_button(),
+                    ),
+            )
+            .fill(p.k.c.hover),
+        );
+    }
+    card(p, "enable", rows)
+}
+
 /// The voice command model's notice while commands are on and it is not
 /// ready. Hotkey dictation never waits for it.
-pub(super) fn model_notice(ui: &Ui) -> Option<(&'static str, &'static str)> {
+fn model_notice(ui: &Ui) -> Option<(&'static str, &'static str)> {
     if !ui.platform.caps.commands || !ui.settings.commands_enabled {
         return None;
     }
@@ -314,7 +324,7 @@ pub(super) fn model_notice(ui: &Ui) -> Option<(&'static str, &'static str)> {
 }
 
 /// The notice with Turn off commands, and Retry once the model failed.
-pub(super) fn model_notice_panel(ui: &Ui, p: Paint, title: &str, description: &str) -> El {
+fn model_notice_panel(ui: &Ui, p: Paint, title: &str, description: &str) -> El {
     let mut actions = row().key("actions").gap(8.0).center_y();
     if ui.platform.command_model == CommandModel::Failed {
         actions = actions.child(button(
@@ -376,7 +386,7 @@ fn detail(ui: &Ui, p: Paint, command: Option<&CatalogCommand>) -> El {
         .key("command-detail")
         .grow(1.0)
         .shrink()
-        .px(24.0)
+        .px(METRICS.gutter)
         .pb(16.0)
         .child(detail_header(
             detail_title(p, &command.phrase),

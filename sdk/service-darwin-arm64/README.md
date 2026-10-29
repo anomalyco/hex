@@ -14,7 +14,7 @@ The separate service-app scripts package the full desktop executable as
 signed artifact, consumer packaging, and helper publication remain planned in
 [`docs/plans/typescript-sdk.md`](../../docs/plans/typescript-sdk.md).
 
-The service-app packager requires an explicit `VOICE_CONTROL_TEAM_ID` and a
+The service-app packager requires an explicit `HEX_TEAM_ID` and a
 matching Developer ID Application signing identity, using the same validation
 as the desktop app. `prepare-service-app.sh` also requires an explicit
 `HEX_NOTARY_PROFILE`. The scripts do not assume a signing team or notarization

@@ -5,16 +5,18 @@
 //! waits on a slow player.
 
 use std::process::Command;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::Duration;
 
-use glib::ToVariant;
+use zbus::{Connection, OwnedVariant};
 
 use crate::app_settings::RecordingAudioBehavior;
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const MPRIS_PLAYER: &str = "org.mpris.MediaPlayer2.Player";
-const DBUS_TIMEOUT_MS: i32 = 500;
+const DBUS_TIMEOUT: Duration = Duration::from_millis(500);
+const RESTORE_GRACE: Duration = Duration::from_millis(300);
 
 enum Request {
     Suppress,
@@ -35,26 +37,7 @@ impl AudioSuppressor {
         let (requests, receiver) = mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("linux-audio-control".into())
-            .spawn(move || {
-                let mut suppressed: Option<Suppressed> = None;
-                while let Ok(request) = receiver.recv() {
-                    match request {
-                        Request::Suppress if suppressed.is_none() => {
-                            suppressed = Some(suppress(behavior));
-                        }
-                        Request::Restore => {
-                            if let Some(suppressed) = suppressed.take() {
-                                restore(suppressed);
-                            }
-                        }
-                        Request::RestoreThen(then) => restore_then(suppressed.take(), then),
-                        Request::Suppress => {}
-                    }
-                }
-                if let Some(suppressed) = suppressed {
-                    restore(suppressed);
-                }
-            });
+            .spawn(move || serve(receiver, || suppress(behavior), restore, restore_then));
         if let Err(error) = &spawned {
             tracing::warn!(%error, "could not start Linux audio control");
         }
@@ -87,6 +70,47 @@ impl AudioSuppressor {
         {
             then();
         }
+    }
+}
+
+/// Applies requests in order. A double-tap restores and suppresses back to
+/// back, before wpctl or the player reports the restored state, so a plain
+/// restore waits briefly and is dropped when another recording starts.
+fn serve<S>(
+    receiver: Receiver<Request>,
+    mut suppress: impl FnMut() -> S,
+    mut restore: impl FnMut(S),
+    mut restore_then: impl FnMut(Option<S>, Box<dyn FnOnce() + Send>),
+) {
+    let mut suppressed: Option<S> = None;
+    let mut next = None;
+    loop {
+        let request = match next.take() {
+            Some(request) => request,
+            None => match receiver.recv() {
+                Ok(request) => request,
+                Err(_) => break,
+            },
+        };
+        match request {
+            Request::Suppress if suppressed.is_none() => suppressed = Some(suppress()),
+            Request::Suppress => {}
+            Request::Restore if suppressed.is_some() => {
+                match receiver.recv_timeout(RESTORE_GRACE) {
+                    Ok(Request::Suppress) => {}
+                    Ok(request @ Request::RestoreThen(_)) => next = Some(request),
+                    Ok(Request::Restore) | Err(RecvTimeoutError::Timeout) => {
+                        restore(suppressed.take().unwrap());
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            Request::Restore => {}
+            Request::RestoreThen(then) => restore_then(suppressed.take(), then),
+        }
+    }
+    if let Some(suppressed) = suppressed {
+        restore(suppressed);
     }
 }
 
@@ -184,80 +208,102 @@ fn run(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn session_bus() -> Option<gio::DBusConnection> {
-    gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)
-        .inspect_err(|error| tracing::warn!(%error, "cannot reach the session D-Bus"))
-        .ok()
+/// Runs MPRIS calls on the worker thread, which blocks on them anyway.
+fn with_session_bus<T: Default>(work: impl AsyncFnOnce(&Connection) -> T) -> T {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            tracing::warn!(%error, "cannot start the D-Bus runtime");
+            return T::default();
+        }
+    };
+    runtime.block_on(async {
+        match tokio::time::timeout(DBUS_TIMEOUT, Connection::session()).await {
+            Ok(Ok(bus)) => work(&bus).await,
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "cannot reach the session D-Bus");
+                T::default()
+            }
+            Err(_) => {
+                tracing::warn!("the session D-Bus did not answer");
+                T::default()
+            }
+        }
+    })
 }
 
-fn call(
-    bus: &gio::DBusConnection,
+async fn call<B, R>(
+    bus: &Connection,
     destination: &str,
     path: &str,
     interface: &str,
     method: &str,
-    parameters: Option<&glib::Variant>,
-) -> Option<glib::Variant> {
-    bus.call_sync(
-        Some(destination),
-        path,
-        interface,
-        method,
-        parameters,
-        None,
-        gio::DBusCallFlags::NONE,
-        DBUS_TIMEOUT_MS,
-        gio::Cancellable::NONE,
-    )
-    .ok()
+    body: &B,
+) -> Option<R>
+where
+    B: serde::Serialize + zbus::Type,
+    R: for<'d> serde::Deserialize<'d> + zbus::Type,
+{
+    let call = bus.call_method(Some(destination), path, Some(interface), method, body);
+    let reply = tokio::time::timeout(DBUS_TIMEOUT, call).await.ok()?.ok()?;
+    reply.body().deserialize().ok()
 }
 
 /// Pauses every MPRIS player that is playing, and returns their bus names.
 fn pause_players() -> Vec<String> {
-    let Some(bus) = session_bus() else {
-        return Vec::new();
-    };
-    let Some(names) = call(
-        &bus,
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-        "ListNames",
-        None,
-    )
-    .and_then(|reply| reply.child_value(0).get::<Vec<String>>()) else {
-        return Vec::new();
-    };
-    names
-        .into_iter()
-        .filter(|name| name.starts_with(MPRIS_PREFIX))
-        .filter(|name| playback_status(&bus, name).as_deref() == Some("Playing"))
-        .filter(|name| call(&bus, name, MPRIS_PATH, MPRIS_PLAYER, "Pause", None).is_some())
-        .collect()
+    with_session_bus(async |bus| {
+        let names: Vec<String> = call(
+            bus,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "ListNames",
+            &(),
+        )
+        .await
+        .unwrap_or_default();
+        let mut paused = Vec::new();
+        for name in names
+            .into_iter()
+            .filter(|name| name.starts_with(MPRIS_PREFIX))
+        {
+            if playback_status(bus, &name).await.as_deref() == Some("Playing")
+                && call::<_, ()>(bus, &name, MPRIS_PATH, MPRIS_PLAYER, "Pause", &())
+                    .await
+                    .is_some()
+            {
+                paused.push(name);
+            }
+        }
+        paused
+    })
 }
 
-fn playback_status(bus: &gio::DBusConnection, name: &str) -> Option<String> {
-    let reply = call(
+async fn playback_status(bus: &Connection, name: &str) -> Option<String> {
+    let status: OwnedVariant = call(
         bus,
         name,
         MPRIS_PATH,
         "org.freedesktop.DBus.Properties",
         "Get",
-        Some(&(MPRIS_PLAYER, "PlaybackStatus").to_variant()),
-    )?;
-    reply.child_value(0).as_variant()?.get::<String>()
+        &(MPRIS_PLAYER, "PlaybackStatus"),
+    )
+    .await?;
+    <&str>::try_from(&status).ok().map(str::to_owned)
 }
 
 fn resume_players(players: &[String]) {
     if players.is_empty() {
         return;
     }
-    let Some(bus) = session_bus() else {
-        return;
-    };
-    for name in players {
-        let _ = call(&bus, name, MPRIS_PATH, MPRIS_PLAYER, "Play", None);
-    }
+    with_session_bus(async |bus| {
+        for name in players {
+            let _ = call::<_, ()>(bus, name, MPRIS_PATH, MPRIS_PLAYER, "Play", &()).await;
+        }
+    });
 }
 
 #[cfg(test)]
@@ -285,5 +331,39 @@ mod tests {
         );
         restore_then(None, Box::new(move || order.send("idle").unwrap()));
         assert_eq!(events.try_iter().collect::<Vec<_>>(), ["then", "idle"]);
+    }
+
+    #[test]
+    fn back_to_back_restore_and_suppress_stay_suppressed() {
+        use std::sync::{Arc, Mutex};
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (requests, receiver) = mpsc::channel();
+        let (suppress_log, restore_log) = (log.clone(), log.clone());
+        let worker = std::thread::spawn(move || {
+            serve(
+                receiver,
+                move || suppress_log.lock().unwrap().push("suppress"),
+                move |()| restore_log.lock().unwrap().push("restore"),
+                |_, then: Box<dyn FnOnce() + Send>| then(),
+            )
+        });
+        // Double-tap: the first tap's restore is followed at once by a start.
+        for request in [Request::Suppress, Request::Restore, Request::Suppress] {
+            requests.send(request).unwrap();
+        }
+        std::thread::sleep(RESTORE_GRACE * 2);
+        assert_eq!(*log.lock().unwrap(), ["suppress"]);
+        // A lone restore applies once the grace period passes.
+        requests.send(Request::Restore).unwrap();
+        std::thread::sleep(RESTORE_GRACE * 2);
+        assert_eq!(*log.lock().unwrap(), ["suppress", "restore"]);
+        // A later recording suppresses again.
+        requests.send(Request::Suppress).unwrap();
+        drop(requests);
+        worker.join().unwrap();
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["suppress", "restore", "suppress", "restore"]
+        );
     }
 }

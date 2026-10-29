@@ -1,6 +1,6 @@
 # One Hex Process Per User, Hosting Rune Windows
 
-**Status:** Implemented on `main` for every OS; GPUI is deleted (see
+**Status:** Implemented on `dev` for every OS; GPUI is deleted (see
 [`rune-ui.md`](rune-ui.md)). Linux runs as one process per user and data root
 with launch forwarding, the single-instance socket, the `Type=notify` systemd
 user unit, and the Rune window and HUD overlay (see
@@ -94,7 +94,7 @@ no instance, otherwise    -> become the instance in this process (custom data ro
 [`windows_app.rs`](../../src/windows_app.rs), and
 [`rune_ui/windows_host.rs`](../../src/rune_ui/windows_host.rs):
 
-- Single instance uses the named auto-reset event `Local\com.kitlangton.hex.app`.
+- Single instance uses the named auto-reset event `Local\anomaly.hex.app`.
   A second launch grants `AllowSetForegroundWindow`, signals the event, and
   exits (`--hidden` exits without signaling).
 - The main thread creates the `tray-icon` (pumped by winit's Win32 message loop)
@@ -123,7 +123,7 @@ no instance, otherwise    -> become the instance in this process (custom data ro
 - Because winit owns `NSApplicationDelegate`, Hex registers an
   `NSAppleEventManager` handler for `kAEReopenApplication` to answer Dock and
   Finder reopen events.
-- An initial `AppHandle::update` closure on the main thread installs Sparkle,
+- An initial `AppHandle::update` closure on the main thread starts the updater,
   `NSStatusItem` (`status_item.rs`), the Hex/File/Window main menu (omitting an
   Edit menu so ⌘C/⌘V reach Rune text fields), the reopen handler, and the
   native Metal HUD (`dictation_indicator.rs`). A 16 ms `NSTimer` in common

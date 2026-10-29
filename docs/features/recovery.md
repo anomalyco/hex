@@ -15,7 +15,6 @@ platforms, and dependencies.
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
-- [Move the macOS data folder once](#move-the-macos-data-folder-once).
 
 ## How To Get To It
 
@@ -89,6 +88,51 @@ Checks in [suppression.rs](../../src/suppression.rs):
 Proof limit: synthetic events and sampled-state fixtures, not every physical
 keyboard or remapping.
 
+`recover.shortcut-press`: Command-Tab swallows Tab's release, and Kit often
+presses Option within 100 ms of letting go of Command. The press itself can
+resynchronize instead of waiting for the poll. Switching apps with Command-Tab
+while a Toggle or double-tap capture is locked left Tab tracked too, and every
+press that should have finished the lock logged `locked with stale tracked
+keys` and did nothing; the finishing press now resynchronizes the same way.
+
+```ts
+Command-Tab -> Tab still tracked (IDLE, DIRTY, or LOCKED)
+  -> typing, Return, Shift …                          // don't matter
+  -> binding press: the binding's own down edge
+     ├── keyboard reported no modifiers after each tracked key's own press
+     ├── only the binding's modifiers went down since
+     └── tracked keys + every other modifier read up now  // same source as recovery
+        -> clear tracked keys, fence input stamped before the press
+           -> fresh press -> Start (IDLE, DIRTY) or Finish (LOCKED)
+              ├── chord at the same tick -> Discard     // not fenced
+              └── older delayed release of the key -> ignored
+  -> any check fails -> press ignored (logged with reason + key_codes)
+                     -> 100 ms poll as before
+LOCKED + Escape -> Cancel, stale keys or not
+fenced edges, edges before a disabled tap, suspension -> no neutral evidence
+```
+Checks in [suppression.rs](../../src/suppression.rs):
+`option_soon_after_command_tab_records`,
+`shortcut_press_after_command_tab_from_dirty_records`,
+`typing_after_command_tab_does_not_block_the_next_press`,
+`a_delayed_release_cannot_untrack_a_resynchronized_key_press`,
+`a_chord_at_the_resynchronized_press_still_discards_it`,
+`voice_action_takes_over_right_after_command_tab`,
+`fenced_and_pre_reset_modifier_edges_are_not_neutral_evidence`,
+`stale_press_waits_for_recovery_while_anything_else_is_held`,
+`stale_press_requires_a_neutral_keyboard_after_the_tracked_keys`,
+`stale_press_finishes_a_lock_and_leaves_escape_unchanged`,
+`toggle_mode_finishes_after_command_tab_while_recording`. Unit tests read a keyboard
+that is all up unless a test sets one, so every shortcut test can take this
+path.
+A binding press ignored while stale or DIRTY logs `shortcut press ignored` to
+`process.log` with its reason; a resynchronized one logs `resynchronized stale
+input tracking on a shortcut press`. Proof limit: synthetic events and injected
+keyboard state; the live state is read when the listener processes the press,
+not when it happened, so a tracked key released in between reads as up (the
+neutral-keyboard check covers the common Tab-then-Option chord). No
+physical-keyboard run yet.
+
 Fn metadata needs a narrower rule than "ignore Fn."
 
 ```ts
@@ -131,17 +175,51 @@ listener restart, even after cancellation.
 ```ts
 initial open fails OR stream interrupts
   -> cancel incomplete capture + discard stale audio  // interrupted audio cannot return
-  -> bounded backoff -> reopen selected input         // warm microphone retries
+  -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+saved microphone missing or will not open
+  -> system default stands in, setting unchanged      // audio::Selection
+  ├── listed but will not open -> look again with bounded backoff
+  └── not listed -> look again on a device-list change // macOS reports arrivals
+                    └── Windows, Linux: bounded backoff, logged only on a switch
+  -> found -> switch back once capture is idle        // not during a pending start or tail
+MacBook lid closed (macOS)                            // built-in mic is off but still listed
+  -> built-in mic is passed over like Hex Microphone  // AppleClamshellState, read per resolve
+  ├── default or saved mic is built in -> first other real input stands in
+  │     -> Settings: "… is off while the lid is closed, so Hex listens to …"
+  ├── no other input -> "the built-in microphone is off while the lid is closed"
+  └── lid opens or closes -> re-resolve like a device-list change // IOKit clamshell notification
+        -> switch once capture is idle
+
+programmatic dictation (local API) when the stream interrupts or gaps
+  ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
+  │     -> /finish transcribes it; /cancel, heartbeats, and the lease still apply
+  │     -> also when /finish arrives before the loss is read (take_loss)
+  └── no audio since the start (open failed, or pre-roll only)
+        -> /finish answers 409 microphone-lost
 ```
 Checks in [audio.rs](../../src/audio.rs):
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
-`startup_retry_recovers_metadata_and_audio_without_restarting`;
+`startup_retry_recovers_metadata_and_audio_without_restarting`,
+`a_missing_selection_uses_the_default_until_it_returns`,
+`a_closed_lid_passes_over_the_built_in_microphone`,
+`where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
+`only_an_idle_capture_lets_the_microphone_switch`;
 [dictation_audio.rs](../../src/dictation_audio.rs):
-`recovered_owner_delivers_audio_and_accepts_a_new_capture`.
+`recovered_owner_delivers_audio_and_accepts_a_new_capture`,
+`microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
+`microphone_loss_with_only_pre_roll_keeps_nothing`,
+`finish_after_an_unread_microphone_loss_takes_the_kept_clip`;
+[recognition.rs](../../src/recognition.rs):
+`microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
+through the running listener).
+[rune_ui/tests.rs](../../src/rune_ui/tests.rs):
+`a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone`.
 Proof limit: retry policy and channel-backed replacement audio, not a physical
-device reconnect or full native mic-to-target result.
+device reconnect or full native mic-to-target result. The closed-lid cases are
+pure resolution and a fixture scene; the IOKit lid read and its notification
+have not been observed on a real MacBook closing and opening its lid.
 
 `recover.cold-open`: "Release when idle" opens for a gesture, not an idle retry
 loop. Each attempt must own its opening result.
@@ -158,7 +236,7 @@ release-when-idle enabled + capture idle -> stop retries
 warm mode enabled during pending capture -> preserve capture; retry after cancellation
 
 cold open -> selected microphone fails to open
-  -> retry it twice, 100 ms apart -> then automatic selection (logged)
+  -> retry it twice, 100 ms apart -> then the system default (logged)
 ready stream fails while the press is held
   ├── before the 300 ms hold threshold -> back to pending, reopen for the same press
   │     ├── release before ready -> discard
@@ -178,7 +256,7 @@ Checks in [dictation_audio.rs](../../src/dictation_audio.rs):
 first hold after minutes of idle failed with the error tone. The reporter's logs
 show the cold stream reporting "A buffer underrun or overrun occurred" 20–76 ms
 after opening. cpal 0.18 reports that as `ErrorKind::Xrun` from CoreAudio's
-`kAudioDeviceProcessorOverload` listener; the stream keeps running, but HEX
+`kAudioDeviceProcessorOverload` listener; the stream keeps running, but Hex
 treated every error callback as fatal. In release-when-idle mode the owner then
 closed the device without retrying, and recognition suspended the held gesture.
 Overloads and refused real-time promotion are now logged and ignored; actual
@@ -255,8 +333,8 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
 Voice Action fails -> paste nothing                    // different contract, no fallback
 either path -> later request -> expected output         // recovery still needs observation
 ```
-Stage-specific sources, checks, and the known host failure are in the
-[index](README.md); late native replies are also covered below.
+Stage-specific sources and checks are in the [index](README.md); runaway
+scripts are covered below.
 Proof limit: fallback behavior alone does not establish that the next request
 succeeds.
 
@@ -508,26 +586,25 @@ issue [#23](https://github.com/anomalyco/hex/issues/23).
 Missing evidence: both modifier orders with a controlled opener, followed by
 native onset evidence.
 
-### Late Native Tool Reply
+### Runaway Script
 
 ```ts
-tool invocation interrupted -> host.ts removes correlation
-  -> late native reply -> unmatched -> rejected
-invocation completes with outstanding tools -> personal_commands.rs rejects completion
-
-timeout + late reply -> unaffected concurrent work -> later successful command
-                                                      // missing lifecycle regression
+handler or transformation runs past 1 s -> interrupted -> that call fails
+  -> transformation chain -> its input is kept           // ordered processing goes on
+  -> later call on the same config -> succeeds
+config load past 2 s or past 64 MiB -> rejected -> previous config stays active
 ```
-Sources: [host.ts](../../sdk/commands/src/host.ts),
+Sources: [script.rs](../../src/personal_commands/script.rs),
 [personal_commands.rs](../../src/personal_commands.rs);
-issue [#20](https://github.com/anomalyco/hex/issues/20).
-Proof limit: rejection paths do not prove host recovery. Retain a Rust/TypeScript
-regression covering that complete lifecycle.
+check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`.
+Handlers return actions instead of awaiting native results, so the old late
+native tool reply ([#20](https://github.com/anomalyco/hex/issues/20)) cannot
+occur.
 
 ### Slow Paste Consumer
 
 ```ts
-publish clipboard -> Chromium browser frontmost? wait 150 ms (#136) -> post Paste
+Chromium 155/156 frontmost? type instead (#212); else publish clipboard -> post Paste
   ├── settle for 100 ms -> allow next output
   └── schedule restore after 500 ms -> restore only if still owned
 target consumes later?                                // no consumption acknowledgment
@@ -544,24 +621,3 @@ Do not reset settings or loosen shortcut matching to make a recovery check pass.
 Keep automatic recovery, explicit retry, and defects that prevent recovery
 distinct. Test cleanup must preserve failure evidence.
 
-### Move The macOS Data Folder Once
-
-`recover.data-folder`: an upgrade renames `~/Library/Application Support/voice-control`
-to `hex` before logging, the instance lock, or any file there opens.
-
-```ts
-launch (not `hex mcp`, no HEX_APPLICATION_SUPPORT_DIR)
-  ├── no voice-control (fresh, or already a symlink to hex) -> use hex
-  │   └── hex exists, symlink missing -> re-create voice-control -> hex
-  ├── voice-control only -> renamex_np(RENAME_EXCL) to hex
-  │   ├── ok -> symlink voice-control -> hex; settings `migrations` +macos-data-folder-hex
-  │   └── fails (busy, cross-volume) -> keep voice-control, log, retry next launch
-  ├── both real folders -> touch neither, log, keep voice-control
-  └── concurrent launch renamed first -> use hex
-`hex mcp` -> resolves the folder read-only, never renames
-Windows (%APPDATA%\voice-control) and Linux -> unchanged
-```
-Checks in [app_paths.rs](../../src/app_paths.rs) `data_folder::tests`: fresh,
-legacy only, both, symlink present, symlink missing, rename failure, concurrent rename, and
-no-clobber rename. Proof limit: temp folders; the Studio upgrade is recorded in
-the change that introduced it.

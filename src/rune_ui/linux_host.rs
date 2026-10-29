@@ -19,8 +19,6 @@ use crate::linux_input::LinuxHotkey;
 pub(super) const HOST_SAVES_SHORTCUTS: bool = true;
 /// Settings records shortcuts from the window's key events.
 pub(super) const RECORDS_KEY_EVENTS: bool = true;
-/// The host checks for updates on its own schedule.
-pub(super) const MANUAL_UPDATE_CHECK: bool = false;
 /// X11 and portal shortcuts paste with Ctrl+V; terminals want Ctrl+Shift+V.
 pub(super) const TERMINAL_PASTE: bool = true;
 /// Linux has no tray, so the window offers Quit Hex.

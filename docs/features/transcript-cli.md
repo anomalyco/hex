@@ -5,19 +5,25 @@ Agent or terminal                                // transcripts.cli; macOS relea
 ├── hex history -> Timestamp, app, recorded mode, final text
 │   ├── --since / --until / --app / --grep -> Filter, then limit
 │   ├── --search <query> -> Rank filtered entries with meetings' fuzzy BM25
+│   │   (raw + final text count as one document)
 │   ├── --raw -> Include the stored pre-processing transcript
 │   ├── --oldest-first -> Reverse timestamp order
 │   └── --json -> Version 1 response, with truncation flag
 └── hex meetings
     ├── list -> Newest first, overlapping time range, live status
     ├── show <id|latest> -> Markdown or versioned JSON with notes and entries
-    └── search <query> -> MCP's stemmed, fuzzy BM25 passages
+    │   ├── --from / --to <mm:ss|h:mm:ss|seconds> -> Only entries overlapping
+    │   │   the range, finished or still recording; inverted or past-the-end
+    │   │   ranges fail with an error
+    │   └── --chapter N -> Only chapter N's entries (not with --from/--to)
+    ├── chapters <id|latest> -> Live chapters (experiment live-chapters):
+    │   spans, names, lines, whether corrected; none -> says so; --json
+    └── search <query> -> MCP's stemmed, fuzzy BM25 passages; exact stems first
 ```
 
 Commands work beside the running app and independently of feature opt-ins.
-`transcript_cli` dispatches before migration, logging, instance locking, local
-API, GUI, permissions, and Hex Microphone. Read-only path resolution supports
-both `hex` and legacy `voice-control` folders. Nothing is created or repaired.
+`transcript_cli` dispatches before logging, instance locking, local
+API, GUI, permissions, and Hex Microphone. Nothing is created or repaired.
 Debug `meeting list/show` shares this path; recording remains debug-only.
 
 History uses one open-file snapshot and the saved retention, so concurrent atomic
@@ -34,8 +40,13 @@ and early dispatch in [main.rs](../../src/main.rs).
 [Command and JSON contracts](../transcript-cli.md) document flags and schema.
 
 Checks in [transcript_cli_tests.rs](../../src/transcript_cli_tests.rs) cover
-filters/order, ranked `--search` within retention, retention and malformed settings, JSON snapshots, atomic-replace
-reads, legacy/symlink paths, and parsing. Existing history checks cover bounded
+filters/order, ranked `--search` within retention, one document per entry
+(`history_search_counts_raw_and_final_text_as_one_document`), retention and malformed settings, JSON snapshots, atomic-replace
+reads, parsing, and `show --from/--to` JSON, Markdown,
+and errors, including `--to 0` (`meeting_show_ranges_filter_json_entries_and_markdown`),
+and `chapters` / `show --chapter` JSON and Markdown on the synthetic
+`tests/fixtures/meetings-chapters` meeting
+(`meeting_chapters_list_and_select_a_chapter_in_json_and_markdown`). Existing history checks cover bounded
 storage, owner-only files, and expiry. Meeting query fixtures cover locks, partial
 NDJSON, interrupted drafts, and search parity with MCP. These fixture checks do
 not establish a signed installed-app invocation; native install evidence must be

@@ -41,9 +41,8 @@ pub fn insert(applications: &mut Vec<InstalledApplication>, application: Install
     normalize(applications);
 }
 
-/// The application a user picked from the file chooser: a `.desktop` entry
-/// or an executable. Only Linux has a file chooser yet.
-#[cfg(target_os = "linux")]
+/// The application a user picked in the file dialog: a macOS `.app`
+/// bundle, a Windows `.exe`, or a Linux `.desktop` entry or executable.
 pub fn metadata(path: &std::path::Path) -> color_eyre::Result<InstalledApplication> {
     platform::metadata(path)
 }

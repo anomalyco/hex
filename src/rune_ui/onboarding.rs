@@ -8,19 +8,21 @@
 //! permissions, and this window cannot observe a practice dictation there,
 //! so their steps are Welcome, the speech model download, and Done.
 //!
-//! The welcome and done art and the listening dot are static until Rune
-//! has looping animation.
+//! The welcome art is the GPU hero ([`hero`](super::hero)); the done art is static.
 
 use std::time::{Duration, Instant};
 
-use rune::{El, TextEdit, col, el, row, text};
-use rune_kit::{Progress, TextInput};
+use rune::{Color, El, TextEdit, TextStyle, col, el, row, text};
+use rune_kit::{Button, ButtonVariant, Progress, TextInput, glyphs};
 
-use super::Request;
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, keycaps, setting_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, KeySize, Paint, PushSize, TRAY_PADDING, button, card, icon_row,
+    key_tray, keycap, keycaps, setting_row,
+};
 use super::lists::{PermissionControl, allowed, permission_control};
 use super::platform::{Os, PlatformRequest, PlatformState};
+use super::{Menu, Request};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
@@ -31,6 +33,13 @@ use crate::onboarding::{
 
 const WIDTH: f32 = 520.0;
 const ART_HEIGHT: f32 = 140.0;
+/// Every step's heading: the one display size in the window.
+const TITLE: TextStyle = TextStyle::new(26.0, 600.0).lh(32.0).tracking(-0.3);
+/// The line under a heading.
+const LEAD: TextStyle = TextStyle::new(15.0, 400.0).lh(22.0);
+/// Back and the primary action hold equal slots, so the page dots stay
+/// centred and nothing in the footer moves between steps.
+const FOOTER_SLOT: f32 = 160.0;
 /// How long the ready check shows before setup moves on.
 const ADVANCE_BEAT: Duration = Duration::from_millis(700);
 
@@ -40,6 +49,60 @@ pub(super) struct Tour {
     completed: bool,
     /// The practice dictation pastes here.
     practice: TextEdit,
+    /// The welcome hero's settled frame, as Reduce Motion shows it (fixtures).
+    pub(super) hero_still: bool,
+    /// What the practice dictation's microphone hears.
+    pub(super) mic: MicMeter,
+}
+
+/// The practice dictation's level, and whether Hex heard nothing from the
+/// microphone it records from.
+#[derive(Default)]
+pub(super) struct MicMeter {
+    /// 0 to 1, shown in `LEVEL_STEPS` steps.
+    pub(super) level: f32,
+    quiet_since: Option<Instant>,
+    /// The microphone setting Hex heard nothing from. The warning stays
+    /// until that microphone is heard or another is picked.
+    pub(super) silent: Option<Option<String>>,
+}
+
+/// A peak this loud is sound; a switched-off microphone delivers zeros
+/// and a quiet room stays well under it.
+const HEARD_PEAK: f32 = 0.02;
+/// Silence this long while recording means Hex hears nothing.
+const QUIET_FOR: Duration = Duration::from_millis(1500);
+const LEVEL_STEPS: f32 = 6.0;
+
+impl MicMeter {
+    /// Takes the latest `peak` from `microphone`; true when what shows changed.
+    fn hear(
+        &mut self,
+        listening: bool,
+        peak: f32,
+        microphone: &Option<String>,
+        now: Instant,
+    ) -> bool {
+        let before = (self.step(), self.silent.clone());
+        if listening {
+            if peak >= HEARD_PEAK {
+                self.quiet_since = None;
+                self.silent = None;
+            } else if now.duration_since(*self.quiet_since.get_or_insert(now)) >= QUIET_FOR {
+                self.silent = Some(microphone.clone());
+            }
+            // Rises at once, falls over a few frames.
+            self.level = (peak * 3.0).clamp(0.0, 1.0).max(self.level - 0.12);
+        } else {
+            self.quiet_since = None;
+            self.level = 0.0;
+        }
+        before != (self.step(), self.silent.clone())
+    }
+
+    fn step(&self) -> u8 {
+        (self.level * LEVEL_STEPS).round() as u8
+    }
 }
 
 impl Tour {
@@ -49,6 +112,8 @@ impl Tour {
             advance_at: None,
             completed,
             practice: TextEdit::default(),
+            hero_still: false,
+            mic: MicMeter::default(),
         }
     }
 
@@ -58,10 +123,11 @@ impl Tour {
         let status = platform.setup_status(installed);
         let completed = crate::onboarding::completion_recorded();
         let resume = crate::onboarding::take_resume();
-        (resume.is_some() || (!completed && !status.ready())).then(|| {
+        let saved = (!completed).then(crate::onboarding::saved_step).flatten();
+        (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
             Tour::new(
                 Flow::new(
-                    resume.unwrap_or(Step::Welcome),
+                    resume.or(saved).unwrap_or(Step::Welcome),
                     status,
                     platform.caps.permissions,
                     platform.caps.practice_dictation,
@@ -104,6 +170,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         return false;
     };
     let before = tour.flow.view();
+    let step = before.step;
     let mut effect = tour.flow.on(Input::Status(status, model));
     if tour
         .advance_at
@@ -124,10 +191,20 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let practicing = tour.flow.step() == Step::TryIt;
     apply(ui, effect);
     let heard = ui.host.tour_inputs(practicing);
-    let changed = refocused || !heard.is_empty();
+    let mut changed = refocused || !heard.is_empty();
     for heard in heard {
         input(ui, heard);
     }
+    let peak = ui.host.practice_level();
+    // Fixtures set the level they show.
+    if let Some(tour) = ui.tour.as_mut().filter(|_| live) {
+        let listening =
+            tour.flow.step() == Step::TryIt && tour.flow.view().practice == Practice::Listening;
+        changed |= tour
+            .mic
+            .hear(listening, peak, &ui.settings.microphone, Instant::now());
+    }
+    remember_step(ui, step);
     let after = ui.tour.as_ref().map(|tour| tour.flow.view());
     changed || after.as_ref() != Some(&before)
 }
@@ -137,9 +214,25 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
     let Some(tour) = &mut ui.tour else {
         return;
     };
+    let step = tour.flow.step();
     let effect = tour.flow.on(input);
     focus_practice(tour, live);
     apply(ui, effect);
+    remember_step(ui, step);
+}
+
+/// Saves a new step so a tour quit part-way resumes there, and sounds the
+/// success chime on reaching the last one.
+fn remember_step(ui: &Ui, before: Step) {
+    if let Some(tour) = &ui.tour
+        && tour.flow.step() != before
+        && ui.live()
+    {
+        crate::onboarding::record_step(tour.flow.step());
+        if tour.flow.step() == Step::Done {
+            crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
+        }
+    }
 }
 
 /// The practice dictation pastes into the focused field, so Try it keeps
@@ -183,36 +276,68 @@ fn apply(ui: &mut Ui, effect: Effect) {
     }
 }
 
-/// The tour over the whole window, while it shows.
-pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
+/// Whether the tour shows the practice microphone, so the window keeps its
+/// input list current.
+pub(super) fn shows_microphone(ui: &Ui) -> bool {
+    ui.tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.step() == Step::TryIt)
+}
+
+/// The tour over the whole window, while it shows. Its menus go in `layer`,
+/// above it.
+pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let tour = ui.tour.as_ref()?;
     let view = tour.flow.view();
     let page = match view.step {
         Step::Welcome => welcome(ui, p),
         Step::Setup => setup(ui, p, &view),
-        Step::TryIt => try_it(ui, p, tour, &view),
+        Step::TryIt => try_it(ui, p, tour, &view, layer),
         Step::Done => done(ui, p),
     };
     let primary = match view.step {
-        Step::Welcome => Some((tr("Get started"), true)),
-        Step::Setup => Some((tr("Continue"), view.ready)),
-        Step::TryIt if view.practice == Practice::Landed => Some((tr("Continue"), true)),
+        Step::Welcome => Some((tr("Get started"), true, Input::Continue)),
+        Step::Setup if view.restart => Some((tr("Restart Hex"), true, Input::Restart)),
+        Step::Setup => Some((tr("Continue"), view.ready, Input::Continue)),
+        Step::TryIt if view.practice == Practice::Landed => {
+            Some((tr("Continue"), true, Input::Continue))
+        }
         Step::TryIt => None,
-        Step::Done => Some((tr("Start using Hex"), true)),
+        Step::Done => Some((tr("Start using Hex"), true, Input::Continue)),
     };
     // Until setup is ready the next setup row carries the accent, so
-    // Continue waits disabled.
+    // Continue waits, dimmed, in the accent's own shape.
+    // Forward actions point onward; Restart and the last step don't.
+    let onward = |label: &'static str, forward: bool| {
+        let button = Button::new(label).variant(ButtonVariant::Contrast);
+        if !forward {
+            return button;
+        }
+        button.label_with(move |font, ink| {
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(text(label).key("label").font(font).color(ink))
+                .child(
+                    rune::icon(&glyphs::ARROW_RIGHT, 16.0)
+                        .key("arrow")
+                        .color(ink),
+                )
+        })
+    };
+    let forward = matches!(view.step, Step::Welcome | Step::TryIt)
+        || (view.step == Step::Setup && !view.restart);
     let primary = match primary {
-        Some((label, true)) => button(
-            p,
-            "tour-continue",
-            label,
-            ButtonKind::Primary,
-            |ui: &mut Ui, _| input(ui, Input::Continue),
-        ),
-        Some((label, false)) => rune_kit::Button::new(label)
+        Some((label, true, action)) => onward(label, forward)
+            .on_press_tx(move |ui: &mut Ui, _| input(ui, action))
+            .build_push(p.k)
+            .key("tour-continue")
+            .default_button(),
+        Some((label, false, _)) => onward(label, forward)
             .disabled(true)
-            .build(p.k)
+            .build_push(p.k)
+            // Dark's light-grey accent still reads as live at Rune's 0.4.
+            .opacity(if p.k.dark { 0.3 } else { 1.0 })
             .key("tour-continue"),
         None => button(
             p,
@@ -231,22 +356,31 @@ pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
             |ui: &mut Ui, _| input(ui, Input::Back),
         )
     });
-    let download = view.show_download.then(|| download(p, view.model));
     let footer = row()
         .key("tour-footer")
         .w(WIDTH)
         .h(32.0)
         .center_y()
-        .child(row().key("start").grow(1.0).w(0.0).children(back))
-        .children(step_dots(p, &view))
+        .child(row().key("start").w(FOOTER_SLOT).children(back))
         .child(
             row()
-                .key("end")
+                .key("middle")
                 .grow(1.0)
                 .w(0.0)
-                .justify_end()
-                .children(download),
-        );
+                .center()
+                .children(step_dots(p, &view)),
+        )
+        .child(row().key("end").w(FOOTER_SLOT).justify_end().child(primary));
+    // The download keeps one corner for the whole tour, clear of the
+    // footer, where the traffic lights' row has room.
+    let top = row()
+        .key("tour-top")
+        .w_full()
+        .h(48.0)
+        .px(20.0)
+        .center_y()
+        .justify_end()
+        .children(view.show_download.then(|| download(p, view.model)));
     Some(
         col()
             .key("tour")
@@ -256,21 +390,21 @@ pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
             .h_full()
             .fill(p.k.c.bg_deep)
             .on_press(|_: &mut Ui| {})
+            .child(super::title_bar(top))
             .child(
                 col()
                     .key("tour-page")
                     .grow(1.0)
                     .shrink()
                     .center()
-                    .child(col().key("tour-column").w(WIDTH).gap(24.0).child(page)),
+                    .child(col().key("tour-column").w(WIDTH).child(page)),
             )
             .child(
                 col()
                     .key("tour-bottom")
-                    .pb(32.0)
-                    .gap(20.0)
+                    .pt(16.0)
+                    .pb(28.0)
                     .center()
-                    .child(primary)
                     .child(footer),
             ),
     )
@@ -293,35 +427,46 @@ fn step_dots(p: Paint, view: &View) -> Option<El> {
     Some(dots)
 }
 
-/// The model's progress beside the step dots, while it downloads behind
-/// the other steps.
+/// The model's progress in the tour's top corner, while it downloads
+/// behind the other steps.
 fn download(p: Paint, status: ItemStatus) -> El {
-    let label = |copy: &str| text(copy).key("label").font(p.k.ty.small).color(p.muted());
+    let label = |key: &str, copy: &str| {
+        text(copy)
+            .key(key)
+            .font(p.k.ty.small_medium)
+            .color(p.muted())
+    };
     match status {
         ItemStatus::Ready => allowed(p, "tour-download", tr("Speech model ready")),
         ItemStatus::Failed => row()
             .key("tour-download")
             .gap(8.0)
             .center_y()
-            .child(label(tr("Download stopped")))
-            .child(button(
-                p,
-                "tour-download-retry",
-                tr("Retry"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| input(ui, Input::Grant(SetupItem::Model)),
-            )),
+            .child(label("label", tr("Download stopped")))
+            .child(
+                rune_kit::Button::new(tr("Retry"))
+                    .on_press(|ui: &mut Ui| input(ui, Input::Grant(SetupItem::Model)))
+                    .build_small_push(p.k)
+                    .key("tour-download-retry"),
+            ),
         ItemStatus::Downloading(fraction) => row()
             .key("tour-download")
-            .gap(8.0)
+            .gap(10.0)
             .center_y()
-            .child(label(tr("Speech model")))
+            .child(label("label", tr("Speech model")))
             .child(
                 Progress::new(Some(fraction))
-                    .show_value()
                     .build(p.k)
                     .key("progress")
-                    .w(120.0),
+                    .w(96.0),
+            )
+            .child(
+                text(format!("{}%", (fraction * 100.0).round()))
+                    .key("value")
+                    .font(p.k.ty.small.features("'tnum' 1"))
+                    .color(p.faint())
+                    .w(30.0)
+                    .align(rune::Align::End),
             ),
         _ => el().key("tour-download"),
     }
@@ -330,63 +475,25 @@ fn download(p: Paint, status: ItemStatus) -> El {
 fn title(p: Paint, title: &str, body: Option<&str>) -> El {
     col()
         .key("title-block")
-        .gap(8.0)
+        .gap(10.0)
         .center()
-        .child(
-            text(title)
-                .key("title")
-                .font(p.k.ty.body_medium.lh(28.0))
-                .color(p.text()),
-        )
+        .child(text(title).key("title").font(TITLE).color(p.text()))
         .children(body.map(|body| {
             text(body)
                 .key("body")
-                .font(p.k.ty.ui)
+                .font(LEAD)
                 .color(p.muted())
                 .align(rune::Align::Center)
                 .wrap()
-                .w(400.0)
+                .w(440.0)
         }))
-}
-
-/// The shortcut as large keycaps inside a ring of sound.
-fn hero(p: Paint, parts: &[String]) -> El {
-    let c = &p.k.c;
-    let caps = row()
-        .key("hero-keys")
-        .gap(6.0)
-        .children(parts.iter().enumerate().map(|(index, part)| {
-            row()
-                .key(format!("cap{index}"))
-                .min_w(56.0)
-                .h(56.0)
-                .px(14.0)
-                .center()
-                .radius(p.k.radius.lg)
-                .fill(c.layer_03)
-                .border(p.hair.max(0.5), c.border_base)
-                .child(
-                    text(part.clone())
-                        .key("label")
-                        .font(p.k.ty.body_medium)
-                        .color(c.text_base),
-                )
-        }));
-    row().key("art").h(ART_HEIGHT).w_full().center().child(
-        row()
-            .key("ring")
-            .padding(18.0)
-            .radius(64.0)
-            .border(1.0, c.info.border)
-            .child(caps),
-    )
 }
 
 fn welcome(ui: &Ui, p: Paint) -> El {
     col()
         .key("welcome")
-        .gap(24.0)
-        .child(hero(p, &ui.settings.dictation_hotkey.keycaps()))
+        .gap(36.0)
+        .child(super::hero::stage())
         .child(title(
             p,
             tr("Welcome to Hex"),
@@ -403,7 +510,7 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
     let rows = view.rows.iter().map(|row| setup_row(ui, p, *row)).collect();
     let mut page = col()
         .key("setup")
-        .gap(24.0)
+        .gap(28.0)
         .child(if permissions {
             title(p, tr("Let Hex hear you and type for you"), None)
         } else {
@@ -435,9 +542,11 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
 fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
     let waiting = row.status == ItemStatus::Waiting;
     let model = crate::transcription_models::validate(&ui.settings.transcription).ok();
-    let (key, title, description): (&str, &str, String) = match row.item {
+    let (key, glyph, title, description): (&str, &'static rune::Icon, &str, String) = match row.item
+    {
         SetupItem::Microphone => (
             "setup-microphone",
+            &glyphs::MIC,
             tr("Microphone"),
             match row.status {
                 ItemStatus::Denied => {
@@ -451,26 +560,21 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
                 _ => tr("Hears you only while you hold the shortcut").into(),
             },
         ),
-        SetupItem::InputMonitoring => (
-            "setup-input-monitoring",
-            tr("Input Monitoring"),
-            if waiting {
-                tr("Drag Hex into the list, or switch it on if it is there").into()
-            } else {
-                tr("Notices the shortcut in every app").into()
-            },
-        ),
         SetupItem::Accessibility => (
             "setup-accessibility",
+            &glyphs::CURSOR_TEXT,
             super::platform_settings::accessibility_name(ui.platform.accessibility_renamed),
-            if waiting {
+            if row.status == ItemStatus::Restart {
+                tr("Turns on when Hex restarts").into()
+            } else if waiting {
                 tr("Drag Hex into the list, or switch it on if it is there").into()
             } else {
-                tr("Pastes your words into the app you are using").into()
+                tr("Notices the shortcut and pastes your words in any app").into()
             },
         ),
         SetupItem::Model => (
             "setup-model",
+            &glyphs::SPARKLE,
             tr("Speech model"),
             match (row.status, model) {
                 (ItemStatus::Failed, _) => {
@@ -508,7 +612,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             p,
             "setup-grant",
             match row.status {
-                ItemStatus::Ready => PermissionControl::Allowed,
+                ItemStatus::Ready | ItemStatus::Restart => PermissionControl::Allowed,
                 ItemStatus::Waiting => PermissionControl::Waiting,
                 _ => PermissionControl::Allow,
             },
@@ -516,14 +620,14 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             grant,
         )
     };
-    setting_row(p, key, title, Some(&description), control)
+    icon_row(p, key, glyph, title, Some(&description), control)
 }
 
 fn holds(ui: &Ui) -> bool {
     ui.settings.shortcut_mode == ShortcutMode::Hold
 }
 
-fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View) -> El {
+fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View, layer: &mut Vec<El>) -> El {
     let shortcut = ui.settings.dictation_hotkey.keycaps().join("");
     let field = TextInput::new(&tour.practice)
         .placeholder(tr("Your words will appear here"))
@@ -545,15 +649,146 @@ fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View) -> El {
     };
     col()
         .key("try-it")
-        .gap(24.0)
+        .gap(28.0)
         .child(title(p, tr("Give it a try"), Some(&body)))
         .child(
-            col()
-                .key("practice")
-                .gap(12.0)
-                .child(field)
-                .child(practice_hint(ui, p, view, &shortcut)),
+            col().key("practice").gap(12.0).child(field).child(
+                col()
+                    .key("practice-status")
+                    .gap(6.0)
+                    .child(practice_hint(ui, p, view, &shortcut))
+                    .child(microphone(ui, p, tour, layer)),
+            ),
         )
+}
+
+/// One quiet line under the practice field: the microphone Hex records
+/// from, as a small menu of every input, with its live level, and a short
+/// warning when that microphone gives Hex nothing.
+fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
+    let listed = ui.microphones.as_ref().ok();
+    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
+    let saved =
+        ui.settings.microphone.as_deref().filter(|saved| {
+            off != Some(*saved) && super::settings::missing_microphone(ui).is_none()
+        });
+    let in_use = saved
+        .or(listed.and_then(|devices| devices.system_default.as_deref()))
+        .or(off);
+    // With nothing else to fall back to, Hex records the closed lid's
+    // switched-off microphone.
+    let lid_closed = off.is_some() && in_use == off;
+    let silent = tour.mic.silent.as_ref() == Some(&ui.settings.microphone);
+    let warning = if lid_closed {
+        Some(tr("The lid is closed, so the built-in mic is off."))
+    } else if silent {
+        Some(tr("No sound. Pick another mic?"))
+    } else {
+        None
+    };
+    let open = ui.open == Some(Menu::TourMicrophone);
+    let name = in_use.unwrap_or(tr("System default"));
+    let trigger = mic_trigger(p, name, tour.mic.level, warning.is_some(), open)
+        .on_press(|ui: &mut Ui| super::settings::toggle_menu(ui, Menu::TourMicrophone));
+    let mut menu = rune_kit::Menu::new("tour-mic")
+        .trigger(trigger)
+        .placement(rune_kit::Placement::BottomStart)
+        .gutter(4.0)
+        .min_width(super::controls::DEVICE_SELECT_WIDTH)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for choice in super::settings::microphone_choices(ui) {
+        let mut item = rune_kit::MenuItem::new(choice.label).checked(choice.selected);
+        if let Some(detail) = choice.detail {
+            item = item.shortcut(detail);
+        }
+        menu = menu.item(item.on_select(move |ui: &mut Ui| (choice.choose)(ui)));
+    }
+    row()
+        .key("tour-mic")
+        .h(24.0)
+        .gap(6.0)
+        .center_y()
+        .child(menu.build(p.k, layer))
+        .children(warning.map(|warning| mic_warning(p, warning)))
+}
+
+/// The microphone line's menu button: the live level and the name of the
+/// microphone `name`, at rest and tinted while `warned`, as the
+/// onboarding stories draw it too.
+pub(super) fn mic_trigger(p: Paint, name: &str, level: f32, warned: bool, open: bool) -> El {
+    let (level, tint) = if warned {
+        (0.0, p.warning())
+    } else {
+        (level, p.faint())
+    };
+    let c = &p.k.c;
+    let chevron = if open {
+        p.k.glyph.chevron_up
+    } else {
+        p.k.glyph.chevron_down
+    };
+    let trigger = row()
+        .key("tour-mic-field")
+        .role("button")
+        .label(tr_fill("Microphone, {}", name))
+        .focusable(true)
+        .focus_ring(1.0, 0.0, c.border_focus)
+        .h(24.0)
+        // The pill bleeds past the line's edge so the level sits on it.
+        .ml(-6.0)
+        .px(6.0)
+        .gap(6.0)
+        .center_y()
+        .radius(p.k.radius.md)
+        .child(mic_bars(p, level, tint))
+        .child(
+            text(name)
+                .key("name")
+                .font(DESCRIPTION)
+                .color(if open { p.text() } else { p.muted() })
+                .truncate()
+                .shrink(),
+        )
+        .child(rune::icon(chevron, 12.0).key("chevron").color(c.icon_muted));
+    if open {
+        trigger.fill(c.hover)
+    } else {
+        trigger.hover(c.hover)
+    }
+}
+
+/// The short warning beside the microphone when it gives Hex nothing.
+pub(super) fn mic_warning(p: Paint, warning: &str) -> El {
+    text(warning)
+        .key("warning")
+        .font(DESCRIPTION)
+        .color(p.muted())
+        .truncate()
+        .shrink()
+}
+
+const MIC_LEVEL: f32 = 14.0;
+
+/// Three short bars, as tall as Hex hears it.
+fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
+    const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
+    let mut bars = row()
+        .key("level")
+        .size(MIC_LEVEL, MIC_LEVEL)
+        .gap(2.0)
+        .center();
+    for (index, weight) in WEIGHTS.into_iter().enumerate() {
+        // Uneven at rest too, so the bars never read as an ellipsis.
+        let height = (2.0 + weight * 4.0 + level * weight * 8.0).round();
+        bars = bars.child(
+            el().key(format!("bar{index}"))
+                .size(2.0, height)
+                .radius(1.0)
+                .fill(if level > 0.0 { p.text() } else { tint }),
+        );
+    }
+    bars
 }
 
 fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
@@ -566,7 +801,13 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
             .grow(1.0)
             .shrink()
     };
-    let line = row().key("practice-hint").gap(8.0).center_y();
+    // As tall as the keys' tray in every state, so the centred page never
+    // jumps when the hint changes.
+    let line = row()
+        .key("practice-hint")
+        .gap(8.0)
+        .center_y()
+        .min_h(KeySize::Small.height() + 2.0 * TRAY_PADDING);
     if view.reopen {
         return line
             .child(hint(
@@ -588,18 +829,16 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
         ));
     }
     let (dot, copy, color) = match view.practice {
-        Practice::Waiting => {
-            return line
-                .child(keycaps(p, "keys", &ui.settings.dictation_hotkey.keycaps()))
-                .child(hint(
-                    if holds(ui) {
-                        tr("Hold to talk")
-                    } else {
-                        tr("Press to talk")
-                    },
-                    p.faint(),
-                ));
-        }
+        Practice::Waiting => (
+            false,
+            if holds(ui) {
+                tr("Hold to talk")
+            } else {
+                tr("Press to talk")
+            }
+            .into(),
+            p.faint(),
+        ),
         Practice::Listening => (
             true,
             if holds(ui) {
@@ -624,7 +863,7 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
         ),
         Practice::NothingHeard => (
             false,
-            tr("Hex did not catch any words. Speak a little closer, or pick another microphone in Settings.").into(),
+            tr("Hex did not catch any words. Speak a little closer, or pick another microphone below.").into(),
             p.muted(),
         ),
         Practice::Failed => (
@@ -640,8 +879,22 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
             ));
         }
     };
+    // The shortcut's keys stay in one tray while it can be pressed, so a
+    // release springs them back up: held down while it records.
+    let down = matches!(view.practice, Practice::Listening) && holds(ui);
+    let line = line.child(key_tray(
+        p,
+        "keys",
+        KeySize::Small,
+        ui.settings
+            .dictation_hotkey
+            .keycaps()
+            .iter()
+            .enumerate()
+            .map(|(index, cap)| keycap(p, index, cap, KeySize::Small, down)),
+    ));
     let line = if dot {
-        line.child(super::controls::status_dot(p.danger()))
+        line.child(super::controls::pulsing_dot(p.danger()))
     } else {
         line
     };
@@ -669,13 +922,15 @@ fn done(ui: &Ui, p: Paint) -> El {
         )),
         keycaps(p, "keys", &ui.settings.edit_hotkey.keycaps()),
     ));
-    tips.push(setting_row(
-        p,
-        "tip-modes",
-        tr("Modes"),
-        Some(tr("Fix names, tone, and formatting per app.")),
-        el().key("none"),
-    ));
+    if ui.platform.modes {
+        tips.push(setting_row(
+            p,
+            "tip-modes",
+            tr("Modes"),
+            Some(tr("Fix names, tone, and formatting per app.")),
+            el().key("none"),
+        ));
+    }
     let send_off = match ui.platform.caps.os {
         Os::Macos => tr_fill(
             "Hex waits in the menu bar. Use {} in any app to dictate.",
@@ -693,15 +948,22 @@ fn done(ui: &Ui, p: Paint) -> El {
     let c = &p.k.c;
     let art = row().key("art").h(ART_HEIGHT).w_full().center().child(
         row()
-            .key("badge")
-            .size(72.0, 72.0)
-            .radius(36.0)
-            .center()
-            .fill(c.success.bg)
+            .key("ring")
+            .padding(16.0)
+            .radius(52.0)
+            .border(1.0, c.border_base.alpha(0.3))
             .child(
-                rune::icon(p.k.glyph.check_small, 40.0)
-                    .key("check")
-                    .color(p.success()),
+                row()
+                    .key("badge")
+                    .size(72.0, 72.0)
+                    .radius(36.0)
+                    .center()
+                    .fill(c.success.bg)
+                    .child(
+                        rune::icon(p.k.glyph.check_small, 40.0)
+                            .key("check")
+                            .color(p.success()),
+                    ),
             ),
     );
     col()
@@ -712,13 +974,13 @@ fn done(ui: &Ui, p: Paint) -> El {
         .child(
             col()
                 .key("more")
-                .gap(8.0)
+                .gap(super::controls::METRICS.label_gap)
                 .child(
                     text(tr("When you want more"))
                         .key("label")
                         .font(DESCRIPTION)
                         .color(p.muted())
-                        .ml(12.0),
+                        .ml(super::controls::METRICS.row_px),
                 )
                 .child(card(p, "tips-card", tips)),
         )
@@ -764,6 +1026,8 @@ pub(super) enum MacStep {
     Setup,
     SetupProgress,
     SetupDenied,
+    /// Every permission on, Accessibility waiting for a restart.
+    SetupRestart,
     SetupDownloadFailed,
     TryIt,
     TryItListening,
@@ -775,10 +1039,9 @@ pub(super) enum MacStep {
 /// Walks a fresh macOS first run to `state`. `ui.platform` must carry
 /// macOS capabilities.
 pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
-    use PermissionState::{NeedsRequest, NeedsSettings, Ready};
+    use PermissionState::{NeedsRequest, NeedsRestart, NeedsSettings, Ready};
     let fresh = crate::onboarding::SetupStatus {
         microphone: NeedsRequest,
-        input_monitoring: NeedsSettings,
         accessibility: NeedsSettings,
         transcription_model: false,
     };
@@ -794,16 +1057,19 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         MacStep::Welcome | MacStep::Setup | MacStep::SetupDownloadFailed => fresh,
         MacStep::SetupProgress => crate::onboarding::SetupStatus {
             microphone: Ready,
-            input_monitoring: Ready,
             ..fresh
         },
         MacStep::SetupDenied => crate::onboarding::SetupStatus {
             microphone: NeedsSettings,
             ..fresh
         },
+        MacStep::SetupRestart => crate::onboarding::SetupStatus {
+            microphone: Ready,
+            accessibility: NeedsRestart,
+            ..fresh
+        },
         _ => crate::onboarding::SetupStatus {
             microphone: Ready,
-            input_monitoring: Ready,
             accessibility: Ready,
             transcription_model: true,
         },
@@ -820,11 +1086,7 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         input(ui, Input::Continue);
     }
     if state == MacStep::SetupProgress {
-        for item in [
-            SetupItem::Microphone,
-            SetupItem::InputMonitoring,
-            SetupItem::Accessibility,
-        ] {
+        for item in [SetupItem::Microphone, SetupItem::Accessibility] {
             input(ui, Input::Grant(item));
         }
     }
@@ -890,7 +1152,6 @@ mod tests {
     fn try_it_focuses_the_practice_field_until_the_dictation_lands() {
         let ready = crate::onboarding::SetupStatus {
             microphone: PermissionState::Ready,
-            input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: true,
         };

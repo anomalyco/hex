@@ -17,12 +17,9 @@ The window follows OpenCode Desktop's layout: a deep-background sidebar and a
 raised, rounded content panel. Hex keeps its own information, sections, and
 copy; the look comes from the kit.
 
-The macOS dictation HUD ([`dictation_indicator.rs`](../src/dictation_indicator.rs))
-is outside the system: its glossy Metal capsule is hand-tuned in HUD Lab. The
-Windows HUD draws the same capsule from a CPU port of its shader
-(`desktop_indicator_shader.rs`), and the Linux HUD
-([`linux_rune_hud.rs`](../src/linux_rune_hud.rs)) is a fixed dark pill in
-either appearance.
+The dictation HUD ([`rune_hud.rs`](../src/rune_hud.rs)) is outside the
+system: its glossy capsule and Dot scope are shaders (`rune_hud.wgsl`) drawn
+by a Rune overlay's compositor on every OS, hand-tuned in HUD Lab.
 
 ## Rules
 
@@ -45,7 +42,21 @@ either appearance.
 4. **Few visible actions.** A detail header shows its one to three most common
    actions; the rest go in an overflow menu, with the destructive choice last.
    A destructive choice ends in "…" and keeps its two-step confirmation.
-5. **Verify by looking.** Render every view you touched with a `--snap` scene
+   Space presses the focused button; Return presses only a `.default_button()`.
+   Make one the confirming action of a dialog, a tour step, or a recoverable
+   confirmation once it shows, never a pane's standing action, and never an
+   irreversible one (Clear all history, Confirm delete of a mode).
+5. **Hover is instant, and only on one target.** A settings row never paints
+   a hover or press fill; only the controls inside it react (a row that
+   toggles is a `pressable_row`). Hover fills belong to things that are one
+   clickable target: list rows, picker rows, sidebar items. Every `.hover(…)`
+   needs nothing extra: the window's root sets
+   `.hover_motion_within(Anim::INSTANT, Anim::INSTANT)` (and each overlay
+   window's root does too), so every hover below it, kit controls and popups
+   included, switches with no fade either way. Never give an element its own
+   `hover_motion`. Press and selection motion stay as the
+   kit draws them.
+6. **Verify by looking.** Render every view you touched with a `--snap` scene
    in light and dark (see [Verification](#verification)).
 
 ## Hex pieces
@@ -55,16 +66,20 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 
 | Job | Piece |
 |---|---|
-| Settings card, titled card | `card`, `section` |
-| Settings row (title, description, control) | `setting_row`, `described_row`, `toggle_row` |
+| Settings page (the gutter and the rhythm between sections) | `page` (cards hang `row_px` past the gutter so row text sits on the title's edge) or `bare_page` (free-standing content on the gutter); their numbers are `METRICS`, the one set of layout tokens |
+| Settings card, titled card, a card whose label line carries a control | `card`, `section`, `section_with` (Advanced, a status, an add button) |
+| Settings row (title, description, control) | `setting_row`, `described_row`, `link_row` (a one-line link under the title, at the plain row height), `toggle_row`; a row that toggles shows `row_switch`; any other row pressed as a whole: `pressable_row` |
 | A few exclusive choices / a dropdown | `segmented`, `select` |
-| Main, other, and destructive actions | `button(…, ButtonKind::{Primary, Secondary, Danger}, …)`; inside a row: `small_button` |
-| Shortcut keycaps | `keycaps`; the recorder is `settings::hotkey_control` |
+| A value whose choices open in a sheet, not a menu | `sheet_button` (the value and a trailing chevron) |
+| Main, other, and destructive actions | `button(…, ButtonKind::{Primary, Secondary, Danger}, …)`; inside a row: `small_button`; icon only (with an accessible label): `icon_button` |
+| How a modal enters and leaves | `modal_transition` on the surface (scale 0.96 and fade), `modal_scrim_transition` on its scrim |
+| Shortcut keycaps | `keycaps` (Small keys in a recessed tray as tall as a recorder); one live key that sinks when pressed: `keycap` inside `key_tray`; the recorder is `settings::hotkey_control` |
 | Status (never clickable) | `tone_tag`; a live or recorded state: `status_dot` |
 | Short message under a control | `note` |
 | Text entry saved when typing pauses | `text_field` |
 | Keyboard highlight in a search popover | `Highlight` |
 | List + detail | `split` with `list_row`, `group_label`, `detail_header`, `detail_title`, `section_label`, `fact` |
+| Keyboard-selectable list (sidebar, list + detail, picker languages) | `source_list` around rows made with `list_row` or `source_item` |
 | Nothing to show, errors | `message`, `placeholder`, `error_panel` |
 | A permission's Allow / Allowed control | `permission_control`, `allowed` |
 | Slider | `slider` |
@@ -82,9 +97,8 @@ missing capability omits the row instead of imitating it.
 - Sentence case for every label, button, title, and section label:
   "Open settings", "Stop & transcribe", "Permissions needed". Proper nouns keep
   their capitals: Hex, OpenCode, Apple Intelligence, Finder, Zoom.
-- One product name: "Hex". Never "HEX" in UI strings, window titles, or menus.
-  File and artifact names (`HEX.app`, `HEX-<version>…`) and `HEX_*` environment
-  variables are identifiers, not copy.
+- One product name: "Hex", in copy, comments, and docs alike. `HEX_*`
+  environment variables are identifiers, not copy.
 - Use "…" (one character) for ellipses, for both progress ("Saving…") and for
   buttons that open a further choice ("Choose a file…").
 - Row descriptions are one phrase with no closing period ("Hold to dictate,
@@ -109,7 +123,7 @@ cargo run -- app -- --snap /tmp/hex-modes.png --scene modes
 cargo run -- app -- --snap /tmp/hex-modes-light.png --scene modes --theme light
 cargo run -- app -- --snap /tmp/hex-mac-settings.png --scene mac-settings
 # Goldens (light and dark) and pane behavior:
-cargo test --bin voice-control rune_ui
+cargo test --bin hex rune_ui
 ```
 
 On a machine without a GPU, render on lavapipe with

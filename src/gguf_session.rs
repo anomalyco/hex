@@ -3,7 +3,9 @@
 //! every live stream) so retained scheduler scratch never outlives the
 //! inference that sized it.
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
@@ -16,6 +18,32 @@ use crate::transcription_models::{
 /// during launch. With a 1 s probe, a new build's first dictation compiled
 /// them in its finish step and took 3-4 s on an RTX 5070 Ti.
 const STREAM_PREWARM_SAMPLES: usize = 8 * 16_000;
+
+thread_local! {
+    static JOB_CANCEL: RefCell<Option<transcribe_cpp::CancelToken>> = const { RefCell::new(None) };
+}
+
+/// Runs `work` with `cancel` installed on every offline run it makes on this
+/// thread, so cancelling one engine job aborts its model between decode steps
+/// and between chunks. The engine's offline closures reach the session through
+/// model types that know nothing of jobs.
+pub(crate) fn with_job_cancel<R>(
+    cancel: &transcribe_cpp::CancelToken,
+    work: impl FnOnce() -> R,
+) -> R {
+    struct Restore(Option<transcribe_cpp::CancelToken>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            JOB_CANCEL.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(JOB_CANCEL.with(|slot| slot.borrow_mut().replace(cancel.clone())));
+    work()
+}
+
+pub(crate) fn job_cancel() -> Option<transcribe_cpp::CancelToken> {
+    JOB_CANCEL.with(|slot| slot.borrow().clone())
+}
 
 pub(crate) fn validate_gguf_artifact(
     path: &Path,
@@ -64,10 +92,16 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
     }
 }
 
+/// A run this recent leaves the weights resident (ggml keeps them so for three
+/// minutes), so a prewarm after it would only repeat work.
+const RECENT_RUN: Duration = Duration::from_secs(60);
+
 pub(crate) struct OfflineGgufSession {
     model: transcribe_cpp::Model,
     session: Option<transcribe_cpp::Session>,
     options: transcribe_cpp::SessionOptions,
+    /// When the last run or live stream completed; `None` until the first.
+    last_run: Option<Instant>,
 }
 
 impl OfflineGgufSession {
@@ -86,7 +120,14 @@ impl OfflineGgufSession {
             model,
             session: Some(session),
             options,
+            last_run: None,
         })
+    }
+
+    /// Whether a run or live stream completed within [`RECENT_RUN`].
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn ran_recently(&self) -> bool {
+        ran_within(self.last_run, Instant::now(), RECENT_RUN)
     }
 
     /// Streams only on a GPU (Metal, Vulkan): a CPU stream re-encodes each
@@ -109,7 +150,11 @@ impl OfflineGgufSession {
             Ok("1") => true,
             _ => false,
         };
-        if !self.model.capabilities().supports_streaming {
+        if !self
+            .model
+            .capabilities()
+            .is_ok_and(|capabilities| capabilities.supports_streaming)
+        {
             return None;
         }
         let device_type = self.model.device().ok()?.device_type;
@@ -177,6 +222,9 @@ impl OfflineGgufSession {
             .stream(options, stream_options)
             .map(|mut stream| drive(&mut stream));
         drop(session);
+        if result.is_ok() {
+            self.last_run = Some(Instant::now());
+        }
         self.session = self.model.session_with(&self.options).ok();
         result
     }
@@ -194,8 +242,22 @@ impl OfflineGgufSession {
             Some(session) => session,
             None => self.model.session_with(&self.options)?,
         };
-        let result = session.run(samples, options);
+        if let Some(cancel) = job_cancel() {
+            session.set_cancel_token(&cancel);
+        }
+        let result =
+            keep_repetition_partial(session.run(samples, options)).map(|mut transcript| {
+                if let Some(transcribe_cpp::RunExtension::Whisper(whisper)) = &options.family
+                    && let Some(prompt) = &whisper.initial_prompt
+                {
+                    drop_prompt_echo(&mut transcript, prompt);
+                }
+                transcript
+            });
         drop(session);
+        if result.is_ok() {
+            self.last_run = Some(Instant::now());
+        }
         match self.model.session_with(&self.options) {
             Ok(session) => {
                 self.session = Some(session);
@@ -224,6 +286,9 @@ impl OfflineGgufSession {
         };
         let mut output = Vec::new();
         for samples in samples.chunks(max_samples) {
+            if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
+                return Err(eyre!("transcription was cancelled"));
+            }
             let mut chunk = samples.to_vec();
             crate::dictation::pad_for_parakeet(&mut chunk);
             let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
@@ -236,9 +301,122 @@ impl OfflineGgufSession {
     }
 }
 
+/// transcribe-cpp 0.4 stops a decoder that starts looping and reports the text
+/// before the loop as an error; 0.2 returned the looped text as success. Keep
+/// returning text.
+fn keep_repetition_partial(
+    result: transcribe_cpp::Result<transcribe_cpp::Transcript>,
+) -> transcribe_cpp::Result<transcribe_cpp::Transcript> {
+    match result {
+        Err(transcribe_cpp::Error::OutputRepetition {
+            partial: Some(partial),
+            ..
+        }) => Ok(*partial),
+        result => result,
+    }
+}
+
+fn ran_within(last_run: Option<Instant>, now: Instant, window: Duration) -> bool {
+    last_run.is_some_and(|last_run| now.saturating_duration_since(last_run) < window)
+}
+
+/// Drops Whisper segments that only repeat the recognition hints. Whisper
+/// reads the hints as its initial prompt and, on silence or noise, often
+/// returns them verbatim. Speech that merely contains a hint is kept, and so
+/// is a single hint: dictating the one listed name must still paste it.
+fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
+    let is_separator = |character: char| matches!(character, ',' | ';' | '\n');
+    let hints = prompt
+        .split(is_separator)
+        .filter(|hint| !hint.trim().is_empty())
+        .count();
+    if hints < 2 {
+        return;
+    }
+    let normalize = |text: &str| crate::spoken_text::normalize(&text.replace(is_separator, " "));
+    let prompt = normalize(prompt);
+    let echoes = |text: &str| normalize(text) == prompt;
+    if transcript.segments.is_empty() {
+        if echoes(&transcript.text) {
+            transcript.text.clear();
+            transcript.words.clear();
+        }
+        return;
+    }
+    if !transcript
+        .segments
+        .iter()
+        .any(|segment| echoes(&segment.text))
+    {
+        return;
+    }
+    let words = std::mem::take(&mut transcript.words);
+    let mut segments = Vec::new();
+    for mut segment in std::mem::take(&mut transcript.segments) {
+        if echoes(&segment.text) {
+            continue;
+        }
+        let first = (segment.first_word.max(0) as usize).min(words.len());
+        let last = (first + segment.n_words.max(0) as usize).min(words.len());
+        segment.first_word = transcript.words.len() as i32;
+        let index = segments.len() as i32;
+        transcript
+            .words
+            .extend(words[first..last].iter().cloned().map(|mut word| {
+                word.seg_index = index;
+                word
+            }));
+        segments.push(segment);
+    }
+    transcript.text = segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    transcript.segments = segments;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_completed_run_inside_the_window_counts_as_recent() {
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        assert!(!ran_within(None, now, window), "a fresh load has not run");
+        assert!(ran_within(Some(now), now, window));
+        assert!(ran_within(Some(now - Duration::from_secs(59)), now, window));
+        assert!(!ran_within(
+            Some(now - Duration::from_secs(60)),
+            now,
+            window
+        ));
+    }
+
+    #[test]
+    fn a_decode_stopped_for_repeating_keeps_its_text_and_truncation_still_fails() {
+        let transcript = |text: &str| {
+            Some(Box::new(transcribe_cpp::Transcript {
+                text: text.into(),
+                ..Default::default()
+            }))
+        };
+        let repeated = keep_repetition_partial(Err(transcribe_cpp::Error::OutputRepetition {
+            message: "loop".into(),
+            partial: transcript("send it now"),
+        }));
+        assert_eq!(repeated.unwrap().text, "send it now");
+        let truncated = keep_repetition_partial(Err(transcribe_cpp::Error::OutputTruncated {
+            message: "budget".into(),
+            partial: transcript("send it"),
+        }));
+        assert!(matches!(
+            truncated,
+            Err(transcribe_cpp::Error::OutputTruncated { .. })
+        ));
+    }
 
     #[test]
     fn gpu_sessions_bound_decoder_threads_and_cpu_sessions_keep_library_default() {
@@ -247,5 +425,136 @@ mod tests {
         assert_eq!(session_options(DeviceType::Igpu).n_threads, 1);
         assert_eq!(session_options(DeviceType::Cpu).n_threads, 0);
         assert_eq!(session_options(DeviceType::Accel).n_threads, 0);
+    }
+
+    fn segment(text: &str, first_word: i32, n_words: i32) -> transcribe_cpp::Segment {
+        transcribe_cpp::Segment {
+            text: text.into(),
+            first_word,
+            n_words,
+            ..Default::default()
+        }
+    }
+
+    fn transcript(segments: &[&str]) -> transcribe_cpp::Transcript {
+        let mut transcript = transcribe_cpp::Transcript::default();
+        let mut first_word = 0;
+        for text in segments {
+            let n_words = text.split_whitespace().count() as i32;
+            transcript.segments.push(segment(text, first_word, n_words));
+            for word in text.split_whitespace() {
+                transcript.words.push(transcribe_cpp::Word {
+                    text: word.into(),
+                    ..Default::default()
+                });
+            }
+            first_word += n_words;
+        }
+        transcript.text = segments.join(" ");
+        transcript
+    }
+
+    fn words(transcript: &transcribe_cpp::Transcript) -> Vec<&str> {
+        transcript
+            .words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn prompt_echo_is_dropped() {
+        let mut echo = transcript(&["T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut echo, "t3 code, ottobit");
+        assert_eq!(echo.text, "");
+        assert!(echo.segments.is_empty());
+        assert!(echo.words.is_empty());
+
+        let mut unsegmented = transcribe_cpp::Transcript {
+            text: " T3 Code, Ottobit. ".into(),
+            ..Default::default()
+        };
+        drop_prompt_echo(&mut unsegmented, "T3 Code, Ottobit");
+        assert_eq!(unsegmented.text, "");
+    }
+
+    #[test]
+    fn speech_containing_the_hints_is_kept() {
+        let mut speech = transcript(&["We shipped T3 Code today"]);
+        let before = speech.clone();
+        drop_prompt_echo(&mut speech, "T3 Code");
+        assert_eq!(speech, before);
+    }
+
+    #[test]
+    fn only_the_echo_segment_is_removed() {
+        let mut mixed = transcript(&["Let's ship it.", "T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut mixed, "T3 Code, Ottobit");
+        assert_eq!(mixed.text, "Let's ship it.");
+        assert_eq!(mixed.segments.len(), 1);
+        assert_eq!(words(&mixed), ["Let's", "ship", "it."]);
+
+        let mut leading = transcript(&["T3 Code, Ottobit.", "Let's ship it."]);
+        drop_prompt_echo(&mut leading, "T3 Code, Ottobit");
+        assert_eq!(leading.text, "Let's ship it.");
+        assert_eq!(words(&leading), ["Let's", "ship", "it."]);
+        assert_eq!(
+            (leading.segments[0].first_word, leading.segments[0].n_words),
+            (0, 3)
+        );
+    }
+
+    #[test]
+    fn single_hint_dictation_is_kept() {
+        let mut dictation = transcript(&["Ottobit."]);
+        let before = dictation.clone();
+        drop_prompt_echo(&mut dictation, "Ottobit");
+        assert_eq!(dictation, before);
+
+        let mut spaced = transcript(&["T3 Code Ottobit"]);
+        let before = spaced.clone();
+        drop_prompt_echo(&mut spaced, "T3 Code Ottobit");
+        assert_eq!(spaced, before);
+    }
+
+    #[test]
+    fn hints_without_spaces_after_commas_are_matched() {
+        let mut echo = transcript(&["T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut echo, "T3 Code,Ottobit");
+        assert_eq!(echo.text, "");
+
+        let mut joined = transcript(&["T3 Code;Ottobit"]);
+        drop_prompt_echo(&mut joined, "T3 Code\nOttobit");
+        assert_eq!(joined.text, "");
+    }
+
+    #[test]
+    fn an_empty_prompt_drops_nothing() {
+        let mut silence = transcribe_cpp::Transcript::default();
+        drop_prompt_echo(&mut silence, "  ");
+        assert_eq!(silence, transcribe_cpp::Transcript::default());
+    }
+
+    #[test]
+    fn a_job_cancel_token_is_installed_only_inside_its_scope() {
+        let outer = transcribe_cpp::CancelToken::new();
+        let inner = transcribe_cpp::CancelToken::new();
+        assert!(job_cancel().is_none());
+        with_job_cancel(&outer, || {
+            with_job_cancel(&inner, || {
+                inner.cancel();
+                assert!(job_cancel().unwrap().is_cancelled());
+            });
+            assert!(
+                !job_cancel().unwrap().is_cancelled(),
+                "the outer job is restored"
+            );
+        });
+        assert!(job_cancel().is_none());
+        let _ = std::panic::catch_unwind(|| with_job_cancel(&outer, || panic!("run failed")));
+        assert!(
+            job_cancel().is_none(),
+            "a panicking run still uninstalls its token"
+        );
     }
 }
