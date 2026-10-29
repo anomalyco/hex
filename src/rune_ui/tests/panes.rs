@@ -1702,18 +1702,16 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
         let slot = element(rt, "double-tap-fold").rect;
         slot[1] + slot[3]
     };
-    let separator = element(&rt, "microphone-mode").rect[1] - edge(&rt);
+    let separator = element(&rt, "double-tap-only-fold").rect[1] - edge(&rt);
     for mode in [1, 0] {
         pick(&mut rt, "shortcut-mode", mode);
         for _ in 0..30 {
             rt.frame(1.0 / 60.0);
             let bottom = edge(&rt);
-            let below = element(&rt, "microphone-mode").rect[1];
+            let below = element(&rt, "double-tap-only-fold").rect[1];
             assert!(
-                // Within a point of pixel snapping; a row left behind would
-                // be off by its whole height.
-                (below - bottom - separator).abs() <= 1.0,
-                "the microphone row rides the slot's edge: {below} vs {bottom} + {separator}"
+                (below - bottom - separator).abs() < 0.01,
+                "the row below rides the slot's edge: {below} vs {bottom}"
             );
             if let Some(row) = rt.elements().into_iter().find(|e| {
                 e.key.as_deref() == Some("double-tap") && e.opacity > 0.0 && e.visible[3] > 0.0
