@@ -112,8 +112,14 @@ fn none() -> El {
     el().key("none")
 }
 
+/// The download, or the one about to start for the Mac's language before
+/// the story plays.
 fn download(s: &Onboard) -> Download {
-    s.download.expect("first run starts its download on open")
+    s.download.unwrap_or(Download {
+        language: s.wants,
+        downloaded: 0,
+        total: s.wants.bytes(),
+    })
 }
 
 fn lead(p: Paint, copy: impl Into<String>) -> El {
