@@ -567,6 +567,7 @@ Pause media + Also pause the browser     // browser_media
         ├── A window above -60 dBFS -> resumed
         ├── No level before the first level (the output is opening again) -> keep polling
         ├── No level after a level -> stop listening
+        ├── No browser output open after 10 windows (tab closed: the play reached another app) -> send pause once
         ├── Never a level and a browser opened its output -> stop listening
         └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 

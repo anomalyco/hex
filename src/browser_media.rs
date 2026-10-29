@@ -40,6 +40,10 @@ const RESUME_LISTEN: Duration = Duration::from_millis(300);
 /// After play, the browser must sound within this many windows (2 s). If it
 /// does not, the play reached something else, so Hex pauses it again.
 const PLAY_CHECK_WINDOWS: usize = 20;
+/// A browser that closed its output opens it again within this many windows
+/// of play (about 200 ms on Brave). If none does, the play reached another
+/// app, so Hex pauses it again sooner.
+const OPEN_CHECK_WINDOWS: usize = 10;
 /// How long a new tap may take to deliver its first cycle.
 const TAP_WARM_UP: Duration = Duration::from_millis(300);
 
@@ -134,14 +138,18 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
         return;
     }
     // The tap delivers again once play opens the output, about 300 ms later.
-    for _ in 0..PLAY_CHECK_WINDOWS {
+    for window in 1..=PLAY_CHECK_WINDOWS {
         match audio.peak_dbfs(WINDOW) {
             Some(peak) if peak > SOUND_DBFS => {
                 tracing::info!("resumed the browser");
                 return;
             }
             Some(_) => heard = true,
-            None if !heard => {}
+            None if !heard => {
+                if window == OPEN_CHECK_WINDOWS && audio.output_closed() {
+                    break;
+                }
+            }
             None => {
                 tracing::info!("sent play but cannot hear the browser any more");
                 return;
@@ -627,6 +635,8 @@ mod tests {
         audio.output_closed = true;
         resume(&mut audio, PausedBrowser::for_test());
         assert_eq!(audio.sent, [MediaCommand::Play, MediaCommand::Pause]);
+        // A closed tab sends the play to another app: stop it after 1 s, not 2.
+        assert_eq!(audio.listened, 1 + 10);
     }
 
     #[test]
