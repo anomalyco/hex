@@ -1315,6 +1315,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     use crate::feedback::{Audition, Cue, SoundSet};
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Signature);
+    open_advanced(&mut rt, Pane::General);
     tap(&mut rt, "sound-set-control");
     assert!(rt.state.sound_sets.open);
     let playing = |rt: &Runtime<Ui>| rt.state.sound_sets.playing();
