@@ -4125,7 +4125,7 @@ dependencies = [
 [[package]]
 name = "procwatch"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
+source = "git+https://github.com/anomalyco/rune.git?rev=07520d007df09a1fa899a6085cd6279d6b6275a5#07520d007df09a1fa899a6085cd6279d6b6275a5"
 dependencies = [
  "libc",
 ]
