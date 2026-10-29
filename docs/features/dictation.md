@@ -636,6 +636,17 @@ floor) through `metal_stream_tracks_offline_transcription` lost "I" after the
 8 s gap of digital silence only, and the whole clip kept it: the loss depends
 on where speech resumes against the stream's chunks. Live text does not cause
 it: `HEX_STREAM_LIVE_TEXT=0` gives the same text.
+
+**Mitigation, October 29, 2026 (#338's diagnosis, by ElliottH):** the engine's
+`PauseCap` now feeds a dictation stream only the first 2.5 s and last 0.3 s of
+each pause (20 ms frames the meeting pause detector calls not speech); the
+clip and its offline fallback keep every sample, and "finished live stream"
+logs `pauses_dropped_ms`. `/streams` is unchanged. Check:
+`a_dictation_stream_hears_only_the_ends_of_long_pauses` (synthetic audio, a
+fake stream). Not re-measured on a real model here; ElliottH's Metal replays
+went from 18/36 to 0/36 lost words for 6–14 s gaps of silence or steady noise.
+Limit: noise that rises mid-dictation counts as speech for up to about 10 s,
+so that pause is not cut.
 ### Optional Voice Controls
 
 Optional spoken entry requires Commands enabled, its model ready, and recognition

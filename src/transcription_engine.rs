@@ -983,12 +983,24 @@ impl Worker {
         let mut stats = FeedStats::default();
         let stalled = &self.stalled;
         let ended = self.model.with_stream(&options, cancel, |stream| {
-            drive_stream(id, stream, commands, stalled, partials, next, &mut stats)
+            let mut capped = PauseCap::new(stream);
+            let ended = drive_stream(
+                id,
+                &mut capped,
+                commands,
+                stalled,
+                partials,
+                next,
+                &mut stats,
+            );
+            stats.pauses_dropped_ms = capped.dropped / 16;
+            ended
         });
         let FeedStats {
             feed_ms,
             feeds,
             partials: changes,
+            pauses_dropped_ms,
         } = stats;
         match ended {
             Ok(StreamEnd::Finished {
@@ -1004,6 +1016,7 @@ impl Worker {
                     feeds,
                     feed_ms,
                     partials = changes,
+                    pauses_dropped_ms,
                     finish_ms = started.elapsed().as_millis(),
                     "finished live stream"
                 );
@@ -1117,12 +1130,105 @@ impl StreamFeed for transcribe_cpp::Stream<'_> {
     }
 }
 
+/// Pause audio a dictation stream still hears before its long pauses are
+/// cut: longer than a chunk plus its lookahead (2.08 s for Unified English),
+/// so the words before a pause decode during it.
+const PAUSE_HEAD_SAMPLES: usize = 40_000;
+/// Pause audio kept just before speech resumes after a cut.
+const PAUSE_TAIL_SAMPLES: usize = 4_800;
+
+/// A dictation stream that hears at most the head and tail of each pause.
+/// Parakeet's buffered stream can drop the first word after a pause longer
+/// than its 5.6 s left context (#324, #338); the clip, and with it any
+/// offline fallback, keeps every sample.
+struct PauseCap<'a, S> {
+    stream: &'a mut S,
+    speech: crate::pause_segmenter::SpeechFrames,
+    /// Samples not yet a whole 20 ms frame.
+    frame: Vec<f32>,
+    /// Non-speech samples since the last speech frame.
+    pause: usize,
+    /// The newest pause samples past the head, released if speech resumes.
+    tail: VecDeque<f32>,
+    dropped: usize,
+}
+
+impl<'a, S: StreamFeed> PauseCap<'a, S> {
+    fn new(stream: &'a mut S) -> Self {
+        Self {
+            stream,
+            speech: Default::default(),
+            frame: Vec::with_capacity(crate::pause_segmenter::FRAME_SAMPLES),
+            pause: 0,
+            tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
+            dropped: 0,
+        }
+    }
+
+    fn frame(&mut self, out: &mut Vec<f32>) {
+        if self.speech.is_speech(&self.frame) {
+            out.extend(self.tail.drain(..));
+            self.pause = 0;
+            out.append(&mut self.frame);
+            return;
+        }
+        self.pause += self.frame.len();
+        if self.pause <= PAUSE_HEAD_SAMPLES {
+            out.append(&mut self.frame);
+            return;
+        }
+        self.tail.extend(self.frame.drain(..));
+        let overflow = self.tail.len().saturating_sub(PAUSE_TAIL_SAMPLES);
+        self.tail.drain(..overflow);
+        self.dropped += overflow;
+    }
+}
+
+impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
+    fn feed(&mut self, mut samples: &[f32]) -> Result<(), String> {
+        let mut out = Vec::with_capacity(samples.len() + self.tail.len());
+        while !samples.is_empty() {
+            let take = samples
+                .len()
+                .min(crate::pause_segmenter::FRAME_SAMPLES - self.frame.len());
+            self.frame.extend_from_slice(&samples[..take]);
+            samples = &samples[take..];
+            if self.frame.len() == crate::pause_segmenter::FRAME_SAMPLES {
+                self.frame(&mut out);
+            }
+        }
+        if out.is_empty() {
+            return Ok(());
+        }
+        self.stream.feed(&out)
+    }
+
+    /// A trailing pause keeps only its head.
+    fn finalize(&mut self) -> Result<String, String> {
+        if self.pause <= PAUSE_HEAD_SAMPLES && !self.frame.is_empty() {
+            let rest = std::mem::take(&mut self.frame);
+            self.stream.feed(&rest)?;
+        } else {
+            self.dropped += self.frame.len();
+        }
+        self.dropped += self.tail.len();
+        self.tail.clear();
+        self.stream.finalize()
+    }
+
+    fn partial(&self) -> Partial {
+        self.stream.partial()
+    }
+}
+
 #[derive(Default)]
 struct FeedStats {
     feed_ms: u128,
     feeds: u32,
     /// Changes of text published for live text.
     partials: u32,
+    /// Pause audio the stream never heard.
+    pauses_dropped_ms: usize,
 }
 
 /// Handles commands while stream `id` is open, publishing its text to
@@ -1397,6 +1503,40 @@ mod tests {
         ));
         drop(deferred);
         assert!(chunk.wait().is_err());
+    }
+
+    fn tone(samples: usize) -> Vec<f32> {
+        (0..samples)
+            .map(|i| 0.3 * (i as f32 * 0.05).sin())
+            .collect()
+    }
+
+    #[test]
+    fn a_dictation_stream_hears_only_the_ends_of_long_pauses() {
+        // Quiet first, as the pre-roll is, so the noise floor starts low.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 160_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 80_000]);
+        let mut fake = FakeStream::default();
+        let mut capped = PauseCap::new(&mut fake);
+        for chunk in clip.chunks(1_234) {
+            capped.feed(chunk).unwrap();
+        }
+        capped.finalize().unwrap();
+        let dropped = capped.dropped;
+        // A 1 s pause passes whole; the 10 s one keeps 2.5 s and 0.3 s, and
+        // the trailing 5 s one only its head.
+        let long = 160_000 - PAUSE_HEAD_SAMPLES - PAUSE_TAIL_SAMPLES;
+        let trailing = 80_000 - PAUSE_HEAD_SAMPLES;
+        assert_eq!(dropped, long + trailing);
+        assert_eq!(fake.fed.len(), clip.len() - dropped);
+        assert_eq!(fake.fed[..56_000], clip[..56_000]);
+        let resumed = 56_000 + PAUSE_HEAD_SAMPLES + PAUSE_TAIL_SAMPLES;
+        assert_eq!(fake.fed[resumed..resumed + 16_000], clip[216_000..232_000]);
     }
 
     fn heard(samples: usize) -> Partial {
