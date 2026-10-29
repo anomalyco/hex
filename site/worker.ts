@@ -1,9 +1,10 @@
 // One Worker serves Hex under /hex on its host: the site, the release files
 // bucket at /hex/files (feeds, appcast, installers, artifacts), and
-// /hex/download/dev, the latest dev channel Mac download. Other hosts and
+// /hex/download/dev, the latest dev channel Mac download, and
+// /hex/download/<target>, the release every download button names. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
-import { BASE_PATH, DEV_DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+import { BASE_PATH, DEV_DOWNLOAD_PATH, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 
 type Env = {
   ASSETS: { fetch(request: Request): Promise<Response> }
@@ -27,6 +28,7 @@ export default {
     }
     if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
     if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
+    if (url.pathname.startsWith(`${DOWNLOAD_PATH}/`)) return download(request, url.pathname.slice(DOWNLOAD_PATH.length + 1))
 
     // The route also matches paths like /hexagon, which are not ours.
     const path = stripBase(url.pathname)
@@ -56,6 +58,38 @@ function secure(headers: Headers) {
   headers.set("Strict-Transport-Security", "max-age=31536000")
   headers.set("X-Content-Type-Options", "nosniff")
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+}
+
+const DOWNLOAD_TARGETS = new Set([
+  "macos-arm64-dmg",
+  "windows-x64-setup",
+  "windows-arm64-setup",
+  "linux-x64",
+  "linux-arm64",
+  "linux-x64-deb",
+  "linux-arm64-deb",
+  "linux-x64-rpm",
+  "linux-arm64-rpm",
+])
+
+// Redirects a download button to the release service's alias for <target>:
+// the stable channel once it has a release, the dev channel until then. The
+// decision happens per request, so the site switches to stable by itself.
+async function download(request: Request, target: string): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } })
+  }
+  if (!DOWNLOAD_TARGETS.has(target)) return new Response("Not found", { status: 404 })
+  let channel = "dev"
+  try {
+    const stable = await fetch(`${RELEASE_SERVICE}/hex/desktop/stable.json`, { headers: { "User-Agent": "hex-site" }, cache: "no-store" })
+    if (stable.ok) channel = "stable"
+  } catch {
+    // The service is unreachable: the dev alias fails the same way, visibly.
+  }
+  const headers = new Headers({ Location: `${RELEASE_SERVICE}/hex/desktop/${channel}/${target}`, "Cache-Control": "no-store" })
+  secure(headers)
+  return new Response(null, { status: 302, headers })
 }
 
 // Redirects to the DMG of the release service's latest dev channel build, so

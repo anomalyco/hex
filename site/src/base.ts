@@ -8,6 +8,8 @@ export const FILES_PATH = `${BASE_PATH}/files`
 export const RELEASE_SERVICE = "https://anoma.ly/release"
 // Redirects to the latest dev channel Mac download (worker.ts).
 export const DEV_DOWNLOAD_PATH = `${BASE_PATH}/download/dev`
+// Redirects to the current release's file for a target (worker.ts).
+export const DOWNLOAD_PATH = `${BASE_PATH}/download`
 
 // The build mode (`--mode dev`) picks the environment; every other mode builds production.
 export function hostForMode(mode: string | undefined): string {

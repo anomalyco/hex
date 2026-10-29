@@ -38,19 +38,21 @@ for what stays on your device and what optional features send to a provider.
 
 ### Downloads
 
-Builds from the dev channel, published on every change to `dev`:
+Each link serves the current release: the newest dev build (published on
+every change to `dev`, and updating itself from the Dev channel) until Hex's
+first stable release, then the stable release.
 
-| Platform | Dev |
+| Platform | Download |
 | --- | --- |
-| macOS (Apple silicon) | [DMG](https://anoma.ly/release/hex/desktop/dev/macos-arm64-dmg) |
-| Windows x64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-x64-setup) |
-| Windows ARM64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-arm64-setup) |
-| Linux x86_64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-x64) |
-| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-x64-deb) |
-| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-x64-rpm) |
-| Linux ARM64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-arm64) |
-| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-arm64-deb) |
-| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-arm64-rpm) |
+| macOS (Apple silicon) | [DMG](https://anoma.ly/hex/download/macos-arm64-dmg) |
+| Windows x64 | [Installer](https://anoma.ly/hex/download/windows-x64-setup) |
+| Windows ARM64 | [Installer](https://anoma.ly/hex/download/windows-arm64-setup) |
+| Linux x86_64 | [Executable](https://anoma.ly/hex/download/linux-x64) |
+| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-x64-deb) |
+| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-x64-rpm) |
+| Linux ARM64 | [Executable](https://anoma.ly/hex/download/linux-arm64) |
+| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-arm64-deb) |
+| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-arm64-rpm) |
 
 Updater files: [macOS ZIP](https://anoma.ly/release/hex/desktop/dev/macos-arm64),
 [Windows x64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-x64),
@@ -72,7 +74,7 @@ or forcibly replace another app already named `Hex.app`.
 
 Or install manually:
 
-1. [Download the latest signed DMG](https://anoma.ly/hex/files/releases/HEX-latest-arm64.dmg) and open it.
+1. [Download the signed DMG](https://anoma.ly/hex/download/macos-arm64-dmg) and open it.
 2. Drag `Hex.app` into Applications, then launch it.
 3. Complete the permission and model steps in setup.
 
@@ -280,8 +282,8 @@ driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
 CPU. Voice commands, meetings, and the local transcription API are not included.
 Download the installer for
-[x64](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-x64.exe) or
-[ARM64](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-arm64.exe)
+[x64](https://anoma.ly/hex/download/windows-x64-setup) or
+[ARM64](https://anoma.ly/hex/download/windows-arm64-setup)
 and run it; it installs for your user without administrator rights. It is not
 code-signed yet, so SmartScreen may warn: choose **More info**, then **Run
 anyway**. See the [Windows guide](docs/windows.md) for details or to build from

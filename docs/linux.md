@@ -175,7 +175,7 @@ On Hyprland, bind the shortcut in your config as described in
 
 The `hex` package installs `/usr/bin/hex`, the desktop entry, and the systemd
 user unit `hex.service` (the same files as the AUR package below). Download
-it for your architecture from <https://anoma.ly/release/hex/desktop/stable/linux-x64-deb>
+it for your architecture from <https://anoma.ly/hex/download/linux-x64-deb>
 (`linux-arm64-deb`, `linux-x64-rpm`, `linux-arm64-rpm`), then:
 
 ```sh

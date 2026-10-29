@@ -31,8 +31,11 @@ app and **Disabled** when it does nothing.
 
 Download and run the installer for your PC:
 
-- x64: [`HEX-Setup-2.3.1-x64.exe`](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-x64.exe)
-- ARM64: [`HEX-Setup-2.3.1-arm64.exe`](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-arm64.exe)
+- x64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-x64-setup)
+- ARM64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-arm64-setup)
+
+Until Hex's first stable release these are the newest dev build, which keeps
+updating itself from the Dev channel; afterwards, the stable release.
 
 [anoma.ly/hex](https://anoma.ly/hex/) picks the right one. The
 installer needs no administrator rights: it installs for the current user,

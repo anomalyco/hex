@@ -1,7 +1,7 @@
 import * as m from "motion/react-m"
 import { useEffect, useState, type ReactNode } from "react"
 import type { Platform } from "./platform"
-import { RELEASE } from "./release"
+import { RELEASE, useRelease, versionLabel, type Current } from "./release"
 
 export function AppleMark() {
   return (
@@ -113,10 +113,10 @@ function SendLink() {
   )
 }
 
-const WINDOWS_NOTE =
-  "The installer isn\u2019t code-signed yet, so Windows may say it protected your PC. Choose More info, then Run anyway."
+const DEV_NOTE = "Hex has no stable release yet: this is the newest dev build, which keeps updating itself from the Dev channel."
 
-function Primary({ platform }: { platform: Platform }) {
+function Primary({ platform, release }: { platform: Platform; release: Current }) {
+  const dev = release.channel === "dev" && <p className="download-note">{DEV_NOTE}</p>
   switch (platform) {
     case "mac":
       return (
@@ -125,9 +125,10 @@ function Primary({ platform }: { platform: Platform }) {
             Download for Mac
           </Button>
           <p className="requirements">
-            Version {RELEASE.mac.version}
+            {versionLabel(release)}
             {SEP}Apple silicon{SEP}macOS 15 or later
           </p>
+          {dev}
         </>
       )
     case "mac-intel":
@@ -151,12 +152,12 @@ function Primary({ platform }: { platform: Platform }) {
             Download for Windows
           </Button>
           <p className="requirements">
-            Version {build.version}
+            {versionLabel(release)}
             {SEP}Windows 10 or 11{SEP}
             {arm ? "ARM64" : "x64"}
             {SEP}beta
           </p>
-          <p className="download-note">{WINDOWS_NOTE}</p>
+          {dev}
         </>
       )
     }
@@ -165,13 +166,14 @@ function Primary({ platform }: { platform: Platform }) {
         <>
           <Command text={RELEASE.linux.command} label="Install command for Linux" />
           <p className="requirements">
-            Version {RELEASE.linux.version}
+            {versionLabel(release)}
             {SEP}x86_64 Arch Linux{SEP}glibc 2.44 or later{SEP}beta
           </p>
           <p className="download-note">
             Paste it into a terminal. The installer checks the signed release, needs no root, and adds Hex to your app
             launcher.
           </p>
+          {dev}
         </>
       )
     case "mobile":
@@ -240,9 +242,10 @@ function rows(platform: Platform): Row[] {
 }
 
 export default function Download({ platform }: { platform: Platform }) {
+  const release = useRelease()
   return (
     <div className="hero__action" data-avoid>
-      <Primary platform={platform} />
+      <Primary platform={platform} release={release} />
       <details className="platforms">
         <summary>Other platforms</summary>
         <ul>
@@ -260,7 +263,9 @@ export default function Download({ platform }: { platform: Platform }) {
             </li>
           ))}
           <li className="platform platform--github">
-            <a href={RELEASE.github}>Every {RELEASE.mac.version} download on GitHub</a>
+            <a href={RELEASE.github}>
+              {release.channel === "stable" ? `Every ${release.version} download on GitHub` : "Releases on GitHub"}
+            </a>
           </li>
         </ul>
       </details>

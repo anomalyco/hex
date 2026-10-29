@@ -9,6 +9,8 @@ anoma.ly/release/hex/                      the Anomaly release service (docs/rel
                                            Hex-Setup-<v>-windows-<arch>.exe,
                                            hex-<v>-linux-<x64|arm64>{,.deb,.rpm}
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
+├── download/<target>                      302 to anoma.ly/release/hex/desktop/stable/<target> once stable.json
+│                                          exists, else to .../dev/<target> (the newest dev build)
 ├── install-linux.sh, install-windows.ps1  installers (once the production site is deployed from production)
 └── files/…                                hex-production-files:
     ├── install-linux.sh, install-windows.ps1   the current installers (Installers workflow, from dev;
