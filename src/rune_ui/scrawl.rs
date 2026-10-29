@@ -395,9 +395,9 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn captures_default_off_and_refuse_a_shortcut_in_use() {
+    fn captures_default_on_and_refuse_a_shortcut_in_use() {
         let settings = AppSettings::default();
-        assert!(!settings.capture.enabled);
+        assert!(settings.capture.enabled);
         let mut taken = AppSettings::default();
         taken.capture.hotkey = taken.dictation_hotkey.clone();
         let before = serde_json::to_value(&taken).unwrap();
@@ -409,8 +409,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&taken).unwrap(), before);
         // Turning captures off always works.
         set_enabled(&mut taken, false).unwrap();
-        // The send-to list's ⌥⇧V is Paste Last's default: rebind one first.
+        // A Paste Last binding on the send-to list's shortcut refuses it.
         let mut list = AppSettings::default();
+        list.paste_last_hotkey = Some(list.capture.list_hotkey.clone());
         assert!(
             set_enabled(&mut list, true)
                 .unwrap_err()

@@ -172,6 +172,7 @@ pub(crate) struct InkState {
     overlay: Option<OverlayHandle<InkState>>,
     shown: bool,
     /// The overlay takes the pointer to draw (Linux).
+    #[cfg(target_os = "linux")]
     drawing: bool,
 }
 
@@ -193,6 +194,7 @@ impl InkState {
             placed: None,
             overlay: None,
             shown: true,
+            #[cfg(target_os = "linux")]
             drawing: false,
         }
     }
@@ -223,8 +225,10 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     });
-    #[cfg_attr(target_os = "linux", allow(unused_mut))]
+    #[cfg(target_os = "linux")]
     let mut scene = Scene::at(&ink, source.now_ms(), tip);
+    #[cfg(not(target_os = "linux"))]
+    let scene = Scene::at(&ink, source.now_ms(), tip);
     // Linux learns the screen's size from the first stroke, so the start
     // glow would be drawn at a guess.
     #[cfg(target_os = "linux")]
