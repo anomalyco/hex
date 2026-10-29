@@ -30,6 +30,7 @@ mod icons;
 mod labs;
 mod list_detail;
 mod lists;
+mod live_notes;
 pub(crate) mod live_text;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;

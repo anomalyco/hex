@@ -493,7 +493,7 @@ fn copy(ui: &mut Ui, tx: &mut Tx, id: String, what: impl Into<String>, text: Str
 /// The status tag; `Ready` only in the detail header, so the list stays
 /// quiet for finished meetings.
 /// The detail's status, while it is one worth a tag.
-fn status_tag(p: Paint, status: Status, stop_pending: bool) -> Option<El> {
+pub(super) fn status_tag(p: Paint, status: Status, stop_pending: bool) -> Option<El> {
     let (label, tone) = match status {
         Status::Recording if stop_pending => (tr("Transcribing"), Tone::Accent),
         Status::Starting | Status::Recording => (tr("Recording"), Tone::Danger),
@@ -1140,43 +1140,7 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
     }
     let mut lines = col().key("turns").gap(14.0);
     for (index, turn) in turns.iter().enumerate() {
-        if let Some(pause) = turn.pause_before_ms {
-            lines = lines.child(
-                text(tr_fill("{} pause", &length(pause)))
-                    .key(format!("pause{index}"))
-                    .font(p.k.ty.small)
-                    .color(p.faint()),
-            );
-        }
-        lines = lines.child(
-            col()
-                .key(format!("turn{index}"))
-                .gap(2.0)
-                .child(
-                    row()
-                        .key("speaker")
-                        .gap(8.0)
-                        .child(
-                            text(if turn.mine { tr("You") } else { tr("Them") })
-                                .key("name")
-                                .font(p.k.ty.small_medium)
-                                .color(if turn.mine { p.text() } else { p.faint() }),
-                        )
-                        .child(
-                            text(clock_offset(turn.start_ms))
-                                .key("clock")
-                                .font(p.k.ty.small)
-                                .color(p.faint()),
-                        ),
-                )
-                .child(
-                    text(turn.text.clone())
-                        .key("text")
-                        .font(p.k.ty.body)
-                        .color(p.text())
-                        .wrap(),
-                ),
-        );
+        lines = lines.children(turn_line(p, index, turn));
     }
     if meeting.status == Status::Recording && !stop_pending {
         lines = lines.child(
@@ -1187,4 +1151,48 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
         );
     }
     lines
+}
+
+/// One turn of a transcript: the pause before it, if any, then the speaker,
+/// the time, and the words.
+pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
+    let mut els = Vec::new();
+    if let Some(pause) = turn.pause_before_ms {
+        els.push(
+            text(tr_fill("{} pause", &length(pause)))
+                .key(format!("pause{index}"))
+                .font(p.k.ty.small)
+                .color(p.faint()),
+        );
+    }
+    els.push(
+        col()
+            .key(format!("turn{index}"))
+            .gap(2.0)
+            .child(
+                row()
+                    .key("speaker")
+                    .gap(8.0)
+                    .child(
+                        text(if turn.mine { tr("You") } else { tr("Them") })
+                            .key("name")
+                            .font(p.k.ty.small_medium)
+                            .color(if turn.mine { p.text() } else { p.faint() }),
+                    )
+                    .child(
+                        text(clock_offset(turn.start_ms))
+                            .key("clock")
+                            .font(p.k.ty.small)
+                            .color(p.faint()),
+                    ),
+            )
+            .child(
+                text(turn.text.clone())
+                    .key("text")
+                    .font(p.k.ty.body)
+                    .color(p.text())
+                    .wrap(),
+            ),
+    );
+    els
 }

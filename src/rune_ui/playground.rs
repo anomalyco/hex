@@ -1,7 +1,7 @@
 //! The `playground` experiment: Rune's playground in Hex's window. ⇧⌘D
 //! (Ctrl+Shift+D off macOS) swaps the window for a folded list of
-//! prototypes (the onboarding options, and on macOS the HUD and the
-//! capture capsule), then every fixture
+//! prototypes (the onboarding options, live meeting notes, and on macOS
+//! the HUD and the capture capsule), then every fixture
 //! scene in [`SCENES`] under a readable name, by pane. Each opens on a fresh
 //! fixture state; the real window's state keeps running underneath,
 //! untouched. Off, nothing is attached: no shortcut, menu item, or scene
@@ -253,6 +253,7 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
         .group_order(GROUPS)
         .start_folded(true);
     let playground = super::onboarding_kit::stories(playground);
+    let playground = super::live_notes::add(playground);
     #[cfg(target_os = "macos")]
     let playground = super::hud_stories::add(playground);
     #[cfg(all(hex_capture, target_os = "macos"))]
