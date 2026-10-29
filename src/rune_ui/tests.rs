@@ -1621,3 +1621,29 @@ fn goldens() {
 }
 
 mod panes;
+
+/// Rune hands focus back to a menu's trigger when it closes. A key the
+/// window means for something else must not reach that trigger.
+#[test]
+fn the_recorder_still_gets_space_and_enter_after_a_menu_closes() {
+    for scene in ["menus", "language-menu"] {
+        for recorded in [Key::Text(" ".into()), Key::Enter] {
+            let mut rt = runtime(scene, true, GOLDEN_SIZE);
+            assert!(rt.state.open.is_some(), "{scene} opens a menu");
+            key(&mut rt, Key::Escape, Mods::default());
+            settle(&mut rt);
+            assert!(rt.state.open.is_none(), "{scene}: Escape closes the menu");
+            tap(&mut rt, "dictation-hotkey");
+            assert!(matches!(
+                rt.state.capture,
+                settings::Capture::Listening { .. }
+            ));
+            key(&mut rt, recorded.clone(), Mods::default());
+            settle(&mut rt);
+            assert!(
+                rt.state.open.is_none(),
+                "{scene}: {recorded:?} reopened a menu while recording"
+            );
+        }
+    }
+}
