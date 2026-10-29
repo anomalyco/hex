@@ -1036,10 +1036,11 @@ Dot scope                                    // dot_scope
 ├── Transcribing / Processing -> Processing look, at least 200 ms so a fast
 │   transcription still shows it (PROCESSING_MIN_DURATION):
 │   ├── Flow (default) -> The braid keeps turning; bands of light travel right
-│   ├── Pulse -> Rings leave the middle
+│   ├── Pulse -> Rings swell in at the middle and travel out
 │   └── Sweep -> Braid irons flat; a cool beam sweeps 76 pt (round 1)
-├── Completed -> Every look clears from the middle out as it collapses
-│   (0.3 s; Sweep's dark field shows only the two fronts); then it fades
+├── Completed -> Every look clears from the middle out (0.3 s; Sweep's
+│   beam fades where it was and its dark field shows only the two fronts);
+│   100 ms in, the HUD (or island) collapses, so the two end together
 ├── Failed -> Coral for 0.6 s, then fades
 ├── Cancelled / discarded -> Fades at once
 ├── Reduce Motion -> A still braid; opacity fades only

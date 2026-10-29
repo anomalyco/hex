@@ -17,8 +17,9 @@ const SILENT: f32 = -120.0;
 /// The shortest processing look: a fast transcription still shows the field
 /// turning blue before done clears it.
 const PROCESSING_MIN_DURATION: Duration = Duration::from_millis(200);
-/// Done's wipe (0.3 s) and a beat of the dark plate after it.
-const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
+/// How long done shows before the HUD collapses: a third into done's
+/// 0.3 s wipe, so the collapse and the wipe end together.
+const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(100);
 const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(600);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

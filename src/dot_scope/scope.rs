@@ -27,6 +27,10 @@ const WORK_HELIX: f32 = 2.6;
 const FLOW_SPACING: f32 = 0.7;
 /// The recording carrier's slowest turn, Hz.
 const CARRIER_REST: f32 = 0.14;
+/// How long a Pulse ring takes to swell in, s.
+const RING_BIRTH: f32 = 0.15;
+/// How long Sweep's beam takes to fade where it is once done begins, s.
+const BEAM_FADE: f32 = 0.14;
 
 /// HUD Lab's synthetic voice: phrases of syllables at about 4.5 a second
 /// with breaths between, as a 0–1 level.
@@ -247,7 +251,9 @@ impl Working {
                 let mut age = time.rem_euclid(period);
                 while age * speed < half_width + 12.0 && age <= time + 1e-4 {
                     let radius = age * speed;
-                    let fade = 1.0 - 0.6 * smoothstep(0.3 * half_width, half_width, radius);
+                    // A ring swells in as it leaves the middle, never pops.
+                    let fade = smoothstep(0.0, RING_BIRTH, age)
+                        * (1.0 - 0.6 * smoothstep(0.3 * half_width, half_width, radius));
                     light += bump(d - radius, 6.0) * fade;
                     age += period;
                 }
@@ -280,10 +286,13 @@ enum Envelope {
     },
     /// Done, for every look: a front clears the field from the middle
     /// out as it collapses, while the light ahead of it fades. Sweep's
-    /// ironed field is already dark (`field` 0), so only the fronts show.
+    /// ironed field is already dark (`field` 0), so only the fronts show,
+    /// and its beam fades out where it was (`beam` at `beam_at`).
     Clear {
         front: f32,
         head: f32,
+        beam: f32,
+        beam_at: f32,
         field: f32,
         working: Working,
         glow: f32,
@@ -333,6 +342,8 @@ impl Scan {
             Envelope::Clear {
                 front,
                 head,
+                beam,
+                beam_at,
                 field,
                 working,
                 glow,
@@ -344,7 +355,9 @@ impl Scan {
                 let light = working.light(x, half_width);
                 (
                     keep,
-                    keep * (1.0 + glow * light) + head * bump(d - front, 6.0),
+                    keep * (1.0 + glow * light)
+                        + head * bump(d - front, 6.0)
+                        + beam * bump(x - beam_at, 5.0),
                     keep * swell * light,
                 )
             }
@@ -670,6 +683,14 @@ impl Scope {
         };
     }
 
+    /// Sweep's beam strength `elapsed` into processing.
+    fn process_head(&self, elapsed: f32) -> f32 {
+        let pass = self.tuning.shimmer_pass.max(0.05);
+        (2.2 + (PI * (elapsed / pass + 0.5)).sin().abs())
+            * smoothstep(0.0, 0.14, elapsed)
+            * self.tuning.shimmer
+    }
+
     fn process_front(&self, elapsed: f32, width: f32) -> f32 {
         let pass = self.tuning.shimmer_pass.max(0.05);
         let position = 0.5 - 0.5 * (PI * (elapsed / pass + 0.5)).cos();
@@ -731,6 +752,13 @@ impl Scope {
                     envelope: Envelope::Clear {
                         front,
                         head: 2.8 * smoothstep(0.0, 0.04, e) * (1.0 - smoothstep(0.22, 0.32, e)),
+                        beam: if sweep && self.done_from > 0.0 {
+                            self.process_head(self.done_from + e)
+                                * (1.0 - smoothstep(0.0, BEAM_FADE, e))
+                        } else {
+                            0.0
+                        },
+                        beam_at: self.process_front(self.done_from + e, width),
                         field: if sweep { 0.0 } else { 1.0 },
                         working: self.working(self.done_from + e),
                         glow: if sweep { 0.0 } else { 2.5 }
@@ -742,11 +770,8 @@ impl Scope {
                 }
             }
             Stage::Processing => {
-                let pass = self.tuning.shimmer_pass.max(0.05);
                 let iron = 1.0 - smoothstep(0.0, 0.28, e);
-                let head = (2.2 + (PI * (e / pass + 0.5)).sin().abs())
-                    * smoothstep(0.0, 0.14, e)
-                    * self.tuning.shimmer;
+                let head = self.process_head(e);
                 Scan {
                     helix: iron,
                     decay: 1.0,
@@ -1139,6 +1164,21 @@ mod tests {
             right += shift(&before, &after, middle + 2..before.len() - 2).signum();
         }
         assert!(left <= -10 && right >= 10, "left {left} right {right}");
+    }
+
+    #[test]
+    fn a_pulse_ring_swells_in_as_it_leaves_the_middle() {
+        let ring = |time| {
+            Working::Pulse {
+                time,
+                period: 1.0,
+                speed: 30.0,
+            }
+            .light(0.0, 40.0)
+        };
+        // Just after the second ring is born, the middle has barely lit.
+        assert!(ring(1.0) < 0.05, "at birth {}", ring(1.0));
+        assert!(ring(1.0 + RING_BIRTH / 2.0) < ring(1.0 + RING_BIRTH));
     }
 
     #[test]
