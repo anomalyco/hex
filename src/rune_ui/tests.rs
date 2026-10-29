@@ -927,6 +927,7 @@ fn history_search_without_matches_says_so() {
     let mut rt = runtime("history-empty", true, PANE_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history));
     rt.state.history.reload();
+    rt.invalidate();
     settle(&mut rt);
     assert!(texts(&rt).iter().all(|text| text != "No dictations match."));
     tap(&mut rt, "history-search");

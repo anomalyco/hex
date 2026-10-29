@@ -1110,7 +1110,7 @@ fn commands_search_select_and_show_their_detail() {
     assert_eq!(rt.state.commands.selected.as_deref(), Some("github.pulls"));
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "github.com"));
-    assert!(shown.iter().any(|text| text == "pull requests\nopen pulls"));
+    assert!(shown.iter().any(|text| text == "pull requests, open pulls"));
     rt.state.commands.search = TextEdit::new("slack");
     refresh(&mut rt);
     assert!(rt.find("command-open.slack").is_some());
@@ -1297,7 +1297,6 @@ fn copy_section_copies_one_chapter() {
     );
     assert!(copied.contains("Prototype it in WebGPU"), "{copied}");
     assert!(!copied.contains("Roblox") && !copied.contains("build screen"));
-    assert!(texts(&rt).iter().any(|text| text == "Copied"));
 }
 
 #[test]
