@@ -96,7 +96,6 @@ pub enum PasteKind {
 pub enum TranscriptionTarget {
     Paste,
     Send,
-    VoiceAction,
     Service,
     /// `hex dictation stop --print`: processed as a paste, then handed to
     /// the waiting command instead of pasted.
@@ -675,24 +674,12 @@ fn run_processor_worker(
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
             continue;
         }
-        let mut processed = process_job_text(
-            &job,
-            crate::config::dictation_profiles,
-            || {
-                crate::dictation_processor::process_voice_action_cancellable(
-                    &job.text,
-                    job.context.selected_text.as_deref(),
-                    &job.context,
-                    &job.control.cancelled,
-                )
-            },
-            || {
-                let _ = events.send(WorkerEvent::Stage {
-                    job_id: job.job_id,
-                    stage: DictationJobStage::Processing,
-                });
-            },
-        );
+        let mut processed = process_job_text(&job, crate::config::dictation_profiles, || {
+            let _ = events.send(WorkerEvent::Stage {
+                job_id: job.job_id,
+                stage: DictationJobStage::Processing,
+            });
+        });
         processed.apply_transformations(transformations, &job.context, &job.control.cancelled);
         if job.control.is_cancelled() {
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
@@ -701,15 +688,11 @@ fn run_processor_worker(
         if let Some(observation) = &processed.observation
             && let Some(error) = &observation.fallback
         {
-            if matches!(job.target, TranscriptionTarget::VoiceAction) {
-                tracing::warn!(%error, "voice action processing failed");
-            } else {
-                tracing::warn!(
-                    profile = observation.profile,
-                    %error,
-                    "dictation processing fell back to the previous pipeline output"
-                );
-            }
+            tracing::warn!(
+                profile = observation.profile,
+                %error,
+                "dictation processing fell back to the previous pipeline output"
+            );
         }
         if output
             .send(OutputJob::Completed {
@@ -731,24 +714,17 @@ fn run_processor_worker(
     }
 }
 
-/// Select processing when the worker reaches the job, keeping Voice Action
-/// independent of mode snapshots. The stage precedes processing in either path.
+/// Select processing when the worker reaches the job; the stage precedes processing.
 fn process_job_text(
     job: &ProcessorJob,
     profiles: impl FnOnce() -> crate::dictation_processor::Profiles,
-    voice_action: impl FnOnce() -> crate::dictation_processor::Processed,
     processing: impl FnOnce(),
 ) -> crate::dictation_processor::Processed {
-    if matches!(job.target, TranscriptionTarget::VoiceAction) {
+    let profiles = profiles();
+    if profiles.processes(&job.context) {
         processing();
-        voice_action()
-    } else {
-        let profiles = profiles();
-        if profiles.processes(&job.context) {
-            processing();
-        }
-        profiles.process_cancellable(&job.text, &job.context, &job.control.cancelled)
     }
+    profiles.process_cancellable(&job.text, &job.context, &job.control.cancelled)
 }
 
 /// The longest audio the capture path hands the model at once; longer
@@ -926,7 +902,6 @@ fn run_inference_worker(
                     target,
                     TranscriptionTarget::Paste
                         | TranscriptionTarget::Send
-                        | TranscriptionTarget::VoiceAction
                         | TranscriptionTarget::Print
                 ) && !text.trim().is_empty() =>
             {
@@ -1108,16 +1083,8 @@ fn finish_output(
                 .ok()
                 .and_then(|result| result.processing.clone());
             let result = result.and_then(|completed| {
-                if matches!(target, TranscriptionTarget::VoiceAction)
-                    && let Some(error) = completed
-                        .processing
-                        .as_ref()
-                        .and_then(|processing| processing.fallback.clone())
-                {
-                    return Err(error);
-                }
                 if control.is_cancelled() {
-                    return Err("voice action was cancelled".into());
+                    return Err("dictation was cancelled".into());
                 }
                 let paste_started = Instant::now();
                 if !completed.text.trim().is_empty() {
@@ -1128,9 +1095,6 @@ fn finish_output(
                         }
                         TranscriptionTarget::Send => {
                             paste(&completed.text, PasteMode::Send, &commit)
-                        }
-                        TranscriptionTarget::VoiceAction => {
-                            paste(&completed.text, PasteMode::Standalone, &commit)
                         }
                         TranscriptionTarget::Service | TranscriptionTarget::Print => commit()
                             .then_some(())
@@ -1206,7 +1170,6 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
     let kind = match target {
         TranscriptionTarget::Paste => HistoryKind::Dictation,
         TranscriptionTarget::Send => HistoryKind::Send,
-        TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
         TranscriptionTarget::Print => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
     };
@@ -1523,44 +1486,6 @@ mod tests {
     }
 
     #[test]
-    fn voice_action_processing_never_loads_modes_and_announces_stage_before_generation() {
-        use crate::dictation_processor::{Processed, ProcessingObservation};
-        use std::cell::Cell;
-
-        let stage_sent = Cell::new(false);
-        let processed = process_job_text(
-            &processing_job(TranscriptionTarget::VoiceAction),
-            || panic!("Voice Action must not read ordinary mode settings"),
-            || {
-                assert!(
-                    stage_sent.get(),
-                    "stage must precede Voice Action settings/generation"
-                );
-                Processed {
-                    text: String::new(),
-                    observation: Some(ProcessingObservation {
-                        profile: "Voice Action".into(),
-                        latency_ms: 0,
-                        fallback: Some("fixture generation failed".into()),
-                    }),
-                    transformations: Vec::new(),
-                }
-            },
-            || stage_sent.set(true),
-        );
-        assert!(stage_sent.get());
-        assert!(
-            processed.text.is_empty(),
-            "failed actions must not fall back to the instruction"
-        );
-        assert!(processed.transformations.is_empty());
-        assert_eq!(
-            processed.observation.unwrap().fallback.as_deref(),
-            Some("fixture generation failed")
-        );
-    }
-
-    #[test]
     fn ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations() {
         use crate::dictation_processor::{Profile, Profiles};
         use std::cell::Cell;
@@ -1578,7 +1503,6 @@ mod tests {
                             Profile::new("Global", "").transformations(transformations.clone()),
                         )
                     },
-                    || panic!("ordinary dictation must not read Voice Action settings"),
                     || {
                         assert!(loaded.get());
                         stage_sent.set(true);
@@ -1850,11 +1774,7 @@ mod tests {
             },
             processing: None,
         };
-        for target in [
-            TranscriptionTarget::Paste,
-            TranscriptionTarget::Send,
-            TranscriptionTarget::VoiceAction,
-        ] {
+        for target in [TranscriptionTarget::Paste, TranscriptionTarget::Send] {
             for cancel_during_preparation in [true, false] {
                 let path = std::env::temp_dir().join(format!(
                     "hex-output-cancellation-{}-{}.json",
@@ -1901,7 +1821,6 @@ mod tests {
                             (target, mode),
                             (TranscriptionTarget::Paste, PasteMode::Continue)
                                 | (TranscriptionTarget::Send, PasteMode::Send)
-                                | (TranscriptionTarget::VoiceAction, PasteMode::Standalone)
                         ));
                         commit_prepared_paste(
                             || {
@@ -1953,12 +1872,7 @@ mod tests {
                     assert_eq!(*clipboard.borrow(), "new output");
                     assert_eq!(*pasted.borrow(), ["new output"]);
                     assert_eq!(sent.get(), matches!(target, TranscriptionTarget::Send));
-                    let expected_last = if matches!(target, TranscriptionTarget::VoiceAction) {
-                        "previous"
-                    } else {
-                        "new output"
-                    };
-                    assert_eq!(last_transcript.as_deref(), Some(expected_last));
+                    assert_eq!(last_transcript.as_deref(), Some("new output"));
                     let entries = history.search("");
                     assert_eq!(entries.len(), 2);
                     assert_eq!(entries[0].final_text, "new output");
@@ -1967,7 +1881,6 @@ mod tests {
                         match target {
                             TranscriptionTarget::Paste => HistoryKind::Dictation,
                             TranscriptionTarget::Send => HistoryKind::Send,
-                            TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
                             TranscriptionTarget::Service | TranscriptionTarget::Print => {
                                 unreachable!()
                             }

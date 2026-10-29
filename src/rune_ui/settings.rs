@@ -358,7 +358,6 @@ pub(super) fn conflicts(
     use crate::app_settings::HotkeySlot;
     let slot = match target {
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
-        ShortcutTarget::VoiceAction => HotkeySlot::VoiceAction,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
@@ -386,7 +385,6 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
     match target {
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
-        ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
     }
@@ -400,7 +398,6 @@ pub(super) fn set_binding(
     match target {
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
-        ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
     }
@@ -648,7 +645,6 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     let name = match target {
         ShortcutTarget::Dictation => "Dictation",
         ShortcutTarget::PasteLast => "Paste last dictation",
-        ShortcutTarget::VoiceAction => "Voice Action",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "Capture",
     };
@@ -674,8 +670,8 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
 
 /// Without a shortcuts portal the desktop's keybindings own every shortcut:
 /// the commands to bind there.
-pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
-    let mut rows = vec![
+pub(super) fn desktop_commands(p: Paint) -> El {
+    let rows = vec![
         note(
             "no-portal",
             tr(
@@ -712,15 +708,6 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             &["hex paste-last"],
         ),
     ];
-    if ui.settings.voice_action.enabled {
-        rows.push(command_row(
-            p,
-            "voice-action",
-            tr("Voice Action"),
-            tr("Hold to speak; selected text is included automatically"),
-            &["hex voice-action start", "hex voice-action stop"],
-        ));
-    }
     section(p, "desktop-shortcuts", tr("Desktop shortcuts"), rows)
 }
 
@@ -940,7 +927,6 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
     match target {
         ShortcutTarget::Dictation => "dictation-hotkey",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
-        ShortcutTarget::VoiceAction => "voice-action-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",
     }

@@ -3,7 +3,7 @@
 //! The running process binds `service.sock` next to its `service.lock`. A
 //! later `hex` forwards `Activate` (with the launcher's activation token) and
 //! exits; `hex dictation …` (including `stop --print`, whose connection
-//! waits for the transcript), `hex voice-action …`, `hex paste-last`,
+//! waits for the transcript), `hex paste-last`,
 //! `hex status`, and `hex quit` forward over the same socket. Shortcut
 //! commands go straight from the socket worker to the listener's command
 //! queue, never through the window's thread. This module also owns the
@@ -51,7 +51,7 @@ pub(crate) enum Request {
         show: bool,
         session: Session,
     },
-    /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
+    /// A `hex dictation` or `hex paste-last` command.
     Shortcut(ShortcutCommand),
     /// `hex dictation stop --print`: replies with the transcript, which is
     /// not pasted.
@@ -142,7 +142,6 @@ impl Session {
 #[derive(Clone)]
 pub(crate) struct ShortcutRoute {
     pub(crate) commands: SyncSender<ListenerCommand>,
-    pub(crate) voice_action: bool,
 }
 
 /// Routes one command, failing fast when nothing listens.
@@ -152,9 +151,6 @@ pub(crate) fn route_shortcut(
 ) -> Result<()> {
     let route = route
         .ok_or_else(|| eyre!("Hex is not listening; enable it in Settings or run `hex start`"))?;
-    if command.is_voice_action() && !route.voice_action {
-        bail!("Voice Action is off; turn it on in Settings");
-    }
     route
         .commands
         .try_send(command.into())
@@ -1008,22 +1004,16 @@ mod tests {
         let error = route_shortcut(None, ShortcutCommand::DictationToggle).unwrap_err();
         assert!(error.to_string().contains("not listening"), "{error}");
         let (commands, received) = mpsc::sync_channel(2);
-        let mut route = ShortcutRoute {
-            commands,
-            voice_action: false,
-        };
+        let route = ShortcutRoute { commands };
         route_shortcut(Some(&route), ShortcutCommand::DictationStart).unwrap();
-        let error = route_shortcut(Some(&route), ShortcutCommand::VoiceActionStart).unwrap_err();
-        assert!(error.to_string().contains("Voice Action is off"), "{error}");
-        route.voice_action = true;
-        route_shortcut(Some(&route), ShortcutCommand::VoiceActionToggle).unwrap();
+        route_shortcut(Some(&route), ShortcutCommand::DictationToggle).unwrap();
         let error = route_shortcut(Some(&route), ShortcutCommand::PasteLast).unwrap_err();
         assert!(error.to_string().contains("busy"), "{error}");
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
             [
                 ListenerCommand::from(ShortcutCommand::DictationStart),
-                ListenerCommand::from(ShortcutCommand::VoiceActionToggle)
+                ListenerCommand::from(ShortcutCommand::DictationToggle)
             ]
         );
     }

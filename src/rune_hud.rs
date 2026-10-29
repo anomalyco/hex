@@ -124,7 +124,7 @@ impl Hud {
         }
         self.model.handle(event, Instant::now(), self.reduce);
         self.animating.store(true, Ordering::Release);
-        let starts = matches!(event, HudEvent::Started | HudEvent::EditingStarted);
+        let starts = matches!(event, HudEvent::Started);
         if starts || (self.shown && !matches!(event, HudEvent::Meter { .. })) {
             self.show();
         }

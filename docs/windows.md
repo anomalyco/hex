@@ -195,7 +195,7 @@ hex app
 
 - Quit Hex in the window or the tray stops the listener and ends the app;
   closing the window only hides it.
-- The window uses the shared Rune panes (General, Modes, Voice Action,
+- The window uses the shared Rune panes (General, Modes,
   History, the transcription picker, first-run setup) with Windows rows:
   Launch at login (the current-user Run key), no terminal-paste row. The
   sidebar footer holds Check for updates, and Download update for unmanaged
@@ -276,7 +276,6 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, Spanish, and Ukrainian |
 | Resident tray and Launch at login | Implemented |
 | Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
-| Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
 | While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
@@ -295,7 +294,7 @@ Linux use.
 
 The Windows window uses the shared design system
 ([design-system.md](design-system.md)): the same Rune panes as macOS and
-Linux under the native title bar. Mode processing, OpenCode rewriting, Voice Action, and transformations run
+Linux under the native title bar. Mode processing, OpenCode rewriting, and transformations run
 through the same `dictation_processor` and `personal_commands` modules as
 macOS; Windows reaches OpenCode through the `opencode2 api` CLI. Like macOS,
 an unset OpenCode model tries the ranked recommended models before the

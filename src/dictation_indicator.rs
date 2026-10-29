@@ -32,8 +32,6 @@ pub enum DictationIndicatorEvent {
     /// until the next `Reset`.
     DemoVoice,
     Started,
-    EditingStarted,
-    PromotedToVoiceAction,
     Meter {
         average: f32,
         peak: f32,
@@ -259,8 +257,6 @@ fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
 pub struct IndicatorModel {
     phase: Phase,
     capturing: bool,
-    /// A Voice Action capture.
-    editing: bool,
     jobs: BTreeSet<u64>,
     phase_started: Instant,
     /// When the processing look began, for [`PROCESSING_MIN_DURATION`].
@@ -287,7 +283,6 @@ impl IndicatorModel {
         Self {
             phase: Phase::Hidden,
             capturing: false,
-            editing: false,
             jobs: BTreeSet::new(),
             phase_started: now,
             working_since: now,
@@ -328,7 +323,6 @@ impl IndicatorModel {
         match event {
             DictationIndicatorEvent::Reset => {
                 self.capturing = false;
-                self.editing = false;
                 self.jobs.clear();
                 self.phase = Phase::Hidden;
                 self.completion_pending = false;
@@ -342,11 +336,10 @@ impl IndicatorModel {
             DictationIndicatorEvent::DemoVoice => {
                 self.demo_voice = Some(0.0);
             }
-            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted => {
+            DictationIndicatorEvent::Started => {
                 // HUD Lab and the playground send `DemoVoice` after this.
                 self.demo_voice = None;
                 self.capturing = true;
-                self.editing = matches!(event, DictationIndicatorEvent::EditingStarted);
                 self.phase = Phase::Recording;
                 self.phase_started = now;
                 self.completion_pending = false;
@@ -354,15 +347,11 @@ impl IndicatorModel {
                 self.stage = Stage::Recording;
                 self.scope.restart(reduce);
             }
-            DictationIndicatorEvent::PromotedToVoiceAction => {
-                self.editing = true;
-            }
             DictationIndicatorEvent::Meter { average, .. } => {
                 self.loudness = dot_scope::loudness(average);
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
-                self.editing = false;
                 self.jobs.insert(job_id);
                 self.show_pipeline(now);
             }
@@ -395,7 +384,6 @@ impl IndicatorModel {
 
     fn finish_capture(&mut self, now: Instant, empty_phase: Phase) {
         self.capturing = false;
-        self.editing = false;
         if !matches!(empty_phase, Phase::Hidden) {
             self.phase_started = now;
         }
@@ -477,7 +465,6 @@ impl IndicatorModel {
                 visible,
                 loudness,
                 reduce_motion: reduce,
-                action: self.editing,
             },
         );
         self.active = visible || !self.scope.settled();
@@ -652,26 +639,6 @@ mod tests {
         assert!(cancelled.iter().all(|frame| frame.pose.fail < 0.01));
         assert!(lit(cancelled.last().unwrap()) == 0 || !model.active());
         assert!(!model.active());
-    }
-
-    #[test]
-    fn voice_action_records_green() {
-        let start = Instant::now();
-        let mut model = IndicatorModel::new(Tuning::default(), start);
-        model.handle(DictationIndicatorEvent::EditingStarted, start, false);
-        let frames = run(&mut model, start, 0.0, 0.8);
-        assert!(frames.last().unwrap().pose.action > 0.95);
-
-        model.handle(DictationIndicatorEvent::Started, at(start, 1.0), false);
-        let frames = run(&mut model, start, 1.0, 0.8);
-        assert!(frames.last().unwrap().pose.action < 0.05);
-        model.handle(
-            DictationIndicatorEvent::PromotedToVoiceAction,
-            at(start, 1.8),
-            false,
-        );
-        let frames = run(&mut model, start, 1.8, 0.8);
-        assert!(frames.last().unwrap().pose.action > 0.95);
     }
 
     #[test]

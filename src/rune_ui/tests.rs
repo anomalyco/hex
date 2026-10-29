@@ -672,9 +672,7 @@ fn switching_panes_is_instant() {
         .collect();
     assert!(!panel.is_empty());
     assert!(
-        !panel
-            .iter()
-            .any(|e| e.key.as_deref() == Some("lab-voice-action")),
+        !panel.iter().any(|e| e.key.as_deref() == Some("lede")),
         "Labs left at once"
     );
     for element in panel {
@@ -873,27 +871,17 @@ fn segments_and_switch_tracks_hover_at_once() {
 }
 
 #[test]
-fn voice_action_saves_its_opt_in_and_refuses_a_taken_shortcut() {
-    let mut rt = runtime("voice-action-off", true, PANE_SIZE);
-    tap(&mut rt, "voice-action-enabled");
-    assert!(rt.state.settings.voice_action.enabled);
-    assert_eq!(saved(&rt), 1);
-    assert!(rt.find("opencode-model").is_some(), "the model row appears");
-
-    let mut rt = runtime("voice-action-off", true, PANE_SIZE);
-    rt.state.settings.edit_hotkey = rt.state.settings.paste_last_hotkey.clone().unwrap();
-    tap(&mut rt, "voice-action-enabled");
-    assert!(!rt.state.settings.voice_action.enabled);
-    assert!(rt.state.voice_action_error.is_some());
-    assert_eq!(saved(&rt), 0);
-}
-
-#[test]
 fn choosing_an_opencode_model_saves_it() {
-    let mut rt = runtime("voice-action-models", true, PANE_SIZE);
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
     tap(&mut rt, "model-picker-option-1");
     assert_eq!(
-        rt.state.settings.voice_action.model.as_deref(),
+        rt.state.settings.dictation_processing.modes[0]
+            .post_processing
+            .model
+            .as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
     assert!(!rt.state.models.picker.open);
@@ -901,14 +889,20 @@ fn choosing_an_opencode_model_saves_it() {
     assert!(rt.state.models.picker.open && rt.state.models.picker.search.focused);
     tap(&mut rt, "model-picker-option-0");
     assert_eq!(
-        rt.state.settings.voice_action.model, None,
+        rt.state.settings.dictation_processing.modes[0]
+            .post_processing
+            .model,
+        None,
         "back to the OpenCode default"
     );
 }
 
 #[test]
 fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
-    let mut rt = runtime("voice-action-models-long", true, PANE_SIZE);
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models = models::Models::fixture_long();
+    rt.state.models.open_picker();
+    rt.invalidate();
     settle(&mut rt);
     let [_, top, _, height] = rt.presented("viewport").unwrap().0;
     assert!(
@@ -930,13 +924,19 @@ fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
 
 #[test]
 fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
-    let mut rt = runtime("voice-action-models", true, PANE_SIZE);
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
     key(&mut rt, Key::Down, Mods::default());
     key(&mut rt, Key::Down, Mods::default());
     key(&mut rt, Key::Up, Mods::default());
     key(&mut rt, Key::Enter, Mods::default());
     assert_eq!(
-        rt.state.settings.voice_action.model.as_deref(),
+        rt.state.settings.dictation_processing.modes[0]
+            .post_processing
+            .model
+            .as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
     assert!(!rt.state.models.picker.open);
@@ -957,7 +957,13 @@ fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
 
 #[test]
 fn opencode_missing_offers_setup_instead_of_models() {
-    let rt = runtime("voice-action-unavailable", true, PANE_SIZE);
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models = models::Models::fixture_missing();
+    rt.state.settings.dictation_processing.modes[0]
+        .post_processing
+        .enabled = false;
+    rt.invalidate();
+    settle(&mut rt);
     assert!(rt.find("opencode-unavailable").is_some());
     assert!(rt.find("open-opencode-setup").is_some());
     assert!(rt.find("opencode-model").is_none());
@@ -980,9 +986,6 @@ fn unavailable_opencode_is_explained_beside_each_switch() {
             .iter()
             .any(|text| text == "Transformation requires OpenCode V2")
     );
-
-    let rt = runtime("voice-action-unavailable", true, PANE_SIZE);
-    assert_eq!(beside(&rt, "voice-action-enabled"), ["Requires OpenCode"]);
 }
 
 #[test]
@@ -1786,7 +1789,6 @@ fn goldens() {
     for dark in [true, false] {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
-            "voice-action",
             "history",
             "modes",
             "modes-picker",
@@ -1798,8 +1800,6 @@ fn goldens() {
     }
     check_golden("commands", true, GOLDEN_SIZE);
     check_golden("menus", false, GOLDEN_SIZE);
-    check_golden("voice-action-models", true, PANE_SIZE);
-    check_golden("voice-action-unavailable", false, PANE_SIZE);
     check_golden("modes-opencode-v1", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
 }

@@ -36,7 +36,6 @@ static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
-static VOICE_ACTION_SETTINGS: OnceLock<RwLock<VoiceActionSettings>> = OnceLock::new();
 #[cfg(hex_capture)]
 static CAPTURE_SETTINGS: OnceLock<RwLock<CaptureSettings>> = OnceLock::new();
 #[cfg(hex_capture)]
@@ -674,19 +673,6 @@ impl HotkeyBinding {
         }
     }
 
-    /// Option-Command on macOS; Ctrl+Alt+I elsewhere, where a modifier-only
-    /// chord would collide with ordinary typing.
-    pub fn edit_default() -> Self {
-        #[cfg(target_os = "macos")]
-        let binding = Self {
-            modifiers: HotkeyModifiers::option_command(),
-            key: None,
-        };
-        #[cfg(not(target_os = "macos"))]
-        let binding = Self::chord(HotkeyModifiers::control_option(), "i");
-        binding
-    }
-
     /// Option-Shift-V on macOS; Ctrl+Alt+V elsewhere.
     pub fn paste_last_default() -> Self {
         #[cfg(target_os = "macos")]
@@ -852,13 +838,6 @@ impl HotkeyBinding {
             modifiers: self.modifiers,
             key_code: self.key.as_ref().map(|key| key.code),
         }
-    }
-
-    #[cfg(test)]
-    pub fn is_modifier_prefix_of(&self, other: &Self) -> bool {
-        self.key.is_none()
-            && other.modifiers.contains(self.modifiers)
-            && (self.modifiers != other.modifiers || other.key.is_some())
     }
 
     pub fn overlaps(&self, other: &Self) -> bool {
@@ -1033,7 +1012,6 @@ fn side_from_flags(flags: u64, general: u64, left: u64, right: u64) -> Option<Mo
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
-    pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
     /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
@@ -1042,10 +1020,9 @@ pub struct RuntimeHotkeys {
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 5] {
+    pub fn all(self) -> [Option<RuntimeHotkey>; 4] {
         [
             Some(self.dictation),
-            self.edit,
             self.paste_last,
             self.paste_meeting,
             self.capture,
@@ -1057,7 +1034,6 @@ impl Default for RuntimeHotkeys {
     fn default() -> Self {
         Self {
             dictation: HotkeyBinding::default().runtime(),
-            edit: None,
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
@@ -1407,26 +1383,6 @@ impl Default for DictationPostProcessing {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct VoiceActionSettings {
-    pub enabled: bool,
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub deadline_seconds: u64,
-}
-
-impl Default for VoiceActionSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            model: None,
-            variant: None,
-            deadline_seconds: 60,
-        }
-    }
-}
-
 /// Annotate: Scrawl's captures inside Hex, on macOS and Linux
 /// (`capture_host`). On by default; off means no capture work at all.
 #[cfg(hex_capture)]
@@ -1637,18 +1593,28 @@ pub struct AppSettings {
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
     pub dictation_hotkey: HotkeyBinding,
+    /// Retired Voice Action shortcut, kept untouched in `settings.json`.
     #[serde(
-        default = "HotkeyBinding::edit_default",
-        deserialize_with = "deserialize_edit_hotkey"
+        default,
+        rename = "edit_hotkey",
+        deserialize_with = "deserialize_retired_value",
+        skip_serializing_if = "Option::is_none"
     )]
-    pub edit_hotkey: HotkeyBinding,
+    pub retired_edit_hotkey: Option<serde_json::Value>,
     pub paste_last_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
     pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
-    pub voice_action: VoiceActionSettings,
+    /// Retired Voice Action settings, kept untouched in `settings.json`.
+    #[serde(
+        default,
+        rename = "voice_action",
+        deserialize_with = "deserialize_retired_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub retired_voice_action: Option<serde_json::Value>,
     pub history_retention: crate::history::HistoryRetention,
     pub meetings: MeetingSettings,
     #[cfg(hex_capture)]
@@ -1704,12 +1670,13 @@ const SCRAWL_IMPORT_MIGRATION: &str = "scrawl-capture-settings";
 #[cfg(hex_capture)]
 const SCRAWL_ROUTING_IMPORT_MIGRATION: &str = "scrawl-routing-settings";
 
-fn deserialize_edit_hotkey<'de, D>(deserializer: D) -> std::result::Result<HotkeyBinding, D::Error>
+fn deserialize_retired_value<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<serde_json::Value>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    Ok(Option::<HotkeyBinding>::deserialize(deserializer)?
-        .unwrap_or_else(HotkeyBinding::edit_default))
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 impl Default for AppSettings {
@@ -1729,14 +1696,14 @@ impl Default for AppSettings {
             double_tap_only: false,
             shortcut_mode: crate::dictation::ShortcutMode::Hold,
             dictation_hotkey: HotkeyBinding::default(),
-            edit_hotkey: HotkeyBinding::edit_default(),
+            retired_edit_hotkey: None,
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
-            voice_action: VoiceActionSettings::default(),
+            retired_voice_action: None,
             history_retention: crate::history::HistoryRetention::default(),
             meetings: MeetingSettings::default(),
             #[cfg(hex_capture)]
@@ -2050,7 +2017,6 @@ impl AppSettings {
                     .mappings
                     .retain(|_, choice| choice.validate().is_ok());
                 crate::transcription_models::validate(&settings.transcription)?;
-                settings.repair_hotkey_conflict();
                 if serde_json::to_value(&settings)? != loaded
                     && let Err(error) = settings.write_to(path)
                 {
@@ -2174,10 +2140,6 @@ impl AppSettings {
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
         crate::config::update_dictation_profiles(&self.dictation_processing);
-        *VOICE_ACTION_SETTINGS
-            .get_or_init(Default::default)
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
         crate::vocabulary::apply(&self.vocabulary, self.vocabulary_boost);
     }
 
@@ -2306,10 +2268,6 @@ impl AppSettings {
     pub fn runtime_hotkeys(&self) -> RuntimeHotkeys {
         RuntimeHotkeys {
             dictation: self.dictation_hotkey.runtime(),
-            edit: self
-                .voice_action
-                .enabled
-                .then(|| self.edit_hotkey.runtime()),
             paste_last: self.paste_last_hotkey.as_ref().map(HotkeyBinding::runtime),
             paste_meeting: self
                 .meetings
@@ -2336,10 +2294,6 @@ impl AppSettings {
             tracing::warn!("replaced a left-click dictation shortcut with the default");
             self.dictation_hotkey = HotkeyBinding::default();
         }
-        if self.edit_hotkey.is_bare_primary_click() {
-            tracing::warn!("replaced a left-click Voice Action shortcut with the default");
-            self.edit_hotkey = HotkeyBinding::edit_default();
-        }
         if self
             .paste_last_hotkey
             .as_ref()
@@ -2352,42 +2306,6 @@ impl AppSettings {
         if self.capture.hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click capture shortcut with the default");
             self.capture.hotkey = HotkeyBinding::capture_default();
-        }
-    }
-
-    fn repair_hotkey_conflict(&mut self) {
-        if !self.voice_action.enabled || !self.dictation_hotkey.overlaps(&self.edit_hotkey) {
-            return;
-        }
-        #[cfg(target_os = "macos")]
-        let edit_with_key = layout_key_code('e').map(|code| HotkeyBinding {
-            modifiers: HotkeyModifiers::option_command(),
-            key: Some(HotkeyKey {
-                code,
-                label: "E".into(),
-            }),
-        });
-        #[cfg(not(target_os = "macos"))]
-        let edit_with_key = Some(HotkeyBinding::chord(HotkeyModifiers::option_command(), "e"));
-        let control_command = HotkeyBinding {
-            modifiers: HotkeyModifiers {
-                control: Some(ModifierSide::Either),
-                command: Some(ModifierSide::Either),
-                ..Default::default()
-            },
-            key: None,
-        };
-        if let Some(binding) = [
-            Some(HotkeyBinding::edit_default()),
-            edit_with_key,
-            Some(control_command),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|binding| !self.dictation_hotkey.overlaps(binding))
-        {
-            tracing::warn!("replaced a conflicting Voice Action shortcut");
-            self.edit_hotkey = binding;
         }
     }
 }
@@ -2410,7 +2328,6 @@ pub fn hotkey_conflicts(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeySlot {
     Dictation,
-    VoiceAction,
     PasteLast,
     #[cfg(hex_capture)]
     Capture,
@@ -2425,9 +2342,6 @@ impl AppSettings {
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {
             others.push(self.dictation_hotkey.clone());
-        }
-        if slot != HotkeySlot::VoiceAction && self.voice_action.enabled {
-            others.push(self.edit_hotkey.clone());
         }
         if slot != HotkeySlot::PasteLast
             && let Some(paste) = &self.paste_last_hotkey
@@ -2672,18 +2586,6 @@ pub fn runtime_hotkeys() -> RuntimeHotkeys {
 
 pub fn dictation_hotkey() -> RuntimeHotkey {
     runtime_hotkeys().dictation
-}
-
-pub fn edit_hotkey() -> Option<RuntimeHotkey> {
-    runtime_hotkeys().edit
-}
-
-pub fn voice_action_settings() -> VoiceActionSettings {
-    VOICE_ACTION_SETTINGS
-        .get_or_init(Default::default)
-        .read()
-        .unwrap_or_else(|error| error.into_inner())
-        .clone()
 }
 
 /// The saved capture settings (`cfg(hex_capture)` builds).
@@ -2958,7 +2860,6 @@ mod tests {
         assert!(settings.double_tap_lock);
         assert!(!settings.double_tap_only);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
-        assert_eq!(settings.edit_hotkey, HotkeyBinding::edit_default());
         assert_eq!(
             settings.paste_last_hotkey,
             Some(HotkeyBinding::paste_last_default())
@@ -2972,9 +2873,6 @@ mod tests {
                 .post_processing
                 .enabled
         );
-        assert!(settings.voice_action.model.is_none());
-        assert!(settings.voice_action.variant.is_none());
-        assert_eq!(settings.voice_action.deadline_seconds, 60);
         assert!(!settings.meetings.enabled);
         assert_eq!(settings.meetings.output_folder, None);
         assert!(settings.meetings.summarize_with_apple_intelligence);
@@ -3431,10 +3329,49 @@ mod tests {
     }
 
     #[test]
-    fn legacy_disabled_edit_shortcut_migrates_to_the_new_default() {
-        let settings: AppSettings = serde_json::from_str(r#"{"edit_hotkey":null}"#).unwrap();
+    fn retired_voice_action_settings_load_cleanly_and_survive_saves() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-retired-voice-action-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.json");
 
-        assert_eq!(settings.edit_hotkey, HotkeyBinding::edit_default());
+        let mut initial = serde_json::to_value(AppSettings::default()).unwrap();
+        initial["edit_hotkey"] = serde_json::json!({
+            "modifiers": {"option": "either", "command": "either"},
+            "key": null
+        });
+        initial["voice_action"] = serde_json::json!({
+            "enabled": true,
+            "model": "anthropic/claude-sonnet-4-5",
+            "variant": "fast",
+            "deadline_seconds": 45
+        });
+        let raw = serde_json::to_vec_pretty(&initial).unwrap();
+        fs::write(&path, &raw).unwrap();
+
+        let mut loaded = AppSettings::load_from(&path).unwrap();
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            raw,
+            "loading already-normalized settings does not rewrite retired keys away"
+        );
+
+        loaded.sound_effect_volume = 0.75;
+        loaded.write_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["edit_hotkey"], initial["edit_hotkey"]);
+        assert_eq!(saved["voice_action"], initial["voice_action"]);
+
+        let null_edit: AppSettings = serde_json::from_str(r#"{"edit_hotkey":null}"#).unwrap();
+        assert_eq!(
+            serde_json::to_value(null_edit).unwrap()["edit_hotkey"],
+            serde_json::Value::Null
+        );
+
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
@@ -3588,44 +3525,6 @@ mod tests {
 
         settings.migrate_disabled_transcription_model();
         assert_eq!(settings.transcription, TranscriptionSelection::default());
-    }
-
-    #[test]
-    fn voice_action_requires_explicit_opt_in_for_new_and_existing_settings() {
-        for json in [
-            r#"{}"#,
-            r#"{"voice_action":{"model":"example/model-a","variant":"fast"}}"#,
-        ] {
-            let settings: AppSettings = serde_json::from_str(json).unwrap();
-            assert!(settings.runtime_hotkeys().edit.is_none());
-            let saved = serde_json::to_value(settings).unwrap();
-            assert_eq!(saved["voice_action"]["enabled"], false);
-        }
-    }
-
-    #[test]
-    fn voice_action_settings_round_trip() {
-        let settings = AppSettings {
-            voice_action: VoiceActionSettings {
-                enabled: true,
-                model: Some("example/rewrite-model".into()),
-                variant: Some("fast".into()),
-                deadline_seconds: 12,
-            },
-            ..AppSettings::default()
-        };
-
-        let encoded = serde_json::to_string(&settings).unwrap();
-        let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
-
-        assert!(decoded.voice_action.enabled);
-        assert_eq!(
-            decoded.runtime_hotkeys().edit,
-            Some(decoded.edit_hotkey.runtime())
-        );
-        assert_eq!(decoded.voice_action.model, settings.voice_action.model);
-        assert_eq!(decoded.voice_action.variant, settings.voice_action.variant);
-        assert_eq!(decoded.voice_action.deadline_seconds, 12);
     }
 
     #[test]
@@ -3882,50 +3781,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn edit_shortcut_cannot_shadow_the_dictation_shortcut() {
-        let option = HotkeyBinding::default();
-        let option_command = HotkeyBinding::edit_default();
-
-        assert!(option.is_modifier_prefix_of(&option_command));
-        assert!(!option_command.is_modifier_prefix_of(&option));
-    }
-
-    #[test]
-    fn old_dictation_binding_cannot_be_taken_over_by_the_new_edit_default() {
-        let mut settings = AppSettings {
-            dictation_hotkey: HotkeyBinding::edit_default(),
-            edit_hotkey: HotkeyBinding::edit_default(),
-            ..Default::default()
-        };
-        settings.voice_action.enabled = true;
-
-        settings.repair_hotkey_conflict();
-
-        assert!(!settings.dictation_hotkey.overlaps(&settings.edit_hotkey));
-    }
-
-    #[test]
-    fn disabled_voice_action_preserves_its_binding_without_reserving_it() {
-        let mut settings = AppSettings {
-            dictation_hotkey: HotkeyBinding::edit_default(),
-            ..Default::default()
-        };
-        let saved_binding = settings.edit_hotkey.clone();
-        settings.repair_hotkey_conflict();
-        assert_eq!(settings.edit_hotkey, saved_binding);
-        assert!(settings.runtime_hotkeys().edit.is_none());
-        settings.voice_action.enabled = true;
-        assert_eq!(
-            settings.runtime_hotkeys().edit,
-            Some(saved_binding.runtime())
-        );
-        settings.voice_action.enabled = false;
-        assert!(settings.runtime_hotkeys().edit.is_none());
-        assert_eq!(settings.edit_hotkey, saved_binding);
-    }
-
     #[test]
     fn side_selection_changes_one_modifier_chords_only() {
         let mut standalone = HotkeyBinding {
@@ -4032,7 +3887,7 @@ mod tests {
                 "key": { "code": 9, "label": "V" }
             },
         });
-        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings: AppSettings = serde_json::from_value(legacy.clone()).unwrap();
         assert_eq!(
             settings.dictation_hotkey.modifiers,
             HotkeyModifiers {
@@ -4040,11 +3895,8 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(
-            settings.edit_hotkey.modifiers,
-            HotkeyModifiers::option_command()
-        );
         let stored = serde_json::to_value(&settings).unwrap();
+        assert_eq!(stored["edit_hotkey"], legacy["edit_hotkey"]);
         assert_eq!(
             stored["dictation_hotkey"],
             serde_json::json!({ "keys": [{ "modifier": "option", "side": "right" }] })
@@ -4059,11 +3911,10 @@ mod tests {
         );
         let reloaded: AppSettings = serde_json::from_value(stored).unwrap();
         assert_eq!(reloaded.dictation_hotkey, settings.dictation_hotkey);
-        assert_eq!(reloaded.edit_hotkey, settings.edit_hotkey);
+        assert_eq!(reloaded.retired_edit_hotkey, settings.retired_edit_hotkey);
         assert_eq!(reloaded.paste_last_hotkey, settings.paste_last_hotkey);
         for binding in [
             HotkeyBinding::default(),
-            HotkeyBinding::edit_default(),
             HotkeyBinding::paste_last_default(),
             HotkeyBinding::paste_meeting_default(),
         ] {

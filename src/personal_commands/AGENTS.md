@@ -139,7 +139,7 @@ dictation: {
 `transformations` registers named text functions that appear as optional
 final steps in Hex's dictation modes. Selected transformations run in order
 after the mode's corrections and optional AI rewrite, for Paste and Send, not
-Voice Action or meetings. A transformation receives the text and the
+meetings. A transformation receives the text and the
 foreground context and returns the new text. If any transformation fails,
 Hex keeps the text from before the transformations.
 

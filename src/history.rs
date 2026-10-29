@@ -1,5 +1,5 @@
 //! Retained dictation history: an owner-only, bounded, crash-safe store of
-//! successful dictation and Voice Action results.
+//! successful dictation results.
 //!
 //! History is a product record, deliberately separate from the diagnostic
 //! Activity event stream. Entries hold text and bounded metadata only; audio

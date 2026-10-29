@@ -109,7 +109,6 @@ impl Pump {
                     // The listener answers once the recording stopped; only
                     // this command then waits for the transcript.
                     match ask(&runtime, |reply| RecognitionControl::Capture {
-                        voice_action: false,
                         action,
                         print: Some(print),
                         reply,
@@ -122,12 +121,10 @@ impl Pump {
                 });
                 None
             }
-            ControlCommand::Dictation { action, .. } | ControlCommand::VoiceAction { action } => {
-                let voice_action = matches!(command, ControlCommand::VoiceAction { .. });
+            ControlCommand::Dictation { action, .. } => {
                 background(reply, move || {
                     listener_ready(&runtime)?;
                     ask(&runtime, |reply| RecognitionControl::Capture {
-                        voice_action,
                         action,
                         print: None,
                         reply,
@@ -498,7 +495,6 @@ impl Pump {
             None | Some(Pane::Settings) => Destination::Settings,
             Some(Pane::Models) => Destination::Models,
             Some(Pane::Modes) => Destination::Modes,
-            Some(Pane::VoiceAction) => Destination::VoiceAction,
             Some(Pane::History) => Destination::History,
             Some(Pane::Commands) => Destination::Commands,
             // While Meetings is off the pane shows its opt-in.
@@ -862,7 +858,6 @@ fn status(
                 CommandModelStatus::Failed => "failed",
             }
             .into(),
-            voice_action: settings.voice_action.enabled,
             meetings: crate::app_settings::meetings_enabled(),
             release_microphone_while_idle: settings.release_microphone_while_idle,
             history_retention: serde_json::to_value(settings.history_retention)

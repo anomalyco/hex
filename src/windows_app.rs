@@ -29,7 +29,6 @@ use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
 use crate::transcription_models::{ModelPreparationStage, TranscriptionModelId};
 use crate::transcription_preparation::TranscriptionPreparation;
-use crate::windows_dictation::voice_action_model;
 use crate::windows_rune::{Published, Request};
 
 type ListenerResult = std::result::Result<(), String>;
@@ -74,8 +73,6 @@ pub(crate) struct WindowsDesktopHost {
     transformations: Arc<crate::personal_commands::TransformationClient>,
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
-    voice_action_model: Arc<RwLock<Option<crate::dictation_processor::Model>>>,
-    opencode_catalog_rx: Option<Receiver<Result<crate::dictation_processor::ModelCatalog>>>,
     preparation: TranscriptionPreparation,
     updater: crate::updater::Updater,
 }
@@ -162,7 +159,6 @@ impl WindowsDesktopHost {
         let mode_runtime = Arc::new(RwLock::new(
             crate::dictation_modes::ModeRuntime::from_settings(&settings),
         ));
-        let voice_action_model = Arc::new(RwLock::new(voice_action_model(&settings)));
         let mut host = Self {
             event_path,
             event_reader,
@@ -183,14 +179,11 @@ impl WindowsDesktopHost {
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
-            voice_action_model,
-            opencode_catalog_rx: None,
             preparation: TranscriptionPreparation::default(),
             updater: crate::updater::Updater::start(),
         };
         crate::transcription_models::delete_set_aside();
         host.refresh_personal_commands_host();
-        host.adopt_default_voice_action_model();
         // The microphone stays cold until first-run setup finishes.
         if host.settings.enable_on_launch {
             if crate::onboarding::completion_recorded() {
@@ -291,7 +284,6 @@ impl WindowsDesktopHost {
             indicator: Some(self.indicator.clone()),
             mode_runtime: self.mode_runtime.clone(),
             transformations: self.transformations.clone(),
-            voice_action_model: self.voice_action_model.clone(),
             ..crate::windows_dictation::WindowsDictationConfig::from_settings(&self.settings)
         };
         let worker = std::thread::Builder::new()
@@ -371,13 +363,6 @@ impl WindowsDesktopHost {
                 .unwrap_or_else(|error| error.into_inner()) =
                 crate::dictation_modes::ModeRuntime::from_settings(current);
         }
-        if previous.voice_action != current.voice_action {
-            *self
-                .voice_action_model
-                .write()
-                .unwrap_or_else(|error| error.into_inner()) = voice_action_model(current);
-            self.adopt_default_voice_action_model();
-        }
         if previous.ui_language != current.ui_language {
             crate::desktop_i18n::apply(current.ui_language.as_deref());
         }
@@ -393,55 +378,6 @@ impl WindowsDesktopHost {
         } else if model_changed && self.listen_when_ready {
             // A listener waiting for a model starts once one is chosen.
             self.start();
-        }
-    }
-
-    /// With an enabled voice action and no chosen model, voice actions use
-    /// OpenCode's default model; settings keep "default" so the choice
-    /// follows OpenCode.
-    fn adopt_default_voice_action_model(&mut self) {
-        if self.settings.voice_action.enabled
-            && self.settings.voice_action.model.is_none()
-            && self.opencode_catalog_rx.is_none()
-            && crate::dictation_processor::opencode_installed()
-        {
-            let (sender, receiver) = mpsc::channel();
-            self.opencode_catalog_rx = Some(receiver);
-            let _ = std::thread::Builder::new()
-                .name("windows-opencode-catalog".into())
-                .spawn(move || {
-                    let _ = sender.send(crate::dictation_processor::load_model_catalog());
-                });
-        }
-    }
-
-    fn poll_opencode_catalog(&mut self) {
-        let Some(receiver) = &self.opencode_catalog_rx else {
-            return;
-        };
-        let catalog = match receiver.try_recv() {
-            Ok(catalog) => catalog,
-            Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => {
-                Err(eyre!("the OpenCode catalog worker stopped unexpectedly"))
-            }
-        };
-        self.opencode_catalog_rx = None;
-        match catalog {
-            Ok(catalog) => {
-                if self.settings.voice_action.model.is_none()
-                    && let Some(default) = catalog
-                        .default_key
-                        .as_ref()
-                        .and_then(|key| catalog.models.iter().find(|choice| &choice.key == key))
-                {
-                    *self
-                        .voice_action_model
-                        .write()
-                        .unwrap_or_else(|error| error.into_inner()) = Some(default.model());
-                }
-            }
-            Err(error) => tracing::warn!(%error, "could not load the OpenCode model catalog"),
         }
     }
 
@@ -534,7 +470,6 @@ impl WindowsDesktopHost {
             self.listen_after_setup = false;
             self.start();
         }
-        self.poll_opencode_catalog();
         // Settings may set up the workspace at any time.
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
             self.personal_commands_checked_at = Instant::now();
@@ -688,17 +623,5 @@ mod tests {
             Some("OpenCode generation failed")
         );
         assert_eq!(visible_failure(&activity, Some(6)), None);
-    }
-
-    #[test]
-    fn voice_action_model_keys_split_into_provider_and_id() {
-        let mut settings = AppSettings::default();
-        assert!(voice_action_model(&settings).is_none());
-        settings.voice_action.model = Some("openai/gpt-5.6-sol".into());
-        settings.voice_action.variant = Some("fast".into());
-        let model = voice_action_model(&settings).unwrap();
-        assert_eq!(model.provider, "openai");
-        assert_eq!(model.id, "gpt-5.6-sol");
-        assert_eq!(model.variant.as_deref(), Some("fast"));
     }
 }

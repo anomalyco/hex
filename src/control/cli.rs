@@ -75,15 +75,6 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
-    /// Start, stop, cancel, or toggle a Voice Action.
-    ///
-    /// Needs voice_action.enabled. Selected text becomes its context.
-    VoiceAction {
-        #[arg(value_enum)]
-        action: CaptureAction,
-        #[command(flatten)]
-        output: Output,
-    },
     /// Paste the last dictation at the current focus (Option-Shift-V).
     PasteLast {
         #[command(flatten)]
@@ -295,9 +286,6 @@ pub fn run(command: ControlCli) -> u8 {
                 return 2;
             }
             send(ControlCommand::Dictation { action, print }, output)
-        }
-        ControlCli::VoiceAction { action, output } => {
-            send(ControlCommand::VoiceAction { action }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
         ControlCli::Settings { command } => settings(command),
@@ -1132,7 +1120,7 @@ fn human_status(report: &StatusReport) -> String {
          Capture      {capture}{pending}\n\
          Meeting      {meeting}\n\
          Model        {model_line}\n\
-         Features     commands {} (model {}), voice action {}, meetings {}, \
+         Features     commands {} (model {}), meetings {}, \
          release mic while idle {}, history {}\n\
          Permissions  {permission_line}\n\
          Window       {window}\n\
@@ -1147,7 +1135,6 @@ fn human_status(report: &StatusReport) -> String {
         },
         on(features.commands),
         features.command_model,
-        on(features.voice_action),
         on(features.meetings),
         on(features.release_microphone_while_idle),
         features.history_retention,

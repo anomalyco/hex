@@ -1251,7 +1251,6 @@ mod tests {
             application: Some("Brave Browser".into()),
             browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
             window_title: None,
-            selected_text: None,
             input_revision: None,
         };
         assert!(matches!(
@@ -1279,7 +1278,6 @@ mod tests {
             application: Some("Slack".into()),
             browser_url: None,
             window_title: None,
-            selected_text: None,
             input_revision: None,
         };
         assert!(matches!(
@@ -1326,7 +1324,6 @@ mod tests {
             application: Some("Slack".into()),
             browser_url: None,
             window_title: None,
-            selected_text: None,
             input_revision: None,
         };
         let slack_commands = config.available_catalog(Mode::Listening, &slack);

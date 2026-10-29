@@ -631,11 +631,11 @@ mod tests {
         let triggers = triggers(vec![
             ("dictation".into(), described("")),
             ("paste-last".into(), described("Ctrl+Alt+V")),
-            ("voice-action".into(), Results::new()),
+            ("capture".into(), Results::new()),
         ]);
         assert_eq!(triggers["dictation"], None);
         assert_eq!(triggers["paste-last"].as_deref(), Some("Ctrl+Alt+V"));
-        assert_eq!(triggers["voice-action"], None);
+        assert_eq!(triggers["capture"], None);
     }
 
     #[test]

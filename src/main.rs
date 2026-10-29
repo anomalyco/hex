@@ -1058,7 +1058,6 @@ mod tests {
 
         for (pane, expected) in [
             ("hud-lab", DeveloperPane::HudLab),
-            ("voice-action", DeveloperPane::VoiceAction),
             ("history", DeveloperPane::History),
         ] {
             let cli = Cli::try_parse_from(["hex", "dev", "show", pane]).unwrap();
@@ -1118,7 +1117,7 @@ mod tests {
             Ok(Some(Command::Control(ControlCli::Settings { .. })))
         ));
         assert!(matches!(
-            parse(&["hex", "window", "show", "voice-action"]),
+            parse(&["hex", "window", "show", "history"]),
             Ok(Some(Command::Control(ControlCli::Window { .. })))
         ));
         assert!(matches!(

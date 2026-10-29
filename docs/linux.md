@@ -7,7 +7,7 @@ to the CPU. The window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
 or a software Vulkan driver. See the Wayland requirements below.
 
-Linux opens the same window as macOS and Windows: Settings, Modes, Voice Action,
+Linux opens the same window as macOS and Windows: Settings, Modes,
 and History. Voice commands, website mode rules, and meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
 protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
@@ -254,10 +254,6 @@ window's process name (`code`, `firefox`); the application picker lists
 `.desktop` entries. Wayland doesn't report the focused window,
 so the Global mode applies there. Completed dictations are kept in History.
 
-Voice Action, once enabled, records an instruction while you hold
-**Ctrl-Alt-I**, pairs it with the primary selection (the text you selected), asks
-OpenCode, and pastes the reply.
-
 **Microphone mode** can release the microphone between dictations; it then opens
 on the shortcut press without pre-roll. **While dictating** can mute the default
 output through `wpctl` (PipeWire) or `pactl` (PulseAudio), or pause playing
@@ -316,9 +312,6 @@ hex dictation stop      # bind to the same key's release: stop and transcribe
 hex dictation toggle    # one key: start, then stop and transcribe
 hex dictation cancel    # discard the recording
 hex paste-last          # paste the last dictation again
-hex voice-action start  # Voice Action, when enabled: press
-hex voice-action stop   #   and release
-hex voice-action toggle
 ```
 
 For example, hold-to-dictate on F9 in Sway, and a toggle in any desktop that

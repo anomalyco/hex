@@ -116,8 +116,8 @@ bindsym F9 exec hex dictation start
 bindsym --release F9 exec hex dictation stop
 ```
 
-`hex dictation toggle`, `hex dictation cancel`, `hex paste-last`, and
-`hex voice-action start|stop|toggle` are also available; see the
+`hex dictation toggle`, `hex dictation cancel`, and `hex paste-last`
+are also available; see the
 [Linux guide](linux.md#shortcuts). The paste helper is `wtype`; no privileged
 input-injection fallback is installed.
 

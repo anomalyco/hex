@@ -23,7 +23,7 @@ pub enum Tone {
     Error,
     DictationStart,
     DictationStop,
-    /// A dictation or Voice Action reply was pasted.
+    /// A dictation was pasted.
     DictationDone,
     Cancel,
     /// The first-run tour reached its last step.

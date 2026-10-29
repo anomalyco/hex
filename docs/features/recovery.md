@@ -117,7 +117,6 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `typing_after_command_tab_does_not_block_the_next_press`,
 `a_delayed_release_cannot_untrack_a_resynchronized_key_press`,
 `a_chord_at_the_resynchronized_press_still_discards_it`,
-`voice_action_takes_over_right_after_command_tab`,
 `fenced_and_pre_reset_modifier_edges_are_not_neutral_evidence`,
 `stale_press_waits_for_recovery_while_anything_else_is_held`,
 `stale_press_requires_a_neutral_keyboard_after_the_tracked_keys`,
@@ -278,8 +277,7 @@ so the cold open retries the selection before the existing fallback.
 Not verified: the reporter's hardware, whether 200 ms of retries is long enough
 for their device, or a physical cold open after idle.
 Proof limit: controlled asynchronous opener and capture ownership, not onset
-latency or the macOS microphone indicator. Cold Voice Action has a separate gap
-below.
+latency or the macOS microphone indicator.
 
 ### Fence Late Capture Notifications
 
@@ -330,8 +328,7 @@ Sources: [dictation_audio.rs](../../src/dictation_audio.rs),
 Proof limit: source-backed contract only. A whole-path native stall check must
 still establish lossless dictation and stale-command rejection together.
 
-`recover.optional-processing`: ordinary dictation falls back to usable text;
-Voice Action does not substitute a transcript for a failed action.
+`recover.optional-processing`: ordinary dictation falls back to usable text.
 
 ```ts
 ordinary dictation -> corrections -> optional rewrite -> transformations -> paste
@@ -340,8 +337,7 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
                              rewrite fails       chain fails
                              -> corrected text   -> chain's input // discard partial results
 
-Voice Action fails -> paste nothing                    // different contract, no fallback
-either path -> later request -> expected output         // recovery still needs observation
+later request -> expected output                       // recovery still needs observation
 ```
 Stage-specific sources and checks are in the [index](README.md); runaway
 scripts are covered below.
@@ -582,19 +578,6 @@ Reports: [#53](https://github.com/anomalyco/hex/issues/53),
 [#54](https://github.com/anomalyco/hex/issues/54).
 Proof limit: existing ownership/timing tests do not establish these native
 failure causes; a current hold-to-result sequence is still needed.
-
-### Cold Voice Action
-
-```ts
-Command-first -> start_pending_voice_action -> intentional threshold -> open mic
-Option-first  -> already-started capture -> promote to Voice Action
-
-ordinary cold-dictation checks -> both Voice Action orders // NOT established
-```
-Source: [recognition.rs](../../src/recognition.rs), `start_pending_voice_action`;
-issue [#23](https://github.com/anomalyco/hex/issues/23).
-Missing evidence: both modifier orders with a controlled opener, followed by
-native onset evidence.
 
 ### Runaway Script
 

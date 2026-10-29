@@ -19,13 +19,13 @@ Hex                                      // macOS release
 ├── Use the result                       // paste, Send, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
 ├── Process text                         // context-selected Modes (experiment `modes`, off by default)
-├── Opt in                               // Voice Action, Commands, Meetings: separately off
+├── Opt in                               // Commands, Meetings: separately off
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit
 ```
 
 [Dictation](dictation.md), [Voice Commands](commands.md),
-[Voice Action](voice-action.md), [Meetings](meetings.md), and [Recovery](recovery.md)
+[Meetings](meetings.md), and [Recovery](recovery.md)
 have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
@@ -158,7 +158,7 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
 │   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
-└── Done -> paste last, Voice Action, Modes tips -> Start using Hex
+└── Done -> paste last, Modes tips -> Start using Hex
     // Windows and Linux: Welcome -> Setup (the model row only) -> Done
 
 General > Speech model or Language
@@ -468,7 +468,7 @@ Completed output                         // output
 ├── Paste -> Current focus, in submission order
 ├── Spoken Send -> Paste, then Enter      // requires Commands and voice capture
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
-│   └── Last completed dictation, not Voice Action
+│   └── Last completed dictation
 └── History
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
@@ -508,7 +508,7 @@ latency measurement.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, History, then each opt-in feature that is on (Voice Action, Commands, Meetings)
+├── General, History, then each opt-in feature that is on (Commands, Meetings)
 └── Labs ▸ -> Labs page: a switch per opt-in feature; one turned on joins the sidebar
     └── Experiments' panes (and Modes when shown) indent under Labs while it's open
         // Command-1…9 follow this order (labs::order)
@@ -597,7 +597,7 @@ Intentional recording                    // recording.environment
 On macOS, **Lower audio** (`recording.environment.duck`) is an explicit fourth
 choice, off by default. The slider appears only while selected and saves on
 release. It remembers its value across behavior changes. Intentional captures
-(including Voice Action) ramp the original output channels to that fraction over
+ramp the original output channels to that fraction over
 one second, preserving balance and silent channels, then restore on finish,
 cancel, or orderly shutdown. Changes apply to the next capture. The stop tone
 waits for restoration. A manually changed volume after settling is left alone;
@@ -708,7 +708,6 @@ Experiment `modes` off (the default)     // experiments.md; modes.experiment
 ├── Processing -> Global replacements only    // literal, cheap, still applied
 │   └── No per-app mode, corrections, OpenCode rewrite, or transformations
 ├── Custom transformations -> Not loaded for modes; a hex.config.ts still loads them
-├── Voice Action and the OpenCode catalog -> Unchanged // the catalog is Voice Action's too
 ├── History -> No processing profile, since nothing processed
 └── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
     // `hex experiments enable modes` + restart -> everything below, as saved
@@ -751,12 +750,11 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
-OpenCode transformation shares Voice Action's OpenCode discovery, which accepts
-`opencode2` or a V2 `opencode` and rejects V1
-([Voice Action](voice-action.md)). While the switch can't be turned on, the
+OpenCode transformation discovery accepts `opencode2` or a V2 `opencode` and
+rejects V1. While the switch can't be turned on, the
 reason ("Requires OpenCode", "Requires OpenCode V2") shows beside it and the
 setup/retry notice below; `unavailable_opencode_is_explained_beside_each_switch`
-covers both panes headlessly.
+covers it headlessly.
 
 GUI executable discovery also checks `~/.vite-plus/bin/opencode2` when it is
 absent from the inherited PATH. `standard_install_location_finds_opencode_outside_the_gui_path`
@@ -787,13 +785,6 @@ preference enabled never activates and every dictation falls back to Global.
 Update to repair saved selections automatically. For older builds, the workaround
 is to quit Hex, remove the `.app` suffix from
 `dictation_processing.modes[].applications` in `settings.json`, then relaunch.
-
-## Use Voice Action
-
-[Voice Action](voice-action.md) maps the separate opt-in, hold-only shortcut,
-optional selection, local transcript-to-OpenCode-to-paste path, and cancellation
-boundary. It owns the mode-bypass/last-result rules, checks, and
-[cold modifier-order gap](voice-action.md#cold-modifier-order).
 
 ## Speak Commands
 

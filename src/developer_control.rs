@@ -18,7 +18,6 @@ pub enum DeveloperPane {
     #[serde(alias = "replacements")]
     #[value(alias = "replacements")]
     Modes,
-    VoiceAction,
     History,
     HudLab,
     Commands,

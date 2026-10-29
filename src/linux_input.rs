@@ -376,10 +376,6 @@ pub(crate) enum HotkeyEvent {
     FinishPrinting(crate::control::PrintReply),
     Cancel,
     PasteLast,
-    /// The Voice Action shortcut went down: record an instruction.
-    VoiceStart,
-    /// The Voice Action shortcut came up: run the instruction.
-    VoiceFinish,
     /// The Annotate shortcut went down: the capture host decides whether
     /// it starts or finishes a capture.
     Capture,
@@ -397,9 +393,6 @@ pub(crate) enum ShortcutCommand {
     DictationStop,
     DictationToggle,
     DictationCancel,
-    VoiceActionStart,
-    VoiceActionStop,
-    VoiceActionToggle,
     PasteLast,
 }
 
@@ -417,15 +410,6 @@ impl From<ShortcutCommand> for ListenerCommand {
     }
 }
 
-impl ShortcutCommand {
-    pub(crate) fn is_voice_action(self) -> bool {
-        matches!(
-            self,
-            Self::VoiceActionStart | Self::VoiceActionStop | Self::VoiceActionToggle
-        )
-    }
-}
-
 /// How the dictation shortcut behaves, and the shortcuts registered
 /// beside it.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -435,8 +419,6 @@ pub(crate) struct HotkeyOptions {
     pub(crate) double_tap_only: bool,
     pub(crate) toggle: bool,
     pub(crate) paste_last: Option<LinuxHotkey>,
-    /// Held to record a Voice Action instruction.
-    pub(crate) voice_action: Option<LinuxHotkey>,
     /// Starts or finishes a capture, while Annotate is on.
     pub(crate) capture: Option<LinuxHotkey>,
     /// Held to draw while Annotate records.
@@ -597,19 +579,12 @@ fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool
 enum Shortcut {
     Dictation,
     PasteLast,
-    VoiceAction,
     Capture,
     Draw,
 }
 
 impl Shortcut {
-    const ALL: [Self; 5] = [
-        Self::Dictation,
-        Self::PasteLast,
-        Self::VoiceAction,
-        Self::Capture,
-        Self::Draw,
-    ];
+    const ALL: [Self; 4] = [Self::Dictation, Self::PasteLast, Self::Capture, Self::Draw];
 
     fn index(self) -> usize {
         self as usize
@@ -620,7 +595,6 @@ impl Shortcut {
         match self {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
-            Self::VoiceAction => ("voice-action", "Voice Action"),
             Self::Capture => ("capture", "Annotate"),
             Self::Draw => ("annotate-draw", "Annotate: hold to draw"),
         }
@@ -649,16 +623,13 @@ enum Capture {
 }
 
 /// The shortcut rules every input shares: hold, double-tap lock, toggle,
-/// double-tap only, Escape, Paste Last, Voice Action, and commands.
+/// double-tap only, Escape, Paste Last, and commands.
 struct ShortcutState {
     double_tap: bool,
     double_tap_only: bool,
     /// Every press acts as the second tap of a double-tap: releasing locks.
     toggle: bool,
-    voice_action: bool,
     capture: Capture,
-    /// A Voice Action instruction is recording.
-    voice_held: bool,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
 }
@@ -669,9 +640,7 @@ impl ShortcutState {
             double_tap: options.double_tap,
             double_tap_only: options.double_tap_only,
             toggle: options.toggle,
-            voice_action: options.voice_action.is_some(),
             capture: Capture::Idle,
-            voice_held: false,
             last_release: None,
             last_press: None,
         }
@@ -679,16 +648,15 @@ impl ShortcutState {
 
     /// Escape cancels only while something records.
     fn wants_escape(&self) -> bool {
-        matches!(self.capture, Capture::Held { .. } | Capture::Locked) || self.voice_held
+        matches!(self.capture, Capture::Held { .. } | Capture::Locked)
     }
 
     fn idle(&self) -> bool {
-        matches!(self.capture, Capture::Idle | Capture::Armed) && !self.voice_held
+        matches!(self.capture, Capture::Idle | Capture::Armed)
     }
 
     fn cancel(&mut self) -> Option<HotkeyEvent> {
         let active = self.wants_escape();
-        self.voice_held = false;
         self.capture = Capture::Idle;
         self.last_release = None;
         active.then_some(HotkeyEvent::Cancel)
@@ -713,22 +681,6 @@ impl ShortcutState {
         Some(HotkeyEvent::Finish)
     }
 
-    fn start_voice(&mut self) -> Option<HotkeyEvent> {
-        if !self.voice_action || !self.idle() {
-            return None;
-        }
-        self.capture = Capture::Idle;
-        self.voice_held = true;
-        Some(HotkeyEvent::VoiceStart)
-    }
-
-    fn stop_voice(&mut self) -> Option<HotkeyEvent> {
-        self.voice_held.then(|| {
-            self.voice_held = false;
-            HotkeyEvent::VoiceFinish
-        })
-    }
-
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
             Input::Escape | Input::Lost => self.cancel(),
@@ -738,7 +690,6 @@ impl ShortcutState {
                     .is_some_and(|pressed| now.saturating_duration_since(pressed) < KEY_REPEAT_GAP);
                 self.last_press = Some(now);
                 match self.capture {
-                    _ if self.voice_held => None,
                     Capture::Locked => {
                         self.capture = Capture::Idle;
                         self.last_release = None;
@@ -786,8 +737,6 @@ impl ShortcutState {
                 }
                 Capture::Idle | Capture::Locked => None,
             },
-            Input::Pressed(Shortcut::VoiceAction) => self.start_voice(),
-            Input::Released(Shortcut::VoiceAction) => self.stop_voice(),
             Input::Pressed(Shortcut::PasteLast) | Input::Command(ShortcutCommand::PasteLast) => {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
@@ -803,11 +752,6 @@ impl ShortcutState {
                     self.stop_dictation().or_else(|| self.start_dictation())
                 }
                 ShortcutCommand::DictationCancel => self.cancel(),
-                ShortcutCommand::VoiceActionStart => self.start_voice(),
-                ShortcutCommand::VoiceActionStop => self.stop_voice(),
-                ShortcutCommand::VoiceActionToggle => {
-                    self.stop_voice().or_else(|| self.start_voice())
-                }
                 ShortcutCommand::PasteLast => unreachable!("handled above"),
             },
         }
@@ -1033,10 +977,6 @@ impl Backend {
                 .paste_last
                 .as_ref()
                 .map(|key| (Shortcut::PasteLast, key)),
-            options
-                .voice_action
-                .as_ref()
-                .map(|key| (Shortcut::VoiceAction, key)),
             options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
             options.draw.as_ref().map(|key| (Shortcut::Draw, key)),
         ];
@@ -1096,13 +1036,8 @@ impl Backend {
         self.status.configure.store(false, Ordering::Release);
         self.mark_ready(DesktopShortcuts::Portal(granted));
         // Escape while the recording shortcut is still held carries its modifiers.
-        let held_escape = |shortcut: Shortcut| -> Option<String> {
-            let key = match shortcut {
-                Shortcut::Dictation => Some(&binding),
-                Shortcut::VoiceAction => options.voice_action.as_ref(),
-                Shortcut::PasteLast | Shortcut::Capture | Shortcut::Draw => None,
-            }?;
-            let trigger = key.portal_trigger_for("Escape").ok()?;
+        let held_escape = || -> Option<String> {
+            let trigger = binding.portal_trigger_for("Escape").ok()?;
             (trigger != "Escape").then_some(trigger)
         };
         let shortcut_for = |id: &str| {
@@ -1165,12 +1100,7 @@ impl Backend {
             let wants_escape = dispatcher.state.wants_escape();
             if wants_escape && !escape_bound {
                 escape_bound = true;
-                let recording = if dispatcher.state.voice_held {
-                    Shortcut::VoiceAction
-                } else {
-                    Shortcut::Dictation
-                };
-                let available = portal.bind_escape(held_escape(recording), &self.stop)?;
+                let available = portal.bind_escape(held_escape(), &self.stop)?;
                 if self.status.update_escape_availability(available) {
                     tracing::warn!("{ESCAPE_CANCEL_WARNING}; continuing without Escape-cancel");
                 }
@@ -1206,7 +1136,6 @@ impl Backend {
         let requested = [
             Some((Shortcut::Dictation, binding)),
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
-            options.voice_action.map(|key| (Shortcut::VoiceAction, key)),
             options.capture.map(|key| (Shortcut::Capture, key)),
             options.draw.map(|key| (Shortcut::Draw, key)),
         ];
@@ -1620,7 +1549,7 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use HotkeyEvent::{Cancel, Finish, PasteLast, Start, VoiceFinish, VoiceStart};
+    use HotkeyEvent::{Cancel, Finish, PasteLast, Start};
     use ShortcutCommand as Command;
 
     struct Test {
@@ -1675,14 +1604,6 @@ mod tests {
             assert_eq!(self.events, [Start, Finish, Start]);
             assert_eq!(self.state.capture, Capture::Locked);
             self.events.clear();
-        }
-    }
-
-    fn voice_options() -> HotkeyOptions {
-        HotkeyOptions {
-            double_tap: true,
-            voice_action: Some(LinuxHotkey::default()),
-            ..HotkeyOptions::default()
         }
     }
 
@@ -2068,16 +1989,11 @@ mod tests {
 
     #[test]
     fn escape_is_wanted_only_while_something_records() {
-        let mut test = Test::with(voice_options());
+        let mut test = Test::new(true);
         assert!(!test.state.wants_escape());
         test.press(Shortcut::Dictation);
         assert!(test.state.wants_escape());
         test.release(Shortcut::Dictation);
-        assert!(!test.state.wants_escape());
-        test.now += Duration::from_secs(1);
-        test.press(Shortcut::VoiceAction);
-        assert!(test.state.wants_escape());
-        test.release(Shortcut::VoiceAction);
         assert!(!test.state.wants_escape());
     }
 
@@ -2099,42 +2015,6 @@ mod tests {
             test.tap();
             assert_eq!(test.events, [Cancel, Start, Finish]);
         }
-    }
-
-    #[test]
-    fn voice_action_records_while_its_shortcut_is_held() {
-        let mut test = Test::with(voice_options());
-        test.press(Shortcut::VoiceAction);
-        test.press(Shortcut::VoiceAction);
-        test.release(Shortcut::VoiceAction);
-        assert_eq!(test.events, [VoiceStart, VoiceFinish]);
-        test.press(Shortcut::VoiceAction);
-        test.input(Input::Escape);
-        test.release(Shortcut::VoiceAction);
-        assert_eq!(test.events, [VoiceStart, VoiceFinish, VoiceStart, Cancel]);
-    }
-
-    #[test]
-    fn voice_action_and_dictation_never_overlap() {
-        let mut test = Test::with(voice_options());
-        test.press(Shortcut::Dictation);
-        test.press(Shortcut::VoiceAction);
-        test.release(Shortcut::VoiceAction);
-        test.release(Shortcut::Dictation);
-        test.now += Duration::from_secs(1);
-        test.press(Shortcut::VoiceAction);
-        test.tap();
-        test.release(Shortcut::VoiceAction);
-        assert_eq!(test.events, [Start, Finish, VoiceStart, VoiceFinish]);
-    }
-
-    #[test]
-    fn disabled_voice_action_ignores_its_shortcut_and_commands() {
-        let mut test = Test::new(true);
-        test.press(Shortcut::VoiceAction);
-        test.command(Command::VoiceActionStart);
-        test.command(Command::VoiceActionToggle);
-        assert!(test.events.is_empty());
     }
 
     #[test]
@@ -2216,19 +2096,6 @@ mod tests {
     }
 
     #[test]
-    fn voice_action_commands_are_idempotent() {
-        let mut test = Test::with(voice_options());
-        test.command(Command::VoiceActionStop);
-        test.command(Command::VoiceActionStart);
-        test.command(Command::VoiceActionStart);
-        test.command(Command::DictationStart);
-        test.command(Command::VoiceActionStop);
-        test.command(Command::VoiceActionToggle);
-        test.command(Command::DictationCancel);
-        assert_eq!(test.events, [VoiceStart, VoiceFinish, VoiceStart, Cancel]);
-    }
-
-    #[test]
     fn x11_auto_repeat_pairs_never_release_the_shortcut() {
         let start = Instant::now();
         let mut keys = X11Keys::default();
@@ -2251,18 +2118,18 @@ mod tests {
     fn x11_release_counts_after_the_grace_period() {
         let start = Instant::now();
         let mut keys = X11Keys::default();
-        keys.press(Shortcut::VoiceAction);
-        keys.release(Shortcut::VoiceAction, start);
+        keys.press(Shortcut::Dictation);
+        keys.release(Shortcut::Dictation, start);
         assert!(keys.expire(start + RELEASE_GRACE / 2).is_empty());
         assert_eq!(
             keys.expire(start + RELEASE_GRACE),
-            [Input::Released(Shortcut::VoiceAction)]
+            [Input::Released(Shortcut::Dictation)]
         );
         assert!(keys.expire(start + RELEASE_GRACE * 2).is_empty());
-        assert!(!keys.held(Shortcut::VoiceAction));
+        assert!(!keys.held(Shortcut::Dictation));
         assert_eq!(
-            keys.press(Shortcut::VoiceAction),
-            Some(Input::Pressed(Shortcut::VoiceAction))
+            keys.press(Shortcut::Dictation),
+            Some(Input::Pressed(Shortcut::Dictation))
         );
     }
 

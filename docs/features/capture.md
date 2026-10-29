@@ -93,7 +93,7 @@ Settings › Annotate                      // capture.pane
 │   input, retention, or folder, as with the experiment off
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S) -> same keycap and recorder as dictation;
-│   a key is required; refused when it overlaps dictation, Voice Action, or paste
+│   a key is required; refused when it overlaps dictation or paste
 ├── How it works (on) -> start, draw, pin, undo, stop, and send, each with
 │   its keys: ⇧, ⇧-click, ⌘Z on macOS; held Ctrl+Alt+D, a click while held,
 │   right-click or Ctrl+Z on Linux. Check: rune_ui::scrawl tests
@@ -448,7 +448,7 @@ hex capture start                        // capture.start; needs a listening Hex
 └── Already recording -> unchanged, same bundle
 
 While it records                         // capture.audio
-├── Dictation, Voice Action, and meetings work as usual on the same audio
+├── Dictation and meetings work as usual on the same audio
 ├── Sink full (collector stalled) -> capture audio dropped as a gap, dictation untouched
 └── Microphone gap or recovery -> the gap is recorded, positions stay on the clock
 

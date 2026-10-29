@@ -30,8 +30,7 @@ runtime settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
 their catalog remain available as a persisted opt-in that defaults off.
-Voice Action also requires its own persisted opt-in, defaulting off even for
-existing settings without an explicit enabled flag. Meetings (beta) is a third
+Meetings (beta) is a second
 persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
 Meetings pane, menu-bar recording controls, and meeting paste in release builds.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
@@ -49,8 +48,8 @@ substitute for source inspection or a second roadmap.
 - Update the affected map in the same change when behavior, entry points,
   defaults, prerequisites, platform availability, recovery, or verification
   coverage changes. Do not churn unrelated maps for internal-only refactors.
-- Organize by user capability, not Rust module or UI pane. Dictation, Voice
-  Commands, and Voice Action are distinct features; link shared flows and
+- Organize by user capability, not Rust module or UI pane. Dictation and Voice
+  Commands are distinct features; link shared flows and
   recovery rather than duplicating their descriptions. Keep the index current
   when adding or splitting a feature file.
 - Prefer small action/outcome diagrams in `ts` fences with Unicode tree
@@ -89,7 +88,7 @@ substitute for source inspection or a second roadmap.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
-  model catalog, Voice Action generation, and the transformation stage. Every
+  model catalog, and the transformation stage. Every
   OS discovers the OpenCode V2 CLI (any `opencode2` first, else an `opencode`
   that proves to be V2; a V1 `opencode` is never run) and links missing installs
   to `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
@@ -210,17 +209,17 @@ substitute for source inspection or a second roadmap.
   real-time voice-filter DSP presets, and the offline WAV renderer behind
   `hex dev voice-filter render`.
 - `linux`, `linux_app`, `linux_dictation`, `linux_paste`:
-  the Linux beta CLI (including the `hex dictation`, `hex voice-action`, and
+  the Linux beta CLI (including the `hex dictation` and
   `hex paste-last` keybinding commands and launch forwarding), the one Linux
   process (host thread, window on demand through one seam, Quit), the hotkey
-  capture-transcribe-paste loop with Paste Last and Voice Action,
-  and paste and primary-selection reads.
+  capture-transcribe-paste loop with Paste Last,
+  and paste.
 - `linux_clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (wlr-data-control on Wayland, its own selection owner with INCR on
   X11) until another client takes it.
 - `linux_input`: the one shortcut state machine (hold, double-tap lock, toggle,
-  double-tap only, Escape, Paste Last, Voice Action, and `hex` commands) and the
+  double-tap only, Escape, Paste Last, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
   or, without the portal, the `hex` commands alone.
 - `linux_portal`: the portal bus (a private zbus connection, `Register("hex")`
@@ -299,7 +298,7 @@ substitute for source inspection or a second roadmap.
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
   `rune-kit` and the OpenCode theme: General and History, then the opt-in
-  Voice Action, Commands, and Meetings once on (each feature owns its
+  Commands and Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
   the opt-in switches) Modes with mode-owned corrections and processing, the
   Voice Filter and developer-only HUD Lab (release too while `playground` is
@@ -532,8 +531,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   taps, chords, and presses during voice-delimited dictation never get one,
   and it never reaches Hex's state machines.
 - The start tone confirms the shortcut press itself, not the hold threshold: it
-  is provisional, sounds after a 40 ms chord grace, and a chord, short tap,
-  cancel, or Voice Action takeover retracts it (silently inside the grace, else
+  is provisional, sounds after a 40 ms chord grace, and a chord, short tap, or
+  cancel retracts it (silently inside the grace, else
   a 20 ms fade). With the microphone released while idle, the tone waits for
   the open microphone and the hold.
 - `Release microphone while idle` and Commands are mutually exclusive through
@@ -641,20 +640,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   `NotRegistered` and `NotFound` as disabled before registration, represent
   `RequiresApproval` with a link to Login Items settings, and poll macOS as the
   source of truth instead of persisting a parallel Boolean.
-- Voice Action is an optional second capture target. Its saved shortcut defaults
-  to Option-Command, but no shortcut is active or reserved until the user enables
-  Voice Action. Disabling it cancels its active capture, not accepted jobs, and
-  preserves the saved shortcut and model. The toggle remains reachable when
-  OpenCode is unavailable. Promoting an active Option capture preserves all recorded
-  audio. Selected text is optional prompt context; inaccessible or empty
-  selections act as no selection. Use the dedicated OpenCode model and deadline,
-  return only paste-ready text, and paste at the current focus. Failed, empty,
-  cancelled, or timed-out actions paste nothing. Voice Action jobs share normal
-  queueing and cancellation but never update the last dictation.
 - Mode processing is best-effort and ordered: corrections, optional OpenCode
   rewriting, then selected transformations. A failed stage preserves its input;
   the transformation chain is one stage, so failure discards its partial results.
-  It applies to Paste and Send, but not Voice Action or meetings.
+  It applies to Paste and Send, not meetings.
 - OpenCode availability checks stay off the UI thread. When the app finds the
   `opencode2` executable, `opencode2 api` discovers or starts the managed service;
   the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
@@ -988,8 +977,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   approved once (restore token, persist mode 2) and kept with the paster.
   With neither, the transcript stays copied and the failure names the
   missing portal. Shortcuts come from the GlobalShortcuts portal when the
-  desktop offers it; otherwise the user binds the `hex dictation`,
-  `hex voice-action`, and `hex paste-last` commands in the desktop's own
+  desktop offers it; otherwise the user binds the `hex dictation` and
+  `hex paste-last` commands in the desktop's own
   keybindings. One general path: no compositor-specific code, no raw input
   devices, no input-group requirement, and no silent fallback to XWayland or
   privileged input injection (uinput). The desktop may grant a different
@@ -1125,7 +1114,7 @@ Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 `src/rune_ui.rs` without starting the runtime, on every OS (`--list-scenes`
 lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
 render). Scenes cover every pane and state the goldens check: the Linux and
-Windows panes (`modes`, `voice-action`, `history`, `picker`, `onboarding`,
+Windows panes (`modes`, `history`, `picker`, `onboarding`,
 `windows-settings`, …) and the macOS ones (`mac-settings`, `mac-commands`,
 `meetings*`, `mac-voice-filter*`, `mac-hud-lab`, `mac-activity`, `mac-onboarding*`).
 `live` renders the running Linux Hex's real state. On a host without a GPU,

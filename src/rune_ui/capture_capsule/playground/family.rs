@@ -238,7 +238,6 @@ fn poll(s: &mut Family, now: f64, _: &mut Tx) -> bool {
             visible: stage.is_some(),
             loudness: demo_loudness(s.t as f32),
             reduce_motion: reduced,
-            action: false,
         },
     );
     true

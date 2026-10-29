@@ -52,11 +52,6 @@ enum Command {
         #[command(subcommand)]
         action: DictationAction,
     },
-    /// Start or stop a Voice Action instruction in the running Hex.
-    VoiceAction {
-        #[command(subcommand)]
-        action: VoiceActionAction,
-    },
     /// Paste the last dictation again through the running Hex.
     PasteLast,
     /// Run X11 or Wayland hotkey dictation and automatic paste until interrupted.
@@ -112,16 +107,6 @@ enum DictationAction {
     Toggle,
     /// Discard the recording.
     Cancel,
-}
-
-#[derive(Subcommand)]
-enum VoiceActionAction {
-    /// Start recording an instruction. Bind to a key press.
-    Start,
-    /// Stop and run the instruction. Bind to the key's release.
-    Stop,
-    /// Start when idle, stop and run the instruction while recording.
-    Toggle,
 }
 
 #[derive(Subcommand)]
@@ -189,11 +174,6 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             DictationAction::Stop { .. } => ShortcutCommand::DictationStop,
             DictationAction::Toggle => ShortcutCommand::DictationToggle,
             DictationAction::Cancel => ShortcutCommand::DictationCancel,
-        }),
-        Command::VoiceAction { action } => shortcut(match action {
-            VoiceActionAction::Start => ShortcutCommand::VoiceActionStart,
-            VoiceActionAction::Stop => ShortcutCommand::VoiceActionStop,
-            VoiceActionAction::Toggle => ShortcutCommand::VoiceActionToggle,
         }),
         Command::PasteLast => shortcut(ShortcutCommand::PasteLast),
         Command::Dictate { device } => {
@@ -290,7 +270,6 @@ impl Command {
                 | Self::Quit
                 | Self::Restart
                 | Self::Dictation { .. }
-                | Self::VoiceAction { .. }
                 | Self::PasteLast
                 | Self::Status { lines: None }
         )

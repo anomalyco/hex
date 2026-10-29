@@ -179,7 +179,7 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
         assert not path.exists()
         assert (support / "settings.json").exists()
 
-        for command in (["restart"], ["dictation", "start"], ["voice-action", "toggle"]):
+        for command in (["restart"], ["dictation", "start"], ["paste-last"]):
             assert run(*command).returncode != 0, command
         assert not marker.exists(), "a custom data root ran systemctl"
     finally:

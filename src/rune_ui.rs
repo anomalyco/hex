@@ -49,7 +49,6 @@ mod sound_sets;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;
-mod voice_action;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -84,11 +83,6 @@ static MODES_ICON: Icon = Icon {
     name: "hex-modes",
     view: 24.0,
     body: include_str!("../assets/icons/modes.svg"),
-};
-static VOICE_ACTION_ICON: Icon = Icon {
-    name: "hex-voice-action",
-    view: 24.0,
-    body: include_str!("../assets/icons/voice-action.svg"),
 };
 static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
@@ -306,7 +300,6 @@ pub(crate) enum Destination {
     Meetings(Option<String>),
     Modes,
     Commands,
-    VoiceAction,
     History,
 }
 
@@ -318,7 +311,6 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
         Destination::Meetings(_) => Pane::Meetings,
         Destination::Modes => Pane::Modes,
         Destination::Commands => Pane::Commands,
-        Destination::VoiceAction => Pane::VoiceAction,
         Destination::History => Pane::History,
     };
     picker::close(ui);
@@ -357,7 +349,6 @@ pub(crate) fn shortcut_rule(
     use crate::app_settings::HotkeySlot;
     let target = match slot {
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
-        HotkeySlot::VoiceAction => ShortcutTarget::VoiceAction,
         HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
         #[cfg(hex_capture)]
         HotkeySlot::Capture => ShortcutTarget::Capture,
@@ -484,7 +475,6 @@ enum Pane {
     #[default]
     General,
     Modes,
-    VoiceAction,
     /// The voice command catalog and its opt-in (macOS).
     Commands,
     /// Recorded calls and their settings, or the opt-in (macOS beta).
@@ -508,7 +498,6 @@ impl Pane {
     const ALL: &[Pane] = &[
         Pane::General,
         Pane::Modes,
-        Pane::VoiceAction,
         Pane::Commands,
         Pane::Meetings,
         Pane::History,
@@ -558,7 +547,6 @@ impl Pane {
             Pane::General => tr("General"),
             Pane::Modes => tr("Modes"),
             Pane::Commands => tr("Commands"),
-            Pane::VoiceAction => tr("Voice Action"),
             Pane::History => tr("History"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
@@ -574,7 +562,6 @@ impl Pane {
             Pane::General => "nav-general",
             Pane::Modes => "nav-modes",
             Pane::Commands => "nav-commands",
-            Pane::VoiceAction => "nav-voice-action",
             Pane::History => "nav-history",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
@@ -590,7 +577,6 @@ impl Pane {
             Pane::General => &SETTINGS_ICON,
             Pane::Modes => &MODES_ICON,
             Pane::Commands => &COMMANDS_ICON,
-            Pane::VoiceAction => &VOICE_ACTION_ICON,
             Pane::History => &HISTORY_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
@@ -673,7 +659,6 @@ pub(crate) struct Ui {
     draft_since: Option<Instant>,
     duck_volume_drag: Option<f32>,
     models: models::Models,
-    voice_action_error: Option<String>,
     history: history::HistoryPane,
     modes: modes::ModesPane,
     picker: picker::Picker,
@@ -763,7 +748,6 @@ impl Ui {
             draft_since: None,
             duck_volume_drag: None,
             models: models::Models::default(),
-            voice_action_error: None,
             history: history::HistoryPane::default(),
             modes,
             picker: picker::Picker::default(),
@@ -1229,7 +1213,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::Commands => commands::pane(ui, p),
-        Pane::VoiceAction => (Vec::new(), voice_action::pane(ui, p, &mut layer)),
         Pane::History => history::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
@@ -1759,34 +1742,6 @@ const SCENES: &[Scene] = &[
             ..Default::default()
         });
         ui.confirm_release = true;
-    }),
-    ("voice-action", |ui| {
-        *ui = portal_fixture();
-        ui.settings.voice_action.enabled = true;
-        ui.pane = Pane::VoiceAction;
-    }),
-    ("voice-action-off", |ui| {
-        *ui = portal_fixture();
-        ui.pane = Pane::VoiceAction;
-    }),
-    ("voice-action-unavailable", |ui| {
-        *ui = portal_fixture();
-        ui.settings.voice_action.enabled = true;
-        ui.models = models::Models::fixture_missing();
-        ui.pane = Pane::VoiceAction;
-    }),
-    ("voice-action-models", |ui| {
-        *ui = portal_fixture();
-        ui.settings.voice_action.enabled = true;
-        ui.pane = Pane::VoiceAction;
-        ui.models.open_picker();
-    }),
-    ("voice-action-models-long", |ui| {
-        *ui = portal_fixture();
-        ui.models = models::Models::fixture_long();
-        ui.settings.voice_action.enabled = true;
-        ui.pane = Pane::VoiceAction;
-        ui.models.open_picker();
     }),
     ("history", |ui| {
         *ui = portal_fixture();

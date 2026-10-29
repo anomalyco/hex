@@ -201,7 +201,7 @@ impl Drop for ChordWatch {
 }
 
 /// The keyboard hook cannot tell a single modifier from ordinary typing,
-/// and Paste Last and Voice Action fire on a key press.
+/// and Paste Last fires on a key press.
 pub(super) fn validate_hotkey(
     target: ShortcutTarget,
     binding: &HotkeyBinding,

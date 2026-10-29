@@ -6,13 +6,11 @@ type CfStringRef = *const c_void;
 type AxUiElementRef = *const c_void;
 
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
-const MAX_SELECTED_TEXT_BYTES: usize = 64 * 1024;
 const MESSAGING_TIMEOUT_SECS: f32 = 0.25;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AxUiElementRef;
-    fn AXUIElementCreateSystemWide() -> AxUiElementRef;
     fn AXUIElementCopyAttributeValue(
         element: AxUiElementRef,
         attribute: CfStringRef,
@@ -39,14 +37,6 @@ unsafe extern "C" {
         encoding: u32,
     ) -> CfStringRef;
     fn CFRelease(value: CfTypeRef);
-}
-
-pub fn capture_optional() -> Option<String> {
-    // SAFETY: AXUIElementCreateSystemWide returns a retained Core Foundation object.
-    let system = bounded_element(unsafe { AXUIElementCreateSystemWide() })?;
-    let focused = copy_element(&system, c"AXFocusedUIElement")?;
-    copy_string(&focused, c"AXSelectedText")
-        .filter(|text| !text.is_empty() && text.len() <= MAX_SELECTED_TEXT_BYTES)
 }
 
 pub fn focused_window_title(pid: i32) -> Option<String> {
@@ -132,15 +122,5 @@ mod tests {
     #[test]
     fn a_missing_attribute_is_none() {
         assert_eq!(focused_window_title(i32::MAX), None);
-    }
-
-    #[test]
-    #[ignore = "requires a trusted signed process and a focused selected text fixture"]
-    fn captures_the_focused_accessibility_selection() {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        assert_eq!(
-            capture_optional().as_deref(),
-            Some("Hex selected text fixture")
-        );
     }
 }

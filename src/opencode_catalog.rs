@@ -36,7 +36,6 @@ pub(crate) struct OpenCodeUnavailableCopy {
 
 #[derive(Clone, Copy)]
 pub(crate) enum OpenCodeFeature {
-    VoiceAction,
     Transformation,
 }
 
@@ -44,18 +43,14 @@ pub(crate) fn opencode_unavailable_copy(
     state: &ModelCatalogState,
     feature: OpenCodeFeature,
 ) -> Option<OpenCodeUnavailableCopy> {
+    let OpenCodeFeature::Transformation = feature;
     match state {
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             reason: tr("Checking for OpenCode"),
             title: tr("Checking for OpenCode"),
-            description: match feature {
-                OpenCodeFeature::VoiceAction => {
-                    tr("Voice Action will be available after Hex connects to OpenCode.")
-                }
-                OpenCodeFeature::Transformation => {
-                    tr("OpenCode transformation will be available after Hex connects to OpenCode.")
-                }
-            },
+            description: tr(
+                "OpenCode transformation will be available after Hex connects to OpenCode.",
+            ),
             error: None,
             can_retry: false,
             retry_label: tr("Retry"),
@@ -63,18 +58,8 @@ pub(crate) fn opencode_unavailable_copy(
         }),
         ModelCatalogState::Missing => Some(OpenCodeUnavailableCopy {
             reason: tr("Requires OpenCode"),
-            title: match feature {
-                OpenCodeFeature::VoiceAction => tr("Voice Action requires OpenCode"),
-                OpenCodeFeature::Transformation => tr("Transformation requires OpenCode"),
-            },
-            description: match feature {
-                OpenCodeFeature::VoiceAction => tr(
-                    "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
-                ),
-                OpenCodeFeature::Transformation => {
-                    tr("Install and configure OpenCode to transform dictated text.")
-                }
-            },
+            title: tr("Transformation requires OpenCode"),
+            description: tr("Install and configure OpenCode to transform dictated text."),
             error: None,
             can_retry: true,
             retry_label: tr("Check again"),
@@ -82,10 +67,7 @@ pub(crate) fn opencode_unavailable_copy(
         }),
         ModelCatalogState::NeedsV2 => Some(OpenCodeUnavailableCopy {
             reason: tr("Requires OpenCode V2"),
-            title: match feature {
-                OpenCodeFeature::VoiceAction => tr("Voice Action requires OpenCode V2"),
-                OpenCodeFeature::Transformation => tr("Transformation requires OpenCode V2"),
-            },
+            title: tr("Transformation requires OpenCode V2"),
             description: tr(
                 "The installed opencode is OpenCode V1, which Hex can't use. Install OpenCode V2.",
             ),
@@ -260,7 +242,7 @@ mod tests {
             "OpenCode /api/model failed: config.providers was invalid".into(),
         );
 
-        let copy = opencode_unavailable_copy(&state, OpenCodeFeature::VoiceAction).unwrap();
+        let copy = opencode_unavailable_copy(&state, OpenCodeFeature::Transformation).unwrap();
 
         assert_eq!(copy.title, "OpenCode is unavailable");
         assert_eq!(
@@ -276,37 +258,16 @@ mod tests {
     }
 
     #[test]
-    fn opencode_missing_copy_offers_setup_without_an_error() {
+    fn opencode_v1_copy_asks_for_v2_with_setup() {
         let copy =
-            opencode_unavailable_copy(&ModelCatalogState::Missing, OpenCodeFeature::VoiceAction)
+            opencode_unavailable_copy(&ModelCatalogState::NeedsV2, OpenCodeFeature::Transformation)
                 .unwrap();
-
-        assert_eq!(copy.title, "Voice Action requires OpenCode");
+        assert_eq!(copy.reason, "Requires OpenCode V2");
+        assert_eq!(copy.title, "Transformation requires OpenCode V2");
+        assert!(copy.description.contains("OpenCode V1"));
         assert_eq!(copy.error, None);
         assert!(copy.can_retry);
         assert!(copy.can_open_setup);
-    }
-
-    #[test]
-    fn opencode_v1_copy_asks_for_v2_with_setup() {
-        for (feature, title) in [
-            (
-                OpenCodeFeature::VoiceAction,
-                "Voice Action requires OpenCode V2",
-            ),
-            (
-                OpenCodeFeature::Transformation,
-                "Transformation requires OpenCode V2",
-            ),
-        ] {
-            let copy = opencode_unavailable_copy(&ModelCatalogState::NeedsV2, feature).unwrap();
-            assert_eq!(copy.reason, "Requires OpenCode V2");
-            assert_eq!(copy.title, title);
-            assert!(copy.description.contains("OpenCode V1"));
-            assert_eq!(copy.error, None);
-            assert!(copy.can_retry);
-            assert!(copy.can_open_setup);
-        }
     }
 
     #[test]
@@ -347,12 +308,7 @@ mod tests {
             default_name: None,
             default_variant: None,
         });
-        for feature in [
-            OpenCodeFeature::VoiceAction,
-            OpenCodeFeature::Transformation,
-        ] {
-            assert!(opencode_unavailable_copy(&loaded, feature).is_none());
-        }
+        assert!(opencode_unavailable_copy(&loaded, OpenCodeFeature::Transformation).is_none());
     }
 
     #[test]

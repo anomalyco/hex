@@ -110,8 +110,8 @@ impl HistoryPane {
                 entry(
                     1,
                     180,
-                    HistoryKind::VoiceAction,
-                    "make this a polite reply saying I'll review it today",
+                    HistoryKind::Dictation,
+                    "Thanks for sending this over! I'll review it today and follow up with comments.",
                     "Thanks for sending this over! I'll review it today and follow up with comments.",
                     Some("Firefox"),
                 ),

@@ -1,6 +1,6 @@
 //! Foreground context for dictation on Windows: the focused application's
 //! executable stem, and for known browsers the page URL read through UI
-//! Automation, so web-domain mode rules and Voice Action prompts see the
+//! Automation, so web-domain mode rules see the
 //! real host. Chromium-family browsers and Firefox expose the page URL on
 //! the UIA Document element's value pattern, which is locale-independent.
 //! The UIA read runs on a bounded helper thread; a slow or hung
@@ -71,7 +71,6 @@ impl PendingContext {
             application: self.application,
             browser_url,
             window_title: None,
-            selected_text: None,
             input_revision: None,
         }
     }

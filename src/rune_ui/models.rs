@@ -1,8 +1,8 @@
-//! The OpenCode model catalog and the model and thinking pickers that Voice
-//! Action and each mode's rewriting share: the catalog loads off the UI
-//! thread, a missing or V1-only OpenCode is retried at a coarse interval, failures
-//! wait for an explicit retry, and choosing a model also picks its
-//! recommended thinking variant.
+//! The OpenCode model catalog and the model and thinking pickers that each
+//! mode's rewriting uses: the catalog loads off the UI thread, a missing or
+//! V1-only OpenCode is retried at a coarse interval, failures wait for an
+//! explicit retry, and choosing a model also picks its recommended thinking
+//! variant.
 
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -29,7 +29,6 @@ const MODEL_FIELD_WIDTH: f32 = 240.0;
 /// Which setting a picker edits.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Target {
-    VoiceAction,
     Mode(Selection),
 }
 
@@ -66,6 +65,7 @@ impl Models {
 
     /// Opens the model popover with its search focused, as pressing the
     /// field does.
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn open_picker(&mut self) {
         self.picker.open = true;
         self.picker.search.focused = true;
@@ -100,10 +100,6 @@ impl Models {
         }
         self.state = ModelCatalogState::Loading;
         self.start_load();
-    }
-
-    pub(super) fn checking(&self) -> bool {
-        matches!(self.state, ModelCatalogState::Loading)
     }
 
     pub(super) fn available(&self) -> bool {
@@ -157,6 +153,7 @@ impl Models {
 
     /// [`Models::fixture`] with as many models as OpenCode lists with
     /// several providers signed in, more than fit in the window.
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn fixture_long() -> Self {
         let mut models = Self::fixture();
         if let ModelCatalogState::Loaded(catalog) = &mut models.state {
@@ -178,6 +175,7 @@ impl Models {
         models
     }
 
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn fixture_missing() -> Self {
         Self {
             state: ModelCatalogState::Missing,
@@ -194,16 +192,9 @@ impl Models {
 }
 
 fn selected(settings: &AppSettings, target: Target) -> (Option<&str>, Option<&str>) {
-    match target {
-        Target::VoiceAction => (
-            settings.voice_action.model.as_deref(),
-            settings.voice_action.variant.as_deref(),
-        ),
-        Target::Mode(selection) => {
-            let processing = &super::modes::mode(settings, selection).post_processing;
-            (processing.model.as_deref(), processing.variant.as_deref())
-        }
-    }
+    let Target::Mode(selection) = target;
+    let processing = &super::modes::mode(settings, selection).post_processing;
+    (processing.model.as_deref(), processing.variant.as_deref())
 }
 
 fn set_model(
@@ -212,17 +203,10 @@ fn set_model(
     model: Option<String>,
     variant: Option<String>,
 ) {
-    match target {
-        Target::VoiceAction => {
-            settings.voice_action.model = model;
-            settings.voice_action.variant = variant;
-        }
-        Target::Mode(selection) => {
-            let processing = &mut super::modes::mode_mut(settings, selection).post_processing;
-            processing.model = model;
-            processing.variant = variant;
-        }
-    }
+    let Target::Mode(selection) = target;
+    let processing = &mut super::modes::mode_mut(settings, selection).post_processing;
+    processing.model = model;
+    processing.variant = variant;
 }
 
 fn choose_model(ui: &mut Ui, target: Target, model: Option<String>) {
@@ -278,23 +262,6 @@ fn status(models: &Models) -> String {
 
 /// The model row (and the thinking row when the model has variants).
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
-    rows_led(ui, p, target, layer, false)
-}
-
-/// [`rows`], each led by an icon.
-pub(super) fn icon_rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
-    rows_led(ui, p, target, layer, true)
-}
-
-fn rows_led(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>, icons: bool) -> Vec<El> {
-    let row_for =
-        |key: &str, glyph: &'static rune::Icon, title: &str, description: &str, control| {
-            if icons {
-                super::controls::icon_row(p, key, glyph, title, Some(description), control)
-            } else {
-                setting_row(p, key, title, Some(description), control)
-            }
-        };
     let (model, variant) = selected(&ui.settings, target);
     let presentation = model_presentation(&ui.models.state, model);
     let c = &p.k.c;
@@ -363,11 +330,11 @@ fn rows_led(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>, icons: bool)
         .child(picker)
         .children(refresh);
     let description = status(&ui.models);
-    let mut rows = vec![row_for(
+    let mut rows = vec![setting_row(
+        p,
         "opencode-model",
-        &super::icons::SPARKLES,
         tr("OpenCode model"),
-        &description,
+        Some(&description),
         control,
     )];
     let catalog = ui.models.catalog();
@@ -399,11 +366,11 @@ fn rows_led(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>, icons: bool)
                 choose_variant(ui, target, variant);
             })
             .build(p.k, layer);
-        rows.push(row_for(
+        rows.push(setting_row(
+            p,
             "thinking",
-            &super::icons::ZAP,
             tr("Thinking"),
-            tr("Choose how much reasoning the model should use"),
+            Some(tr("Choose how much reasoning the model should use")),
             select,
         ));
     }

@@ -167,18 +167,6 @@ pub enum HotkeyAction {
     Finish,
     Cancel,
     PasteLast,
-    VoiceStart,
-    VoiceFinish,
-    VoiceCancel,
-}
-
-/// Map a capture-state transition onto the voice-action event family.
-fn voice_action_variant(action: HotkeyAction) -> HotkeyAction {
-    match action {
-        HotkeyAction::Start => HotkeyAction::VoiceStart,
-        HotkeyAction::Finish => HotkeyAction::VoiceFinish,
-        _ => HotkeyAction::VoiceCancel,
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -213,14 +201,10 @@ struct CallbackState {
     trigger_vk: Option<u32>,
     paste_last: Option<WindowsHotkey>,
     paste_trigger_vk: Option<u32>,
-    voice_action: Option<WindowsHotkey>,
-    voice_trigger_vk: Option<u32>,
     modifiers: ModifierState,
     side_down: SideDownTimes,
     trigger_down: bool,
     paste_trigger_down: bool,
-    voice_trigger_down: bool,
-    voice_capture: CaptureState,
     escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
@@ -331,7 +315,7 @@ static CAPTURE_INHIBIT: AtomicBool = AtomicBool::new(false);
 
 /// Turns hook processing off (true) or back on (false) for the duration
 /// of a chord capture. Entering a capture also cancels any in-flight
-/// dictation or voice-action hold, like the macOS capture flow.
+/// dictation hold, like the macOS capture flow.
 pub(crate) fn set_capture_inhibited(inhibited: bool) {
     CAPTURE_INHIBIT.store(inhibited, Ordering::Relaxed);
     if !inhibited {
@@ -344,12 +328,8 @@ pub(crate) fn set_capture_inhibited(inhibited: bool) {
         let now = unsafe { GetTickCount() };
         state.trigger_down = false;
         state.paste_trigger_down = false;
-        state.voice_trigger_down = false;
         if let Some(action) = state.capture.cancel() {
             send_event(state, action, now);
-        }
-        if let Some(action) = state.voice_capture.cancel() {
-            send_event(state, voice_action_variant(action), now);
         }
     }
 }
@@ -384,7 +364,6 @@ impl WindowsHotkeyMonitor {
     pub fn start(
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
-        voice_action: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
         shortcut_mode: ShortcutMode,
@@ -393,8 +372,6 @@ impl WindowsHotkeyMonitor {
         binding.validate()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
         let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
-        let voice_trigger_vk =
-            chord_virtual_key(voice_action.as_ref(), "the voice action shortcut")?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
         let (error_sender, errors) = mpsc::channel();
@@ -406,14 +383,10 @@ impl WindowsHotkeyMonitor {
             trigger_vk,
             paste_last,
             paste_trigger_vk,
-            voice_action,
-            voice_trigger_vk,
             modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),
             trigger_down: false,
             paste_trigger_down: false,
-            voice_trigger_down: false,
-            voice_capture: CaptureState::default(),
             escape_down: false,
             double_tap_enabled,
             double_tap_only,
@@ -629,16 +602,6 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
             if CAPTURE_INHIBIT.load(Ordering::Relaxed) {
                 return false;
             }
-            let voice_event = state.voice_trigger_vk == Some(vk)
-                && (state.voice_trigger_down
-                    || (is_down
-                        && !state.capture.active
-                        && !state.capture.locked
-                        && !state.dirty
-                        && state
-                            .voice_action
-                            .as_ref()
-                            .is_some_and(|binding| state.modifiers.matches(binding))));
             let paste_event = state.paste_trigger_vk == Some(vk)
                 && (state.paste_trigger_down
                     || (is_down
@@ -649,20 +612,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                             .paste_last
                             .as_ref()
                             .is_some_and(|binding| state.modifiers.matches(binding))));
-            if voice_event {
-                suppressed = true;
-                if is_down && !state.voice_trigger_down {
-                    state.voice_trigger_down = true;
-                    if let Some(action) = state.voice_capture.press(false, false, time) {
-                        send_event(state, voice_action_variant(action), time);
-                    }
-                } else if is_up && state.voice_trigger_down {
-                    state.voice_trigger_down = false;
-                    if let Some(action) = state.voice_capture.release(false, time) {
-                        send_event(state, voice_action_variant(action), time);
-                    }
-                }
-            } else if paste_event {
+            if paste_event {
                 suppressed = true;
                 if is_down && !state.paste_trigger_down {
                     state.paste_trigger_down = true;
@@ -674,10 +624,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                 if is_down {
                     if state.trigger_down {
                         suppressed = !state.share_trigger;
-                    } else if !state.dirty
-                        && !state.voice_capture.active
-                        && state.modifiers.matches(&state.binding)
-                    {
+                    } else if !state.dirty && state.modifiers.matches(&state.binding) {
                         state.trigger_down = true;
                         suppressed = !state.share_trigger;
                         let was_locked = state.capture.locked;
@@ -703,18 +650,12 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                if is_down
-                    && (state.capture.active || state.capture.locked || state.voice_capture.active)
-                {
+                if is_down && (state.capture.active || state.capture.locked) {
                     state.dirty = true;
                     state.escape_down = true;
                     suppressed = true;
                     if let Some(action) = state.capture.cancel() {
                         send_event(state, action, time);
-                    }
-                    if let Some(action) = state.voice_capture.cancel() {
-                        state.voice_trigger_down = false;
-                        send_event(state, voice_action_variant(action), time);
                     }
                 } else if is_up && state.escape_down {
                     state.escape_down = false;
@@ -727,17 +668,7 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                     }
                 }
             } else if modifier_event {
-                if state.voice_capture.active
-                    && !state
-                        .voice_action
-                        .as_ref()
-                        .is_some_and(|binding| state.modifiers.matches(binding))
-                {
-                    if let Some(action) = state.voice_capture.release(false, time) {
-                        state.voice_trigger_down = false;
-                        send_event(state, voice_action_variant(action), time);
-                    }
-                } else if state.trigger_vk.is_none()
+                if state.trigger_vk.is_none()
                     && state.capture.locked
                     && !state.dirty
                     && is_down
@@ -764,7 +695,6 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                 } else if state.trigger_vk.is_none()
                     && !state.capture.active
                     && !state.capture.locked
-                    && !state.voice_capture.active
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)

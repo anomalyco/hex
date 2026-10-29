@@ -153,7 +153,6 @@ fn draw(
                     .as_deref()
                     .and_then(|url| url::Url::parse(url).ok()),
                 window_title: None,
-                selected_text: None,
                 input_revision: None,
             }),
             _ => None,

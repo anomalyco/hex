@@ -43,7 +43,7 @@ click that opened the recorder to be released before accepting a mouse button.
 
 Wayland's XDG shortcut syntax has no mouse-button trigger. Use the desktop's
 mouse bindings to run `hex dictation start`/`stop` (hold) or `hex dictation toggle`
-(toggle), or the matching Voice Action / paste-last commands. Existing mouse
+(toggle), or `hex paste-last`. Existing mouse
 bindings from X11 appear ungranted on Wayland; they do not prevent keyboard
 shortcuts from registering. Hex does not use raw input devices or XWayland to
 bypass the compositor. See the [XDG shortcut specification](https://specifications.freedesktop.org/shortcuts/latest/).
@@ -142,10 +142,8 @@ Checks: the `both_options_*` tests and
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 
-**Separate targets:** [Voice Action](voice-action.md) has its own opt-in and
-capture target, with no double-tap lock. Host-owned API capture has its own
-ownership protocol.
-Neither proves the physical dictation shortcut; see the [feature index](README.md).
+**Separate targets:** Host-owned API capture has its own ownership protocol and
+does not prove the physical dictation shortcut; see the [feature index](README.md).
 
 ## Sub-features
 
@@ -237,7 +235,6 @@ Press that finishes a lock                         -> Chord breaker at once
 Short tap, chord discard, double-tap lock taps     -> Nothing (still a tap)
 Press during voice-delimited dictation             -> Nothing (starts nothing)
 Keyed shortcuts (consumed), Globe/Fn (system tap)  -> Nothing
-Voice Action ⌥⌘, including promotion               -> Its own, after its hold
 ```
 
 The breaker never reaches the focused app:
@@ -262,7 +259,6 @@ input is pending. Checks:
 `a_held_modifier_only_shortcut_breaks_the_chord_once_after_the_hold_threshold`,
 `short_taps_chords_and_other_bindings_never_break_the_chord`,
 `locked_and_toggle_captures_break_the_chord_only_for_presses_hex_owns`,
-`voice_action_promotion_breaks_its_own_chord_after_its_hold`,
 `marked_chord_breaker_never_reaches_the_shortcut_machines_or_the_app`.
 
 Observed October 27, 2026 on a macOS 27.0.1 VM (`macvm`), with a stand-in for
@@ -474,8 +470,7 @@ Release or locked finishing press                     // dictate.release-tail
   -> Wait for audio through release + 200 ms (POST_RELEASE_TAIL)
      ├── Arrives -> Clip ends exactly at release + 200 ms
      └── Stream stalls/fails -> Finish within tail + 100 ms with what arrived
-  -> Same for Voice Action and promotion; not Escape, short taps, voice
-     controls, programmatic stop, or meetings
+  -> Not Escape, short taps, voice controls, programmatic stop, or meetings
   -> Linux and Windows wait the same tail; Linux ends at the release it observes
      (an X11 key release, a portal Deactivated, or `hex dictation stop`)
   -> A press inside the tail starts after the old clip finishes, with its own pre-roll
@@ -841,7 +836,7 @@ A pending -> Start capture B                          // dictate.overlap
 Source: `finish_dictation` in [recognition.rs](../../src/recognition.rs).
 The silence gate stops models from hallucinating closing phrases such as "thank
 you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
-covers hotkey, voice-delimited, and Voice Action captures on macOS, and the Linux
+covers hotkey and voice-delimited captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
 are deliberately left ungated: they skip both silence checks, and only Whisper
 output that repeats the recognition hints is dropped there.
@@ -943,10 +938,9 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Chord within 40 ms (e.g. Option-Command-I) -> Silent
      -> Chord or short tap before 300 ms -> Tone fades out over 20 ms
      -> Hold reaches 300 ms -> Tone already played; mute/pause/sleep begin now
-     -> Voice Action takeover -> Retracted; Voice Action rings at its own hold
      -> Release microphone while idle -> Output warms on press; tone once
         the microphone is open and the hold counts
-  Dictation or Voice Action reply pasted -> Done tone         // dictate.done-tone
+  Dictation pasted -> Done tone                                // dictate.done-tone
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
   Tone requested -> Playback worker opens the default output, then plays
@@ -1135,8 +1129,7 @@ Dot scope                                    // dot_scope
 │   ├── Auto level (default) -> 24 dB below the recent peak (3 s release),
 │   │   at least 16 dB above the room and the −60 dB noise floor   // AutoLevel
 │   ├── Auto level off -> Fixed RMS window, −40 to −10 dB
-│   ├── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
-│   └── Voice Action (started or promoted) -> Green instead of pearl
+│   └── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
 ├── Locked / hands-free -> Same as recording; the HUD draws no lock
 ├── Transcribing / Processing -> Processing look, at least 200 ms so a fast
 │   transcription still shows it (PROCESSING_MIN_DURATION):
@@ -1219,7 +1212,7 @@ Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
 
 Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
-Reduce Motion, the stages, auto level, Voice Action green, each processing
+Reduce Motion, the stages, auto level, each processing
 look settling dark), `scripts/check dictation_indicator` (phases, the
 processing minimum, failure and cancel, a hot microphone still moving),
 `scripts/check hud_placement` (each placement on flat and notched screens),
@@ -1271,9 +1264,6 @@ TextEdit process were stopped afterward.
 - **Microphone modes:** verify onset and idle closure separately for Keep ready
   and Release when idle on an identified device. The macOS microphone indicator
   while Keep ready is idle is expected, not proof of recording.
-- **Voice Action is distinct:** its
-  [cold modifier-order gap](voice-action.md#cold-modifier-order) is not covered by
-  ordinary cold-dictation checks.
 - **Streaming:** `dictate.streaming` has benchmark, synthetic, and Linux CI
   (CPU-forced) evidence only. Real microphones, room noise, Bluetooth inputs,
   and a physical shortcut on a Mac or a Linux GPU have not been observed with a

@@ -11,16 +11,15 @@ Agent or terminal                                  // control.cli; macOS release
 │   ├── Meeting or dictation in progress, no --force -> refused, exit 1
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables
-├── hex dictation | voice-action start|stop|cancel|toggle
+├── hex dictation start|stop|cancel|toggle
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   ├── start -> intentional at once: tone once the mic is open, recording
 │   │   behavior, live stream
 │   ├── stop -> done only when the clip went to transcription;
 │   │   no audio yet or silent -> discarded, nothing transcribing
-│   ├── Idle cancel while the other capture records -> busy (Escape's order:
+│   ├── Idle cancel while another capture records -> busy (Escape's order:
 │   │   the recording before any job)
 │   ├── Repeat a command -> unchanged, exit 0
-│   ├── voice-action with Voice Action off -> feature-off, exit 1
 │   └── dictation stop --print -> stops at once, then waits ≤ 60 s and prints
 │       the transcript (processed as a paste) instead of pasting it
 │       ├── No speech -> no-speech, exit 4, prints nothing
@@ -59,10 +58,10 @@ Hex through the owner-only discovery file and the bearer-authenticated
 `POST /control` route; none of them launch Hex. Commands dispatch in `main`
 before logging, and the instance lock, so they never compete
 with the running app for its files. Opt-ins stay explicit settings: no command
-turns Voice Action, Commands, or Meetings on as a side effect.
+turns Commands or Meetings on as a side effect.
 
 Linux and Windows add only `hex settings`, which reports `unsupported`; the
-Linux service socket keeps its own `dictation`, `voice-action`, `paste-last`,
+Linux service socket keeps its own `dictation`, `paste-last`,
 `status`, `quit`, and `restart`.
 
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
@@ -78,8 +77,8 @@ Checks: `control::tests` round-trip every command and reply (including
 protocol versions, and cover the quit rules (an unanswered listener refuses)
 and `model_selection` (remembered hints, wildcard-language validation); `control::settings::tests` include
 `every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts, the
-microphone/Commands confirmation, zero volume, and Voice Action's free-shortcut
-rule; `control::cli::tests` pin exit codes, output, and `hex start`'s `open`
+microphone/Commands confirmation, and zero volume; `control::cli::tests` pin
+exit codes, output, and `hex start`'s `open`
 arguments; `onboarding::tests::relaunch_forwards_only_the_hex_environment`
 pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;

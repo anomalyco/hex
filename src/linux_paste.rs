@@ -196,36 +196,6 @@ impl LinuxPaster {
         })
     }
 
-    /// The focused application's selected text: the primary selection,
-    /// which X11 and Wayland compositors update as the user selects.
-    pub(crate) fn selected_text(&mut self) -> Option<String> {
-        let bytes = match &mut self.backend {
-            Backend::X11(paster) => {
-                let atoms = &paster.clipboard.getter.atoms;
-                paster
-                    .clipboard
-                    .load(
-                        atoms.primary,
-                        atoms.utf8_string,
-                        atoms.property,
-                        Duration::from_millis(500),
-                    )
-                    .ok()?
-            }
-            Backend::Wayland(_) => {
-                let output = Command::new("wl-paste")
-                    .args(["--primary", "--no-newline", "--type", "text/plain"])
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .output()
-                    .ok()?;
-                output.status.success().then_some(output.stdout)?
-            }
-        };
-        let text = String::from_utf8(bytes).ok()?;
-        (!text.trim().is_empty()).then_some(text)
-    }
-
     /// Puts `text` on the clipboard without pasting it. On X11 the clipboard
     /// is served for as long as this paster lives.
     pub(crate) fn copy(&mut self, text: &str) -> Result<()> {

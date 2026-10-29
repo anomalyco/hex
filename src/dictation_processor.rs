@@ -25,8 +25,6 @@ use crate::text_replacements::ReplacementSet;
 use crate::vocabulary::VocabularyEntry;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
-const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
-const VOICE_ACTION_PROFILE: &str = "Voice Action";
 const MAX_OPENCODE_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 /// Newest service info route first; older OpenCode V2 builds only serve the later names.
 #[cfg(not(target_os = "windows"))]
@@ -162,8 +160,8 @@ pub struct RecommendedModel {
     pub preferred_variants: &'static [&'static str],
 }
 
-/// Ranked fast, 100%-protocol-compliant OpenCode models for Voice Action and
-/// dictation rewriting, ordered by latency, cost, and strict paste-ready output
+/// Ranked fast, 100%-protocol-compliant OpenCode models for dictation
+/// rewriting, ordered by latency, cost, and strict paste-ready output
 /// compliance.
 pub const RECOMMENDED_OPENCODE_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
@@ -322,77 +320,6 @@ impl Profiles {
             observation: Some(observation),
             transformations: profile.transformations.clone(),
         }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub fn process_voice_action_cancellable(
-    instruction: &str,
-    selected_text: Option<&str>,
-    context: &ContextSnapshot,
-    cancelled: &AtomicBool,
-) -> Processed {
-    let settings = crate::app_settings::voice_action_settings();
-    let deadline = Duration::from_secs(settings.deadline_seconds.max(1));
-    let started = Instant::now();
-    let model = match settings.model.as_deref() {
-        None => None,
-        Some(key) => {
-            let Some((provider, id)) = key.split_once('/') else {
-                return voice_action_failure(
-                    started,
-                    "Voice Action model must use provider/model format".into(),
-                );
-            };
-            Some(Model {
-                provider: provider.into(),
-                id: id.into(),
-                variant: settings.variant.clone(),
-            })
-        }
-    };
-    process_voice_action(
-        instruction,
-        selected_text,
-        context,
-        model.as_ref(),
-        deadline,
-        cancelled,
-        started,
-    )
-}
-
-/// One Voice Action: the instruction and optional selection go to OpenCode,
-/// and only paste-ready text comes back. Failures leave the text empty and
-/// record the reason in the observation.
-pub fn process_voice_action(
-    instruction: &str,
-    selected_text: Option<&str>,
-    context: &ContextSnapshot,
-    model: Option<&Model>,
-    deadline: Duration,
-    cancelled: &AtomicBool,
-    started: Instant,
-) -> Processed {
-    let prompt = voice_action_prompt(instruction, selected_text, context);
-    let (text, observation) = generate_observed(
-        &prompt,
-        model,
-        deadline,
-        cancelled,
-        VOICE_ACTION_PROFILE,
-        started,
-    );
-    if observation.fallback.is_none() {
-        tracing::info!(
-            latency_ms = observation.latency_ms,
-            "voice action completed"
-        );
-    }
-    Processed {
-        text: text.unwrap_or_default(),
-        observation: Some(observation),
-        transformations: Vec::new(),
     }
 }
 
@@ -674,16 +601,6 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
     }
 }
 
-/// Whether Hex can likely run OpenCode, without running anything: an
-/// `opencode` not yet probed counts until a probe proves it V1. Callers on
-/// the UI or hotkey path use this; [`find_opencode_install`] decides.
-pub fn opencode_installed() -> bool {
-    matches!(
-        discover_opencode(|executable| cached_opencode_verdict(executable).unwrap_or(true)),
-        OpenCodeInstall::Ready(_)
-    )
-}
-
 #[cfg(not(target_os = "windows"))]
 fn is_executable(path: &std::path::Path) -> bool {
     path.metadata()
@@ -841,36 +758,6 @@ fn vocabulary_lines(vocabulary: &[VocabularyEntry]) -> String {
         .collect::<Vec<_>>()
         .join("; ");
     format!("Vocabulary (spell these exactly when the speaker means them): {terms}\n\n")
-}
-
-fn voice_action_prompt(
-    instruction: &str,
-    selected_text: Option<&str>,
-    context: &ContextSnapshot,
-) -> String {
-    let application = context.application.as_deref().unwrap_or("unknown");
-    let host = context.browser_host().unwrap_or("none");
-    let selection = selected_text.map_or_else(
-        || "No text was selected. Generate the requested paste-ready text.".into(),
-        |text| format!("Selected text ({} UTF-8 bytes):\n{text}", text.len()),
-    );
-    format!(
-        "{VOICE_ACTION_PROTOCOL_PROMPT}\n\nForeground application: {application}\nBrowser host: {host}\n\nDictated instruction ({} UTF-8 bytes):\n{instruction}\n\n{selection}",
-        instruction.len()
-    )
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn voice_action_failure(started: Instant, error: String) -> Processed {
-    Processed {
-        text: String::new(),
-        observation: Some(ProcessingObservation {
-            profile: VOICE_ACTION_PROFILE.into(),
-            latency_ms: started.elapsed().as_millis() as u64,
-            fallback: Some(error),
-        }),
-        transformations: Vec::new(),
-    }
 }
 
 #[derive(Serialize)]
@@ -2212,7 +2099,6 @@ mod tests {
             application: Some(application.into()),
             browser_url: url.map(|url| Url::parse(url).unwrap()),
             window_title: None,
-            selected_text: None,
             input_revision: None,
         }
     }
@@ -2778,33 +2664,6 @@ mod tests {
             "Vocabulary (spell these exactly when the speaker means them): abattoir (may be \
              transcribed as avatar, a bat war); Rune\n\nForeground application: Slack"
         ));
-    }
-
-    #[test]
-    fn voice_action_prompt_keeps_the_instruction_separate_from_selected_text() {
-        let prompt = voice_action_prompt(
-            "Make this concise.",
-            Some("This is the original selected paragraph."),
-            &context("Slack", None),
-        );
-
-        assert!(prompt.contains("Foreground application: Slack"));
-        assert!(prompt.contains("Dictated instruction (18 UTF-8 bytes):\nMake this concise."));
-        assert!(
-            prompt.contains(
-                "Selected text (40 UTF-8 bytes):\nThis is the original selected paragraph."
-            )
-        );
-        assert!(prompt.contains("Return only the exact paste-ready result"));
-    }
-
-    #[test]
-    fn voice_action_prompt_supports_generation_without_a_selection() {
-        let prompt =
-            voice_action_prompt("Write a funny release note.", None, &context("Slack", None));
-
-        assert!(prompt.contains("No text was selected"));
-        assert!(prompt.contains("Write a funny release note."));
     }
 
     #[test]

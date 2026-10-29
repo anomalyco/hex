@@ -25,7 +25,6 @@ pub struct ContextSnapshot {
     pub application: Option<String>,
     pub browser_url: Option<Url>,
     pub window_title: Option<String>,
-    pub selected_text: Option<String>,
     pub input_revision: Option<u64>,
 }
 
@@ -166,7 +165,6 @@ impl ContextSnapshot {
                 application: Some("Brave Browser".into()),
                 browser_url: Some(browser_url),
                 window_title,
-                selected_text: None,
                 input_revision: None,
             });
         }
@@ -228,7 +226,6 @@ fn capture_macos() -> Result<ContextSnapshot> {
         application: Some(application),
         browser_url,
         window_title: crate::accessibility::focused_window_title(pid),
-        selected_text: None,
         input_revision: None,
     })
 }

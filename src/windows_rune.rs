@@ -82,7 +82,6 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     PasteLast,
-    VoiceAction,
 }
 
 /// What the runtime last published for the window.

@@ -25,8 +25,8 @@ pastes the result into the app you are using.
   ordinary dictation does not require OpenCode or a cloud transcription service.
 - **Your words, your way.** Choose a shortcut, language, and model. Use Modes for
   corrections, application-specific behavior, and optional text processing.
-- **Optional voice tools.** Enable Voice Action or voice commands when you need
-  them. Both start off; provider-backed rewriting is separate from local speech
+- **Optional voice tools.** Enable voice commands when you need
+  them. Commands start off; provider-backed rewriting is separate from local speech
   recognition.
 
 The macOS app is available now. The [Windows beta](#windows-beta) covers x64 and
@@ -139,12 +139,6 @@ the menu. **Manage Models…** opens the full picker for downloads and language 
 [OpenCode V2 beta](https://v2.opencode.ai/) (`opencode2`) is optional. Ordinary
 dictation does not require it.
 
-- **Voice Action:** enable it in the Voice Action pane, then hold
-  **Option-Command** and describe what you want. It defaults off, independently
-  of your dictation shortcut. Hex sends
-  that instruction, selected text when Accessibility makes it available, and
-  the foreground application and Brave website hostname. It pastes the result
-  at the current focus.
 - **Post-processing:** enable OpenCode in Modes to rewrite a transcript before
   paste. Hex sends the transcript, foreground application, and Brave website
   hostname to the configured model provider. Modes can target applications and
@@ -152,8 +146,7 @@ dictation does not require it.
 
 If OpenCode rewriting fails, Hex keeps the corrected local transcript and still
 runs any selected text transformations. If that transformation stage fails, Hex
-keeps the text from before the stage, not partial transformation results. A
-failed Voice Action pastes nothing.
+keeps the text from before the stage, not partial transformation results.
 
 ## Annotate
 
@@ -234,7 +227,7 @@ See [flags and the versioned JSON schema](docs/transcript-cli.md).
 
 - Speech transcription and command recognition run locally.
 - Hex does not save dictation audio by default.
-- History retains successfully pasted dictation and Voice Action text
+- History retains successfully pasted dictation text
   for seven days by default, including the local transcript, final text, and
   limited application and timing metadata. It never stores audio, full browser
   URLs, or window titles. Every retention choice is capped at 10,000 entries and
@@ -279,7 +272,7 @@ Diagnostics are stored at:
 ## Windows Beta
 
 The Windows beta runs on Windows 10 and 11, x64 and ARM64. It covers hotkey
-dictation (Hold or Toggle, `Ctrl+Space` by default), Modes, Voice Action,
+dictation (Hold or Toggle, `Ctrl+Space` by default), Modes,
 History, a tray icon, and signed self-updates. On x64 with a Vulkan graphics
 driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
@@ -295,7 +288,7 @@ source.
 ## Linux Beta
 
 The Linux beta targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
-compositors. It supports local hotkey dictation, Modes, Voice Action, History,
+compositors. It supports local hotkey dictation, Modes, History,
 the Hex window, and signed updates for direct installs. With a Vulkan graphics driver, dictation
 streams while you speak, as on macOS and Windows. Native Wayland requires
 compositor support for clipboard and layer-shell protocols; paste uses `wtype`

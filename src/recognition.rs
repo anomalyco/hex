@@ -12,8 +12,7 @@ use crate::commands::{Action, ActionExecutor, ActionOutcome, CommandConfig, Deci
 use crate::context::{ContextMonitor, ContextSnapshot};
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
 use crate::dictation::{
-    ControlStability, DictationClip, DictationControl, DictationProtocol, Finish,
-    MINIMUM_HOLD_DURATION, POST_RELEASE_TAIL,
+    ControlStability, DictationClip, DictationControl, DictationProtocol, Finish, POST_RELEASE_TAIL,
 };
 use crate::dictation_audio::{DictationAudio, DictationAudioEvent, LostCapture};
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender};
@@ -108,12 +107,11 @@ pub enum RecognitionControl {
         reply: Option<SyncSender<ControlReply>>,
     },
     RetryCommands,
-    /// `hex dictation` and `hex voice-action`: drives the shortcut machine
-    /// as a press would, so the shortcut and Escape still finish or cancel.
+    /// `hex dictation`: drives the shortcut machine as a press would, so the
+    /// shortcut and Escape still finish or cancel.
     /// A dictation `stop` with `print` answers `reply` once recording stops
     /// and sends the transcript to `print` instead of pasting it.
     Capture {
-        voice_action: bool,
         action: CaptureAction,
         print: Option<PrintReply>,
         reply: SyncSender<ControlReply>,
@@ -276,79 +274,43 @@ impl RecognitionOrigin {
     }
 }
 
-/// The dictation shortcut machine plus the optional Voice Action machine.
-/// `edit` stays `None` until Voice Action is enabled so no shortcut is reserved.
+/// The dictation shortcut machine.
 struct Hotkeys {
     dictation: DictationHotkey,
-    edit: Option<DictationHotkey>,
 }
 
 impl Hotkeys {
     fn any_recording(&self) -> bool {
-        self.dictation.is_recording() || self.edit_recording()
-    }
-
-    fn edit_recording(&self) -> bool {
-        self.edit
-            .as_ref()
-            .is_some_and(DictationHotkey::is_recording)
+        self.dictation.is_recording()
     }
 
     fn suppresses_recognition(&self) -> bool {
         self.dictation.suppresses_recognition()
-            || self
-                .edit
-                .as_ref()
-                .is_some_and(DictationHotkey::suppresses_recognition)
     }
 
-    /// Suspends both machines and reports whether either was recording.
+    /// Suspends the machine and reports whether it was recording.
     fn suspend_all(&mut self) -> bool {
-        let dictation_recording = self.dictation.suspend().is_some();
-        let edit_recording = self.suspend_edit();
-        dictation_recording || edit_recording
-    }
-
-    fn suspend_edit(&mut self) -> bool {
-        self.edit
-            .as_mut()
-            .and_then(DictationHotkey::suspend)
-            .is_some()
+        self.dictation.suspend().is_some()
     }
 
     fn disarm_pending_gestures(&mut self) {
         self.dictation.disarm_pending_gesture();
-        if let Some(edit) = &mut self.edit {
-            edit.disarm_pending_gesture();
-        }
     }
 
     fn track_key_state(&mut self, event: InputEvent, at: CaptureInstant) {
         self.dictation.track_key_state(event, at);
-        if let Some(edit) = &mut self.edit {
-            edit.track_key_state(event, at);
-        }
     }
 
     fn recover_stale_keys(&mut self) {
         self.dictation.recover_stale_keys();
-        if let Some(edit) = &mut self.edit {
-            edit.recover_stale_keys();
-        }
     }
 
     fn break_chords(&mut self, now: CaptureInstant) {
         self.dictation.break_chord(now);
-        if let Some(edit) = &mut self.edit {
-            edit.break_chord(now);
-        }
     }
 
     fn forgo_chord_breaks(&mut self) {
         self.dictation.forgo_chord_break();
-        if let Some(edit) = &mut self.edit {
-            edit.forgo_chord_break();
-        }
     }
 }
 
@@ -391,8 +353,6 @@ pub fn listen(
             crate::app_settings::double_tap_lock(),
             crate::app_settings::dictation_hotkey(),
         ),
-        edit: crate::app_settings::edit_hotkey()
-            .map(|binding| DictationHotkey::new_without_paste(CaptureInstant::now(), binding)),
     };
     hotkeys
         .dictation
@@ -400,8 +360,6 @@ pub fn listen(
     hotkeys
         .dictation
         .set_toggle(crate::app_settings::shortcut_toggle());
-    let mut edit_context = None;
-    let mut edit_pending_since = None;
     let mut mode = Mode::Listening;
     let mut voice: Option<VoiceCapture> = None;
     let mut activation_stability = ActivationStability::default();
@@ -470,21 +428,6 @@ pub fn listen(
             hotkeys.dictation.suspend();
         }
     }
-    if hotkeys.edit_recording() {
-        let accepted = input.start(capture_boundary(
-            &input,
-            microphone_policy.release_while_idle,
-        ))?;
-        if accepted {
-            edit_context = Some(voice_action_context_snapshot(&context));
-            events.dictation(DictationPhase::Started, "")?;
-            if let Some(indicator) = &indicator {
-                indicator.send(DictationIndicatorEvent::EditingStarted);
-            }
-        } else {
-            hotkeys.suspend_edit();
-        }
-    }
     emit_state(
         &mut events,
         hotkeys.any_recording(),
@@ -521,8 +464,6 @@ pub fn listen(
                         let capture_active = programmatic.is_some()
                             || voice.is_some()
                             || hotkeys.suppresses_recognition()
-                            || edit_context.is_some()
-                            || edit_pending_since.is_some()
                             || input.is_recording();
                         let answer = match paste_last_refusal(capture_active) {
                             Some(refusal) => refusal,
@@ -562,8 +503,6 @@ pub fn listen(
                             Some(CaptureKind::Service)
                         } else if voice.is_some() {
                             Some(CaptureKind::Voice)
-                        } else if hotkeys.edit_recording() || edit_context.is_some() {
-                            Some(CaptureKind::VoiceAction)
                         } else if hotkeys.dictation.is_recording() {
                             Some(CaptureKind::Dictation)
                         } else {
@@ -576,57 +515,29 @@ pub fn listen(
                         });
                     }
                     RecognitionControl::Capture {
-                        voice_action,
                         action,
                         print,
                         reply,
                     } => {
                         let release_while_idle = microphone_policy.release_while_idle;
-                        let other_recording = programmatic.is_some()
-                            || voice.is_some()
-                            || if voice_action {
-                                hotkeys.dictation.is_recording()
-                            } else {
-                                hotkeys.edit_recording()
-                                    || edit_context.is_some()
-                                    || edit_pending_since.is_some()
-                            };
+                        let other_recording = programmatic.is_some() || voice.is_some();
                         let suspended =
                             crate::app_settings::hotkey_capture_active() || input.is_recovering();
-                        let outcome = if voice_action {
-                            control_voice_action(
-                                action,
-                                other_recording,
-                                suspended,
-                                &mut hotkeys,
-                                &mut edit_pending_since,
-                                &mut edit_context,
-                                &mut recognizer,
-                                &input,
-                                &dictation_worker,
-                                mode,
-                                &context,
-                                &mut events,
-                                indicator.as_ref(),
-                                release_while_idle,
-                            )?
-                        } else {
-                            control_dictation(
-                                action,
-                                print,
-                                other_recording,
-                                suspended,
-                                &mut hotkeys,
-                                &mut recognizer,
-                                &input,
-                                &dictation_worker,
-                                mode,
-                                &context,
-                                &mut events,
-                                indicator.as_ref(),
-                                release_while_idle,
-                            )?
-                        };
+                        let outcome = control_dictation(
+                            action,
+                            print,
+                            other_recording,
+                            suspended,
+                            &mut hotkeys,
+                            &mut recognizer,
+                            &input,
+                            &dictation_worker,
+                            mode,
+                            &context,
+                            &mut events,
+                            indicator.as_ref(),
+                            release_while_idle,
+                        )?;
                         let _ = reply.send(outcome);
                     }
                     RecognitionControl::StartDictation {
@@ -1045,39 +956,6 @@ pub fn listen(
         hotkeys
             .dictation
             .set_binding(crate::app_settings::dictation_hotkey());
-        match crate::app_settings::edit_hotkey() {
-            Some(binding) => match &mut hotkeys.edit {
-                Some(edit) => edit.set_binding(binding),
-                None => {
-                    let mut edit =
-                        DictationHotkey::new_without_paste(CaptureInstant::now(), binding);
-                    edit.wait_for_release();
-                    hotkeys.edit = Some(edit);
-                }
-            },
-            None => {
-                if let Some(mut edit) = hotkeys.edit.take() {
-                    let was_recording = edit.suspend().is_some();
-                    let was_pending = edit_pending_since.take().is_some();
-                    if (was_recording || was_pending || edit_context.is_some()) && voice.is_none() {
-                        hotkeys.dictation.suppress_until_release();
-                        handle_edit_hotkey_action(
-                            HotkeyAction::Cancel,
-                            CaptureInstant::now(),
-                            &mut edit_context,
-                            &mut recognizer,
-                            &input,
-                            &dictation_worker,
-                            mode,
-                            &context,
-                            &input.device_name(),
-                            &mut events,
-                            indicator.as_ref(),
-                        )?;
-                    }
-                }
-            }
-        }
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
         if next_microphone_revision != microphone_revision {
             input.request_selection(next_microphone_revision, microphone.as_deref());
@@ -1089,24 +967,20 @@ pub fn listen(
         }
         let hotkey_capture_active = crate::app_settings::hotkey_capture_active();
         let hotkey_capture_suspended = hotkey_capture_active || input.is_recovering();
-        if hotkey_capture_suspended && voice.is_none() {
-            edit_pending_since = None;
-            if hotkeys.suspend_all() {
-                edit_context = None;
-                handle_hotkey_action(
-                    HotkeyAction::Cancel,
-                    input.captured_through(),
-                    &mut recognizer,
-                    &input,
-                    &dictation_worker,
-                    mode,
-                    &context,
-                    &input.device_name(),
-                    &mut events,
-                    indicator.as_ref(),
-                    microphone_policy.release_while_idle,
-                )?;
-            }
+        if hotkey_capture_suspended && voice.is_none() && hotkeys.suspend_all() {
+            handle_hotkey_action(
+                HotkeyAction::Cancel,
+                input.captured_through(),
+                &mut recognizer,
+                &input,
+                &dictation_worker,
+                mode,
+                &context,
+                &input.device_name(),
+                &mut events,
+                indicator.as_ref(),
+                microphone_policy.release_while_idle,
+            )?;
         }
         // The capture shortcut ignores keys while shortcuts are suspended or
         // a programmatic dictation holds them, so their releases go unseen.
@@ -1155,7 +1029,7 @@ pub fn listen(
                 )?;
                 continue;
             }
-            // Escape ends a dictation or Voice Action hold first, then
+            // Escape ends a dictation hold first, then
             // closes the capsule's picker or open list (never an Undo: that is a
             // click), then cancels queued
             // dictation. It never ends a recording capture: it may be meant
@@ -1174,8 +1048,8 @@ pub fn listen(
                 continue;
             }
             // Annotate records the narration itself: while it records, the
-            // dictation and Voice Action shortcuts start nothing. The tap
-            // still swallows their chords, so they never reach the app.
+            // dictation shortcut starts nothing. The tap still swallows its
+            // chord, so it never reaches the app.
             #[cfg(hex_capture)]
             if !hotkeys.any_recording()
                 && voice.is_none()
@@ -1186,33 +1060,11 @@ pub fn listen(
                 hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }
-            let edit_action = hotkeys
-                .edit
-                .as_mut()
-                .and_then(|edit| edit.process(input_event, capture_at));
-            if matches!(edit_action, Some(HotkeyAction::Start)) && voice.is_none() {
-                // Voice Action confirms itself once its own hold counts.
-                feedback::retract_start();
-                start_pending_voice_action(
-                    &mut edit_pending_since,
-                    capture_at,
-                    input.is_recording(),
-                    indicator.as_ref(),
-                );
-            }
             if let Some(action) = hotkeys.dictation.process(input_event, capture_at) {
                 if matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) {
                     voice = None;
                 }
-                let voice_action_takeover = voice_action_owns_action(
-                    action,
-                    edit_pending_since.is_some(),
-                    hotkeys.edit_recording(),
-                    edit_action,
-                );
-                if voice_action_takeover {
-                    let _ = hotkeys.dictation.suspend();
-                } else if voice.is_none() {
+                if voice.is_none() {
                     let accepted = handle_hotkey_action(
                         action,
                         capture_at,
@@ -1231,78 +1083,6 @@ pub fn listen(
                     }
                 }
             }
-            if let Some(action) = edit_action
-                && voice.is_none()
-                && !matches!(action, HotkeyAction::Start)
-            {
-                let pending_start = edit_pending_since.take();
-                match pending_start {
-                    None => {
-                        let accepted = handle_edit_hotkey_action(
-                            action,
-                            capture_at,
-                            &mut edit_context,
-                            &mut recognizer,
-                            &input,
-                            &dictation_worker,
-                            mode,
-                            &context,
-                            &input.device_name(),
-                            &mut events,
-                            indicator.as_ref(),
-                        )?;
-                        if !accepted {
-                            hotkeys.suspend_edit();
-                        }
-                    }
-                    Some(started_at)
-                        if pending_voice_action_is_intentional(started_at, capture_at, action) =>
-                    {
-                        let accepted = handle_edit_hotkey_action(
-                            HotkeyAction::Start,
-                            started_at,
-                            &mut edit_context,
-                            &mut recognizer,
-                            &input,
-                            &dictation_worker,
-                            mode,
-                            &context,
-                            &input.device_name(),
-                            &mut events,
-                            None,
-                        )?;
-                        if accepted {
-                            handle_edit_hotkey_action(
-                                HotkeyAction::Finish,
-                                capture_at,
-                                &mut edit_context,
-                                &mut recognizer,
-                                &input,
-                                &dictation_worker,
-                                mode,
-                                &context,
-                                &input.device_name(),
-                                &mut events,
-                                indicator.as_ref(),
-                            )?;
-                        } else if let Some(indicator) = &indicator {
-                            indicator.send(DictationIndicatorEvent::Failed);
-                        }
-                    }
-                    Some(_) => {
-                        edit_context = None;
-                        end_capture(
-                            CaptureEnd::Discarded(action.discard_cause()),
-                            &input,
-                            &mut recognizer,
-                            mode,
-                            &input.device_name(),
-                            &mut events,
-                            indicator.as_ref(),
-                        )?;
-                    }
-                }
-            }
             // A shortcut press during voice-delimited dictation starts nothing.
             if voice.is_some() {
                 hotkeys.forgo_chord_breaks();
@@ -1316,7 +1096,6 @@ pub fn listen(
             hotkeys.recover_stale_keys();
         }
         if hotkeys.dictation.is_recording()
-            && edit_pending_since.is_none()
             && input.become_intentional(capture_boundary(
                 &input,
                 microphone_policy.release_while_idle,
@@ -1325,37 +1104,9 @@ pub fn listen(
         {
             feedback::play(Tone::DictationStart);
         }
-        if edit_pending_since.is_some_and(|started| {
-            capture_boundary(&input, microphone_policy.release_while_idle).duration_since(started)
-                >= MINIMUM_HOLD_DURATION
-        }) && hotkeys.edit_recording()
-        {
-            let capture_at = edit_pending_since.expect("pending voice action has a boundary");
-            edit_pending_since = None;
-            let accepted = handle_edit_hotkey_action(
-                HotkeyAction::Start,
-                capture_at,
-                &mut edit_context,
-                &mut recognizer,
-                &input,
-                &dictation_worker,
-                mode,
-                &context,
-                &input.device_name(),
-                &mut events,
-                None,
-            )?;
-            if !accepted {
-                hotkeys.suspend_edit();
-                if let Some(indicator) = &indicator {
-                    indicator.send(DictationIndicatorEvent::Failed);
-                }
-            }
-        }
         // Only once every queued edge is handled, so a release already seen
         // ends the press first.
         if voice.is_none()
-            && edit_pending_since.is_none()
             && !hotkey_capture_suspended
             && input_monitor.pending_events().oldest().is_none()
         {
@@ -1462,12 +1213,7 @@ pub fn listen(
                         &mut programmatic_lost,
                         &mut programmatic_completions,
                     );
-                    abandon_capture(
-                        &mut hotkeys,
-                        &mut voice,
-                        &mut edit_context,
-                        &mut edit_pending_since,
-                    );
+                    abandon_capture(&mut hotkeys, &mut voice);
                     fail_capture(
                         format!("Could not open microphone: {error}"),
                         &dictation_worker,
@@ -1501,12 +1247,7 @@ pub fn listen(
                             &mut programmatic_lost,
                             &mut programmatic_completions,
                         );
-                        abandon_capture(
-                            &mut hotkeys,
-                            &mut voice,
-                            &mut edit_context,
-                            &mut edit_pending_since,
-                        );
+                        abandon_capture(&mut hotkeys, &mut voice);
                         fail_capture(
                             format!("Microphone audio was interrupted for {gap_ms} ms."),
                             &dictation_worker,
@@ -1537,12 +1278,7 @@ pub fn listen(
                             &mut programmatic_completions,
                         );
                     }
-                    abandon_capture(
-                        &mut hotkeys,
-                        &mut voice,
-                        &mut edit_context,
-                        &mut edit_pending_since,
-                    );
+                    abandon_capture(&mut hotkeys, &mut voice);
                     resync_recognizer(&input, recognizer.as_mut())?;
                     if was_recording {
                         fail_capture(
@@ -1566,9 +1302,6 @@ pub fn listen(
             let followed = input.is_recording()
                 && programmatic.is_none()
                 && !hotkey_capture_suspended
-                && edit_pending_since.is_none()
-                && edit_context.is_none()
-                && !hotkeys.edit_recording()
                 && (voice.is_some() || hotkeys.dictation.is_recording());
             smart_turn.track(followed.then(|| crate::smart_turn::Capture {
                 generation: input.capture_generation(),
@@ -2408,132 +2141,6 @@ fn control_dictation(
     })
 }
 
-/// `hex voice-action`, only while Voice Action is on.
-#[allow(clippy::too_many_arguments)]
-fn control_voice_action(
-    action: CaptureAction,
-    other_recording: bool,
-    suspended: bool,
-    hotkeys: &mut Hotkeys,
-    edit_pending_since: &mut Option<CaptureInstant>,
-    edit_context: &mut Option<ContextSnapshot>,
-    recognizer: &mut Option<Moonshine>,
-    input: &DictationAudio,
-    worker: &DictationWorker,
-    mode: Mode,
-    context: &ContextSnapshot,
-    events: &mut EventLog,
-    indicator: Option<&DictationIndicatorSender>,
-    release_while_idle: bool,
-) -> Result<ControlReply> {
-    let Some(edit) = hotkeys.edit.as_mut() else {
-        return Ok(ControlReply::error(
-            "feature-off",
-            "Voice Action is off; turn it on with `hex settings set voice_action.enabled on`",
-        ));
-    };
-    let recording = edit.is_recording() || edit_context.is_some();
-    let device = input.device_name();
-    let action = match action {
-        CaptureAction::Toggle if recording => CaptureAction::Stop,
-        CaptureAction::Toggle => CaptureAction::Start,
-        action => action,
-    };
-    Ok(match action {
-        CaptureAction::Start if recording => {
-            ControlReply::unchanged("Voice Action is already recording")
-        }
-        CaptureAction::Start => {
-            if let Some(refusal) = capture_refusal(other_recording, suspended) {
-                return Ok(refusal);
-            }
-            if !edit.lock() {
-                return Ok(ControlReply::error(
-                    "busy",
-                    "the Voice Action shortcut is held; release it and try again",
-                ));
-            }
-            *edit_pending_since = None;
-            let accepted = handle_edit_hotkey_action(
-                HotkeyAction::Start,
-                capture_boundary(input, release_while_idle),
-                edit_context,
-                recognizer,
-                input,
-                worker,
-                mode,
-                context,
-                &device,
-                events,
-                indicator,
-            )?;
-            if accepted {
-                make_control_capture_intentional(input, true)?;
-                ControlReply::done(
-                    "Recording an instruction; `hex voice-action stop` or the shortcut finishes, \
-                     Escape cancels",
-                )
-            } else {
-                hotkeys.suspend_edit();
-                ControlReply::error(
-                    "unavailable",
-                    "Voice Action couldn't start; it needs OpenCode (`opencode2`) and a free \
-                     microphone",
-                )
-            }
-        }
-        CaptureAction::Stop if !recording => {
-            ControlReply::unchanged("Voice Action isn't recording")
-        }
-        CaptureAction::Stop => {
-            hotkeys.suspend_edit();
-            *edit_pending_since = None;
-            let finished = finish_voice_action(
-                capture_boundary(input, release_while_idle),
-                edit_context,
-                recognizer,
-                input,
-                worker,
-                mode,
-                &device,
-                events,
-                indicator,
-            )?;
-            finish_reply(
-                finished,
-                "Finished the instruction; Hex pastes the result when it's ready",
-            )
-        }
-        CaptureAction::Cancel if recording => {
-            hotkeys.suspend_edit();
-            *edit_pending_since = None;
-            handle_edit_hotkey_action(
-                HotkeyAction::Cancel,
-                capture_boundary(input, release_while_idle),
-                edit_context,
-                recognizer,
-                input,
-                worker,
-                mode,
-                context,
-                &device,
-                events,
-                indicator,
-            )?;
-            ControlReply::done("Cancelled Voice Action")
-        }
-        CaptureAction::Cancel | CaptureAction::Toggle => {
-            if let Some(refusal) = idle_cancel_refusal(other_recording) {
-                refusal
-            } else if cancel_latest_job(worker, events, indicator)? {
-                ControlReply::done("Cancelled the newest unfinished dictation")
-            } else {
-                ControlReply::unchanged("Nothing to cancel")
-            }
-        }
-    })
-}
-
 /// A `hex paste-last` (or the menu bar's Paste Last Dictation) waits for
 /// every capture and shortcut gesture to end: pasting cancels the audio
 /// owner's capture, which would strand the machine that started it.
@@ -2563,152 +2170,6 @@ fn paste_last(
     };
     emit_engine_state(events, false, worker, mode, device)?;
     Ok(reply)
-}
-
-/// Ends a Voice Action capture and hands its instruction to OpenCode;
-/// `None` when no Voice Action was recording.
-#[allow(clippy::too_many_arguments)]
-fn finish_voice_action(
-    action_at: CaptureInstant,
-    edit_context: &mut Option<ContextSnapshot>,
-    recognizer: &mut Option<Moonshine>,
-    dictation: &DictationAudio,
-    worker: &DictationWorker,
-    mode: Mode,
-    device: &str,
-    events: &mut EventLog,
-    indicator: Option<&DictationIndicatorSender>,
-) -> Result<Option<FinishResult>> {
-    let Some(context) = edit_context.take() else {
-        dictation.cancel()?;
-        return Ok(None);
-    };
-    let finished = finish_dictation(
-        dictation,
-        action_at,
-        POST_RELEASE_TAIL,
-        worker,
-        TranscriptionTarget::VoiceAction,
-        None,
-        &context,
-        device,
-        events,
-        indicator,
-    )?;
-    reset_command_recognizer(dictation, recognizer)?;
-    emit_engine_state(events, false, worker, mode, device)?;
-    Ok(Some(finished))
-}
-
-fn voice_action_context_snapshot(fallback: &ContextSnapshot) -> ContextSnapshot {
-    let mut context = fallback.clone();
-    context.selected_text = crate::accessibility::capture_optional();
-    context.input_revision = None;
-    context
-}
-
-#[allow(clippy::too_many_arguments)]
-fn handle_edit_hotkey_action(
-    action: HotkeyAction,
-    action_at: CaptureInstant,
-    edit_context: &mut Option<ContextSnapshot>,
-    recognizer: &mut Option<Moonshine>,
-    dictation: &DictationAudio,
-    worker: &DictationWorker,
-    mode: Mode,
-    context: &ContextSnapshot,
-    device: &str,
-    events: &mut EventLog,
-    indicator: Option<&DictationIndicatorSender>,
-) -> Result<bool> {
-    match action {
-        HotkeyAction::Start => {
-            if !admit_voice_action(
-                crate::dictation_processor::opencode_installed(),
-                edit_context,
-                || {
-                    dictation.cancel()?;
-                    reset_command_recognizer(dictation, recognizer)
-                },
-            )? {
-                feedback::play(Tone::Error);
-                events.dictation(
-                    DictationPhase::Failed("Voice Action requires OpenCode".into()),
-                    "",
-                )?;
-                emit_engine_state(events, false, worker, mode, device)?;
-                return Ok(false);
-            }
-            let promoted = dictation.is_recording();
-            if !promoted {
-                if !dictation.start(action_at)? {
-                    *edit_context = None;
-                    return Ok(false);
-                }
-                reset_command_recognizer(dictation, recognizer)?;
-            }
-            let became_intentional = dictation.become_intentional(CaptureInstant::now())?;
-            *edit_context = Some(voice_action_context_snapshot(context));
-            if became_intentional {
-                feedback::play(Tone::DictationStart);
-            }
-            if !promoted {
-                events.dictation(DictationPhase::Started, "")?;
-            }
-            if let Some(indicator) = indicator {
-                indicator.send(if promoted {
-                    DictationIndicatorEvent::PromotedToVoiceAction
-                } else {
-                    DictationIndicatorEvent::EditingStarted
-                });
-            }
-            emit_state(events, true, mode, device)?;
-            Ok(true)
-        }
-        HotkeyAction::Finish => Ok(finish_voice_action(
-            action_at,
-            edit_context,
-            recognizer,
-            dictation,
-            worker,
-            mode,
-            device,
-            events,
-            indicator,
-        )?
-        .is_some()),
-        HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
-            *edit_context = None;
-            end_capture(
-                if matches!(action, HotkeyAction::Cancel) {
-                    CaptureEnd::Cancelled
-                } else {
-                    CaptureEnd::Discarded(action.discard_cause())
-                },
-                dictation,
-                recognizer,
-                mode,
-                device,
-                events,
-                indicator,
-            )?;
-            Ok(true)
-        }
-        HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => Ok(false),
-    }
-}
-
-fn admit_voice_action(
-    installed: bool,
-    edit_context: &mut Option<ContextSnapshot>,
-    cancel_capture: impl FnOnce() -> Result<()>,
-) -> Result<bool> {
-    if installed {
-        return Ok(true);
-    }
-    *edit_context = None;
-    cancel_capture()?;
-    Ok(false)
 }
 
 /// The instant a shortcut edge applies to. A released microphone has no
@@ -2744,19 +2205,12 @@ fn reset_command_recognizer(
     reset_recognizer(recognizer.as_mut())
 }
 
-/// Drops the shortcut-, Voice Action-, and voice-owned capture state after the
+/// Drops the shortcut- and voice-owned capture state after the
 /// microphone stopped delivering audio. Programmatic ownership stays with the
 /// caller because only a recording interruption ends it.
-fn abandon_capture(
-    hotkeys: &mut Hotkeys,
-    voice: &mut Option<VoiceCapture>,
-    edit_context: &mut Option<ContextSnapshot>,
-    edit_pending_since: &mut Option<CaptureInstant>,
-) {
+fn abandon_capture(hotkeys: &mut Hotkeys, voice: &mut Option<VoiceCapture>) {
     hotkeys.suspend_all();
     *voice = None;
-    *edit_context = None;
-    *edit_pending_since = None;
 }
 
 fn fail_capture(
@@ -3204,48 +2658,6 @@ fn recognition_boundary(
         .unwrap_or(fallback)
 }
 
-/// Whether an in-flight Option-Command gesture owns a dictation-hotkey
-/// action. While the Voice Action gesture is pending, recording, or acting on
-/// this event, the Option-only machine must not start, finish, or discard the
-/// capture: with a slow chord (Command joining after the hold threshold) both
-/// machines are otherwise live, and whichever modifier lifts first would let
-/// plain dictation consume the capture and leave the Voice Action to discard
-/// silently. Explicit paste shortcuts remain available.
-fn voice_action_owns_action(
-    action: HotkeyAction,
-    edit_pending: bool,
-    edit_recording: bool,
-    edit_action: Option<HotkeyAction>,
-) -> bool {
-    (edit_pending || edit_recording || edit_action.is_some())
-        && !matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
-}
-
-fn start_pending_voice_action(
-    pending_since: &mut Option<CaptureInstant>,
-    started_at: CaptureInstant,
-    promoted: bool,
-    indicator: Option<&DictationIndicatorSender>,
-) {
-    *pending_since = Some(started_at);
-    if let Some(indicator) = indicator {
-        indicator.send(if promoted {
-            DictationIndicatorEvent::PromotedToVoiceAction
-        } else {
-            DictationIndicatorEvent::EditingStarted
-        });
-    }
-}
-
-fn pending_voice_action_is_intentional(
-    started_at: CaptureInstant,
-    finished_at: CaptureInstant,
-    action: HotkeyAction,
-) -> bool {
-    matches!(action, HotkeyAction::Finish)
-        && finished_at.duration_since(started_at) >= MINIMUM_HOLD_DURATION
-}
-
 fn finish_outcome(result: &FinishResult) -> CommandOutcome {
     match result {
         FinishResult::Submitted => CommandOutcome::Executed,
@@ -3280,7 +2692,6 @@ fn handle_dictation_event(
             processing,
         } => {
             let phase = match target {
-                TranscriptionTarget::VoiceAction => DictationPhase::VoiceAction,
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
                 TranscriptionTarget::Print => DictationPhase::Printed,
                 TranscriptionTarget::Service => return Ok(()),
@@ -3360,7 +2771,6 @@ fn handle_dictation_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_settings::{COMMAND_KEY_MASK, OPTION_KEY_MASK};
 
     #[test]
     fn command_preparation_does_not_block_the_listener_or_propagate_failure() {
@@ -3599,232 +3009,5 @@ mod tests {
         let mut stability = ActivationStability::default();
 
         assert!(stability.observe(&say_protocol(), "Say!", true, Instant::now()));
-    }
-
-    #[test]
-    fn slow_chord_release_keeps_voice_action_ownership() {
-        use crate::app_settings::RuntimeHotkey;
-        use crate::suppression::{DictationHotkey, InputEvent};
-
-        let now = CaptureInstant::from_nanos(60_000_000_000);
-        let mut dictation = DictationHotkey::new(
-            now,
-            true,
-            RuntimeHotkey {
-                modifiers: crate::app_settings::modifiers_from_flags(OPTION_KEY_MASK),
-                key_code: None,
-            },
-        );
-        let mut edit = DictationHotkey::new_without_paste(
-            now,
-            RuntimeHotkey {
-                modifiers: crate::app_settings::modifiers_from_flags(
-                    OPTION_KEY_MASK | COMMAND_KEY_MASK,
-                ),
-                key_code: None,
-            },
-        );
-
-        dictation.suspend();
-        edit.suspend();
-
-        // Option down: plain dictation starts, no Voice Action gesture yet.
-        let event = InputEvent::Flags(OPTION_KEY_MASK);
-        let edit_action = edit.process(event, now);
-        let action = dictation.process(event, now).expect("dictation starts");
-        assert_eq!(action, HotkeyAction::Start);
-        assert!(!voice_action_owns_action(
-            action,
-            false,
-            edit.is_recording(),
-            edit_action,
-        ));
-
-        // Command joins after the hold threshold: the dictation machine stays
-        // silently recording while the edit machine starts the gesture.
-        let chord_at = now + MINIMUM_HOLD_DURATION + Duration::from_millis(150);
-        let event = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
-        let edit_action = edit.process(event, chord_at);
-        assert_eq!(edit_action, Some(HotkeyAction::Start));
-        assert_eq!(dictation.process(event, chord_at), None);
-
-        // Option lifts first: both machines emit Finish on the same event.
-        // The Voice Action gesture must own the dictation Finish, or plain
-        // dictation would consume the capture out from under it.
-        let release_at = chord_at + Duration::from_secs(1);
-        let event = InputEvent::Flags(COMMAND_KEY_MASK);
-        let edit_action = edit.process(event, release_at);
-        assert_eq!(edit_action, Some(HotkeyAction::Finish));
-        let action = dictation
-            .process(event, release_at)
-            .expect("dictation machine also finishes");
-        assert_eq!(action, HotkeyAction::Finish);
-        assert!(voice_action_owns_action(
-            action,
-            true,
-            edit.is_recording(),
-            edit_action,
-        ));
-        let _ = dictation.suspend();
-
-        // A later plain Option dictation is unaffected.
-        let idle_at = release_at + Duration::from_secs(2);
-        let event = InputEvent::Flags(OPTION_KEY_MASK);
-        let edit_action = edit.process(event, idle_at);
-        let action = dictation.process(event, idle_at).expect("dictation starts");
-        assert_eq!(action, HotkeyAction::Start);
-        assert!(!voice_action_owns_action(
-            action,
-            false,
-            edit.is_recording(),
-            edit_action,
-        ));
-    }
-
-    #[test]
-    fn rejected_voice_action_cancels_promoted_capture() {
-        use crate::app_settings::RuntimeHotkey;
-        use crate::dictation::DictationCapture;
-        use crate::suppression::InputEvent;
-
-        let now = CaptureInstant::from_nanos(60_000_000_000);
-        let mut hotkey = DictationHotkey::new(
-            now,
-            true,
-            RuntimeHotkey {
-                modifiers: crate::app_settings::modifiers_from_flags(OPTION_KEY_MASK),
-                key_code: None,
-            },
-        );
-        let mut edit_hotkey = DictationHotkey::new_without_paste(
-            now,
-            RuntimeHotkey {
-                modifiers: crate::app_settings::modifiers_from_flags(
-                    OPTION_KEY_MASK | COMMAND_KEY_MASK,
-                ),
-                key_code: None,
-            },
-        );
-        hotkey.suspend();
-        edit_hotkey.suspend();
-        let mut capture = DictationCapture::new(16_000);
-        let option = InputEvent::Flags(OPTION_KEY_MASK);
-        assert_eq!(edit_hotkey.process(option, now), None);
-        assert_eq!(hotkey.process(option, now), Some(HotkeyAction::Start));
-        capture.start_at(now);
-
-        let chord_at = now + Duration::from_millis(40);
-        let chord = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
-        let edit_action = edit_hotkey.process(chord, chord_at);
-        assert_eq!(edit_action, Some(HotkeyAction::Start));
-        let mut pending = None;
-        start_pending_voice_action(&mut pending, chord_at, capture.is_recording(), None);
-        let action = hotkey.process(chord, chord_at).unwrap();
-        assert!(voice_action_owns_action(
-            action,
-            pending.is_some(),
-            edit_hotkey.is_recording(),
-            edit_action,
-        ));
-        hotkey.suspend();
-
-        let rejected_at = chord_at + MINIMUM_HOLD_DURATION;
-        capture.ingest(&[0.5; 5_440], rejected_at);
-        let mut edit_context = Some(ContextSnapshot::default());
-        assert!(
-            !admit_voice_action(false, &mut edit_context, || {
-                capture.cancel();
-                Ok(())
-            })
-            .unwrap()
-        );
-        edit_hotkey.suspend();
-        assert!(!capture.is_recording());
-        assert!(edit_context.is_none());
-
-        let released_at = rejected_at + Duration::from_millis(100);
-        assert_eq!(hotkey.process(InputEvent::Flags(0), released_at), None);
-        assert_eq!(edit_hotkey.process(InputEvent::Flags(0), released_at), None);
-        capture.ingest(&[0.5; 1_600], released_at);
-        assert!(matches!(capture.finish(released_at), Finish::Discard));
-        assert_eq!(
-            hotkey.process(option, released_at + Duration::from_secs(1)),
-            Some(HotkeyAction::Start)
-        );
-    }
-
-    #[test]
-    fn accepted_voice_action_preserves_promoted_capture() {
-        let mut capture = crate::dictation::DictationCapture::new(16_000);
-        let now = CaptureInstant::from_nanos(60_000_000_000);
-        capture.start_at(now);
-        let mut edit_context = None;
-
-        assert!(
-            admit_voice_action(true, &mut edit_context, || {
-                capture.cancel();
-                Ok(())
-            })
-            .unwrap()
-        );
-        assert!(capture.is_recording());
-    }
-
-    #[test]
-    fn explicit_paste_shortcuts_stay_available_during_a_voice_action_gesture() {
-        assert!(!voice_action_owns_action(
-            HotkeyAction::PasteLast,
-            true,
-            true,
-            None,
-        ));
-        assert!(voice_action_owns_action(
-            HotkeyAction::Finish,
-            false,
-            false,
-            Some(HotkeyAction::Finish),
-        ));
-        assert!(!voice_action_owns_action(
-            HotkeyAction::Finish,
-            false,
-            false,
-            None,
-        ));
-    }
-
-    #[test]
-    fn delayed_voice_action_edges_use_their_source_timestamps() {
-        let started_at = CaptureInstant::from_nanos(1_000_000_000);
-
-        assert!(!pending_voice_action_is_intentional(
-            started_at,
-            started_at + Duration::from_millis(299),
-            HotkeyAction::Finish,
-        ));
-        assert!(pending_voice_action_is_intentional(
-            started_at,
-            started_at + MINIMUM_HOLD_DURATION,
-            HotkeyAction::Finish,
-        ));
-        assert!(!pending_voice_action_is_intentional(
-            started_at,
-            started_at + Duration::from_secs(1),
-            HotkeyAction::Discard(DiscardCause::Key),
-        ));
-    }
-
-    #[test]
-    fn pending_voice_action_updates_the_hud_before_the_hold_threshold() {
-        let started_at = CaptureInstant::now();
-        let (indicator, events) = crate::dictation_indicator::channel();
-        let mut pending_since = None;
-
-        start_pending_voice_action(&mut pending_since, started_at, false, Some(&indicator));
-
-        assert_eq!(pending_since, Some(started_at));
-        assert!(matches!(
-            events.try_recv(),
-            Ok(DictationIndicatorEvent::EditingStarted)
-        ));
     }
 }

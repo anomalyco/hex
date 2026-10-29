@@ -913,15 +913,6 @@ fn done(ui: &Ui, p: Paint) -> El {
             keycaps(p, "keys", &binding.keycaps()),
         ));
     }
-    tips.push(setting_row(
-        p,
-        "tip-voice-action",
-        tr("Voice Action"),
-        Some(tr(
-            "Ask OpenCode to write or rewrite. Turn it on in Voice Action.",
-        )),
-        keycaps(p, "keys", &ui.settings.edit_hotkey.keycaps()),
-    ));
     if ui.platform.modes {
         tips.push(setting_row(
             p,

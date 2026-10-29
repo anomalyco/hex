@@ -112,7 +112,6 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     PasteLast,
-    VoiceAction,
     #[cfg(hex_capture)]
     Capture,
 }
@@ -1212,7 +1211,6 @@ impl Pump {
                     DeveloperPane::Settings => Destination::Settings,
                     DeveloperPane::Modes => Destination::Modes,
                     DeveloperPane::Commands => Destination::Commands,
-                    DeveloperPane::VoiceAction => Destination::VoiceAction,
                     DeveloperPane::History => Destination::History,
                     DeveloperPane::Meetings => Destination::Meetings(None),
                     other => {

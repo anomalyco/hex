@@ -29,14 +29,6 @@ fn labs(ui: &Ui) -> Vec<Lab> {
     let settings = &ui.settings;
     let mut labs = vec![
         Lab {
-            key: "lab-voice-action",
-            title: tr("Voice Action"),
-            about: tr("Speak an instruction, paste the answer"),
-            on: settings.voice_action.enabled,
-            flip: super::voice_action::toggle,
-            pane: Pane::VoiceAction,
-        },
-        Lab {
             key: "lab-commands",
             title: tr("Commands"),
             about: tr("Open apps and press keys by voice"),
@@ -66,7 +58,6 @@ fn labs(ui: &Ui) -> Vec<Lab> {
 /// An opt-in feature's pane is in the main sidebar: it's on.
 fn turned_on(ui: &Ui, pane: Pane) -> bool {
     match pane {
-        Pane::VoiceAction => ui.settings.voice_action.enabled,
         Pane::Commands => ui.settings.commands_enabled,
         Pane::Meetings => super::meetings::available(ui),
         _ => false,
@@ -78,7 +69,7 @@ fn turned_on(ui: &Ui, pane: Pane) -> bool {
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     let mut panes = vec![Pane::General, Pane::History];
     panes.extend(
-        [Pane::VoiceAction, Pane::Commands, Pane::Meetings]
+        [Pane::Commands, Pane::Meetings]
             .into_iter()
             .filter(|pane| pane.shown(ui) && turned_on(ui, *pane)),
     );
@@ -190,9 +181,6 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
         rows.push(lab_row(p, &lab));
         if pane == Pane::Commands {
             rows.extend(super::commands::confirm_row(ui, p).map(CardRow::from));
-        }
-        if pane == Pane::VoiceAction {
-            rows.extend(super::voice_action::error_note(ui, p).map(CardRow::from));
         }
     }
     let mut content = controls::page("content").child(

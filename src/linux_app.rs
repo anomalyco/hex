@@ -43,7 +43,6 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     PasteLast,
-    VoiceAction,
     Capture,
 }
 
@@ -817,7 +816,6 @@ impl LinuxDesktopHost {
                     match target {
                         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
                         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
-                        ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
                         ShortcutTarget::Capture => settings.capture.hotkey = binding,
                     }
                 })
@@ -998,7 +996,6 @@ impl LinuxDesktopHost {
             .filter(|listener| matches!(listener.startup, ListenerStartup::Observed))
             .map(|listener| ShortcutRoute {
                 commands: listener.commands.clone(),
-                voice_action: self.settings.voice_action.enabled,
             })
     }
 
@@ -1422,11 +1419,8 @@ mod tests {
         assert!(host.shortcut_route().is_none());
         host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
         let route = host.shortcut_route().unwrap();
-        assert!(!route.voice_action);
         linux_service::route_shortcut(Some(&route), crate::linux_input::ShortcutCommand::PasteLast)
             .unwrap();
-        host.settings.voice_action.enabled = true;
-        assert!(host.shortcut_route().unwrap().voice_action);
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
             [ListenerCommand::from(

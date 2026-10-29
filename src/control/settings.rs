@@ -27,8 +27,15 @@ pub struct SettingValue {
 #[derive(Clone, Copy, Debug)]
 enum Kind {
     Bool,
-    Number { min: f64, max: f64 },
-    Integer { min: u64, max: u64 },
+    Number {
+        min: f64,
+        max: f64,
+    },
+    #[cfg_attr(not(hex_capture), allow(dead_code))]
+    Integer {
+        min: u64,
+        max: u64,
+    },
     Choice(&'static [&'static str]),
     Text,
     Shortcut(HotkeySlot),
@@ -92,7 +99,6 @@ const fn read_only(key: &'static str, kind: Kind, about: &'static str, why: &'st
 }
 
 const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
-const DEADLINE: Kind = Kind::Integer { min: 1, max: 600 };
 const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
 
 const KEYS: &[Key] = &[
@@ -176,11 +182,6 @@ const KEYS: &[Key] = &[
         Kind::Shortcut(HotkeySlot::Dictation),
         "The dictation shortcut",
     ),
-    key(
-        "edit_hotkey",
-        Kind::Shortcut(HotkeySlot::VoiceAction),
-        "The Voice Action shortcut",
-    ),
     optional(
         "paste_last_hotkey",
         Kind::Shortcut(HotkeySlot::PasteLast),
@@ -228,26 +229,6 @@ const KEYS: &[Key] = &[
         "dictation_processing.modes",
         Kind::Json,
         "Modes for specific apps and websites, as a JSON array",
-    ),
-    key(
-        "voice_action.enabled",
-        Kind::Bool,
-        "Voice Action: speak an instruction and paste OpenCode's result",
-    ),
-    optional(
-        "voice_action.model",
-        Kind::Text,
-        "OpenCode model for Voice Action (provider/model); none uses the default",
-    ),
-    optional(
-        "voice_action.variant",
-        Kind::Text,
-        "The Voice Action model's thinking variant",
-    ),
-    key(
-        "voice_action.deadline_seconds",
-        DEADLINE,
-        "How long Voice Action may take",
     ),
     key(
         "history_retention",
@@ -608,13 +589,12 @@ pub fn apply(
                 ));
             }
         }
-        "dictation_hotkey" | "edit_hotkey" | "paste_last_hotkey" | "capture.hotkey" => {
+        "dictation_hotkey" | "paste_last_hotkey" | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
             let binding = match slot {
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
-                HotkeySlot::VoiceAction => Some(&candidate.edit_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
@@ -634,16 +614,6 @@ pub fn apply(
             if candidate.dictation_hotkey.key.is_none() {
                 candidate.double_tap_only = false;
             }
-        }
-        "voice_action.enabled"
-            if candidate.voice_action.enabled
-                && candidate.hotkey_in_use(HotkeySlot::VoiceAction, &candidate.edit_hotkey) =>
-        {
-            return Err(ControlError::new(
-                "shortcut-in-use",
-                "The Voice Action shortcut is already in use; set edit_hotkey to another \
-                 shortcut first",
-            ));
         }
         "keyboard_model_switching.mappings" => {
             for choice in candidate.keyboard_model_switching.mappings.values() {
@@ -1071,7 +1041,6 @@ mod tests {
         for (key, value) in [
             ("sound_effects", "maybe"),
             ("sound_effect_volume", "2"),
-            ("voice_action.deadline_seconds", "0"),
             ("shortcut_mode", "tap"),
             ("meetings.calendar.lead_minutes", "3"),
             ("meetings.output_folder", "relative/path"),
@@ -1267,9 +1236,15 @@ mod tests {
             rule: |_, _| Err("Modifier-only shortcuts aren't supported here".into()),
         };
         assert_eq!(
-            apply(&settings, "edit_hotkey", "control+shift", false, &refuse)
-                .unwrap_err()
-                .code,
+            apply(
+                &settings,
+                "dictation_hotkey",
+                "control+shift",
+                false,
+                &refuse
+            )
+            .unwrap_err()
+            .code,
             "invalid-value"
         );
     }
@@ -1281,21 +1256,6 @@ mod tests {
         assert!(parse_hotkey("option+mouse1", named).is_ok());
         assert!(parse_hotkey("mouse2", named).is_ok());
         assert!(parse_hotkey("mouse4", named).is_ok());
-    }
-
-    #[test]
-    fn voice_action_turns_on_only_with_a_free_shortcut() {
-        let mut settings = AppSettings::default();
-        settings.edit_hotkey = settings.dictation_hotkey.clone();
-        assert_eq!(
-            apply(&settings, "voice_action.enabled", "on", false, &rules())
-                .unwrap_err()
-                .code,
-            "shortcut-in-use"
-        );
-        let settings = AppSettings::default();
-        let change = apply(&settings, "voice_action.enabled", "on", false, &rules()).unwrap();
-        assert!(change.settings.voice_action.enabled);
     }
 
     #[test]

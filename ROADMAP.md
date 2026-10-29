@@ -1,15 +1,14 @@
 # Roadmap
 
 Hex ships the macOS product loop: configurable hold-to-talk local dictation,
-explicit selected-text voice editing, optional context-aware OpenCode
-post-processing, a Metal HUD, bounded paste workers, settings, and a signed
-app bundle. Streaming commands are a disabled-by-default experimental opt-in,
-and Meetings (beta) is a separate persisted opt-in (`meetings.enabled`, default
-off). Windows (x64 and ARM64) and x86_64 Linux (i3/X11 and compatible wlroots
-Wayland compositors) betas provide hotkey dictation, Modes, Voice Action,
-History, the shared Rune window, and signed user-local updates; they do not yet
-include voice commands or meetings. Nix packaging for Linux is implemented and
-awaiting supported-host validation before release.
+optional context-aware OpenCode post-processing, a Metal HUD, bounded paste
+workers, settings, and a signed app bundle. Streaming commands are a
+disabled-by-default experimental opt-in, and Meetings (beta) is a separate
+persisted opt-in (`meetings.enabled`, default off). Windows (x64 and ARM64) and
+x86_64 Linux (i3/X11 and compatible wlroots Wayland compositors) betas provide
+hotkey dictation, Modes, History, the shared Rune window, and signed user-local
+updates; they do not yet include voice commands or meetings. Nix packaging for
+Linux is implemented and awaiting supported-host validation before release.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 `@kitlangton/hex@0.3.0` publishes ready transcribers through Promise and Effect
@@ -47,7 +46,7 @@ owns Microphone, Accessibility, and Automation permissions.
 Later, split features from settings into two windows (Kit, 2026-10-24; deferred
 in favour of the one-window feature-owned panes): the Hex window keeps what you
 use, History and Meetings recordings, and a separate Settings window (⌘, and
-the menu bar's Settings…) holds General, Modes, Voice Action, Commands,
+the menu bar's Settings…) holds General, Modes, Commands,
 Meetings settings, and Experiments.
 
 Microphone selection, idle-safe live switching, unavailable-device fallback,
@@ -154,9 +153,9 @@ Track the remaining shortcut requests explicitly:
   it still needs physical chord-discard and cold-microphone checks.
 - [#67](https://github.com/anomalyco/hex/issues/67): standalone keypad/character
   bindings need explicit key-consumption, cancellation, and rebinding semantics.
-- [#37](https://github.com/anomalyco/hex/issues/37): the original Voice Action
-  conflict is resolved; remaining Caps Lock-to-Control behavior needs physical
-  remapping evidence. Side-less flags and actual Right Control flags are distinct.
+- [#37](https://github.com/anomalyco/hex/issues/37): remaining Caps
+  Lock-to-Control behavior needs physical remapping evidence. Side-less flags
+  and actual Right Control flags are distinct.
 
 On-demand rewrite [PR #63](https://github.com/anomalyco/hex/pull/63) remains under
 review: publish the shared last transcript only after successful paste, require
@@ -174,11 +173,6 @@ user setting.
 
 Add end-of-speech detection only if it preserves explicit Send, Cancel, and
 locked-capture controls.
-
-Before consolidating Voice Action's pending timestamp and active context into
-one lifecycle owner, cover pending/promotion/disable/microphone-interruption
-sequences together, including both cold-microphone modifier orders. Existing
-gesture-decision tests do not establish those integrated transitions.
 
 ## Make Diagnostics Incremental
 

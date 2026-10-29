@@ -1,8 +1,7 @@
 # Voice Commands
 
 Opt in to spoken commands without changing ordinary hotkey dictation. Commands
-uses its own Moonshine model and awake/sleep state; it is not
-[Voice Action](voice-action.md).
+uses its own Moonshine model and awake/sleep state.
 
 This map covers macOS. Linked checks are locators, not passing runs; no tests,
 previews, providers, or native actions were run for this split.
