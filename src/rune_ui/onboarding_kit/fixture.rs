@@ -1,12 +1,9 @@
-//! Stand-ins for what the running app reports, in the shapes it reports
-//! them: model bytes from `transcription_preparation`, the microphone's
-//! `Meter { average, peak }`, and a recognizer's partial transcripts.
-//! Every effect the stories show reads only these.
+//! Stand-ins for what the running app reports: model bytes from
+//! `transcription_preparation`, the microphone's `Meter { average, peak }`,
+//! and a recognizer's partial transcripts.
 
 use crate::transcription_models::{TranscriptionModelId, definition};
 
-/// The language picked before the download starts. English gets the
-/// streaming English model; anything else gets the multilingual one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Language {
     English,
@@ -25,24 +22,17 @@ impl Language {
         definition(self.model()).download_bytes().unwrap_or(0)
     }
 
-    /// Whether the downloaded model shows words while you speak (it
-    /// advertises streaming), rather than all at once on release.
     pub(crate) fn streams(self) -> bool {
         definition(self.model()).streams
     }
 }
 
-/// Where words come from before the download finishes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Speech {
-    /// macOS 26 and later: Apple's SpeechAnalyzer streams words with no
-    /// download.
     Apple,
-    /// Windows, Linux, and older macOS: nothing until the model lands.
     AfterDownload,
 }
 
-/// A download as `transcription_preparation` reports it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Download {
     pub(crate) language: Language,
@@ -63,24 +53,18 @@ impl Download {
     }
 }
 
-/// The bytes a download `elapsed` seconds in has, when the whole takes
-/// `seconds`: a quick start, a slower middle, a quick finish, as a real
-/// connection wobbles.
 pub(crate) fn downloaded(total: u64, elapsed: f64, seconds: f64) -> u64 {
     let u = (elapsed / seconds).clamp(0.0, 1.0);
     let eased = u + 0.06 * (u * std::f64::consts::TAU).sin();
     (total as f64 * eased.clamp(0.0, 1.0)).round() as u64
 }
 
-/// One recorded utterance: the partial transcripts a streaming recognizer
-/// emitted, by seconds after the key went down, and when it was released.
 pub(crate) struct Take {
     pub(crate) updates: &'static [(f64, &'static str)],
     pub(crate) release: f64,
 }
 
 impl Take {
-    /// The newest partial `elapsed` seconds in.
     pub(crate) fn partial(&self, elapsed: f64) -> &'static str {
         self.updates
             .iter()
@@ -93,41 +77,41 @@ impl Take {
         elapsed >= self.release
     }
 
-    /// The final transcript.
     pub(crate) fn text(&self) -> &'static str {
         self.updates.last().map_or("", |(_, text)| text)
     }
 
-    /// A microphone meter `elapsed` seconds in: speech-shaped bursts while
-    /// held, the room's floor after.
     pub(crate) fn meter(&self, elapsed: f64) -> (f32, f32) {
         if elapsed < 0.0 || elapsed > self.release {
             return (0.02, 0.04);
         }
         let t = elapsed as f32;
-        let syllables = ((t * 7.3).sin() * (t * 2.9 + 0.7).sin()).abs();
-        let breath = 0.6 + 0.4 * (t * 1.3).sin().abs();
-        let average = (0.06 + 0.5 * syllables * breath).min(1.0);
-        (average, (average * 1.5).min(1.0))
+        let syllables = ((t * 9.2).sin() * (t * 3.7 + 0.7).sin()).abs();
+        let breath = 0.65 + 0.35 * (t * 2.1).sin().abs();
+        let average = (0.10 + 0.58 * syllables * breath).min(1.0);
+        (average, (average * 1.45).min(1.0))
     }
 }
 
-/// Jay asked about moving the sync; Apple Speech partials, revised as it
-/// hears more.
+/// Confident 1.5 s spoken answer when the investors are in the room.
 pub(crate) const ANSWER_JAY: Take = Take {
     updates: &[
-        (0.45, "Hey"),
-        (0.7, "Hey Jay"),
-        (0.95, "Hey Jay can"),
-        (1.15, "Hey Jay can we"),
-        (1.35, "Hey Jay can we move"),
-        (1.6, "Hey Jay can we move our"),
-        (1.85, "Hey Jay can we move our sink"),
-        (2.1, "Hey Jay can we move our sync to"),
-        (2.4, "Hey Jay can we move our sync to Thursday"),
-        (2.8, "Hey Jay, can we move our sync to Thursday afternoon?"),
+        (0.14, "Every"),
+        (0.26, "Every test"),
+        (0.38, "Every test is"),
+        (0.52, "Every test is green"),
+        (0.66, "Every test is green and"),
+        (0.80, "Every test is green and prod"),
+        (0.94, "Every test is green and prod is"),
+        (1.08, "Every test is green and prod is warm."),
+        (1.22, "Every test is green and prod is warm. Ship it"),
+        (1.36, "Every test is green and prod is warm. Ship it right"),
+        (
+            1.46,
+            "Every test is green and prod is warm. Ship it right now.",
+        ),
     ],
-    release: 3.2,
+    release: 1.5,
 };
 
 /// Saying anything on the try screen.
@@ -144,7 +128,6 @@ pub(crate) const ANSWER_TRY: Take = Take {
     release: 2.4,
 };
 
-/// The examples that type themselves into the demo cards.
 pub(crate) const EXAMPLE_REPLIES: [&str; 2] = ["Yes, call me after this.", "Give me five minutes."];
 
 #[cfg(test)]
@@ -172,10 +155,10 @@ mod tests {
     }
 
     #[test]
-    fn a_take_reports_its_newest_partial() {
+    fn a_take_reports_its_newest_partial_in_one_and_a_half_seconds() {
         assert_eq!(ANSWER_JAY.partial(0.0), "");
-        assert_eq!(ANSWER_JAY.partial(0.8), "Hey Jay");
-        assert!(ANSWER_JAY.partial(9.0).ends_with('?'));
-        assert!(ANSWER_JAY.finished(3.2));
+        assert_eq!(ANSWER_JAY.partial(0.3), "Every test");
+        assert!(ANSWER_JAY.partial(2.0).ends_with('.'));
+        assert!(ANSWER_JAY.finished(1.5));
     }
 }

@@ -176,6 +176,7 @@ pub(crate) fn run_app(
 /// The window as a Rune app whose lifetime the caller chooses, connected to
 /// its host through `connect`, with the playground when its experiment is on.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
+    onboarding_kit::set_live_window(true);
     let app = build(connect, playground::enabled());
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
@@ -204,7 +205,20 @@ fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     let playground = rune_args.iter().any(|arg| arg == "--playground");
-    build(Default::default(), playground && playground::enabled()).args(rune_args)
+    let headless = rune_args
+        .iter()
+        .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
+    onboarding_kit::set_live_window(playground && !headless);
+    let app = build(Default::default(), playground && playground::enabled()).args(rune_args);
+    if playground && !headless {
+        app.handle().update_if(|_, _| {
+            crate::feedback::set_enabled(true);
+            crate::feedback::set_volume(0.65);
+            let _ = crate::feedback::preload();
+            false
+        });
+    }
+    app
 }
 
 /// The window's compositor: the UI, then the welcome hero over the tour's

@@ -282,6 +282,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
     let settings = AppSettings::load()?;
+    // Preload bundled feedback sounds on a worker so onboarding and the Sounds
+    // sheet play immediately even before permissions let `recognition` start.
+    // Opens no audio output device until a tone actually plays.
+    let _ = crate::feedback::preload();
     // Known before the observer's first report, so launching keeps the saved
     // model instead of applying the current source's mapping.
     let initial_input_source = settings

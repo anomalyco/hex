@@ -13,6 +13,65 @@ use rodio::cpal::BufferSize;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
 use serde::{Deserialize, Serialize};
 
+/// Auditionable key-sound styles for the onboarding typing demo.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum KeySoundStyle {
+    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse (default).
+    #[default]
+    Taptic,
+    /// Whisper-quiet 28 ms felt-damped Magic Keyboard tap.
+    Felt,
+    /// Rounded 22 ms low-pitch warm droplet.
+    Soft,
+    /// Silent typing (only Hex's dictation tones play).
+    Silent,
+}
+
+impl KeySoundStyle {
+    pub const ALL: [Self; 4] = [Self::Taptic, Self::Felt, Self::Soft, Self::Silent];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Taptic => "Taptic tick",
+            Self::Felt => "Muted felt",
+            Self::Soft => "Soft warm",
+            Self::Silent => "Silent typing",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Taptic => Self::Felt,
+            Self::Felt => Self::Soft,
+            Self::Soft => Self::Silent,
+            Self::Silent => Self::Taptic,
+        }
+    }
+}
+
+/// Soft, varied tactile and motion cues for first-run onboarding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OnboardingTone {
+    /// One of six distinct key taps (`0..6`) in `style`.
+    Key(KeySoundStyle, u8),
+    /// Deeper stabilized space / return bar tap in `style`.
+    KeySpace(KeySoundStyle),
+    /// Soft delete / backspace tap in `style`.
+    KeyBackspace(KeySoundStyle),
+    /// Dictation shortcut keycap pressed down.
+    ShortcutDown,
+    /// Dictation shortcut keycap released.
+    ShortcutUp,
+    /// The single-hexagon mark arriving or settling.
+    Hexagon,
+    /// The Accessibility helper detaching and docking beside System Settings.
+    PanelEscape,
+    /// A permission row ticking to `Allowed`.
+    PermissionTick,
+    /// `"Almost ready"` appearing while finishing a slow model download.
+    AlmostReady,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
     #[cfg(target_os = "macos")]
@@ -24,6 +83,8 @@ pub enum Tone {
     Cancel,
     /// The first-run tour reached its last step.
     OnboardingSuccess,
+    /// A first-run onboarding cue (typing clacks, shortcut keycap, motion landings).
+    Onboarding(OnboardingTone),
     /// A Scrawl capture started recording.
     #[cfg(hex_capture)]
     CaptureStart,
@@ -181,7 +242,7 @@ pub fn preload() -> Result<()> {
         // the player itself, so report the same slow-audio outcome.
         return Err(eyre!("feedback audio is still initializing"));
     }
-    let (sender, receiver) = mpsc::sync_channel::<Request>(8);
+    let (sender, receiver) = mpsc::sync_channel::<Request>(32);
     let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let sounds = match Sounds::load() {
@@ -566,11 +627,99 @@ impl SetSounds {
     }
 }
 
+/// Decoded onboarding cues (`resources/audio/sounds/onboarding/`).
+struct OnboardingSounds {
+    felt_keys: [SamplesBuffer; 6],
+    felt_space: SamplesBuffer,
+    felt_backspace: SamplesBuffer,
+    taptic_keys: [SamplesBuffer; 6],
+    taptic_space: SamplesBuffer,
+    soft_keys: [SamplesBuffer; 6],
+    soft_space: SamplesBuffer,
+    shortcut_down: SamplesBuffer,
+    shortcut_up: SamplesBuffer,
+    hexagon: SamplesBuffer,
+    panel_escape: SamplesBuffer,
+    permission_tick: SamplesBuffer,
+    almost_ready: SamplesBuffer,
+}
+
+impl OnboardingSounds {
+    fn load() -> Result<Self> {
+        Ok(Self {
+            felt_keys: [
+                decode_wav(bundled_sound!("onboarding", "key_1"))?,
+                decode_wav(bundled_sound!("onboarding", "key_2"))?,
+                decode_wav(bundled_sound!("onboarding", "key_3"))?,
+                decode_wav(bundled_sound!("onboarding", "key_4"))?,
+                decode_wav(bundled_sound!("onboarding", "key_5"))?,
+                decode_wav(bundled_sound!("onboarding", "key_6"))?,
+            ],
+            felt_space: decode_wav(bundled_sound!("onboarding", "key_space"))?,
+            felt_backspace: decode_wav(bundled_sound!("onboarding", "key_backspace"))?,
+            taptic_keys: [
+                decode_wav(bundled_sound!("onboarding", "taptic_1"))?,
+                decode_wav(bundled_sound!("onboarding", "taptic_2"))?,
+                decode_wav(bundled_sound!("onboarding", "taptic_3"))?,
+                decode_wav(bundled_sound!("onboarding", "taptic_4"))?,
+                decode_wav(bundled_sound!("onboarding", "taptic_5"))?,
+                decode_wav(bundled_sound!("onboarding", "taptic_6"))?,
+            ],
+            taptic_space: decode_wav(bundled_sound!("onboarding", "taptic_space"))?,
+            soft_keys: [
+                decode_wav(bundled_sound!("onboarding", "soft_key_1"))?,
+                decode_wav(bundled_sound!("onboarding", "soft_key_2"))?,
+                decode_wav(bundled_sound!("onboarding", "soft_key_3"))?,
+                decode_wav(bundled_sound!("onboarding", "soft_key_4"))?,
+                decode_wav(bundled_sound!("onboarding", "soft_key_5"))?,
+                decode_wav(bundled_sound!("onboarding", "soft_key_6"))?,
+            ],
+            soft_space: decode_wav(bundled_sound!("onboarding", "soft_key_space"))?,
+            shortcut_down: decode_wav(bundled_sound!("onboarding", "shortcut_down"))?,
+            shortcut_up: decode_wav(bundled_sound!("onboarding", "shortcut_up"))?,
+            hexagon: decode_wav(bundled_sound!("onboarding", "hexagon"))?,
+            panel_escape: decode_wav(bundled_sound!("onboarding", "panel_escape"))?,
+            permission_tick: decode_wav(bundled_sound!("onboarding", "permission_tick"))?,
+            almost_ready: decode_wav(bundled_sound!("onboarding", "almost_ready"))?,
+        })
+    }
+
+    fn get(&self, cue: OnboardingTone) -> Option<&SamplesBuffer> {
+        Some(match cue {
+            OnboardingTone::Key(KeySoundStyle::Silent, _)
+            | OnboardingTone::KeySpace(KeySoundStyle::Silent)
+            | OnboardingTone::KeyBackspace(KeySoundStyle::Silent) => return None,
+            OnboardingTone::Key(KeySoundStyle::Felt, i) => {
+                &self.felt_keys[usize::from(i) % self.felt_keys.len()]
+            }
+            OnboardingTone::Key(KeySoundStyle::Taptic, i) => {
+                &self.taptic_keys[usize::from(i) % self.taptic_keys.len()]
+            }
+            OnboardingTone::Key(KeySoundStyle::Soft, i) => {
+                &self.soft_keys[usize::from(i) % self.soft_keys.len()]
+            }
+            OnboardingTone::KeySpace(KeySoundStyle::Felt) => &self.felt_space,
+            OnboardingTone::KeySpace(KeySoundStyle::Taptic) => &self.taptic_space,
+            OnboardingTone::KeySpace(KeySoundStyle::Soft) => &self.soft_space,
+            OnboardingTone::KeyBackspace(KeySoundStyle::Felt) => &self.felt_backspace,
+            OnboardingTone::KeyBackspace(KeySoundStyle::Taptic) => &self.taptic_keys[3],
+            OnboardingTone::KeyBackspace(KeySoundStyle::Soft) => &self.soft_keys[3],
+            OnboardingTone::ShortcutDown => &self.shortcut_down,
+            OnboardingTone::ShortcutUp => &self.shortcut_up,
+            OnboardingTone::Hexagon => &self.hexagon,
+            OnboardingTone::PanelEscape => &self.panel_escape,
+            OnboardingTone::PermissionTick => &self.permission_tick,
+            OnboardingTone::AlmostReady => &self.almost_ready,
+        })
+    }
+}
+
 /// The decoded sounds the playback worker plays, every set at once so a new
 /// choice plays at once.
 struct Sounds {
     /// In [`SoundSet::ALL`]'s order.
     sets: Vec<SetSounds>,
+    onboarding: OnboardingSounds,
     #[cfg(hex_capture)]
     capture: [SamplesBuffer; 5],
 }
@@ -582,6 +731,7 @@ impl Sounds {
                 .iter()
                 .map(SetSounds::load)
                 .collect::<Result<_>>()?,
+            onboarding: OnboardingSounds::load()?,
             #[cfg(hex_capture)]
             capture: capture_sounds()?,
         })
@@ -624,6 +774,7 @@ impl Sounds {
                     .as_ref()
                     .or(self.set(SoundSet::Signature).success.as_ref());
             }
+            Tone::Onboarding(cue) => return self.onboarding.get(cue),
             #[cfg(target_os = "macos")]
             Tone::Error => return sounds.error.as_ref(),
             #[cfg(hex_capture)]
@@ -887,6 +1038,101 @@ fn spawn_system_sound(sound: &str) -> Option<std::process::Child> {
         .ok()
 }
 
+/// Mixes a timed `(at_secs, Tone)` timeline offline into a 48 kHz 16-bit mono
+/// WAV file at `path` using the exact bundled `Sounds` without opening any
+/// audio output device. Used by headless `--video` renders and tests.
+pub(crate) fn mix_offline_wav(
+    path: &std::path::Path,
+    cues: &[(f64, Tone)],
+    set: SoundSet,
+    gain: f32,
+    duration_secs: f64,
+) -> Result<()> {
+    const OUT_SR: u32 = 48_000;
+    let total_samples = ((duration_secs.max(0.1) * f64::from(OUT_SR)).round() as usize).max(1);
+    let mut mix = vec![0.0_f32; total_samples];
+    let gain = gain.clamp(0.0, 1.0);
+    if gain > 0.0 && !cues.is_empty() {
+        let sounds = Sounds::load()?;
+        for &(at, tone) in cues {
+            if at < 0.0 {
+                continue;
+            }
+            let Some(buf) = sounds.get(set, tone) else {
+                continue;
+            };
+            let src_channels = usize::from(buf.channels().get());
+            let src_rate = buf.sample_rate().get();
+            let raw: Vec<f32> = buf.clone().collect();
+            let frames = raw.len() / src_channels.max(1);
+            let start_idx = (at * f64::from(OUT_SR)).round() as usize;
+            if start_idx >= total_samples {
+                continue;
+            }
+            if src_rate == OUT_SR {
+                for f in 0..frames {
+                    let dst = start_idx + f;
+                    if dst >= total_samples {
+                        break;
+                    }
+                    let mut mono = 0.0_f32;
+                    for ch in 0..src_channels {
+                        mono += raw[f * src_channels + ch];
+                    }
+                    mix[dst] += (mono / src_channels as f32) * gain;
+                }
+            } else {
+                let out_frames = ((frames as f64 * f64::from(OUT_SR) / f64::from(src_rate)).round()
+                    as usize)
+                    .max(1);
+                for of in 0..out_frames {
+                    let dst = start_idx + of;
+                    if dst >= total_samples {
+                        break;
+                    }
+                    let sf = (of as f64 * f64::from(src_rate) / f64::from(OUT_SR))
+                        .min((frames.saturating_sub(1)) as f64);
+                    let i0 = sf.floor() as usize;
+                    let i1 = (i0 + 1).min(frames.saturating_sub(1));
+                    let frac = (sf - i0 as f64) as f32;
+                    let sample_at = |idx: usize| -> f32 {
+                        (0..src_channels)
+                            .map(|ch| raw[idx * src_channels + ch])
+                            .sum::<f32>()
+                            / src_channels as f32
+                    };
+                    let val = sample_at(i0) * (1.0 - frac) + sample_at(i1) * frac;
+                    mix[dst] += val * gain;
+                }
+            }
+        }
+    }
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: OUT_SR,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)
+        .wrap_err_with(|| format!("could not create {}", path.display()))?;
+    for sample in mix {
+        // Gentle tanh knee above 0.85 so overlapping tones never hard-clip.
+        let a = sample.abs();
+        let soft = if a <= 0.85 {
+            sample
+        } else {
+            sample.signum() * (0.85 + 0.14 * ((a - 0.85) / 0.14).tanh())
+        };
+        let pcm = (soft.clamp(-1.0, 1.0) * f32::from(i16::MAX)).round() as i16;
+        writer
+            .write_sample(pcm)
+            .wrap_err("could not write WAV sample")?;
+    }
+    writer.finalize().wrap_err("could not finalize WAV")?;
+    Ok(())
+}
+
 /// Decodes one of Hex's bundled 16-bit PCM sounds.
 fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let reader =
@@ -996,6 +1242,93 @@ mod tests {
                 bundled.done.is_some() && bundled.error.is_some() && bundled.success.is_some();
             assert_eq!(whole, set != SoundSet::Classic, "{set:?}");
         }
+    }
+
+    #[test]
+    fn onboarding_cues_decode_stay_compact_and_respect_zero_volume_mix() {
+        let sounds = Sounds::load().unwrap();
+        for style in [
+            KeySoundStyle::Taptic,
+            KeySoundStyle::Felt,
+            KeySoundStyle::Soft,
+        ] {
+            for i in 0..6 {
+                let buf = sounds
+                    .get(
+                        SoundSet::Signature,
+                        Tone::Onboarding(OnboardingTone::Key(style, i)),
+                    )
+                    .expect("key cue present");
+                assert!(buf.total_duration().unwrap() <= Duration::from_millis(60));
+            }
+            assert!(
+                sounds
+                    .get(
+                        SoundSet::Signature,
+                        Tone::Onboarding(OnboardingTone::KeySpace(style))
+                    )
+                    .is_some()
+            );
+        }
+        assert!(
+            sounds
+                .get(
+                    SoundSet::Signature,
+                    Tone::Onboarding(OnboardingTone::Key(KeySoundStyle::Silent, 0))
+                )
+                .is_none(),
+            "Silent typing plays no key clacks"
+        );
+        for cue in [
+            OnboardingTone::ShortcutDown,
+            OnboardingTone::ShortcutUp,
+            OnboardingTone::Hexagon,
+            OnboardingTone::PanelEscape,
+            OnboardingTone::PermissionTick,
+            OnboardingTone::AlmostReady,
+        ] {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(250));
+        }
+
+        let k0: Vec<f32> = sounds.onboarding.felt_keys[0].clone().collect();
+        let k1: Vec<f32> = sounds.onboarding.felt_keys[1].clone().collect();
+        assert_ne!(k0, k1, "adjacent key clacks must differ");
+
+        // Offline mix with gain 0.0 writes pure silence; gain 0.5 writes audible cues.
+        let dir = std::env::temp_dir().join(format!(
+            "hex-sfx-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let silent = dir.join("silent.wav");
+        let audible = dir.join("audible.wav");
+        let timeline = [
+            (
+                0.05,
+                Tone::Onboarding(OnboardingTone::Key(KeySoundStyle::Taptic, 0)),
+            ),
+            (0.20, Tone::DictationStart),
+        ];
+        mix_offline_wav(&silent, &timeline, SoundSet::Signature, 0.0, 0.5).unwrap();
+        mix_offline_wav(&audible, &timeline, SoundSet::Signature, 0.5, 0.5).unwrap();
+        let max_abs = |p: &std::path::Path| -> i16 {
+            hound::WavReader::open(p)
+                .unwrap()
+                .into_samples::<i16>()
+                .map(|s| s.unwrap().saturating_abs())
+                .max()
+                .unwrap_or(0)
+        };
+        assert_eq!(max_abs(&silent), 0, "volume 0 means silent");
+        assert!(max_abs(&audible) > 400, "non-zero volume mixes cues");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
