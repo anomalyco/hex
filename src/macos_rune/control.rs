@@ -912,6 +912,7 @@ mod tests {
             automatic_preparation: false,
             preparation,
             recognition_start: None,
+            listener_failure: Default::default(),
         };
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,

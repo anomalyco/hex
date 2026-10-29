@@ -41,6 +41,7 @@ impl Fixture {
                 preparation,
                 automatic_preparation: false,
                 recognition_start: None,
+                listener_failure: Default::default(),
             },
             started,
             release,
