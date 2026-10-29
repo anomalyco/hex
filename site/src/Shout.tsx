@@ -6,7 +6,9 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 type Engine = {
   renderer: string
-  start(options: { context: AudioContext | null; muted: boolean }): Promise<void>
+  pressKey?(pressed: boolean, rect?: DOMRect | null): void
+  explodeKey?(rect?: DOMRect | null): void
+  start(options: { context: AudioContext | null; muted: boolean; keyRect?: DOMRect | null }): Promise<void>
   setMuted(muted: boolean, context?: AudioContext | null): void
   destroy(): void
 }
@@ -76,19 +78,32 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
   useEffect(() => () => live.current?.destroy(), [])
 
   const context = useRef<AudioContext | null>(null)
+  const pressKey = useCallback((down: boolean, el?: HTMLElement | null) => {
+    live.current?.pressKey?.(down, el?.getBoundingClientRect() ?? null)
+  }, [])
+
   // Must run inside the click: that gesture is what lets the browser play audio.
-  const start = useCallback(() => {
-    if (phase === "starting" || phase === "started") return
-    const quiet = readMuted()
-    if (!quiet) context.current ??= newContext()
-    void context.current?.resume()
-    setPhase("starting")
-    void load().then(async (e) => {
-      if (!e) return setPhase("idle")
-      await e.start({ context: context.current, muted: quiet })
-      setPhase("started")
-    })
-  }, [phase, load])
+  const start = useCallback(
+    (el?: HTMLElement | null) => {
+      if (phase === "starting" || phase === "started") return
+      const quiet = readMuted()
+      if (!quiet) context.current ??= newContext()
+      void context.current?.resume()
+      const keyRect = el?.getBoundingClientRect() ?? null
+      setPhase("starting")
+      if (live.current && !reduced.current) {
+        root.current?.setAttribute("data-key-exploded", "")
+        live.current.explodeKey?.(keyRect)
+      }
+      void load().then(async (e) => {
+        if (!e) return setPhase("idle")
+        if (!reduced.current) root.current?.setAttribute("data-key-exploded", "")
+        await e.start({ context: context.current, muted: quiet, keyRect })
+        setPhase("started")
+      })
+    },
+    [phase, load, root],
+  )
 
   const toggleMuted = useCallback(() => {
     const next = !muted
@@ -103,25 +118,63 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
     live.current?.setMuted(next, context.current)
   }, [muted])
 
-  return { phase, muted, start, load, toggleMuted }
+  return { phase, muted, start, load, pressKey, toggleMuted }
 }
 
-export function OptionKey({ phase, onStart, onIntent }: { phase: Phase; onStart(): void; onIntent(): void }) {
+export function OptionKey({
+  phase,
+  onStart,
+  onIntent,
+  onPress,
+}: {
+  phase: Phase
+  onStart(el?: HTMLElement | null): void
+  onIntent(): void
+  onPress?(down: boolean, el?: HTMLElement | null): void
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [pressed, setPressed] = useState(false)
   const gone = phase === "started"
+
+  const setDown = (down: boolean) => {
+    setPressed(down)
+    onPress?.(down, ref.current)
+  }
 
   return (
     <button
+      ref={ref}
       type="button"
       className="keycap"
-      data-pressed={phase === "starting" || undefined}
+      data-pressed={pressed || phase === "starting" || undefined}
       data-gone={gone || undefined}
       aria-label="Play the demo with sound"
       tabIndex={gone ? -1 : undefined}
       aria-hidden={gone || undefined}
       onPointerEnter={onIntent}
       onFocus={onIntent}
-      onPointerDown={onIntent}
-      onClick={onStart}
+      onPointerDown={() => {
+        onIntent()
+        setDown(true)
+      }}
+      onPointerUp={() => setDown(false)}
+      onPointerLeave={() => {
+        if (pressed) setDown(false)
+      }}
+      onPointerCancel={() => setDown(false)}
+      onBlur={() => {
+        if (pressed) setDown(false)
+      }}
+      onKeyDown={(e) => {
+        if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+          onIntent()
+          setDown(true)
+        }
+      }}
+      onKeyUp={(e) => {
+        if (e.key === " " || e.key === "Enter") setDown(false)
+      }}
+      onClick={() => onStart(ref.current)}
     >
       <span className="keycap__glow" aria-hidden="true" />
       <span className="keycap__well" aria-hidden="true" />

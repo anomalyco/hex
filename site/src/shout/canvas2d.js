@@ -85,8 +85,10 @@ export class Canvas2DRenderer {
   }
   resize(w, h, dpr) {
     this.dpr = dpr
-    this.canvas.width = Math.max(1, Math.round(w * dpr))
-    this.canvas.height = Math.max(1, Math.round(h * dpr))
+    const cw = Math.max(1, Math.round(w * dpr))
+    const ch = Math.max(1, Math.round(h * dpr))
+    if (this.canvas.width !== cw) this.canvas.width = cw
+    if (this.canvas.height !== ch) this.canvas.height = ch
   }
   done() {
     return Promise.resolve()
@@ -167,16 +169,20 @@ export class Canvas2DRenderer {
     const floorY = h - 14
     for (let i = this.shards.length - 1; i >= 0; i--) {
       const s = this.shards[i]
-      s.vx *= Math.exp(-look.shardDrag * dt)
-      s.vy = s.vy * Math.exp(-look.shardDrag * dt) + look.shardGravity * dt
+      const isKeycap = s.half && s.half[1] < 0
+      const drag = isKeycap ? look.shardDrag * 0.28 : look.shardDrag
+      const grav = isKeycap ? look.shardGravity * 1.75 : look.shardGravity
+      s.vx *= Math.exp(-drag * dt)
+      s.vy = s.vy * Math.exp(-drag * dt) + grav * dt
       s.x += s.vx * dt
       s.y += s.vy * dt
       s.ang += s.spin * dt
-      s.spin *= Math.exp(-0.95 * dt)
+      s.spin *= Math.exp((isKeycap ? -0.25 : -0.95) * dt)
       s.tumble = (s.tumble ?? 1) + (Math.abs(s.spin) * 0.65 + 2.5) * dt
       s.heat *= Math.exp(-dt / 0.28)
-      if (s.y > floorY && s.vy > 0) {
-        s.y = floorY
+      const sFloor = isKeycap ? h + 260 : floorY
+      if (s.y > sFloor && s.vy > 0) {
+        s.y = sFloor
         s.vy = -s.vy * 0.42
         s.vx *= 0.78
       }
@@ -186,7 +192,7 @@ export class Canvas2DRenderer {
         continue
       }
       const t = s.life / s.maxLife
-      const fade = Math.min(1, t / 0.35)
+      const fade = Math.min(1, t / (isKeycap ? 0.12 : 0.35))
       const tiltX = 0.4 + 0.6 * Math.abs(Math.cos(s.tumble))
       for (const k of [-0.2, 0.2]) {
         ctx.save()
@@ -205,8 +211,10 @@ export class Canvas2DRenderer {
         const e = s.entry
         ctx.drawImage(atlas, e.px, e.py, e.w * 2, e.h * 2, -s.base[0] - e.w / 2, -s.base[1] - e.h / 2, e.w, e.h)
         ctx.restore()
-        if (s.heat > 0.08 && k > 0) {
-          ctx.strokeStyle = rgb(saiyan > 0.25 ? saiyanCol(0.75) : ember(0.75), fade * Math.min(1, s.heat))
+        if ((s.heat > 0.08 || isKeycap) && k > 0) {
+          ctx.strokeStyle = isKeycap
+            ? `rgba(255,172,58,${fade * Math.max(0.35, Math.min(1, s.heat))})`
+            : rgb(saiyan > 0.25 ? saiyanCol(0.75) : ember(0.75), fade * Math.min(1, s.heat))
           ctx.lineWidth = 1.4
           ctx.stroke()
         }
@@ -292,6 +300,55 @@ export class Canvas2DRenderer {
         ctx.lineTo(f.r || 120, 0)
         ctx.stroke()
         ctx.restore()
+      } else if (f.kind === 8) {
+        // Fireball cooling to smoke
+        const rad = Math.max(4, f.r)
+        if (f.t > 0.18) {
+          ctx.globalCompositeOperation = "source-over"
+          const sa = Math.min(0.65, (1 - f.t) * 0.75 * f.k)
+          const sg = ctx.createRadialGradient(f.x, f.y, rad * 0.1, f.x, f.y, rad)
+          sg.addColorStop(0, `rgba(22,20,26,${sa})`)
+          sg.addColorStop(0.7, `rgba(14,13,18,${sa * 0.7})`)
+          sg.addColorStop(1, "rgba(10,10,12,0)")
+          ctx.fillStyle = sg
+          ctx.beginPath()
+          ctx.arc(f.x, f.y, rad, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.globalCompositeOperation = "lighter"
+        }
+        if (f.t < 0.8) {
+          const fg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, rad * 0.85)
+          const fireA = Math.max(0, 1 - f.t / 0.8) * f.k
+          fg.addColorStop(0, `rgba(255,248,220,${fireA})`)
+          fg.addColorStop(0.45, saiyan > 0.3 ? `rgba(255,195,55,${fireA * 0.85})` : `rgba(255,115,35,${fireA * 0.85})`)
+          fg.addColorStop(1, "rgba(220,40,10,0)")
+          ctx.fillStyle = fg
+          ctx.beginPath()
+          ctx.arc(f.x, f.y, rad * 0.85, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      } else if (f.kind === 9) {
+        // Rising smoke plume
+        ctx.globalCompositeOperation = "source-over"
+        const rad = Math.max(4, f.r)
+        const sa = Math.min(0.55, Math.min(1, f.t * 6) * Math.pow(1 - f.t, 1.4) * f.k * 0.6)
+        const sg = ctx.createRadialGradient(f.x, f.y, rad * 0.1, f.x, f.y, rad)
+        sg.addColorStop(0, `rgba(24,23,28,${sa})`)
+        sg.addColorStop(0.65, `rgba(18,17,22,${sa * 0.65})`)
+        sg.addColorStop(1, "rgba(12,12,15,0)")
+        ctx.fillStyle = sg
+        ctx.beginPath()
+        ctx.arc(f.x, f.y, rad, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalCompositeOperation = "lighter"
+      } else if (f.kind === 10) {
+        // Scorch + shockwave double ring
+        const rad = Math.max(4, f.r)
+        ctx.strokeStyle = `rgba(255,205,130,${(1 - f.t) * f.k * 0.7})`
+        ctx.lineWidth = 2.2
+        ctx.beginPath()
+        ctx.arc(f.x, f.y, rad * (0.25 + 0.7 * (1 - Math.pow(1 - f.t, 2.2))), 0, Math.PI * 2)
+        ctx.stroke()
       } else {
         const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r)
         const c = f.kind === 1 ? [1, 0.97, 0.92] : saiyan > 0.25 ? [1, 0.78, 0.2] : [1, 0.42, 0.16]

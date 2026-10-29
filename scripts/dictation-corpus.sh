@@ -16,7 +16,7 @@ if [[ ! -d "$CORPUS_DIR" ]]; then
 fi
 
 if [[ ! -f "$MODEL_PATH" ]]; then
-  DEFAULT_MODEL="$HOME/Library/Application Support/voice-control/models/parakeet-unified-en-0.6b-Q8_0.gguf"
+  DEFAULT_MODEL="$HOME/Library/Application Support/hex/models/parakeet-unified-en-0.6b-Q8_0.gguf"
   if [[ -f "$DEFAULT_MODEL" ]]; then
     MODEL_PATH="$DEFAULT_MODEL"
   else
@@ -32,7 +32,7 @@ export CARGO_TARGET_DIR="$TARGET_DIR"
 
 if command -v hivemind >/dev/null 2>&1; then
   exec hivemind run --kind cargo -- \
-    cargo test --bin voice-control -j 2 evaluate_dictation_corpus -- --ignored --nocapture --test-threads=1
+    cargo test --bin hex -j 2 evaluate_dictation_corpus -- --ignored --nocapture --test-threads=1
 else
-  exec cargo test --bin voice-control -j 2 evaluate_dictation_corpus -- --ignored --nocapture --test-threads=1
+  exec cargo test --bin hex -j 2 evaluate_dictation_corpus -- --ignored --nocapture --test-threads=1
 fi

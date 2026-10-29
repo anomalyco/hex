@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "next_id": 5,
+  "entries": [
+    {"id":1,"timestamp_ms":1792000000000,"kind":"dictation","raw_text":"expired problems","final_text":"Expired problems","application":"OpenCode Beta"},
+    {"id":2,"timestamp_ms":1792540000000,"kind":"dictation","raw_text":"the problems board","final_text":"The Problems board.","application":"OpenCode Beta","processing":{"profile":"Engineering","latency_ms":120,"fallback":null}},
+    {"id":3,"timestamp_ms":1792600000000,"kind":"voice_action","raw_text":"rewrite this","final_text":"Other text","application":"Zed"},
+    {"id":4,"timestamp_ms":1792700000000,"kind":"send","raw_text":"raw only NEEDLE","final_text":"Recent result","application":"OpenCode Beta"}
+  ]
+}

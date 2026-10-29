@@ -1,10 +1,15 @@
 # Hex website
 
-`hex.kitlangton.com` is the one Hex site. `bun run dev` starts Vite. `bun run
-build` checks TypeScript and builds it; `bun run check:downloads` checks that
-every download link serves a file; `bunx wrangler deploy` publishes the Worker,
-whose `worker.ts` 301s `hex.kitlangton.dev`, plain HTTP, and workers.dev to the
-same path on `hex.kitlangton.com`.
+`https://anoma.ly/hex` is the one Hex site (dev: `https://dev.anoma.ly/hex`).
+`bun run dev` starts Vite. `bun run build [--mode dev]` checks TypeScript and
+builds Cloudflare Build Output with base `/hex/`; `bun run check:downloads`
+checks that every download link serves a file. `cloudflare.config.ts` defines
+both Workers. CI deploys them, never a laptop: Site builds without secrets and
+`.github/release/deploy-site.sh` deploys the verified Build Output
+(`cf deploy --prebuilt --mode <mode>`), refusing any Worker, route, or binding
+other than this config's (docs/releasing.md). `worker.ts` serves the
+site and, at `/hex/files/`, the environment's R2 bucket of release files, and
+301s other hosts and plain HTTP to the canonical host.
 
 The download section (`src/Download.tsx`) names the visitor's platform on first
 paint and refines it with UA client hints: a DMG for Apple silicon Macs, the
@@ -49,3 +54,12 @@ the name, and one line. `scripts/og/hex-icon.png` is the 1024 px icon exported
 from the built app (`iconutil -c iconset Hex.app/Contents/Resources/AppIcon.icns`).
 Regenerate with `bun run generate:og`, bump the `?v=` on both image tags in
 `index.html`, rebuild, deploy, and fetch the published PNG.
+
+Messages also plays `public/og.mp4` (`og:video`) inline on a loop in place of the
+image; other apps keep the PNG. It's a 4.5 s, 1200 × 630, 60 fps silent H.264
+loop: the icon speaks and the words pile up under it
+(`scripts/og-video/hex-pour.js`, matter.js physics, deterministic per frame so
+the last frame meets the first). `bun run generate:og-video [hex-line|hex-key]`
+renders it through Chromium and ffmpeg; bump the `?v=` on both `og:video` tags
+after changing it. The Worker answers Range requests for `.mp4`, which Safari
+and AVFoundation need.

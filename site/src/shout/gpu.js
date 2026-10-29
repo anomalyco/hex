@@ -22,6 +22,8 @@ struct U {
   h9: vec4f,    // finaleSpin, finaleAngle, dizzy, hairX
   h10: vec4f,   // hairY, intensity, finalePower, -
   h11: vec4f,   // visemeFrom, visemeTo, visemeMix, saiyanFrame
+  l0: vec4f,    // explosion light 0: x, y, r, k
+  l1: vec4f,    // explosion light 1: x, y, r, k
 }
 @group(0) @binding(0) var<uniform> u: U;
 const CORNERS = array<vec2f, 6>(vec2f(-1, -1), vec2f(1, -1), vec2f(-1, 1), vec2f(-1, 1), vec2f(1, -1), vec2f(1, 1));
@@ -228,6 +230,24 @@ struct VO {
     let castCol = mix(vec3f(1.0, 0.26, 0.08), vec3f(1.0, 0.74, 0.18), clamp(u.h6.x * 1.1, 0.0, 1.0));
     let rimLight = (edgeBand * (0.15 + 0.85 * facing) * 0.78 + crackGlow * 0.28) * auraPower * atten * flicker;
     rgb = rgb + castCol * rimLight * bodyMask * t.a;
+  }
+
+  // Dynamic light cast by nearby explosions (u.l0, u.l1) onto facing cards
+  for (var li = 0; li < 2; li = li + 1) {
+    let L = select(u.l0, u.l1, li == 1);
+    if (L.w > 0.01 && bodyMask > 0.01 && !isResolved) {
+      let toCard = i.world - L.xy;
+      let dist = length(toCard);
+      let atten = exp(-dist / max(L.z, 1.0) * 1.55) * L.w;
+      if (atten > 0.005) {
+        let lDir = -toCard / max(dist, 1.0);
+        let cardNrm = normalize(q * vec2f(1.0, aspect) + vec2f(1e-4));
+        let face = 0.25 + 0.75 * max(0.0, dot(cardNrm, lDir));
+        let edgeBoost = smoothstep(0.55, 0.93, max(abs(q.x) / 0.90, abs(q.y) / 0.80));
+        let lCol = select(vec3f(1.0, 0.58, 0.18), vec3f(1.0, 0.84, 0.28), u.h6.x > 0.25);
+        rgb = rgb + lCol * atten * (edgeBoost * face * 0.95 + face * 0.30) * bodyMask * t.a;
+      }
+    }
   }
 
   // Specular sheen when tilted in 3D
@@ -658,13 +678,16 @@ ${SHARD_T}
   var s = ss[i];
   if (s.life <= 0.0) { return; }
   let dt = u.misc.y;
-  s.vel = s.vel * exp(-u.phys.x * dt);
-  s.vel.y = s.vel.y + u.phys.y * dt;
+  let isKeycap = s.hs.y < 0.0;
+  let drag = select(u.phys.x, u.phys.x * 0.28, isKeycap);
+  let grav = select(u.phys.y, u.phys.y * 1.75, isKeycap);
+  s.vel = s.vel * exp(-drag * dt);
+  s.vel.y = s.vel.y + grav * dt;
   s.pos = s.pos + s.vel * dt;
   s.ang = s.ang + s.spin * dt;
-  s.spin = s.spin * exp(-0.95 * dt);
+  s.spin = s.spin * exp(select(-0.95, -0.25, isKeycap) * dt);
 
-  let floorY = u.view.y - 14.0;
+  let floorY = select(u.view.y - 14.0, u.view.y + 260.0, isKeycap);
   if (s.pos.y > floorY && s.vel.y > 0.0) {
     s.pos.y = floorY;
     s.vel.y = -s.vel.y * 0.42;
@@ -739,22 +762,24 @@ fn edgeDist(a: vec2f, b: vec2f, p: vec2f, sgn: f32) -> f32 {
     let dIn = min(min(d0, d1), min(d2, d3));
     if (dIn >= 0.0) {
       let sp = s.base + lp;
-      let uv = mix(s.uvr.xy, s.uvr.zw, sp / (2.0 * s.hs) + 0.5);
+      let uv = mix(s.uvr.xy, s.uvr.zw, sp / (2.0 * abs(s.hs)) + 0.5);
       let sampCol = textureSampleLevel(tex, samp, uv, 0.0);
       acc = acc + sampCol;
-      edgeGlowAcc = edgeGlowAcc + (1.0 - smoothstep(0.0, 2.0, dIn)) * sampCol.a;
+      edgeGlowAcc = edgeGlowAcc + (1.0 - smoothstep(0.0, 2.2, dIn)) * sampCol.a;
     }
   }
   acc = acc / f32(N);
   if (acc.a <= 0.002) { return vec4f(0.0); }
   let edgeRim = edgeGlowAcc / f32(N);
+  let isKeycap = s.hs.y < 0.0;
 
   let t = clamp(s.life / s.maxLife, 0.0, 1.0);
-  let fade = smoothstep(0.0, 0.35, t);
-  let glint = pow(max(0.0, sin(tumble * 2.0 + s.ang * 0.5)), 10.0) * 0.42;
-  let rimCol = select(ember(0.45 + 0.5 * heat), saiyanCol(0.55 + 0.45 * heat), u.h6.x > 0.25);
-  var rgb = acc.rgb + vec3f(0.88, 0.94, 1.0) * glint * acc.a;
-  rgb = rgb + rimCol * edgeRim * (0.35 + 1.20 * heat);
+  let fade = smoothstep(0.0, select(0.35, 0.12, isKeycap), t);
+  let glint = pow(max(0.0, sin(tumble * 2.0 + s.ang * 0.5)), select(10.0, 6.0, isKeycap)) * select(0.42, 0.65, isKeycap);
+  let keycapAmber = mix(vec3f(1.0, 0.52, 0.12), vec3f(1.0, 0.88, 0.45), heat);
+  let rimCol = select(select(ember(0.45 + 0.5 * heat), saiyanCol(0.55 + 0.45 * heat), u.h6.x > 0.25), keycapAmber, isKeycap);
+  var rgb = acc.rgb + vec3f(0.95, 0.96, 1.0) * glint * acc.a;
+  rgb = rgb + rimCol * edgeRim * (select(0.35, 0.65, isKeycap) + 1.25 * heat);
 
   return vec4f(rgb, acc.a) * fade;
 }
@@ -828,7 +853,7 @@ struct VO {
 }
 `
 
-// ─── 5. FX Pass: Rings, Flashes, Lightning (4), Emerald Checkmark (5), Tommy Muzzle Cone (6), Tracer Beam (7) ───
+// ─── 5. FX Pass: Rings, Flashes, Lightning (4), Emerald Checkmark (5), Tommy Muzzle Cone (6), Tracer Beam (7), Fireball (8), Smoke (9), Scorch (10) ───
 const FX = /* wgsl */ `
 ${COMMON}
 struct F { pos: vec2f, r: f32, kind: f32, t: f32, width: f32, k: f32, pad: f32 }
@@ -838,6 +863,7 @@ struct VO {
   @location(0) q: vec2f,
   @location(1) @interpolate(flat) kind: i32,
   @location(2) p: vec4f,
+  @location(3) @interpolate(flat) seed: f32,
 }
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VO {
   var o: VO;
@@ -857,11 +883,14 @@ struct VO {
     let nrm = vec2f(-dir.y, dir.x);
     let local = dir * ((c.x * 0.5 + 0.35) * f.r * 1.4) + nrm * (c.y * f.r * 0.85);
     w = f.pos + local;
+  } else if (k >= 8) {
+    w = f.pos + c * (f.r * 1.18 + 6.0);
   }
   o.pos = toClip(w);
   o.q = c;
   o.kind = k;
   o.p = vec4f(f.r, f.t, f.width, f.k);
+  o.seed = f.pad;
   return o;
 }
 fn sdSeg2(p: vec2f, a: vec2f, b: vec2f) -> f32 {
@@ -944,6 +973,68 @@ fn sdSeg2(p: vec2f, a: vec2f, b: vec2f) -> f32 {
     let beamGlow = exp(-vC * 5.5) * trail * 0.72;
     let col = vec3f(1.0, 0.98, 0.90) * beamCore * 1.4 + vec3f(1.0, 0.72, 0.18) * beamGlow;
     return vec4f(col * k * (1.0 - t * 0.65), 0.0);
+  }
+  if (i.kind == 8) {
+    // Volumetric noise-driven fireball expanding and cooling into dark billowing smoke
+    let p = rot(i.seed * 1.7) * i.q;
+    let r0 = length(p);
+    if (r0 > 1.08) { return vec4f(0.0); }
+    let adv = vec2f(0.0, t * 2.4);
+    let n1 = fbm(p * 2.7 - adv + vec2f(i.seed * 3.1, i.seed * 5.3));
+    let n2 = fbm(p * 5.8 + vec2f(n1 * 1.35, -t * 3.6) + vec2f(i.seed * 7.9));
+    let billow = n1 * 0.60 + n2 * 0.40;
+    let lobeDist = r0 + (billow - 0.52) * (0.36 + 0.24 * t);
+    let density = clamp((0.80 - lobeDist) / 0.30, 0.0, 1.0) * smoothstep(1.05, 0.75, r0);
+    if (density <= 0.002) { return vec4f(0.0); }
+
+    let cool = smoothstep(0.14, 0.86, t);
+    let coreHeat = clamp((1.05 - r0 * 0.92) * (0.55 + 0.75 * billow) - cool * 0.82, 0.0, 1.0);
+    let firePal = select(ember(0.22 + 0.78 * coreHeat), saiyanCol(0.28 + 0.72 * coreHeat), saiyan > 0.35);
+    let whiteHot = vec3f(1.0, 0.98, 0.90) * pow(coreHeat, 3.2) * (1.0 - smoothstep(0.0, 0.52, t));
+    let fireEmit = (firePal * pow(coreHeat, 1.25) * 1.65 + whiteHot * 1.4) * density * (1.0 - smoothstep(0.75, 1.0, t)) * k;
+
+    // Dark charcoal smoke shell forming as the outer billows cool
+    let smokeForm = smoothstep(0.16, 0.58, t) * (1.0 - smoothstep(0.72, 1.0, t));
+    let shade = 0.045 + 0.045 * billow + 0.025 * max(0.0, -i.q.y);
+    let underRim = max(0.0, i.q.y * 0.6 + 0.4) * pow(1.0 - coreHeat, 1.5) * (1.0 - t);
+    let smokeRgb = vec3f(shade, shade * 0.96, shade * 1.06) + firePal * underRim * 0.22;
+    let smokeAlpha = clamp(density * smokeForm * (1.0 - coreHeat * 0.65) * 0.78 * min(1.0, k), 0.0, 0.82);
+
+    return vec4f(smokeRgb * smokeAlpha + fireEmit, smokeAlpha);
+  }
+  if (i.kind == 9) {
+    // Rising smoke plume that lingers, drifts, and catches warm under-light
+    let p = rot(i.seed * 0.9) * i.q;
+    let r0 = length(p);
+    if (r0 > 1.05) { return vec4f(0.0); }
+    let n1 = fbm(p * 2.4 - vec2f(0.0, t * 1.6) + vec2f(i.seed * 4.3, i.seed * 2.1));
+    let n2 = fbm(p * 4.8 + vec2f(n1 * 1.1, -t * 2.4) + vec2f(i.seed * 6.7));
+    let cloud = n1 * 0.65 + n2 * 0.35;
+    let edge = r0 + (cloud - 0.5) * 0.42;
+    let density = clamp((0.76 - edge) / 0.34, 0.0, 1.0) * smoothstep(1.02, 0.68, r0);
+    if (density <= 0.002) { return vec4f(0.0); }
+
+    let env = smoothstep(0.0, 0.14, t) * pow(1.0 - t, 1.45);
+    let shade = 0.065 + 0.055 * cloud + 0.025 * (0.5 - i.q.y * 0.5);
+    let warmBounce = max(0.0, i.q.y * 0.7 + 0.35) * exp(-t * 2.6) * (0.35 + 0.65 * cloud);
+    let warmCol = select(vec3f(1.0, 0.48, 0.16), vec3f(1.0, 0.78, 0.24), saiyan > 0.3);
+    let smokeCol = vec3f(shade, shade * 0.98, shade * 1.05);
+    let alpha = clamp(density * env * 0.62 * k, 0.0, 0.72);
+    let rimEmit = warmCol * warmBounce * density * env * 0.32 * k;
+    return vec4f(smokeCol * alpha + rimEmit, alpha);
+  }
+  if (i.kind == 10) {
+    // Scorch heat glow & double shockwave pressure distortion ring
+    let r0 = length(i.q);
+    if (r0 > 1.05) { return vec4f(0.0); }
+    let n = fbm(i.q * 4.2 + vec2f(i.seed * 2.7, -t * 1.8));
+    let waveR = 0.25 + 0.70 * (1.0 - pow(1.0 - t, 2.4));
+    let ring1 = exp(-pow((r0 - waveR) / 0.055, 2.0)) * (1.0 - t);
+    let ring2 = exp(-pow((r0 - waveR * 0.76) / 0.08, 2.0)) * (1.0 - t) * 0.55;
+    let scorchCore = pow(max(0.0, 1.0 - r0 * 1.25), 2.0) * (0.5 + 0.8 * n) * pow(1.0 - t, 1.8);
+    let pal = select(ember(0.35 + 0.55 * (ring1 + scorchCore)), saiyanCol(0.45 + 0.5 * (ring1 + scorchCore)), saiyan > 0.3);
+    let col = pal * (scorchCore * 0.75 + ring2 * 0.85) + vec3f(1.0, 0.94, 0.82) * ring1 * 1.15;
+    return vec4f(col * k, 0.0);
   }
 
   let span = r + w * 2.0 + 6.0;
@@ -1119,7 +1210,7 @@ export class GpuRenderer {
     this.ctx.configure({ device, format, alphaMode: "premultiplied" })
 
     const U = GPUBufferUsage
-    this.uni = device.createBuffer({ size: 256, usage: U.UNIFORM | U.COPY_DST })
+    this.uni = device.createBuffer({ size: 288, usage: U.UNIFORM | U.COPY_DST })
     this.probBuf = device.createBuffer({ size: MAX_PROBLEMS * PROB_FLOATS * 4, usage: U.STORAGE | U.COPY_DST })
     this.wordBuf = device.createBuffer({ size: MAX_WORDS * 64, usage: U.STORAGE | U.COPY_DST })
     this.shards = device.createBuffer({ size: MAX_SHARDS * SHARD_FLOATS * 4, usage: U.STORAGE | U.COPY_DST })
@@ -1151,7 +1242,7 @@ export class GpuRenderer {
     this.headPipe = pipe(HEAD, pre)
     this.shardPipe = pipe(SHARDS, pre)
     this.wordPipe = pipe(WORDS, pre)
-    this.fxPipe = pipe(FX, add)
+    this.fxPipe = pipe(FX, pre)
     this.sparkPipe = pipe(SPARKS, add)
     this.shardSim = cpipe(SHARD_SIM)
     this.sparkSim = cpipe(SPARK_SIM)
@@ -1171,7 +1262,7 @@ export class GpuRenderer {
     this.shardSimBind = bg(this.shardSim, [B(this.shards)])
     this.sparkSimBind = bg(this.sparkSim, [B(this.sparks)])
 
-    this.u = new Float32Array(64)
+    this.u = new Float32Array(72)
     this.probData = new Float32Array(MAX_PROBLEMS * PROB_FLOATS)
     this.wordData = new Float32Array(MAX_WORDS * 16)
     this.fxData = new Float32Array(MAX_FX * 8)
@@ -1226,8 +1317,10 @@ export class GpuRenderer {
   }
 
   resize(w, h, dpr) {
-    this.canvas.width = Math.max(1, Math.round(w * dpr))
-    this.canvas.height = Math.max(1, Math.round(h * dpr))
+    const cw = Math.max(1, Math.round(w * dpr))
+    const ch = Math.max(1, Math.round(h * dpr))
+    if (this.canvas.width !== cw) this.canvas.width = cw
+    if (this.canvas.height !== ch) this.canvas.height = ch
   }
 
   uploadAtlases() {
@@ -1281,6 +1374,8 @@ export class GpuRenderer {
     const finAng = this.fx.finale?.angle ?? 0
     const finPow = this.fx.finale?.power ?? 0
 
+    const l0 = scene.lights?.[0]
+    const l1 = scene.lights?.[1]
     u.set([w, h, scene.shakeX, scene.shakeY, scene.time, scene.dt, look.shutter, scene.roll], 0)
     u.set([head.x, head.y, head.R, head.tilt, head.sx, head.sy, head.anger, mouth], 8)
     u.set([gazeX, gazeY, head.blink, head.happy, head.faceX, head.faceY, head.browUp, mouthW], 16)
@@ -1290,6 +1385,7 @@ export class GpuRenderer {
     u.set([head._fxGooglyLX ?? 0, head._fxGooglyLY ?? 0, head._fxGooglyRX ?? 0, head._fxGooglyRY ?? 0, finSpin, finAng, head._fxDizzy ?? 0, head._fxHairX ?? 0], 48)
     u.set([head._fxHairY ?? 0, this.fx.intensity ?? 0, finPow, 0], 56)
     u.set([head._fxVisemeFrom ?? 0, head._fxVisemeTo ?? 0, head._fxVisemeMix ?? 1, head._fxSaiyanFrame ?? 13], 60)
+    u.set([l0?.x ?? 0, l0?.y ?? 0, l0?.r ?? 0, l0?.k ?? 0, l1?.x ?? 0, l1?.y ?? 0, l1?.r ?? 0, l1?.k ?? 0], 64)
 
     const q = this.device.queue
     q.writeBuffer(this.uni, 0, u)
@@ -1348,7 +1444,7 @@ export class GpuRenderer {
     const fd = this.fxData
     for (let i = 0; i < nf; i++) {
       const f = fx[i]
-      fd.set([f.x, f.y, f.r, f.kind, f.t, f.width ?? 0, f.k, 0], i * 8)
+      fd.set([f.x, f.y, f.r, f.kind, f.t, f.width ?? 0, f.k, f.seed ?? 0], i * 8)
     }
     if (nf) q.writeBuffer(this.fxBuf, 0, fd, 0, nf * 8)
 

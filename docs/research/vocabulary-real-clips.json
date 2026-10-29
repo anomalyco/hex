@@ -1,0 +1,2603 @@
+{
+ "clips": 49,
+ "audio_s": 219.9,
+ "results": {
+  "production-history": {
+   "term_recall": "7/14",
+   "false_hint_insertions": 0,
+   "wer": 0.95,
+   "errors": 7,
+   "words": 733,
+   "wer_confident": 1.17,
+   "confident_words": 598,
+   "empty_outputs": 0,
+   "median_ms_per_audio_s": null,
+   "median_finalize_ms_per_audio_s": null,
+   "median_clip_ms": null,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 1,
+     "terms": {
+      "grill": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 3,
+     "terms": {
+      "dotfiles": "0/1",
+      "MacBook Air": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 1,
+     "terms": {
+      "Rune": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  },
+  "unified-stream": {
+   "term_recall": "7/14",
+   "false_hint_insertions": 0,
+   "wer": 1.09,
+   "errors": 8,
+   "words": 733,
+   "wer_confident": 1.17,
+   "confident_words": 598,
+   "empty_outputs": 0,
+   "median_ms_per_audio_s": 38.2,
+   "median_finalize_ms_per_audio_s": 11.9,
+   "median_clip_ms": 175.2,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 1,
+     "terms": {
+      "grill": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 3,
+     "terms": {
+      "dotfiles": "0/1",
+      "MacBook Air": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 1,
+     "terms": {
+      "Rune": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  },
+  "unified-offline": {
+   "term_recall": "9/14",
+   "false_hint_insertions": 0,
+   "wer": 3.0,
+   "errors": 22,
+   "words": 733,
+   "wer_confident": 2.01,
+   "confident_words": 598,
+   "empty_outputs": 0,
+   "median_ms_per_audio_s": 14.6,
+   "median_finalize_ms_per_audio_s": null,
+   "median_clip_ms": 63.6,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 1,
+     "terms": {
+      "grill": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 4,
+     "terms": {
+      "dotfiles": "0/1",
+      "MacBook Air": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "2/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 0,
+     "terms": {
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  },
+  "qwen-offline": {
+   "term_recall": "9/14",
+   "false_hint_insertions": 0,
+   "wer": 6.55,
+   "errors": 48,
+   "words": 733,
+   "wer_confident": 5.02,
+   "confident_words": 598,
+   "empty_outputs": 0,
+   "median_ms_per_audio_s": 70.3,
+   "median_finalize_ms_per_audio_s": null,
+   "median_clip_ms": 267.1,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 4,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 0,
+     "terms": {
+      "grill": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 5,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 2,
+     "terms": {
+      "dotfiles": "0/1",
+      "MacBook Air": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 2,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "0/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 4,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 0,
+     "terms": {
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  },
+  "qwen-hints17": {
+   "term_recall": "11/14",
+   "false_hint_insertions": 0,
+   "wer": 6.0,
+   "errors": 44,
+   "words": 733,
+   "wer_confident": 4.18,
+   "confident_words": 598,
+   "empty_outputs": 0,
+   "median_ms_per_audio_s": 74.9,
+   "median_finalize_ms_per_audio_s": null,
+   "median_clip_ms": 294.6,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 6,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 0,
+     "terms": {
+      "grill": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 5,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 2,
+     "terms": {
+      "dotfiles": "0/1",
+      "MacBook Air": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 2,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 4,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 0,
+     "terms": {
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  },
+  "qwen-hints27": {
+   "term_recall": "11/14",
+   "false_hint_insertions": 0,
+   "wer": 8.19,
+   "errors": 60,
+   "words": 733,
+   "wer_confident": 6.35,
+   "confident_words": 598,
+   "empty_outputs": 4,
+   "median_ms_per_audio_s": 73.1,
+   "median_finalize_ms_per_audio_s": null,
+   "median_clip_ms": 310.3,
+   "per_clip": [
+    {
+     "id": "1792735602344",
+     "words": 7,
+     "errors": 7,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": true
+    },
+    {
+     "id": "1792735614045",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735621309",
+     "words": 13,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735640808",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735644146",
+     "words": 7,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735738237",
+     "words": 8,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735748307",
+     "words": 18,
+     "errors": 5,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735751933",
+     "words": 13,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735783602",
+     "words": 25,
+     "errors": 0,
+     "terms": {
+      "grill": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735789906",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735798045",
+     "words": 14,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735803080",
+     "words": 16,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735813672",
+     "words": 19,
+     "errors": 0,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735816210",
+     "words": 11,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735830077",
+     "words": 21,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735848456",
+     "words": 38,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735850685",
+     "words": 10,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735854781",
+     "words": 16,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735880498",
+     "words": 22,
+     "errors": 0,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735887560",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735967611",
+     "words": 5,
+     "errors": 5,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": true
+    },
+    {
+     "id": "1792735980294",
+     "words": 23,
+     "errors": 5,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792735991409",
+     "words": 9,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736041649",
+     "words": 17,
+     "errors": 0,
+     "terms": {
+      "dotfiles": "1/1",
+      "MacBook Air": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736106662",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Hex": "0/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736124209",
+     "words": 19,
+     "errors": 2,
+     "terms": {
+      "Dax": "1/1",
+      "Rune": "1/2"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736129862",
+     "words": 14,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736139345",
+     "words": 23,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736156155",
+     "words": 8,
+     "errors": 4,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736160614",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736168539",
+     "words": 26,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736176091",
+     "words": 36,
+     "errors": 0,
+     "terms": {
+      "HiveMind": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736178726",
+     "words": 7,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736194331",
+     "words": 6,
+     "errors": 6,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": true
+    },
+    {
+     "id": "1792736200401",
+     "words": 15,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736202331",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736219057",
+     "words": 27,
+     "errors": 0,
+     "terms": {
+      "Rune": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792736241659",
+     "words": 17,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766783684",
+     "words": 15,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792766796419",
+     "words": 30,
+     "errors": 1,
+     "terms": {
+      "Dax": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770882378",
+     "words": 20,
+     "errors": 2,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792770914729",
+     "words": 14,
+     "errors": 0,
+     "terms": {
+      "Adam": "1/1"
+     },
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771062622",
+     "words": 9,
+     "errors": 1,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771064830",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792771217192",
+     "words": 7,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792773230065",
+     "words": 4,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791956432",
+     "words": 9,
+     "errors": 0,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    },
+    {
+     "id": "1792791967269",
+     "words": 3,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": true
+    },
+    {
+     "id": "1792791971568",
+     "words": 2,
+     "errors": 3,
+     "terms": {},
+     "inserted_hints": [],
+     "empty": false
+    }
+   ]
+  }
+ },
+ "reference_revisions_after_inference": [
+  "only->probably: Unified offline and all Qwen arms agree",
+  "macro gear->MacBook Air: all Qwen arms agree; the Air left Kit's fleet that week"
+ ],
+ "schema": "vocabulary-real-clips/1",
+ "worker": "Apple M4 Pro Mac mini (64 GB), strict Metal, shared worker (load avg ~6.5)",
+ "engine": "transcribe-cpp 0.4.1 unpatched (spike/parakeet-boost model-runner), 1 CPU thread, fresh session per clip, 1 warm + 2 measured passes, accuracy from pass 1, 0 transcripts changed in pass 2",
+ "models": {
+  "unified": "handy-computer/parakeet-unified-en-0.6b-gguf@7e948f2 Q8_0 sha256 4b50b6dd\u2026",
+  "qwen": "handy-computer/Qwen3-ASR-1.7B-gguf@0e0a596 Q8_0 sha256 9a0d8179\u2026"
+ },
+ "hint_prompts": {
+  "qwen-hints17": "Names and technical terms: Hex, Abattoir, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind.",
+  "qwen-hints27": "Names and technical terms: Hex, Abattoir, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind, Psychopomp, dotfiles, Qwen, Claude, Opus, Sonnet, Gemini, skulk, Zen, grill me."
+ },
+ "raw_results_sha256": "81eb7e9f51e18aa9aa28895bb646c1a0bdcbb9b70f01e2ca66b469e745ae343c",
+ "notes": "Term recall is case-sensitive for names (Hex, Dax, Rune, Adam, HiveMind with optional space). MacBook Air was added to the reference after inference. production-history is the text Hex pasted (transcribe-cpp 0.2.4 streaming); no replacements or transformations were configured, so it is also the corrections arm. Per-clip transcripts are kept out of git."
+}

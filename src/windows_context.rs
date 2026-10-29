@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use url::Url;
 
+use crate::context::ContextSnapshot;
 use crate::dictation_modes::normalize_host;
 
 /// Executable stems whose foreground document exposes the page URL.
@@ -31,8 +32,6 @@ const BROWSER_STEMS: &[&str] = &[
 ];
 
 const URL_READ_DEADLINE: Duration = Duration::from_millis(300);
-
-pub type WindowsContext = crate::context::ContextSnapshot;
 
 /// A context read in flight: the application stem is immediate, the UIA
 /// URL read proceeds on a helper thread while the caller transcribes.
@@ -54,7 +53,7 @@ pub fn begin_capture() -> PendingContext {
 }
 
 impl PendingContext {
-    pub fn finish(self) -> WindowsContext {
+    pub fn finish(self) -> ContextSnapshot {
         let browser_url = self
             .url
             .and_then(|receiver| match receiver.recv_timeout(URL_READ_DEADLINE) {
@@ -68,7 +67,7 @@ impl PendingContext {
             })
             .as_deref()
             .and_then(browser_url);
-        WindowsContext {
+        ContextSnapshot {
             application: self.application,
             browser_url,
             window_title: None,
@@ -194,7 +193,7 @@ mod tests {
     use super::*;
     use crate::dictation_modes::canonical_host;
 
-    fn capture() -> WindowsContext {
+    fn capture() -> ContextSnapshot {
         begin_capture().finish()
     }
 

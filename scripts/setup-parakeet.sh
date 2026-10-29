@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-model_dir="$HOME/Library/Application Support/voice-control/models"
+support="$HOME/Library/Application Support/hex"
+model_dir="$support/models"
 model="$model_dir/parakeet-unified-en-0.6b-Q8_0.gguf"
 partial="$model.partial"
 revision="7e948f21b7bdbac698d3318db9d350f1096f3b6c"

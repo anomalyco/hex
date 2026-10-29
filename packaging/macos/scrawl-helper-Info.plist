@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>anomaly.hex.scrawl-helper</string>
+  <key>CFBundleName</key>
+  <string>Hex</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Hex mirrors and records a cabled iPhone's screen for a capture.</string>
+</dict>
+</plist>

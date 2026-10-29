@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "meeting": {
+    "id": "1790000500000-1002",
+    "title": "Roadmap review",
+    "timestamp_ms": 1790000500000,
+    "duration_ms": 65000,
+    "application": null,
+    "status": "complete",
+    "in_progress": false,
+    "transcript_source": "final",
+    "warnings": ["skipped 1 unreadable lines in transcript.ndjson"]
+  },
+  "notes": null,
+  "entries": [
+    {"source":"system","start_ms":0,"end_ms":5000,"text":"Let's review the roadmap for the desktop app."},
+    {"source":"microphone","start_ms":5500,"end_ms":12000,"text":"Performance profiling comes first, then the onboarding flow."},
+    {"source":"system","start_ms":13000,"end_ms":18000,"text":"Agreed. The schedule is tight but doable."},
+    {"source":"microphone","start_ms":60000,"end_ms":64000,"text":"One more thing: the release notes."}
+  ]
+}

@@ -10,6 +10,7 @@ import { Cards, FIXABLE, KINDS, PAD } from "./cards.js"
 import { GpuRenderer } from "./gpu.js"
 import { Words } from "./words.js"
 import { AudioEngine } from "./audio.js"
+import { ScreenBreak } from "./screen-break.js"
 
 const CAPTURE = import.meta.env.VITE_SHOUT_CAPTURE === "1"
 // The poster box is this many head radii wide (head, hair, and halo).
@@ -42,7 +43,7 @@ const smooth = (a, b, x) => {
 // Tuned in the prototype's knobs panel.
 const v = {
   intensity: -0.01, // < 0: follow the arc
-  cycle: 88,
+  cycle: 102.5,
   curve: 1.4,
   spawn: 1,
   maxCards: 22,
@@ -64,6 +65,7 @@ await cards.ready
 const words = new Words()
 const atlases = { cards, words }
 const renderer = (!forceCanvas2d && (await GpuRenderer.create(canvas, atlases).catch(() => null))) || new Canvas2DRenderer(canvas, atlases)
+const screenBreak = new ScreenBreak(root, canvas, rand)
 root.dataset.renderer = renderer.kind
 
 // ─── Layout ────────────────────────────────────────────────────────────────────
@@ -73,27 +75,188 @@ let W = 0
 let H = 0
 let copyRects = []
 let slot = { x: 0, y: 0, R: 60 }
+const titleWords = [...root.querySelectorAll("[data-title-word]")].map((el, idx) => ({
+  el,
+  idx,
+  text: (el.textContent || "").trim(),
+  state: "rest", // "rest" | "jolted" | "falling" | "returning"
+  x: 0,
+  y: 0,
+  vx: 0,
+  vy: 0,
+  rot: 0,
+  vrot: 0,
+  heat: 0,
+  bounces: 0,
+  targetRot: 0,
+  returnAge: 0,
+  returnDelay: 0,
+  fromX: 0,
+  fromY: 0,
+  fromRot: 0,
+  rest: { cx: 0, cy: 0, w: 0, h: 0, bottom: 0 },
+}))
+
+function applyTitleWordStyle(w) {
+  if (w.state === "rest") {
+    w.el.style.transform = ""
+    w.el.style.color = ""
+    w.el.style.textShadow = ""
+    return
+  }
+  w.el.style.transform = `translate3d(${w.x.toFixed(2)}px, ${w.y.toFixed(2)}px, 0) rotate(${w.rot.toFixed(4)}rad)`
+  if (w.heat > 0.02) {
+    const h = clamp(w.heat, 0, 1)
+    w.el.style.color = `rgb(255, ${Math.round(244 - 64 * h)}, ${Math.round(240 - 155 * h)})`
+    w.el.style.textShadow = `0 0 ${Math.round(18 * h)}px rgba(255, 132, 36, ${(0.88 * h).toFixed(2)}), 0 0 ${Math.round(38 * h)}px rgba(255, 68, 16, ${(0.55 * h).toFixed(2)})`
+  } else {
+    w.el.style.color = ""
+    w.el.style.textShadow = ""
+  }
+}
+
+function measureAvoid() {
+  const r = root.getBoundingClientRect()
+  W = r.width
+  H = r.height
+  // Temporarily clear transforms on title words so resting geometry and [data-avoid] rects are exact.
+  for (const w of titleWords) if (w.state !== "rest") w.el.style.transform = ""
+
+  const rects = []
+  let heroL = Infinity
+  let heroT = Infinity
+  let heroR = -Infinity
+  let heroB = -Infinity
+
+  for (const el of root.querySelectorAll("[data-avoid]")) {
+    const e = el.getBoundingClientRect()
+    if (e.width <= 0 || e.height <= 0) continue
+    const inHero = !!el.closest(".hero")
+    const padX = inHero ? 32 : 22
+    const padY = inHero ? 26 : 16
+    const l = e.left - r.left - padX
+    const t = e.top - r.top - padY
+    const rr = e.right - r.left + padX
+    const b = e.bottom - r.top + padY
+    rects.push({ l, t, r: rr, b, isHero: inHero })
+    if (inHero) {
+      heroL = Math.min(heroL, l)
+      heroT = Math.min(heroT, t)
+      heroR = Math.max(heroR, rr)
+      heroB = Math.max(heroB, b)
+    }
+  }
+  // Also measure individual hero children so wide containers never hide inner bounds, and unify the hero stack
+  // from above h1 all the way to the bottom of the viewport so no card ever wedges between copy and Download.
+  for (const el of root.querySelectorAll(".hero h1, .hero__copy p, .hero .download, .hero .command, .hero .requirements, .hero .download-note, .hero .platforms")) {
+    const e = el.getBoundingClientRect()
+    if (e.width <= 0 || e.height <= 0) continue
+    heroL = Math.min(heroL, e.left - r.left - 34)
+    heroT = Math.min(heroT, e.top - r.top - 30)
+    heroR = Math.max(heroR, e.right - r.left + 34)
+    heroB = Math.max(heroB, e.bottom - r.top + 32)
+  }
+  if (heroL < heroR && heroT < heroB) {
+    rects.push({ l: heroL, t: heroT, r: heroR, b: Math.max(heroB, H + 40), isHero: true })
+  }
+  copyRects = rects
+
+  for (const w of titleWords) {
+    const e = w.el.getBoundingClientRect()
+    w.rest = {
+      cx: e.left - r.left + e.width / 2,
+      cy: e.top - r.top + e.height / 2,
+      w: e.width,
+      h: e.height,
+      bottom: e.bottom - r.top,
+    }
+    if (w.state !== "rest") applyTitleWordStyle(w)
+  }
+}
+
 function resize() {
   const r = root.getBoundingClientRect()
   W = r.width
   H = r.height
   v.maxCards = W < 640 ? 9 : W < 1100 ? 15 : 22
-  renderer.resize(W, H, Math.min(devicePixelRatio || 1, W < 640 ? 1.5 : v.dprCap))
+  const dpr = Math.min(devicePixelRatio || 1, W < 640 ? 1.5 : v.dprCap)
+  renderer.resize(W, H, dpr)
+  screenBreak.resize(W, H, dpr)
   const b = headEl.getBoundingClientRect()
   slot = { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height / 2, R: b.width / HEAD_BOX }
-  copyRects = [...root.querySelectorAll("[data-avoid]")].map((el) => {
-    const e = el.getBoundingClientRect()
-    return { l: e.left - r.left - 16, t: e.top - r.top - 12, r: e.right - r.left + 16, b: e.bottom - r.top + 12 }
-  })
+  measureAvoid()
 }
 const cardScale = () => clamp(W / 1500, 0.56, 1)
-const headR = () => slot.R
+let fourthZoom = { x: 1, v: 0 }
+const headR = () => slot.R * fourthZoom.x
 // Phones have no room beside the head, so once the show starts it slides right and the
 // OpenCode window takes the left.
 const narrow = () => W < 640
 let baseShift = 0
 const shiftTarget = () => (narrow() && started ? Math.max(0, W - headR() * 1.45 - 8 - slot.x) : 0)
-const headBase = () => ({ x: slot.x + baseShift, y: slot.y })
+const headBase = () => ({ x: slot.x + baseShift, y: slot.y + (fourthZoom.x - 1) * slot.R * 0.22 })
+
+// Only during the Tommy-gun spin / screen-break finale may cards or debris overlap the hero copy;
+// at all other times (and again in "after" / reset) the hero copy + download stack is a hard exclusion zone.
+const allowCopyOverlap = () =>
+  blastStage === "fire" ||
+  blastStage === "blast" ||
+  blastStage === "stare" ||
+  blastStage === "cracking" ||
+  blastStage === "shattered" ||
+  blastStage === "rebuilding"
+
+function effectiveAvoidRect(r, hw) {
+  let l = r.l
+  let rr = r.r
+  if (r.isHero) {
+    // If a side flank beside the hero copy is too narrow to hold a card cleanly, close that flank
+    // so cards stay above the copy instead of wedging into the side of the subtitle/button.
+    if (l < hw * 2 + 28) l = -200
+    if (W - rr < hw * 2 + 28) rr = W + 200
+  }
+  return { l, t: r.t, r: rr, b: r.b }
+}
+
+function overlapsAvoid(x, y, hw, hh) {
+  if (allowCopyOverlap()) return false
+  for (const raw of copyRects) {
+    const r = effectiveAvoidRect(raw, hw)
+    if (x + hw > r.l && x - hw < r.r && y + hh > r.t && y - hh < r.b) return true
+  }
+  return false
+}
+
+function resolveAvoid(x, y, hw, hh) {
+  let cx = clamp(x, hw + 14, Math.max(hw + 14, W - hw - 14))
+  let cy = clamp(y, hh + 58, Math.max(hh + 58, H - hh - 18))
+  if (allowCopyOverlap()) return { x: cx, y: cy, pushed: false }
+  let pushed = false
+  for (let pass = 0; pass < 2; pass++) {
+    for (const raw of copyRects) {
+      const r = effectiveAvoidRect(raw, hw)
+      if (cx + hw <= r.l || cx - hw >= r.r || cy + hh <= r.t || cy - hh >= r.b) continue
+      pushed = true
+      const cands = []
+      const upY = r.t - hh - 6
+      if (upY >= hh + 52) cands.push({ x: cx, y: upY, cost: Math.abs(cy - upY) * 0.85 })
+      const leftX = r.l - hw - 6
+      if (leftX >= hw + 12) cands.push({ x: leftX, y: cy, cost: Math.abs(cx - leftX) })
+      const rightX = r.r + hw + 6
+      if (rightX <= W - hw - 12) cands.push({ x: rightX, y: cy, cost: Math.abs(cx - rightX) })
+      const downY = r.b + hh + 6
+      if (downY <= H - hh - 16) cands.push({ x: cx, y: downY, cost: Math.abs(cy - downY) * 1.15 })
+      if (cands.length) {
+        cands.sort((a, b) => a.cost - b.cost)
+        cx = cands[0].x
+        cy = cands[0].y
+      } else {
+        cy = Math.max(hh + 52, r.t - hh - 6)
+      }
+    }
+  }
+  return { x: cx, y: cy, pushed }
+}
 
 // ─── Springs ───────────────────────────────────────────────────────────────────
 const S = (x = 0) => ({ x, v: 0 })
@@ -130,7 +293,7 @@ const BEATS = [
   { at: 53.5, line: "p4-nine", agents: 9001, fix: 12, version: "9.0.0", set: true },
   { at: 57.5, line: "p4-go", agents: 999, fix: 12, version: "9.0.1" },
 ]
-const k80 = () => v.cycle / 88
+const k80 = () => 1
 const arcAt = (id) => ARC.find((a) => a.id === id).at * k80()
 function arcNow() {
   let cur = ARC[0]
@@ -258,25 +421,25 @@ function mouthPos() {
 
 // ─── Cards ─────────────────────────────────────────────────────────────────────
 function freeSpot(c, want) {
-  const s = cardScale()
-  const hw = (c.w / 2) * s
-  const hh = (c.h / 2) * s
+  const s = cardScale() * (c.kind === "opencode" ? 1.12 : 1)
+  const hw = (c.w / 2 + PAD * 0.75) * s
+  const hh = (c.h / 2 + PAD * 0.75) * s
   const hp = headBase()
   const R = headR()
   const overlap = 0.45 * smooth(0.35, 0.85, I) // how much crowding is allowed; capped so text stays readable
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 90; i++) {
     let x
     let y
     if (want && i === 0) ({ x, y } = want)
     else {
-      x = rnd(hw + 16, W - hw - 16)
-      y = rnd(hh + 64, H - hh - 20)
+      x = rnd(hw + 16, Math.max(hw + 16, W - hw - 16))
+      y = rnd(hh + 62, Math.max(hh + 62, H - hh - 20))
     }
     const dx = Math.max(Math.abs(x - hp.x) - hw, 0)
     const dy = Math.max(Math.abs(y - hp.y) - hh, 0)
     const core = R * lerp(1.9, 1.15, overlap)
     if (Math.hypot(dx, dy) < core) continue
-    if (copyRects.some((r) => x + hw > r.l && x - hw < r.r && y + hh > r.t && y - hh < r.b)) continue
+    if (overlapsAvoid(x, y, hw, hh)) continue
     let hits = 0
     for (const o of live) {
       if (o.state === "dead") continue
@@ -284,8 +447,9 @@ function freeSpot(c, want) {
       const oy = Math.max(0, Math.min(y + hh, o.by + o.hh) - Math.max(y - hh, o.by - o.hh))
       if (ox * oy > hw * hh * 4 * overlap * 0.6 + 40) hits++
     }
-    if (hits === 0 || (overlap > 0.8 && i > 30)) return { x, y }
+    if (hits === 0 || (overlap > 0.8 && i > 30) || i > 70) return { x, y }
   }
+  if (want) return resolveAvoid(want.x, want.y, hw, hh)
   return null
 }
 
@@ -294,22 +458,26 @@ function spawnCard(at, opts = {}) {
   const kinds = KINDS.filter((k) => !recentKinds.includes(k))
   const kind = opts.kind ?? pick(kinds.length ? kinds : KINDS)
   const c = cards.make(kind, rand, opts.item)
-  const spot = freeSpot(c, at) ?? (opts.force ? at : null)
-  if (!spot) return null
+  const s = cardScale() * (kind === "opencode" ? 1.12 : 1)
+  const hw = (c.w / 2) * s
+  const hh = (c.h / 2) * s
+  const rawSpot = freeSpot(c, at) ?? (opts.force && at ? resolveAvoid(at.x, at.y, hw + PAD * 0.75 * s, hh + PAD * 0.75 * s) : null)
+  if (!rawSpot) return null
+  const spot = resolveAvoid(rawSpot.x, rawSpot.y, hw + PAD * 0.75 * s, hh + PAD * 0.75 * s)
   if (!cards.alloc(c)) return null
   if (!opts.kind) recentKinds = [kind, ...recentKinds].slice(0, 2)
   const cue = { chat: "knock", dm: "knock", mail: "swoosh", messages: "bubble", calendar: "pop", review: "pop", issue: "pop", tweet: "bubble", discord: "knock", opencode: "pop" }[kind]
   audio.sfx(cue, { gain: lerp(0.55, 0.3, I), rate: rnd(0.95, 1.06) * lerp(1, 1.12, I), pan: (spot.x / W) * 1.4 - 0.7 })
-  const s = cardScale()
+  const baseScale = cardScale()
   const fromRight = spot.x > W / 2 ? 1 : -1
   Object.assign(c, {
     x: spot.x,
     y: spot.y,
     bx: spot.x,
     by: spot.y,
-    hw: (c.w / 2) * s,
-    hh: (c.h / 2) * s,
-    base: s,
+    hw: (c.w / 2) * baseScale,
+    hh: (c.h / 2) * baseScale,
+    base: baseScale,
     pop: S(0),
     ox: S(fromRight * lerp(26, 70, I)),
     oy: S(-lerp(10, 24, I)),
@@ -481,13 +649,455 @@ function explode(c, power = 1) {
     const s = rnd(40, 200)
     sparks.push({ x: c.x + rnd(-40, 40), y: c.y + rnd(-14, 14), vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life: rnd(0.8, 1.5), heat: 0, size: rnd(1.2, 2) })
   }
-  renderer.spawnSparks(sparks)
   const size = Math.max(c.hw, c.hh) * 2
-  fx.push({ kind: 0, x: c.x, y: c.y, r: 0, rMax: (size * 0.7 + 60) * v.fx * lerp(0.8, 1.3, I), width: 2.2, t: 0, k: 1, age: 0, life: 0.42 })
-  fx.push({ kind: 1, x: c.x, y: c.y, r: (size * 0.35 + 24) * v.fx, t: 0, k: 1.1, age: 0, life: 0.09 })
-  cam.trauma = Math.min(1, cam.trauma + 0.28 * lerp(0.5, 1, I) * v.shake * power)
-  cam.kx.v += dir.x * 240 * v.shake
-  cam.ky.v += dir.y * 240 * v.shake
+  const pyro = smooth(0.32, 0.92, Math.max(I, blastStage ? 1 : 0)) * power
+  // Buoyant rising embers at higher intensity
+  if (pyro > 0.1) {
+    const emberCount = Math.round(lerp(8, 28, pyro) * v.fx)
+    for (let i = 0; i < emberCount; i++) {
+      const a = rand() * Math.PI * 2
+      const s = rnd(60, 260)
+      sparks.push({
+        x: c.x + rnd(-c.hw * 0.65, c.hw * 0.65),
+        y: c.y + rnd(-c.hh * 0.45, c.hh * 0.45),
+        vx: Math.cos(a) * s + dir.x * 110,
+        vy: -rnd(120, 360) + Math.sin(a) * 60,
+        life: rnd(0.65, 1.45),
+        heat: rnd(0.75, 1.0),
+        size: rnd(1.6, 3.0),
+      })
+    }
+  }
+  renderer.spawnSparks(sparks)
+
+  fx.push({ kind: 0, x: c.x, y: c.y, r: 0, rMax: (size * 0.78 + 68) * v.fx * lerp(0.85, 1.4, I), width: lerp(2.2, 3.6, pyro), t: 0, k: 1.05, age: 0, life: 0.44 })
+  fx.push({ kind: 1, x: c.x, y: c.y, r: (size * 0.42 + 30) * v.fx, t: 0, k: 1.2, age: 0, life: 0.1 })
+
+  // Volumetric noise-driven fireballs (kind 8), rising smoke plumes (kind 9), scorch/pressure wave (kind 10),
+  // and dynamic point lighting on nearby cards
+  if (pyro > 0.08 && !reduced) {
+    // Scorch heat glow & double shockwave pressure ring
+    fx.push({
+      kind: 10,
+      x: c.x,
+      y: c.y,
+      r: (size * 0.85 + 75) * lerp(0.8, 1.35, pyro) * v.fx,
+      t: 0,
+      k: lerp(0.65, 1.25, pyro),
+      seed: rnd(1, 50),
+      age: 0,
+      life: lerp(0.32, 0.52, pyro),
+    })
+
+    // Primary + secondary volumetric fireballs expanding and cooling into charcoal smoke
+    const lobeCount = pyro > 0.55 ? 3 : 2
+    for (let li = 0; li < lobeCount; li++) {
+      const ox = li === 0 ? 0 : rnd(-c.hw * 0.45, c.hw * 0.45)
+      const oy = li === 0 ? 0 : rnd(-c.hh * 0.35, c.hh * 0.35)
+      const r0 = (li === 0 ? size * 0.32 : size * 0.24) * lerp(0.85, 1.35, pyro)
+      fx.push({
+        kind: 8,
+        x: c.x + ox,
+        y: c.y + oy,
+        vx: dir.x * rnd(25, 70) + ox * 0.6,
+        vy: -rnd(28, 65) + dir.y * 25,
+        r: r0,
+        r0,
+        rMax: r0 * lerp(1.85, 2.35, pyro),
+        t: 0,
+        k: lerp(0.95, 1.45, pyro) * (li === 0 ? 1 : 0.85),
+        seed: rnd(1, 99),
+        age: -li * 0.025,
+        life: lerp(0.58, 0.92, pyro),
+      })
+    }
+
+    // Lingering rising smoke plumes that drift upward after the fireball
+    const smokeCount = pyro > 0.6 ? 3 : 2
+    for (let si = 0; si < smokeCount; si++) {
+      const sx = c.x + rnd(-c.hw * 0.5, c.hw * 0.5)
+      const sy = c.y + rnd(-c.hh * 0.3, c.hh * 0.3)
+      const sr0 = size * rnd(0.26, 0.38) * lerp(0.85, 1.3, pyro)
+      fx.push({
+        kind: 9,
+        x: sx,
+        y: sy,
+        vx: rnd(-28, 28) + dir.x * 18,
+        vy: -rnd(52, 98),
+        r: sr0,
+        r0: sr0,
+        rMax: sr0 * rnd(1.75, 2.25),
+        t: 0,
+        k: lerp(0.75, 1.15, pyro),
+        seed: rnd(1, 99),
+        age: -0.05 - si * 0.04,
+        life: rnd(1.15, 1.85),
+      })
+    }
+
+    addBlastLight(c.x, c.y, (size * 1.65 + 160) * lerp(0.85, 1.35, pyro), lerp(0.9, 1.55, pyro), 0.38)
+  }
+
+  cam.trauma = Math.min(1, cam.trauma + 0.32 * lerp(0.5, 1.15, I) * v.shake * power)
+  cam.kx.v += dir.x * 280 * v.shake * power
+  cam.ky.v += dir.y * 280 * v.shake * power
+}
+
+// Dynamic point lights cast by explosions onto nearby cards and the head
+const blastLights = []
+function addBlastLight(x, y, r, k, life = 0.36) {
+  blastLights.push({ x, y, r, k, k0: k, age: 0, life })
+}
+function updateBlastLights(dt) {
+  for (let i = blastLights.length - 1; i >= 0; i--) {
+    const l = blastLights[i]
+    l.age += dt
+    if (l.age >= l.life) {
+      blastLights.splice(i, 1)
+      continue
+    }
+    const t = l.age / l.life
+    l.k = l.k0 * Math.pow(1 - t, 1.85)
+  }
+  blastLights.sort((a, b) => b.k - a.k)
+}
+
+// ─── Keycap Press & Tactile Explosion ──────────────────────────────────────────
+let keycapExploded = false
+function pressKey(down, rect) {
+  if (reduced || started) return
+  if (down) {
+    head.stretch.v -= 1.55
+    head.ly.v += 28
+    head.browUp.v += 2.2
+    if (rect) {
+      const r = root.getBoundingClientRect()
+      aimAt(rect.left - r.left + rect.width / 2, rect.top - r.top + rect.height / 2)
+    }
+  } else {
+    head.stretch.v += 1.1
+  }
+}
+
+function explodeKeycap(rect) {
+  if (keycapExploded || reduced) return
+  keycapExploded = true
+  root.setAttribute("data-key-exploded", "")
+
+  const r = root.getBoundingClientRect()
+  const hp = headPos()
+  const kx = rect && rect.width > 0 ? rect.left - r.left + rect.width / 2 : hp.x
+  const ky = rect && rect.height > 0 ? rect.top - r.top + rect.height / 2 : hp.y + headR() * 1.55
+  const kw = rect && rect.width > 0 ? rect.width : 124
+  const kh = rect && rect.height > 0 ? rect.height : 102
+
+  // 1. Textured keycap atlas slot fractured into Voronoi chunks (cap face with ⌥ + "option", bevels, amber LED)
+  const kc = cards.makeKeycap()
+  if (kc) {
+    const cols = 6
+    const rows = 4
+    const ew = kc.sw
+    const eh = kc.sh
+    const half = [ew / 2, eh / 2]
+    const scX = kw / kc.w
+    const scY = kh / kc.h
+    const sc = (scX + scY) * 0.5
+    const pts = []
+    for (let j = 0; j <= rows; j++) {
+      for (let i = 0; i <= cols; i++) {
+        const edge = i === 0 || j === 0 || i === cols || j === rows
+        pts.push([
+          ((i + (edge ? 0 : rnd(-0.36, 0.36))) / cols - 0.5) * ew,
+          ((j + (edge ? 0 : rnd(-0.36, 0.36))) / rows - 0.5) * eh,
+        ])
+      }
+    }
+    const at = (i, j) => pts[j * (cols + 1) + i]
+    const shards = []
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const a = at(i, j)
+        const b = at(i + 1, j)
+        const cc = at(i + 1, j + 1)
+        const d = at(i, j + 1)
+        const tris = rand() < 0.5 ? [[a, b, cc], [a, cc, d]] : [[a, b, d], [b, cc, d]]
+        for (const t of tris) {
+          const cx = (t[0][0] + t[1][0] + t[2][0]) / 3
+          const cy = (t[0][1] + t[1][1] + t[2][1]) / 3
+          const rx = cx / half[0]
+          const ry = cy / half[1]
+          const rl = Math.hypot(rx, ry) + 0.18
+          const sp = rnd(280, 660)
+          const vx = (rx / rl) * sp * 0.95 + rnd(-85, 85)
+          const vy = (ry / rl) * sp * 0.65 - rnd(240, 520) // pop up, then heavy gravity pulls off bottom of screen
+          shards.push({
+            x: kx + cx * sc,
+            y: ky + cy * sc,
+            vx,
+            vy,
+            ang: rnd(-0.18, 0.18),
+            spin: (rx >= 0 ? 1 : -1) * rnd(6, 16),
+            life: rnd(1.5, 2.3),
+            v0: [(t[0][0] - cx) * sc * 1.08, (t[0][1] - cy) * sc * 1.08],
+            v1: [(t[1][0] - cx) * sc * 1.08, (t[1][1] - cy) * sc * 1.08],
+            v2: [(t[2][0] - cx) * sc * 1.08, (t[2][1] - cy) * sc * 1.08],
+            heat: 1.0,
+            base: [cx, cy],
+            // Negative half[1] signals keycap shard in SHARD_SIM / SHARDS (amber LED rim + falls off bottom of screen)
+            half: [half[0], -half[1]],
+            uv: kc.uv,
+            entry: { px: kc.px, py: kc.py, w: kc.sw, h: kc.sh },
+          })
+        }
+      }
+    }
+    renderer.spawnShards(shards)
+    releaseQueue.push({ c: kc, at: time + 2.5 })
+  }
+
+  // 2. Amber switch-LED sparks, polycarbonate chips, volumetric fireball, smoke plume, and shockwave ring
+  const sparks = []
+  for (let i = 0; i < 68; i++) {
+    const a = rand() * Math.PI * 2
+    const s = rnd(180, 1250)
+    sparks.push({
+      x: kx + rnd(-kw * 0.28, kw * 0.28),
+      y: ky + rnd(-kh * 0.22, kh * 0.22),
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s - rnd(90, 280),
+      life: rnd(0.26, 0.85),
+      heat: rnd(0.75, 1.0),
+      size: rnd(1.5, 3.1),
+    })
+  }
+  renderer.spawnSparks(sparks)
+
+  // Crisp shockwave ring + scorch wave + amber fireball + rising smoke plume
+  fx.push({ kind: 0, x: kx, y: ky, r: 0, rMax: 240 * v.fx, width: 3.4, t: 0, k: 1.25, age: 0, life: 0.42 })
+  fx.push({ kind: 10, x: kx, y: ky, r: 195 * v.fx, t: 0, k: 1.15, seed: 17.3, age: 0, life: 0.36 })
+  fx.push({ kind: 1, x: kx, y: ky, r: 96 * v.fx, t: 0, k: 1.45, age: 0, life: 0.11 })
+  fx.push({
+    kind: 8,
+    x: kx,
+    y: ky,
+    vx: 0,
+    vy: -42,
+    r: 54,
+    r0: 54,
+    rMax: 128,
+    t: 0,
+    k: 1.38,
+    seed: 31.7,
+    age: 0,
+    life: 0.62,
+  })
+  fx.push({
+    kind: 9,
+    x: kx,
+    y: ky - 8,
+    vx: rnd(-18, 18),
+    vy: -76,
+    r: 48,
+    r0: 48,
+    rMax: 112,
+    t: 0,
+    k: 0.92,
+    seed: 53.1,
+    age: -0.04,
+    life: 1.28,
+  })
+  addBlastLight(kx, ky, 360, 1.45, 0.42)
+
+  // 3. Brief hit-stop, camera punch, and head flinch / perk-up reaction
+  hitStop.remaining = Math.max(hitStop.remaining, 0.036)
+  cam.trauma = Math.min(1, cam.trauma + 0.42 * v.shake)
+  cam.ky.v -= 240 * v.shake
+  head.stretch.v += 4.6
+  head.ly.v -= 75
+  head.browUp.v += 4.2
+  head.blink = 1
+}
+
+// ─── Title ("Speak. It appears.") Physics Destruction & Recovery ───────────────
+function joltTitleWords() {
+  if (reduced) return
+  measureAvoid()
+  for (const w of titleWords) {
+    if (w.state !== "rest") continue
+    w.state = "jolted"
+    const side = w.idx === 0 ? -1 : w.idx === 2 ? 1 : 0.35
+    w.vx = side * rnd(24, 52)
+    w.vy = -rnd(42, 78)
+    w.vrot = side * rnd(0.28, 0.55)
+    w.targetRot = side * rnd(0.028, 0.052)
+    w.heat = 0.65
+    chip(w.rest.cx, w.rest.cy, side * 0.5, -1, 14, 0.9)
+  }
+}
+
+function knockTitleWord(idx) {
+  if (reduced) return
+  const w = titleWords[idx]
+  if (!w || w.state === "falling") return
+  measureAvoid()
+  const cx = w.rest.cx + w.x
+  const cy = w.rest.cy + w.y
+  w.state = "falling"
+  w.bounces = 0
+  w.heat = 1.0
+  const dirX = idx === 0 ? -1 : idx === 2 ? 1 : rnd(-0.45, 0.45)
+  w.vx = dirX * rnd(105, 220)
+  w.vy = -rnd(260, 410)
+  w.vrot = (dirX >= 0 ? 1 : -1) * rnd(2.2, 4.6)
+
+  // Volumetric fireball + rising smoke plume + shockwave at the word detachment point
+  fx.push({ kind: 0, x: cx, y: cy, r: 0, rMax: 190 * v.fx, width: 3.0, t: 0, k: 1.15, age: 0, life: 0.4 })
+  fx.push({ kind: 10, x: cx, y: cy, r: 155 * v.fx, t: 0, k: 1.05, seed: 19 + idx * 13, age: 0, life: 0.35 })
+  fx.push({ kind: 1, x: cx, y: cy, r: 78 * v.fx, t: 0, k: 1.25, age: 0, life: 0.09 })
+  fx.push({
+    kind: 8,
+    x: cx,
+    y: cy,
+    vx: dirX * 30,
+    vy: -45,
+    r: 46,
+    r0: 46,
+    rMax: 108,
+    t: 0,
+    k: 1.32,
+    seed: 41 + idx * 17,
+    age: 0,
+    life: 0.64,
+  })
+  fx.push({
+    kind: 9,
+    x: cx,
+    y: cy - 6,
+    vx: dirX * 18,
+    vy: -68,
+    r: 44,
+    r0: 44,
+    rMax: 98,
+    t: 0,
+    k: 0.9,
+    seed: 73 + idx * 11,
+    age: -0.04,
+    life: 1.35,
+  })
+  addBlastLight(cx, cy, 310, 1.25, 0.35)
+  chip(cx, cy, dirX, -0.8, 32, 1.0)
+  audio.sfx("shatter", { bus: "impacts", gain: 0.65, rate: rnd(0.92, 1.08), pan: (cx / W) * 1.2 - 0.6 })
+  cam.trauma = Math.min(1, cam.trauma + 0.34 * v.shake)
+}
+
+function returnTitleWords() {
+  for (const w of titleWords) {
+    if (w.state === "rest") continue
+    w.state = "returning"
+    w.returnAge = 0
+    w.returnDelay = w.idx * 0.09
+    w.fromX = w.x
+    w.fromY = w.y
+    w.fromRot = ((w.rot + Math.PI) % (Math.PI * 2)) - Math.PI
+  }
+}
+
+function updateTitleWords(dt) {
+  if (reduced) return
+  const floorY = Math.max(200, H - 26)
+  for (const w of titleWords) {
+    if (w.state === "rest") continue
+    w.heat = Math.max(0, w.heat - dt * 1.1)
+
+    if (w.state === "jolted") {
+      // Damped spring around a slightly cracked/tilted offset until the finale knocks it loose
+      w.vx += (-180 * w.x - 14 * w.vx) * dt
+      w.vy += (-180 * (w.y - 3) - 14 * w.vy) * dt
+      w.vrot += (-160 * (w.rot - w.targetRot) - 12 * w.vrot) * dt
+      w.x += w.vx * dt
+      w.y += w.vy * dt
+      w.rot += w.vrot * dt
+    } else if (w.state === "falling") {
+      w.vx *= Math.exp(-0.45 * dt)
+      w.vy += 1480 * dt
+      w.x += w.vx * dt
+      w.y += w.vy * dt
+      w.rot += w.vrot * dt
+
+      // Keep horizontally inside the viewport
+      const worldX = w.rest.cx + w.x
+      const minX = w.rest.w * 0.55 + 16
+      const maxX = W - w.rest.w * 0.55 - 16
+      if (worldX < minX) {
+        w.x = minX - w.rest.cx
+        w.vx = Math.abs(w.vx) * 0.6
+      } else if (worldX > maxX) {
+        w.x = maxX - w.rest.cx
+        w.vx = -Math.abs(w.vx) * 0.6
+      }
+
+      // Floor collision with thud, bounce, and dust/smoke puffs
+      const maxDrop = Math.max(60, floorY - w.rest.bottom)
+      if (w.y >= maxDrop && w.vy > 0) {
+        w.y = maxDrop
+        const impactVy = w.vy
+        w.bounces++
+        if (impactVy > 110 && w.bounces <= 3) {
+          w.vy = -impactVy * (w.bounces === 1 ? 0.36 : 0.22)
+          w.vx *= 0.72
+          w.vrot = w.vrot * 0.55 + rnd(-1.1, 1.1)
+          const gx = w.rest.cx + w.x
+          const gy = floorY - 6
+          const pan = (gx / W) * 1.2 - 0.6
+          if (w.bounces === 1) {
+            audio.sfx("thump", { bus: "impacts", gain: 0.72, rate: rnd(0.88, 1.04), pan })
+            cam.trauma = Math.min(1, cam.trauma + 0.24 * v.shake)
+            cam.ky.v += 180 * v.shake
+          }
+          // Floor dust & smoke puffs expanding sideways along the ground
+          for (const side of [-1, 1]) {
+            fx.push({
+              kind: 9,
+              x: gx + side * (w.rest.w * 0.28),
+              y: gy,
+              vx: side * rnd(45, 95),
+              vy: -rnd(24, 52),
+              r: w.bounces === 1 ? 34 : 22,
+              r0: w.bounces === 1 ? 34 : 22,
+              rMax: w.bounces === 1 ? 76 : 46,
+              t: 0,
+              k: w.bounces === 1 ? 0.88 : 0.52,
+              seed: rnd(1, 99),
+              age: 0,
+              life: w.bounces === 1 ? 0.95 : 0.6,
+            })
+          }
+          fx.push({ kind: 0, x: gx, y: gy, r: 0, rMax: (w.bounces === 1 ? 110 : 60) * v.fx, width: 1.8, t: 0, k: 0.55, age: 0, life: 0.28 })
+          chip(gx, gy, 0, -1, w.bounces === 1 ? 16 : 6, 0.55)
+        } else {
+          w.vy = 0
+          w.vx *= 0.8
+          w.vrot *= 0.75
+        }
+      }
+    } else if (w.state === "returning") {
+      w.returnAge += dt
+      const t = clamp((w.returnAge - w.returnDelay) / 0.82, 0, 1)
+      // Smooth spring ease-out-back rise into the h1 slot
+      const c1 = 1.55
+      const c3 = c1 + 1
+      const ease = t <= 0 ? 0 : t >= 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
+      w.x = lerp(w.fromX, 0, ease)
+      w.y = lerp(w.fromY, 0, ease)
+      w.rot = lerp(w.fromRot, 0, ease)
+      if (t >= 1) {
+        w.state = "rest"
+        w.x = w.y = w.vx = w.vy = w.rot = w.vrot = w.heat = 0
+      }
+    }
+
+    applyTitleWordStyle(w)
+  }
 }
 
 function chip(x, y, nx, ny, n, heat) {
@@ -779,6 +1389,7 @@ function updateHead(dt) {
   const tgt = head.target && head.target.state !== "dead" ? head.target : null
   if (blastStage === "windup" || powerStage === "charge") aimAt(W / 2, 0)
   else if (blastStage === "fire") aimAt(headBase().x + Math.cos(finale.angle) * 300, headBase().y + Math.sin(finale.angle) * 300)
+  else if (blastStage === "stare" || blastStage === "cracking" || blastStage === "shattered" || blastStage === "rebuilding") aimAt(headBase().x, headBase().y + 18)
   else if (head.glance && time < head.glance.until && head.phase !== "speak") aimAt(head.glance.c.x, head.glance.c.y)
   else if (tgt) aimAt(tgt.x, tgt.y)
   else if (pointer.seen) aimAt(pointer.x, pointer.y)
@@ -888,6 +1499,41 @@ function updateHead(dt) {
     anger = 1
     squint = 1
     smile = -1
+  } else if (blastStage === "stare") {
+    // Fourth wall Beat 1: squints suspiciously, leans in toward the camera: "Hey. What are you looking at?"
+    const talk = mouthOpen()
+    stretch = -0.05 + 0.08 * talk
+    lean = 14
+    mouth = 0.04 + 0.52 * talk
+    mouthW = 0.76
+    anger = 0.68
+    squint = 0.82
+    browUp = -0.38
+    asym = 0.35
+    smile = -0.45
+  } else if (blastStage === "cracking") {
+    // Fourth wall Beat 2: firing Z-axis words straight at the screen glass
+    const talk = mouthOpen()
+    stretch = 0.12 * talk
+    lean = 20
+    mouth = 0.28 + 0.92 * talk
+    mouthW = 1.14
+    anger = 1
+    squint = 0.9
+    browUp = -0.5
+    smile = -1
+  } else if (blastStage === "shattered" || blastStage === "rebuilding") {
+    // Fourth wall Beat 3 & 4: smug in the void ("You should've downloaded this earlier... 'cause this is going away.")
+    const talk = mouthOpen()
+    stretch = 0.04 * talk
+    lean = 10
+    mouth = 0.06 + 0.58 * talk
+    mouthW = 0.88
+    anger = 0.18
+    squint = 0.32
+    browUp = 0.42
+    asym = 0.48
+    smile = 0.65
   } else if (blastStage === "after") {
     const k = head.t
     mouth = 0.05 + 0.6 * mouthOpen()
@@ -899,6 +1545,16 @@ function updateHead(dt) {
     browUp = 0.3
     wobble = (1 - smooth(0, 3.4, k)) * (reduced ? 0 : 1)
   }
+
+  const zoomTarget =
+    blastStage === "stare"
+      ? 1.26
+      : blastStage === "cracking"
+        ? 1.34
+        : blastStage === "shattered"
+          ? 1.28
+          : 1.0
+  spring(fourthZoom, zoomTarget, 2.2, 0.78, dt)
 
   const fast = blastStage ? 1.6 : 1
   const d = head.dir
@@ -951,6 +1607,8 @@ function director(dt) {
       beatIndex = 0
       ocBusy = null
       cards.counts = {}
+      screenBreak.reset()
+      returnTitleWords()
       for (const b of BEATS) b.spawned = false
     }
   }
@@ -987,11 +1645,14 @@ function director(dt) {
 
 // ─── OpenCode ──────────────────────────────────────────────────────────────────
 function spawnOpenCode() {
-  const s = cardScale()
+  const s = cardScale() * 1.12
   const hp = headBase()
-  const want = narrow()
-    ? { x: 196 * s + 6, y: clamp(slot.y + headR() * 0.4, 150, H - 140 * s) }
-    : { x: clamp(hp.x - headR() * 2.2 - 190 * s, 200 * s, W - 200 * s), y: clamp(hp.y + headR() * 0.9, 150, H - 140 * s) }
+  const hw = 180 * s + PAD * 0.75 * s
+  const hh = 100 * s + PAD * 0.75 * s
+  const rawWant = narrow()
+    ? { x: 196 * cardScale() + 6, y: clamp(slot.y + headR() * 0.4, 150, H - 140 * cardScale()) }
+    : { x: clamp(hp.x - headR() * 2.2 - 190 * cardScale(), 200 * cardScale(), W - 200 * cardScale()), y: clamp(hp.y - headR() * 0.15, 130, H - 140 * cardScale()) }
+  const want = resolveAvoid(rawWant.x, rawWant.y, hw, hh)
   oc = spawnCard(want, { kind: "opencode", force: true })
   if (!oc) return
   // Arrives with presence: a touch larger than the messages, a swoosh, and the head glances over.
@@ -1106,6 +1767,9 @@ function updatePower(dt) {
     const hp = headPos()
     fx.push({ kind: 2, x: 0, y: 0, r: 0, t: 0, k: 0.22 * v.fx, age: 0, life: 0.14 })
     fx.push({ kind: 0, x: hp.x, y: hp.y, r: 0, rMax: Math.hypot(W, H) * 0.6, width: 4, t: 0, k: 1, age: 0, life: 0.6 })
+    fx.push({ kind: 8, x: hp.x, y: hp.y, vx: 0, vy: -35, r: headR() * 1.15, r0: headR() * 1.15, rMax: headR() * 2.55, t: 0, k: 1.45, seed: 77.7, age: 0, life: 0.72 })
+    addBlastLight(hp.x, hp.y, Math.hypot(W, H) * 0.55, 1.65, 0.52)
+    joltTitleWords()
     for (const c of live) {
       const dx = c.x - hp.x
       const dy = c.y - hp.y
@@ -1117,10 +1781,10 @@ function updatePower(dt) {
   }
   renderer.setSaiyan?.(clamp(saiyan, 0, 1))
 }
-// Seamless 4 s aura bed, retriggered back to back until the wipe.
+// Seamless 4 s aura bed during Saiyan rapid-fire; stops once the finale starts so finale voice lines stay crystal-clear.
 function aura() {
-  if (powerStage !== "on" || blastStage === "after") return
-  audio.sfx("aura", { bus: "impacts", gain: 0.45 })
+  if (powerStage !== "on" || blastStage) return
+  audio.sfx("aura", { bus: "impacts", gain: 0.38, dur: 4.0 })
   setTimeout0(4, aura)
 }
 
@@ -1169,6 +1833,26 @@ function startFire() {
     for (const w of take.words) setTimeout0(start + w.t, () => fireWord(w.text))
     at += take.dur + 0.05
   }
+  // Knock the three h1 title words ("Speak.", "It", "appears.") loose during the Tommy-gun barrage
+  ;[
+    { idx: 0, delay: 2.1, word: "SPEAK!" },
+    { idx: 1, delay: 4.6, word: "IT!" },
+    { idx: 2, delay: 7.1, word: "BOOM!" },
+  ].forEach(({ idx, delay, word }) => {
+    setTimeout0(delay, () => {
+      if (reduced || !titleWords[idx]) return
+      measureAvoid()
+      const tw = titleWords[idx]
+      const goal = { x: tw.rest.cx + tw.x, y: tw.rest.cy + tw.y }
+      launch(word, null, {
+        point: goal,
+        i: 1,
+        size: clamp(W * 0.042, 36, 58),
+        weight: 880,
+        onPop: () => knockTitleWord(idx),
+      })
+    })
+  })
   setTimeout0(Math.max(at, F.end - F.fire), finalBlast)
 }
 
@@ -1252,13 +1936,33 @@ function finalBlast() {
   fx.push({ kind: 2, x: 0, y: 0, r: 0, t: 0, k: 0.32 * v.fx, age: 0, life: 0.16 })
   fx.push({ kind: 0, x: hp.x, y: hp.y, r: 0, rMax: diag, width: 5, t: 0, k: 1.2, age: 0, life: 0.75 })
   fx.push({ kind: 0, x: hp.x, y: hp.y, r: 0, rMax: diag * 0.7, width: 2.5, t: 0, k: 0.8, age: -0.08, life: 0.75 })
+  fx.push({ kind: 8, x: hp.x, y: hp.y, vx: 0, vy: -30, r: headR() * 1.35, r0: headR() * 1.35, rMax: headR() * 3.1, t: 0, k: 1.55, seed: 88.8, age: 0, life: 0.82 })
+  addBlastLight(hp.x, hp.y, diag * 0.65, 1.8, 0.58)
+  for (let idx = 0; idx < titleWords.length; idx++) {
+    if (titleWords[idx].state !== "falling") knockTitleWord(idx)
+  }
+  // Keep 6 outer cards on screen during the fourth-wall stare & glass cracking so the cracks
+  // visibly refract cards as well as the copy/header/button, then clear them when the screen shatters!
+  let kept = 0
   for (const c of live) {
     if (c.state === "dead") continue
+    if (kept < 6) {
+      kept++
+      continue
+    }
     const dd = Math.hypot(c.x - hp.x, c.y - hp.y)
-    c.blastAt = time + 0.75 * (1 - Math.pow(1 - clamp(dd / diag, 0, 1), 1 / 3))
+    c.blastAt = time + 0.45 * (1 - Math.pow(1 - clamp(dd / diag, 0, 1), 1 / 3))
     c.hitDir = { x: c.x - hp.x, y: c.y - hp.y }
   }
-  setTimeout0(F.dizzy - F.end, () => {
+  while (kept < 6 && !reduced) {
+    const nc = spawnCard()
+    if (!nc) break
+    kept++
+  }
+
+  const startDizzyExhale = () => {
+    screenBreak.reset()
+    returnTitleWords()
     blastStage = "after"
     finale.phase = "dizzy"
     head.t = 0
@@ -1266,13 +1970,186 @@ function finalBlast() {
     audio.sfx("dizzy", { gain: 0.6 })
     setTimeout0(0.45, () => {
       const ex = manifest.voice.dizzy.takes[0]
-      say(ex, { gain: 0.95, level: 0.3 })
+      say(ex, { gain: 1.05, level: 0.3, duck: 0.85 })
       const p = headPos()
       ex.words.forEach((w, k) =>
         setTimeout0(w.t, () => launch(w.text, null, { point: { x: p.x + (k - 1.5) * 110, y: p.y + headR() * 1.9 }, size: 18, weight: 500, i: 0, quiet: true })),
       )
     })
+  }
+
+  if (reduced) {
+    setTimeout0(F.dizzy - F.end, startDizzyExhale)
+    return
+  }
+
+  // ─── Beat 1 (Fourth Wall Stare): spin stops, beat of silence so explosions decay, then leans in ───
+  setTimeout0(0.85, () => {
+    blastStage = "stare"
+    finale.phase = "stare"
+    finale.spin = 0
+    head.t = 0
+    // Immediate sidechain duck to hush any lingering explosion tails before he speaks
+    audio.setDuck(0.92, 3.6)
+    setTimeout0(0.6, () => {
+      const stareTake = manifest.voice["fourth-stare"]?.takes?.[0]
+      if (stareTake) {
+        say(stareTake, { gain: 1.65, level: 0.48, duck: 0.94 })
+        screenBreak.setCaption({
+          words: stareTake.words,
+          startRtime: rtime,
+          endRtime: rtime + stareTake.dur,
+        })
+      }
+    })
   })
+
+  // ─── Beat 2 (Cracking the Screen): shoots Z-axis words straight at the glass ───
+  setTimeout0(4.25, () => {
+    blastStage = "cracking"
+    finale.phase = "cracking"
+    head.t = 0
+    const fireTake = manifest.voice["fourth-fire"]?.takes?.[0]
+    if (fireTake) {
+      say(fireTake, { gain: 1.65, level: 1.0, duck: 0.85 })
+      screenBreak.setCaption({
+        words: fireTake.words,
+        startRtime: rtime,
+        endRtime: rtime + fireTake.dur,
+      })
+    }
+
+    const rootRect = root.getBoundingClientRect()
+    const dlEl = root.querySelector(".hero .download")
+    const dlRect = dlEl ? dlEl.getBoundingClientRect() : null
+    const dlX = dlRect && dlRect.width > 0 ? dlRect.left - rootRect.left + dlRect.width * 0.52 : W * 0.5
+    const dlY = dlRect && dlRect.height > 0 ? dlRect.top - rootRect.top + dlRect.height * 0.5 : H * 0.72
+
+    const targets = [
+      { x: W * 0.31, y: H * 0.31, hitsDownload: false },
+      { x: W * 0.69, y: H * 0.29, hitsDownload: false },
+      { x: W * 0.36, y: H * 0.56, hitsDownload: false },
+      { x: dlX - 68, y: dlY - 22, hitsDownload: true },
+      { x: W * 0.66, y: H * 0.48, hitsDownload: false },
+      { x: W * 0.61, y: H * 0.66, hitsDownload: false },
+      { x: W * 0.5, y: H * 0.46, hitsDownload: false, final: true },
+    ]
+
+    const wordsList = fireTake?.words ?? [
+      { text: "TAKE!", t: 0.06 },
+      { text: "THIS!", t: 0.55 },
+      { text: "AND!", t: 1.11 },
+      { text: "THIS!", t: 1.35 },
+      { text: "AND!", t: 1.83 },
+      { text: "THAT!", t: 2.07 },
+      { text: "BREAK!", t: 2.79 },
+    ]
+
+    wordsList.forEach((w, idx) => {
+      const tgt = targets[Math.min(idx, targets.length - 1)]
+      const isFinal = idx === wordsList.length - 1 || !!tgt.final
+      setTimeout0(w.t, () => {
+        const m = mouthPos()
+        head.stretch.v += isFinal ? 5.5 : 2.8
+        head.ly.v -= isFinal ? 55 : 26
+        screenBreak.fireWordAtScreen({
+          text: w.text,
+          fromX: m.x,
+          fromY: m.y,
+          targetX: tgt.x,
+          targetY: tgt.y,
+          dur: isFinal ? 0.21 : 0.16,
+          final: isFinal,
+          hitsDownload: tgt.hitsDownload,
+          onImpact: () => {
+            const pan = (tgt.x / W) * 1.2 - 0.6
+            if (!isFinal) {
+              // Crisp, ducked glass-crack transient + pitch/time-spread propagation sweep (90–160 ms)
+              const primaryCrack = idx % 2 === 0 ? "glass-crack-1" : "glass-crack-2"
+              const secondaryCrack = idx % 2 === 0 ? "glass-crack-2" : "glass-crack-1"
+              audio.sfx(primaryCrack, {
+                bus: "impacts",
+                gain: 0.32,
+                rate: rnd(0.95, 1.06),
+                pan,
+                dur: 0.22,
+              })
+              setTimeout0(0.052, () =>
+                audio.sfx(secondaryCrack, {
+                  bus: "impacts",
+                  gain: 0.21,
+                  rate: rnd(1.18, 1.34),
+                  pan: clamp(pan * 1.25, -0.85, 0.85),
+                  dur: 0.18,
+                }),
+              )
+              setTimeout0(0.105, () =>
+                audio.sfx(primaryCrack, {
+                  bus: "impacts",
+                  gain: 0.14,
+                  rate: rnd(1.36, 1.54),
+                  pan: clamp(-pan * 0.75, -0.85, 0.85),
+                  dur: 0.15,
+                }),
+              )
+              fx.push({ kind: 0, x: tgt.x, y: tgt.y, r: 0, rMax: 165 * v.fx, width: 2.8, t: 0, k: 1.1, age: 0, life: 0.34 })
+              fx.push({ kind: 1, x: tgt.x, y: tgt.y, r: 68 * v.fx, t: 0, k: 1.15, age: 0, life: 0.08 })
+              chip(tgt.x, tgt.y, 0, -1, 18, 0.9)
+              addBlastLight(tgt.x, tgt.y, 260, 1.15, 0.28)
+              hitStop.remaining = Math.max(hitStop.remaining, 0.024)
+              cam.trauma = Math.min(1, cam.trauma + 0.52 * v.shake)
+              cam.kx.v += (tgt.x > W * 0.5 ? 1 : -1) * 240 * v.shake
+              cam.ky.v += 220 * v.shake
+            } else {
+              // ─── Beat 3 (Full-Screen Shatter into Void + Download Knocked Off) ───
+              blastStage = "shattered"
+              finale.phase = "shattered"
+              head.t = 0
+              for (const c of live) if (c.state !== "dead") retire(c)
+              live.length = 0
+              // Brief window for the glass shatter crash + tinkle before sidechain-ducking for the punchline
+              audio.setDuck(0, 0)
+              audio.sfx("glass-shatter", { bus: "impacts", gain: 0.72, dur: 1.15 })
+              audio.sfx("boom", { bus: "impacts", gain: 0.48, rate: 0.88, dur: 0.8 })
+              setTimeout0(0.28, () => audio.sfx("glass-tinkle", { bus: "impacts", gain: 0.46, dur: 0.9 }))
+              fx.push({ kind: 0, x: tgt.x, y: tgt.y, r: 0, rMax: diag * 0.85, width: 4.5, t: 0, k: 1.35, age: 0, life: 0.62 })
+              fx.push({ kind: 1, x: tgt.x, y: tgt.y, r: 160 * v.fx, t: 0, k: 1.4, age: 0, life: 0.12 })
+              addBlastLight(tgt.x, tgt.y, diag * 0.65, 1.75, 0.52)
+              hitStop.remaining = Math.max(hitStop.remaining, 0.085)
+              cam.trauma = 1
+              // Hold 1.18s while the screen shatters into the void, then sidechain-duck hard & deliver the punchline!
+              setTimeout0(1.18, () => {
+                const goneTake = manifest.voice["fourth-gone"]?.takes?.[0]
+                if (goneTake) {
+                  say(goneTake, { gain: 1.72, level: 0.68, duck: 0.95 })
+                  screenBreak.setCaption({
+                    words: goneTake.words,
+                    startRtime: rtime,
+                    endRtime: rtime + goneTake.dur,
+                  })
+                }
+              })
+            }
+          },
+        })
+      })
+    })
+  })
+
+  // ─── Beat 4 (Time-Reverse Crystalline Rebuild): shards, Download button, and title fly back ───
+  setTimeout0(12.6, () => {
+    blastStage = "rebuilding"
+    finale.phase = "rebuilding"
+    head.t = 0
+    screenBreak.setCaption(null)
+    audio.setDuck(0, 0)
+    audio.sfx("glass-rebuild", { bus: "impacts", gain: 0.76, dur: 1.8 })
+    screenBreak.startRebuild(1.8)
+    returnTitleWords()
+  })
+
+  // ─── Beat 5 (Dizzy Exhale & Reset to Calm) ───
+  setTimeout0(14.55, startDizzyExhale)
 }
 
 function updateFinale(dt) {
@@ -1365,6 +2242,26 @@ function updateCards(dt) {
       explode(c)
       continue
     }
+    // Keep cards out of the hero copy + download button exclusion zone except during the finale climax
+    if (c.state !== "resolving" && c.state !== "sent" && !allowCopyOverlap()) {
+      const padMargin = PAD * 0.75 * c.base
+      const baseRes = resolveAvoid(c.bx, c.by, c.hw + padMargin, c.hh + padMargin)
+      if (baseRes.pushed) {
+        c.bx = lerp(c.bx, baseRes.x, 1 - Math.exp(-dt * 12))
+        c.by = lerp(c.by, baseRes.y, 1 - Math.exp(-dt * 12))
+      }
+      const curRes = resolveAvoid(x, y, c.hw + padMargin, c.hh + padMargin)
+      if (curRes.pushed) {
+        const pushX = curRes.x - x
+        const pushY = curRes.y - y
+        c.kx.v += pushX * 26 * dt
+        c.ky.v += pushY * 26 * dt
+        c.kx.x += pushX * 0.65
+        c.ky.x += pushY * 0.65
+        x = curRes.x
+        y = curRes.y
+      }
+    }
     if (dt > 0) {
       c.vx = (x - c.x) / dt
       c.vy = (y - c.y) / dt
@@ -1394,11 +2291,22 @@ function updateFx(dt) {
       continue
     }
     f.k0 ??= f.k
+    if (f.vx || f.vy) {
+      f.x += (f.vx ?? 0) * dt
+      f.y += (f.vy ?? 0) * dt
+      if (f.vx) f.vx *= Math.exp(-1.8 * dt)
+      if (f.vy && f.kind === 8) f.vy *= Math.exp(-1.2 * dt)
+    }
     if (f.kind === 0) {
       f.width0 ??= f.width
       f.r = f.rMax * (1 - Math.pow(1 - f.t, 3))
       f.width = f.width0 * (1 - f.t * 0.7)
       f.k = f.k0 * (1 - f.t) * (1 - f.t) * (f.age < 0 ? 0 : 1)
+    } else if (f.kind === 8 || f.kind === 9) {
+      f.r = lerp(f.r0 ?? f.r, f.rMax ?? f.r * 1.8, 1 - Math.pow(1 - f.t, 2.2))
+      f.k = f.k0 * (f.age < 0 ? 0 : 1)
+    } else if (f.kind === 10) {
+      f.k = f.k0 * (1 - f.t) * (f.age < 0 ? 0 : 1)
     } else f.k = f.k0 * (1 - f.t)
   }
 }
@@ -1428,18 +2336,20 @@ function step(realDt) {
   updateWords(dt)
   updateLanding(dt)
   updateCards(dt)
+  updateTitleWords(dt)
   updateFx(realDt)
+  updateBlastLights(realDt)
 
-  cam.trauma = Math.max(0, cam.trauma - realDt * 1.3) * Math.exp(-realDt * 2.2)
-  spring(cam.kx, 0, 6, 0.5, realDt)
-  spring(cam.ky, 0, 6, 0.5, realDt)
-  const tr = cam.trauma * cam.trauma
+  cam.trauma = Math.max(0, cam.trauma - realDt * 1.18) * Math.exp(-realDt * 2.0)
+  spring(cam.kx, 0, 6.2, 0.45, realDt)
+  spring(cam.ky, 0, 6.2, 0.45, realDt)
+  const tr = Math.pow(cam.trauma, 1.85)
   const nz = (f, o) => Math.sin(time * f + o) * 0.6 + Math.sin(time * f * 1.7 + o * 3) * 0.4
   const calm = reduced ? 0 : 1
-  const amp = lerp(6, 14, I)
-  const shakeX = (nz(38, 1) * amp * tr + cam.kx.x * 0.03) * calm
-  const shakeY = (nz(43, 7) * amp * tr + cam.ky.x * 0.03) * calm
-  const roll = nz(29, 3) * 0.008 * tr * calm
+  const amp = lerp(6, 17, I)
+  const shakeX = (nz(38, 1) * amp * tr + cam.kx.x * 0.032) * calm
+  const shakeY = (nz(43, 7) * amp * tr + cam.ky.x * 0.032) * calm
+  const roll = nz(29, 3) * 0.01 * tr * calm
 
   const c = headPos()
   const sy = 1 + head.stretch.x
@@ -1451,6 +2361,7 @@ function step(realDt) {
     shakeX,
     shakeY,
     roll,
+    lights: blastLights.slice(0, 2),
     head: {
       x: c.x,
       y: c.y,
@@ -1496,7 +2407,8 @@ function step(realDt) {
       sparkGravity: 380,
     },
   }))
-
+  screenBreak.setHeadLight(c.x, c.y, headR())
+  screenBreak.stepAndDraw(realDt, rtime)
 }
 
 // ─── Input ─────────────────────────────────────────────────────────────────────
@@ -1566,6 +2478,7 @@ const ro = new ResizeObserver(() => {
   if (!raf) step(0)
 })
 ro.observe(root)
+for (const el of root.querySelectorAll(".hero, .hero__copy, .hero__action, .platforms")) ro.observe(el)
 resize()
 if (reduced) head.smile.x = 1
 step(0)
@@ -1582,7 +2495,38 @@ if (capture) {
       for (let k = 0; k < n; k++) step(dt)
       await renderer.done?.()
     },
-    state: () => ({ rtime, time, clock, I, stage: currentStage(), arc: arcNow().id, saiyan: +saiyan.toFixed(3), blast: blastStage, finale: finale.phase, power: powerStage, cards: live.length, words: flying.length, phase: head.phase }),
+    state: () => ({
+      rtime,
+      time,
+      clock,
+      I,
+      stage: currentStage(),
+      arc: arcNow().id,
+      saiyan: +saiyan.toFixed(3),
+      blast: blastStage,
+      finale: finale.phase,
+      power: powerStage,
+      cards: live.length,
+      words: flying.length,
+      phase: head.phase,
+      screenBreak: screenBreak.state,
+      cracks: screenBreak.cracks.length,
+      glassShards: screenBreak.shards.length,
+    }),
+    titleState: () => titleWords.map((w) => ({ text: w.text, state: w.state, x: +w.x.toFixed(1), y: +w.y.toFixed(1), rot: +w.rot.toFixed(3), bounces: w.bounces })),
+    avoidState: () => ({
+      copyRects,
+      cards: live.map((c) => ({
+        kind: c.kind,
+        x: +c.x.toFixed(1),
+        y: +c.y.toFixed(1),
+        hw: +c.hw.toFixed(1),
+        hh: +c.hh.toFixed(1),
+        overlaps: overlapsAvoid(c.x, c.y, c.hw, c.hh),
+      })),
+    }),
+    pressKey: (down, rect) => pressKey(down, rect),
+    explodeKey: (rect) => explodeKeycap(rect),
     focus: () => {
       const c = head.target && head.target.state !== "dead" ? head.target : live.find((o) => o.state === "typing")
       return c ? { x: c.x, y: c.y, kind: c.kind } : null
@@ -1594,10 +2538,17 @@ if (capture) {
 
 return {
   renderer: renderer.kind,
+  pressKey,
+  explodeKey: explodeKeycap,
   // Call from a click with an AudioContext created inside that gesture.
-  async start({ context, muted }) {
+  async start({ context, muted, keyRect }) {
     if (started) return
     audio.attach(context, { muted })
+    if (!reduced) {
+      audio.keyBoom()
+      explodeKeycap(keyRect)
+    }
+    wake()
     const [m] = await Promise.all([import("./audio/manifest.json").then((x) => x.default), cards.ready])
     manifest = m
     for (const [id, line] of Object.entries(manifest.voice)) if (LINES[line.stage] && !line.prompt) LINES[line.stage].push({ id, ...line, next: 0 })
@@ -1617,6 +2568,7 @@ return {
     off.abort()
     io.disconnect()
     ro.disconnect()
+    screenBreak.destroy()
     if (raf) cancelAnimationFrame(raf)
     raf = 0
     visible = false

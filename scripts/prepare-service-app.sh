@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$root/scripts/macos-signing.sh"
-notary_profile=${HEX_NOTARY_PROFILE:?Set HEX_NOTARY_PROFILE to the matching notarization profile}
+: "${HEX_NOTARY_PROFILE:?Set HEX_NOTARY_PROFILE to the matching notarization profile}"
 version=$(hex_version "$root")
 arch=$(uname -m)
 dist="$root/dist/service"
@@ -14,7 +14,7 @@ bundle=$("$root/scripts/build-service-app.sh")
 rm -rf "$dist"
 mkdir -p "$dist"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$submission"
-xcrun notarytool submit "$submission" --keychain-profile "$notary_profile" --wait
+hex_notarize "$submission"
 xcrun stapler staple "$bundle"
 xcrun stapler validate "$bundle"
 rm -f "$submission"

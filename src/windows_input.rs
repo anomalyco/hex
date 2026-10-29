@@ -122,16 +122,6 @@ impl From<&WindowsHotkey> for HotkeyBinding {
 }
 
 impl WindowsHotkey {
-    pub fn paste_last_default() -> Self {
-        Self {
-            control: true,
-            windows: false,
-            alt: true,
-            shift: false,
-            key: Some("v".into()),
-        }
-    }
-
     pub fn validate(&self) -> Result<()> {
         let modifier_count = [self.control, self.windows, self.alt, self.shift]
             .into_iter()
@@ -163,31 +153,7 @@ impl WindowsHotkey {
     }
 
     pub fn label(&self) -> String {
-        self.keycaps().join("+")
-    }
-
-    pub fn keycaps(&self) -> Vec<String> {
-        let mut parts = Vec::new();
-        if self.control {
-            parts.push("Ctrl".into());
-        }
-        if self.windows {
-            parts.push("Win".into());
-        }
-        if self.alt {
-            parts.push("Alt".into());
-        }
-        if self.shift {
-            parts.push("Shift".into());
-        }
-        if let Some(key) = &self.key {
-            parts.push(match key.to_ascii_lowercase().as_str() {
-                "space" => "Space".into(),
-                "enter" | "return" => "Enter".into(),
-                key => key.to_ascii_uppercase(),
-            });
-        }
-        parts
+        HotkeyBinding::from(self).keycaps().join("+")
     }
 }
 
@@ -213,10 +179,6 @@ fn voice_action_variant(action: HotkeyAction) -> HotkeyAction {
         HotkeyAction::Finish => HotkeyAction::VoiceFinish,
         _ => HotkeyAction::VoiceCancel,
     }
-}
-
-fn dictation_key_is_suppressed(pass_through: bool) -> bool {
-    !pass_through
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -261,22 +223,10 @@ struct CallbackState {
     escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
-    pass_through_dictation_shortcut: bool,
+    /// Pass the dictation key on to other apps instead of consuming it.
+    share_trigger: bool,
     capture: CaptureState,
     dirty: bool,
-}
-
-struct HookBindings {
-    dictation: WindowsHotkey,
-    dictation_trigger_vk: Option<u32>,
-    paste_last: Option<WindowsHotkey>,
-    paste_trigger_vk: Option<u32>,
-    voice_action: Option<WindowsHotkey>,
-    voice_trigger_vk: Option<u32>,
-    double_tap_enabled: bool,
-    double_tap_only: bool,
-    pass_through_dictation_shortcut: bool,
-    shortcut_mode: ShortcutMode,
 }
 
 #[derive(Default)]
@@ -436,58 +386,45 @@ impl WindowsHotkeyMonitor {
         voice_action: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
-        pass_through_dictation_shortcut: bool,
         shortcut_mode: ShortcutMode,
+        share_trigger: bool,
     ) -> Result<Self> {
         binding.validate()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
-        let paste_trigger_vk = paste_last
-            .as_ref()
-            .map(|binding| {
-                binding.validate()?;
-                binding
-                    .key
-                    .as_deref()
-                    .ok_or_else(|| eyre!("Paste Last requires a non-modifier key"))
-                    .and_then(virtual_key)
-            })
-            .transpose()?;
-        let voice_trigger_vk = voice_action
-            .as_ref()
-            .map(|binding| {
-                binding.validate()?;
-                binding
-                    .key
-                    .as_deref()
-                    .ok_or_else(|| eyre!("the voice action shortcut requires a non-modifier key"))
-                    .and_then(virtual_key)
-            })
-            .transpose()?;
+        let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
+        let voice_trigger_vk =
+            chord_virtual_key(voice_action.as_ref(), "the voice action shortcut")?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
         let (error_sender, errors) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let state = CallbackState {
+            events: event_sender,
+            errors: error_sender,
+            binding,
+            trigger_vk,
+            paste_last,
+            paste_trigger_vk,
+            voice_action,
+            voice_trigger_vk,
+            modifiers: ModifierState::default(),
+            trigger_down: false,
+            paste_trigger_down: false,
+            voice_trigger_down: false,
+            voice_capture: CaptureState::default(),
+            escape_down: false,
+            double_tap_enabled,
+            double_tap_only,
+            share_trigger,
+            capture: CaptureState {
+                toggle: shortcut_mode == ShortcutMode::Toggle,
+                ..CaptureState::default()
+            },
+            dirty: false,
+        };
         let worker = thread::Builder::new()
             .name("windows-hotkey".into())
-            .spawn(move || {
-                run_hook(
-                    HookBindings {
-                        dictation: binding,
-                        dictation_trigger_vk: trigger_vk,
-                        paste_last,
-                        paste_trigger_vk,
-                        voice_action,
-                        voice_trigger_vk,
-                        double_tap_enabled,
-                        double_tap_only,
-                        pass_through_dictation_shortcut,
-                        shortcut_mode,
-                    },
-                    event_sender,
-                    error_sender,
-                    ready_sender,
-                )
-            })?;
+            .spawn(move || run_hook(state, ready_sender))?;
         let thread_id = ready_receiver
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| eyre!("timed out installing the Windows {label} keyboard hook"))?
@@ -499,6 +436,19 @@ impl WindowsHotkeyMonitor {
             worker: Some(worker),
         })
     }
+}
+
+fn chord_virtual_key(binding: Option<&WindowsHotkey>, name: &str) -> Result<Option<u32>> {
+    binding
+        .map(|binding| {
+            binding.validate()?;
+            binding
+                .key
+                .as_deref()
+                .ok_or_else(|| eyre!("{name} requires a non-modifier key"))
+                .and_then(virtual_key)
+        })
+        .transpose()
 }
 
 impl Drop for WindowsHotkeyMonitor {
@@ -516,17 +466,14 @@ impl Drop for WindowsHotkeyMonitor {
     }
 }
 
-fn run_hook(
-    bindings: HookBindings,
-    events: SyncSender<HotkeyEvent>,
-    errors: mpsc::Sender<String>,
-    ready: SyncSender<Result<u32, String>>,
-) {
+fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) {
     let thread_id = unsafe { GetCurrentThreadId() };
     let mut message = MSG::default();
     unsafe {
         PeekMessageW(&mut message, ptr::null_mut(), 0, 0, PM_NOREMOVE);
     }
+    let errors = initial.errors.clone();
+    initial.modifiers = ModifierState::current();
     {
         let mut state = CALLBACK_STATE
             .lock()
@@ -535,30 +482,7 @@ fn run_hook(
             let _ = ready.send(Err("the Windows keyboard hook is already active".into()));
             return;
         }
-        *state = Some(CallbackState {
-            events,
-            errors: errors.clone(),
-            binding: bindings.dictation,
-            trigger_vk: bindings.dictation_trigger_vk,
-            paste_last: bindings.paste_last,
-            paste_trigger_vk: bindings.paste_trigger_vk,
-            voice_action: bindings.voice_action,
-            voice_trigger_vk: bindings.voice_trigger_vk,
-            modifiers: ModifierState::current(),
-            trigger_down: false,
-            paste_trigger_down: false,
-            voice_trigger_down: false,
-            voice_capture: CaptureState::default(),
-            escape_down: false,
-            double_tap_enabled: bindings.double_tap_enabled,
-            double_tap_only: bindings.double_tap_only,
-            pass_through_dictation_shortcut: bindings.pass_through_dictation_shortcut,
-            capture: CaptureState {
-                toggle: bindings.shortcut_mode == ShortcutMode::Toggle,
-                ..CaptureState::default()
-            },
-            dirty: false,
-        });
+        *state = Some(initial);
     }
 
     let hook =
@@ -623,6 +547,13 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(state) = guard.as_mut() {
+            // The hook never sees a release that lands on another desktop,
+            // such as the Windows key of Win+L or the modifiers of
+            // Ctrl+Alt+Delete, so tracked modifiers stayed held after
+            // unlocking and Ctrl+Space no longer matched. Re-read them on
+            // every event: the asynchronous key state does not include this
+            // event yet, so `update` applies it on top.
+            state.modifiers = ModifierState::current();
             let modifier_event = state.modifiers.update(event.vkCode, is_down);
             // During a chord capture the hook only tracks modifier state;
             // it neither triggers actions nor suppresses keys, so the
@@ -674,15 +605,13 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             } else if state.trigger_vk == Some(event.vkCode) {
                 if is_down {
                     if state.trigger_down {
-                        suppressed =
-                            dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
+                        suppressed = !state.share_trigger;
                     } else if !state.dirty
                         && !state.voice_capture.active
                         && state.modifiers.matches(&state.binding)
                     {
                         state.trigger_down = true;
-                        suppressed =
-                            dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
+                        suppressed = !state.share_trigger;
                         let was_locked = state.capture.locked;
                         if let Some(action) = state.capture.press(
                             state.double_tap_enabled,
@@ -697,7 +626,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     }
                 } else if state.trigger_down {
                     state.trigger_down = false;
-                    suppressed = dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
+                    suppressed = !state.share_trigger;
                     if let Some(action) =
                         state.capture.release(state.double_tap_enabled, event.time)
                     {
@@ -812,6 +741,10 @@ fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32
 
 impl ModifierState {
     fn current() -> Self {
+        Self::read(key_down)
+    }
+
+    fn read(key_down: impl Fn(u16) -> bool) -> Self {
         Self {
             left_control: key_down(VK_LCONTROL),
             right_control: key_down(VK_RCONTROL),
@@ -871,7 +804,7 @@ fn key_down(key: u16) -> bool {
 }
 
 /// One step of the settings-pane chord capture. The UI polls this on a
-/// timer instead of listening to gpui keystrokes because dictation
+/// timer instead of listening to window keystrokes because dictation
 /// bindings can be modifier-only chords (for example Ctrl+Win), which
 /// never produce a keystroke event.
 pub(crate) enum ChordPoll {
@@ -912,10 +845,6 @@ const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
 ];
 
 impl ChordCapture {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn poll(&mut self) -> ChordPoll {
         if key_down(VK_ESCAPE) {
             return ChordPoll::Cancelled;
@@ -957,6 +886,17 @@ impl ChordCapture {
         }
         ChordPoll::Pending
     }
+
+    /// The modifiers a release would record so far.
+    pub fn held(&self) -> WindowsHotkey {
+        WindowsHotkey {
+            control: self.seen_control,
+            windows: self.seen_windows,
+            alt: self.seen_alt,
+            shift: self.seen_shift,
+            key: None,
+        }
+    }
 }
 
 /// Whether any pressed key is one the capture cannot map to a binding
@@ -986,10 +926,8 @@ fn unsupported_key_down() -> bool {
 }
 
 fn pressed_capture_key() -> Option<String> {
-    for (vk, name) in CAPTURE_NAMED_KEYS {
-        if key_down(vk) {
-            return Some((name).to_string());
-        }
+    if let Some((_, name)) = CAPTURE_NAMED_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
+        return Some(name.to_string());
     }
     for vk in 0x41..=0x5A_u16 {
         // A-Z
@@ -1014,21 +952,16 @@ fn pressed_capture_key() -> Option<String> {
 
 pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     let normalized = key.trim().to_ascii_lowercase();
+    if let Some((vk, _)) = CAPTURE_NAMED_KEYS
+        .into_iter()
+        .find(|&(_, name)| name == normalized)
+    {
+        return Ok(u32::from(vk));
+    }
     let virtual_key = match normalized.as_str() {
-        "space" => u32::from(VK_SPACE),
-        "enter" | "return" => u32::from(VK_RETURN),
-        "tab" => u32::from(VK_TAB),
-        "backspace" => 0x08,
-        "delete" => 0x2e,
-        "insert" => 0x2d,
-        "home" => 0x24,
-        "end" => 0x23,
-        "pageup" | "page_up" => 0x21,
-        "pagedown" | "page_down" => 0x22,
-        "left" => 0x25,
-        "up" => 0x26,
-        "right" => 0x27,
-        "down" => 0x28,
+        "return" => u32::from(VK_RETURN),
+        "page_up" => 0x21,
+        "page_down" => 0x22,
         _ => {
             if let Some(number) = normalized
                 .strip_prefix('f')
@@ -1063,12 +996,6 @@ mod tests {
     }
 
     #[test]
-    fn dictation_key_passes_through_only_when_sharing_is_enabled() {
-        assert!(dictation_key_is_suppressed(false));
-        assert!(!dictation_key_is_suppressed(true));
-    }
-
-    #[test]
     fn unmodified_letters_are_rejected() {
         let binding = WindowsHotkey {
             control: false,
@@ -1093,10 +1020,32 @@ mod tests {
     }
 
     #[test]
+    fn a_release_missed_while_locked_does_not_block_the_shortcut() {
+        let binding = WindowsHotkey::default();
+        // Win+L: the hook saw Windows go down, then the lock screen took
+        // its release, so tracking events alone leaves it held.
+        let mut tracked = ModifierState::default();
+        tracked.update(u32::from(VK_LWIN), true);
+        tracked.update(u32::from(VK_LCONTROL), true);
+        assert!(!tracked.matches(&binding));
+        // After unlocking, the system reports every key up before this
+        // Ctrl press, which `update` then applies.
+        let mut synced = ModifierState::read(|_| false);
+        synced.update(u32::from(VK_LCONTROL), true);
+        assert!(synced.matches(&binding));
+    }
+
+    #[test]
     fn hotkeys_round_trip_through_the_portable_binding() {
         for hotkey in [
             WindowsHotkey::default(),
-            WindowsHotkey::paste_last_default(),
+            WindowsHotkey {
+                control: true,
+                windows: false,
+                alt: true,
+                shift: false,
+                key: Some("v".into()),
+            },
             WindowsHotkey {
                 key: Some("pageup".into()),
                 shift: true,

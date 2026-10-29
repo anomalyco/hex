@@ -173,6 +173,7 @@ const LAYOUT = {
   tweet: { w: 340, h: 132 },
   discord: { w: 340, h: 118 },
   opencode: { w: 360, h: 200 },
+  keycap: { w: 124, h: 102 },
 }
 
 function rr(ctx, x, y, w, h, r) {
@@ -807,6 +808,84 @@ Object.assign(DRAW, {
     ctx.lineTo(sx + 4.5, by - 0.5)
     ctx.stroke()
   },
+  // Tactile ⌥ Option keycap rendered into the atlas so it shatters into real Voronoi chunks.
+  keycap(ctx, _c, w, h) {
+    // 1. Switch well & glowing amber LED underglow
+    ctx.save()
+    const glow = ctx.createRadialGradient(w * 0.5, h * 0.78, 4, w * 0.5, h * 0.68, w * 0.54)
+    glow.addColorStop(0, "rgba(255, 176, 64, 0.92)")
+    glow.addColorStop(0.52, "rgba(255, 118, 32, 0.42)")
+    glow.addColorStop(1, "rgba(255, 90, 20, 0)")
+    ctx.fillStyle = glow
+    rr(ctx, 2, 4, w - 4, h - 2, 18)
+    ctx.fill()
+    ctx.restore()
+
+    rr(ctx, 4, 4, w - 8, h - 4, 18)
+    ctx.fillStyle = "#050508"
+    ctx.fill()
+    ctx.strokeStyle = "rgba(255, 180, 80, 0.28)"
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+
+    // 2. Anodized outer cap skirt
+    const capX = 6
+    const capY = 2
+    const capW = w - 12
+    const capH = h - 8
+    const capGrad = ctx.createLinearGradient(0, capY, 0, capY + capH)
+    capGrad.addColorStop(0, "#2f333d")
+    capGrad.addColorStop(0.38, "#181b22")
+    capGrad.addColorStop(0.82, "#0f1116")
+    capGrad.addColorStop(1, "#08090c")
+    rr(ctx, capX, capY, capW, capH, 16)
+    ctx.fillStyle = capGrad
+    ctx.fill()
+    rr(ctx, capX + 0.6, capY + 0.6, capW - 1.2, capH - 1.2, 15.4)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)"
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+
+    // 3. Sculpted concave dish
+    const dX = capX + 7
+    const dY = capY + 4
+    const dW = capW - 14
+    const dH = capH - 16
+    const dishGrad = ctx.createLinearGradient(dX, dY, dX + dW * 0.6, dY + dH)
+    dishGrad.addColorStop(0, "#242730")
+    dishGrad.addColorStop(0.5, "#13151b")
+    dishGrad.addColorStop(1, "#191c24")
+    rr(ctx, dX, dY, dW, dH, 12)
+    ctx.fillStyle = dishGrad
+    ctx.fill()
+    rr(ctx, dX + 0.6, dY + 0.6, dW - 1.2, dH - 1.2, 11.4)
+    ctx.strokeStyle = "rgba(255, 220, 165, 0.24)"
+    ctx.lineWidth = 1.1
+    ctx.stroke()
+
+    // 4. ⌥ Option glyph at top-right of dish
+    ctx.save()
+    ctx.translate(dX + dW - 12 - 22, dY + 10)
+    ctx.scale(22 / 24, 18 / 18)
+    ctx.strokeStyle = "rgba(248, 249, 252, 0.96)"
+    ctx.lineWidth = 2.25
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    ctx.shadowColor = "rgba(255, 196, 110, 0.65)"
+    ctx.shadowBlur = 8
+    ctx.stroke(path2d("M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3"))
+    ctx.restore()
+
+    // 5. "option" legend at bottom-left of dish
+    ctx.save()
+    ctx.font = `560 14.5px ${SANS}`
+    ctx.fillStyle = "rgba(248, 249, 252, 0.96)"
+    ctx.textBaseline = "alphabetic"
+    ctx.shadowColor = "rgba(255, 196, 110, 0.55)"
+    ctx.shadowBlur = 8
+    ctx.fillText("option", dX + 12, dY + dH - 10)
+    ctx.restore()
+  },
 })
 
 // A complaint that OpenCode fixed: green edge and a resolution bar over the reply field.
@@ -901,6 +980,21 @@ export class Cards {
     c.h = L.h
     c.sw = L.w + PAD * 2
     c.sh = L.h + PAD * 2
+    return c
+  }
+
+  makeKeycap() {
+    const L = LAYOUT.keycap
+    const c = {
+      kind: "keycap",
+      layout: "keycap",
+      item: "__keycap__",
+      w: L.w,
+      h: L.h,
+      sw: L.w + PAD * 2,
+      sh: L.h + PAD * 2,
+    }
+    if (!this.alloc(c)) return null
     return c
   }
 

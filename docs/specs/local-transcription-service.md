@@ -1,4 +1,4 @@
-# HEX Local Transcription Service and SDK
+# Hex Local Transcription Service and SDK
 
 **Status:** The internal service and direct-child mode are implemented.
 `@kitlangton/hex@0.3.0` publishes ready transcribers through Promise and Effect
@@ -28,7 +28,7 @@ settings and model choice
 ```
 
 The host's signed app owns the microphone grant. A correctly configured packaged
-host prompts under its own identity, not HEX; a development Electron runtime may
+host prompts under its own identity, not Hex; a development Electron runtime may
 appear as Electron. The embedded helper never opens the microphone.
 
 ## Decisions
@@ -63,7 +63,10 @@ through its separate capture API.
 Verified model artifacts remain shared per user under Application Support.
 Each embedded helper has its own warm model and inference queue. Multiple hosts
 may reuse the same verified file, but they do not share Metal allocations or
-runtime selection. The current cache is filename-based; immutable revision-safe
+runtime selection. Inside `Hex.app`, a clip of up to 30 seconds for the GGUF
+model dictation has loaded runs on dictation's model between dictations, so
+the app holds one copy; another model, or a longer clip, uses the service's own,
+and a longer clip's copy is released when dictation holds the model. The current cache is filename-based; immutable revision-safe
 storage for independently versioned helpers remains planned.
 
 ## Embedded Startup and Authentication
@@ -96,7 +99,7 @@ Every request requires `Authorization: Bearer <token>`. The token is delivered
 only over the child's stdout pipe. The server deliberately sends no CORS
 headers. A parsed request with a missing or incorrect bearer credential returns
 an empty `401` response; malformed HTTP can be rejected before authentication.
-The standalone HEX application may still publish owner-only discovery for its
+The standalone Hex application may still publish owner-only discovery for its
 own existing local API. Embedded `create()` uses the child handshake; desktop
 `connect()` remains a separate discovery-based path.
 
@@ -199,12 +202,24 @@ system-managed metadata do not make it a supported service model.
 
 For the available GGUF models, preparation means download if needed, checksum
 verification (or reuse of a matching verification receipt), strict-Metal load, and
-prewarm. `managed` means system-managed, not downloaded by HEX, so these models
+prewarm. `managed` means system-managed, not downloaded by Hex, so these models
 report `managed: false`. Preparation activates the helper's warm model but does
 not change full `Hex.app` settings. The service serializes preparation, publishes
 only verified replacement files, and preserves the previous warm runtime if
 candidate loading fails. A verified download can remain installed after a load
 failure; artifact publication and runtime activation are separate steps.
+
+Preparing a model that is already loaded, including the desktop app's
+dictation model, reruns the prewarm: an inference over 1.5 seconds of silence
+(the minimum clip length) that, in the app, yields to dictation like meeting
+chunks. ggml keeps the Metal weights resident for three minutes after a run;
+then macOS may compress or swap them, and the next transcription pays to
+restore them. A host that records its own audio can prepare when recording
+starts, so the restore happens while it records rather than after. The
+prewarm is skipped when the model ran in the last minute. When the app's
+dictation model is the one requested, preparation uses it and never loads a
+second copy; if dictation is recording or transcribing, the model is already
+warm and preparation succeeds at once.
 
 ### Ready Transcriber
 

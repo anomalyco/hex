@@ -27,40 +27,41 @@ pub struct AppleSpeech {
     selection: crate::transcription_models::TranscriptionSelection,
 }
 
-type ReadinessCacheMap = HashMap<String, (Instant, Option<bool>)>;
+#[derive(Default)]
+struct ReadinessState {
+    active: HashMap<String, usize>,
+    cached: HashMap<String, (Instant, Option<bool>)>,
+}
 
-static READY_LOCALES: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
-static READINESS_CACHE: OnceLock<Mutex<ReadinessCacheMap>> = OnceLock::new();
+fn readiness() -> std::sync::MutexGuard<'static, ReadinessState> {
+    static STATE: OnceLock<Mutex<ReadinessState>> = OnceLock::new();
+    STATE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
 
 // The retained Swift actor is safe to move to the dedicated inference thread.
 unsafe impl Send for AppleSpeech {}
 
 impl AppleSpeech {
     pub fn readiness_status(language: &str) -> Option<bool> {
-        if READY_LOCALES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .contains_key(language)
         {
-            return Some(true);
-        }
-        let cache = READINESS_CACHE.get_or_init(Default::default);
-        if let Some((checked_at, cached)) = cache
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .get(language)
-            .copied()
-            && checked_at.elapsed() < READINESS_CACHE_TTL
-        {
-            return cached;
+            let state = readiness();
+            if state.active.contains_key(language) {
+                return Some(true);
+            }
+            if let Some(&(checked_at, cached)) = state.cached.get(language)
+                && checked_at.elapsed() < READINESS_CACHE_TTL
+            {
+                return cached;
+            }
         }
         let ready =
             with_locale(language, |locale| unsafe { hex_apple_speech_ready(locale) }).unwrap_or(-1);
         let status = (ready >= 0).then_some(ready != 0);
-        cache
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        readiness()
+            .cached
             .insert(language.to_string(), (Instant::now(), status));
         status
     }
@@ -77,13 +78,10 @@ impl AppleSpeech {
         if session.is_null() {
             return Err(take_error(error));
         }
-        READY_LOCALES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        *readiness()
+            .active
             .entry(selection.language.clone())
-            .and_modify(|references| *references += 1)
-            .or_insert(1);
+            .or_insert(0) += 1;
         Ok(Self {
             session,
             selection: selection.clone(),
@@ -115,15 +113,12 @@ impl AppleSpeech {
 impl Drop for AppleSpeech {
     fn drop(&mut self) {
         unsafe { hex_apple_speech_release(self.session) };
-        let mut ready = READY_LOCALES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if let Some(references) = ready.get_mut(&self.selection.language) {
+        let mut state = readiness();
+        if let Some(references) = state.active.get_mut(&self.selection.language) {
             if *references > 1 {
                 *references -= 1;
             } else {
-                ready.remove(&self.selection.language);
+                state.active.remove(&self.selection.language);
             }
         }
     }

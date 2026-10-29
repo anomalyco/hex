@@ -203,9 +203,11 @@ export async function create(options: CreateOptions | TranscriberOptions = {}): 
   return startHost(options)
 }
 
+const defaultSupportDirectory = (): string => join(homedir(), "Library", "Application Support", "hex")
+
 export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
   const discoveryPath = options.discoveryPath
-    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? join(homedir(), "Library", "Application Support", "voice-control"), "local-api.json")
+    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? defaultSupportDirectory(), "local-api.json")
   let value: unknown
   try {
     value = JSON.parse(await readFile(discoveryPath, "utf8"))

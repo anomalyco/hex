@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && vite build --ssr src/prerender.tsx --outDir dist-server && bun scripts/prerender.ts",
+    "dev": "bun scripts/release-data.ts --mode dev && vite",
+    "build": "bun scripts/build.ts",
     "preview": "vite preview",
     "check:downloads": "bun scripts/check-downloads.ts",
     "generate:og": "bun scripts/generate-og.ts",
-    "generate:poster": "bun scripts/generate-poster.ts"
+    "generate:poster": "bun scripts/generate-poster.ts",
+    "generate:og-video": "node scripts/og-video/capture.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -18,9 +19,13 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@cloudflare/build-output-utils": "0.8.5",
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "cf": "1.0.0-beta.12",
+    "matter-js": "0.20.0",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.3"

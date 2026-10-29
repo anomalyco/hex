@@ -2,6 +2,17 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    build_version();
+    test_build_commit();
+    // `hex_capture`: the `capture` experiment's code, in every macOS and Linux
+    // build (`scrawl-capture` is their dependency); Windows has no host yet.
+    println!("cargo::rustc-check-cfg=cfg(hex_capture)");
+    if matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("macos" | "linux")
+    ) {
+        println!("cargo::rustc-cfg=hex_capture");
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
             // transcribe-cpp's static manifest records OpenBLAS as an absolute
@@ -38,7 +49,7 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=AVFAudio");
     println!("cargo:rustc-link-lib=framework=Speech");
     // FoundationModels exists only on macOS 26 and later. Weak-link it, and
-    // drop the object's strong autolink entry, so HEX still launches on older
+    // drop the object's strong autolink entry, so Hex still launches on older
     // systems and reports Apple Intelligence as unavailable.
     compile_swift_bridge(
         "apple_intelligence",
@@ -46,7 +57,8 @@ fn main() {
         &["FoundationModels"],
     );
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
-    compile_indicator_shader();
+    compile_swift_bridge("calendar", "HEXCalendarBridge", &[]);
+    println!("cargo:rustc-link-lib=framework=EventKit");
     compile_permission_guide();
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     for runtime in ["swift-5.5/macosx", "swift/macosx"] {
@@ -58,7 +70,87 @@ fn main() {
     }
 }
 
-/// Gives the executable its icon and the "HEX" name Explorer and Task
+/// The version Hex reports (`HEX_BUILD_VERSION`): the crate version, which
+/// the Release workflow stamps (scripts/set-crate-version.sh), else, for any
+/// other build of the unstamped `0.0.0`, `0.0.0-dev-local-<commit>` with
+/// `-dirty` for uncommitted changes (`0.0.0-dev-local` without git, as in Nix).
+/// It counts as a dev build, so it follows the dev channel's current release.
+fn build_version() {
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+    if version != "0.0.0" {
+        println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
+        return;
+    }
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let mut version = "0.0.0-dev-local".to_owned();
+    if let Some(commit) =
+        git(&["rev-parse", "--short=7", "HEAD"]).filter(|commit| !commit.is_empty())
+    {
+        version = format!("{version}-{commit}");
+        if git(&["status", "--porcelain", "--untracked-files=no"])
+            .is_some_and(|status| !status.is_empty())
+        {
+            version.push_str("-dirty");
+        }
+        let reference = git(&["symbolic-ref", "-q", "HEAD"]);
+        for name in ["HEAD", "packed-refs", "index"]
+            .into_iter()
+            .chain(reference.as_deref())
+        {
+            if let Some(path) = git(&["rev-parse", "--path-format=absolute", "--git-path", name])
+                .filter(|path| std::path::Path::new(path).exists())
+            {
+                println!("cargo:rerun-if-changed={path}");
+            }
+        }
+    }
+    println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
+}
+
+/// A test or local build carries its commit (`HEX_COMMIT`), which the sidebar shows
+/// beside the version.
+fn test_build_commit() {
+    println!("cargo:rerun-if-env-changed=HEX_TEST_BUILD");
+    println!("cargo:rerun-if-env-changed=HEX_LOCAL_BUILD");
+    if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1")
+        && std::env::var("HEX_LOCAL_BUILD").as_deref() != Ok("1")
+    {
+        return;
+    }
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let Some(commit) = git(&["rev-parse", "--short=7", "HEAD"]) else {
+        return;
+    };
+    println!("cargo:rustc-env=HEX_COMMIT={commit}");
+    let reference = git(&["symbolic-ref", "-q", "HEAD"]);
+    for name in ["HEAD", "packed-refs"]
+        .into_iter()
+        .chain(reference.as_deref())
+    {
+        if let Some(path) = git(&["rev-parse", "--path-format=absolute", "--git-path", name])
+            .filter(|path| std::path::Path::new(path).exists())
+        {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+}
+
+/// Gives the executable its icon and the "Hex" name Explorer and Task
 /// Manager show, whatever the file is called.
 #[cfg(windows)]
 fn embed_windows_resources() {
@@ -88,8 +180,8 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "HEX"
-      VALUE "ProductName", "HEX"
+      VALUE "FileDescription", "Hex"
+      VALUE "ProductName", "Hex"
       VALUE "FileVersion", "{version}"
       VALUE "ProductVersion", "{version}"
       VALUE "OriginalFilename", "hex.exe"
@@ -115,7 +207,11 @@ fn compile_permission_guide() {
     println!("cargo:rerun-if-changed=native/permission_guide.m");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=ApplicationServices");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreGraphics");
+    println!("cargo:rustc-link-lib=framework=CoreImage");
+    println!("cargo:rustc-link-lib=framework=IOKit");
+    println!("cargo:rustc-link-lib=framework=QuartzCore");
 
     cc::Build::new()
         .file("native/permission_guide.m")
@@ -168,31 +264,4 @@ fn compile_swift_bridge(name: &str, module: &str, without_autolink: &[&str]) {
         .expect("xcrun swiftc is required to compile Swift bridges");
     assert!(status.success(), "{module} compilation failed");
     println!("cargo:rustc-link-arg={}", object.display());
-}
-
-fn compile_indicator_shader() {
-    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let source = manifest_dir.join("src/dictation_indicator.metal");
-    let air = output_dir.join("dictation_indicator.air");
-    let library = output_dir.join("dictation_indicator.metallib");
-    println!("cargo:rerun-if-changed={}", source.display());
-
-    let metal = Command::new("xcrun")
-        .args(["--sdk", "macosx", "metal", "-c"])
-        .arg(&source)
-        .arg("-o")
-        .arg(&air)
-        .status()
-        .expect("xcrun metal is required to build the dictation indicator");
-    assert!(metal.success(), "Metal shader compilation failed");
-
-    let metallib = Command::new("xcrun")
-        .args(["--sdk", "macosx", "metallib"])
-        .arg(&air)
-        .arg("-o")
-        .arg(&library)
-        .status()
-        .expect("xcrun metallib is required to build the dictation indicator");
-    assert!(metallib.success(), "Metal library creation failed");
 }

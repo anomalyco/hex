@@ -1,11 +1,12 @@
 # Nix
 
-The flake packages HEX for `x86_64-linux`. It supports the Linux X11 beta
+The flake packages Hex for `x86_64-linux`. It supports the Linux X11 beta
 and native Wayland on compatible wlroots compositors. Wayland requires
 layer-shell for the recording overlay, the clipboard protocol used by
-`wl-copy`, the virtual-keyboard protocol used by `wtype`, and read access to
-every `/dev/input/event*` device for global hotkeys. This is not a claim of support
-for every Wayland desktop; GNOME and KDE are not covered by this contract.
+`wl-copy`, and the virtual-keyboard protocol used by `wtype`. Global shortcuts
+come from the desktop's GlobalShortcuts portal, or from your own compositor
+keybindings running the `hex` commands. This is not a claim of support for every
+Wayland desktop; GNOME and KDE are not covered by this contract.
 
 ## Run Or Install
 
@@ -26,14 +27,14 @@ falls back to the CPU. On non-NixOS hosts, Nix GUI
 applications may require the host's usual Nix graphics integration.
 
 Models are downloaded into your user data directory, not the Nix store.
-Run `hex model install` once, then launch HEX as your normal desktop user.
-Do not run HEX as root.
+Run `hex model install` once, then launch Hex as your normal desktop user.
+Do not run Hex as root.
 
-The Nix store is not HEX's user-local managed installation layout. In-app
+The Nix store is not Hex's user-local managed installation layout. In-app
 updates do not replace a Nix installation. Update the flake input and
 rebuild or switch your Nix/Home Manager configuration instead. Remove any
 old source-install XDG autostart entry before enabling a second autostart
-mechanism; do not run two HEX listeners.
+mechanism; do not run two Hex listeners.
 
 ## NixOS
 
@@ -46,8 +47,8 @@ Import `hex.nixosModules.hex` and enable the package:
 }
 ```
 
-This installs HEX system-wide. It does not start a root service, enable
-autostart for every account, or change input-device permissions. Use the
+This installs Hex system-wide. It does not start a root service or enable
+autostart for every account. Use the
 Home Manager module below for per-user autostart. Both modules accept an
 explicit `programs.hex.package` override. The flake also exports
 `hex.overlays.default` for configurations that prefer `pkgs.hex`.
@@ -68,12 +69,14 @@ explicit `programs.hex.package` override. The flake also exports
 
 The module always installs the systemd **user** service. Autostart defaults to
 `false`; when enabled, the unit is wanted by `graphical-session.target` by default.
-It waits for a Wayland socket or an X11 window manager before launching `hex service`.
-Use `hex start` to start it manually and `hex app` to open the separate Settings
-client. Closing Settings never stops the service, and there is no Linux tray.
-The service stops with the configured target and retries failed starts
-without a tight restart loop. `hex stop` leaves it stopped until
-the next session or an explicit `systemctl --user start hex.service`.
+It waits for a Wayland socket or an X11 window manager before launching `hex service`,
+which reports readiness to systemd (`Type=notify`) once its socket answers.
+Hex is one process: `hex` opens its window, starting the unit when it is not
+running, and `hex start` starts it without the window. Closing the window never
+stops Hex; a tray icon shows when the desktop has a tray host. The unit stops with the configured target
+and retries failed starts without a tight restart loop; a crash restart opens no
+window. `hex quit` (or **Quit Hex** in the window) leaves it stopped until the
+next session or the next launch.
 
 Your session manager must import its current `DISPLAY`, `XAUTHORITY`,
 `WAYLAND_DISPLAY`, and `XDG_RUNTIME_DIR` values as applicable into the systemd
@@ -86,8 +89,8 @@ start this service automatically.
 
 `hex start` records the current display/session environment in an owner-only
 file read by the unit; it clears stale variables when switching between X11 and
-Wayland. There is one active desktop service per user. Starting it from a
-different desktop explicitly restarts the service for that session.
+Wayland. There is one Hex per user. Launching it from a different desktop
+explicitly restarts the unit for that session.
 
 Home Manager's normal service-switch policy applies: newly enabled services
 can start during a switch if the session target is already active, and
@@ -99,26 +102,24 @@ systemctl --user status hex.service
 journalctl --user -u hex.service
 ```
 
-## Wayland Input Access
+## Wayland Shortcuts
 
-The native Wayland beta requires the intended user to be able to read
-**every `/dev/input/event*` node**, as with deliberate `input`-group access.
-Keyboard-only ACLs are insufficient: HEX cannot rule out held modifiers on
-an unreadable device. Monitoring, shortcut capture, and paste fail with a
-permission error if any event device is unreadable.
+Hex reads no input devices, so neither module adds users to the `input`
+group, installs udev rules, or grants capabilities. With a GlobalShortcuts
+portal, the desktop grants the shortcuts Settings records; the portal
+identifies Hex by the package's `hex.desktop` entry, so keep the package's
+`share/applications` on `XDG_DATA_DIRS` (NixOS and Home Manager profiles do).
+Without the portal, bind the commands in your compositor, for example in Sway:
 
-Neither module adds users to the `input` group, installs permissive udev
-rules, or grants capabilities to HEX. Make this access decision explicitly
-for the intended account; do not make event devices world-readable.
-**Raw input access exposes all keystrokes on those keyboards, not just
-HEX's hotkeys, and can expose other input devices.** Other processes running
-as the same user receive the same broad access.
+```sh
+bindsym F9 exec hex dictation start
+bindsym --release F9 exec hex dictation stop
+```
 
-Wayland shortcuts use physical evdev key positions and US-style key labels,
-not the current layout's characters. HEX observes the keys but does not
-suppress them. The compositor or focused app can still act on the chord;
-use an appropriate compositor binding if you need to reserve it. The paste
-helper is `wtype`; no privileged input-injection fallback is installed.
+`hex dictation toggle`, `hex dictation cancel`, `hex paste-last`, and
+`hex voice-action start|stop|toggle` are also available; see the
+[Linux guide](linux.md#shortcuts). The paste helper is `wtype`; no privileged
+input-injection fallback is installed.
 
 ## Development
 
