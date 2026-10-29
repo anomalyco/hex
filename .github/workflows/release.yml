@@ -144,6 +144,9 @@ jobs:
           bundle=$(HEX_RELEASE_UNSIGNED=1 scripts/build-app.sh)
           mkdir -p "$RUNNER_TEMP/macos"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$RUNNER_TEMP/macos/Hex.app.zip"
+          # The DMG window's background and Finder layout: data for sign-macos.sh.
+          cp packaging/macos/dmg/background.tiff "$RUNNER_TEMP/macos/dmg-background.tiff"
+          cp packaging/macos/dmg/DS_Store "$RUNNER_TEMP/macos/dmg-DS_Store"
       - id: upload
         uses: ./.github/release/upload
         with:

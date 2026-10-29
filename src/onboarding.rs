@@ -291,10 +291,12 @@ impl Flow {
             reopen: false,
             relaunching: false,
         };
-        flow.setup_needed = !flow.setup_ready();
-        flow.step = if start == Step::Setup
-            || start.position() > Step::Setup.position() && !flow.setup_ready()
-        {
+        // A tour resumed at setup keeps its page dot: the person was there.
+        flow.setup_needed = !flow.setup_ready() || start == Step::Setup;
+        // `status` is read fresh at launch, so a tour resumed after macOS's
+        // Quit & Reopen passes a setup whose grants are now real, and one
+        // resumed past setup waits there until they are.
+        flow.step = if start.position() > Step::Setup.position() && !flow.setup_ready() {
             Step::Setup
         } else {
             flow.forward_from(start)
@@ -1315,8 +1317,9 @@ mod tests {
 
     #[test]
     fn without_practice_setup_continues_to_done() {
-        let mut flow = Flow::new(Step::Setup, ready_status(), false, false);
+        let mut flow = Flow::new(Step::Setup, permissions_only(), false, false);
         assert_eq!(flow.step(), Step::Setup);
+        flow.on(Input::Status(ready_status(), installed()));
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Done);
         assert!(!flow.view().can_go_back);
@@ -1366,6 +1369,39 @@ mod tests {
         assert_eq!(flow.step(), Step::TryIt);
         flow.on(Input::Back);
         assert_eq!(flow.step(), Step::Welcome, "a ready setup is passed");
+    }
+
+    #[test]
+    fn resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real() {
+        // macOS's Quit & Reopen after the last grant: setup is finished.
+        let flow = Flow::new(Step::Setup, permissions_only(), true, true);
+        assert_eq!(flow.step(), Step::TryIt, "the model can finish in practice");
+        assert_eq!(flow.view().count, 3, "setup keeps its page dot");
+        assert_eq!(flow.view().index, 2);
+        let flow = Flow::new(Step::Setup, ready_status(), false, false);
+        assert_eq!(flow.step(), Step::Done);
+
+        // A grant still waiting (or a saved step alone) is not trusted.
+        for status in [
+            SetupStatus {
+                accessibility: PermissionState::NeedsRestart,
+                ..ready_status()
+            },
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready_status()
+            },
+        ] {
+            assert_eq!(
+                Flow::new(Step::Setup, status, true, true).step(),
+                Step::Setup
+            );
+        }
+        assert_eq!(
+            Flow::new(Step::Setup, permissions_only(), false, false).step(),
+            Step::Setup,
+            "without practice the model is a setup row"
+        );
     }
 
     #[test]

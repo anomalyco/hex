@@ -121,6 +121,8 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── macOS: opens centred at one fixed size, so tiling managers float it
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
+│   └── Permissions are read again at launch: a setup they now finish (macOS's
+│       Quit & Reopen after a grant) is passed; past setup, it waits until they do
 ├── Welcome -> Get started                // setup.welcome-hero
 │   ├── The Hex glyph backlit by a cool corona, drawn live on the GPU
 │   │   (`rune_ui/hero.rs`); core, middle ring, outer ring light in turn,
@@ -288,7 +290,9 @@ Unit tests (`onboarding::tests`) cover step order, the download starting on the
 welcome screen and retrying from any step, permissions-only setup with the
 model waiting for practice, the auto-advance beat, live row flips, a refused
 microphone, platforms without permissions or practice, practice hints, resume,
-the relaunch guard and resume marker, grants waiting for a restart
+the relaunch guard and resume marker, resuming past a setup the relaunch
+finished (`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
+grants waiting for a restart
 (`a_grant_the_process_cannot_use_yet_waits_for_a_restart`,
 `setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
 advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
