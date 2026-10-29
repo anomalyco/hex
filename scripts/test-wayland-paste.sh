@@ -113,7 +113,7 @@ if [[ $# != 2 || $(id -u) == 0 ]]; then
   echo "Usage: $0 /path/to/compiled-test /path/to/hex (run as an unprivileged user)" >&2
   exit 1
 fi
-for command in cc pkg-config sway swaymsg wtype wl-copy dbus-run-session timeout; do
+for command in cc pkg-config sway swaymsg wtype wl-copy wl-paste dbus-run-session timeout; do
   command -v "$command" >/dev/null
 done
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -146,4 +146,4 @@ if ! timeout 25 dbus-run-session -- sway --config "$root/tests/fixtures/wayland-
   if [[ -f "$work/hex.log.service" ]]; then cat "$work/hex.log.service"; fi
   exit 1
 fi
-echo "Native Wayland clipboard insertion and the single-process window checks passed."
+echo "Native Wayland clipboard insertion, clipboard restoration, and the single-process window checks passed."

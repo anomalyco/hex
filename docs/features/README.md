@@ -1116,7 +1116,12 @@ Linux beta                               // not macOS feature parity
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 │   └── Overload (Xrun) glitch -> Logged; not a failure
-├── Paste -> Retain transcript clipboard, not restore previous contents
+├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
+│   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
+│   ├── Later paste, copy, or another client replaced the transcript -> left alone
+│   ├── Over the cap or unreadable -> transcript stays; the log says why
+│   ├── Paste only reached the clipboard -> transcript stays for Ctrl+V
+│   └── Wayland without wlr-data-control -> transcript stays
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
@@ -1130,6 +1135,14 @@ Linux beta                               // not macOS feature parity
     Hex writes ~/.local/share/applications/hex.desktop (X-Hex-Managed) for itself
 ```
 
+Clipboard restoration lives in [linux_paste.rs](../../src/linux_paste.rs)
+(generation and timing) and [linux_clipboard.rs](../../src/linux_clipboard.rs)
+(snapshot and serving). Observed on apollo (2026-10-29), in nested headless Sway:
+`native_wayland_clipboard_shortcut` restores a two-format clipboard and keeps an
+empty one empty; a full dictation from a file-fed ALSA microphone pasted into a
+GTK target, then Ctrl+V pasted the original text; an X11 round trip on Xwayland
+restored a 3 MB image through INCR. Not observed on X11 dictation, KDE, or
+Hyprland.
 The Wayland paste choice lives in [linux_paste.rs](../../src/linux_paste.rs) and
 [linux_remote_desktop.rs](../../src/linux_remote_desktop.rs). Observed: the
 wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri

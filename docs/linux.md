@@ -375,11 +375,21 @@ screen, or turns it off.
 Insertion uses the clipboard and **Ctrl-V** for new installations. Enable
 **Terminal paste shortcut** in Settings for targets that require **Ctrl-Shift-V**.
 Existing X11 settings retain their previous Ctrl-Shift-V behavior until changed.
-The target application must accept the selected binding. The beta leaves the
-transcript on the clipboard; arbitrary previous
-clipboard formats are not restored. A short settling delay prevents immediate
-back-to-back replacement, but is not an acknowledgment from a stalled target
-application (see [#24](https://github.com/anomalyco/hex/issues/24)).
+The target application must accept the selected binding.
+
+After a paste, Hex puts the previous clipboard back, as on macOS
+([#391](https://github.com/anomalyco/hex/issues/391)). Before writing the
+transcript it reads every format the clipboard offers (text, rich text, images),
+up to 32 MiB within one second, and 500 ms after the paste shortcut serves them
+again from Hex until something else copies. It restores only if nothing newer
+replaced the transcript in the meantime: a later dictation, a copy, or another
+application. An empty clipboard stays empty. A larger or unreadable clipboard
+is left holding the transcript, and Hex's log says why. When automatic paste
+fails, the transcript stays on the clipboard for Ctrl+V. Nothing confirms the
+target read the paste, so a target stalled past the delay can paste the
+restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
+On Wayland, restoring needs the compositor's `wlr-data-control` protocol
+(wlroots compositors, niri, Hyprland, KDE); without it the transcript stays.
 
 ## Native Wayland Requirements
 
@@ -441,6 +451,8 @@ compositor, and target-application smoke tests remain necessary before a release
 `scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/hex` runs the real
 paste helpers against a GTK target under an isolated headless Sway compositor.
 Its first paste runs while another virtual keyboard holds Ctrl and Alt.
+It then checks that every format of the previous clipboard comes back after the
+paste, and that an empty clipboard stays empty.
 It also starts an isolated Hex, opens its window through a second `hex app`
 (the window must belong to the same process), repeats paste while the window is
 open, closes the window, checks that the same process still answers, opens the

@@ -107,6 +107,7 @@ futures-util = { version = "0.3.34", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time"] }
 transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
 wayland-client = "0.31.15"
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xtest"] }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }

@@ -3,8 +3,8 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,7 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
+use crate::linux_clipboard::{Selection, Snapshot};
 use crate::linux_input::{
     KEY_PRESS, KEY_RELEASE, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
 };
@@ -25,6 +26,9 @@ const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
+/// How long after the paste shortcut the previous clipboard comes back, as
+/// on macOS. Nothing acknowledges that the target read the paste.
+const RESTORE_DELAY: Duration = Duration::from_millis(500);
 
 pub(crate) struct LinuxPaster {
     backend: Backend,
@@ -33,6 +37,18 @@ pub(crate) struct LinuxPaster {
     paste_with_shift: Arc<AtomicBool>,
     /// When the shortcut that asked for the paste has let go of its keys.
     keys: ShortcutKeys,
+    selection: Selection,
+    restore: Arc<Mutex<Restore>>,
+}
+
+/// The clipboard a paste replaced, waiting to come back.
+#[derive(Default)]
+struct Restore {
+    /// Advances with every clipboard write, so only the latest paste restores.
+    generation: u64,
+    original: Option<Snapshot>,
+    /// What the latest paste put on the clipboard, until it restores.
+    inserted: Option<(Mime, Vec<u8>)>,
 }
 
 enum Backend {
@@ -159,15 +175,24 @@ impl LinuxPaster {
         paste_with_shift: Arc<AtomicBool>,
         keys: ShortcutKeys,
     ) -> Result<Self> {
-        let backend = match LinuxSession::detect() {
-            LinuxSession::X11 => Backend::X11(Box::new(X11Paster::new()?)),
-            LinuxSession::Wayland => Backend::Wayland(WaylandKeys::Unchosen),
+        let (backend, selection) = match LinuxSession::detect() {
+            LinuxSession::X11 => {
+                let paster = X11Paster::new()?;
+                let transcript_owner = paster.clipboard.setter.window;
+                (
+                    Backend::X11(Box::new(paster)),
+                    Selection::X11 { transcript_owner },
+                )
+            }
+            LinuxSession::Wayland => (Backend::Wayland(WaylandKeys::Unchosen), Selection::Wayland),
         };
         Ok(Self {
             backend,
             stop,
             paste_with_shift,
             keys,
+            selection,
+            restore: Arc::default(),
         })
     }
 
@@ -204,6 +229,11 @@ impl LinuxPaster {
     /// Puts `text` on the clipboard without pasting it. On X11 the clipboard
     /// is served for as long as this paster lives.
     pub(crate) fn copy(&mut self, text: &str) -> Result<()> {
+        let mut restore = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+        *restore = Restore {
+            generation: restore.generation.wrapping_add(1),
+            ..Restore::default()
+        };
         match &mut self.backend {
             Backend::X11(paster) => {
                 let atoms = &paster.clipboard.getter.atoms;
@@ -234,7 +264,45 @@ impl LinuxPaster {
         self.paste_as(Mime::Png, png)
     }
 
+    /// Pastes through the clipboard, then puts the previous clipboard back
+    /// unless something newer replaced the paste first.
     fn paste_as(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
+        let restore = self.restore.clone();
+        let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
+        state.generation = state.generation.wrapping_add(1);
+        // A paste before the previous one restored keeps that one's original.
+        let previous_pending = state
+            .inserted
+            .take()
+            .is_some_and(|(mime, bytes)| self.selection.holds(mime.wayland(), &bytes));
+        if !previous_pending {
+            state.original = match self.selection.snapshot() {
+                Ok(snapshot) => Some(snapshot),
+                Err(error) => {
+                    tracing::info!(
+                        error = format!("{error:#}"),
+                        "not restoring the clipboard after this paste"
+                    );
+                    None
+                }
+            };
+        }
+        let result = self.send_paste(mime, bytes);
+        if result.is_ok() {
+            state.inserted = Some((mime, bytes.to_vec()));
+            schedule_restore(restore.clone(), state.generation, self.selection);
+        } else {
+            // A paste that only reached the clipboard leaves it for Ctrl+V.
+            state.original = None;
+        }
+        drop(state);
+        // Give the target time to request the selection before the next queued
+        // transcript replaces it. This is a bounded settling policy, not an ACK.
+        thread::sleep(PASTE_SETTLE);
+        result
+    }
+
+    fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
         let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
             Backend::X11(paster) => paster.paste(mime, bytes, &self.stop, paste_with_shift)?,
@@ -251,11 +319,34 @@ impl LinuxPaster {
                     .map_err(|error| copied_only(error, paste_with_shift))?;
             }
         }
-        // Give the target time to request the selection before the next queued
-        // transcript replaces it. This is a bounded settling policy, not an ACK.
-        thread::sleep(PASTE_SETTLE);
         Ok(())
     }
+}
+
+/// Puts the paste's original clipboard back once the target has had time to
+/// read the paste, if no later paste, copy, or other client replaced it.
+fn schedule_restore(restore: Arc<Mutex<Restore>>, generation: u64, selection: Selection) {
+    thread::spawn(move || {
+        thread::sleep(RESTORE_DELAY);
+        let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.generation != generation {
+            return;
+        }
+        let (Some((mime, bytes)), Some(original)) = (state.inserted.take(), state.original.take())
+        else {
+            return;
+        };
+        if !selection.holds(mime.wayland(), &bytes) {
+            tracing::debug!("the clipboard changed after the paste; leaving it");
+            return;
+        }
+        if let Err(error) = selection.restore(original) {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not restore the clipboard after a paste"
+            );
+        }
+    });
 }
 
 /// What a paste puts on the clipboard.
@@ -586,25 +677,65 @@ mod tests {
         let path = std::env::var_os("HEX_WAYLAND_PASTE_OUTPUT")
             .expect("the isolated Wayland test runner must supply its output file");
         let expected = "Example dictation: --flags, punctuation, \u{6f22}\u{5b57}.\nSecond line.";
-        LinuxPaster::new(
+        let wait_for = |what: &str, done: &mut dyn FnMut() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !done() {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        let wl_paste = |args: &[&str]| {
+            Command::new("wl-paste")
+                .args(args)
+                .stderr(Stdio::null())
+                .output()
+                .unwrap()
+        };
+        let original = vec![
+            ("text/html".to_owned(), b"<b>original</b>".to_vec()),
+            ("text/plain;charset=utf-8".to_owned(), b"original".to_vec()),
+        ];
+        Selection::Wayland
+            .restore(Snapshot::Wayland(original.clone()))
+            .unwrap();
+        let mut paster = LinuxPaster::new(
             Arc::new(AtomicBool::new(false)),
             Default::default(),
             Default::default(),
         )
-        .unwrap()
-        .paste(expected)
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let actual = std::fs::read_to_string(&path).unwrap_or_default();
-            if actual == expected {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "GTK did not receive the transcript: {actual:?}"
-            );
-            thread::sleep(Duration::from_millis(20));
-        }
+        paster.paste(expected).unwrap();
+        wait_for("GTK to receive the transcript", &mut || {
+            std::fs::read_to_string(&path).unwrap_or_default() == expected
+        });
+        // Every format of the previous clipboard comes back.
+        wait_for("the original clipboard", &mut || {
+            original.iter().all(|(mime, data)| {
+                let output = wl_paste(&["--no-newline", "--type", mime]);
+                output.status.success() && output.stdout == *data
+            })
+        });
+
+        // An empty clipboard stays empty.
+        assert!(
+            Command::new("wl-copy")
+                .arg("--clear")
+                .status()
+                .unwrap()
+                .success()
+        );
+        wait_for("the clipboard to clear", &mut || {
+            !wl_paste(&["--list-types"]).status.success()
+        });
+        paster.paste(expected).unwrap();
+        let twice = expected.repeat(2);
+        wait_for("GTK to receive the second transcript", &mut || {
+            std::fs::read_to_string(&path).unwrap_or_default() == twice
+        });
+        thread::sleep(RESTORE_DELAY * 2);
+        assert!(
+            !wl_paste(&["--list-types"]).status.success(),
+            "the transcript stayed on a clipboard that was empty"
+        );
     }
 }

@@ -215,6 +215,10 @@ substitute for source inspection or a second roadmap.
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last and Voice Action,
   and paste and primary-selection reads.
+- `linux_clipboard`: the clipboard a Linux paste restores: every format of the
+  CLIPBOARD selection read within a size cap and deadline, then served again
+  from Hex (wlr-data-control on Wayland, its own selection owner with INCR on
+  X11) until another client takes it.
 - `linux_input`: the one shortcut state machine (hold, double-tap lock, toggle,
   double-tap only, Escape, Paste Last, Voice Action, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
@@ -1016,9 +1020,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   recommend modifier-free binds there. A sent paste is not a verified one.
   New installs use Ctrl-V;
   the terminal-paste preference selects Ctrl-Shift-V and defaults on for
-  persisted legacy X11 settings. The beta retains
-  the transcript clipboard; arbitrary MIME restoration and consumption
-  acknowledgments remain unimplemented.
+  persisted legacy X11 settings.
+- Linux paste restores the previous clipboard by default, as macOS does: it
+  snapshots every format of the selection (32 MiB cap, 1 s deadline) before
+  writing the transcript, and 500 ms after the paste shortcut restores it only
+  if the paste's generation is still the latest and the clipboard still holds
+  the paste (the same bytes on Wayland, the paste's owner on X11). An empty
+  clipboard is cleared again; an oversized or unreadable one is not restored,
+  and the log says why. A paste that only reached the clipboard keeps it for
+  Ctrl+V, and a capture copy is never restored over. Wayland restoration needs
+  wlr-data-control; there is no consumption acknowledgment.
 
 ## Development
 
