@@ -741,7 +741,7 @@ fn try_stage(p: Paint, s: &Onboard) -> El {
     } else {
         k.c.border_base
     };
-    let landed = flights.iter().any(|(f, _)| f.landed(s.now, reduced).is_some());
+    let speaking = flights.iter().any(|(f, _)| s.now >= f.start());
     let field = el()
         .key("try-field")
         .absolute(TRY_FIELD_X, TRY_FIELD_Y)
@@ -752,7 +752,7 @@ fn try_stage(p: Paint, s: &Onboard) -> El {
         .border(p.hair * 1.5, border.mix(ember(0.6), (flash * 1.3).min(1.0)))
         .offset(knock[0], knock[1])
         .offset_motion(Anim::INSTANT)
-        .children((!landed).then(|| {
+        .children((!speaking).then(|| {
             text("Say anything")
                 .key("placeholder")
                 .font(TRY_TEXT.font.lh(TRY_TEXT.line))
