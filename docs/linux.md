@@ -146,6 +146,32 @@ Remove the application while preserving logs and settings with:
 sh install-linux.sh uninstall
 ```
 
+### Upgrading from 2.3.1
+
+HEX 2.3.1 read every `/dev/input` device on Wayland, so it needed the `input`
+group. Current builds don't: they use the GlobalShortcuts portal or `hex`
+commands bound in your desktop (see [Shortcuts](#shortcuts)). Don't grant input
+access; install the new build instead.
+
+The new build is a separate install in `~/.local/share/hex` and imports
+nothing from 2.3.1's `~/.local/share/voice-control`, so set up the model and
+settings again. The installer refuses to replace 2.3.1's files, so remove them
+first (the paths below assume the default XDG directories):
+
+```sh
+systemctl --user disable --now hex.service
+rm -f ~/.config/systemd/user/hex.service ~/.local/bin/hex \
+  ~/.local/share/applications/hex.desktop ~/.config/autostart/HEX.desktop
+systemctl --user daemon-reload
+rm -rf ~/.local/share/voice-control   # optional: 2.3.1's settings, logs, and models
+curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
+~/.local/bin/hex model install
+~/.local/bin/hex
+```
+
+On Hyprland, bind the shortcut in your config as described in
+[Shortcuts](#shortcuts).
+
 ### Debian, Ubuntu, Fedora, and openSUSE
 
 The `hex` package installs `/usr/bin/hex`, the desktop entry, and the systemd
