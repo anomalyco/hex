@@ -2551,6 +2551,8 @@ mod tests {
             edit: None,
             paste_last: None,
             paste_meeting: None,
+            capture: None,
+            capture_list: None,
         }
     }
 
