@@ -9,10 +9,10 @@ let
 in
 {
   options.programs.hex = {
-    enable = lib.mkEnableOption "HEX local voice dictation";
+    enable = lib.mkEnableOption "Hex local voice dictation";
     package = lib.mkOption {
       type = lib.types.package;
-      description = "HEX package to install.";
+      description = "Hex package to install.";
     };
   };
 
@@ -20,7 +20,7 @@ in
     assertions = [
       {
         assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux";
-        message = "The HEX Nix package supports x86_64-linux only.";
+        message = "The Hex Nix package supports x86_64-linux only.";
       }
     ];
     environment.systemPackages = [ cfg.package ];

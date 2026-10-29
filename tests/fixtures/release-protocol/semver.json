@@ -1,0 +1,24 @@
+{
+  "description": "Versions the service accepts (strict SemVer 2.0.0 without build metadata, so schema-1 clients from before 2026-10-27 parse them) and refuses. Clients never compare versions.",
+  "valid": [
+    "1.0.0",
+    "2.3.1",
+    "2.3.2-dev.29",
+    "0.0.0-dev-42",
+    "1.0.0-beta.11",
+    "9007199254740991.0.0"
+  ],
+  "invalid": [
+    "1",
+    "1.0",
+    "v1.0.0",
+    "01.0.0",
+    "1.0.0-01",
+    "1.0.0+build",
+    "1.0.0-",
+    "1.0.0-beta..1",
+    " 1.0.0",
+    "9007199254740992.0.0",
+    "1.0.0-a_b"
+  ]
+}

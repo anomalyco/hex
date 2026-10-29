@@ -1648,7 +1648,7 @@
         { id: "setting-dictation-model", title: "Dictation model", category: "Dictation", summary: "Local ONNX model used after Option is released.", kind: "select", value: "Parakeet v2" },
         { id: "setting-preroll", title: "Warm pre-roll", category: "Dictation", summary: "Protects the first phoneme without changing the hold threshold.", kind: "select", value: "450 ms" },
         { id: "setting-meeting-offers", title: "Automatic meeting offers", category: "Meetings", summary: "Offer recording after supported apps use the microphone for two seconds.", kind: "toggle", enabled: true },
-        { id: "setting-local-storage", title: "Meeting library", category: "Meetings", summary: "Owner-only audio, manifests, and transcripts.", kind: "path", value: "~/Library/Application Support/voice-control/meetings" },
+        { id: "setting-local-storage", title: "Meeting library", category: "Meetings", summary: "Owner-only audio, manifests, and transcripts.", kind: "path", value: "~/Library/Application Support/hex/meetings" },
         { id: "setting-microphone", title: "Microphone", category: "Permissions", summary: "Required for commands, dictation, and your meeting track.", kind: "permission", value: "Allowed" },
         { id: "setting-screen", title: "Screen & system audio", category: "Permissions", summary: "Required only for explicit local meeting recording.", kind: "permission", value: "Allowed" },
         { id: "setting-accessibility", title: "Accessibility", category: "Permissions", summary: "Required to paste dictation and post keyboard shortcuts.", kind: "permission", value: "Allowed" },
@@ -1867,7 +1867,7 @@
               </div>
               <section class="section"><h3 class="section-title">Capture tracks <span class="section-note">WRITING OWNER-ONLY WAV</span></h3>${trackGrid(item)}</section>
               <section class="section"><div class="notice"><strong>Recording stays on this Mac.</strong> Voice Control excludes its own audio and does not make network calls. Tell participants before recording.</div></section>
-              <section class="section"><h3 class="section-title">Destination</h3><div class="path-row"><code>~/Library/Application Support/voice-control/meetings/${item.id}</code><button type="button" class="small-action">Reveal</button></div></section>
+              <section class="section"><h3 class="section-title">Destination</h3><div class="path-row"><code>~/Library/Application Support/hex/meetings/${item.id}</code><button type="button" class="small-action">Reveal</button></div></section>
             </div>
           </div>`;
         }
@@ -1962,7 +1962,7 @@
             <section class="section"><p class="setting-summary">Voice Control stores preferences locally in <code>settings.json</code>. Changes affect the signed desktop agent and never sync to an account.</p></section>
             <section class="section"><h3 class="section-title">${escapeHtml(item.category)}</h3>${related.map((setting) => `<div class="setting-control"><div><div class="control-title">${escapeHtml(setting.title)}</div><div class="control-copy">${escapeHtml(setting.summary)}${setting.kind === "permission" ? ` Current status: <span class="tone-green">${setting.value}</span>.` : ""}</div></div>${settingControl(setting)}</div>`).join("")}</section>
             ${item.kind === "path" ? `<section class="section"><h3 class="section-title">Storage location</h3><div class="path-row"><code>${escapeHtml(item.value)}</code><button type="button" class="small-action">Reveal</button></div></section>` : ""}
-            <section class="section"><h3 class="section-title">Local configuration</h3><div class="value-grid"><div class="value-cell"><div class="value-label">SETTINGS FILE</div><div class="value mono">~/Library/Application Support/voice-control/settings.json</div></div><div class="value-cell"><div class="value-label">SYNC</div><div class="value">None</div></div><div class="value-cell"><div class="value-label">ACCOUNT</div><div class="value">Not required</div></div><div class="value-cell"><div class="value-label">NETWORK</div><div class="value tone-green">Idle</div></div></div></section>
+            <section class="section"><h3 class="section-title">Local configuration</h3><div class="value-grid"><div class="value-cell"><div class="value-label">SETTINGS FILE</div><div class="value mono">~/Library/Application Support/hex/settings.json</div></div><div class="value-cell"><div class="value-label">SYNC</div><div class="value">None</div></div><div class="value-cell"><div class="value-label">ACCOUNT</div><div class="value">Not required</div></div><div class="value-cell"><div class="value-label">NETWORK</div><div class="value tone-green">Idle</div></div></div></section>
           </div>
         </div>`;
       }

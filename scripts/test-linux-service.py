@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Display-free service/IPC regression. Never uses personal settings or a microphone."""
+"""Display-free single-instance regression. Never uses personal settings or a microphone.
+
+One Hex process owns a data root. A second launch forwards to it and exits;
+`hex` commands forward over the same socket and fail fast without it.
+"""
 import json
 import os
 from pathlib import Path
@@ -21,25 +25,44 @@ def wait_for(check, timeout=8):
         if result:
             return result
         time.sleep(0.025)
-    raise AssertionError("timed out waiting for the service")
+    raise AssertionError("timed out waiting for Hex")
 
 
-with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPDIR")) as directory:
+with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMPDIR")) as directory:
     root = Path(directory)
     support = root / "data"
+    support.mkdir(mode=0o700)
+    # Never listen: no microphone, no shortcuts portal registration.
+    (support / "settings.json").write_text(json.dumps({"enable_on_launch": False}))
     alsa = root / "alsa.conf"
     alsa.write_text("# No physical audio devices in this test.\n")
-    env = os.environ | {"HEX_APPLICATION_SUPPORT_DIR": str(support), "ALSA_CONFIG_PATH": str(alsa)}
-    env.pop("DISPLAY", None)
-    env.pop("WAYLAND_DISPLAY", None)
+    # Custom data roots must never start, stop, or restart the user's real unit.
+    fakebin = root / "bin"
+    fakebin.mkdir()
+    marker = root / "unexpected-systemctl"
+    fake = fakebin / "systemctl"
+    fake.write_text(f'#!/bin/sh\ntouch "{marker}"\necho loaded\nexit 0\n')
+    fake.chmod(0o755)
+    env = os.environ | {
+        "HEX_APPLICATION_SUPPORT_DIR": str(support),
+        "ALSA_CONFIG_PATH": str(alsa),
+        "PATH": f'{fakebin}:{os.environ["PATH"]}',
+    }
+    # No display: a window request fails the window, never Hex.
+    for key in ("DISPLAY", "WAYLAND_DISPLAY", "HEX_SYSTEMD_UNIT", "NOTIFY_SOCKET"):
+        env.pop(key, None)
     path = support / "service.sock"
     children = []
 
-    def launch():
-        child = subprocess.Popen([binary, "service"], env=env, stdin=subprocess.DEVNULL,
+    def spawn(*arguments):
+        child = subprocess.Popen([binary, *arguments], env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         children.append(child)
         return child
+
+    def run(*arguments, timeout=10):
+        return subprocess.run([binary, *arguments], env=env, capture_output=True, text=True,
+                              timeout=timeout)
 
     def connection():
         client = socket.socket(socket.AF_UNIX)
@@ -51,109 +74,118 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
         data = b""
         while len(data) < size:
             chunk = client.recv(size - len(data))
-            assert chunk, "service disconnected"
+            assert chunk, "Hex disconnected"
             data += chunk
         return data
 
-    def call(client, request="Snapshot", version=1):
+    def call(client, request="Status", version=2):
         body = json.dumps({"version": version, "request": request}).encode()
         client.sendall(struct.pack(">I", len(body)) + body)
         size, = struct.unpack(">I", exact(client, 4))
         return json.loads(exact(client, size))
 
-    def snapshot():
+    def status():
         try:
             with connection() as client:
-                return call(client)["state"]
+                return call(client)["status"]
         except (OSError, AssertionError):
             return None
 
     try:
-        service = launch()
-        state = wait_for(snapshot)
-        assert state["pid"] == service.pid
-        assert state["desktop"]["listener"]["status"] == "Model required"
-        assert state["desktop"]["listener"]["warning"] is None
+        # Without an instance every forwarded command fails fast.
+        for command in (["status"], ["dictation", "start"], ["paste-last"]):
+            started = time.monotonic()
+            missing = run(*command)
+            assert missing.returncode != 0 and "not running" in missing.stderr, missing.stderr
+            assert time.monotonic() - started < 2
+        assert run("quit").returncode == 0, "quitting nothing succeeds"
+
+        # `hex start` with no unit becomes the instance in this process.
+        instance = spawn("start")
+        state = wait_for(status)
+        assert state["pid"] == instance.pid
+        assert state["window_open"] is False
+        assert state["desktop"]["listener"]["status"] == "Disabled"
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(support.stat().st_mode) == 0o700
 
-        duplicate = launch()
-        assert duplicate.wait(timeout=5) != 0
-        assert snapshot()["pid"] == service.pid
+        # A second launch forwards and exits 0, leaving the same instance.
+        for command in (["start"], ["app", "--hidden"], ["service"]):
+            forwarded = run(*command)
+            assert forwarded.returncode == 0, (command, forwarded.stderr)
+            assert status()["pid"] == instance.pid
 
-        # A Settings client can leave and reconnect without replacing the service.
-        with connection() as client:
-            assert call(client)["state"]["pid"] == service.pid
-        assert snapshot()["pid"] == service.pid
-
-        # Settings saves settings.json itself and asks the service to adopt it.
-        (support / "settings.json").write_text(
-            json.dumps({"sound_effects": False, "paste_with_shift": True})
-        )
-        with connection() as client:
-            reply = call(client, "ReloadSettings")
-            assert reply["error"] is None
-            assert reply["state"]["settings"]["sound_effects"] is False
-            assert reply["state"]["settings"]["paste_with_shift"] is True
-
-        # Disconnecting an uncommitted focused shortcut capture releases only that edit.
-        with connection() as client:
-            assert call(client, "CaptureShortcut")["state"]["capturing"]
-            with connection() as other:
-                assert call(other, "CancelShortcut")["error"]
-        wait_for(lambda: (s := snapshot()) and not s["editing"])
-        assert service.poll() is None
+        # Activate reaches the window seam; without a display only the window fails.
+        token = run("app")
+        assert token.returncode == 0, token.stderr
+        time.sleep(0.5)
+        assert instance.poll() is None
+        assert status()["pid"] == instance.pid
 
         with connection() as client:
-            assert call(client, version=999)["error"]
+            reply = call(client, {"Activate": {
+                "activation": {"token": "test-token", "startup_id": None},
+                "show": False,
+                "session": state["session"],
+            }})
+            assert reply["error"] is None and reply["status"]["pid"] == instance.pid
+
+        printed = run("status")
+        assert printed.returncode == 0, printed.stderr
+        printed = json.loads(printed.stdout)
+        assert printed["pid"] == instance.pid
+        # No listener has registered shortcuts, so none is claimed, not even X11's.
+        assert printed["desktop"]["listener"]["shortcuts"] == "Unregistered"
+
+        # Keybinding commands need a listening Hex; they fail fast without one,
+        # with one line rather than an error report.
+        refused = run("dictation", "toggle")
+        assert refused.returncode != 0 and "not listening" in refused.stderr, refused.stderr
+        assert refused.stderr.startswith("hex: ") and refused.stderr.count("\n") == 1, refused.stderr
+
+        # Version 1 (service/Settings) clients get a version error, not a hang.
+        with connection() as client:
+            reply = call(client, "Snapshot", version=1)
+            assert reply["version"] == 2 and reply["error"]
         with connection() as client:
             client.sendall(struct.pack(">I", 128 * 1024 + 1))
             assert client.recv(1) == b""
-        # A stalled request cannot stall other clients or live runtime state.
+        # A stalled request cannot stall other clients.
         with connection() as stalled:
             stalled.sendall(b"\x00")
-            assert snapshot()["pid"] == service.pid
+            assert status()["pid"] == instance.pid
             assert stalled.recv(1) == b""
 
-        status = subprocess.run([binary, "status"], env=env, check=True, capture_output=True, text=True)
-        status_state = json.loads(status.stdout)
-        assert status_state["pid"] == service.pid
-        assert status_state["desktop"]["listener"]["warning"] is None
-        assert status_state["desktop"]["listener"]["shortcuts"] == "Registered"
-
-        # Keybinding commands need a listening service; they fail fast without one.
-        refused = subprocess.run([binary, "dictation", "toggle"], env=env, capture_output=True, text=True)
-        assert refused.returncode != 0 and "not listening" in refused.stderr, refused.stderr
-
-        # Crash leaves a socket, not a permanent instance lock. No stale state is reported.
-        service.kill()
-        service.wait(timeout=5)
-        assert subprocess.run([binary, "status"], env=env, capture_output=True).returncode != 0
-        missing = subprocess.run([binary, "paste-last"], env=env, capture_output=True, text=True)
+        # A crash leaves a socket, not a permanent lock.
+        instance.kill()
+        instance.wait(timeout=5)
+        assert path.exists()
+        missing = run("paste-last")
         assert missing.returncode != 0 and "not running" in missing.stderr, missing.stderr
-        service = launch()
-        state = wait_for(snapshot)
-        assert state["pid"] == service.pid
-        assert state["settings"]["sound_effects"] is False
-        subprocess.run([binary, "stop"], env=env, check=True, capture_output=True)
-        assert service.wait(timeout=8) == 0
+        assert missing.stderr.count("\n") == 1, missing.stderr
+
+        # Two racing launches produce one instance; the other forwards and exits 0.
+        first, second = spawn("start"), spawn("start")
+        state = wait_for(status)
+        owners = {first.pid, second.pid}
+        assert state["pid"] in owners
+        loser = second if state["pid"] == first.pid else first
+        assert loser.wait(timeout=8) == 0
+        instance = first if loser is second else second
+
+        # Quit drains and exits 0, removing the socket and keeping settings.
+        assert run("quit").returncode == 0
+        assert instance.wait(timeout=8) == 0
         assert not path.exists()
         assert (support / "settings.json").exists()
-        # Custom data roots must never start/restart the user's real installed unit.
-        fakebin = root / "bin"
-        fakebin.mkdir()
-        marker = root / "unexpected-systemctl"
-        fake = fakebin / "systemctl"
-        fake.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 0\n')
-        fake.chmod(0o755)
-        isolated_env = env | {"DISPLAY": ":invalid", "PATH": f'{fakebin}:{env["PATH"]}'}
-        for command in (["start"], ["restart"], ["dictation", "start"], ["voice-action", "toggle"]):
-            assert subprocess.run([binary, *command], env=isolated_env, capture_output=True).returncode != 0
-        assert not marker.exists()
+
+        for command in (["restart"], ["dictation", "start"], ["voice-action", "toggle"]):
+            assert run(*command).returncode != 0, command
+        assert not marker.exists(), "a custom data root ran systemctl"
     finally:
         for child in children:
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
 
-print("Linux service IPC/lifecycle checks passed.")
+print("Linux single-instance checks passed.")

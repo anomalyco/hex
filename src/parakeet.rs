@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::Once;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::{Once, OnceLock};
 use std::thread;
 use std::time::Instant;
 
@@ -14,7 +14,9 @@ use transcribe_cpp::{
 };
 
 use crate::context::ContextSnapshot;
-use crate::dictation::{DictationClip, DictationProtocol, pad_for_parakeet};
+use crate::dictation::{
+    DictationClip, DictationControl, DictationProtocol, VoiceTranscript, pad_for_parakeet,
+};
 use crate::dictation_processor::ProcessingObservation;
 use crate::gguf_session::OfflineGgufSession;
 use crate::history::{History, HistoryDraft, HistoryKind};
@@ -34,8 +36,11 @@ pub struct Parakeet {
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
+    _weights: procwatch::Lease,
 }
 
+/// Loaded model weights, estimated from the model file size (they live in Metal buffers).
+static MODEL_WEIGHTS: procwatch::Gauge = procwatch::Gauge::new("speech.model_weights");
 static TRANSCRIBE_LOGGING: Once = Once::new();
 const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
 const MAX_PENDING_OUTPUTS: usize = 16;
@@ -53,6 +58,11 @@ pub enum WorkerEvent {
         stage: DictationJobStage,
     },
     Cancelled {
+        job_id: DictationJobId,
+    },
+    /// A Smart Turn voice capture ended with a spoken cancel phrase, so its
+    /// job was cancelled; `Cancelled` follows from the output worker.
+    SpokenCancel {
         job_id: DictationJobId,
     },
     Pasted {
@@ -99,6 +109,9 @@ struct InferenceJob {
     prepare_ms: u128,
     target: TranscriptionTarget,
     protocol: Option<Arc<DictationProtocol>>,
+    /// Whether a control phrase at the end of the transcript decides the
+    /// target, as Moonshine would have had it finished the capture.
+    obeys_spoken_control: bool,
     context: ContextSnapshot,
 }
 
@@ -161,6 +174,11 @@ impl OutputJob {
 struct JobControl {
     cancelled: AtomicBool,
     output_started: Mutex<bool>,
+    /// The control phrase a voice transcript ended with.
+    spoken: OnceLock<DictationControl>,
+    /// A programmatic dictation's job: its owner app cancels it through the
+    /// API, so Escape never does.
+    owner_cancels: bool,
 }
 
 impl JobControl {
@@ -173,6 +191,15 @@ impl JobControl {
             return false;
         }
         !self.cancelled.swap(true, Ordering::AcqRel)
+    }
+
+    /// Whether [`JobControl::cancel`] would cancel it now.
+    fn cancellable(&self) -> bool {
+        let output_started = self
+            .output_started
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        !*output_started && !self.is_cancelled()
     }
 
     fn is_cancelled(&self) -> bool {
@@ -244,7 +271,14 @@ impl WorkerState {
         self.jobs
             .iter()
             .rev()
+            .filter(|(_, control)| !control.owner_cancels)
             .find_map(|(&job_id, control)| control.cancel().then_some(job_id))
+    }
+
+    fn has_escape_cancellable_job(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|control| !control.owner_cancels && control.cancellable())
     }
 }
 
@@ -334,9 +368,38 @@ impl DictationWorker {
     /// before any later capture begins one; the job then waits in order.
     pub fn transcribe(
         &self,
+        clip: DictationClip,
+        target: TranscriptionTarget,
+        protocol: Option<Arc<DictationProtocol>>,
+        context: ContextSnapshot,
+    ) -> Result<DictationJobId, &'static str> {
+        self.submit(clip, target, protocol, false, context)
+    }
+
+    /// A voice capture Smart Turn finished before any control phrase was
+    /// recognized: one at the end of the transcript still applies, so
+    /// "dictate cancel" cancels and "dictate send" sends.
+    pub fn transcribe_voice_turn(
+        &self,
+        clip: DictationClip,
+        protocol: Arc<DictationProtocol>,
+        context: ContextSnapshot,
+    ) -> Result<DictationJobId, &'static str> {
+        self.submit(
+            clip,
+            TranscriptionTarget::Paste,
+            Some(protocol),
+            true,
+            context,
+        )
+    }
+
+    fn submit(
+        &self,
         mut clip: DictationClip,
         target: TranscriptionTarget,
         protocol: Option<Arc<DictationProtocol>>,
+        obeys_spoken_control: bool,
         context: ContextSnapshot,
     ) -> Result<DictationJobId, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -344,7 +407,10 @@ impl DictationWorker {
         let (Some(engine), Some(jobs)) = (&self.engine, &self.inference_jobs) else {
             return Err("dictation worker is unavailable");
         };
-        let control = Arc::new(JobControl::default());
+        let control = Arc::new(JobControl {
+            owner_cancels: matches!(target, TranscriptionTarget::Service),
+            ..JobControl::default()
+        });
         let (_, selection) = crate::app_settings::transcription_selection();
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
@@ -367,7 +433,16 @@ impl DictationWorker {
                     .activate(&selection)
                     .map_err(|error| error.to_string())?;
                 match protocol.as_deref() {
-                    Some(protocol) => transcriber.transcribe_voice(samples, protocol),
+                    Some(protocol) => {
+                        transcriber
+                            .transcribe_voice(samples, protocol)
+                            .map(|transcript| {
+                                if let Some(spoken) = transcript.control {
+                                    let _ = control.spoken.set(spoken);
+                                }
+                                transcript.text
+                            })
+                    }
                     None => transcriber.transcribe(samples),
                 }
                 .map_err(|error| error.to_string())
@@ -385,6 +460,7 @@ impl DictationWorker {
             prepare_ms,
             target,
             protocol,
+            obeys_spoken_control,
             context,
         })
         .map(|()| {
@@ -466,6 +542,15 @@ impl DictationWorker {
             .len()
     }
 
+    /// Whether Escape has a queued job to cancel; programmatic dictations'
+    /// jobs don't count.
+    pub fn has_escape_cancellable_job(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .has_escape_cancellable_job()
+    }
+
     pub fn cancel_latest(&self) -> Option<DictationJobId> {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let job_id = state.cancel_latest()?;
@@ -525,7 +610,9 @@ fn run_output_worker(
                 WorkerEvent::Pasted { .. } => {
                     state.pending_pastes = state.pending_pastes.saturating_sub(1);
                 }
-                WorkerEvent::ModelFailed(_) | WorkerEvent::Stage { .. } => {}
+                WorkerEvent::ModelFailed(_)
+                | WorkerEvent::Stage { .. }
+                | WorkerEvent::SpokenCancel { .. } => {}
             }
             drop(state);
             if events.send(event).is_err() {
@@ -627,6 +714,110 @@ fn process_job_text(
     }
 }
 
+/// The longest audio the capture path hands the model at once; longer
+/// captures are transcribed in consecutive chunks with their times offset.
+#[cfg(hex_capture)]
+const WORD_CHUNK_SAMPLES: usize = 30 * 16_000;
+/// How long a capture chunk waits for dictation to go idle before it is
+/// queued anyway; the engine still never runs it inside a live stream.
+#[cfg(hex_capture)]
+const WORD_DICTATION_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Transcribes a capture's 16 kHz audio with word timestamps on the engine's
+/// warm model (the `capture` experiment). Before each chunk it waits while
+/// dictation is busy (from the shortcut press through inference); each chunk
+/// is then a foreground request: after the dictation already sent, before
+/// meeting chunks, and never inside a dictation live stream, which finishes
+/// first. No second copy of the model is loaded, and only a weak reference
+/// to the engine is kept between chunks. Quitting stops it between chunks.
+/// Every chunk runs on `selection`.
+#[cfg(hex_capture)]
+pub fn transcribe_with_words(
+    engine: &std::sync::Weak<TranscriptionEngine>,
+    selection: &crate::transcription_models::TranscriptionSelection,
+    samples: Vec<f32>,
+) -> Result<crate::transcription::Transcript> {
+    if samples.is_empty() {
+        return Ok(crate::transcription::Transcript::default());
+    }
+    transcribe_in_chunks(samples, WORD_CHUNK_SAMPLES, |chunk| {
+        wait_for_dictation_idle()?;
+        let selection = selection.clone();
+        let (send, transcript) = mpsc::sync_channel(1);
+        let offline: crate::transcription_engine::Offline = Box::new(move |model, samples| {
+            let _busy = DictationInference::begin();
+            let transcriber = model
+                .activate(&selection)
+                .map_err(|error| format!("{error:#}"))?;
+            let result = transcriber
+                .transcribe_segments(samples)
+                .map_err(|error| format!("{error:#}"))?;
+            let text = result.text.clone();
+            let _ = send.send(result);
+            Ok(text)
+        });
+        let pending = engine
+            .upgrade()
+            .ok_or_else(|| eyre!("the transcription engine stopped"))?
+            .foreground(chunk, offline)?;
+        pending.wait().map_err(|error| eyre!(error))?;
+        transcript
+            .try_recv()
+            .map_err(|_| eyre!("the transcription returned no words"))
+    })
+}
+
+#[cfg(hex_capture)]
+fn wait_for_dictation_idle() -> Result<()> {
+    let started = Instant::now();
+    while dictation_busy()
+        && !crate::process_exit::quitting()
+        && started.elapsed() < WORD_DICTATION_WAIT
+    {
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if crate::process_exit::quitting() {
+        return Err(eyre!("Hex is quitting"));
+    }
+    Ok(())
+}
+
+/// Transcribes `samples` in chunks of at most `chunk_samples`, offsetting
+/// each chunk's segment and word times by where it starts.
+#[cfg(hex_capture)]
+fn transcribe_in_chunks(
+    samples: Vec<f32>,
+    chunk_samples: usize,
+    mut transcribe: impl FnMut(Vec<f32>) -> Result<crate::transcription::Transcript>,
+) -> Result<crate::transcription::Transcript> {
+    use crate::transcription::{Transcript, TranscriptSegment};
+    let shift = |spans: Vec<TranscriptSegment>, offset_ms: i64| {
+        spans.into_iter().filter_map(move |span| {
+            let text = span.text.trim();
+            let start_ms = span.start_ms.max(0);
+            (!text.is_empty()).then(|| TranscriptSegment {
+                start_ms: start_ms + offset_ms,
+                end_ms: span.end_ms.max(start_ms) + offset_ms,
+                text: text.to_string(),
+            })
+        })
+    };
+    let mut merged = Transcript::default();
+    let mut texts = Vec::new();
+    for (index, chunk) in samples.chunks(chunk_samples.max(1)).enumerate() {
+        let offset_ms = (index * chunk_samples / TRANSCRIPTION_SAMPLES_PER_MS) as i64;
+        let result = transcribe(chunk.to_vec())?;
+        let text = result.text.trim();
+        if !text.is_empty() {
+            texts.push(text.to_string());
+        }
+        merged.segments.extend(shift(result.segments, offset_ms));
+        merged.words.extend(shift(result.words, offset_ms));
+    }
+    merged.text = texts.join(" ");
+    Ok(merged)
+}
+
 /// Waits for each accepted job's transcript in submission order, then hands
 /// it to processing. The engine thread runs the inference itself.
 fn run_inference_worker(
@@ -680,10 +871,22 @@ fn run_inference_worker(
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
             continue;
         }
+        let spoken = job
+            .obeys_spoken_control
+            .then(|| job.control.spoken.get().copied())
+            .flatten()
+            .filter(|_| result.is_ok());
+        let Some(target) = spoken_target(job.target, spoken) else {
+            if job.control.cancel() {
+                let _ = events.send(WorkerEvent::SpokenCancel { job_id: job.job_id });
+            }
+            let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
+            continue;
+        };
         match result {
             Ok(text)
                 if matches!(
-                    job.target,
+                    target,
                     TranscriptionTarget::Paste
                         | TranscriptionTarget::Send
                         | TranscriptionTarget::VoiceAction
@@ -693,7 +896,7 @@ fn run_inference_worker(
                     .send(ProcessorJob {
                         job_id: job.job_id,
                         control: job.control,
-                        target: job.target,
+                        target,
                         text,
                         context: job.context,
                         timings,
@@ -716,7 +919,7 @@ fn run_inference_worker(
                     .send(OutputJob::Completed {
                         job_id: job.job_id,
                         control: job.control,
-                        target: job.target,
+                        target,
                         result: Box::new(result),
                     })
                     .is_err()
@@ -725,6 +928,19 @@ fn run_inference_worker(
                 }
             }
         }
+    }
+}
+
+/// Where a transcript goes once its spoken control phrase applies, or
+/// `None` when the phrase cancelled it.
+fn spoken_target(
+    target: TranscriptionTarget,
+    spoken: Option<DictationControl>,
+) -> Option<TranscriptionTarget> {
+    match spoken {
+        None | Some(DictationControl::Stop) => Some(target),
+        Some(DictationControl::Send) => Some(TranscriptionTarget::Send),
+        Some(DictationControl::Cancel) => None,
     }
 }
 
@@ -771,6 +987,19 @@ impl DictationInference {
 impl Drop for DictationInference {
     fn drop(&mut self) {
         DICTATION_INFERENCE.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Makes [`dictation_busy`] hold until dropped, as a dictation would.
+#[cfg(test)]
+pub(crate) struct DictationBusyForTest {
+    _busy: DictationInference,
+}
+
+#[cfg(test)]
+pub(crate) fn dictation_busy_for_test() -> DictationBusyForTest {
+    DictationBusyForTest {
+        _busy: DictationInference::begin(),
     }
 }
 
@@ -978,16 +1207,7 @@ impl Parakeet {
         }
         let path = model_path(definition)?;
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
-        let prewarm_started = Instant::now();
-        let mut silence = Vec::new();
-        pad_for_parakeet(&mut silence);
-        parakeet
-            .transcribe(&silence)
-            .wrap_err("could not prewarm transcription model")?;
-        tracing::info!(
-            prewarm_ms = prewarm_started.elapsed().as_millis(),
-            "prewarmed transcription model"
-        );
+        parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
         let architecture = match definition.runtime {
             crate::transcription_models::ModelRuntime::Gguf(artifact) => artifact.architecture,
@@ -1043,7 +1263,7 @@ impl Parakeet {
             model_path,
             &ModelOptions {
                 backend: Backend::Metal,
-                device: None,
+                ..Default::default()
             },
         )
         .wrap_err_with(|| {
@@ -1070,7 +1290,7 @@ impl Parakeet {
             variant,
             "loaded transcription model"
         );
-        let capabilities = model.capabilities();
+        let capabilities = model.capabilities()?;
         let mut language = None;
         let mut family = None;
         if let (Some(selection), Some(definition)) = (selection, definition) {
@@ -1111,6 +1331,7 @@ impl Parakeet {
             language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
+        let weights_bytes = std::fs::metadata(model_path).map_or(0, |meta| meta.len() as usize);
         Ok(Self {
             session,
             options: RunOptions {
@@ -1130,7 +1351,28 @@ impl Parakeet {
                 capabilities.max_audio_ms,
             ),
             stream: None,
+            _weights: MODEL_WEIGHTS.track(weights_bytes),
         })
+    }
+
+    /// Runs a short silent inference. ggml keeps the Metal weights resident
+    /// for only three minutes after a run; then macOS may compress or swap
+    /// them out, and the next run pays to bring them back. A prewarm pays that
+    /// before the audio arrives, and is skipped right after another run.
+    pub(crate) fn prewarm(&mut self) -> Result<()> {
+        if self.session.ran_recently() {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let mut silence = Vec::new();
+        pad_for_parakeet(&mut silence);
+        self.transcribe(&silence)
+            .wrap_err("could not prewarm transcription model")?;
+        tracing::info!(
+            prewarm_ms = started.elapsed().as_millis(),
+            "prewarmed transcription model"
+        );
+        Ok(())
     }
 
     pub(crate) fn name(&self) -> &str {
@@ -1141,6 +1383,10 @@ impl Parakeet {
         self.selection.as_ref() == Some(selection)
     }
 
+    pub(crate) fn selection(&self) -> Option<&TranscriptionSelection> {
+        self.selection.as_ref()
+    }
+
     pub(crate) fn model_id(&self) -> Option<TranscriptionModelId> {
         self.selection.as_ref().map(|selection| selection.model)
     }
@@ -1149,35 +1395,20 @@ impl Parakeet {
     /// whole-clip padding; chunks and control-trimmed reruns below only apply
     /// the minimum duration, never another model-specific trailing context.
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
-        let Some(max_audio_samples) = self
-            .max_audio_samples
-            .filter(|&max_samples| samples.len() > max_samples)
-        else {
-            return self.transcribe_segments(samples).map(|result| result.text);
-        };
-        let mut text = Vec::new();
-        for chunk in samples.chunks(max_audio_samples) {
-            let mut chunk = chunk.to_vec();
-            pad_for_parakeet(&mut chunk);
-            let result = self.transcribe_segments(&chunk)?;
-            let result = result.text.trim();
-            if !result.is_empty() {
-                text.push(result.to_string());
-            }
-        }
-        Ok(text.join(" "))
+        self.session
+            .transcribe_chunked(samples, &self.options, self.max_audio_samples)
     }
 
     pub fn transcribe_voice(
         &mut self,
         samples: &[f32],
         protocol: &DictationProtocol,
-    ) -> Result<String> {
+    ) -> Result<VoiceTranscript> {
         if self
             .max_audio_samples
             .is_some_and(|maximum| samples.len() > maximum)
         {
-            return self.transcribe(samples);
+            return Ok(VoiceTranscript::heard(self.transcribe(samples)?, protocol));
         }
         let transcript = self.transcribe_segments(samples)?;
         let words = transcript
@@ -1185,21 +1416,27 @@ impl Parakeet {
             .iter()
             .map(|word| word.text.clone())
             .collect::<Vec<_>>();
-        let Some(control_words) = protocol.control_suffix_word_count(&words) else {
-            return Ok(transcript.text);
+        let Some((control, control_words)) = protocol.control_suffix_words(&words) else {
+            return Ok(VoiceTranscript::heard(transcript.text, protocol));
         };
-        let control = &transcript.words[transcript.words.len() - control_words];
-        let cut = (control.t0_ms.max(0) as usize * TRANSCRIPTION_SAMPLES_PER_MS).min(samples.len());
+        let first = &transcript.words[transcript.words.len() - control_words];
+        let cut = (first.t0_ms.max(0) as usize * TRANSCRIPTION_SAMPLES_PER_MS).min(samples.len());
         if cut == 0 || cut == samples.len() {
-            return Ok(transcript.text);
+            return Ok(VoiceTranscript {
+                text: transcript.text,
+                control: Some(control),
+            });
         }
         let mut content = samples[..cut].to_vec();
         pad_for_parakeet(&mut content);
         tracing::debug!(
-            control_start_ms = control.t0_ms,
+            control_start_ms = first.t0_ms,
             "retranscribing voice dictation without control audio"
         );
-        self.transcribe(&content)
+        Ok(VoiceTranscript {
+            text: self.transcribe(&content)?,
+            control: Some(control),
+        })
     }
 
     pub fn transcribe_segments(&mut self, samples: &[f32]) -> Result<Transcript> {
@@ -1211,7 +1448,6 @@ impl Parakeet {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::path::PathBuf;
 
     use hound::WavReader;
@@ -1219,7 +1455,7 @@ mod tests {
     use super::*;
 
     use crate::dictation::resample_for_parakeet;
-    use crate::meeting::{MeetingSource, TranscriptEntry, prepare_meeting_delta};
+    use crate::meeting::{MeetingSource, TranscriptEntry, format_meeting_delta};
 
     fn processing_job(target: TranscriptionTarget) -> ProcessorJob {
         ProcessorJob {
@@ -1357,6 +1593,33 @@ mod tests {
     }
 
     #[test]
+    fn a_spoken_control_decides_a_smart_turn_voice_target() {
+        let paste = TranscriptionTarget::Paste;
+        assert!(matches!(
+            spoken_target(paste, None),
+            Some(TranscriptionTarget::Paste)
+        ));
+        assert!(matches!(
+            spoken_target(paste, Some(DictationControl::Stop)),
+            Some(TranscriptionTarget::Paste)
+        ));
+        assert!(matches!(
+            spoken_target(paste, Some(DictationControl::Send)),
+            Some(TranscriptionTarget::Send)
+        ));
+        assert!(spoken_target(paste, Some(DictationControl::Cancel)).is_none());
+        let protocol = DictationProtocol::default();
+        let heard = VoiceTranscript::heard("Hello world, dictate cancel.".into(), &protocol);
+        assert_eq!(heard.control, Some(DictationControl::Cancel));
+        let heard = VoiceTranscript::heard("Hello world dictate send".into(), &protocol);
+        assert_eq!(heard.control, Some(DictationControl::Send));
+        assert_eq!(
+            VoiceTranscript::heard("Hello world".into(), &protocol).control,
+            None
+        );
+    }
+
+    #[test]
     fn protocol_stripping_removes_control_phrases_without_a_protocol_fallback() {
         let protocol = DictationProtocol::default();
         assert_eq!(
@@ -1384,7 +1647,7 @@ mod tests {
     }
 
     #[test]
-    fn meeting_delta_tracks_each_source_and_coalesces_turns() {
+    fn meeting_delta_coalesces_turns_in_time_order() {
         let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
             source,
             start_ms,
@@ -1393,31 +1656,15 @@ mod tests {
         };
         let entries = [
             entry(MeetingSource::Microphone, 0, 1_000, "First."),
-            entry(MeetingSource::System, 500, 2_500, "Reply."),
-            entry(MeetingSource::Microphone, 1_100, 2_000, "Second."),
+            entry(MeetingSource::Microphone, 1_100, 1_400, "Still me."),
+            entry(MeetingSource::System, 1_500, 2_500, "Reply."),
+            entry(MeetingSource::Microphone, 2_600, 3_000, "Second."),
         ];
-
-        let mut seen = HashSet::new();
-        let (text, pasted) = prepare_meeting_delta(&entries, &seen).unwrap();
-        assert_eq!(text, "You: First.\n\nThem: Reply.\n\nYou: Second.");
-        seen.extend(pasted);
-        assert!(prepare_meeting_delta(&entries, &seen).is_err());
-
-        let appended = [
-            entries[0].clone(),
-            entries[1].clone(),
-            entry(MeetingSource::System, 900, 1_050, "Late completion."),
-            entries[2].clone(),
-            entry(MeetingSource::Microphone, 2_600, 3_000, "Third."),
-            entry(MeetingSource::System, 2_800, 3_200, "Follow-up."),
-        ];
-        let (text, pasted) = prepare_meeting_delta(&appended, &seen).unwrap();
         assert_eq!(
-            text,
-            "Them: Late completion.\n\nYou: Third.\n\nThem: Follow-up."
+            format_meeting_delta(&entries).unwrap(),
+            "You: First. Still me.\n\nThem: Reply.\n\nYou: Second."
         );
-        seen.extend(pasted);
-        assert!(prepare_meeting_delta(&appended, &seen).is_err());
+        assert!(format_meeting_delta(&[]).is_err());
     }
 
     #[test]
@@ -1803,6 +2050,111 @@ mod tests {
         }
     }
 
+    #[cfg(hex_capture)]
+    #[test]
+    fn chunked_word_transcription_keeps_word_times_across_chunks() {
+        use crate::transcription::{Transcript, TranscriptSegment};
+        let span = |start_ms, end_ms, text: &str| TranscriptSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        };
+        let mut calls = Vec::new();
+        let merged = transcribe_in_chunks(vec![0.0; 16_000 * 25], 16_000 * 10, |chunk| {
+            calls.push(chunk.len());
+            let chunk_index = calls.len();
+            Ok(Transcript {
+                text: format!(" part {chunk_index} "),
+                segments: vec![span(0, 900, " part ")],
+                words: vec![
+                    span(-5, 400, " part"),
+                    span(450, 300, "two"),
+                    span(500, 600, "  "),
+                ],
+            })
+        })
+        .unwrap();
+        assert_eq!(calls, [160_000, 160_000, 80_000]);
+        assert_eq!(merged.text, "part 1 part 2 part 3");
+        let words = merged
+            .words
+            .iter()
+            .map(|word| (word.start_ms, word.end_ms, word.text.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            words,
+            [
+                (0, 400, "part"),
+                (450, 450, "two"),
+                (10_000, 10_400, "part"),
+                (10_450, 10_450, "two"),
+                (20_000, 20_400, "part"),
+                (20_450, 20_450, "two"),
+            ]
+        );
+        assert_eq!(merged.segments[2].start_ms, 20_000);
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn word_transcription_is_a_foreground_request_on_the_shared_engine() {
+        use crate::transcription_engine::Command as EngineCommand;
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let engine = Arc::new(engine);
+        let weak = Arc::downgrade(&engine);
+        assert!(
+            transcribe_with_words(&weak, &Default::default(), Vec::new())
+                .unwrap()
+                .words
+                .is_empty()
+        );
+        assert!(
+            commands.try_recv().is_err(),
+            "silence never reaches the model"
+        );
+
+        // A busy dictation holds the chunk back until it is idle.
+        let busy = DictationInference::begin();
+        let request = {
+            let weak = weak.clone();
+            thread::spawn(move || {
+                transcribe_with_words(
+                    &weak,
+                    &Default::default(),
+                    vec![0.1; WORD_CHUNK_SAMPLES + 1_600],
+                )
+            })
+        };
+        assert!(
+            commands
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_err()
+        );
+        drop(busy);
+        let command = commands
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        // A foreground request: after dictation already sent, counted as a
+        // request so meeting chunks yield to it, and never inside a stream.
+        assert!(matches!(
+            command,
+            EngineCommand::Foreground { ref clip, .. } if clip.len() == WORD_CHUNK_SAMPLES
+        ));
+        // The next chunk waits for this one, so a dictation sent meanwhile
+        // runs first.
+        assert!(
+            commands
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err()
+        );
+        drop(command);
+        assert!(request.join().unwrap().is_err());
+        // Only a weak reference is held: once the engine is gone, a capture
+        // fails instead of keeping it alive.
+        drop(engine);
+        assert!(transcribe_with_words(&weak, &Default::default(), vec![0.1; 16]).is_err());
+    }
+
     #[test]
     fn repeated_cancellation_walks_back_through_pending_jobs() {
         let jobs = [0, 1, 2]
@@ -1822,10 +2174,49 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
+    fn escape_skips_programmatic_dictation_jobs() {
+        let owned = || {
+            Arc::new(JobControl {
+                owner_cancels: true,
+                ..JobControl::default()
+            })
+        };
+        let state = WorkerState {
+            next_sequence: 2,
+            jobs: BTreeMap::from([
+                (DictationJobId(0), Arc::new(JobControl::default())),
+                (DictationJobId(1), owned()),
+            ]),
+            pending_pastes: 0,
+        };
+        assert!(state.has_escape_cancellable_job());
+        assert_eq!(state.cancel_latest(), Some(DictationJobId(0)));
+        assert_eq!(state.cancel_latest(), None);
+        assert!(!state.has_escape_cancellable_job());
+        assert!(!state.jobs[&DictationJobId(1)].is_cancelled());
+
+        // A job whose output has started can no longer be cancelled.
+        let pasting = WorkerState {
+            next_sequence: 1,
+            jobs: BTreeMap::from([(DictationJobId(0), Arc::new(JobControl::default()))]),
+            pending_pastes: 0,
+        };
+        assert!(pasting.jobs[&DictationJobId(0)].begin_output());
+        assert!(!pasting.has_escape_cancellable_job());
+        assert_eq!(pasting.cancel_latest(), None);
+
+        let only_owned = WorkerState {
+            next_sequence: 1,
+            jobs: BTreeMap::from([(DictationJobId(0), owned())]),
+            pending_pastes: 0,
+        };
+        assert!(!only_owned.has_escape_cancellable_job());
+    }
+
+    #[test]
+    #[ignore = "requires HEX_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
     fn dictation_protocol_audio() {
-        let directory =
-            PathBuf::from(std::env::var("VOICE_CONTROL_DICTATION_FIXTURE_DIR").unwrap());
+        let directory = PathBuf::from(std::env::var("HEX_DICTATION_FIXTURE_DIR").unwrap());
         let protocol = DictationProtocol::try_new(
             vec!["say".into()],
             vec!["say paste".into(), "say stop".into()],
@@ -1859,7 +2250,7 @@ mod tests {
                 transcript.text
             );
 
-            let clipped = model.transcribe_voice(&samples, &protocol).unwrap();
+            let clipped = model.transcribe_voice(&samples, &protocol).unwrap().text;
             let prepared = strip_transcript_protocol(&clipped, Some(&protocol));
             println!("  clipped: {:?} -> {:?}", clipped, prepared);
             assert_eq!(prepared, expected);
@@ -1867,9 +2258,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_STUTTER_FIXTURE and the installed Parakeet model"]
+    #[ignore = "requires HEX_STUTTER_FIXTURE and the installed Parakeet model"]
     fn tdt_decoder_does_not_repeat_single_letter_tokens() {
-        let path = PathBuf::from(std::env::var("VOICE_CONTROL_STUTTER_FIXTURE").unwrap());
+        let path = PathBuf::from(std::env::var("HEX_STUTTER_FIXTURE").unwrap());
         let mut reader = WavReader::open(path).unwrap();
         let sample_rate = reader.spec().sample_rate;
         let samples = reader

@@ -97,7 +97,7 @@ function Button({ href, mark, children }: { href: string; mark: ReactNode; child
 function SendLink() {
   const [copied, copy] = useCopy()
   const send = () => {
-    const url = location.origin + "/"
+    const url = location.origin + import.meta.env.BASE_URL
     if (navigator.share) {
       void navigator.share({ title: "Hex", text: "Voice dictation for Mac, Windows, and Linux", url }).catch(() => {})
     } else {

@@ -11,7 +11,8 @@ previews, providers, or native actions were run for this split.
 
 ```ts
 Hex > Commands                                      // commands; off by default
-├── Enable -> Prepare command model                  // needs setup permissions
+├── Top card "Voice commands" switch -> Prepare command model // needs setup permissions
+├── Model failed -> card below it: Retry / Turn off commands  // only in this pane
 ├── Search / select a catalog row -> Inspect, not execute
 └── Create config / Edit config / Copy agent prompt  // personal workspace
 
@@ -20,10 +21,11 @@ hex listen -> Use saved command opt-in               // never beside another lis
 ```
 
 The catalog and config controls remain reachable while Commands is off. Sources:
-`render_commands` in [app_window.rs](../../src/app_window.rs), CLI routes in
+[rune_ui/commands.rs](../../src/rune_ui/commands.rs), CLI routes in
 [main.rs](../../src/main.rs), and workspace paths in
-[app_paths.rs](../../src/app_paths.rs). Debug-only `hex dev commands on|off`
-changes the running app's opt-in; it is not a release CLI route.
+[app_paths.rs](../../src/app_paths.rs). The release
+`hex commands enable|disable|retry` ([control CLI](control-cli.md)) changes the
+running app's opt-in like the window; debug `hex dev commands on|off` remains.
 
 ## Sub-features
 
@@ -41,10 +43,11 @@ Hotkey dictation -> Remains available during preparation and failure
 ```
 
 Sources: `load_command_recognizer` and live policy handling in
-[recognition.rs](../../src/recognition.rs); `render_model_notice` in
-[app_window.rs](../../src/app_window.rs). Checks:
+[recognition.rs](../../src/recognition.rs); the enable card and command model
+notice in [rune_ui/commands.rs](../../src/rune_ui/commands.rs). Checks:
 `command_preparation_does_not_block_the_listener_or_propagate_failure`,
-`command_model_failure_has_recovery_without_blocking_dictation`, and
+`a_failed_command_model_offers_retry_and_turning_commands_off`,
+`commands_turn_on_from_their_card` (scene `mac-commands-unavailable`), and
 `missing_fields_receive_defaults` /
 `microphone_policy_requires_explicit_combined_transitions` in
 [app_settings.rs](../../src/app_settings.rs).
@@ -94,7 +97,7 @@ cannot become a later command; backlog pressure is covered by
 ```ts
 Compiled registry -> Catalog phrases / aliases / scopes // commands.catalog
 ├── Protected commands + typed patterns -> Native Rust
-└── Personal commands -> Explicit TypeScript config
+└── Personal commands -> Explicit config script (embedded QuickJS)
 
 Completed speech + current context                     // commands.context
 ├── Matching application / browser host -> Include contextual candidate
@@ -128,44 +131,55 @@ is discoverability, not proof that its scope is active or its action succeeded.
 
 ```ts
 Create config / hex commands init                      // commands.personal-config
-  -> Managed Bun workspace + @hex/commands SDK
-  -> ~/.config/hex/hex.config.ts                         // trusted executable user code
+  -> ~/.config/hex: hex.d.ts typings + AGENTS.md (Hex-owned, refreshed)
+  -> hex.config.ts starter, published last, atomically // user code, run by Hex
+     // TypeScript or JavaScript; imports only @hex/commands and folder files
 
-Running watcher sees config edit -> Validate candidate
-├── Valid -> Replace active registry and catalog
-└── Invalid -> Preserve active registry; show reload error
+Hex starts or the folder changes (polled, 350 ms debounce)
+  -> Erase TypeScript types in place -> Evaluate in embedded QuickJS
+     // one worker thread; no filesystem, network, process, or timers
+├── Registration compiles -> Replace active registry and catalog
+├── Load, syntax, or overlap error -> Keep active registry; show file:line:column
+└── Config deleted -> Native registry; Not configured
 
-Same workspace -> Custom transformations for Modes     // Commands need not be enabled
+Handler phrase -> Call handler (1 s limit) -> Returned + queued actions
+  -> Validate all -> Run in order on the native executor // first failure fails it
+
+Same config -> Custom transformations for Modes        // Commands need not be enabled
+hex commands check -> Load as Hex would -> Summary or error  // macOS CLI
 ```
 
-Sources: `initialize_workspace`, `run_worker`, `reload`, and `compile_registration`
-in [personal_commands.rs](../../src/personal_commands.rs), plus
-[host.ts](../../sdk/commands/src/host.ts). Checks in `personal_commands.rs`:
-`clean_workspace_provisioning_preserves_user_config_on_refresh`,
-`invalid_candidate_does_not_mutate_base_registry`,
-`wake_sleep_ids_and_phrases_are_reserved`.
-These cover provisioning/registration fixtures, not a live editor-to-reload path.
+Sources: `initialize_workspace`, `Worker::reload`, `Worker::invoke`,
+`load_config`, and `compile_registration` in
+[personal_commands.rs](../../src/personal_commands.rs), the engine in
+[script.rs](../../src/personal_commands/script.rs), the module and registration
+glue in [commands.js](../../src/personal_commands/commands.js) and
+[host.js](../../src/personal_commands/host.js), and type erasure in
+[typescript.rs](../../src/personal_commands/typescript.rs). Checks in
+`personal_commands.rs`:
+`the_starter_config_registers_and_its_handlers_return_actions`,
+`handlers_queue_and_return_actions_in_order_and_fail_on_bad_ones`,
+`load_errors_name_the_file_line_and_column_and_keep_the_last_good_config`,
+`runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`,
+`stale_generations_never_reach_a_newer_config`,
+`scripts_import_only_hex_commands_and_files_in_the_folder`,
+`initialization_writes_typings_and_a_starter_config_but_keeps_the_users`,
+`invalid_candidate_does_not_mutate_base_registry`, and
+`wake_sleep_ids_and_phrases_are_reserved`; `typescript.rs` checks erasure and
+rejected syntax. They drive the worker directly with real scripts, resolve
+spoken text through the compiled registry, and stop before native actions run;
+they do not cover the polling watcher thread or a live editor save.
 
-[Host tests](../../sdk/commands/test/host.test.ts), including
-`emits a bounded serializable registration without handlers` and
-`waits for vanilla tool calls even when the handler forgets await`, cover the
-wire protocol with supplied messages. The
-[workspace smoke](../../scripts/smoke-commands-workspace.sh) exercises temporary
-Bun installs, type checking, and host registration, not speech-to-native-action
-success. See [Modes](README.md#process-text-with-modes) for transformation output.
-
-Capture constructors and host registration share normalization and union
-validation in [captures.ts](../../sdk/commands/src/captures.ts), retaining ASCII
-case semantics. [Parity regressions](../../sdk/commands/test/captures.test.ts)
-cover distinct non-ASCII case, normalized overlaps, nesting/member limits, and
-invalid descriptors. Rust independently validates registration;
-`normalizes_spoken_numbers_and_punctuation` in
-[spoken_text.rs](../../src/spoken_text.rs) also preserves distinct `Ä`/`ä` aliases.
+Capture descriptors are plain data; Rust alone validates and normalizes them
+when it compiles the registration. `normalizes_spoken_numbers_and_punctuation`
+in [spoken_text.rs](../../src/spoken_text.rs) also preserves distinct `Ä`/`ä`
+aliases. See [Modes](README.md#process-text-with-modes) for transformation
+output.
 
 ### Spoken Dictation Controls
 
 ```ts
-Commands enabled + command model ready + awake         // dictate.voice-controls
+Commands enabled + command model ready + awake         // dictate.hexs
   -> "dictate start" -> Voice-delimited capture
      // wake first if sleeping; up to one second of available pre-roll
 
@@ -200,20 +214,14 @@ native voice-to-paste pass.
 
 ## Gaps And Constraints
 
-- **Pre-watcher startup failure:** `run_worker` can return before starting
-  `watch_workspace` when config, Bun, or SDK preparation is unavailable. Repairing
-  the files alone then has no watcher to trigger a reload. The live-reload
-  contract above applies only after the watcher starts; startup recovery remains
-  a gap.
-- **Timeout and late native result:** [#20](https://github.com/anomalyco/hex/issues/20)
-  remains a known gap. Host interruption removes tool correlation;
-  a late reply is rejected, and Rust rejects completion with outstanding tools.
-  `reports Effect timeouts without losing subsequent invocations` in the host
-  tests has no outstanding native tool and does not cover this failure. See
-  [Recovery](recovery.md#late-native-tool-reply) for the missing lifecycle evidence.
-- **Trust and scope:** personal config and npm dependencies are not sandboxed.
-  Ordinary hotkey dictation needs neither Bun nor this opt-in; disabling Commands
-  does not stop a personal host still needed by selected custom transformations.
+- **Actions run after the handler:** a handler cannot observe an action's
+  result; `hex.*` calls resolve at once and Hex runs every action once the
+  handler returns. Scripts have no I/O, so there is nothing else to wait on.
+- **Trust and scope:** the script engine exposes no filesystem, network, or
+  process API, but the actions a config asks for run with the user's
+  permissions. Ordinary hotkey dictation needs no config and no opt-in;
+  disabling Commands does not unload a config still needed by selected custom
+  transformations.
 - **Native proof:** grammar, protocol, and rendered catalog checks do not prove
   that speech matched the expected command, captured the right context, and
   completed the native action. This map does not authorize live input or actions.

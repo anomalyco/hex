@@ -1,5 +1,5 @@
 #!/bin/sh
-# Mirrors another Mac's HEX meetings folder for a local, read-only `hex mcp
+# Mirrors another Mac's Hex meetings folder for a local, read-only `hex mcp
 # --meetings-dir`. One rsync over SSH; audio (*.wav), lock, and temporary
 # files stay behind. Updated files land together at the end of the transfer
 # (--delay-updates), and meetings trashed on the source disappear here.
@@ -10,12 +10,12 @@
 # Environment:
 #   HEX_MEETINGS_HOST    SSH host (default: pro)
 #   HEX_MEETINGS_SOURCE  folder on the host, relative to its home
-#                        (default: Library/Application Support/voice-control/meetings)
+#                        (default: Library/Application Support/hex/meetings)
 #   HEX_MEETINGS_MIRROR  local mirror (default: ~/Library/Caches/hex-meetings-mirror)
 set -eu
 
 host=${HEX_MEETINGS_HOST:-pro}
-source_dir=${HEX_MEETINGS_SOURCE:-Library/Application Support/voice-control/meetings}
+source_dir=${HEX_MEETINGS_SOURCE:-Library/Application Support/hex/meetings}
 mirror=${HEX_MEETINGS_MIRROR:-$HOME/Library/Caches/hex-meetings-mirror}
 
 mkdir -p "$mirror"

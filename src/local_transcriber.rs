@@ -6,10 +6,15 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::gguf_session::OfflineGgufSession;
+#[cfg(target_os = "linux")]
+use crate::transcription_models::{ModelDefinition, TranscriptionModelId, definition};
 use crate::transcription_models::{
-    ModelDefinition, TranscriptionModelId, TranscriptionSelection, definition,
-    download_with_progress, model_path, validate,
+    TranscriptionSelection, download_with_progress, model_path, validate,
 };
+
+/// A word or segment's start and end (ms from the clip's start) and text.
+#[cfg(target_os = "linux")]
+pub type TimedSpan = (i64, i64, String);
 
 pub struct LocalTranscriber {
     session: OfflineGgufSession,
@@ -17,12 +22,17 @@ pub struct LocalTranscriber {
     device_label: String,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
+    /// The finest timestamps the model gives, for a capture's word times.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    finest_timestamps: TimestampKind,
 }
 
+#[cfg(target_os = "linux")]
 pub fn default_model() -> &'static ModelDefinition {
     definition(TranscriptionModelId::default())
 }
 
+#[cfg(target_os = "linux")]
 pub fn install_default(canceled: &AtomicBool) -> Result<()> {
     install(&TranscriptionSelection::default(), canceled)
 }
@@ -64,6 +74,22 @@ pub fn devices() -> Result<Vec<String>> {
         .collect())
 }
 
+/// Initializes transcribe.cpp's backends, which creates its Vulkan instance,
+/// on the calling thread. The Linux process calls this before its listener
+/// or window can start: two Vulkan instances created at once in one process
+/// (ggml's here, wgpu's for the window) crash inside the Vulkan loader.
+/// Later model loads reuse the instance.
+#[cfg(target_os = "linux")]
+pub fn initialize_backends() {
+    transcribe_cpp::init_logging();
+    match transcribe_cpp::init_backends_default() {
+        // Enumerating the devices makes sure the Vulkan backend exists now.
+        Ok(()) => drop(transcribe_cpp::devices()),
+        Err(error) => tracing::warn!(%error, "could not initialize transcription backends"),
+    }
+}
+
+#[cfg(target_os = "linux")]
 pub fn transcribe_wav(path: &Path) -> Result<String> {
     transcribe_wav_with_selection(path, &TranscriptionSelection::default())
 }
@@ -104,6 +130,7 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
 }
 
 impl LocalTranscriber {
+    #[cfg(target_os = "linux")]
     pub fn load_default() -> Result<Self> {
         Self::load(&TranscriptionSelection::default())
     }
@@ -124,14 +151,14 @@ impl LocalTranscriber {
             &path,
             &ModelOptions {
                 backend: Backend::Auto,
-                device: None,
+                ..Default::default()
             },
         )
         .wrap_err_with(|| format!("could not load transcription model from {}", path.display()))?;
         let device = model.device()?;
         let variant = model.variant();
         let architecture = model.arch();
-        let capabilities = model.capabilities();
+        let capabilities = model.capabilities()?;
         let language = crate::gguf_session::validate_gguf_artifact(
             &path,
             definition,
@@ -176,6 +203,10 @@ impl LocalTranscriber {
                 capabilities.max_audio_ms,
             ),
             stream: None,
+            finest_timestamps: match capabilities.max_timestamp_kind {
+                TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
+                kind => kind,
+            },
         };
         let started = Instant::now();
         transcriber.transcribe(&vec![0.0; 24_000])?;
@@ -216,30 +247,197 @@ impl LocalTranscriber {
         &self.device_label
     }
 
-    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
-        let Some(max_samples) = self
-            .max_audio_samples
-            .filter(|&max_samples| samples.len() > max_samples)
-        else {
-            return self.run(samples);
+    /// Text and word times (ms from the clip's start) for a capture, in
+    /// chunks the model takes whole. A model without word times gives its
+    /// segments instead.
+    #[cfg(target_os = "linux")]
+    pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
+        const CHUNK: usize = 30 * 16_000;
+        let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
+        let options = RunOptions {
+            timestamps: self.finest_timestamps,
+            ..self.options.clone()
         };
-        let mut output = Vec::new();
-        for samples in samples.chunks(max_samples) {
-            let mut chunk = samples.to_vec();
-            crate::dictation::pad_for_parakeet(&mut chunk);
-            let text = self.run(&chunk)?;
-            let text = text.trim();
+        let (mut texts, mut words) = (Vec::new(), Vec::new());
+        for (index, part) in samples.chunks(chunk.max(1)).enumerate() {
+            let offset = (index * chunk / 16) as i64;
+            let transcript = self
+                .session
+                .run(part, &options)
+                .wrap_err("transcription failed")?;
+            let text = transcript.text.trim();
             if !text.is_empty() {
-                output.push(text.to_string());
+                texts.push(text.to_owned());
             }
+            let spans = if transcript.words.is_empty() {
+                transcript
+                    .segments
+                    .into_iter()
+                    .map(|s| (s.t0_ms, s.t1_ms, s.text))
+                    .collect::<Vec<_>>()
+            } else {
+                transcript
+                    .words
+                    .into_iter()
+                    .map(|w| (w.t0_ms, w.t1_ms, w.text))
+                    .collect()
+            };
+            words.extend(spans.into_iter().filter_map(|(t0, t1, text)| {
+                let text = text.trim().to_owned();
+                (!text.is_empty()).then(|| (t0.max(0) + offset, t1.max(t0) + offset, text))
+            }));
         }
-        Ok(output.join(" "))
+        Ok((texts.join(" "), words))
     }
 
-    fn run(&mut self, samples: &[f32]) -> Result<String> {
+    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
         self.session
-            .run(samples, &self.options)
-            .map(|transcript| transcript.text)
-            .wrap_err("transcription failed")
+            .transcribe_chunked(samples, &self.options, self.max_audio_samples)
+    }
+}
+
+/// A running listener's model: the one it transcribes with, and the one it
+/// changes to. A new selection loads on a worker thread while dictation goes
+/// on with the old model; the listener swaps it in once nothing records or
+/// waits on the old one. A model the host already prepared skips the load.
+pub(crate) struct ModelSwap {
+    loaded: TranscriptionSelection,
+    loading: Option<(
+        TranscriptionSelection,
+        std::sync::mpsc::Receiver<std::result::Result<LocalTranscriber, String>>,
+    )>,
+    ready: Option<(TranscriptionSelection, LocalTranscriber)>,
+}
+
+impl ModelSwap {
+    pub(crate) fn new(loaded: &TranscriptionSelection) -> Self {
+        Self {
+            loaded: runnable(loaded),
+            loading: None,
+            ready: None,
+        }
+    }
+
+    /// The selection the listener will transcribe with once swaps settle.
+    fn target(&self) -> &TranscriptionSelection {
+        self.ready
+            .as_ref()
+            .map(|(selection, _)| selection)
+            .or(self.loading.as_ref().map(|(selection, _)| selection))
+            .unwrap_or(&self.loaded)
+    }
+
+    /// A model the host loaded for `selection` (Linux prepares models
+    /// beside the listener; Windows lets the listener load them).
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    pub(crate) fn offer(
+        &mut self,
+        selection: &TranscriptionSelection,
+        transcriber: LocalTranscriber,
+    ) {
+        self.loading = None;
+        self.ready = Some((runnable(selection), transcriber));
+    }
+
+    /// Settings now select `selection`; loads it unless it is already the
+    /// target.
+    pub(crate) fn want(&mut self, selection: &TranscriptionSelection) {
+        let selection = runnable(selection);
+        if &selection == self.target() {
+            return;
+        }
+        self.ready = None;
+        if selection == self.loaded {
+            self.loading = None;
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let load = selection.clone();
+        let spawned = std::thread::Builder::new()
+            .name("hex-model-swap".into())
+            .spawn(move || {
+                let _ = sender
+                    .send(LocalTranscriber::load(&load).map_err(|error| format!("{error:#}")));
+            });
+        match spawned {
+            Ok(_) => self.loading = Some((selection, receiver)),
+            Err(error) => tracing::warn!(%error, "could not load the new transcription model"),
+        }
+    }
+
+    /// Collects a finished load; a failure keeps the current model.
+    pub(crate) fn poll(&mut self) -> Option<SwapFailed> {
+        let (_, receiver) = self.loading.as_ref()?;
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("the model loader stopped unexpectedly".into())
+            }
+        };
+        let (selection, _) = self.loading.take()?;
+        match result {
+            Ok(transcriber) => {
+                self.ready = Some((selection, transcriber));
+                None
+            }
+            Err(error) => Some(SwapFailed {
+                wanted: selection,
+                kept: self.loaded.clone(),
+                error: format!("could not switch the transcription model: {error}"),
+            }),
+        }
+    }
+
+    /// The model to swap in now, if one is ready.
+    pub(crate) fn take_ready(&mut self) -> Option<LocalTranscriber> {
+        let (selection, transcriber) = self.ready.take()?;
+        self.loaded = selection;
+        Some(transcriber)
+    }
+}
+
+/// A model change that failed to load; the listener still runs `kept`.
+/// Windows hands it to the host, which puts settings back on `kept`; Linux
+/// only reports the error.
+#[derive(Debug)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) struct SwapFailed {
+    pub(crate) wanted: TranscriptionSelection,
+    pub(crate) kept: TranscriptionSelection,
+    pub(crate) error: String,
+}
+
+/// `selection` without recognition hints a model cannot use, which
+/// `validate` would reject.
+fn runnable(selection: &TranscriptionSelection) -> TranscriptionSelection {
+    let mut selection = selection.clone();
+    if !crate::transcription_models::definition(selection.model).supports_recognition_hints {
+        selection.recognition_hints = String::new();
+    }
+    selection
+}
+
+#[cfg(test)]
+mod model_swap_tests {
+    use super::*;
+    use crate::transcription_models::TranscriptionModelId;
+
+    #[test]
+    fn an_unchanged_or_hint_only_change_on_a_hintless_model_loads_nothing() {
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::default(),
+            ..Default::default()
+        };
+        let mut swap = ModelSwap::new(&selection);
+        swap.want(&selection);
+        let mut hinted = selection.clone();
+        hinted.recognition_hints = "Hex".into();
+        if !crate::transcription_models::definition(hinted.model).supports_recognition_hints {
+            swap.want(&hinted);
+        }
+        assert!(swap.loading.is_none());
+        assert!(swap.take_ready().is_none());
+        assert!(swap.poll().is_none());
     }
 }

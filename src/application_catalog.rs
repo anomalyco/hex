@@ -3,11 +3,8 @@
 //! bundle name Finder shows, Windows and Linux by the executable name.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-
-use color_eyre::eyre::Result;
-use gpui::Image;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[cfg(target_os = "macos")]
 #[path = "application_catalog/macos.rs"]
@@ -25,7 +22,6 @@ pub struct InstalledApplication {
     pub name: String,
     pub bundle_id: Option<String>,
     pub path: PathBuf,
-    pub icon: Option<Arc<Image>>,
 }
 
 static APPLICATIONS: OnceLock<Vec<InstalledApplication>> = OnceLock::new();
@@ -45,9 +41,9 @@ pub fn insert(applications: &mut Vec<InstalledApplication>, application: Install
     normalize(applications);
 }
 
-/// The application a user picked from a file dialog: a `.app` bundle on
-/// macOS, an `.exe` on Windows.
-pub fn metadata(path: &Path) -> Result<InstalledApplication> {
+/// The application a user picked in the file dialog: a macOS `.app`
+/// bundle, a Windows `.exe`, or a Linux `.desktop` entry or executable.
+pub fn metadata(path: &std::path::Path) -> color_eyre::Result<InstalledApplication> {
     platform::metadata(path)
 }
 

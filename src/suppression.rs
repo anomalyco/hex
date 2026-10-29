@@ -24,6 +24,26 @@ const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEY_UP: u32 = 11;
 const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_OTHER_MOUSE_DOWN: u32 = 25;
+#[cfg(hex_capture)]
+const EVENT_LEFT_MOUSE_UP: u32 = 2;
+#[cfg(hex_capture)]
+const EVENT_RIGHT_MOUSE_UP: u32 = 4;
+#[cfg(hex_capture)]
+const EVENT_MOUSE_MOVED: u32 = 5;
+#[cfg(hex_capture)]
+const EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
+#[cfg(hex_capture)]
+const EVENT_RIGHT_MOUSE_DRAGGED: u32 = 7;
+#[cfg(hex_capture)]
+const EVENT_SCROLL_WHEEL: u32 = 22;
+#[cfg(hex_capture)]
+const EVENT_OTHER_MOUSE_DRAGGED: u32 = 27;
+#[cfg(hex_capture)]
+const KEYBOARD_EVENT_AUTOREPEAT: u32 = 8;
+#[cfg(hex_capture)]
+const SCROLL_WHEEL_DELTA_AXIS_1: u32 = 11;
+#[cfg(hex_capture)]
+const SCROLL_WHEEL_DELTA_AXIS_2: u32 = 12;
 const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = u32::MAX - 1;
 const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = u32::MAX;
 const KEYBOARD_EVENT_KEYCODE: u32 = 9;
@@ -31,12 +51,16 @@ const EVENT_SOURCE_USER_DATA: u32 = 42;
 
 // Assistive keyboards inject downstream of HID; observe them alongside hardware input.
 const ANNOTATED_SESSION_EVENT_TAP: u32 = 2;
+// Another app's global shortcut (Carbon hotkeys such as a window manager's
+// Option-1) consumes its key before the session, so only HID sees that press.
+const HID_EVENT_TAP: u32 = 0;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
 const DEFAULT_EVENT_TAP: u32 = 0;
 const LISTEN_ONLY_EVENT_TAP: u32 = 1;
 const HID_SYSTEM_STATE: u32 = 1;
 const COMBINED_SESSION_STATE: u32 = 0;
 const STALE_KEY_NEUTRAL_DURATION: Duration = Duration::from_millis(100);
+const PHYSICAL_KEY_DOWN_HISTORY: usize = 8;
 
 type EventRef = *mut c_void;
 type EventTapCallback = unsafe extern "C" fn(
@@ -62,6 +86,23 @@ unsafe extern "C" {
     fn CGEventGetFlags(event: EventRef) -> u64;
     fn CGEventGetTimestamp(event: EventRef) -> u64;
     fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
+    #[cfg(hex_capture)]
+    fn CGEventGetLocation(event: EventRef) -> CgPoint;
+    #[cfg(hex_capture)]
+    fn CGEventKeyboardGetUnicodeString(
+        event: EventRef,
+        max_length: usize,
+        actual_length: *mut usize,
+        buffer: *mut u16,
+    );
+}
+
+#[cfg(hex_capture)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CgPoint {
+    x: f64,
+    y: f64,
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -83,9 +124,66 @@ unsafe extern "C" {
 #[derive(Clone, Copy, Debug)]
 pub enum InputEvent {
     Flags(u64),
-    Key { code: u16, down: bool, flags: u64 },
+    Key {
+        code: u16,
+        down: bool,
+        flags: u64,
+    },
+    /// A key press seen at the HID level. It only signals a chord: the session
+    /// `Key` events, when they arrive, remain the source of key state.
+    PhysicalKeyDown {
+        code: u16,
+        timing: HidTiming,
+    },
     MouseDown,
     TapDisabled,
+}
+
+/// How a HID-tap timestamp was read, kept only for diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HidTiming {
+    pub raw: u64,
+    pub clock: HidClock,
+    /// When the tap callback ran.
+    pub received_at: CaptureInstant,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HidClock {
+    MachTicks,
+    Nanos,
+    /// Neither reading was recent, so the event took its arrival time.
+    Arrival,
+}
+
+impl HidClock {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MachTicks => "mach",
+            Self::Nanos => "nanos",
+            Self::Arrival => "arrival",
+        }
+    }
+}
+
+/// What ended a press as a chord before it became a dictation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiscardCause {
+    Key,
+    HidKey,
+    Mouse,
+    ExtraModifier,
+}
+
+impl DiscardCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Key => "key",
+            Self::HidKey => "hid-key",
+            Self::Mouse => "mouse",
+            Self::ExtraModifier => "extra-modifier",
+        }
+    }
 }
 
 impl InputEvent {
@@ -99,11 +197,6 @@ impl InputEvent {
             }
         )
     }
-}
-
-pub fn physical_modifier_flags() -> u64 {
-    // SAFETY: HID state is a process-independent CoreGraphics query.
-    unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -262,9 +355,96 @@ struct EventTapContext {
     escape_cancels: Arc<AtomicBool>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
+    physical_tap: AtomicPtr<c_void>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
     pending: PendingInputEvents,
     next_sequence: AtomicU64,
+}
+
+struct AttachedTap {
+    tap: *mut c_void,
+    source: *mut c_void,
+    run_loop: *mut c_void,
+}
+
+impl AttachedTap {
+    /// # Safety
+    /// `context` and `run_loop` must outlive the returned `AttachedTap`.
+    unsafe fn create(
+        location: u32,
+        options: u32,
+        mask: u64,
+        callback: EventTapCallback,
+        context: *mut EventTapContext,
+        run_loop: *mut c_void,
+        slot: &AtomicPtr<c_void>,
+    ) -> Result<Self, &'static str> {
+        let tap = unsafe {
+            CGEventTapCreate(
+                location,
+                HEAD_INSERT_EVENT_TAP,
+                options,
+                mask,
+                callback,
+                context.cast(),
+            )
+        };
+        if tap.is_null() {
+            return Err("could not create event tap");
+        }
+        let source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), tap, 0) };
+        if source.is_null() {
+            unsafe { CFRelease(tap.cast_const()) };
+            return Err("could not create input run-loop sources");
+        }
+        slot.store(tap, Ordering::Release);
+        unsafe {
+            CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
+            CGEventTapEnable(tap, true);
+        }
+        Ok(Self {
+            tap,
+            source,
+            run_loop,
+        })
+    }
+}
+
+impl Drop for AttachedTap {
+    fn drop(&mut self) {
+        unsafe {
+            CGEventTapEnable(self.tap, false);
+            CFRunLoopRemoveSource(self.run_loop, self.source, kCFRunLoopCommonModes);
+            CFRelease(self.source.cast_const());
+            CFRelease(self.tap.cast_const());
+        }
+    }
+}
+
+const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN) | (1_u64 << EVENT_KEY_UP);
+const OBSERVATION_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_DOWN)
+    | (1_u64 << EVENT_RIGHT_MOUSE_DOWN)
+    | (1_u64 << EVENT_FLAGS_CHANGED)
+    | (1_u64 << EVENT_OTHER_MOUSE_DOWN);
+/// What the observation tap adds in builds with captures, while the
+/// `capture` experiment is on: the pointer moving, dragging, coming up, and
+/// scrolling. The callback drops them at once unless a capture records
+/// (`capture_host::wants_input`); they never reach the listener.
+#[cfg(hex_capture)]
+const CAPTURE_POINTER_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_UP)
+    | (1_u64 << EVENT_RIGHT_MOUSE_UP)
+    | (1_u64 << EVENT_MOUSE_MOVED)
+    | (1_u64 << EVENT_LEFT_MOUSE_DRAGGED)
+    | (1_u64 << EVENT_RIGHT_MOUSE_DRAGGED)
+    | (1_u64 << EVENT_SCROLL_WHEEL)
+    | (1_u64 << EVENT_OTHER_MOUSE_DRAGGED);
+
+fn observation_mask() -> u64 {
+    #[cfg(hex_capture)]
+    if crate::app_settings::capture_available() {
+        return OBSERVATION_MASK | CAPTURE_POINTER_MASK;
+    }
+    OBSERVATION_MASK
 }
 
 fn run_event_tap(
@@ -275,126 +455,176 @@ fn run_event_tap(
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
 ) {
-    let context = Box::into_raw(Box::new(EventTapContext {
+    let mut context = Box::new(EventTapContext {
         sender,
         activity,
         escape_cancels,
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
+        physical_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
         pending,
         next_sequence: AtomicU64::new(0),
-    }));
-    let key_mask = [EVENT_KEY_DOWN, EVENT_KEY_UP]
-        .into_iter()
-        .fold(0, |mask, event| mask | 1_u64 << event);
-    let observation_mask = [
-        EVENT_LEFT_MOUSE_DOWN,
-        EVENT_RIGHT_MOUSE_DOWN,
-        EVENT_FLAGS_CHANGED,
-        EVENT_OTHER_MOUSE_DOWN,
-    ]
-    .into_iter()
-    .fold(0, |mask, event| mask | 1_u64 << event);
-    // SAFETY: The callback context remains allocated until this run loop stops.
-    let key_tap = unsafe {
-        CGEventTapCreate(
+    });
+    let context_ptr = &raw mut *context;
+    // SAFETY: This is the dedicated event-tap thread's current run loop, and
+    // `context` outlives all `AttachedTap`s created below.
+    let current_run_loop = unsafe { CFRunLoopGetCurrent() };
+    let _key_tap = match unsafe {
+        AttachedTap::create(
             ANNOTATED_SESSION_EVENT_TAP,
-            HEAD_INSERT_EVENT_TAP,
             DEFAULT_EVENT_TAP,
-            key_mask,
+            KEY_MASK,
             event_callback,
-            context.cast(),
+            context_ptr,
+            current_run_loop,
+            &context.key_tap,
         )
+    } {
+        Ok(tap) => tap,
+        Err(_) => {
+            let _ = ready.send(Err(eyre!(
+                "could not create keyboard event tap; grant Accessibility permission"
+            )));
+            return;
+        }
     };
-    if key_tap.is_null() {
-        // SAFETY: No callback can run because tap creation failed.
-        unsafe { drop(Box::from_raw(context)) };
-        let _ = ready.send(Err(eyre!(
-            "could not create keyboard event tap; grant Input Monitoring and Accessibility permissions"
-        )));
-        return;
-    }
     // A modifying tap disrupts Finder's Option-driven alternate menu items even when it returns
     // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
-    let observation_tap = unsafe {
-        CGEventTapCreate(
+    let _observation_tap = match unsafe {
+        AttachedTap::create(
             ANNOTATED_SESSION_EVENT_TAP,
-            HEAD_INSERT_EVENT_TAP,
             LISTEN_ONLY_EVENT_TAP,
-            observation_mask,
+            observation_mask(),
             event_callback,
-            context.cast(),
+            context_ptr,
+            current_run_loop,
+            &context.observation_tap,
         )
+    } {
+        Ok(tap) => tap,
+        Err(message) => {
+            let _ = ready.send(Err(eyre!(message)));
+            return;
+        }
     };
-    if observation_tap.is_null() {
-        // SAFETY: The observation tap was not created, so no callback can use the context.
-        unsafe {
-            CGEventTapEnable(key_tap, false);
-            CFRelease(key_tap.cast_const());
-            drop(Box::from_raw(context));
+    // Listens for key presses at the HID level, where shortcuts that other apps
+    // register globally are still visible. Without it those chords are invisible
+    // to the session taps; dictation still works.
+    let _physical_tap = match unsafe {
+        AttachedTap::create(
+            HID_EVENT_TAP,
+            LISTEN_ONLY_EVENT_TAP,
+            1_u64 << EVENT_KEY_DOWN,
+            physical_event_callback,
+            context_ptr,
+            current_run_loop,
+            &context.physical_tap,
+        )
+    } {
+        Ok(tap) => Some(tap),
+        Err(_) => {
+            tracing::warn!(
+                "could not observe HID key presses; global-shortcut chords cannot cancel"
+            );
+            None
         }
-        let _ = ready.send(Err(eyre!("could not create input observation event tap")));
-        return;
-    }
-    // SAFETY: `context` remains owned by this event-tap thread.
-    unsafe {
-        (*context).key_tap.store(key_tap, Ordering::Release);
-        (*context)
-            .observation_tap
-            .store(observation_tap, Ordering::Release);
-    }
-    // SAFETY: Both taps are valid CFMachPorts returned above.
-    let key_source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), key_tap, 0) };
-    let observation_source =
-        unsafe { CFMachPortCreateRunLoopSource(ptr::null(), observation_tap, 0) };
-    if key_source.is_null() || observation_source.is_null() {
-        // SAFETY: Neither source has been attached to the run loop yet.
-        unsafe {
-            if !key_source.is_null() {
-                CFRelease(key_source.cast_const());
-            }
-            if !observation_source.is_null() {
-                CFRelease(observation_source.cast_const());
-            }
-            CGEventTapEnable(key_tap, false);
-            CGEventTapEnable(observation_tap, false);
-            CFRelease(key_tap.cast_const());
-            CFRelease(observation_tap.cast_const());
-            drop(Box::from_raw(context));
-        }
-        let _ = ready.send(Err(eyre!("could not create input run-loop sources")));
-        return;
-    }
-    // SAFETY: This is the dedicated event-tap thread's current run loop.
-    let current_run_loop = unsafe { CFRunLoopGetCurrent() };
+    };
     run_loop.store(current_run_loop, Ordering::Release);
-    // SAFETY: All values belong to this thread and remain alive while the run loop runs.
-    unsafe {
-        CFRunLoopAddSource(current_run_loop, key_source, kCFRunLoopCommonModes);
-        CFRunLoopAddSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
-        CGEventTapEnable(key_tap, true);
-        CGEventTapEnable(observation_tap, true);
-    }
     let _ = ready.send(Ok(()));
     // SAFETY: This dedicated thread exists solely to dispatch the event tap.
     unsafe { CFRunLoopRun() };
-    // SAFETY: Disable the tap before releasing its callback context.
-    unsafe {
-        CGEventTapEnable(key_tap, false);
-        CGEventTapEnable(observation_tap, false);
-        CFRunLoopRemoveSource(current_run_loop, key_source, kCFRunLoopCommonModes);
-        CFRunLoopRemoveSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
-    }
     run_loop.store(ptr::null_mut(), Ordering::Release);
-    // SAFETY: The source is detached and the tap is disabled, so no callback can use context.
-    unsafe {
-        CFRelease(key_source.cast_const());
-        CFRelease(observation_source.cast_const());
-        CFRelease(key_tap.cast_const());
-        CFRelease(observation_tap.cast_const());
-        drop(Box::from_raw(context));
+}
+
+unsafe extern "C" fn physical_event_callback(
+    _proxy: *mut c_void,
+    event_type: u32,
+    event: EventRef,
+    user_info: *mut c_void,
+) -> EventRef {
+    if user_info.is_null() {
+        return event;
     }
+    // SAFETY: `user_info` points to the context allocated by `run_event_tap`.
+    let context = unsafe { &*(user_info.cast::<EventTapContext>()) };
+    if matches!(
+        event_type,
+        EVENT_TAP_DISABLED_BY_TIMEOUT | EVENT_TAP_DISABLED_BY_USER_INPUT
+    ) {
+        // Missing evidence only lets a chord count as a hold, so just resume.
+        let tap = context.physical_tap.load(Ordering::Acquire);
+        if !tap.is_null() {
+            // SAFETY: `tap` is a CFMachPort returned by `CGEventTapCreate`.
+            unsafe { CGEventTapEnable(tap, true) };
+        }
+        return event;
+    }
+    if event.is_null()
+        || event_type != EVENT_KEY_DOWN
+        || crate::app_settings::hotkey_capture_active()
+        // SAFETY: CoreGraphics supplied a valid event to this callback.
+        || unsafe { CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA) }
+            == crate::keyboard::SYNTHETIC_EVENT_MARKER
+    {
+        return event;
+    }
+    // SAFETY: CoreGraphics supplied a valid keyboard event.
+    let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16 };
+    // SAFETY: CoreGraphics supplied a valid event.
+    let flags = unsafe { CGEventGetFlags(event) };
+    if !is_chord_evidence(code, flags, crate::app_settings::runtime_hotkeys()) {
+        return event;
+    }
+    // SAFETY: CoreGraphics supplied a valid event.
+    let raw = unsafe { CGEventGetTimestamp(event) };
+    let received_at = CaptureInstant::now();
+    let (at, clock) = physical_event_instant(raw, received_at);
+    send_input(
+        context,
+        InputEvent::PhysicalKeyDown {
+            code,
+            timing: HidTiming {
+                raw,
+                clock,
+                received_at,
+            },
+        },
+        at,
+    );
+    event
+}
+
+/// Whether a HID key press can reveal a chord Hex would otherwise miss.
+/// Escape and Hex's own shortcuts already act through their session events.
+fn is_chord_evidence(code: u16, flags: u64, hotkeys: RuntimeHotkeys) -> bool {
+    code != ESCAPE_KEY_CODE
+        && !hotkeys
+            .all()
+            .iter()
+            .flatten()
+            .any(|hotkey| hotkey.matches_key_press(code, flags))
+}
+
+/// HID-tap timestamps arrive as Mach ticks on Apple Silicon and as
+/// nanoseconds on some events; keep whichever reading is recent, else `now`.
+fn physical_event_instant(raw: u64, now: CaptureInstant) -> (CaptureInstant, HidClock) {
+    const RECENT: Duration = Duration::from_secs(5);
+    [
+        (CaptureInstant::from_mach_ticks(raw), HidClock::MachTicks),
+        (CaptureInstant::from_nanos(raw), HidClock::Nanos),
+    ]
+    .into_iter()
+    .find(|(at, _)| {
+        now.checked_duration_since(*at)
+            .is_some_and(|age| age <= RECENT)
+    })
+    .unwrap_or((now, HidClock::Arrival))
+}
+
+/// Signed milliseconds from `from` to `to`.
+fn signed_ms(to: CaptureInstant, from: CaptureInstant) -> f64 {
+    (i128::from(to.as_nanos()) - i128::from(from.as_nanos())) as f64 / 1e6
 }
 
 unsafe extern "C" fn event_callback(
@@ -429,7 +659,46 @@ unsafe extern "C" fn event_callback(
     if unsafe { CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA) }
         == crate::keyboard::SYNTHETIC_EVENT_MARKER
     {
-        return event;
+        // The chord breaker has already passed the HID and session taps and
+        // global monitors that watch for modifier taps; the focused app would
+        // only beep at it.
+        let chord_breaker = matches!(event_type, EVENT_KEY_DOWN | EVENT_KEY_UP)
+            // SAFETY: CoreGraphics supplied a valid keyboard event.
+            && unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) }
+                == i64::from(crate::keyboard::CHORD_BREAKER_KEY_CODE);
+        return if chord_breaker {
+            ptr::null_mut()
+        } else {
+            event
+        };
+    }
+    #[cfg(hex_capture)]
+    let list_swallows = match list_tap(event_type, event) {
+        ListSwallow::No => false,
+        ListSwallow::Only => return ptr::null_mut(),
+        ListSwallow::AfterListener => true,
+    };
+    #[cfg(not(hex_capture))]
+    let list_swallows = false;
+    #[cfg(hex_capture)]
+    let capture_key = if crate::capture_host::wants_input() {
+        match report_capture_input(event_type, event) {
+            CaptureTap::Only => return event,
+            CaptureTap::Shared => None,
+            CaptureTap::Key(key) => Some(key),
+        }
+    } else {
+        None
+    };
+    // A press anywhere while the list or suggestions are open may fold it; the click still
+    // goes to the app and to the listener as chord evidence.
+    #[cfg(hex_capture)]
+    if matches!(
+        event_type,
+        EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN | EVENT_OTHER_MOUSE_DOWN
+    ) && (crate::capture_host::list_open() || crate::capture_host::suggesting())
+    {
+        crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::Press);
     }
     let input = match event_type {
         EVENT_FLAGS_CHANGED => {
@@ -473,7 +742,234 @@ unsafe extern "C" fn event_callback(
         context.escape_cancels.load(Ordering::Acquire),
     );
     context.activity.observe(input, suppress);
-    if suppress { ptr::null_mut() } else { event }
+    // A key Hex consumed (its shortcuts, Escape) was never the app's chord.
+    #[cfg(hex_capture)]
+    if let Some(key) = capture_key
+        && !suppress
+        && !list_swallows
+    {
+        crate::capture_host::report_input(capture_at, key);
+    }
+    if suppress || list_swallows {
+        ptr::null_mut()
+    } else {
+        event
+    }
+}
+
+/// What the session tap does with a key while the capture capsule's list
+/// is open (`capture_host::list_open`).
+#[cfg(hex_capture)]
+enum ListSwallow {
+    /// Not the list's.
+    No,
+    /// The list's Escape: kept from the app and from the listener, so it
+    /// cancels nothing else.
+    Only,
+    /// The list's, or the release of a key it took: kept from the app, but
+    /// the listener still sees it, so a held ⌥ typing a character stays a
+    /// chord rather than a dictation.
+    AfterListener,
+}
+
+/// Whether the capsule's list or suggestions may take a key press: only
+/// while captures are on, something is open, and no shortcut is being
+/// recorded. With captures turned off, a capsule left open takes nothing.
+#[cfg(hex_capture)]
+fn list_takes_keys(capture_on: bool, open: bool, recording_shortcut: bool) -> bool {
+    capture_on && open && !recording_shortcut
+}
+
+/// Hands the open list its keys (`capture_host::list_key`) on the tap's
+/// thread; their releases stay with it even after it closes.
+#[cfg(hex_capture)]
+fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
+    use crate::capture_host::{CapsuleKey, ListTap, capsule_key, list_key, list_open, suggesting};
+    static TAKEN: Mutex<u128> = Mutex::new(0);
+    // Shift is followed always, so a release while nothing showed never
+    // leaves it stuck down; the list or suggestions hear each change.
+    static SHIFT: AtomicBool = AtomicBool::new(false);
+    if event_type == EVENT_FLAGS_CHANGED {
+        const SHIFT_MASK: u64 = 1 << 17;
+        // SAFETY: CoreGraphics supplied a valid event.
+        let down = unsafe { CGEventGetFlags(event) } & SHIFT_MASK != 0;
+        if SHIFT.swap(down, Ordering::Relaxed) != down
+            && list_takes_keys(
+                crate::app_settings::capture_on(),
+                list_open() || suggesting(),
+                crate::app_settings::hotkey_capture_active(),
+            )
+        {
+            capsule_key(CapsuleKey::Shift(down));
+        }
+        return ListSwallow::No;
+    }
+    if !matches!(event_type, EVENT_KEY_DOWN | EVENT_KEY_UP) {
+        return ListSwallow::No;
+    }
+    // SAFETY: CoreGraphics supplied a valid keyboard event.
+    let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) } as u16;
+    let Some(bit) = 1u128.checked_shl(u32::from(code)) else {
+        return ListSwallow::No;
+    };
+    let mut taken = TAKEN.lock().unwrap_or_else(|error| error.into_inner());
+    if event_type == EVENT_KEY_UP {
+        let ours = *taken & bit != 0;
+        *taken &= !bit;
+        return if ours {
+            ListSwallow::AfterListener
+        } else {
+            ListSwallow::No
+        };
+    }
+    let suggesting = suggesting();
+    if !list_takes_keys(
+        crate::app_settings::capture_on(),
+        list_open() || suggesting,
+        crate::app_settings::hotkey_capture_active(),
+    ) {
+        return ListSwallow::No;
+    }
+    // SAFETY: CoreGraphics supplied a valid event.
+    let flags = unsafe { CGEventGetFlags(event) };
+    if crate::app_settings::runtime_hotkeys()
+        .all()
+        .iter()
+        .flatten()
+        .any(|hotkey| hotkey.matches_key_press(code, flags))
+    {
+        return ListSwallow::No;
+    }
+    let mut typed = [0u16; 8];
+    let mut length = 0usize;
+    // SAFETY: the buffer holds `typed.len()` UTF-16 units; CoreGraphics
+    // writes at most that many and reports how many in `length`.
+    unsafe { CGEventKeyboardGetUnicodeString(event, typed.len(), &mut length, typed.as_mut_ptr()) };
+    let typed = String::from_utf16_lossy(&typed[..length.min(typed.len())]);
+    match list_key(code, flags, &typed) {
+        // The suggestions take only their digits (and the toast Return
+        // and Tab); the rest goes on.
+        ListTap::Key(
+            key @ (CapsuleKey::Digit(_) | CapsuleKey::Return { .. } | CapsuleKey::Tab { .. }),
+        ) if suggesting => {
+            *taken |= bit;
+            drop(taken);
+            if capsule_key(key) {
+                ListSwallow::AfterListener
+            } else {
+                *TAKEN.lock().unwrap_or_else(|error| error.into_inner()) &= !bit;
+                ListSwallow::No
+            }
+        }
+        _ if suggesting => ListSwallow::No,
+        ListTap::Pass => ListSwallow::No,
+        ListTap::Swallow => {
+            *taken |= bit;
+            ListSwallow::AfterListener
+        }
+        ListTap::Key(key) => {
+            *taken |= bit;
+            drop(taken);
+            let escape = key == CapsuleKey::Escape;
+            capsule_key(key);
+            if escape {
+                ListSwallow::Only
+            } else {
+                ListSwallow::AfterListener
+            }
+        }
+    }
+}
+
+/// What the session tap does with an event while a capture records.
+#[cfg(hex_capture)]
+enum CaptureTap {
+    /// Reported; only a capture wants it, so the listener never sees it.
+    Only,
+    /// Reported, and it goes on to the listener too (mouse downs, modifier
+    /// changes) or isn't a capture's (key ups, other buttons).
+    Shared,
+    /// A fresh key press: reported after suppression, only if it reaches
+    /// the app, and never while a shortcut is being recorded.
+    Key(crate::capture_host::Tapped),
+}
+
+/// Reports a pointer or modifier event to a recording capture
+/// (`capture_host::report_input`) and says what else happens to the event.
+#[cfg(hex_capture)]
+fn report_capture_input(event_type: u32, event: EventRef) -> CaptureTap {
+    use crate::capture_host::{Tapped, modifiers, report_input};
+    use scrawl_capture::hosted_input::HostInput;
+    // SAFETY: CoreGraphics supplied a valid event to this callback.
+    let at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
+    // SAFETY: CoreGraphics supplied a valid event.
+    let flags = unsafe { CGEventGetFlags(event) };
+    // SAFETY: CoreGraphics supplied a valid event; every event has a location.
+    let CgPoint { x, y } = unsafe { CGEventGetLocation(event) };
+    let held = modifiers(flags);
+    let (input, capture_only) = match event_type {
+        EVENT_LEFT_MOUSE_DOWN
+        | EVENT_RIGHT_MOUSE_DOWN
+        | EVENT_LEFT_MOUSE_UP
+        | EVENT_RIGHT_MOUSE_UP => (
+            Tapped::Pointer(HostInput::Button {
+                down: matches!(event_type, EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN),
+                right: matches!(event_type, EVENT_RIGHT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_UP),
+                x,
+                y,
+                modifiers: held,
+            }),
+            !matches!(event_type, EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN),
+        ),
+        EVENT_MOUSE_MOVED
+        | EVENT_LEFT_MOUSE_DRAGGED
+        | EVENT_RIGHT_MOUSE_DRAGGED
+        | EVENT_OTHER_MOUSE_DRAGGED => (
+            Tapped::Pointer(HostInput::Moved {
+                x,
+                y,
+                modifiers: held,
+            }),
+            true,
+        ),
+        EVENT_SCROLL_WHEEL => (
+            Tapped::Pointer(HostInput::Scroll {
+                x,
+                y,
+                // SAFETY: CoreGraphics supplied a valid scroll event.
+                dx: unsafe { CGEventGetIntegerValueField(event, SCROLL_WHEEL_DELTA_AXIS_2) } as f64,
+                // SAFETY: CoreGraphics supplied a valid scroll event.
+                dy: unsafe { CGEventGetIntegerValueField(event, SCROLL_WHEEL_DELTA_AXIS_1) } as f64,
+            }),
+            true,
+        ),
+        EVENT_FLAGS_CHANGED => (
+            Tapped::Pointer(HostInput::ModifiersChanged {
+                x,
+                y,
+                modifiers: held,
+            }),
+            false,
+        ),
+        // SAFETY: CoreGraphics supplied a valid keyboard event.
+        EVENT_KEY_DOWN
+            if unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_AUTOREPEAT) } == 0 =>
+        {
+            return CaptureTap::Key(Tapped::Key {
+                // SAFETY: CoreGraphics supplied a valid keyboard event.
+                code: unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16 },
+                flags,
+            });
+        }
+        EVENT_OTHER_MOUSE_DOWN | EVENT_KEY_DOWN | EVENT_KEY_UP => return CaptureTap::Shared,
+        _ => return CaptureTap::Only,
+    };
+    report_input(at, input);
+    if capture_only {
+        CaptureTap::Only
+    } else {
+        CaptureTap::Shared
+    }
 }
 
 fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureInstant) -> bool {
@@ -512,12 +1008,7 @@ impl ShortcutSuppression {
         delivered: bool,
         escape_cancels: bool,
     ) -> bool {
-        let bindings = [
-            Some(hotkeys.dictation),
-            hotkeys.edit,
-            hotkeys.paste_last,
-            hotkeys.paste_meeting,
-        ];
+        let bindings = hotkeys.all();
         match input {
             InputEvent::Key {
                 code,
@@ -557,6 +1048,8 @@ impl ShortcutSuppression {
                 edit: None,
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
+                capture: None,
+                capture_list: None,
             },
             delivered,
             false,
@@ -607,10 +1100,19 @@ fn paste_action_with_meetings(
 pub enum HotkeyAction {
     Start,
     Finish,
-    Discard,
+    Discard(DiscardCause),
     Cancel,
     PasteLast,
     PasteMeeting,
+}
+
+impl HotkeyAction {
+    pub fn discard_cause(self) -> Option<DiscardCause> {
+        match self {
+            Self::Discard(cause) => Some(cause),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -649,6 +1151,52 @@ impl State {
     }
 }
 
+/// Modifier changes seen since the keyboard last reported no modifiers.
+#[derive(Clone, Copy)]
+struct ModifierHistory {
+    flags: u64,
+    flags_at: CaptureInstant,
+    since_neutral: u64,
+    neutral_at: Option<CaptureInstant>,
+}
+
+impl ModifierHistory {
+    /// No evidence, and none from events stamped before `at`.
+    const fn reset(at: CaptureInstant) -> Self {
+        Self {
+            flags: 0,
+            flags_at: at,
+            since_neutral: 0,
+            neutral_at: None,
+        }
+    }
+}
+
+/// Live keyboard state, read only by the stale-press check.
+#[derive(Clone, Copy)]
+struct PhysicalKeyboard {
+    flags: fn() -> u64,
+    key_down: fn(u16) -> bool,
+}
+
+impl PhysicalKeyboard {
+    // Same source as `recover_stale_keys`. Unit tests never read the real
+    // keyboard (see `trigger_is_physically_down`); their default reads as
+    // everything up, so every test can take the fast path.
+    const SESSION: Self = if cfg!(test) {
+        Self {
+            flags: || 0,
+            key_down: |_| false,
+        }
+    } else {
+        Self {
+            // SAFETY: Read-only queries of a documented event-source state.
+            flags: || unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) },
+            key_down: |code| unsafe { CGEventSourceKeyState(COMBINED_SESSION_STATE, code) },
+        }
+    };
+}
+
 pub struct DictationHotkey {
     state: State,
     pressed_keys: HashSet<u16>,
@@ -665,6 +1213,14 @@ pub struct DictationHotkey {
     // Fn evidence comes only from modifier events; None marks a blind period.
     // The timestamp prevents delayed events from restoring invalidated evidence.
     function_modifier: (CaptureInstant, Option<bool>),
+    // Recent HID key presses, which another app's shortcut may have hidden.
+    physical_key_downs: VecDeque<(CaptureInstant, u16, HidTiming)>,
+    // When the held modifier-only press Hex owns is due its chord breaker.
+    chord_break_at: Option<CaptureInstant>,
+    modifier_history: ModifierHistory,
+    // When each tracked key last went down.
+    key_down_at: HashMap<u16, CaptureInstant>,
+    physical: PhysicalKeyboard,
 }
 
 impl DictationHotkey {
@@ -710,11 +1266,22 @@ impl DictationHotkey {
             recovery_ignore_through: None,
             recovery_updated_keys: HashSet::new(),
             function_modifier: (CaptureInstant::ZERO, None),
+            physical_key_downs: VecDeque::new(),
+            chord_break_at: None,
+            modifier_history: ModifierHistory::reset(CaptureInstant::ZERO),
+            key_down_at: HashMap::new(),
+            physical: PhysicalKeyboard::SESSION,
         }
     }
 
     pub fn is_recording(&self) -> bool {
         matches!(self.state, State::Recording { .. } | State::Locked)
+    }
+
+    /// Recording hands-free: locked by a double tap, a Toggle release, or
+    /// `hex dictation start`.
+    pub fn is_locked(&self) -> bool {
+        matches!(self.state, State::Locked)
     }
 
     pub fn suppresses_recognition(&self) -> bool {
@@ -757,11 +1324,30 @@ impl DictationHotkey {
 
     pub fn suspend(&mut self) -> Option<HotkeyAction> {
         let was_recording = self.is_recording();
-        self.function_modifier = (CaptureInstant::now(), None);
+        let now = CaptureInstant::now();
+        self.function_modifier = (now, None);
+        self.modifier_history = ModifierHistory::reset(now);
         self.state = State::IDLE;
         self.pressed_keys.clear();
+        self.key_down_at.clear();
         self.stale_keys_neutral_since = None;
+        self.chord_break_at = None;
         was_recording.then_some(HotkeyAction::Cancel)
+    }
+
+    /// Locks an idle machine without a press, as a `hex dictation start`
+    /// does: the next shortcut press finishes it and Escape cancels it, the
+    /// same as a double-tap lock. Returns false while a press is in flight.
+    pub fn lock(&mut self) -> bool {
+        if !matches!(self.state, State::Idle { .. }) && !self.state.is_pending_gesture() {
+            return false;
+        }
+        self.state = State::Locked;
+        self.pressed_keys.clear();
+        self.key_down_at.clear();
+        self.stale_keys_neutral_since = None;
+        self.chord_break_at = None;
+        true
     }
 
     pub fn disarm_pending_gesture(&mut self) {
@@ -788,6 +1374,7 @@ impl DictationHotkey {
     pub fn suppress_until_release(&mut self) {
         self.state = State::Dirty;
         self.stale_keys_neutral_since = None;
+        self.chord_break_at = None;
     }
 
     // Call only after draining input. Polling repairs bookkeeping, never capture boundaries.
@@ -844,16 +1431,20 @@ impl DictationHotkey {
             return;
         }
         let locked = matches!(self.state, State::Locked);
+        // A system shortcut such as Command-Tab swallows its key's release.
         tracing::warn!(
             key_count = self.pressed_keys.len(),
+            key_codes = ?self.pressed_keys,
             locked,
             "resynchronized stale input tracking after neutral keyboard"
         );
         self.pressed_keys.clear();
+        self.key_down_at.clear();
         // Repair bookkeeping only: a lock keeps capturing until a fresh press or Escape.
         if !locked {
             self.state = State::IDLE;
         }
+        self.chord_break_at = None;
         self.stale_keys_neutral_since = None;
         self.recovery_ignore_through = Some(sampled_through);
         self.recovery_updated_keys.clear();
@@ -873,6 +1464,10 @@ impl DictationHotkey {
     // Suspended shortcut matching must still observe releases of previously held keys.
     pub fn track_key_state(&mut self, event: InputEvent, at: CaptureInstant) -> Option<bool> {
         self.stale_keys_neutral_since = None;
+        let fenced = self.ignore_before.is_some_and(|changed_at| at < changed_at)
+            || self
+                .recovery_ignore_through
+                .is_some_and(|fence| at <= fence);
         if let InputEvent::Flags(flags) = event
             && at >= self.function_modifier.0
         {
@@ -881,7 +1476,25 @@ impl DictationHotkey {
                 Some(flags & crate::app_settings::FUNCTION_KEY_MASK != 0),
             );
         } else if matches!(event, InputEvent::TapDisabled) {
-            self.function_modifier = (CaptureInstant::now(), None);
+            let now = CaptureInstant::now();
+            self.function_modifier = (now, None);
+            self.modifier_history = ModifierHistory::reset(now);
+        }
+        // Only modifier changes: key events can carry Fn as navigation metadata.
+        // Fenced edges predate the evidence that replaced them.
+        if let InputEvent::Flags(flags) = event
+            && !fenced
+            && at >= self.modifier_history.flags_at
+        {
+            let history = &mut self.modifier_history;
+            history.flags = flags;
+            history.flags_at = at;
+            if flags & HOTKEY_MODIFIERS_MASK == 0 {
+                history.since_neutral = 0;
+                history.neutral_at = Some(at);
+            } else {
+                history.since_neutral |= flags & HOTKEY_MODIFIERS_MASK;
+            }
         }
         if let InputEvent::Key { code, .. } = event
             && let Some(fence) = self.recovery_ignore_through
@@ -897,21 +1510,143 @@ impl DictationHotkey {
         Some(match event {
             InputEvent::Key { code, down, .. } => {
                 if down {
+                    let down_at = self.key_down_at.entry(code).or_insert(at);
+                    *down_at = (*down_at).max(at);
                     self.pressed_keys.insert(code)
                 } else {
                     self.pressed_keys.remove(&code);
+                    self.key_down_at.remove(&code);
                     false
                 }
             }
-            InputEvent::Flags(_) | InputEvent::MouseDown | InputEvent::TapDisabled => false,
+            InputEvent::Flags(_)
+            | InputEvent::PhysicalKeyDown { .. }
+            | InputEvent::MouseDown
+            | InputEvent::TapDisabled => false,
         })
     }
 
+    fn shortcut_name(&self) -> &'static str {
+        // Only the Voice Action hotkey is built without paste actions.
+        if self.paste_actions_enabled {
+            "dictation"
+        } else {
+            "voice-action"
+        }
+    }
+
+    fn log_hid(
+        &self,
+        message: &'static str,
+        code: u16,
+        at: CaptureInstant,
+        timing: HidTiming,
+        press_at: CaptureInstant,
+    ) {
+        tracing::info!(
+            shortcut = self.shortcut_name(),
+            cause = DiscardCause::HidKey.as_str(),
+            key_code = code,
+            after_press_ms = signed_ms(at, press_at),
+            hid_raw = timing.raw,
+            hid_clock = timing.clock.as_str(),
+            hid_received_after_press_ms = signed_ms(timing.received_at, press_at),
+            hid_arrival_delay_ms = signed_ms(timing.received_at, at),
+            "{message}"
+        );
+    }
+
     pub fn process(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
+        let was_locked = matches!(self.state, State::Locked);
+        let action = self.process_event(event, now);
+        self.track_chord_break(event, now, action, was_locked);
+        action
+    }
+
+    /// A bare modifier passes through to other apps, so a hold reads to them
+    /// as a tap on release (Raycast's Option-tap hotkey, for one). Once Hex
+    /// owns the press (a hold past the threshold, a Toggle start past the
+    /// chord grace, or the press that finishes a lock) it is owed one chord
+    /// breaker while still held.
+    fn track_chord_break(
+        &mut self,
+        event: InputEvent,
+        now: CaptureInstant,
+        action: Option<HotkeyAction>,
+        was_locked: bool,
+    ) {
+        if self.binding.key_code.is_some() || self.binding.modifiers.function {
+            self.chord_break_at = None;
+            return;
+        }
+        let released = match event {
+            InputEvent::Flags(flags) | InputEvent::Key { flags, .. } => {
+                !self.binding.required_modifiers_down(flags)
+            }
+            InputEvent::TapDisabled => true,
+            InputEvent::PhysicalKeyDown { .. } | InputEvent::MouseDown => false,
+        };
+        match action {
+            Some(HotkeyAction::Start) if matches!(self.state, State::Recording { .. }) => {
+                // Toggle's press is usually a short tap, so it can't wait out
+                // the hold; the grace lets an extra modifier pressed with it
+                // discard it first.
+                self.chord_break_at = Some(if self.toggle {
+                    now + crate::feedback::CHORD_GRACE
+                } else {
+                    now + MINIMUM_HOLD_DURATION
+                });
+            }
+            Some(HotkeyAction::Finish) if was_locked && !released => {
+                self.chord_break_at = Some(now);
+            }
+            Some(_) => self.chord_break_at = None,
+            None if released => self.chord_break_at = None,
+            None => {}
+        }
+    }
+
+    /// Drops the chord breaker the current press would be owed, for a press
+    /// Hex does not act on.
+    pub fn forgo_chord_break(&mut self) {
+        self.chord_break_at = None;
+    }
+
+    /// Whether the held press is due its chord breaker at `now`; true at most
+    /// once per press.
+    pub fn take_chord_break(&mut self, now: CaptureInstant) -> bool {
+        let due = self.chord_break_at.is_some_and(|due_at| now >= due_at);
+        if due {
+            self.chord_break_at = None;
+        }
+        due
+    }
+
+    /// Posts the chord breaker the held press is due, if exactly its modifiers
+    /// are still physically down; any other modifier already breaks the tap.
+    /// The posted key carries Hex's marker, so neither shortcut machine sees
+    /// it, and the key tap drops it before the focused app.
+    pub fn break_chord(&mut self, now: CaptureInstant) {
+        if !self.take_chord_break(now) {
+            return;
+        }
+        // SAFETY: A read-only query of the documented HID system state.
+        let flags = unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) };
+        if !self.binding.exact_modifiers(flags) {
+            return;
+        }
+        if let Err(error) = crate::keyboard::post_chord_breaker(flags) {
+            tracing::warn!(shortcut = self.shortcut_name(), %error, "chord breaker failed");
+        }
+    }
+
+    fn process_event(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
         self.stale_keys_neutral_since = None;
         if matches!(event, InputEvent::TapDisabled) {
             let was_recording = self.is_recording();
-            self.function_modifier = (CaptureInstant::now(), None);
+            let now = CaptureInstant::now();
+            self.function_modifier = (now, None);
+            self.modifier_history = ModifierHistory::reset(now);
             self.state = State::Dirty;
             return was_recording.then_some(HotkeyAction::Cancel);
         }
@@ -922,12 +1657,17 @@ impl DictationHotkey {
         {
             return None;
         }
+        let prior = self.modifier_history;
         let fresh_key_down = self.track_key_state(event, now)?;
+        let binding_press = self.binding_press(event, fresh_key_down, prior.flags);
 
         if self
             .recovery_ignore_through
             .is_some_and(|sampled_through| now <= sampled_through)
         {
+            if binding_press {
+                self.log_ignored_press("inside a stale-key recovery window");
+            }
             // A key can go down during the non-atomic scan. Retain its edge but
             // require a later neutral event before accepting another gesture.
             // An old neutral release cannot invalidate the recovery's neutral sample.
@@ -954,10 +1694,44 @@ impl DictationHotkey {
             return Some(HotkeyAction::Cancel);
         }
 
+        let ignored_because = binding_press
+            .then(|| self.resync_stale_press(now))
+            .flatten();
         let trigger_pressed = self.trigger_pressed(event, fresh_key_down);
+        if let InputEvent::PhysicalKeyDown { code, timing } = event
+            && self.binding.key_code != Some(code)
+        {
+            if self.physical_key_downs.len() == PHYSICAL_KEY_DOWN_HISTORY {
+                self.physical_key_downs.pop_front();
+            }
+            self.physical_key_downs.push_back((now, code, timing));
+        }
+        // HID evidence can overtake the session event of the press it follows.
+        if trigger_pressed
+            && matches!(
+                self.state,
+                State::Idle { .. } | State::AwaitingSecondTap { .. }
+            )
+            && let Some(&(at, code, timing)) = self.physical_key_downs.iter().find(|(at, ..)| {
+                at.checked_duration_since(now)
+                    .is_some_and(|after| after > Duration::ZERO && after < MINIMUM_HOLD_DURATION)
+            })
+        {
+            self.log_hid(
+                "dictation press dropped: HID key evidence overtook it",
+                code,
+                at,
+                timing,
+                now,
+            );
+            self.state = State::Dirty;
+            return None;
+        }
         let flags = match event {
             InputEvent::Flags(flags) | InputEvent::Key { flags, .. } => Some(flags),
-            InputEvent::MouseDown | InputEvent::TapDisabled => None,
+            InputEvent::PhysicalKeyDown { .. }
+            | InputEvent::MouseDown
+            | InputEvent::TapDisabled => None,
         };
         let trigger_down = flags.is_some_and(|flags| {
             self.binding.required_modifiers_down(flags)
@@ -973,13 +1747,13 @@ impl DictationHotkey {
                 code,
                 down: true,
                 ..
-            } if self.binding.key_code != Some(code)
+            } | InputEvent::PhysicalKeyDown { code, .. } if self.binding.key_code != Some(code)
         );
         let extra_modifiers = flags.is_some_and(|flags| {
             self.binding.required_modifiers_down(flags) && !self.binding.exact_modifiers(flags)
         });
 
-        match self.state {
+        let action = match self.state {
             State::Idle { .. } if self.double_tap_only && !self.toggle && trigger_pressed => {
                 self.state = State::FirstTapPressed;
                 None
@@ -1059,13 +1833,57 @@ impl DictationHotkey {
                 Some(HotkeyAction::Finish)
             }
             State::Recording { started_at, .. }
-                if now.duration_since(started_at) < MINIMUM_HOLD_DURATION
-                    && (unrelated_key_down
-                        || matches!(event, InputEvent::MouseDown)
-                        || extra_modifiers) =>
+                // Delayed HID evidence from before the press is not a chord.
+                if !(matches!(event, InputEvent::PhysicalKeyDown { .. }) && now < started_at)
+                    && ((now.duration_since(started_at) < MINIMUM_HOLD_DURATION
+                        && (unrelated_key_down
+                            || matches!(event, InputEvent::MouseDown)
+                            || extra_modifiers))
+                        // A held modifier-only shortcut plus any key is a chord at any time.
+                        || (unrelated_key_down
+                            && self.binding.key_code.is_none()
+                            && !self.toggle)) =>
             {
                 self.state = State::Dirty;
-                Some(HotkeyAction::Discard)
+                let cause = match event {
+                    InputEvent::PhysicalKeyDown { code, timing } => {
+                        self.log_hid(
+                            "dictation press discarded as a chord",
+                            code,
+                            now,
+                            timing,
+                            started_at,
+                        );
+                        DiscardCause::HidKey
+                    }
+                    InputEvent::Key { code, .. } if unrelated_key_down => {
+                        tracing::info!(
+                            shortcut = self.shortcut_name(),
+                            cause = DiscardCause::Key.as_str(),
+                            key_code = code,
+                            after_press_ms = signed_ms(now, started_at),
+                            "dictation press discarded as a chord"
+                        );
+                        DiscardCause::Key
+                    }
+                    _ => {
+                        let cause = if matches!(event, InputEvent::MouseDown) {
+                            DiscardCause::Mouse
+                        } else {
+                            DiscardCause::ExtraModifier
+                        };
+                        tracing::info!(
+                            shortcut = self.shortcut_name(),
+                            cause = cause.as_str(),
+                            modifier_flags =
+                                format_args!("{:#x}", flags.unwrap_or(0) & HOTKEY_MODIFIERS_MASK),
+                            after_press_ms = signed_ms(now, started_at),
+                            "dictation press discarded as a chord"
+                        );
+                        cause
+                    }
+                };
+                Some(HotkeyAction::Discard(cause))
             }
             State::Dirty
                 if flags.is_some_and(|flags| flags & HOTKEY_MODIFIERS_MASK == 0)
@@ -1075,7 +1893,113 @@ impl DictationHotkey {
                 None
             }
             _ => None,
+        };
+        if action.is_none()
+            && let Some(reason) = ignored_because
+        {
+            self.log_ignored_press(reason);
         }
+        action
+    }
+
+    /// A down edge of the binding, whether or not tracked keys block it.
+    fn binding_press(&self, event: InputEvent, fresh_key_down: bool, prior_flags: u64) -> bool {
+        match self.binding.key_code {
+            Some(_) => self.trigger_pressed(event, fresh_key_down),
+            None => {
+                matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
+                    && !self.binding.modifiers.is_empty()
+                    && !self.binding.required_modifiers_down(prior_flags)
+            }
+        }
+    }
+
+    /// A system shortcut such as Command-Tab swallows its key's release, and
+    /// the stale key blocks the next press until `recover_stale_keys` has
+    /// sampled 100 ms of neutral keyboard. A press of the binding itself
+    /// resynchronizes at once, as a fresh press, when the keyboard reported no
+    /// modifiers after every tracked key went down, only the binding's
+    /// modifiers went down since, and both the tracked keys and every other
+    /// modifier read up now. A lock stays locked, so the press finishes it.
+    /// Returns why the press stays ignored.
+    fn resync_stale_press(&mut self, now: CaptureInstant) -> Option<&'static str> {
+        let binding_key = self.binding.key_code;
+        let stale = |code: &u16| Some(*code) != binding_key;
+        let has_stale = self.pressed_keys.iter().any(stale);
+        match self.state {
+            State::Dirty if has_stale => {}
+            State::Dirty => return Some("waiting for a neutral keyboard"),
+            // Tracked keys block only modifier-only presses outside Dirty.
+            State::Idle { .. } | State::Locked if has_stale && binding_key.is_none() => {}
+            _ => return None,
+        }
+        let history = self.modifier_history;
+        // Typing after the switch is fine; only the stale keys' own presses count.
+        let neutral_since_down = |code: &u16| {
+            history
+                .neutral_at
+                .zip(self.key_down_at.get(code).copied())
+                .is_some_and(|(neutral, down)| neutral > down)
+        };
+        if !self
+            .pressed_keys
+            .iter()
+            .filter(|code| stale(code))
+            .all(neutral_since_down)
+        {
+            return Some("no neutral keyboard since the tracked keys went down");
+        }
+        let binding_mask = modifier_mask(self.binding.modifiers);
+        if history.since_neutral & !binding_mask != 0 {
+            return Some("another modifier went down since the keyboard was neutral");
+        }
+        if self
+            .pressed_keys
+            .iter()
+            .filter(|code| stale(code))
+            .any(|&code| (self.physical.key_down)(code))
+        {
+            return Some("a tracked key is physically down");
+        }
+        // As in recovery, arrow keys can leave SecondaryFn set after release.
+        let mut others = HOTKEY_MODIFIERS_MASK & !binding_mask;
+        if self.function_modifier.1 == Some(false) {
+            others &= !crate::app_settings::FUNCTION_KEY_MASK;
+        }
+        if (self.physical.flags)() & others != 0 {
+            return Some("another modifier is physically down");
+        }
+        tracing::info!(
+            shortcut = self.shortcut_name(),
+            key_codes = ?self.pressed_keys,
+            "resynchronized stale input tracking on a shortcut press"
+        );
+        self.pressed_keys.retain(|code| !stale(code));
+        let pressed = &self.pressed_keys;
+        self.key_down_at.retain(|code, _| pressed.contains(code));
+        // Command-Tab while hands-free: the press finishes the lock.
+        if !matches!(self.state, State::Locked) {
+            self.state = State::IDLE;
+        }
+        self.stale_keys_neutral_since = None;
+        // Edges stamped before the press must not finish or restart it, and a
+        // delayed older release must not untrack the binding's key. Edges at
+        // the press itself still count, so a same-tick chord discards it.
+        self.recovery_ignore_through = now.checked_sub(Duration::from_nanos(1));
+        self.recovery_updated_keys = binding_key
+            .filter(|code| self.pressed_keys.contains(code))
+            .into_iter()
+            .collect();
+        None
+    }
+
+    fn log_ignored_press(&self, reason: &'static str) {
+        tracing::info!(
+            shortcut = self.shortcut_name(),
+            reason,
+            key_codes = ?self.pressed_keys,
+            "shortcut press ignored"
+        );
     }
 
     fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool) -> bool {
@@ -1100,7 +2024,30 @@ impl DictationHotkey {
     }
 }
 
+/// The device-independent flag bits of `modifiers`, either side.
+fn modifier_mask(modifiers: crate::app_settings::HotkeyModifiers) -> u64 {
+    use crate::app_settings::{
+        COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, OPTION_KEY_MASK, SHIFT_KEY_MASK,
+    };
+    [
+        (modifiers.control.is_some(), CONTROL_KEY_MASK),
+        (modifiers.option.is_some(), OPTION_KEY_MASK),
+        (modifiers.shift.is_some(), SHIFT_KEY_MASK),
+        (modifiers.command.is_some(), COMMAND_KEY_MASK),
+        (modifiers.function, FUNCTION_KEY_MASK),
+    ]
+    .into_iter()
+    .filter(|(held, _)| *held)
+    .fold(0, |mask, (_, bit)| mask | bit)
+}
+
 fn trigger_is_physically_down(binding: RuntimeHotkey) -> bool {
+    // Unit tests never read the real keyboard: a key held while they run must
+    // not change their outcome, and the first HID query can deadlock in a
+    // process without a window-server session.
+    if cfg!(test) {
+        return false;
+    }
     // HID state reflects the physical keyboard. Combined-session state can
     // remain latched after synthetic events or application switching.
     // SAFETY: These are pure system queries with a documented state id.
@@ -1129,19 +2076,34 @@ mod tests {
         fn CGEventSetIntegerValueField(event: EventRef, field: u32, value: i64);
     }
 
-    // Drive the real callback without installing a tap or posting global input.
-    fn callback_input(timestamps_and_events: &[(u64, InputEvent)]) -> Vec<ObservedInputEvent> {
+    fn test_tap_context(
+        escape_cancels: bool,
+    ) -> (EventTapContext, mpsc::Receiver<ObservedInputEvent>) {
         let (sender, receiver) = mpsc::channel();
-        let mut context = EventTapContext {
+        let context = EventTapContext {
             sender,
             activity: InputActivity::default(),
-            escape_cancels: Arc::new(AtomicBool::new(false)),
+            escape_cancels: Arc::new(AtomicBool::new(escape_cancels)),
             key_tap: AtomicPtr::new(ptr::null_mut()),
             observation_tap: AtomicPtr::new(ptr::null_mut()),
+            physical_tap: AtomicPtr::new(ptr::null_mut()),
             shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
             pending: PendingInputEvents::default(),
             next_sequence: AtomicU64::new(0),
         };
+        (context, receiver)
+    }
+
+    // Drive the real callback without installing a tap or posting global input.
+    fn callback_input(timestamps_and_events: &[(u64, InputEvent)]) -> Vec<ObservedInputEvent> {
+        callback_input_with(false, timestamps_and_events)
+    }
+
+    fn callback_input_with(
+        escape_cancels: bool,
+        timestamps_and_events: &[(u64, InputEvent)],
+    ) -> Vec<ObservedInputEvent> {
+        let (mut context, receiver) = test_tap_context(escape_cancels);
         for &(timestamp, input) in timestamps_and_events {
             // SAFETY: This locally owned event and context live through the callback.
             unsafe {
@@ -1179,6 +2141,46 @@ mod tests {
             }
         }
         receiver.try_iter().collect()
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn a_capture_logs_only_keys_that_reach_the_app() {
+        const ESCAPE: u16 = 53;
+        const K: u16 = 40;
+        let now = capture_time().as_nanos();
+        let tapped = crate::capture_host::tapped_while(|| {
+            callback_input_with(
+                true,
+                &[
+                    // Escape cancels the capture: Hex consumes it.
+                    (
+                        now,
+                        InputEvent::Key {
+                            code: ESCAPE,
+                            down: true,
+                            flags: 0,
+                        },
+                    ),
+                    // ⌘K goes to the app, so the capture logs it.
+                    (
+                        now + 1,
+                        InputEvent::Key {
+                            code: K,
+                            down: true,
+                            flags: COMMAND_KEY_MASK,
+                        },
+                    ),
+                ],
+            );
+        });
+        assert!(
+            matches!(
+                tapped.as_slice(),
+                [crate::capture_host::Tapped::Key { code: K, .. }]
+            ),
+            "{tapped:?}"
+        );
     }
 
     #[test]
@@ -1691,6 +2693,471 @@ mod tests {
         }
     }
 
+    /// Command-Tab: the app switcher swallows Tab's key-up, leaving Tab tracked.
+    fn command_tab(hotkey: &mut DictationHotkey, at: CaptureInstant) -> CaptureInstant {
+        let tab = InputEvent::Key {
+            code: 48,
+            down: true,
+            flags: COMMAND_KEY_MASK,
+        };
+        for (offset, event) in [
+            (0, InputEvent::Flags(COMMAND_KEY_MASK)),
+            (40, tab),
+            (120, InputEvent::Flags(NO_FLAGS)),
+        ] {
+            assert_eq!(
+                hotkey.process(event, at + Duration::from_millis(offset)),
+                None
+            );
+        }
+        assert!(hotkey.pressed_keys.contains(&48));
+        at + Duration::from_millis(120)
+    }
+
+    #[test]
+    fn option_soon_after_command_tab_records() {
+        for double_tap_enabled in [false, true] {
+            let now = capture_time();
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.set_double_tap_enabled(double_tap_enabled);
+            let released = command_tab(&mut hotkey, now);
+            assert!(matches!(hotkey.state, State::Idle { .. }));
+            // Well inside the 100 ms that `recover_stale_keys` needs.
+            let press = released + Duration::from_millis(30);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), press),
+                Some(HotkeyAction::Start)
+            );
+            assert!(hotkey.pressed_keys.is_empty());
+            let mut capture = ingest_timeline(press);
+            capture.start_at(press);
+            // An older queued edge cannot finish the fresh press.
+            assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), released), None);
+            assert!(hotkey.is_recording());
+            let release = press + Duration::from_secs(1);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(NO_FLAGS), release),
+                Some(HotkeyAction::Finish)
+            );
+            let crate::dictation::Finish::Transcribe(clip) = capture.finish(release) else {
+                panic!("the hold must transcribe");
+            };
+            assert_eq!(clip.duration_ms(), 1_450);
+        }
+    }
+
+    #[test]
+    fn shortcut_press_after_command_tab_from_dirty_records() {
+        let now = capture_time();
+        for binding in [option_binding(), key_binding(96)] {
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+            let (press, release) = match binding.key_code {
+                None => (
+                    InputEvent::Flags(OPTION_KEY_MASK),
+                    InputEvent::Flags(NO_FLAGS),
+                ),
+                Some(code) => (
+                    InputEvent::Key {
+                        code,
+                        down: true,
+                        flags: NO_FLAGS,
+                    },
+                    InputEvent::Key {
+                        code,
+                        down: false,
+                        flags: NO_FLAGS,
+                    },
+                ),
+            };
+            let (extra, lift) = match binding.key_code {
+                None => (
+                    OPTION_KEY_MASK | COMMAND_KEY_MASK,
+                    InputEvent::Flags(COMMAND_KEY_MASK),
+                ),
+                Some(code) => (
+                    COMMAND_KEY_MASK,
+                    InputEvent::Key {
+                        code,
+                        down: false,
+                        flags: COMMAND_KEY_MASK,
+                    },
+                ),
+            };
+            // Command-Tab while holding the shortcut discards it, then the
+            // switcher swallows Tab's release.
+            assert_eq!(hotkey.process(press, now), Some(HotkeyAction::Start));
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(extra), now + Duration::from_millis(50)),
+                Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
+            );
+            for (offset, event) in [
+                (
+                    100,
+                    InputEvent::Key {
+                        code: 48,
+                        down: true,
+                        flags: extra,
+                    },
+                ),
+                (200, lift),
+                (250, InputEvent::Flags(NO_FLAGS)),
+            ] {
+                assert_eq!(
+                    hotkey.process(event, now + Duration::from_millis(offset)),
+                    None
+                );
+            }
+            assert!(matches!(hotkey.state, State::Dirty));
+            let again = now + Duration::from_millis(280);
+            assert_eq!(hotkey.process(press, again), Some(HotkeyAction::Start));
+            assert_eq!(
+                hotkey.process(release, again + Duration::from_secs(1)),
+                Some(HotkeyAction::Finish)
+            );
+        }
+    }
+
+    #[test]
+    fn stale_press_waits_for_recovery_while_anything_else_is_held() {
+        let now = capture_time();
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        for keyboard in [
+            // Tab really is still down.
+            PhysicalKeyboard {
+                flags: || NO_FLAGS,
+                key_down: |code| code == 48,
+            },
+            // Another modifier went down after the press was queued.
+            PhysicalKeyboard {
+                flags: || OPTION_KEY_MASK | SHIFT_KEY_MASK,
+                key_down: |_| false,
+            },
+        ] {
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.physical = keyboard;
+            let released = command_tab(&mut hotkey, now);
+            let press = released + Duration::from_millis(30);
+            assert_eq!(hotkey.process(option, press), None);
+            assert!(hotkey.pressed_keys.contains(&48));
+            // The held press stays ignored; recovery rearms after release.
+            let release = press + Duration::from_secs(1);
+            assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), release), None);
+            recover_after_neutral_window(&mut hotkey, release, 0);
+            let next = release + Duration::from_secs(1);
+            assert_eq!(hotkey.process(option, next), Some(HotkeyAction::Start));
+        }
+    }
+
+    #[test]
+    fn stale_press_requires_a_neutral_keyboard_after_the_tracked_keys() {
+        let now = capture_time();
+        // A key pressed alone and then Option is a chord even if the key
+        // reads up by the time the press is processed.
+        let mut hotkey = test_hotkey(false, now);
+        let tab = InputEvent::Key {
+            code: 48,
+            down: true,
+            flags: NO_FLAGS,
+        };
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), now), None);
+        assert_eq!(hotkey.process(tab, now + Duration::from_millis(10)), None);
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK),
+                now + Duration::from_millis(40)
+            ),
+            None
+        );
+
+        // Shift went down and up again while Option-Command was assembled.
+        let binding = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::option_command(),
+            key_code: None,
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        let released = command_tab(&mut hotkey, now);
+        for (offset, flags) in [
+            (10, SHIFT_KEY_MASK),
+            (20, SHIFT_KEY_MASK | OPTION_KEY_MASK),
+            (30, OPTION_KEY_MASK),
+            (40, OPTION_KEY_MASK | COMMAND_KEY_MASK),
+        ] {
+            assert_eq!(
+                hotkey.process(
+                    InputEvent::Flags(flags),
+                    released + Duration::from_millis(offset)
+                ),
+                None
+            );
+        }
+        // Without Shift, the same chord starts.
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        let released = command_tab(&mut hotkey, now);
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK),
+                released + Duration::from_millis(10)
+            ),
+            None
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK),
+                released + Duration::from_millis(20)
+            ),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    #[test]
+    fn stale_press_finishes_a_lock_and_leaves_escape_unchanged() {
+        let now = capture_time();
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let neutral = InputEvent::Flags(NO_FLAGS);
+        let escape = |down| InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down,
+            flags: NO_FLAGS,
+        };
+
+        // Command-Tab while locked: the next press finishes the lock at once.
+        let mut hotkey = test_hotkey(false, now);
+        assert!(hotkey.lock());
+        let released = command_tab(&mut hotkey, now);
+        assert!(hotkey.is_locked());
+        let press = released + Duration::from_millis(30);
+        assert_eq!(hotkey.process(option, press), Some(HotkeyAction::Finish));
+        assert!(!hotkey.is_recording());
+        assert!(hotkey.pressed_keys.is_empty());
+        // An older queued edge cannot restart it.
+        assert_eq!(hotkey.process(option, released), None);
+        assert_eq!(
+            hotkey.process(neutral, press + Duration::from_millis(80)),
+            None
+        );
+        assert_eq!(
+            hotkey.process(option, press + Duration::from_secs(1)),
+            Some(HotkeyAction::Start)
+        );
+
+        // Escape still cancels a lock that tracks a stale key.
+        let mut hotkey = test_hotkey(false, now);
+        assert!(hotkey.lock());
+        let released = command_tab(&mut hotkey, now);
+        assert_eq!(
+            hotkey.process(escape(true), released + Duration::from_millis(50)),
+            Some(HotkeyAction::Cancel)
+        );
+
+        // After a resynchronized press, double-tap lock and Escape behave as
+        // they do for any fresh press.
+        let mut hotkey = test_hotkey(false, now);
+        let released = command_tab(&mut hotkey, now);
+        let first = released + Duration::from_millis(30);
+        let ms = |offset| first + Duration::from_millis(offset);
+        assert_eq!(hotkey.process(option, first), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(neutral, ms(80)), Some(HotkeyAction::Finish));
+        assert_eq!(hotkey.process(option, ms(180)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(neutral, ms(260)), None);
+        assert!(hotkey.is_locked());
+        assert_eq!(
+            hotkey.process(escape(true), ms(1_000)),
+            Some(HotkeyAction::Cancel)
+        );
+        assert_eq!(hotkey.process(escape(false), ms(1_050)), None);
+        assert_eq!(hotkey.process(option, ms(2_000)), Some(HotkeyAction::Start));
+    }
+
+    #[test]
+    fn typing_after_command_tab_does_not_block_the_next_press() {
+        let now = capture_time();
+        let key = |code, down, flags| InputEvent::Key { code, down, flags };
+        for binding in [option_binding(), key_binding(96)] {
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+            let released = command_tab(&mut hotkey, now);
+            if binding.key_code.is_some() {
+                // Tracked keys block a key binding only from Dirty, as a
+                // Command-Tab during the press leaves it.
+                hotkey.suppress_until_release();
+            }
+            // "hI" and Return in the new app.
+            for (offset, event) in [
+                (20, key(4, true, NO_FLAGS)),
+                (40, key(4, false, NO_FLAGS)),
+                (60, InputEvent::Flags(SHIFT_KEY_MASK)),
+                (70, key(34, true, SHIFT_KEY_MASK)),
+                (90, key(34, false, SHIFT_KEY_MASK)),
+                (100, InputEvent::Flags(NO_FLAGS)),
+                (150, key(36, true, NO_FLAGS)),
+                (170, key(36, false, NO_FLAGS)),
+            ] {
+                assert_eq!(
+                    hotkey.process(event, released + Duration::from_millis(offset)),
+                    None
+                );
+            }
+            assert!(hotkey.pressed_keys.contains(&48));
+            let (press, release) = match binding.key_code {
+                None => (
+                    InputEvent::Flags(OPTION_KEY_MASK),
+                    InputEvent::Flags(NO_FLAGS),
+                ),
+                Some(code) => (key(code, true, NO_FLAGS), key(code, false, NO_FLAGS)),
+            };
+            let pressed = released + Duration::from_millis(200);
+            assert_eq!(hotkey.process(press, pressed), Some(HotkeyAction::Start));
+            assert_eq!(
+                hotkey.process(release, pressed + Duration::from_secs(1)),
+                Some(HotkeyAction::Finish)
+            );
+        }
+    }
+
+    #[test]
+    fn a_delayed_release_cannot_untrack_a_resynchronized_key_press() {
+        let now = capture_time();
+        let f5 = |down| InputEvent::Key {
+            code: 96,
+            down,
+            flags: NO_FLAGS,
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, key_binding(96));
+        let released = command_tab(&mut hotkey, now);
+        hotkey.suppress_until_release();
+        let press = released + Duration::from_millis(30);
+        assert_eq!(hotkey.process(f5(true), press), Some(HotkeyAction::Start));
+        // An older release delivered late.
+        assert_eq!(
+            hotkey.process(
+                f5(false),
+                press.checked_sub(Duration::from_millis(10)).unwrap()
+            ),
+            None
+        );
+        assert!(hotkey.pressed_keys.contains(&96));
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(NO_FLAGS),
+                press + Duration::from_millis(50)
+            ),
+            None
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(f5(false), press + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn a_chord_at_the_resynchronized_press_still_discards_it() {
+        let now = capture_time();
+        for (chord, cause) in [
+            (InputEvent::MouseDown, DiscardCause::Mouse),
+            (hid_key(18), DiscardCause::HidKey),
+            (
+                InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK),
+                DiscardCause::ExtraModifier,
+            ),
+        ] {
+            let mut hotkey = test_hotkey(false, now);
+            let released = command_tab(&mut hotkey, now);
+            let press = released + Duration::from_millis(30);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), press),
+                Some(HotkeyAction::Start)
+            );
+            assert_eq!(
+                hotkey.process(chord, press),
+                Some(HotkeyAction::Discard(cause))
+            );
+        }
+    }
+
+    #[test]
+    fn voice_action_takes_over_right_after_command_tab() {
+        let now = capture_time();
+        let mut dictation = test_hotkey(false, now);
+        let mut edit = DictationHotkey::new_without_paste(
+            now,
+            RuntimeHotkey {
+                modifiers: crate::app_settings::HotkeyModifiers::option_command(),
+                key_code: None,
+            },
+        );
+        let released = command_tab(&mut dictation, now);
+        command_tab(&mut edit, now);
+        let ms = |offset| released + Duration::from_millis(offset);
+
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        assert_eq!(dictation.process(option, ms(30)), Some(HotkeyAction::Start));
+        assert_eq!(edit.process(option, ms(30)), None);
+        let chord = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
+        assert_eq!(
+            dictation.process(chord, ms(70)),
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
+        );
+        assert_eq!(edit.process(chord, ms(70)), Some(HotkeyAction::Start));
+        let neutral = InputEvent::Flags(NO_FLAGS);
+        assert_eq!(dictation.process(neutral, ms(1_070)), None);
+        assert_eq!(edit.process(neutral, ms(1_070)), Some(HotkeyAction::Finish));
+    }
+
+    #[test]
+    fn fenced_and_pre_reset_modifier_edges_are_not_neutral_evidence() {
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let neutral = InputEvent::Flags(NO_FLAGS);
+
+        // A key and a neutral edge from before a recovery arrive after it.
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        command_tab(&mut hotkey, now);
+        let repaired = recover_after_neutral_window(&mut hotkey, now + Duration::from_secs(1), 0);
+        let before = |ms| repaired.checked_sub(Duration::from_millis(ms)).unwrap();
+        let a = InputEvent::Key {
+            code: 0,
+            down: true,
+            flags: NO_FLAGS,
+        };
+        assert_eq!(hotkey.process(a, before(50)), None);
+        assert_eq!(hotkey.process(neutral, before(20)), None);
+        let press = repaired + Duration::from_millis(30);
+        assert_eq!(hotkey.process(option, press), None);
+        let release = press + Duration::from_secs(1);
+        assert_eq!(hotkey.process(neutral, release), None);
+        recover_after_neutral_window(&mut hotkey, release, 0);
+        assert_eq!(
+            hotkey.process(option, release + Duration::from_secs(1)),
+            Some(HotkeyAction::Start)
+        );
+
+        // A neutral edge queued before the tap was disabled.
+        let now = CaptureInstant::now();
+        let mut hotkey = test_hotkey(false, now);
+        command_tab(
+            &mut hotkey,
+            now.checked_sub(Duration::from_secs(1)).unwrap(),
+        );
+        assert_eq!(hotkey.process(InputEvent::TapDisabled, now), None);
+        assert_eq!(
+            hotkey.process(
+                neutral,
+                now.checked_sub(Duration::from_millis(500)).unwrap()
+            ),
+            None
+        );
+        let press = CaptureInstant::now() + Duration::from_secs(1);
+        assert_eq!(hotkey.process(option, press), None);
+        assert!(hotkey.pressed_keys.contains(&48));
+
+        // Suspending forgets a modifier it may never see released.
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.track_key_state(option, now);
+        hotkey.suspend();
+        assert_eq!(hotkey.modifier_history.flags, NO_FLAGS);
+        assert_eq!(hotkey.modifier_history.neutral_at, None);
+    }
+
     #[test]
     fn neutral_keyboard_rearms_after_a_missing_modifier_release() {
         for double_tap_enabled in [false, true] {
@@ -1714,7 +3181,7 @@ mod tests {
                         (
                             50,
                             OPTION_KEY_MASK | SHIFT_KEY_MASK,
-                            Some(HotkeyAction::Discard),
+                            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier)),
                         ),
                         (100, SHIFT_KEY_MASK, None),
                     ]);
@@ -1794,7 +3261,13 @@ mod tests {
                 .into_iter()
                 .filter_map(|edge| hotkey.process(edge.event, edge.capture_at))
                 .collect::<Vec<_>>();
-            assert_eq!(actions, [HotkeyAction::Start, HotkeyAction::Discard]);
+            assert_eq!(
+                actions,
+                [
+                    HotkeyAction::Start,
+                    HotkeyAction::Discard(DiscardCause::ExtraModifier)
+                ]
+            );
             assert!(matches!(hotkey.state, State::Dirty));
             assert!(hotkey.pressed_keys.is_empty());
 
@@ -2137,7 +3610,7 @@ mod tests {
                 InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK),
                 now + Duration::from_millis(50)
             ),
-            Some(HotkeyAction::Discard)
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
         );
         hotkey.disarm_pending_gesture();
         let later = now + Duration::from_secs(1);
@@ -2219,6 +3692,23 @@ mod tests {
             |_| panic!("keys must not be polled"),
         );
         assert!(hotkey.is_recording());
+    }
+
+    #[test]
+    fn programmatic_lock_finishes_on_the_next_press() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        assert!(hotkey.lock());
+        assert!(hotkey.is_recording());
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let press = now + Duration::from_millis(500);
+        assert_eq!(hotkey.process(option, press), Some(HotkeyAction::Finish));
+        assert!(!hotkey.is_recording());
+
+        // A held shortcut is not interrupted by a programmatic lock.
+        let mut held = test_hotkey(false, now);
+        assert_eq!(held.process(option, now), Some(HotkeyAction::Start));
+        assert!(!held.lock());
     }
 
     #[test]
@@ -2429,6 +3919,41 @@ mod tests {
                 None
             );
             assert!(!hotkey.is_recording());
+        }
+    }
+
+    #[test]
+    fn toggle_mode_finishes_after_command_tab_while_recording() {
+        let now = capture_time();
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let neutral = InputEvent::Flags(NO_FLAGS);
+        for physical_still_down in [false, true] {
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.set_toggle(true);
+            assert_eq!(hotkey.process(option, now), Some(HotkeyAction::Start));
+            assert_eq!(
+                hotkey.process(neutral, now + Duration::from_millis(80)),
+                None
+            );
+            assert!(hotkey.is_locked());
+            if physical_still_down {
+                // Tab really is still down: the press waits, as before.
+                hotkey.physical = PhysicalKeyboard {
+                    flags: || NO_FLAGS,
+                    key_down: |code| code == 48,
+                };
+            }
+            let released = command_tab(&mut hotkey, now + Duration::from_secs(1));
+            assert!(hotkey.is_locked());
+            let press = released + Duration::from_secs(1);
+            let expected = (!physical_still_down).then_some(HotkeyAction::Finish);
+            assert_eq!(hotkey.process(option, press), expected);
+            assert_eq!(hotkey.is_recording(), physical_still_down);
+            assert_eq!(
+                hotkey.process(neutral, press + Duration::from_millis(80)),
+                None
+            );
+            assert_eq!(hotkey.is_recording(), physical_still_down);
         }
     }
 
@@ -2868,7 +4393,7 @@ mod tests {
         let chord = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
         assert_eq!(
             dictation.process(chord, now + Duration::from_millis(40)),
-            Some(HotkeyAction::Discard)
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
         );
         assert_eq!(
             edit.process(chord, now + Duration::from_millis(40)),
@@ -2878,6 +4403,220 @@ mod tests {
             edit.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
+    }
+
+    #[test]
+    fn a_held_modifier_only_shortcut_breaks_the_chord_once_after_the_hold_threshold() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        for press in [now, now + Duration::from_secs(5)] {
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), press),
+                Some(HotkeyAction::Start)
+            );
+            assert!(!hotkey.take_chord_break(press + Duration::from_millis(299)));
+            assert!(hotkey.take_chord_break(press + MINIMUM_HOLD_DURATION));
+            assert!(!hotkey.take_chord_break(press + Duration::from_secs(2)));
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(NO_FLAGS), press + Duration::from_secs(3)),
+                Some(HotkeyAction::Finish)
+            );
+            assert!(!hotkey.take_chord_break(press + Duration::from_secs(4)));
+        }
+    }
+
+    #[test]
+    fn short_taps_chords_and_other_bindings_never_break_the_chord() {
+        let now = capture_time();
+        let later = now + Duration::from_secs(1);
+
+        let mut tap = test_hotkey(false, now);
+        tap.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        tap.process(
+            InputEvent::Flags(NO_FLAGS),
+            now + Duration::from_millis(200),
+        );
+        assert!(!tap.take_chord_break(later));
+
+        for (chord, cause) in [
+            (option_key(0, true, OPTION_KEY_MASK), DiscardCause::Key),
+            (hid_key(18), DiscardCause::HidKey),
+            (InputEvent::MouseDown, DiscardCause::Mouse),
+            (
+                InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK),
+                DiscardCause::ExtraModifier,
+            ),
+        ] {
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+            assert_eq!(
+                hotkey.process(chord, now + Duration::from_millis(100)),
+                Some(HotkeyAction::Discard(cause))
+            );
+            assert!(!hotkey.take_chord_break(later), "{cause:?}");
+        }
+
+        // A key held past the threshold is already a chord to other apps.
+        let mut held_key = test_hotkey(false, now);
+        held_key.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        held_key.process(
+            option_key(0, true, OPTION_KEY_MASK),
+            now + Duration::from_millis(400),
+        );
+        assert!(!held_key.take_chord_break(later));
+
+        // Keyed shortcuts are consumed, and Globe's own tap action is the system's.
+        let mut keyed = DictationHotkey::with_binding(false, now, true, shift_space_binding());
+        assert_eq!(
+            keyed.process(shift_space_event(true), now),
+            Some(HotkeyAction::Start)
+        );
+        let mut globe = DictationHotkey::with_binding(false, now, true, function_binding());
+        assert_eq!(
+            globe.process(InputEvent::Flags(FUNCTION_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+        assert!(!keyed.take_chord_break(later));
+        assert!(!globe.take_chord_break(later));
+
+        // A suspended press (Voice Action took over, or a refused start) owes nothing.
+        let mut suspended = test_hotkey(false, now);
+        suspended.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        suspended.suspend();
+        assert!(!suspended.take_chord_break(later));
+        // Neither does a press voice-delimited dictation ignores.
+        let mut ignored = test_hotkey(false, now);
+        ignored.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        ignored.forgo_chord_break();
+        assert!(!ignored.take_chord_break(later));
+    }
+
+    #[test]
+    fn locked_and_toggle_captures_break_the_chord_only_for_presses_hex_owns() {
+        let now = capture_time();
+        let at = |ms| now + Duration::from_millis(ms);
+
+        // Double-tap lock: both presses are taps, which stay taps.
+        let mut locked = test_hotkey(false, now);
+        locked.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        locked.process(InputEvent::Flags(NO_FLAGS), at(100));
+        locked.process(InputEvent::Flags(OPTION_KEY_MASK), at(200));
+        locked.process(InputEvent::Flags(NO_FLAGS), at(300));
+        assert!(locked.is_locked());
+        assert!(!locked.take_chord_break(at(2_000)));
+        // The press that finishes the lock is Hex's.
+        assert_eq!(
+            locked.process(InputEvent::Flags(OPTION_KEY_MASK), at(3_000)),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(locked.take_chord_break(at(3_000)));
+        assert!(!locked.take_chord_break(at(3_050)));
+        // Released before the loop got to it: nothing to break.
+        let mut programmatic = test_hotkey(false, now);
+        assert!(programmatic.lock());
+        programmatic.process(InputEvent::Flags(OPTION_KEY_MASK), at(1_000));
+        programmatic.process(InputEvent::Flags(NO_FLAGS), at(1_060));
+        assert!(!programmatic.take_chord_break(at(1_060)));
+
+        // Toggle: the starting press is Hex's once past the chord grace.
+        let grace = crate::feedback::CHORD_GRACE;
+        let mut toggle = test_hotkey(false, now);
+        toggle.set_toggle(true);
+        toggle.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert!(!toggle.take_chord_break(now));
+        assert!(!toggle.take_chord_break(now + (grace - Duration::from_millis(1))));
+        assert!(toggle.take_chord_break(now + grace));
+        toggle.process(InputEvent::Flags(NO_FLAGS), at(80));
+        assert!(toggle.is_locked());
+        assert!(!toggle.take_chord_break(at(1_000)));
+        toggle.process(InputEvent::Flags(OPTION_KEY_MASK), at(2_000));
+        assert!(toggle.take_chord_break(at(2_000)));
+        // Shift pressed with it, as for Option-Shift-S, discards the press first.
+        let mut chord = test_hotkey(false, now);
+        chord.set_toggle(true);
+        chord.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert_eq!(
+            chord.process(InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK), at(20)),
+            Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
+        );
+        assert!(!chord.take_chord_break(at(1_000)));
+    }
+
+    #[test]
+    fn voice_action_promotion_breaks_its_own_chord_after_its_hold() {
+        let now = capture_time();
+        let mut dictation = test_hotkey(false, now);
+        let mut edit = DictationHotkey::new_without_paste(
+            now,
+            RuntimeHotkey {
+                modifiers: crate::app_settings::modifiers_from_flags(
+                    OPTION_KEY_MASK | COMMAND_KEY_MASK,
+                ),
+                key_code: None,
+            },
+        );
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        dictation.process(option, now);
+        edit.process(option, now);
+        assert!(dictation.take_chord_break(now + MINIMUM_HOLD_DURATION));
+
+        let promoted = now + Duration::from_millis(500);
+        let chord = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
+        dictation.process(chord, promoted);
+        assert_eq!(edit.process(chord, promoted), Some(HotkeyAction::Start));
+        dictation.suspend();
+        assert!(!edit.take_chord_break(promoted + Duration::from_millis(299)));
+        assert!(edit.take_chord_break(promoted + MINIMUM_HOLD_DURATION));
+        assert!(!edit.take_chord_break(promoted + Duration::from_secs(2)));
+        assert!(!dictation.take_chord_break(promoted + Duration::from_secs(2)));
+    }
+
+    /// The chord breaker is posted through both taps; its mark keeps it from
+    /// becoming the user's chord or HID chord evidence, and the key tap drops
+    /// it so the focused app never beeps at it. Hex's other synthetic keys,
+    /// such as the paste shortcut, still reach the app.
+    #[test]
+    fn marked_chord_breaker_never_reaches_the_shortcut_machines_or_the_app() {
+        let breaker = crate::keyboard::CHORD_BREAKER_KEY_CODE;
+        for (code, marked) in [(breaker, true), (breaker, false), (9, true)] {
+            let (mut context, receiver) = test_tap_context(false);
+            // SAFETY: This locally owned event and context live through both callbacks.
+            unsafe {
+                let user_info = (&mut context as *mut EventTapContext).cast();
+                for event_type in [EVENT_KEY_DOWN, EVENT_KEY_UP] {
+                    let event = CGEventCreate(ptr::null_mut());
+                    assert!(!event.is_null());
+                    CGEventSetType(event, event_type);
+                    CGEventSetFlags(event, OPTION_KEY_MASK);
+                    CGEventSetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE, i64::from(code));
+                    if marked {
+                        CGEventSetIntegerValueField(
+                            event,
+                            EVENT_SOURCE_USER_DATA,
+                            crate::keyboard::SYNTHETIC_EVENT_MARKER,
+                        );
+                    }
+                    let returned = event_callback(ptr::null_mut(), event_type, event, user_info);
+                    if marked && code == breaker {
+                        assert!(returned.is_null());
+                    } else {
+                        assert_eq!(returned, event);
+                    }
+                    if event_type == EVENT_KEY_DOWN {
+                        let returned =
+                            physical_event_callback(ptr::null_mut(), event_type, event, user_info);
+                        assert_eq!(returned, event);
+                    }
+                    CFRelease(event.cast_const());
+                }
+            }
+            let observed = receiver.try_iter().count();
+            if marked {
+                assert_eq!(observed, 0);
+            } else {
+                assert_eq!(observed, 3, "an unmarked key is the user's chord");
+            }
+        }
     }
 
     #[test]
@@ -3064,7 +4803,7 @@ mod tests {
                 },
                 now + Duration::from_millis(100),
             ),
-            Some(HotkeyAction::Discard)
+            Some(HotkeyAction::Discard(DiscardCause::Key))
         );
         assert_eq!(
             hotkey.process(
@@ -3087,6 +4826,374 @@ mod tests {
         assert!(!hotkey.is_recording());
     }
 
+    fn option_key(code: u16, down: bool, flags: u64) -> InputEvent {
+        InputEvent::Key { code, down, flags }
+    }
+
+    fn hid_key(code: u16) -> InputEvent {
+        InputEvent::PhysicalKeyDown {
+            code,
+            timing: HidTiming {
+                raw: 0,
+                clock: HidClock::Nanos,
+                received_at: CaptureInstant::from_nanos(0),
+            },
+        }
+    }
+
+    // Another app's global Option-1 hides the digit from the session tap, so
+    // the HID press is the only sign of the chord.
+    #[test]
+    fn hid_evidence_discards_a_chord_hidden_by_a_global_shortcut() {
+        let now = capture_time();
+        for (key, chord_ms) in [(18, 20), (19, 100), (20, 200), (49, 150)] {
+            let mut hotkey = test_hotkey(false, now);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+                Some(HotkeyAction::Start)
+            );
+            assert_eq!(
+                hotkey.process(hid_key(key), now + Duration::from_millis(chord_ms)),
+                Some(HotkeyAction::Discard(DiscardCause::HidKey)),
+                "key {key} at {chord_ms} ms"
+            );
+            for release_ms in [chord_ms + 50, 1_500] {
+                assert_eq!(
+                    hotkey.process(
+                        InputEvent::Flags(NO_FLAGS),
+                        now + Duration::from_millis(release_ms)
+                    ),
+                    None
+                );
+            }
+            assert!(!hotkey.is_recording());
+            // The discarded chord is not the first tap of a double tap.
+            let again = now + Duration::from_millis(1_600);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), again),
+                Some(HotkeyAction::Start)
+            );
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(NO_FLAGS), again + Duration::from_secs(1)),
+                Some(HotkeyAction::Finish)
+            );
+        }
+    }
+
+    #[test]
+    fn hid_evidence_and_visible_chord_keys_discard_once_in_either_release_order() {
+        let now = capture_time();
+        for key_released_first in [true, false] {
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+            let chord = now + Duration::from_millis(60);
+            assert_eq!(
+                hotkey.process(hid_key(18), chord),
+                Some(HotkeyAction::Discard(DiscardCause::HidKey))
+            );
+            assert_eq!(
+                hotkey.process(option_key(18, true, OPTION_KEY_MASK), chord),
+                None
+            );
+            let mut releases = vec![
+                option_key(18, false, OPTION_KEY_MASK),
+                InputEvent::Flags(NO_FLAGS),
+            ];
+            if !key_released_first {
+                releases = vec![InputEvent::Flags(NO_FLAGS), option_key(18, false, NO_FLAGS)];
+            }
+            for (offset, event) in releases.into_iter().enumerate() {
+                let at = chord + Duration::from_millis(40 * (offset as u64 + 1));
+                assert_eq!(hotkey.process(event, at), None);
+            }
+            assert!(!hotkey.is_recording());
+            assert!(hotkey.pressed_keys.is_empty());
+            let again = now + Duration::from_secs(1);
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), again),
+                Some(HotkeyAction::Start),
+                "key_released_first={key_released_first}"
+            );
+        }
+    }
+
+    // On 2026-10-22 two quick Option-1/Option-2 switches locked dictation:
+    // with the digits hidden, the two Option taps looked like a double tap.
+    #[test]
+    fn hidden_chords_in_quick_succession_never_double_tap_lock() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        let mut actions = Vec::new();
+        for (at_ms, event) in [
+            (0, InputEvent::Flags(OPTION_KEY_MASK)),
+            (40, hid_key(18)),
+            (160, InputEvent::Flags(NO_FLAGS)),
+            (280, InputEvent::Flags(OPTION_KEY_MASK)),
+            (310, hid_key(19)),
+            (400, InputEvent::Flags(NO_FLAGS)),
+        ] {
+            actions.extend(hotkey.process(event, now + Duration::from_millis(at_ms)));
+        }
+        assert_eq!(
+            actions,
+            [
+                HotkeyAction::Start,
+                HotkeyAction::Discard(DiscardCause::HidKey),
+                HotkeyAction::Start,
+                HotkeyAction::Discard(DiscardCause::HidKey)
+            ]
+        );
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn hid_evidence_that_overtakes_its_press_prevents_the_capture() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        let chord = now + Duration::from_millis(15);
+        assert_eq!(hotkey.process(hid_key(18), chord), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            None
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(500)
+            ),
+            None
+        );
+        assert!(!hotkey.is_recording());
+
+        // A later overtaking press must not hide the early one.
+        let mut hotkey = test_hotkey(false, now);
+        for chord_ms in [20, 400] {
+            hotkey.process(hid_key(18), now + Duration::from_millis(chord_ms));
+        }
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            None
+        );
+
+        // Delayed evidence of a key pressed before the shortcut is no chord.
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert_eq!(
+            hotkey.process(
+                hid_key(0),
+                now.checked_sub(Duration::from_millis(5)).unwrap()
+            ),
+            None
+        );
+        assert!(hotkey.is_recording());
+
+        // A key pressed before the shortcut does not block it.
+        let mut hotkey = test_hotkey(false, now);
+        let later = now + Duration::from_secs(2);
+        hotkey.process(hid_key(0), later);
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK),
+                later + Duration::from_millis(5)
+            ),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    // Kit's Studio, 2026-10-25: holds discarded ~20 ms after the press. Suspect:
+    // the HID press of a key typed just before Option, delivered late in Mach
+    // ticks, reads as a chord. The conversion and the guard keep it a hold.
+    #[test]
+    fn late_hid_evidence_in_mach_ticks_of_a_key_before_the_press_keeps_the_hold() {
+        let now = CaptureInstant::now();
+        let press = now.checked_sub(Duration::from_millis(100)).unwrap();
+        for typed_before_ms in [1, 5, 30] {
+            let typed = press
+                .checked_sub(Duration::from_millis(typed_before_ms))
+                .unwrap();
+            for delivered_after_press_ms in [1, 20, 60] {
+                let received = press + Duration::from_millis(delivered_after_press_ms);
+                let raw = mach_ticks_for(typed);
+                let (at, clock) = physical_event_instant(raw, received);
+                assert_eq!(clock, HidClock::MachTicks);
+                assert!(signed_ms(at, typed).abs() < 0.001);
+                let mut hotkey = test_hotkey(false, press);
+                assert_eq!(
+                    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), press),
+                    Some(HotkeyAction::Start)
+                );
+                let event = InputEvent::PhysicalKeyDown {
+                    code: 0,
+                    timing: HidTiming {
+                        raw,
+                        clock,
+                        received_at: received,
+                    },
+                };
+                assert_eq!(hotkey.process(event, at), None);
+                assert!(hotkey.is_recording());
+                assert_eq!(
+                    hotkey.process(InputEvent::Flags(NO_FLAGS), press + Duration::from_secs(1)),
+                    Some(HotkeyAction::Finish)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn early_mouse_down_discards_with_its_cause() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert_eq!(
+            hotkey.process(InputEvent::MouseDown, now + Duration::from_millis(20)),
+            Some(HotkeyAction::Discard(DiscardCause::Mouse))
+        );
+    }
+
+    #[test]
+    fn held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold() {
+        let now = capture_time();
+        for chord_ms in [300, 450, 2_000] {
+            for (key, hidden) in [(18, true), (19, true), (20, true), (49, true), (18, false)] {
+                let mut hotkey = test_hotkey(false, now);
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+                let chord = now + Duration::from_millis(chord_ms);
+                let event = if hidden {
+                    hid_key(key)
+                } else {
+                    option_key(key, true, OPTION_KEY_MASK)
+                };
+                assert_eq!(
+                    hotkey.process(event, chord),
+                    Some(HotkeyAction::Discard(if hidden {
+                        DiscardCause::HidKey
+                    } else {
+                        DiscardCause::Key
+                    })),
+                    "key {key} hidden={hidden} at {chord_ms} ms"
+                );
+                if !hidden {
+                    hotkey.process(option_key(key, false, OPTION_KEY_MASK), chord);
+                }
+                assert_eq!(
+                    hotkey.process(
+                        InputEvent::Flags(NO_FLAGS),
+                        chord + Duration::from_millis(50)
+                    ),
+                    None
+                );
+                assert!(!hotkey.is_recording());
+            }
+        }
+
+        // Toggle captures keep recording, and keyed shortcuts keep the threshold.
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.set_toggle(true);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert_eq!(
+            hotkey.process(hid_key(18), now + Duration::from_millis(500)),
+            None
+        );
+        assert!(hotkey.is_recording());
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, shift_space_binding());
+        hotkey.process(shift_space_event(true), now);
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: 0,
+                    down: true,
+                    flags: SHIFT_KEY_MASK
+                },
+                now + Duration::from_millis(500)
+            ),
+            None
+        );
+        assert!(hotkey.is_recording());
+    }
+
+    #[test]
+    fn hid_evidence_while_locked_is_ignored() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80));
+        hotkey.process(
+            InputEvent::Flags(OPTION_KEY_MASK),
+            now + Duration::from_millis(180),
+        );
+        hotkey.process(
+            InputEvent::Flags(NO_FLAGS),
+            now + Duration::from_millis(260),
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(hid_key(18), now + Duration::from_millis(400)),
+            None
+        );
+        assert!(hotkey.is_recording());
+    }
+
+    #[test]
+    fn chord_evidence_skips_escape_and_hex_shortcuts() {
+        let hotkeys = RuntimeHotkeys::default();
+        assert!(is_chord_evidence(18, OPTION_KEY_MASK, hotkeys));
+        assert!(is_chord_evidence(49, OPTION_KEY_MASK, hotkeys));
+        assert!(!is_chord_evidence(
+            ESCAPE_KEY_CODE,
+            OPTION_KEY_MASK,
+            hotkeys
+        ));
+        let paste_last = hotkeys
+            .paste_last
+            .expect("paste last has a default binding");
+        let code = paste_last.key_code.expect("paste last binds a key");
+        assert!(!is_chord_evidence(
+            code,
+            OPTION_KEY_MASK | SHIFT_KEY_MASK,
+            hotkeys
+        ));
+        assert!(is_chord_evidence(code, OPTION_KEY_MASK, hotkeys));
+    }
+
+    #[test]
+    fn physical_event_instants_accept_mach_ticks_or_nanoseconds() {
+        let now = CaptureInstant::now();
+        let earlier = now.checked_sub(Duration::from_millis(8)).unwrap();
+        let (converted, clock) = physical_event_instant(earlier.as_nanos(), now);
+        assert_eq!(converted, earlier);
+        // With a 1:1 timebase (Intel) both readings agree and Mach wins.
+        let unit_timebase =
+            CaptureInstant::from_mach_ticks(1_000) == CaptureInstant::from_nanos(1_000);
+        assert_eq!(
+            clock,
+            if unit_timebase {
+                HidClock::MachTicks
+            } else {
+                HidClock::Nanos
+            }
+        );
+        let (converted, clock) = physical_event_instant(mach_ticks_for(earlier), now);
+        assert_eq!(clock, HidClock::MachTicks);
+        assert!(now.duration_since(converted) < Duration::from_millis(9));
+        assert!(converted <= now);
+        assert_eq!(physical_event_instant(1, now), (now, HidClock::Arrival));
+    }
+
+    fn mach_ticks_for(instant: CaptureInstant) -> u64 {
+        // Binary search the tick count whose conversion reaches `instant`.
+        let (mut low, mut high) = (0_u64, instant.as_nanos().max(1));
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if CaptureInstant::from_mach_ticks(mid) < instant {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    }
+
     #[test]
     fn escape_cancels_active_capture() {
         let now = capture_time();
@@ -3102,6 +5209,42 @@ mod tests {
             ),
             Some(HotkeyAction::Cancel)
         );
+    }
+
+    /// A capsule list left open when captures are turned off takes no keys.
+    #[cfg(hex_capture)]
+    #[test]
+    fn the_list_takes_keys_only_while_captures_are_on() {
+        assert!(list_takes_keys(true, true, false));
+        assert!(!list_takes_keys(false, true, false));
+        assert!(!list_takes_keys(true, false, false));
+        assert!(!list_takes_keys(true, true, true));
+    }
+
+    /// Escape during a dictation hold while a screen capture records cancels
+    /// only the dictation: the capture shortcut lets it pass, and the
+    /// listener never hands it to the recording.
+    #[cfg(hex_capture)]
+    #[test]
+    fn escape_during_a_capture_cancels_only_the_dictation_hold() {
+        use crate::capture_host::{CaptureShortcut, ShortcutAction, ShortcutActivity};
+        let now = capture_time();
+        let mut hotkey = test_hotkey(true, now);
+        let escape = InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down: true,
+            flags: OPTION_KEY_MASK,
+        };
+        let mut capture = CaptureShortcut::default();
+        let recording = ShortcutActivity::Recording {
+            elapsed: std::time::Duration::from_secs(5),
+        };
+        assert_eq!(
+            capture.input(escape, RuntimeHotkeys::default(), recording),
+            ShortcutAction::None
+        );
+        assert!(!capture.takes_escape());
+        assert_eq!(hotkey.process(escape, now), Some(HotkeyAction::Cancel));
     }
 
     #[test]
@@ -3184,6 +5327,71 @@ mod tests {
     }
 
     #[test]
+    fn the_capture_shortcut_is_suppressed_and_never_chord_evidence() {
+        let hotkeys = RuntimeHotkeys {
+            capture: Some(RuntimeHotkey {
+                modifiers: crate::app_settings::HotkeyModifiers {
+                    option: Some(crate::app_settings::ModifierSide::Either),
+                    shift: Some(crate::app_settings::ModifierSide::Either),
+                    ..Default::default()
+                },
+                key_code: Some(1),
+            }),
+            ..RuntimeHotkeys::default()
+        };
+        let flags = OPTION_KEY_MASK | SHIFT_KEY_MASK;
+        assert!(!is_chord_evidence(1, flags, hotkeys));
+        assert!(is_chord_evidence(1, flags, RuntimeHotkeys::default()));
+        let mut suppression = ShortcutSuppression::default();
+        let key = |down| InputEvent::Key {
+            code: 1,
+            down,
+            flags,
+        };
+        assert!(suppression.process_all(key(true), hotkeys, true, false));
+        assert!(suppression.process_all(key(false), hotkeys, true, false));
+        assert!(!suppression.process_all(key(true), RuntimeHotkeys::default(), true, false));
+    }
+
+    /// The send-to list's ⌥⇧V is Hex's only while the capsule takes it
+    /// (`app_settings::runtime_hotkeys` has it only then); otherwise it's an
+    /// ordinary chord that reaches the app.
+    #[test]
+    fn the_list_shortcut_is_suppressed_only_while_matched() {
+        let list = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers {
+                option: Some(crate::app_settings::ModifierSide::Either),
+                shift: Some(crate::app_settings::ModifierSide::Either),
+                ..Default::default()
+            },
+            key_code: Some(9),
+        };
+        let taken = RuntimeHotkeys {
+            paste_last: None,
+            capture_list: Some(list),
+            ..RuntimeHotkeys::default()
+        };
+        let free = RuntimeHotkeys {
+            capture_list: None,
+            ..taken
+        };
+        let flags = OPTION_KEY_MASK | SHIFT_KEY_MASK;
+        assert!(!is_chord_evidence(9, flags, taken));
+        assert!(is_chord_evidence(9, flags, free));
+        let key = |down| InputEvent::Key {
+            code: 9,
+            down,
+            flags,
+        };
+        let mut suppression = ShortcutSuppression::default();
+        assert!(suppression.process_all(key(true), taken, true, false));
+        // The release goes where the press went, even once the capsule let go.
+        assert!(suppression.process_all(key(false), free, true, false));
+        assert!(!suppression.process_all(key(true), free, true, false));
+        assert!(!suppression.process_all(key(false), taken, true, false));
+    }
+
+    #[test]
     fn paste_last_can_be_disabled_or_bound_to_a_side_specific_shortcut() {
         let key_code = 0;
         let input = InputEvent::Key {
@@ -3247,7 +5455,7 @@ mod tests {
             if crate::DEVELOPER_FEATURES_ENABLED {
                 Some(HotkeyAction::PasteMeeting)
             } else {
-                Some(HotkeyAction::Discard)
+                Some(HotkeyAction::Discard(DiscardCause::Key))
             }
         );
         assert!(!hotkey.is_recording());

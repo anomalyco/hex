@@ -42,7 +42,16 @@ mod tests {
         let first = acquire_in(&directory, "test").unwrap();
         assert!(acquire_in(&directory, "test").is_err());
         drop(first);
-        assert!(acquire_in(&directory, "test").is_ok());
+        // A child another test thread forks before it execs holds a copy of the
+        // lock's descriptor for a moment, so the release can take a few tries.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while acquire_in(&directory, "test").is_err() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lock was never released"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         fs::remove_dir_all(directory).unwrap();
     }
 }

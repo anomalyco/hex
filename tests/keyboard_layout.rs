@@ -10,8 +10,13 @@ mod keyboard;
 #[path = "../src/keys.rs"]
 mod keys;
 
+// The harness answers libtest's `--list` (which nextest uses to discover
+// tests): one `name: test` line per case, and nothing for `--ignored`.
 #[cfg(not(target_os = "macos"))]
 fn main() {
+    if std::env::args().any(|arg| arg == "--list") {
+        return;
+    }
     println!("keyboard layout regression: skipped (macOS only)");
 }
 
@@ -37,20 +42,20 @@ fn main() {
         run_case(args.get(1).expect("missing child case"));
         return;
     }
+    if args.iter().any(|arg| arg == "--ignored") {
+        return;
+    }
     if args.iter().any(|arg| arg == "--list") {
         for case in CASES {
             println!("keyboard_layout::{case}: test");
         }
         return;
     }
-    if args.iter().any(|arg| arg == "--ignored") {
-        return;
-    }
     for option in args.iter().filter(|arg| arg.starts_with('-')) {
         assert!(
             matches!(
                 option.as_str(),
-                "--nocapture" | "--exact" | "--quiet" | "-q"
+                "--nocapture" | "--exact" | "--quiet" | "-q" | "--include-ignored"
             ) || option
                 .strip_prefix("--test-threads=")
                 .is_some_and(|value| value.parse::<usize>().is_ok_and(|value| value > 0)),

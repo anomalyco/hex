@@ -1,0 +1,161 @@
+schema "sigil/v1"
+// Hex's capture capsule (src/rune_ui/capture_capsule), every state as a scene.
+// Kit's Scrawl capsule (sigil examples/scrawl_capsule.sigil) in the OpenCode
+// theme: no iPhone, Paste, Inspect or Write at cursor; Window shows no Record;
+// a finished capture reads "Saved" until the router answers, and "Copied"
+// when it's on the clipboard and nothing sent it.
+model Capsule {
+  picking: bool = true,
+  area: bool = false,
+  window: bool = false,
+  recording: bool = false,
+  chips: bool = false,
+  processing: bool = false,
+  done: bool = false,
+  lead: string = "Sent to SEER",
+  warning: bool = false,
+  why: bool = false,
+  why_text: string = "rule",
+  undo: bool = false,
+  undo_label: string = "Undo 3",
+  ask: bool = false,
+  ask_label: string = "→ SEER?",
+  field: bool = false,
+  typed: bool = false,
+  query: string = "",
+  list: bool = false,
+  sug: bool = false,
+  recent: bool = false,
+  foot_send: string = "Send to SEER",
+  foot_key: string = "esc",
+  foot_alt: string = "Keep copied",
+  clock: string = "0:07"
+}
+
+component Chip(label: string, fill: color = "#00000000", ink: color = color.text_muted) {
+  chip := Row { presence: "blur"; presence_exit: 170; h: 32; px: 12; radius: 16; center_y: true; fill: fill; hover: color.hover; press: color.pressed
+    chip-label := Text { value: label; font: type.ui_medium; color: ink }
+  }
+}
+
+// Record and Finish: the one contrast action.
+component Action(label: string) {
+  action := Row { presence: "blur"; presence_exit: 170; h: 32; px: 12; radius: 16; center_y: true; fill: color.bg_contrast; hover: color.contrast_hover; press: color.contrast_pressed
+    action-label := Text { value: label; font: type.ui_medium; weight: "semibold"; color: color.text_contrast }
+  }
+}
+
+component Key(keys: string) {
+  key := Row { h: 18; px: 5; radius: 5; center: true; fill: color.layer_02; border: 0.5; border_color: color.border_strong
+    key-label := Text { value: keys; font: type.small_medium; color: color.text_muted }
+  }
+}
+
+component KeyChip(keys: string, label: string) {
+  keychip := Row { presence: "blur"; presence_exit: 170; h: 32; px: 12; gap: 6; radius: 16; center_y: true; hover: color.hover; press: color.pressed
+    keychip-key := Key(keys: keys)
+    keychip-label := Text { value: label; font: type.ui_medium; color: color.text_muted }
+  }
+}
+
+component Section(title: string) {
+  section := Row { h: 24; px: 8; center_y: true
+    section-title := Text { value: title; font: type.small_medium; weight: "semibold"; tracking: 0.5; color: color.text_faint }
+  }
+}
+
+component Dest(n: string, title: string, reason: string, fill: color = "#00000000") {
+  dest := Row { h: 30; px: 8; gap: 10; radius: 10; center_y: true; fill: fill; hover: color.hover
+    dest-n := Text { value: n; w: 10; font: type.ui_medium; color: color.text_faint }
+    dest-title := Text { value: title; font: type.ui_medium; color: color.text_base }
+    dest-gap := El { grow: 1 }
+    dest-reason := Text { value: reason; font: type.text_xsmall_medium; color: color.text_muted }
+  }
+}
+
+artboard capsule (w: 640, theme: "opencode.dark") {
+  stage := Col { pt: 22; center: true; fill: color.layer_03
+    shell := Row { h: 40; px: 4; gap: 2; radius: 20; center_y: true; fill: color.bg_base; elevation: "floating"; clip: true; dissolve: true; min_w: state.field ? 420 : 0
+      rec-lead := Row { visible: state.recording; presence: "blur"; presence_exit: 170; pl: 11; pr: 8; gap: 7; center_y: true
+        rec-dot := El { w: 10; h: 10; radius: 5; fill: color.danger.fg }
+        rec-clock := Text { value: state.clock; font: type.ui_medium; weight: "semibold"; color: color.text_base }
+      }
+      busy-lead := Row { visible: state.processing; presence: "blur"; presence_exit: 170; pl: 9; pr: 12; gap: 8.5; center_y: true
+        busy-spinner := El { w: 14; h: 14; radius: 7; fill: color.layer_03 }
+        busy-label := Text { value: "Processing…"; font: type.ui_medium; color: color.text_base }
+      }
+      done-lead := Row { visible: state.done; presence: "blur"; presence_exit: 170; pl: 8; pr: 12; gap: 4; center_y: true
+        done-check := Icon { visible: !state.warning; name: "check"; color: color.success.fg }
+        done-warning := Icon { visible: state.warning; name: "circle_x"; color: color.warning.fg }
+        done-label := Text { value: state.lead; font: type.ui_medium; weight: "semibold"; color: color.text_base }
+      }
+      route-why := Row { visible: state.why; presence: "blur"; presence_exit: 170; pr: 6; center_y: true
+        route-why-text := Text { value: state.why_text; font: type.text_xsmall_medium; color: color.text_faint }
+      }
+      route-field := Row { visible: state.field; presence: "blur"; presence_exit: 170; h: 32; ml: 4; px: 12; gap: 1; grow: 1; radius: 16; center_y: true; fill: color.layer_01
+        field-caret-before := El { visible: !state.typed; w: 1.5; h: 15; radius: 0.75; fill: color.text_accent }
+        field-placeholder := Text { visible: !state.typed; value: "Send to…"; font: type.ui_medium; color: color.text_faint }
+        field-query := Text { visible: state.typed; value: state.query; font: type.ui_medium; color: color.text_base }
+        field-caret := El { visible: state.typed; w: 1.5; h: 15; radius: 0.75; fill: color.text_accent }
+      }
+      modes := Row { visible: state.picking || state.chips; presence: "blur"; presence_exit: 170; gap: 2; center_y: true
+        mode-area := Chip(label: "Area", fill: state.area ? color.layer_02 : "#00000000", ink: state.area ? color.text_base : color.text_muted)
+        mode-window := Chip(label: "Window", fill: state.window ? color.layer_02 : "#00000000", ink: state.window ? color.text_base : color.text_muted) { visible: !state.chips }
+        mode-screen := Chip(label: "Screen", fill: state.area || state.window ? "#00000000" : color.layer_02, ink: state.area || state.window ? color.text_muted : color.text_base)
+      }
+      record := Action(label: "Record") { visible: state.picking && !state.area && !state.window }
+      cancel := Chip(label: "Cancel") { visible: state.recording && !state.chips }
+      finish := Action(label: "Finish") { visible: state.recording && !state.chips }
+      route-undo := KeyChip(keys: "esc", label: state.undo_label) { visible: state.undo; ml: 4 }
+      route-ask := KeyChip(keys: "⌥⇧V", label: state.ask_label) { visible: state.ask; ml: state.undo ? 0 : 4 }
+      close := Row { visible: state.picking || state.chips || state.done; presence: "blur"; presence_exit: 170; w: 32; h: 32; radius: 16; center: true; hover: color.hover
+        close-icon := Icon { name: "close"; color: color.text_muted }
+      }
+    }
+    send-list := Col { visible: state.list; w: 420; mt: 6; padding: 4; radius: 14; fill: color.bg_base; elevation: "floating"; presence: "drop"; presence_exit: 170
+      sug-head := Section(title: "SUGGESTED") { visible: state.sug }
+      row-seer := Dest(n: "1", title: "SEER", reason: "guess · problems.kitlangton.com", fill: color.layer_01) { visible: state.sug }
+      row-hex := Dest(n: "2", title: "HEX", reason: "last sent") { visible: state.sug }
+      recent-head := Section(title: "RECENT") { visible: state.recent }
+      row-home := Dest(n: state.sug ? "3" : "1", title: "HOME", reason: "yesterday", fill: state.sug ? "#00000000" : color.layer_01) { visible: state.recent }
+      row-rune := Dest(n: state.sug ? "4" : "2", title: "RUNE", reason: "2 days ago") { visible: state.recent }
+      list-rule := El { h: 1; mt: 6; fill: color.border_base }
+      list-foot := Row { h: 28; px: 8; gap: 5; center_y: true
+        foot-send-key := Key(keys: "⏎")
+        foot-send := Text { value: state.foot_send; font: type.text_xsmall_medium; color: color.text_muted }
+        foot-gap := El { w: 14 }
+        foot-alt-key := Key(keys: state.foot_key)
+        foot-alt := Text { value: state.foot_alt; font: type.text_xsmall_medium; color: color.text_muted }
+      }
+    }
+    pb: 50;
+  }
+}
+
+scene "picker-screen" {}
+scene "picker-area" { area: true }
+scene "picker-window" { window: true }
+scene "recording" { picking: false, recording: true }
+scene "recording-chips" { picking: false, recording: true, chips: true }
+scene "processing" { picking: false, processing: true }
+scene "saved" { picking: false, done: true, lead: "Saved" }
+scene "failed" { picking: false, done: true, warning: true, lead: "Couldn't save the capture" }
+scene "rule-sent" { picking: false, done: true, why: true, undo: true, ask: true, ask_label: "Elsewhere…" }
+scene "sent" { picking: false, done: true }
+scene "queued" { picking: false, done: true, lead: "Copied", why: true, why_text: "couldn't reach SEER" }
+scene "guess" { picking: false, done: true, lead: "Copied", ask: true }
+scene "nothing" { picking: false, done: true, lead: "Copied", ask: true, ask_label: "Send to…" }
+scene "no-answer" { picking: false, done: true, lead: "Copied", why: true, why_text: "the router didn't answer", ask: true, ask_label: "Send to…" }
+scene "list-guess" { picking: false, done: true, lead: "Copied", field: true, list: true, sug: true, recent: true }
+scene "list-search" { picking: false, done: true, lead: "Copied", field: true, typed: true, query: "ru", list: true, recent: true, foot_send: "Send to RUNE" }
+scene "list-offer" { picking: false, done: true, lead: "Copied", field: true, list: true, sug: true, recent: true, foot_key: "⇧⏎", foot_alt: "Always for problems.kitlangton.com" }
+scene "taken-back" { picking: false, done: true, lead: "Taken back" }
+scene "too-late" { picking: false, done: true, why: true, why_text: "too late to take back" }
+story "capture" {
+  "picker-screen"
+  -> "recording" (caption: "Record")
+  -> "processing" (caption: "Finish")
+  -> "saved" (caption: "Written")
+  -> "rule-sent" (caption: "A rule sent it")
+  -> "taken-back" (caption: "Undo")
+}

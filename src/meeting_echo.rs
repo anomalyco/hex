@@ -151,16 +151,6 @@ impl EchoEnvelope {
         self.tracks[index(source)].push(start_ms, samples, rate);
     }
 
-    /// Timeline milliseconds through which `source` has audio.
-    pub(super) fn covered_ms(&self, source: MeetingSource) -> u64 {
-        let track = &self.tracks[index(source)];
-        if track.rate == 0 {
-            0
-        } else {
-            track.expected_ms()
-        }
-    }
-
     /// Forgets one source, before rebuilding it from its recording.
     pub(super) fn clear(&mut self, source: MeetingSource) {
         self.tracks[index(source)] = Track::default();

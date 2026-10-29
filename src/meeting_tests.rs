@@ -1,5 +1,4 @@
 use super::*;
-use crate::events::TranscriptPhase;
 use hound::WavReader;
 
 #[test]
@@ -20,48 +19,6 @@ fn rejects_non_numeric_media_times() {
     assert_eq!(media_time_us(CMTime::new(3, 2)), Some(1_500_000));
     assert_eq!(media_time_us(CMTime::INVALID), None);
     assert_eq!(media_time_us(CMTime::positive_infinity()), None);
-}
-
-#[test]
-fn live_transcript_projects_the_latest_version_of_each_source_line() {
-    let event = |source, line_id, phase, start_ms, text: &str| live::Event {
-        source,
-        line_id,
-        phase,
-        start_ms,
-        end_ms: start_ms + 500,
-        text: text.into(),
-        signal: None,
-    };
-    let transcript = live::project([
-        event(
-            MeetingSource::Microphone,
-            1,
-            TranscriptPhase::Started,
-            1_000,
-            "draft",
-        ),
-        event(
-            MeetingSource::System,
-            4,
-            TranscriptPhase::Completed,
-            500,
-            "computer",
-        ),
-        event(
-            MeetingSource::Microphone,
-            1,
-            TranscriptPhase::Completed,
-            1_000,
-            "final live line",
-        ),
-    ]);
-
-    assert_eq!(transcript.len(), 2);
-    assert_eq!(transcript[0].source, MeetingSource::System);
-    assert_eq!(transcript[0].text, "computer");
-    assert_eq!(transcript[1].source, MeetingSource::Microphone);
-    assert_eq!(transcript[1].text, "final live line");
 }
 
 #[test]
@@ -86,113 +43,30 @@ fn transcript_entries_coalesce_into_source_turns_without_hiding_long_pauses() {
 }
 
 #[test]
-fn final_transcript_supplements_gaps_without_replacing_live_entries() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    let mut live = vec![entry(MeetingSource::Microphone, 0, 1_000, "Live words.")];
-    supplement_live_transcript(
-        &mut live,
-        vec![
-            entry(MeetingSource::Microphone, 100, 900, "Final replacement."),
-            entry(MeetingSource::System, 100, 900, "Other source."),
-            entry(MeetingSource::Microphone, 1_200, 2_000, "Recovered tail."),
-        ],
-    );
-
-    assert_eq!(live.len(), 3);
-    assert_eq!(live[0].text, "Live words.");
-    assert_eq!(live[1].text, "Other source.");
-    assert_eq!(live[2].text, "Recovered tail.");
-}
-
-#[test]
-fn live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin() {
-    // A dropped 10 ms microphone packet is far below any media-time jitter
-    // threshold, but the recorded position still accounts for it.
-    let packet = AudioPacket {
-        source: MeetingSource::Microphone,
-        pts_us: None,
-        arrival_us: 1_200_000,
-        position: 44_100 + 441,
-        sample_rate: 44_100,
-        samples: vec![0.0; 441],
-    };
-    assert_eq!(
-        live::audio_gap(44_100, &packet),
-        Some(live::AudioGap {
-            silence_samples: 441,
-            skipped_us: 0,
-        })
-    );
-    assert_eq!(live::audio_gap(44_100 + 441, &packet), None);
-    assert_eq!(live::source_offset([Some(500_000), Some(700_000)], 0), 0);
-    assert_eq!(
-        live::source_offset([Some(500_000), Some(700_000)], 1),
-        200_000
-    );
-}
-
-#[test]
-fn live_gaps_bound_synthesized_silence() {
-    let delayed = AudioPacket {
-        source: MeetingSource::Microphone,
-        pts_us: None,
-        arrival_us: 2_000_000,
-        position: 44_100 * 3,
-        sample_rate: 44_100,
-        samples: vec![0.0; 8_820],
-    };
-    assert_eq!(
-        live::audio_gap(44_100, &delayed),
-        Some(live::AudioGap {
-            silence_samples: 22_050,
-            skipped_us: 1_500_000,
-        })
-    );
-    assert_eq!(live::adjusted_time_ms(499, &[(500_000, 1_500_000)]), 499);
-    assert_eq!(live::adjusted_time_ms(500, &[(500_000, 1_500_000)]), 2_000);
-}
-
-#[test]
-fn live_microphone_normalization_lifts_quiet_speech_without_touching_system_audio() {
-    let mut microphone = vec![0.002, -0.002, 0.001, -0.001];
-    live::normalize_microphone(MeetingSource::Microphone, &mut microphone);
-    assert!(microphone.iter().copied().fold(0.0_f32, f32::max) > 0.02);
-
-    let mut system = vec![0.002, -0.002];
-    live::normalize_microphone(MeetingSource::System, &mut system);
-    assert_eq!(system, [0.002, -0.002]);
-}
-
-#[test]
-fn final_transcript_replaces_the_live_draft_atomically() {
+fn final_transcript_replaces_the_rolling_transcript_atomically() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-transcript-{}-{}",
+        "hex-meeting-transcript-{}-{}",
         std::process::id(),
         now_ms()
     ));
     fs::create_dir_all(&directory).unwrap();
-    let live = live::Event {
+    let rolling = TranscriptEntry {
         source: MeetingSource::Microphone,
-        line_id: 1,
-        phase: TranscriptPhase::Completed,
         start_ms: 0,
         end_ms: 500,
-        text: "live draft".into(),
-        signal: None,
+        text: "rolling transcript".into(),
     };
     fs::write(
-        directory.join("transcript.live.ndjson"),
-        format!("{}\n", serde_json::to_string(&live).unwrap()),
+        directory.join(transcript::ROLLING_FILE),
+        format!(
+            "{{\"covered_ms\":{{\"system\":null,\"microphone\":500}}}}\n{}\n",
+            serde_json::to_string(&rolling).unwrap()
+        ),
     )
     .unwrap();
     assert_eq!(
         transcript_entries_in(&directory).unwrap()[0].text,
-        "live draft"
+        "rolling transcript"
     );
 
     let final_entry = TranscriptEntry {
@@ -208,7 +82,7 @@ fn final_transcript_replaces_the_live_draft_atomically() {
     .unwrap();
     assert_eq!(
         transcript_entries_in(&directory).unwrap()[0].text,
-        "live draft"
+        "rolling transcript"
     );
     fs::write(directory.join("transcript.md.tmp"), "# Final\n").unwrap();
     let active = ActiveMeeting::acquire(&directory).unwrap();
@@ -224,20 +98,17 @@ fn final_transcript_replaces_the_live_draft_atomically() {
 }
 
 #[test]
-fn reading_live_transcript_ignores_an_in_flight_trailing_write() {
+fn reading_a_transcript_ignores_an_in_flight_trailing_write() {
     let path = std::env::temp_dir().join(format!(
-        "voice-control-live-transcript-{}-{}.ndjson",
+        "hex-transcript-tail-{}-{}.ndjson",
         std::process::id(),
         now_ms()
     ));
-    let complete = live::Event {
+    let complete = TranscriptEntry {
         source: MeetingSource::System,
-        line_id: 1,
-        phase: TranscriptPhase::Completed,
         start_ms: 0,
         end_ms: 500,
         text: "complete".into(),
-        signal: None,
     };
     fs::write(
         &path,
@@ -248,56 +119,22 @@ fn reading_live_transcript_ignores_an_in_flight_trailing_write() {
     )
     .unwrap();
 
-    let events: Vec<live::Event> = read_ndjson(&path).unwrap();
+    let events: Vec<TranscriptEntry> = read_ndjson(&path).unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].text, "complete");
 
     let mut bytes = fs::read(&path).unwrap();
     bytes.extend_from_slice(&[0xe2, 0x82]);
     fs::write(&path, bytes).unwrap();
-    let events: Vec<live::Event> = read_ndjson(&path).unwrap();
+    let events: Vec<TranscriptEntry> = read_ndjson(&path).unwrap();
     assert_eq!(events.len(), 1);
-    fs::remove_file(path).unwrap();
-}
-
-#[test]
-fn transcript_reader_only_parses_newly_appended_live_events() {
-    let path = std::env::temp_dir().join(format!(
-        "voice-control-live-tail-{}-{}.ndjson",
-        std::process::id(),
-        now_ms()
-    ));
-    let event = |line_id, text: &str| live::Event {
-        source: MeetingSource::System,
-        line_id,
-        phase: TranscriptPhase::Updated,
-        start_ms: line_id * 1_000,
-        end_ms: line_id * 1_000 + 500,
-        text: text.into(),
-        signal: None,
-    };
-    let first = serde_json::to_string(&event(1, "first")).unwrap();
-    let second = serde_json::to_string(&event(2, "second")).unwrap();
-    let split = second.len() / 2;
-    fs::write(&path, format!("{first}\n{}", &second[..split])).unwrap();
-
-    let mut reader = TranscriptReader::default();
-    reader.read_live_tail(&path).unwrap();
-    assert_eq!(reader.event_count(), 1);
-    assert!(reader.has_pending_bytes());
-
-    let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
-    writeln!(file, "{}", &second[split..]).unwrap();
-    reader.read_live_tail(&path).unwrap();
-    assert_eq!(reader.event_count(), 2);
-    assert!(!reader.has_pending_bytes());
     fs::remove_file(path).unwrap();
 }
 
 #[test]
 fn capture_failures_are_persisted_instead_of_looking_interrupted() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-failure-{}-{}",
+        "hex-meeting-failure-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -312,7 +149,6 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         duration_ms: None,
         system: TrackManifest::default(),
         microphone: TrackManifest::default(),
-        live_dropped_packets: 0,
         live_transcription_error: None,
         error: None,
         app: None,
@@ -322,6 +158,10 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         provisional_title: None,
         notes: None,
         notes_error: None,
+        calendar: None,
+        title_source: None,
+        chapters: Vec::new(),
+        chapters_refined: false,
     };
     write_manifest(&directory, &manifest).unwrap();
 
@@ -338,7 +178,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
 #[test]
 fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-capture-loss-{}-{}",
+        "hex-meeting-capture-loss-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -353,7 +193,6 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         duration_ms: Some(60_000),
         system: TrackManifest::default(),
         microphone: TrackManifest::default(),
-        live_dropped_packets: 0,
         live_transcription_error: None,
         error: None,
         app: None,
@@ -363,6 +202,10 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         provisional_title: None,
         notes: None,
         notes_error: None,
+        calendar: None,
+        title_source: None,
+        chapters: Vec::new(),
+        chapters_refined: false,
     };
     let (sender, receiver) = mpsc::sync_channel(4);
 
@@ -437,7 +280,7 @@ fn abandoned_recording_and_finalization_are_recovered_as_interrupted() {
 #[test]
 fn meeting_lock_reports_liveness_across_file_descriptors() {
     let directory = std::env::temp_dir().join(format!(
-        "voice-control-meeting-lock-{}-{}",
+        "hex-meeting-lock-{}-{}",
         std::process::id(),
         now_ms()
     ));
@@ -451,378 +294,8 @@ fn meeting_lock_reports_liveness_across_file_descriptors() {
     fs::remove_dir_all(directory).unwrap();
 }
 
-#[test]
-#[ignore = "requires VOICE_CONTROL_MEETING_FIXTURE and the installed Moonshine model"]
-fn live_transcription_replays_both_recorded_tracks() {
-    let fixture = PathBuf::from(std::env::var("VOICE_CONTROL_MEETING_FIXTURE").unwrap());
-    let output = std::env::temp_dir().join(format!(
-        "voice-control-live-replay-{}-{}",
-        std::process::id(),
-        now_ms()
-    ));
-    fs::create_dir_all(&output).unwrap();
-    let (sender, receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
-    let worker_output = output.clone();
-    let drops = Arc::new(AtomicU64::new(0));
-    let worker_drops = drops.clone();
-    let worker = thread::spawn(move || {
-        live::transcribe(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            &worker_output,
-            receiver,
-            &worker_drops,
-        )
-    });
-
-    let tracks = [
-        (MeetingSource::System, "system.wav"),
-        (MeetingSource::Microphone, "microphone.wav"),
-    ]
-    .map(|(source, file)| {
-        let mut reader = WavReader::open(fixture.join(file)).unwrap();
-        let sample_rate = reader.spec().sample_rate;
-        let samples = reader
-            .samples::<f32>()
-            .take(sample_rate as usize * 10)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        (source, sample_rate, samples)
-    });
-    let chunks = tracks
-        .iter()
-        .map(|(_, sample_rate, samples)| samples.len().div_ceil(*sample_rate as usize / 5))
-        .max()
-        .unwrap_or_default();
-    for index in 0..chunks {
-        for (source, sample_rate, samples) in &tracks {
-            let packet_samples = *sample_rate as usize / 5;
-            let start = index * packet_samples;
-            let end = (start + packet_samples).min(samples.len());
-            if start >= end {
-                continue;
-            }
-            sender
-                .send(AudioPacket {
-                    source: *source,
-                    pts_us: None,
-                    arrival_us: index as u64 * 200_000,
-                    position: start as u64,
-                    sample_rate: *sample_rate,
-                    samples: samples[start..end].to_vec(),
-                })
-                .unwrap();
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
-    drop(sender);
-    worker.join().unwrap().unwrap();
-
-    let events: Vec<live::Event> = read_ndjson(&output.join("transcript.live.ndjson")).unwrap();
-    assert!(!events.is_empty());
-    for source in [MeetingSource::System, MeetingSource::Microphone] {
-        assert!(
-            events
-                .iter()
-                .any(|event| { event.source == source && !event.text.trim().is_empty() }),
-            "{source:?} emitted no text: {events:#?}"
-        );
-        assert!(
-            events.iter().any(|event| {
-                event.source == source && event.phase == TranscriptPhase::Completed
-            }),
-            "{source:?} emitted no completed line: {events:#?}"
-        );
-    }
-    fs::remove_dir_all(output).unwrap();
-}
-
-#[test]
-fn rolling_entries_replace_the_live_draft_for_the_time_they_cover() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    let rolling = [
-        entry(MeetingSource::System, 0, 20_000, "Final system."),
-        entry(MeetingSource::Microphone, 1_000, 9_000, "Final mic."),
-    ];
-    let live = vec![
-        entry(MeetingSource::System, 5_000, 6_000, "draft system"),
-        entry(MeetingSource::Microphone, 8_000, 8_500, "draft overlap"),
-        entry(MeetingSource::Microphone, 9_500, 10_000, "draft mic tail"),
-        entry(MeetingSource::System, 21_000, 22_000, "draft system tail"),
-    ];
-    let rolling = transcript::RollingView {
-        entries: rolling.to_vec(),
-        ..Default::default()
-    };
-    let merged = live::merge_rolling(&rolling, live.clone());
-    assert_eq!(
-        merged
-            .iter()
-            .map(|entry| entry.text.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "Final system.",
-            "Final mic.",
-            "draft mic tail",
-            "draft system tail"
-        ]
-    );
-    assert_eq!(live::merge_rolling(&Default::default(), live.clone()), live);
-}
-
-#[test]
-fn rolling_coverage_hides_draft_echo_that_rolling_dropped() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    // Rolling transcribed the microphone through 30 s and dropped all of it
-    // as echo, so no microphone entry marks how far it got.
-    let rolling = transcript::RollingView {
-        entries: vec![entry(MeetingSource::System, 0, 29_000, "Final system.")],
-        covered_ms: transcript::RollingCoverage {
-            system: Some(30_000),
-            microphone: Some(30_000),
-        },
-    };
-    let live = vec![
-        entry(MeetingSource::Microphone, 12_000, 13_000, "draft echo"),
-        entry(MeetingSource::Microphone, 31_000, 32_000, "draft tail"),
-    ];
-    assert_eq!(
-        live::merge_rolling(&rolling, live)
-            .iter()
-            .map(|entry| entry.text.as_str())
-            .collect::<Vec<_>>(),
-        ["Final system.", "draft tail"]
-    );
-}
-
-fn live_event(
-    source: MeetingSource,
-    line_id: u64,
-    phase: TranscriptPhase,
-    (start_ms, end_ms): (u64, u64),
-    text: &str,
-    signal: Option<echo::Signal>,
-) -> live::Event {
-    live::Event {
-        source,
-        line_id,
-        phase,
-        start_ms,
-        end_ms,
-        text: text.into(),
-        signal,
-    }
-}
-
-fn shown(entries: &[TranscriptEntry]) -> Vec<(MeetingSource, &str)> {
-    entries
-        .iter()
-        .map(|entry| (entry.source, entry.text.as_str()))
-        .collect()
-}
-
-#[test]
-fn live_view_hides_microphone_twins_of_remote_speech() {
-    use TranscriptPhase::Completed;
-    let events = [
-        live_event(
-            MeetingSource::System,
-            1,
-            Completed,
-            (19_635, 22_707),
-            "I feel like over the course of a couple of months we could make like",
-            None,
-        ),
-        live_event(
-            MeetingSource::Microphone,
-            2,
-            Completed,
-            (19_718, 22_630),
-            "I feel like over the course of a couple of months we can make by...",
-            None,
-        ),
-        live_event(
-            MeetingSource::System,
-            3,
-            Completed,
-            (24_051, 25_811),
-            "To thirty games and that's",
-            None,
-        ),
-        live_event(
-            MeetingSource::Microphone,
-            4,
-            Completed,
-            (23_974, 25_574),
-            "230 games and that's",
-            None,
-        ),
-        // Misheard bleed with different words: only the signal catches it.
-        live_event(
-            MeetingSource::System,
-            5,
-            Completed,
-            (7_763, 9_075),
-            "I feel like it.",
-            None,
-        ),
-        live_event(
-            MeetingSource::Microphone,
-            6,
-            Completed,
-            (7_846, 8_998),
-            "Good luck, man.",
-            Some(echo::Signal::Bleed),
-        ),
-        // The user talking over the remote side with matching words.
-        live_event(
-            MeetingSource::System,
-            7,
-            Completed,
-            (40_000, 41_000),
-            "Yeah.",
-            None,
-        ),
-        live_event(
-            MeetingSource::Microphone,
-            8,
-            Completed,
-            (40_050, 41_000),
-            "Yeah.",
-            Some(echo::Signal::Local),
-        ),
-        live_event(
-            MeetingSource::Microphone,
-            9,
-            Completed,
-            (50_000, 52_000),
-            "Apple has a new thing.",
-            None,
-        ),
-    ];
-    let entries = live::live_view(&Default::default(), events.iter());
-    assert_eq!(
-        shown(&entries),
-        [
-            (MeetingSource::System, "I feel like it."),
-            (
-                MeetingSource::System,
-                "I feel like over the course of a couple of months we could make like"
-            ),
-            (MeetingSource::System, "To thirty games and that's"),
-            (MeetingSource::System, "Yeah."),
-            (MeetingSource::Microphone, "Yeah."),
-            (MeetingSource::Microphone, "Apple has a new thing."),
-        ]
-    );
-}
-
-#[test]
-fn an_undecided_draft_line_waits_while_the_remote_side_speaks() {
-    use TranscriptPhase::{Completed, Updated};
-    let system = live_event(
-        MeetingSource::System,
-        1,
-        Updated,
-        (1_000, 3_000),
-        "Basically, I want",
-        None,
-    );
-    let draft = |phase, text: &str| {
-        live_event(
-            MeetingSource::Microphone,
-            2,
-            phase,
-            (1_080, 2_900),
-            text,
-            None,
-        )
-    };
-    let entries = live::live_view(&Default::default(), [&system, &draft(Updated, "Basically")]);
-    assert_eq!(
-        shown(&entries),
-        [(MeetingSource::System, "Basically, I want")]
-    );
-
-    // No twin arrived: once complete, the line is the user's.
-    let entries = live::live_view(
-        &Default::default(),
-        [&system, &draft(Completed, "Hold on a second.")],
-    );
-    assert_eq!(
-        shown(&entries),
-        [
-            (MeetingSource::System, "Basically, I want"),
-            (MeetingSource::Microphone, "Hold on a second."),
-        ]
-    );
-
-    // Local speech shows immediately, and a draft with no remote speech
-    // around it is never held.
-    let local = live_event(
-        MeetingSource::Microphone,
-        3,
-        Updated,
-        (1_200, 2_000),
-        "Wait",
-        Some(echo::Signal::Local),
-    );
-    let alone = live_event(
-        MeetingSource::Microphone,
-        4,
-        Updated,
-        (9_000, 9_800),
-        "So anyway",
-        None,
-    );
-    let entries = live::live_view(&Default::default(), [&system, &local, &alone]);
-    assert_eq!(
-        shown(&entries),
-        [
-            (MeetingSource::System, "Basically, I want"),
-            (MeetingSource::Microphone, "Wait"),
-            (MeetingSource::Microphone, "So anyway"),
-        ]
-    );
-}
-
-#[test]
-fn live_view_keeps_rolling_microphone_entries_that_rolling_already_judged() {
-    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-        source,
-        start_ms,
-        end_ms,
-        text: text.into(),
-    };
-    // Rolling kept this double-talk line on signal evidence; the live view
-    // has no signal for it and must not re-judge it by words.
-    let rolling = [
-        entry(MeetingSource::System, 0, 2_000, "Yeah, totally."),
-        entry(MeetingSource::Microphone, 50, 2_000, "Yeah, totally."),
-    ];
-    let rolling = transcript::RollingView {
-        entries: rolling.to_vec(),
-        ..Default::default()
-    };
-    let entries = live::live_view(&rolling, std::iter::empty());
-    assert_eq!(entries.len(), 2);
-}
-
 fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
-    let base = std::env::temp_dir().join(format!(
-        "voice-control-{name}-{}-{}",
-        std::process::id(),
-        now_ms()
-    ));
+    let base = std::env::temp_dir().join(format!("hex-{name}-{}-{}", std::process::id(), now_ms()));
     let directory = base.join("1760000000000-1");
     fs::create_dir_all(&directory).unwrap();
     let export = base.join("2026-10-15 1418 Meeting.md");
@@ -856,6 +329,15 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     let renamed = rename_meeting(&directory, "  Arcade   planning ").unwrap();
     assert_eq!(renamed.title, "Arcade planning");
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade planning");
+    // Only live chapters read the title's source; with the experiment off
+    // the manifest gains no field.
+    let live_chapters = crate::experiments::enabled(crate::experiments::Experiment::LiveChapters);
+    assert_eq!(
+        fs::read_to_string(directory.join("manifest.json"))
+            .unwrap()
+            .contains("title_source"),
+        live_chapters
+    );
     assert!(
         fs::read_to_string(&export)
             .unwrap()
@@ -871,6 +353,77 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
         "# My own heading\n\nNotes.\n"
     );
     assert!(rename_meeting(&directory, "   ").is_err());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn chapters_extend_every_title_but_one_the_user_typed() {
+    let chapters = vec![
+        Chapter {
+            title: "Image storage".into(),
+            summary: String::new(),
+            start_ms: 0,
+        },
+        Chapter {
+            title: "Motion lint".into(),
+            summary: String::new(),
+            start_ms: 200_000,
+        },
+        Chapter {
+            title: "Chat app name".into(),
+            summary: String::new(),
+            start_ms: 500_000,
+        },
+    ];
+    let (base, directory) = finished_meeting("chapter-title", "Team sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.duration_ms = Some(700_000);
+    manifest.chapters = chapters;
+    // Older manifests have no source: a title other than the default is
+    // the user's, so chapters leave it alone.
+    assert_eq!(manifest.title_source, None);
+    assert_eq!(manifest.title_source(), TitleSource::User);
+    assert_eq!(display_title(&manifest), "Team sync");
+
+    for source in [TitleSource::Call, TitleSource::Calendar] {
+        manifest.title_source = Some(source);
+        assert_eq!(
+            display_title(&manifest),
+            "Team sync: Image storage, Motion lint, Chat app name"
+        );
+    }
+    let default = default_title(None, manifest.created_at_ms);
+    manifest.title = default.clone();
+    manifest.title_source = None;
+    assert_eq!(manifest.title_source(), TitleSource::Default);
+    assert_eq!(
+        display_title(&manifest),
+        format!("{default}: Image storage, Motion lint, Chat app name")
+    );
+    manifest.provisional_title = Some("Launch prep".into());
+    assert_eq!(
+        display_title(&manifest),
+        "Launch prep: Image storage, Motion lint, Chat app name"
+    );
+    write_manifest(&directory, &manifest).unwrap();
+
+    // A rename is the user's, and stays theirs while the recorder, holding
+    // its own copy of the manifest, records more chapters.
+    let renamed = rename_meeting(&directory, "Budget").unwrap();
+    assert_eq!(renamed.title_source, Some(TitleSource::User));
+    assert_eq!(display_title(&read_manifest(&directory).unwrap()), "Budget");
+    adopt_rename(&directory, &mut manifest);
+    assert_eq!(manifest.title, "Budget");
+    assert_eq!(manifest.title_source(), TitleSource::User);
+    assert_eq!(display_title(&manifest), "Budget");
+
+    // A generated title on disk is not adopted.
+    let mut generated = read_manifest(&directory).unwrap();
+    generated.title = "Calendar name".into();
+    generated.title_source = Some(TitleSource::Calendar);
+    write_manifest(&directory, &generated).unwrap();
+    adopt_rename(&directory, &mut manifest);
+    assert_eq!(manifest.title, "Budget");
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -930,38 +483,26 @@ fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
     assert_eq!(cursor.pending_turn_count("meeting-a", &initial), 2);
 
     // A failed paste or clipboard write must not advance the cursor.
-    let failed = cursor.consume_entries("meeting-a", TranscriptPublication::Live, &initial, |_| {
+    let failed = cursor.consume_entries("meeting-a", &initial, |_| {
         Err(eyre!("clipboard unavailable"))
     });
     assert!(failed.is_err());
     assert_eq!(cursor.pending_turn_count("meeting-a", &initial), 2);
-    assert_eq!(cursor.publication_for("meeting-a"), None);
 
-    // A successful copy/paste commits the seen entries and drops the count to 0.
+    // A successful copy/paste commits the entries and drops the count to 0.
     let mut copied = String::new();
     let text = cursor
-        .consume_entries(
-            "meeting-a",
-            TranscriptPublication::Live,
-            &initial,
-            |delta| {
-                copied = delta.to_string();
-                Ok(())
-            },
-        )
+        .consume_entries("meeting-a", &initial, |delta| {
+            copied = delta.to_string();
+            Ok(())
+        })
         .unwrap();
     assert_eq!(text, "You: First. Still me.\n\nThem: Got it.");
     assert_eq!(copied, text);
     assert_eq!(cursor.pending_turn_count("meeting-a", &initial), 0);
-    assert_eq!(
-        cursor.publication_for("meeting-a"),
-        Some(TranscriptPublication::Live)
-    );
     assert!(
         cursor
-            .consume_entries("meeting-a", TranscriptPublication::Live, &initial, |_| Ok(
-                ()
-            ))
+            .consume_entries("meeting-a", &initial, |_| Ok(()))
             .is_err()
     );
 
@@ -975,15 +516,108 @@ fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
     ));
     assert_eq!(cursor.pending_turn_count("meeting-a", &extended), 1);
     let delta = cursor
-        .consume_entries("meeting-a", TranscriptPublication::Live, &extended, |_| {
-            Ok(())
-        })
+        .consume_entries("meeting-a", &extended, |_| Ok(()))
         .unwrap();
     assert_eq!(delta, "You: Next point.");
     assert_eq!(cursor.pending_turn_count("meeting-a", &extended), 0);
 
-    // Switching to a new meeting resets the seen set cleanly.
+    // Switching to a new meeting starts from the beginning.
     assert_eq!(cursor.pending_turn_count("meeting-b", &initial), 2);
+}
+
+#[test]
+fn paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten() {
+    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
+        source,
+        start_ms,
+        end_ms,
+        text: text.into(),
+    };
+    let mut cursor = MeetingPasteCursor::default();
+    let mut pasted = Vec::new();
+    let mut paste = |cursor: &mut MeetingPasteCursor, entries: &[TranscriptEntry]| {
+        if let Ok(text) = cursor.consume_entries("meeting", entries, |_| Ok(())) {
+            pasted.push(text);
+        }
+    };
+    let rolling = vec![
+        entry(MeetingSource::System, 0, 4_000, "Kickoff is at two."),
+        entry(MeetingSource::System, 4_200, 6_000, "Sound good?"),
+    ];
+    paste(&mut cursor, &rolling);
+
+    // The microphone entry before the copied remote speech is published once
+    // the remote side is transcribed past it, and a re-judged echo line
+    // disappears; neither repeats what was copied.
+    let later = vec![
+        entry(MeetingSource::System, 0, 4_000, "Kickoff is at two."),
+        entry(MeetingSource::Microphone, 3_000, 4_000, "Two works."),
+        entry(MeetingSource::System, 4_200, 6_000, "Sound good?"),
+        entry(MeetingSource::System, 6_100, 9_000, "Then let's ship it."),
+    ];
+    paste(&mut cursor, &later);
+
+    // After Stop, the final transcript rebuilt a track with different
+    // segmentation; only text mostly after what was copied is new.
+    let published = vec![
+        entry(
+            MeetingSource::System,
+            0,
+            6_000,
+            "Kickoff is at two. Sounds good?",
+        ),
+        entry(MeetingSource::Microphone, 3_000, 4_000, "Two works."),
+        entry(MeetingSource::System, 6_100, 9_000, "Then let's ship it."),
+        entry(MeetingSource::System, 8_800, 11_000, "And the tail."),
+        entry(MeetingSource::Microphone, 10_000, 11_000, "Bye."),
+    ];
+    paste(&mut cursor, &published);
+    assert!(
+        cursor
+            .consume_entries("meeting", &published, |_| Ok(()))
+            .is_err()
+    );
+    assert_eq!(
+        pasted,
+        [
+            "Them: Kickoff is at two. Sound good?",
+            "You: Two works.\n\nThem: Then let's ship it.",
+            "Them: And the tail.\n\nYou: Bye.",
+        ]
+    );
+}
+
+#[test]
+fn paste_cursor_pastes_text_the_final_pass_recovers_for_skipped_audio() {
+    let entry = |start_ms, end_ms, text: &str| TranscriptEntry {
+        source: MeetingSource::System,
+        start_ms,
+        end_ms,
+        text: text.into(),
+    };
+    let mut cursor = MeetingPasteCursor::default();
+    let mut paste = |entries: &[TranscriptEntry]| {
+        cursor
+            .consume_entries("meeting", entries, |_| Ok(()))
+            .unwrap_or_default()
+    };
+    // The in-call transcript fell behind and skipped 10–40 s of audio.
+    assert_eq!(
+        paste(&[
+            entry(0, 9_000, "Before the backlog."),
+            entry(41_000, 45_000, "After the backlog."),
+        ]),
+        "Them: Before the backlog.\n\nThem: After the backlog."
+    );
+    // The final pass rebuilt the skipped audio; only that text is new.
+    assert_eq!(
+        paste(&[
+            entry(0, 9_000, "Before the backlog."),
+            entry(12_000, 30_000, "Recovered middle."),
+            entry(41_000, 45_000, "After the backlog."),
+        ]),
+        "Them: Recovered middle."
+    );
 }
 
 fn packet_at(source: MeetingSource, arrival_ms: u64, samples: usize) -> AudioPacket {
@@ -1042,7 +676,7 @@ fn writer_fills_a_capture_gap_with_silence_and_records_it() {
         sender.send(packet_at(source, arrival_ms, 1_600)).unwrap();
     }
     drop(sender);
-    let stats = write_tracks(&directory, receiver, None, None, &AtomicU64::new(0)).unwrap();
+    let stats = write_tracks(&directory, receiver, None).unwrap();
     assert_eq!(stats.microphone.samples, 4_800);
     assert!(stats.microphone.gaps.is_empty());
     assert_eq!(stats.system.gaps.len(), 1);

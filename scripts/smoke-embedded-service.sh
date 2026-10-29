@@ -21,7 +21,7 @@ trap cleanup EXIT INT TERM
 cargo build --manifest-path "$root/Cargo.toml"
 mkfifo "$lease"
 HEX_APPLICATION_SUPPORT_DIR="$runtime/support" \
-  "$root/target/debug/voice-control" service --embedded \
+  "$root/target/debug/hex" service --embedded \
   <"$lease" >"$endpoint" 2>"$stderr" &
 pid=$!
 exec 3>"$lease"

@@ -1,6 +1,6 @@
 # Nix
 
-The flake packages HEX for `x86_64-linux`. It supports the Linux X11 beta
+The flake packages Hex for `x86_64-linux`. It supports the Linux X11 beta
 and native Wayland on compatible wlroots compositors. Wayland requires
 layer-shell for the recording overlay, the clipboard protocol used by
 `wl-copy`, and the virtual-keyboard protocol used by `wtype`. Global shortcuts
@@ -27,14 +27,14 @@ falls back to the CPU. On non-NixOS hosts, Nix GUI
 applications may require the host's usual Nix graphics integration.
 
 Models are downloaded into your user data directory, not the Nix store.
-Run `hex model install` once, then launch HEX as your normal desktop user.
-Do not run HEX as root.
+Run `hex model install` once, then launch Hex as your normal desktop user.
+Do not run Hex as root.
 
-The Nix store is not HEX's user-local managed installation layout. In-app
+The Nix store is not Hex's user-local managed installation layout. In-app
 updates do not replace a Nix installation. Update the flake input and
 rebuild or switch your Nix/Home Manager configuration instead. Remove any
 old source-install XDG autostart entry before enabling a second autostart
-mechanism; do not run two HEX listeners.
+mechanism; do not run two Hex listeners.
 
 ## NixOS
 
@@ -47,7 +47,7 @@ Import `hex.nixosModules.hex` and enable the package:
 }
 ```
 
-This installs HEX system-wide. It does not start a root service or enable
+This installs Hex system-wide. It does not start a root service or enable
 autostart for every account. Use the
 Home Manager module below for per-user autostart. Both modules accept an
 explicit `programs.hex.package` override. The flake also exports
@@ -69,12 +69,14 @@ explicit `programs.hex.package` override. The flake also exports
 
 The module always installs the systemd **user** service. Autostart defaults to
 `false`; when enabled, the unit is wanted by `graphical-session.target` by default.
-It waits for a Wayland socket or an X11 window manager before launching `hex service`.
-Use `hex start` to start it manually and `hex app` to open the separate Settings
-client. Closing Settings never stops the service, and there is no Linux tray.
-The service stops with the configured target and retries failed starts
-without a tight restart loop. `hex stop` leaves it stopped until
-the next session or an explicit `systemctl --user start hex.service`.
+It waits for a Wayland socket or an X11 window manager before launching `hex service`,
+which reports readiness to systemd (`Type=notify`) once its socket answers.
+Hex is one process: `hex` opens its window, starting the unit when it is not
+running, and `hex start` starts it without the window. Closing the window never
+stops Hex; a tray icon shows when the desktop has a tray host. The unit stops with the configured target
+and retries failed starts without a tight restart loop; a crash restart opens no
+window. `hex quit` (or **Quit Hex** in the window) leaves it stopped until the
+next session or the next launch.
 
 Your session manager must import its current `DISPLAY`, `XAUTHORITY`,
 `WAYLAND_DISPLAY`, and `XDG_RUNTIME_DIR` values as applicable into the systemd
@@ -87,8 +89,8 @@ start this service automatically.
 
 `hex start` records the current display/session environment in an owner-only
 file read by the unit; it clears stale variables when switching between X11 and
-Wayland. There is one active desktop service per user. Starting it from a
-different desktop explicitly restarts the service for that session.
+Wayland. There is one Hex per user. Launching it from a different desktop
+explicitly restarts the unit for that session.
 
 Home Manager's normal service-switch policy applies: newly enabled services
 can start during a switch if the session target is already active, and
@@ -102,10 +104,10 @@ journalctl --user -u hex.service
 
 ## Wayland Shortcuts
 
-HEX reads no input devices, so neither module adds users to the `input`
+Hex reads no input devices, so neither module adds users to the `input`
 group, installs udev rules, or grants capabilities. With a GlobalShortcuts
 portal, the desktop grants the shortcuts Settings records; the portal
-identifies HEX by the package's `hex.desktop` entry, so keep the package's
+identifies Hex by the package's `hex.desktop` entry, so keep the package's
 `share/applications` on `XDG_DATA_DIRS` (NixOS and Home Manager profiles do).
 Without the portal, bind the commands in your compositor, for example in Sway:
 

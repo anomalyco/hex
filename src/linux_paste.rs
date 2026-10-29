@@ -21,10 +21,11 @@ const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 
-pub struct LinuxPaster {
+pub(crate) struct LinuxPaster {
     backend: Backend,
     stop: Arc<AtomicBool>,
-    paste_with_shift: bool,
+    /// The terminal-paste preference, which the window changes live.
+    paste_with_shift: Arc<AtomicBool>,
 }
 
 enum Backend {
@@ -35,7 +36,7 @@ enum Backend {
 }
 
 impl LinuxPaster {
-    pub fn new(stop: Arc<AtomicBool>, paste_with_shift: bool) -> Result<Self> {
+    pub(crate) fn new(stop: Arc<AtomicBool>, paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
         let backend = match LinuxSession::detect() {
             LinuxSession::X11 => Backend::X11(Box::new(X11Paster::new()?)),
             LinuxSession::Wayland => Backend::Wayland,
@@ -49,7 +50,7 @@ impl LinuxPaster {
 
     /// The focused application's selected text: the primary selection,
     /// which X11 and Wayland compositors update as the user selects.
-    pub fn selected_text(&mut self) -> Option<String> {
+    pub(crate) fn selected_text(&mut self) -> Option<String> {
         let bytes = match &mut self.backend {
             Backend::X11(paster) => {
                 let atoms = &paster.clipboard.getter.atoms;
@@ -77,12 +78,33 @@ impl LinuxPaster {
         (!text.trim().is_empty()).then_some(text)
     }
 
-    pub fn paste(&mut self, text: &str) -> Result<()> {
+    /// Puts `text` on the clipboard without pasting it. On X11 the clipboard
+    /// is served for as long as this paster lives.
+    pub(crate) fn copy(&mut self, text: &str) -> Result<()> {
+        match &mut self.backend {
+            Backend::X11(paster) => {
+                let atoms = &paster.clipboard.getter.atoms;
+                paster
+                    .clipboard
+                    .store(atoms.clipboard, atoms.utf8_string, text.as_bytes())
+                    .wrap_err("could not own the X11 clipboard")
+            }
+            Backend::Wayland => {
+                let mut copy = Command::new("wl-copy");
+                copy.args(["--type", "text/plain;charset=utf-8"]);
+                run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
+                    .wrap_err("could not own the Wayland clipboard; install wl-clipboard")
+            }
+        }
+    }
+
+    pub(crate) fn paste(&mut self, text: &str) -> Result<()> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
+        let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
-            Backend::X11(paster) => paster.paste(text, &self.stop, self.paste_with_shift)?,
+            Backend::X11(paster) => paster.paste(text, &self.stop, paste_with_shift)?,
             Backend::Wayland => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
@@ -91,7 +113,7 @@ impl LinuxPaster {
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
                 let mut keys = Command::new("wtype");
-                keys.args(paste_keys(self.paste_with_shift));
+                keys.args(paste_keys(paste_with_shift));
                 run_helper(keys, &[], &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not send the Wayland paste shortcut; install wtype and use a compositor supporting virtual keyboards")?;
             }
@@ -113,7 +135,7 @@ struct X11Paster {
 }
 
 impl X11Paster {
-    pub fn new() -> Result<Self> {
+    fn new() -> Result<Self> {
         let clipboard = Clipboard::new().wrap_err("could not open the X11 clipboard")?;
         let (connection, root, keymap) = connect_x11()?;
         Ok(Self {
@@ -401,7 +423,7 @@ mod tests {
         let path = std::env::var_os("HEX_WAYLAND_PASTE_OUTPUT")
             .expect("the isolated Wayland test runner must supply its output file");
         let expected = "Example dictation: --flags, punctuation, \u{6f22}\u{5b57}.\nSecond line.";
-        LinuxPaster::new(Arc::new(AtomicBool::new(false)), false)
+        LinuxPaster::new(Arc::new(AtomicBool::new(false)), Default::default())
             .unwrap()
             .paste(expected)
             .unwrap();

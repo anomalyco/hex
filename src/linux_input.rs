@@ -18,19 +18,19 @@ use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Window};
 use x11rb::rust_connection::RustConnection;
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
-use crate::desktop_host::{DesktopGrantedShortcut, DesktopShortcuts};
+use crate::desktop_host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts};
 use crate::linux_session::LinuxSession;
 
 /// A shortcut as X11 grabs and the portal see it: held modifiers and a
 /// named key. Settings store it as a portable `HotkeyBinding`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
-pub struct LinuxHotkey {
-    pub control: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub super_key: bool,
-    pub key: String,
+pub(crate) struct LinuxHotkey {
+    pub(crate) control: bool,
+    pub(crate) alt: bool,
+    pub(crate) shift: bool,
+    pub(crate) super_key: bool,
+    pub(crate) key: String,
 }
 
 impl Default for LinuxHotkey {
@@ -78,39 +78,37 @@ impl From<&LinuxHotkey> for HotkeyBinding {
     }
 }
 
+impl TryFrom<DesktopShortcut> for LinuxHotkey {
+    type Error = color_eyre::Report;
+
+    fn try_from(shortcut: DesktopShortcut) -> Result<Self> {
+        if shortcut.function {
+            return Err(eyre!("the Fn modifier cannot be registered on Linux"));
+        }
+        Ok(Self {
+            control: shortcut.control,
+            alt: shortcut.alt,
+            shift: shortcut.shift,
+            super_key: shortcut.platform,
+            key: if shortcut.key == " " {
+                "space".into()
+            } else {
+                shortcut.key.to_ascii_lowercase()
+            },
+        })
+    }
+}
+
 impl LinuxHotkey {
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.key.trim().is_empty() {
             return Err(eyre!("Linux hotkeys require a non-modifier key"));
         }
         Ok(())
     }
 
-    pub fn label(&self) -> String {
-        self.keycaps().join("+")
-    }
-
-    pub fn keycaps(&self) -> Vec<String> {
-        let mut parts = Vec::new();
-        if self.control {
-            parts.push("Ctrl".to_string());
-        }
-        if self.alt {
-            parts.push("Alt".to_string());
-        }
-        if self.shift {
-            parts.push("Shift".to_string());
-        }
-        if self.super_key {
-            parts.push("Super".to_string());
-        }
-        let key = if self.key == "space" {
-            "Space".into()
-        } else {
-            self.key.to_ascii_uppercase()
-        };
-        parts.push(key);
-        parts
+    pub(crate) fn label(&self) -> String {
+        HotkeyBinding::from(self).keycaps().join("+")
     }
 
     /// The trigger the shortcuts portal asks the desktop for, in the
@@ -204,6 +202,9 @@ pub(crate) const KEY_PRESS: u8 = 2;
 pub(crate) const KEY_RELEASE: u8 = 3;
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
 pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+/// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
+/// than this, so a press after a longer gap is a new press.
+const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Binding through the portal can wait for the user to approve a dialog.
 const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
@@ -217,7 +218,7 @@ pub(crate) fn connect_x11() -> Result<(RustConnection, Window, Keymap)> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HotkeyEvent {
+pub(crate) enum HotkeyEvent {
     Start,
     Finish,
     Cancel,
@@ -226,12 +227,15 @@ pub enum HotkeyEvent {
     VoiceStart,
     /// The Voice Action shortcut came up: run the instruction.
     VoiceFinish,
+    /// The capture shortcut went down (the `capture` experiment): the
+    /// capture host decides whether it starts or finishes a capture.
+    Capture,
 }
 
 /// What a `hex` command asks of the running listener. Each one is
 /// idempotent: starting while recording or stopping while idle does nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ShortcutCommand {
+pub(crate) enum ShortcutCommand {
     DictationStart,
     DictationStop,
     DictationToggle,
@@ -253,15 +257,17 @@ impl ShortcutCommand {
 
 /// How the dictation shortcut behaves, and the shortcuts registered
 /// beside it.
-#[derive(Clone, Debug, Default)]
-pub struct HotkeyOptions {
-    pub double_tap: bool,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct HotkeyOptions {
+    pub(crate) double_tap: bool,
     /// Only a double-tap starts recording, which then stays locked.
-    pub double_tap_only: bool,
-    pub toggle: bool,
-    pub paste_last: Option<LinuxHotkey>,
+    pub(crate) double_tap_only: bool,
+    pub(crate) toggle: bool,
+    pub(crate) paste_last: Option<LinuxHotkey>,
     /// Held to record a Voice Action instruction.
-    pub voice_action: Option<LinuxHotkey>,
+    pub(crate) voice_action: Option<LinuxHotkey>,
+    /// Starts or finishes a capture, while captures are on.
+    pub(crate) capture: Option<LinuxHotkey>,
 }
 
 pub(crate) const ESCAPE_CANCEL_WARNING: &str =
@@ -269,7 +275,7 @@ pub(crate) const ESCAPE_CANCEL_WARNING: &str =
 
 /// What the running listener reports about its shortcuts.
 #[derive(Clone, Debug, Default)]
-pub struct HotkeyStatus {
+pub(crate) struct HotkeyStatus {
     escape_unavailable: Arc<AtomicBool>,
     shortcuts: Arc<Mutex<DesktopShortcuts>>,
 }
@@ -307,10 +313,16 @@ enum Shortcut {
     Dictation,
     PasteLast,
     VoiceAction,
+    Capture,
 }
 
 impl Shortcut {
-    const ALL: [Self; 3] = [Self::Dictation, Self::PasteLast, Self::VoiceAction];
+    const ALL: [Self; 4] = [
+        Self::Dictation,
+        Self::PasteLast,
+        Self::VoiceAction,
+        Self::Capture,
+    ];
 
     fn index(self) -> usize {
         self as usize
@@ -322,6 +334,7 @@ impl Shortcut {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::VoiceAction => ("voice-action", "Voice Action"),
+            Self::Capture => ("capture", "Capture"),
         }
     }
 }
@@ -359,6 +372,7 @@ struct ShortcutState {
     /// A Voice Action instruction is recording.
     voice_held: bool,
     last_release: Option<Instant>,
+    last_press: Option<Instant>,
 }
 
 impl ShortcutState {
@@ -371,6 +385,7 @@ impl ShortcutState {
             capture: Capture::Idle,
             voice_held: false,
             last_release: None,
+            last_press: None,
         }
     }
 
@@ -429,28 +444,42 @@ impl ShortcutState {
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
             Input::Escape | Input::Lost => self.cancel(),
-            Input::Pressed(Shortcut::Dictation) => match self.capture {
-                _ if self.voice_held => None,
-                Capture::Locked => {
-                    self.capture = Capture::Idle;
-                    self.last_release = None;
-                    Some(HotkeyEvent::Finish)
-                }
-                Capture::Idle => {
-                    let second_tap = self.toggle
-                        || self.last_release.take().is_some_and(|released| {
-                            now.checked_duration_since(released)
-                                .is_some_and(|gap| gap < DOUBLE_TAP_WINDOW)
-                        });
-                    if self.double_tap_only && !second_tap {
-                        self.capture = Capture::Armed;
-                        return None;
+            Input::Pressed(Shortcut::Dictation) => {
+                let repeat = self
+                    .last_press
+                    .is_some_and(|pressed| now.saturating_duration_since(pressed) < KEY_REPEAT_GAP);
+                self.last_press = Some(now);
+                match self.capture {
+                    _ if self.voice_held => None,
+                    Capture::Locked => {
+                        self.capture = Capture::Idle;
+                        self.last_release = None;
+                        Some(HotkeyEvent::Finish)
                     }
-                    self.capture = Capture::Held { second_tap };
-                    Some(HotkeyEvent::Start)
+                    Capture::Idle => {
+                        let second_tap = self.toggle
+                            || self.last_release.take().is_some_and(|released| {
+                                now.checked_duration_since(released)
+                                    .is_some_and(|gap| gap < DOUBLE_TAP_WINDOW)
+                            });
+                        if self.double_tap_only && !second_tap {
+                            self.capture = Capture::Armed;
+                            return None;
+                        }
+                        self.capture = Capture::Held { second_tap };
+                        Some(HotkeyEvent::Start)
+                    }
+                    // The desktop never sent the release that would have locked
+                    // this capture (Hyprland's Lua binds drop it when the
+                    // modifier comes up first), so this press finishes it.
+                    Capture::Held { second_tap: true } if !repeat => {
+                        self.capture = Capture::Idle;
+                        self.last_release = None;
+                        Some(HotkeyEvent::Finish)
+                    }
+                    Capture::Armed | Capture::Held { .. } => None,
                 }
-                Capture::Armed | Capture::Held { .. } => None,
-            },
+            }
             Input::Released(Shortcut::Dictation) => match self.capture {
                 Capture::Armed => {
                     self.capture = Capture::Idle;
@@ -475,6 +504,8 @@ impl ShortcutState {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
             Input::Released(Shortcut::PasteLast) => None,
+            Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
+            Input::Released(Shortcut::Capture) => None,
             Input::Command(command) => match command {
                 ShortcutCommand::DictationStart => self.start_dictation(),
                 ShortcutCommand::DictationStop => self.stop_dictation(),
@@ -493,13 +524,24 @@ impl ShortcutState {
     }
 }
 
+/// `hex` commands for whichever monitor runs now. The listener keeps one
+/// queue while it registers its shortcuts again after a settings change.
+#[derive(Clone)]
+pub(crate) struct CommandQueue(Arc<Mutex<Receiver<ShortcutCommand>>>);
+
+impl From<Receiver<ShortcutCommand>> for CommandQueue {
+    fn from(receiver: Receiver<ShortcutCommand>) -> Self {
+        Self(Arc::new(Mutex::new(receiver)))
+    }
+}
+
 /// The monitor thread's side: the state machine and its outputs. Backends
 /// feed inputs, update their Escape registration, then [`Dispatcher::flush`],
 /// so Escape is registered before dictation hears that recording started.
 struct Dispatcher {
     state: ShortcutState,
     sender: SyncSender<HotkeyEvent>,
-    commands: Receiver<ShortcutCommand>,
+    commands: CommandQueue,
     pending: Vec<HotkeyEvent>,
 }
 
@@ -507,7 +549,7 @@ impl Dispatcher {
     fn new(
         options: &HotkeyOptions,
         sender: SyncSender<HotkeyEvent>,
-        commands: Receiver<ShortcutCommand>,
+        commands: CommandQueue,
     ) -> Self {
         Self {
             state: ShortcutState::new(options),
@@ -525,7 +567,14 @@ impl Dispatcher {
     /// Feeds every queued `hex` command.
     fn commands(&mut self) {
         // Without a sender (`hex dictate`), only shortcuts remain.
-        while let Ok(command) = self.commands.try_recv() {
+        let commands = self
+            .commands
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let queued: Vec<_> = commands.try_iter().collect();
+        drop(commands);
+        for command in queued {
             self.input(Input::Command(command));
         }
     }
@@ -541,9 +590,9 @@ impl Dispatcher {
     }
 }
 
-pub struct LinuxHotkeyMonitor {
-    pub events: Receiver<HotkeyEvent>,
-    pub errors: Receiver<String>,
+pub(crate) struct LinuxHotkeyMonitor {
+    pub(crate) events: Receiver<HotkeyEvent>,
+    pub(crate) errors: Receiver<String>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
@@ -551,11 +600,11 @@ pub struct LinuxHotkeyMonitor {
 impl LinuxHotkeyMonitor {
     /// Registers the shortcuts on X11 or through the Wayland shortcuts
     /// portal; without the portal only `commands` drive dictation.
-    pub fn start(
+    pub(crate) fn start(
         binding: LinuxHotkey,
         options: HotkeyOptions,
         status: HotkeyStatus,
-        commands: Receiver<ShortcutCommand>,
+        commands: CommandQueue,
     ) -> Result<Self> {
         Self::start_for(binding, options, LinuxSession::detect(), status, commands)
     }
@@ -565,7 +614,7 @@ impl LinuxHotkeyMonitor {
         options: HotkeyOptions,
         session: LinuxSession,
         status: HotkeyStatus,
-        commands: Receiver<ShortcutCommand>,
+        commands: CommandQueue,
     ) -> Result<Self> {
         let (sender, events) = mpsc::sync_channel(16);
         let (error_sender, errors) = mpsc::channel();
@@ -686,6 +735,7 @@ impl Backend {
                 .voice_action
                 .as_ref()
                 .map(|key| (Shortcut::VoiceAction, key)),
+            options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
         ];
         let mut shortcuts = Vec::new();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -715,7 +765,7 @@ impl Backend {
             let key = match shortcut {
                 Shortcut::Dictation => Some(&binding),
                 Shortcut::VoiceAction => options.voice_action.as_ref(),
-                Shortcut::PasteLast => None,
+                Shortcut::PasteLast | Shortcut::Capture => None,
             }?;
             let trigger = key.portal_trigger_for("Escape").ok()?;
             (trigger != "Escape").then_some(trigger)
@@ -797,6 +847,7 @@ impl Backend {
             Some((Shortcut::Dictation, binding)),
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
             options.voice_action.map(|key| (Shortcut::VoiceAction, key)),
+            options.capture.map(|key| (Shortcut::Capture, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let code = keymap.keycode(keysym(&key.key)?)?;
@@ -873,8 +924,8 @@ impl Backend {
 /// [`RELEASE_GRACE`] passes without a new press.
 #[derive(Default)]
 struct X11Keys {
-    held: [bool; 3],
-    releasing: [Option<Instant>; 3],
+    held: [bool; Shortcut::ALL.len()],
+    releasing: [Option<Instant>; Shortcut::ALL.len()],
 }
 
 impl X11Keys {
@@ -953,12 +1004,13 @@ impl X11Grabs<'_> {
     }
 
     fn release_escape(&mut self) -> Result<()> {
-        release_escape(
-            self.connection,
-            self.root,
-            self.escape,
-            &mut self.escape_grabbed,
-        )
+        for modifiers in self.escape_grabbed.drain(..) {
+            self.connection
+                .ungrab_key(self.escape, self.root, modifiers)?
+                .check()?;
+        }
+        self.connection.flush()?;
+        Ok(())
     }
 }
 
@@ -1014,22 +1066,6 @@ fn grab_escape(
         }
         Err(error) => Err(error).wrap_err("could not grab the Escape key for cancel"),
     }
-}
-
-fn release_escape(
-    connection: &RustConnection,
-    root: Window,
-    escape: u8,
-    grabbed: &mut Vec<ModMask>,
-) -> Result<()> {
-    if !grabbed.is_empty() {
-        for &modifiers in grabbed.iter() {
-            connection.ungrab_key(escape, root, modifiers)?.check()?;
-        }
-        connection.flush()?;
-        grabbed.clear();
-    }
-    Ok(())
 }
 
 fn keysym(key: &str) -> Result<u32> {
@@ -1378,6 +1414,51 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_that_would_lock_finishes_when_the_desktop_drops_its_release() {
+        // Hyprland's Lua binds send no release when Alt comes up before Z.
+        for toggle in [true, false] {
+            let mut test = Test::with(HotkeyOptions {
+                double_tap: !toggle,
+                toggle,
+                ..HotkeyOptions::default()
+            });
+            if !toggle {
+                test.tap();
+                test.now += Duration::from_millis(20);
+            }
+            test.press(Shortcut::Dictation);
+            assert_eq!(test.state.capture, Capture::Held { second_tap: true });
+            test.events.clear();
+            test.now += Duration::from_secs(5);
+            test.press(Shortcut::Dictation);
+            assert_eq!(test.events, [Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            test.release(Shortcut::Dictation);
+            test.now += Duration::from_secs(1);
+            test.press(Shortcut::Dictation);
+            assert_eq!(test.events, [Finish, Start]);
+        }
+    }
+
+    #[test]
+    fn a_repeating_held_press_never_finishes_the_capture() {
+        // KWin repeats a held global shortcut's press.
+        let mut test = Test::with(HotkeyOptions {
+            toggle: true,
+            ..HotkeyOptions::default()
+        });
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(900);
+        for _ in 0..100 {
+            test.press(Shortcut::Dictation);
+            test.now += Duration::from_millis(40);
+        }
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [Start]);
+        assert_eq!(test.state.capture, Capture::Locked);
+    }
+
+    #[test]
     fn escape_during_hold_ignores_the_remaining_release() {
         let mut test = Test::new(true);
         test.press(Shortcut::Dictation);
@@ -1695,9 +1776,14 @@ mod tests {
         status: HotkeyStatus,
     ) -> (LinuxHotkeyMonitor, SyncSender<ShortcutCommand>) {
         let (commands, receiver) = mpsc::sync_channel(4);
-        let monitor =
-            LinuxHotkeyMonitor::start_for(binding, options, LinuxSession::X11, status, receiver)
-                .unwrap();
+        let monitor = LinuxHotkeyMonitor::start_for(
+            binding,
+            options,
+            LinuxSession::X11,
+            status,
+            receiver.into(),
+        )
+        .unwrap();
         (monitor, commands)
     }
 
@@ -1814,8 +1900,14 @@ mod tests {
             status: status.clone(),
         };
         let stop = backend.stop.clone();
+        // A starting listener claims no shortcut kind, not even X11's.
+        assert_eq!(status.shortcuts(), DesktopShortcuts::Unregistered);
         let worker = thread::spawn(move || {
-            backend.run_commands(Dispatcher::new(&HotkeyOptions::default(), sender, receiver))
+            backend.run_commands(Dispatcher::new(
+                &HotkeyOptions::default(),
+                sender,
+                receiver.into(),
+            ))
         });
         readiness.recv().unwrap().unwrap();
         assert_eq!(status.shortcuts(), DesktopShortcuts::Commands);

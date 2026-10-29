@@ -1,0 +1,47 @@
+[package]
+name = "capture-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Screen recording for macOS: ScreenCaptureKit streams, bounded stop, and a capture manifest"
+
+# macOS only: every source file is `#![cfg(target_os = "macos")]`, and nothing
+# here is compiled for other targets.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+hound = "3.5.1"
+mach2 = "0.6.0"
+objc2 = "0.6.4"
+# Only the classes in use: the default features pull in frameworks (Image I/O,
+# Media Toolbox) that nothing here needs.
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-graphics",
+    "objc2-core-media",
+    "objc2-core-video",
+    "AVAsset",
+    "AVAssetImageGenerator",
+    "AVAssetTrack",
+    "AVAssetWriter",
+    "AVAssetWriterInput",
+    "AVMediaFormat",
+    "AVVideoSettings",
+] }
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AVAudioSettings",
+] }
+objc2-core-audio-types = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-core-media = "0.3.2"
+# Used only by the tests' fixtures: dev-dependencies of a crate outside the
+# workspace are not resolved.
+objc2-core-video = "0.3.2"
+objc2-foundation = "0.3.2"
+screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"

@@ -1,9 +1,10 @@
-//! Final meeting transcription. Each track streams through a 16 kHz resampler
-//! into pause-aware chunks that are transcribed at utility QoS whenever
-//! dictation is idle: during the recording (rolling) or from the WAV after
-//! Stop. Hard cuts overlap and are deduplicated at the seam. The joined
-//! transcript drops microphone utterances that echo the remote audio, and a
-//! Markdown copy is published to the user's meeting folder.
+//! Meeting transcription. Each track streams through a 16 kHz resampler into
+//! short pause-aware chunks that are transcribed at utility QoS whenever
+//! dictation is idle: during the recording (rolling, which is also what the
+//! Meetings pane and every in-call copy show) or from the WAV after Stop.
+//! Hard cuts overlap and are deduplicated at the seam. The joined transcript
+//! drops microphone utterances that echo the remote audio, and a Markdown
+//! copy is published to the user's meeting folder.
 
 use std::collections::VecDeque;
 use std::fs::{self, File};
@@ -33,19 +34,23 @@ use super::{
 const RATE: usize = 16_000;
 const FRAME: usize = RATE / 50;
 /// Pause cuts closer than this to the chunk start are ignored.
-const CHUNK_MIN: usize = RATE * 10;
-/// The first pause after this length ends a chunk.
-const CHUNK_TARGET: usize = RATE * 20;
+const CHUNK_MIN: usize = RATE * 3;
+/// The first pause after this length ends a chunk. Short chunks keep the
+/// in-call transcript a few seconds behind the call.
+const CHUNK_TARGET: usize = RATE * 6;
 /// Without a pause, a chunk is cut here and the next one overlaps it.
-const CHUNK_MAX: usize = RATE * 30;
+const CHUNK_MAX: usize = RATE * 10;
 const CHUNK_OVERLAP: usize = RATE * 2;
 const MIN_TAIL: usize = RATE * 3 / 10;
+/// A chunk with no 20 ms frame this loud is silence and is not transcribed.
+const SILENT_DB: f32 = -60.0;
 /// About five minutes of one-second blocks for both sources.
 const ROLLING_QUEUE_CAPACITY: usize = 600;
-/// Chunks slower than this are logged; a stalled worker loses the queue.
+/// Chunks slower than this are logged.
 const SLOW_CHUNK: Duration = Duration::from_secs(5);
-/// A source whose untranscribed backlog exceeds this falls back to the WAV.
-const MAX_PENDING_CHUNKS: usize = 24;
+/// A source whose untranscribed backlog exceeds this skips its oldest chunks;
+/// the final transcript then rebuilds it from the WAV.
+const MAX_PENDING_AUDIO: usize = RATE * 120;
 const DICTATION_WAIT: Duration = Duration::from_secs(20);
 /// Pause before retrying a chunk that dictation preempted.
 const PREEMPTED_RETRY: Duration = Duration::from_millis(250);
@@ -58,6 +63,11 @@ const ECHO_SIMILARITY: f32 = 0.6;
 /// A pause this long between timed words starts a new sentence.
 const SENTENCE_PAUSE_MS: i64 = 600;
 const SEAM_MAX_WORDS: usize = 12;
+/// How far apart two chunks may place the same word and still splice on it.
+const SEAM_ANCHOR_MS: i64 = 300;
+/// How far the system source's capture may trail the microphone's before
+/// microphone text stops waiting for it.
+const SYSTEM_STALL_MS: u64 = 5_000;
 
 pub(super) const ROLLING_FILE: &str = "transcript.rolling.ndjson";
 
@@ -67,7 +77,19 @@ pub(super) struct Chunk {
     start: usize,
     /// Leading samples shared with the previous chunk.
     overlap: usize,
+    /// Trailing samples the next chunk transcribes again.
+    tail: usize,
     samples: Vec<f32>,
+}
+
+impl Chunk {
+    fn is_silent(&self) -> bool {
+        let threshold = 10_f32.powf(SILENT_DB / 10.0);
+        self.samples.chunks(FRAME).all(|frame| {
+            frame.iter().map(|sample| sample * sample).sum::<f32>() / (frame.len() as f32)
+                < threshold
+        })
+    }
 }
 
 /// Splits a 16 kHz track into chunks that end at pauses when possible.
@@ -93,10 +115,18 @@ impl Chunker {
     }
 
     pub(super) fn finish(self) -> Option<Chunk> {
+        self.rest(MIN_TAIL)
+    }
+
+    /// The audio not yet in a chunk, as one last chunk, when at least
+    /// `min_tail` samples follow the previous chunk; leaves the chunker as
+    /// it was.
+    fn rest(&self, min_tail: usize) -> Option<Chunk> {
         let begin = self.chunk_start - self.overlap;
-        (self.end() >= self.chunk_start + MIN_TAIL).then(|| Chunk {
+        (self.end() >= self.chunk_start + min_tail.max(1)).then(|| Chunk {
             start: begin,
             overlap: self.overlap,
+            tail: 0,
             samples: self.buffer[begin - self.buffer_start..].to_vec(),
         })
     }
@@ -129,6 +159,7 @@ impl Chunker {
         let chunk = Chunk {
             start: begin,
             overlap: self.overlap,
+            tail: next_overlap,
             samples: self.buffer[begin - self.buffer_start..cut - self.buffer_start].to_vec(),
         };
         let keep_from = cut - next_overlap;
@@ -140,13 +171,48 @@ impl Chunker {
     }
 }
 
+/// Transcribes a chunk unless the speech detector finds no speech in it.
+/// Models invent text for silence and noise, so a speechless chunk becomes an
+/// empty transcript; accepting it still advances the track's coverage.
+fn transcribe_speech(
+    samples: &[f32],
+    transcribe: impl FnOnce() -> Result<Transcript>,
+) -> Result<Transcript> {
+    if speechless(samples) {
+        return Ok(Transcript::default());
+    }
+    transcribe()
+}
+
+/// Whether the speech detector heard no speech in `samples`, so they skip the
+/// model.
+fn speechless(samples: &[f32]) -> bool {
+    let speechless = crate::speech_detector::contains_speech(samples) == Some(false);
+    if speechless {
+        tracing::debug!(
+            audio_ms = samples_ms(samples.len()),
+            "skipped meeting chunk without detected speech"
+        );
+    }
+    speechless
+}
+
 /// One source's entries in capture-clock milliseconds.
+#[derive(Clone)]
 pub(super) struct TrackTranscript {
     source: MeetingSource,
     origin_ms: u64,
     entries: Vec<TranscriptEntry>,
-    /// Capture-clock end of the audio transcribed so far.
-    through_ms: u64,
+    /// Timed words, in capture-clock milliseconds, of a sentence the next
+    /// chunk can still change: one that runs into its overlap.
+    words: Vec<TranscriptSegment>,
+    /// Capture-clock time before which entries are final: the next chunk's
+    /// seam replaces only entries that start after it.
+    settled_ms: u64,
+    /// Where a flush for a copy cut this track: a sentence always ends
+    /// there, so the copy's last sentence and the rest of it, published
+    /// later, are separate entries the paste cursor tells apart.
+    breaks: Vec<i64>,
 }
 
 impl TrackTranscript {
@@ -155,19 +221,26 @@ impl TrackTranscript {
             source,
             origin_ms,
             entries: Vec::new(),
-            through_ms: origin_ms,
+            words: Vec::new(),
+            settled_ms: origin_ms,
+            breaks: Vec::new(),
         }
     }
 
     fn accept(&mut self, chunk: &Chunk, transcript: Transcript) {
         let chunk_ms = self.origin_ms + samples_ms(chunk.start);
         let duration_ms = samples_ms(chunk.samples.len());
-        self.through_ms = self.through_ms.max(chunk_ms + duration_ms);
-        let segments = if transcript.words.is_empty() {
-            transcript.segments
-        } else {
-            sentences(transcript.words)
-        };
+        let next_seam = chunk_ms + duration_ms - samples_ms(chunk.tail) / 2;
+        self.settled_ms = self.settled_ms.max(next_seam);
+        let untimed = !transcript.segments.is_empty() || !transcript.text.trim().is_empty();
+        if !transcript.words.is_empty() || (!untimed && !self.words.is_empty()) {
+            self.accept_words(chunk, chunk_ms, duration_ms, transcript.words);
+            self.publish_sentences(next_seam, chunk.tail == 0);
+            return;
+        }
+        // A model without word timings (Apple Speech) took over mid-track.
+        self.finish();
+        let segments = transcript.segments;
         let segmented = !segments.is_empty();
         let mut incoming: Vec<TranscriptEntry> = if segmented {
             segments
@@ -209,36 +282,194 @@ impl TrackTranscript {
         }
         self.entries.extend(incoming);
     }
+
+    /// Joins a chunk's timed words at the seam word by word, so a sentence
+    /// that runs across a hard cut keeps every word from one side or the
+    /// other.
+    fn accept_words(
+        &mut self,
+        chunk: &Chunk,
+        chunk_ms: u64,
+        duration_ms: u64,
+        words: Vec<TranscriptSegment>,
+    ) {
+        let mut incoming = words
+            .into_iter()
+            .filter_map(|word| {
+                let text = word.text.trim().to_string();
+                let start = (word.start_ms.max(0) as u64).min(duration_ms);
+                let end = (word.end_ms.max(0) as u64).clamp(start, duration_ms);
+                (!text.is_empty()).then(|| TranscriptSegment {
+                    start_ms: (chunk_ms + start) as i64,
+                    end_ms: (chunk_ms + end) as i64,
+                    text,
+                })
+            })
+            .collect::<Vec<_>>();
+        if chunk.overlap > 0
+            && let Some((kept, skipped)) =
+                seam_anchor(&self.words, &incoming, chunk_ms, samples_ms(chunk.overlap))
+        {
+            self.words.truncate(kept);
+            incoming.drain(..skipped);
+        } else if chunk.overlap > 0 {
+            let seam = (chunk_ms + samples_ms(chunk.overlap) / 2) as i64;
+            self.words.retain(|word| word.start_ms < seam);
+            incoming.retain(|word| word.start_ms >= seam);
+            let previous = if self.words.is_empty() {
+                self.entries
+                    .last()
+                    .map(|entry| entry.text.split_whitespace().map(normalize_word).collect())
+                    .unwrap_or_default()
+            } else {
+                self.words
+                    .iter()
+                    .map(|word| normalize_word(&word.text))
+                    .collect::<Vec<_>>()
+            };
+            let next = incoming
+                .iter()
+                .map(|word| normalize_word(&word.text))
+                .collect::<Vec<_>>();
+            incoming.drain(..repeated_prefix(&previous, &next));
+        }
+        self.words.extend(incoming);
+    }
+
+    /// Publishes every pending word, as when no chunk follows.
+    fn finish(&mut self) {
+        if let Some(end) = self.words.iter().map(|word| word.end_ms).max() {
+            self.settled_ms = self.settled_ms.max(end as u64 + 1);
+        }
+        self.publish_sentences(self.settled_ms, true);
+    }
+
+    /// Moves sentences no later chunk can change into the entries: every
+    /// sentence when nothing overlaps the next chunk, else those wholly
+    /// before `seam_ms` and closed by punctuation or a later sentence.
+    fn publish_sentences(&mut self, seam_ms: u64, all: bool) {
+        let seam_ms = seam_ms as i64;
+        let groups = sentence_groups(&self.words, &self.breaks);
+        let published = if all {
+            groups.len()
+        } else {
+            groups
+                .iter()
+                .enumerate()
+                .take_while(|(index, group)| {
+                    let before_seam = |word: &TranscriptSegment| word.start_ms < seam_ms;
+                    self.words[group.start..group.end].iter().all(before_seam)
+                        && (self.words[group.end - 1].text.ends_with(['.', '?', '!'])
+                            || groups
+                                .get(index + 1)
+                                .is_some_and(|next| before_seam(&self.words[next.start])))
+                })
+                .count()
+        };
+        let end = groups
+            .get(published)
+            .map_or(self.words.len(), |group| group.start);
+        let mut words = self.words.drain(..end).collect::<Vec<_>>();
+        if let Some(last) = words.last() {
+            let last = word_middle(last);
+            self.breaks.retain(|&cut| cut > last);
+        }
+        for group in groups.into_iter().take(published) {
+            let group = words.drain(..group.len()).collect::<Vec<_>>();
+            self.entries.push(TranscriptEntry {
+                source: self.source,
+                start_ms: group[0].start_ms as u64,
+                end_ms: group
+                    .iter()
+                    .map(|word| word.end_ms)
+                    .max()
+                    .unwrap_or_default() as u64,
+                text: group
+                    .iter()
+                    .map(|word| word.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            });
+        }
+    }
 }
 
-/// Groups timed words into sentences: a group ends after sentence
-/// punctuation or before a pause. Models that time words often return one
-/// segment per chunk, which is too coarse to tell echo from a reply.
-fn sentences(words: Vec<TranscriptSegment>) -> Vec<TranscriptSegment> {
-    let mut sentences: Vec<TranscriptSegment> = Vec::new();
-    let mut open = false;
-    for word in words {
-        let text = word.text.trim();
-        if text.is_empty() {
+/// The middle of a word. Word boundaries move by tens of milliseconds when
+/// a later chunk hears more context, so a cut is placed by word middles.
+fn word_middle(word: &TranscriptSegment) -> i64 {
+    (word.start_ms + word.end_ms) / 2
+}
+
+/// Word ranges of each sentence in `words`: a sentence ends after sentence
+/// punctuation, before a pause, or at one of `breaks` (the end of the last
+/// word a copy took), between the words whose middles lie either side of it.
+fn sentence_groups(words: &[TranscriptSegment], breaks: &[i64]) -> Vec<std::ops::Range<usize>> {
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        match groups.last_mut() {
+            Some(group)
+                if !words[group.end - 1].text.ends_with(['.', '?', '!'])
+                    && !breaks.iter().any(|&cut| {
+                        word_middle(&words[group.end - 1]) < cut && cut <= word_middle(word)
+                    })
+                    && word.start_ms.saturating_sub(
+                        words[group.clone()]
+                            .iter()
+                            .map(|word| word.end_ms)
+                            .max()
+                            .unwrap_or_default(),
+                    ) < SENTENCE_PAUSE_MS =>
+            {
+                group.end = index + 1;
+            }
+            _ => groups.push(index..index + 1),
+        }
+    }
+    groups
+}
+
+/// A word both chunks heard inside their overlap, at nearly the same time,
+/// closest to the overlap's middle: the earlier chunk keeps it and the words
+/// before it, the later chunk supplies what follows. Returns how many pending
+/// words to keep and how many incoming words to skip. Splicing at a shared
+/// word neither drops nor repeats a word whose timestamp shifts across the
+/// middle between the two chunks.
+fn seam_anchor(
+    previous: &[TranscriptSegment],
+    incoming: &[TranscriptSegment],
+    overlap_start_ms: u64,
+    overlap_ms: u64,
+) -> Option<(usize, usize)> {
+    let start = overlap_start_ms as i64;
+    let end = start + overlap_ms as i64;
+    let middle = start + overlap_ms as i64 / 2;
+    let in_overlap = |word: &TranscriptSegment| word.start_ms >= start && word.start_ms < end;
+    let mut best: Option<(i64, usize, usize)> = None;
+    for (kept, old) in previous
+        .iter()
+        .enumerate()
+        .filter(|(_, word)| in_overlap(word))
+    {
+        let old_text = normalize_word(&old.text);
+        if old_text.is_empty() {
             continue;
         }
-        match sentences.last_mut() {
-            Some(sentence)
-                if open && word.start_ms.saturating_sub(sentence.end_ms) < SENTENCE_PAUSE_MS =>
+        for (skipped, new) in incoming
+            .iter()
+            .enumerate()
+            .filter(|(_, word)| in_overlap(word))
+        {
+            if (old.start_ms - new.start_ms).abs() <= SEAM_ANCHOR_MS
+                && normalize_word(&new.text) == old_text
             {
-                sentence.text.push(' ');
-                sentence.text.push_str(text);
-                sentence.end_ms = sentence.end_ms.max(word.end_ms);
+                let distance = (old.start_ms - middle).abs();
+                if best.is_none_or(|(best, _, _)| distance < best) {
+                    best = Some((distance, kept + 1, skipped + 1));
+                }
             }
-            _ => sentences.push(TranscriptSegment {
-                start_ms: word.start_ms,
-                end_ms: word.end_ms,
-                text: text.into(),
-            }),
         }
-        open = !text.ends_with(['.', '?', '!']);
     }
-    sentences
+    best.map(|(_, kept, skipped)| (kept, skipped))
 }
 
 /// Removes words at the start of `next` that repeat the end of `previous`.
@@ -252,15 +483,17 @@ fn strip_repeated_prefix(previous: &str, next: &str) -> String {
         .iter()
         .map(|word| normalize_word(word))
         .collect::<Vec<_>>();
-    let longest = previous_words
-        .len()
-        .min(normalized_next.len())
-        .min(SEAM_MAX_WORDS);
-    let repeated = (2..=longest)
+    next_words[repeated_prefix(&previous_words, &normalized_next)..].join(" ")
+}
+
+/// How many words (two to twelve) at the start of `next` repeat the end of
+/// `previous`.
+fn repeated_prefix(previous: &[String], next: &[String]) -> usize {
+    let longest = previous.len().min(next.len()).min(SEAM_MAX_WORDS);
+    (2..=longest)
         .rev()
-        .find(|&count| previous_words[previous_words.len() - count..] == normalized_next[..count])
-        .unwrap_or(0);
-    next_words[repeated..].join(" ")
+        .find(|&count| previous[previous.len() - count..] == next[..count])
+        .unwrap_or(0)
 }
 
 fn normalize_word(word: &str) -> String {
@@ -393,11 +626,6 @@ pub(super) fn suppress_echo(
     (kept, dropped_utterances)
 }
 
-/// Whether a microphone entry's words repeat remote speech around it.
-pub(super) fn repeats_remote(entry: &TranscriptEntry, remote: &[&TranscriptEntry]) -> bool {
-    echo_score(&tokens(&entry.text), entry.start_ms, entry.end_ms, remote) >= ECHO_SIMILARITY
-}
-
 /// The share of `spoken` that remote speech within the echo window contains.
 fn echo_score(spoken: &[String], start_ms: u64, end_ms: u64, remote: &[&TranscriptEntry]) -> f32 {
     let start = start_ms.saturating_sub(ECHO_WINDOW_MS);
@@ -446,7 +674,10 @@ fn source_index(source: MeetingSource) -> usize {
 
 fn wait_for_dictation() {
     let started = Instant::now();
-    while crate::parakeet::dictation_busy() && started.elapsed() < DICTATION_WAIT {
+    while crate::parakeet::dictation_busy()
+        && !crate::process_exit::quitting()
+        && started.elapsed() < DICTATION_WAIT
+    {
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -478,8 +709,17 @@ impl ChunkModel {
         }
     }
 
-    /// Fails with the chunk's own transcription error.
+    /// Fails with the chunk's own transcription error. A chunk without
+    /// detected speech returns an empty transcript without the model.
     fn transcribe(&mut self, samples: &[f32]) -> Result<Chunked> {
+        // Quitting drops the dictation engine; a model loaded now would
+        // outlast the drain.
+        if crate::process_exit::quitting() {
+            return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
+        }
+        if speechless(samples) {
+            return Ok(Chunked::Done(Transcript::default()));
+        }
         let engine = crate::transcription_engine::TranscriptionEngine::shared();
         if let Some(engine) = &engine
             && let Some(result) = Self::transcribe_shared(engine, samples)
@@ -506,6 +746,9 @@ impl ChunkModel {
             return Ok(Chunked::Unavailable(eyre!(
                 "meeting transcriber is unavailable"
             )));
+        }
+        if crate::process_exit::quitting() {
+            return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
         }
         let model = match load_model(&mut self.owned, &selection) {
             Ok(model) => model,
@@ -566,11 +809,26 @@ impl ChunkModel {
     }
 }
 
+/// What the rolling worker transcribes chunks with: [`ChunkModel`], or a
+/// fake in tests.
+trait ChunkTranscriber {
+    /// `chunk.start` is the chunk's 16 kHz offset in its track.
+    fn transcribe_chunk(&mut self, chunk: &Chunk) -> Result<Chunked>;
+}
+
+impl ChunkTranscriber for ChunkModel {
+    fn transcribe_chunk(&mut self, chunk: &Chunk) -> Result<Chunked> {
+        self.transcribe(&chunk.samples)
+    }
+}
+
 fn load_model<'a>(
     model: &'a mut Option<Transcriber>,
     selection: &TranscriptionSelection,
 ) -> Result<&'a mut Transcriber> {
     if model.is_none() {
+        #[cfg(test)]
+        tests::MODEL_LOADS.fetch_add(1, Ordering::SeqCst);
         *model = Some(Transcriber::load_selection(selection)?);
     }
     model
@@ -582,26 +840,88 @@ struct RollingTrack {
     resampler: Option<StreamingResampler>,
     sample_rate: u32,
     chunker: Chunker,
+    /// 16 kHz track offset where the current chunker began, after any gap.
+    base: usize,
     transcript: TrackTranscript,
-    /// 16 kHz samples fed to the chunker.
+    /// 16 kHz samples of the track so far, gaps included.
     fed: usize,
     /// Track position, in source samples, expected of the next packet.
     next_position: u64,
+    /// Untranscribed 16 kHz samples queued for this track.
     pending: usize,
     failed: bool,
 }
 
-/// Transcribes completed chunks while the meeting is still recording so the
-/// final transcript is ready shortly after Stop.
+impl RollingTrack {
+    fn push(
+        &mut self,
+        index: usize,
+        samples: &[f32],
+        envelope: &mut EchoEnvelope,
+        pending: &mut VecDeque<(usize, Chunk)>,
+    ) {
+        envelope.push(
+            self.transcript.source,
+            self.transcript.origin_ms + samples_ms(self.fed),
+            samples,
+            RATE as u32,
+        );
+        self.fed += samples.len();
+        for mut chunk in self.chunker.push(samples) {
+            chunk.start += self.base;
+            self.pending += chunk.samples.len();
+            pending.push_back((index, chunk));
+        }
+    }
+
+    /// Queues the rest of the audio, as at Stop or before a gap.
+    fn end(
+        &mut self,
+        index: usize,
+        envelope: &mut EchoEnvelope,
+        pending: &mut VecDeque<(usize, Chunk)>,
+    ) {
+        let tail = self
+            .resampler
+            .take()
+            .map(StreamingResampler::finish)
+            .unwrap_or_default();
+        self.push(index, &tail, envelope, pending);
+        if let Some(mut chunk) = std::mem::take(&mut self.chunker).finish() {
+            chunk.start += self.base;
+            self.pending += chunk.samples.len();
+            pending.push_back((index, chunk));
+        }
+    }
+}
+
+/// Transcribes short chunks while the meeting is still recording. Its
+/// snapshot is the in-call transcript, and the final transcript reuses it
+/// shortly after Stop.
 pub(super) struct Rolling {
-    sender: Option<SyncSender<AudioPacket>>,
-    lost: Arc<[AtomicBool; 2]>,
+    sender: Option<SyncSender<RollingInput>>,
+    flushes: Option<Receiver<FlushRequest>>,
+    flusher: RollingFlusher,
+    incomplete: Arc<[AtomicBool; 2]>,
     worker: JoinHandle<RollingOutcome>,
 }
 
+/// What the capture writer sends the rolling worker, in capture order.
+enum RollingInput {
+    Audio(AudioPacket),
+    /// Transcribe everything sent before this, for a copy.
+    Flush(FlushRequest),
+}
+
+struct FlushRequest {
+    deadline: Instant,
+    reply: SyncSender<Vec<TranscriptEntry>>,
+}
+
 pub(super) struct RollingFeed {
-    sender: SyncSender<AudioPacket>,
-    lost: Arc<[AtomicBool; 2]>,
+    sender: SyncSender<RollingInput>,
+    flushes: Receiver<FlushRequest>,
+    incomplete: Arc<[AtomicBool; 2]>,
     /// Per-source audio gathered into blocks of about a second, so the
     /// bounded queue holds minutes of audio rather than ScreenCaptureKit's
     /// many small packets.
@@ -609,13 +929,10 @@ pub(super) struct RollingFeed {
 }
 
 impl RollingFeed {
-    /// Forwards without blocking; a full queue abandons that source's rolling
-    /// transcript, which is then rebuilt from its WAV after Stop.
+    /// Forwards without blocking. A full queue skips that block: the source
+    /// continues after the gap, and the final pass rebuilds it from its WAV.
     pub(super) fn offer(&mut self, packet: &AudioPacket) {
         let index = source_index(packet.source);
-        if self.lost[index].load(Ordering::Relaxed) {
-            return;
-        }
         if self.blocks[index].as_ref().is_some_and(|block| {
             block.sample_rate != packet.sample_rate
                 || block.position + block.samples.len() as u64 != packet.position
@@ -634,28 +951,83 @@ impl RollingFeed {
         if block.samples.len() >= block.sample_rate as usize {
             self.send(index);
         }
+        self.forward_copies();
     }
 
-    /// Sends partial blocks; call once capture ends.
+    /// Sends partial blocks and any copies waiting; call once capture ends.
     pub(super) fn flush(&mut self) {
+        self.send_blocks();
+        self.forward_copies();
+    }
+
+    fn send_blocks(&mut self) {
         self.send(0);
         self.send(1);
+    }
+
+    /// Forwards waiting copies behind the partial blocks, so each covers
+    /// every sample received so far.
+    fn forward_copies(&mut self) {
+        while let Ok(request) = self.flushes.try_recv() {
+            self.send_blocks();
+            if self.sender.try_send(RollingInput::Flush(request)).is_err() {
+                tracing::warn!(
+                    "rolling meeting transcription is behind; a copy gets what is ready"
+                );
+            }
+        }
     }
 
     fn send(&mut self, index: usize) {
         let Some(block) = self.blocks[index].take() else {
             return;
         };
-        let lost = &self.lost[index];
         let source = block.source;
-        if self.sender.try_send(block).is_err() && !lost.swap(true, Ordering::Relaxed) {
-            tracing::warn!(?source, "rolling meeting transcription fell behind");
+        if self.sender.try_send(RollingInput::Audio(block)).is_err()
+            && !self.incomplete[index].swap(true, Ordering::Relaxed)
+        {
+            tracing::warn!(
+                ?source,
+                "rolling meeting transcription fell behind; skipping audio"
+            );
+        }
+    }
+}
+
+/// Asks a recording's rolling worker for its transcript up to now.
+#[derive(Clone)]
+pub(super) struct RollingFlusher(SyncSender<FlushRequest>);
+
+impl RollingFlusher {
+    /// Transcribes everything captured so far and returns the joined
+    /// entries, as the in-call transcript will show them, or `None` when
+    /// that takes longer than `wait`.
+    /// Quitting ends the wait.
+    pub(super) fn transcribe_up_to_now(&self, wait: Duration) -> Option<Vec<TranscriptEntry>> {
+        const STEP: Duration = Duration::from_millis(50);
+        if crate::process_exit::quitting() {
+            return None;
+        }
+        let deadline = Instant::now() + wait;
+        let (reply, entries) = mpsc::sync_channel(1);
+        self.0.try_send(FlushRequest { deadline, reply }).ok()?;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match entries.recv_timeout(left.min(STEP)) {
+                Ok(entries) => return Some(entries),
+                Err(RecvTimeoutError::Timeout)
+                    if !left.is_zero() && !crate::process_exit::quitting() => {}
+                Err(_) => return None,
+            }
         }
     }
 }
 
 pub(super) struct RollingOutcome {
     tracks: [Option<TrackTranscript>; 2],
+    /// Where copies cut each track, so a track rebuilt from its WAV splits
+    /// its sentences at the same places.
+    cuts: [Vec<i64>; 2],
     envelope: EchoEnvelope,
     model: ChunkModel,
 }
@@ -663,25 +1035,33 @@ pub(super) struct RollingOutcome {
 impl Rolling {
     pub(super) fn start(directory: PathBuf, selection: TranscriptionSelection) -> Self {
         let (sender, receiver) = mpsc::sync_channel(ROLLING_QUEUE_CAPACITY);
-        let lost = Arc::new([AtomicBool::new(false), AtomicBool::new(false)]);
-        let worker_lost = lost.clone();
+        let (flusher, flushes) = mpsc::sync_channel(4);
+        let incomplete = Arc::new([AtomicBool::new(false), AtomicBool::new(false)]);
+        let worker_incomplete = incomplete.clone();
         let worker = thread::Builder::new()
             .name("meeting-transcription".into())
-            .spawn(move || run_rolling(&directory, &selection, receiver, &worker_lost))
+            .spawn(move || run_rolling(&directory, &selection, receiver, &worker_incomplete))
             .expect("meeting transcription thread must start");
         Self {
             sender: Some(sender),
-            lost,
+            flushes: Some(flushes),
+            flusher: RollingFlusher(flusher),
+            incomplete,
             worker,
         }
     }
 
     pub(super) fn feed(&mut self) -> Option<RollingFeed> {
-        self.sender.take().map(|sender| RollingFeed {
-            sender,
-            lost: self.lost.clone(),
+        Some(RollingFeed {
+            sender: self.sender.take()?,
+            flushes: self.flushes.take()?,
+            incomplete: self.incomplete.clone(),
             blocks: [None, None],
         })
+    }
+
+    pub(super) fn flusher(&self) -> RollingFlusher {
+        self.flusher.clone()
     }
 
     /// Waits for the worker after the capture writer dropped its feed.
@@ -691,23 +1071,235 @@ impl Rolling {
     }
 }
 
+/// The recording in this process that a copy can flush.
+static FLUSHERS: std::sync::Mutex<Vec<(String, RollingFlusher)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Makes a recording's flusher reachable by its meeting id until dropped.
+pub(super) struct FlushRegistration(String);
+
+impl Drop for FlushRegistration {
+    fn drop(&mut self) {
+        FLUSHERS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|(id, _)| *id != self.0);
+    }
+}
+
+pub(super) fn register_flusher(id: &str, flusher: RollingFlusher) -> FlushRegistration {
+    FLUSHERS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push((id.to_string(), flusher));
+    FlushRegistration(id.to_string())
+}
+
+pub(super) enum Flushed {
+    /// The transcript through the request.
+    Fresh(Vec<TranscriptEntry>),
+    /// The worker did not answer in time.
+    TimedOut,
+    /// This process is not recording that meeting.
+    NotRecording,
+}
+
+/// Transcribes meeting `id` up to now when this process records it.
+pub(super) fn transcribe_up_to_now(id: &str, wait: Duration) -> Flushed {
+    let flusher = FLUSHERS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .iter()
+        .find(|(recording, _)| recording == id)
+        .map(|(_, flusher)| flusher.clone());
+    match flusher.map(|flusher| flusher.transcribe_up_to_now(wait)) {
+        Some(Some(entries)) => Flushed::Fresh(entries),
+        Some(None) => Flushed::TimedOut,
+        None => Flushed::NotRecording,
+    }
+}
+
+/// The rolling worker's state between inputs.
+struct RollingWorker<'a, M> {
+    directory: &'a Path,
+    tracks: [Option<RollingTrack>; 2],
+    pending: VecDeque<(usize, Chunk)>,
+    envelope: EchoEnvelope,
+    model: M,
+    model_failed: bool,
+    microphone_shown_ms: u64,
+    /// Every copy's cut per track, capture-clock, for a track rebuilt from
+    /// its WAV after Stop.
+    cuts: [Vec<i64>; 2],
+}
+
+impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
+    fn new(directory: &'a Path, model: M) -> Self {
+        Self {
+            directory,
+            tracks: [None, None],
+            pending: VecDeque::new(),
+            envelope: EchoEnvelope::default(),
+            model,
+            model_failed: false,
+            microphone_shown_ms: 0,
+            cuts: [Vec::new(), Vec::new()],
+        }
+    }
+
+    fn ingest(&mut self, incomplete: &[AtomicBool; 2], packet: AudioPacket) {
+        ingest(
+            &mut self.tracks,
+            &mut self.pending,
+            &mut self.envelope,
+            incomplete,
+            packet,
+        );
+    }
+
+    /// Transcribes the oldest pending chunk; `false` when dictation
+    /// preempted it.
+    fn transcribe_next(&mut self) -> bool {
+        transcribe_pending(
+            self.directory,
+            &mut self.tracks,
+            &mut self.pending,
+            &mut self.model,
+            &mut self.model_failed,
+        )
+    }
+
+    fn write_snapshot(&mut self) {
+        write_rolling_snapshot(
+            self.directory,
+            &self.tracks,
+            &mut self.microphone_shown_ms,
+            &self.envelope,
+        );
+    }
+
+    /// Answers a copy with the transcript through everything received: the
+    /// queued chunks as usual, then each track's audio not yet in a chunk,
+    /// transcribed into a copy of its transcript so no later chunk is
+    /// affected. Like every meeting chunk it waits while dictation is busy,
+    /// and it gives up, without replying, at the request's deadline.
+    fn serve_flush(&mut self, request: FlushRequest) {
+        let started = Instant::now();
+        let deadline = request.deadline;
+        let wait = || {
+            thread::sleep(PREEMPTED_RETRY.min(deadline.saturating_duration_since(Instant::now())))
+        };
+        let give_up = |model_failed: bool| {
+            model_failed || crate::process_exit::quitting() || Instant::now() >= deadline
+        };
+        while !self.pending.is_empty() {
+            if give_up(self.model_failed) {
+                return;
+            }
+            if crate::parakeet::dictation_busy() {
+                wait();
+            } else if self.transcribe_next() {
+                self.write_snapshot();
+            } else {
+                wait();
+            }
+        }
+        let mut provisional = self.tracks.each_ref().map(|track| {
+            track
+                .as_ref()
+                .filter(|track| !track.failed)
+                .map(|track| track.transcript.clone())
+        });
+        for (track, copy) in self.tracks.iter().zip(&mut provisional) {
+            let (Some(track), Some(copy)) = (track, copy) else {
+                continue;
+            };
+            // Every sample up to the request, however little follows the
+            // last chunk: a word straddling a hard cut is heard whole.
+            if let Some(mut chunk) = track.chunker.rest(1) {
+                chunk.start += track.base;
+                let transcript = if chunk.is_silent() {
+                    Transcript::default()
+                } else {
+                    loop {
+                        if give_up(false) {
+                            return;
+                        }
+                        if crate::parakeet::dictation_busy() {
+                            wait();
+                            continue;
+                        }
+                        match self.model.transcribe_chunk(&chunk) {
+                            Ok(Chunked::Done(transcript)) => break transcript,
+                            Ok(Chunked::Preempted) => wait(),
+                            Ok(Chunked::Unavailable(error)) | Err(error) => {
+                                tracing::warn!(%error, "could not transcribe the meeting up to a copy");
+                                return;
+                            }
+                        }
+                    }
+                };
+                copy.accept(&chunk, transcript);
+            }
+            // Everything fed is transcribed now, so microphone text waits
+            // for the system track only through the audio it has.
+            copy.settled_ms = copy.settled_ms.max(copy.origin_ms + samples_ms(track.fed));
+            copy.finish();
+        }
+        let view = rolling_view(
+            provisional.each_ref().map(Option::as_ref),
+            system_advancing(&self.tracks),
+            self.microphone_shown_ms,
+            &self.envelope,
+        );
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            entries = view.entries.len(),
+            "transcribed the meeting up to a copy"
+        );
+        // The view is on the meeting's timeline; breaks are capture-clock.
+        let origin_ms = view_origin_ms(provisional.each_ref().map(Option::as_ref));
+        let cuts = [MeetingSource::System, MeetingSource::Microphone].map(|source| {
+            view.entries
+                .iter()
+                .filter(|entry| entry.source == source)
+                .map(|entry| (origin_ms + entry.end_ms) as i64)
+                .max()
+        });
+        if request.reply.try_send(view.entries).is_err() {
+            return;
+        }
+        // The copy ends at each source's last word; the rest of a sentence
+        // running past it is new for the next copy.
+        for ((track, all), cut) in self.tracks.iter_mut().zip(&mut self.cuts).zip(cuts) {
+            if let (Some(track), Some(cut)) = (track, cut)
+                && all.last().is_none_or(|&last| last < cut)
+            {
+                track.transcript.breaks.push(cut);
+                all.push(cut);
+            }
+        }
+    }
+}
+
 fn run_rolling(
     directory: &Path,
     selection: &TranscriptionSelection,
-    receiver: Receiver<AudioPacket>,
-    lost: &[AtomicBool; 2],
+    receiver: Receiver<RollingInput>,
+    incomplete: &[AtomicBool; 2],
 ) -> RollingOutcome {
     crate::parakeet::deprioritize_background_thread();
-    let mut tracks: [Option<RollingTrack>; 2] = [None, None];
-    let mut pending: VecDeque<(usize, Chunk)> = VecDeque::new();
-    let mut envelope = EchoEnvelope::default();
-    let mut model = ChunkModel::new(selection.clone());
-    let mut model_failed = false;
+    let mut worker = RollingWorker::new(directory, ChunkModel::new(selection.clone()));
     loop {
         let mut disconnected = false;
+        let mut flush = None;
         loop {
             match receiver.try_recv() {
-                Ok(packet) => ingest(&mut tracks, &mut pending, &mut envelope, lost, packet),
+                Ok(RollingInput::Audio(packet)) => worker.ingest(incomplete, packet),
+                Ok(RollingInput::Flush(request)) => {
+                    flush = Some(request);
+                    break;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     disconnected = true;
@@ -715,65 +1307,72 @@ fn run_rolling(
                 }
             }
         }
+        if let Some(request) = flush {
+            worker.serve_flush(request);
+            continue;
+        }
         if disconnected {
             break;
         }
         // A preempted chunk falls through to the wait below before retrying.
-        if !pending.is_empty()
-            && !model_failed
+        if !worker.pending.is_empty()
+            && !worker.model_failed
+            && !crate::process_exit::quitting()
             && !crate::parakeet::dictation_busy()
-            && transcribe_pending(&mut tracks, &mut pending, &mut model, &mut model_failed)
+            && worker.transcribe_next()
         {
-            write_rolling_snapshot(directory, &tracks, &envelope);
+            worker.write_snapshot();
             continue;
         }
         match receiver.recv_timeout(Duration::from_millis(200)) {
-            Ok(packet) => ingest(&mut tracks, &mut pending, &mut envelope, lost, packet),
+            Ok(RollingInput::Audio(packet)) => worker.ingest(incomplete, packet),
+            Ok(RollingInput::Flush(request)) => worker.serve_flush(request),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
+    let RollingWorker {
+        mut tracks,
+        mut pending,
+        mut envelope,
+        mut model,
+        mut model_failed,
+        cuts,
+        ..
+    } = worker;
     for (index, track) in tracks.iter_mut().enumerate() {
-        let Some(track) = track else { continue };
-        if track.failed {
-            continue;
-        }
-        let tail = track
-            .resampler
-            .take()
-            .map(StreamingResampler::finish)
-            .unwrap_or_default();
-        envelope.push(
-            track.transcript.source,
-            track.transcript.origin_ms + samples_ms(track.fed),
-            &tail,
-            RATE as u32,
-        );
-        track.fed += tail.len();
-        for chunk in track.chunker.push(&tail) {
-            track.pending += 1;
-            pending.push_back((index, chunk));
-        }
-        let chunker = std::mem::take(&mut track.chunker);
-        if let Some(chunk) = chunker.finish() {
-            track.pending += 1;
-            pending.push_back((index, chunk));
+        if let Some(track) = track
+            && !track.failed
+        {
+            track.end(index, &mut envelope, &mut pending);
         }
     }
-    while !pending.is_empty() && !model_failed {
+    while !pending.is_empty() && !model_failed && !crate::process_exit::quitting() {
         wait_for_dictation();
-        if !transcribe_pending(&mut tracks, &mut pending, &mut model, &mut model_failed) {
+        if !transcribe_pending(
+            directory,
+            &mut tracks,
+            &mut pending,
+            &mut model,
+            &mut model_failed,
+        ) {
             thread::sleep(PREEMPTED_RETRY);
         }
+    }
+    for track in tracks.iter_mut().flatten() {
+        track.transcript.finish();
     }
     let [system, microphone] = tracks;
     let complete = |track: Option<RollingTrack>, index: usize| {
         track
-            .filter(|track| !track.failed && !model_failed && !lost[index].load(Ordering::Relaxed))
+            .filter(|track| {
+                !track.failed && !model_failed && !incomplete[index].load(Ordering::Relaxed)
+            })
             .map(|track| track.transcript)
     };
     RollingOutcome {
         tracks: [complete(system, 0), complete(microphone, 1)],
+        cuts,
         envelope,
         model,
     }
@@ -783,7 +1382,7 @@ fn ingest(
     tracks: &mut [Option<RollingTrack>; 2],
     pending: &mut VecDeque<(usize, Chunk)>,
     envelope: &mut EchoEnvelope,
-    lost: &[AtomicBool; 2],
+    incomplete: &[AtomicBool; 2],
     packet: AudioPacket,
 ) {
     let index = source_index(packet.source);
@@ -796,55 +1395,63 @@ fn ingest(
             resampler,
             sample_rate: packet.sample_rate,
             chunker: Chunker::default(),
+            base: 0,
             transcript: TrackTranscript::new(packet.source, packet.arrival_us / 1_000),
             fed: 0,
             next_position: packet.position,
             pending: 0,
         }
     });
-    if !track.failed && packet.position != track.next_position {
-        // A capture gap was padded in the WAV; the final pass rebuilds this
-        // source from the file rather than misplacing later rolling chunks.
-        tracing::warn!(source = ?packet.source, "rolling meeting transcription skipped a capture gap");
-        track.failed = true;
-        pending.retain(|(source, _)| *source != index);
-    }
-    track.next_position = packet.position + packet.samples.len() as u64;
-    if track.failed
-        || lost[index].load(Ordering::Relaxed)
-        || track.sample_rate != packet.sample_rate
-    {
-        track.failed = true;
+    if track.failed {
         return;
     }
+    if track.sample_rate != packet.sample_rate || packet.position < track.next_position {
+        tracing::warn!(source = ?packet.source, "rolling meeting transcription lost its timeline");
+        track.failed = true;
+        pending.retain(|(source, _)| *source != index);
+        return;
+    }
+    if packet.position > track.next_position {
+        // Silence padded in the WAV after a capture outage, or a block the
+        // full queue skipped: finish the chunk before the gap and start
+        // again after it, at the same place on the timeline.
+        track.end(index, envelope, pending);
+        track.base =
+            (u128::from(packet.position) * RATE as u128 / u128::from(packet.sample_rate)) as usize;
+        track.fed = track.base;
+        track.resampler = StreamingResampler::new(packet.sample_rate).ok();
+    }
+    track.next_position = packet.position + packet.samples.len() as u64;
     let Some(resampler) = &mut track.resampler else {
+        track.failed = true;
         return;
     };
     let samples = resampler.push(&packet.samples);
-    envelope.push(
-        packet.source,
-        track.transcript.origin_ms + samples_ms(track.fed),
-        &samples,
-        RATE as u32,
-    );
-    track.fed += samples.len();
-    for chunk in track.chunker.push(&samples) {
-        track.pending += 1;
-        pending.push_back((index, chunk));
-    }
-    if track.pending > MAX_PENDING_CHUNKS {
-        tracing::warn!(source = ?packet.source, "rolling meeting transcription backlog is full");
-        track.failed = true;
-        pending.retain(|(source, _)| *source != index);
+    track.push(index, &samples, envelope, pending);
+    if track.pending > MAX_PENDING_AUDIO {
+        // Transcription cannot keep up: keep the in-call transcript current
+        // by skipping the oldest audio; the final pass rebuilds the track.
+        if !incomplete[index].swap(true, Ordering::Relaxed) {
+            tracing::warn!(source = ?packet.source, "rolling meeting transcription is behind; skipping audio");
+        }
+        while track.pending > MAX_PENDING_AUDIO / 2 {
+            let Some(position) = pending.iter().position(|(source, _)| *source == index) else {
+                break;
+            };
+            if let Some((_, chunk)) = pending.remove(position) {
+                track.pending = track.pending.saturating_sub(chunk.samples.len());
+            }
+        }
     }
 }
 
 /// Transcribes the oldest pending chunk. Returns `false`, keeping the chunk,
 /// when dictation preempted it.
 fn transcribe_pending(
+    directory: &Path,
     tracks: &mut [Option<RollingTrack>; 2],
     pending: &mut VecDeque<(usize, Chunk)>,
-    model: &mut ChunkModel,
+    model: &mut impl ChunkTranscriber,
     model_failed: &mut bool,
 ) -> bool {
     let Some((index, chunk)) = pending.pop_front() else {
@@ -854,24 +1461,34 @@ fn transcribe_pending(
         return true;
     };
     if track.failed {
-        track.pending = track.pending.saturating_sub(1);
+        track.pending = track.pending.saturating_sub(chunk.samples.len());
+        return true;
+    }
+    if chunk.is_silent() {
+        track.pending = track.pending.saturating_sub(chunk.samples.len());
+        track.transcript.accept(&chunk, Transcript::default());
         return true;
     }
     let started = Instant::now();
-    let result = match model.transcribe(&chunk.samples) {
+    let result = match model.transcribe_chunk(&chunk) {
         Ok(Chunked::Done(transcript)) => Ok(transcript),
         Ok(Chunked::Preempted) => {
             pending.push_front((index, chunk));
             return false;
         }
+        Ok(Chunked::Unavailable(_)) if crate::process_exit::quitting() => {
+            *model_failed = true;
+            return true;
+        }
         Ok(Chunked::Unavailable(error)) => {
             tracing::warn!(%error, "rolling meeting transcription could not load the model");
+            persist_error(directory, &error);
             *model_failed = true;
             return true;
         }
         Err(error) => Err(error),
     };
-    track.pending = track.pending.saturating_sub(1);
+    track.pending = track.pending.saturating_sub(chunk.samples.len());
     if started.elapsed() > SLOW_CHUNK {
         tracing::warn!(
             elapsed_ms = started.elapsed().as_millis() as u64,
@@ -883,6 +1500,7 @@ fn transcribe_pending(
         Ok(transcript) => track.transcript.accept(&chunk, transcript),
         Err(error) => {
             tracing::warn!(%error, "rolling meeting chunk failed");
+            persist_error(directory, &error);
             track.failed = true;
             pending.retain(|(source, _)| *source != index);
         }
@@ -890,21 +1508,28 @@ fn transcribe_pending(
     true
 }
 
+/// Why the in-call transcript stopped, beside the meeting's manifest. The
+/// final transcript is still made from the recording after Stop.
+pub(super) const ERROR_FILE: &str = "transcript.rolling.error.txt";
+
+fn persist_error(directory: &Path, error: &color_eyre::Report) {
+    let path = directory.join(ERROR_FILE);
+    let result = (|| -> Result<()> {
+        fs::write(&path, format!("{error}\n"))?;
+        set_owner_only(&path, false)?;
+        Ok(())
+    })();
+    if let Err(persist_error) = result {
+        tracing::warn!(%persist_error, %error, "could not record why live transcription stopped");
+    }
+}
+
 /// Meeting-timeline milliseconds through which each source's rolling
-/// transcript replaces the live draft, including entries dropped as echo.
+/// transcript is final.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct RollingCoverage {
     pub system: Option<u64>,
     pub microphone: Option<u64>,
-}
-
-impl RollingCoverage {
-    pub(super) fn get(&self, source: MeetingSource) -> Option<u64> {
-        match source {
-            MeetingSource::System => self.system,
-            MeetingSource::Microphone => self.microphone,
-        }
-    }
 }
 
 /// One line of the rolling snapshot: its coverage, then its entries.
@@ -935,63 +1560,108 @@ impl FromIterator<RollingLine> for RollingView {
     }
 }
 
-/// The joined rolling transcript. A microphone entry is published only once
-/// the system track is transcribed through its end, so echo is judged
-/// against the remote words regardless of which chunk finished first. A
-/// system track that stopped advancing is not waited for.
+/// The joined rolling transcript, with only entries no later chunk can
+/// replace. A microphone entry is published only once the system track is
+/// transcribed through its end, so echo is judged against the remote words
+/// regardless of which chunk finished first. A system track that stopped
+/// advancing is not waited for. Microphone entries through
+/// `microphone_shown_ms` were already shown and stay shown.
 fn rolling_view(
     tracks: [Option<&TrackTranscript>; 2],
     system_advancing: bool,
+    microphone_shown_ms: u64,
     envelope: &EchoEnvelope,
 ) -> RollingView {
-    let origin_ms = tracks
-        .iter()
-        .flatten()
-        .map(|track| track.origin_ms)
-        .min()
-        .unwrap_or_default();
+    let origin_ms = view_origin_ms(tracks);
     let [system, microphone] = tracks;
-    let system_through = system.map(|track| track.through_ms);
-    let microphone_through = microphone.map(|track| match system_through {
-        Some(system) if system_advancing => track.through_ms.min(system),
-        _ => track.through_ms,
+    let system_settled = system.map(|track| track.settled_ms);
+    let microphone_settled = microphone.map(|track| match system_settled {
+        Some(system) if system_advancing => track
+            .settled_ms
+            .min(system)
+            .max(microphone_shown_ms.min(track.settled_ms)),
+        _ => track.settled_ms,
     });
-    // A track that fell behind keeps showing what it transcribed; the live
-    // draft continues after it.
+    let settled = |track: &TrackTranscript, through: Option<u64>| {
+        let settled = track.settled_ms;
+        track
+            .entries
+            .iter()
+            .filter(move |entry| {
+                entry.start_ms < settled && through.is_none_or(|through| entry.end_ms <= through)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     let entries = system
+        .map(|track| settled(track, None))
         .into_iter()
-        .flat_map(|track| track.entries.iter().cloned())
-        .chain(microphone.into_iter().flat_map(|track| {
-            track
-                .entries
-                .iter()
-                .filter(|entry| microphone_through.is_none_or(|through| entry.end_ms <= through))
-                .cloned()
-        }))
+        .flatten()
+        .chain(
+            microphone
+                .map(|track| settled(track, microphone_settled))
+                .into_iter()
+                .flatten(),
+        )
         .collect::<Vec<_>>();
     let (entries, _) = join_entries(entries, origin_ms, envelope);
     RollingView {
         entries,
         covered_ms: RollingCoverage {
-            system: system_through.map(|through| through.saturating_sub(origin_ms)),
-            microphone: microphone_through.map(|through| through.saturating_sub(origin_ms)),
+            system: system_settled.map(|through| through.saturating_sub(origin_ms)),
+            microphone: microphone_settled.map(|through| through.saturating_sub(origin_ms)),
         },
     }
 }
 
-/// Atomically replaces the draft that the Meetings pane shows while recording.
+/// Where a rolling view's timeline starts: the earliest track's first
+/// capture-clock arrival.
+fn view_origin_ms(tracks: [Option<&TrackTranscript>; 2]) -> u64 {
+    tracks
+        .iter()
+        .flatten()
+        .map(|track| track.origin_ms)
+        .min()
+        .unwrap_or_default()
+}
+
+/// Whether microphone text waits for the system track. A system source in a
+/// capture outage receives nothing; microphone text does not wait for it.
+fn system_advancing(tracks: &[Option<RollingTrack>; 2]) -> bool {
+    let [system, microphone] = tracks;
+    let captured_ms = |track: &RollingTrack| track.transcript.origin_ms + samples_ms(track.fed);
+    system.as_ref().is_some_and(|system| {
+        !system.failed
+            && microphone.as_ref().is_none_or(|microphone| {
+                captured_ms(microphone) <= captured_ms(system) + SYSTEM_STALL_MS
+            })
+    })
+}
+
+/// Atomically replaces the in-call transcript.
 fn write_rolling_snapshot(
     directory: &Path,
     tracks: &[Option<RollingTrack>; 2],
+    microphone_shown_ms: &mut u64,
     envelope: &EchoEnvelope,
 ) {
     let result = (|| -> Result<()> {
         let [system, microphone] = tracks;
         let view = rolling_view(
             [system, microphone].map(|track| track.as_ref().map(|track| &track.transcript)),
-            system.as_ref().is_some_and(|track| !track.failed),
+            system_advancing(tracks),
+            *microphone_shown_ms,
             envelope,
         );
+        if let (Some(covered), Some(microphone)) = (view.covered_ms.microphone, microphone) {
+            let origin_ms = tracks
+                .iter()
+                .flatten()
+                .map(|track| track.transcript.origin_ms)
+                .min()
+                .unwrap_or(microphone.transcript.origin_ms);
+            *microphone_shown_ms = (*microphone_shown_ms).max(origin_ms + covered);
+        }
         let temporary = directory.join(format!("{ROLLING_FILE}.tmp"));
         let mut file = BufWriter::new(File::create(&temporary)?);
         set_owner_only(&temporary, false)?;
@@ -1015,6 +1685,50 @@ fn write_rolling_snapshot(
     }
 }
 
+/// What the Meetings pane and every copy read: the final transcript once
+/// published, else the rolling one, re-read only when its file changes.
+#[derive(Default)]
+pub struct TranscriptReader {
+    meeting_id: Option<String>,
+    final_entries: Option<Vec<TranscriptEntry>>,
+    rolling_modified: Option<std::time::SystemTime>,
+    rolling: Vec<TranscriptEntry>,
+}
+
+impl TranscriptReader {
+    pub fn read(&mut self, id: &str) -> Result<Vec<TranscriptEntry>> {
+        if self.meeting_id.as_deref() != Some(id) {
+            *self = Self {
+                meeting_id: Some(id.into()),
+                ..Self::default()
+            };
+        }
+        let directory = super::root()?.join(id);
+        super::recover_final_publication(&directory)?;
+        if super::final_transcript_exists(&directory) {
+            if self.final_entries.is_none() {
+                self.final_entries =
+                    Some(super::read_ndjson(&directory.join("transcript.ndjson"))?);
+            }
+            return Ok(self.final_entries.clone().unwrap_or_default());
+        }
+        let path = directory.join(ROLLING_FILE);
+        let modified = match fs::metadata(&path) {
+            Ok(metadata) => metadata.modified().ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        if modified.is_none() || modified != self.rolling_modified {
+            self.rolling = super::read_ndjson::<RollingLine>(&path)?
+                .into_iter()
+                .collect::<RollingView>()
+                .entries;
+            self.rolling_modified = modified;
+        }
+        Ok(self.rolling.clone())
+    }
+}
+
 /// Produces the final transcript, using complete rolling tracks and
 /// streaming any remaining track from its WAV. Returns the joined entries and
 /// the number of echo utterances removed.
@@ -1025,10 +1739,16 @@ pub(super) fn transcribe(
     rolling: Option<RollingOutcome>,
 ) -> Result<(Vec<TranscriptEntry>, u64)> {
     crate::parakeet::deprioritize_background_thread();
-    let (mut rolled, mut envelope, mut model) = match rolling {
-        Some(outcome) => (outcome.tracks, outcome.envelope, outcome.model),
+    let (mut rolled, mut cuts, mut envelope, mut model) = match rolling {
+        Some(outcome) => (
+            outcome.tracks,
+            outcome.cuts,
+            outcome.envelope,
+            outcome.model,
+        ),
         None => (
             [None, None],
+            Default::default(),
             EchoEnvelope::default(),
             ChunkModel::new(selection.clone()),
         ),
@@ -1044,10 +1764,12 @@ pub(super) fn transcribe(
             None => {
                 envelope.clear(source);
                 transcribe_file(
-                    &mut model,
+                    |chunk| model.transcribe_blocking(&chunk.samples),
                     &directory.join(&track.file),
-                    source,
-                    origin_ms,
+                    TrackTranscript {
+                        breaks: std::mem::take(&mut cuts[source_index(source)]),
+                        ..TrackTranscript::new(source, origin_ms)
+                    },
                     &mut envelope,
                 )?
             }
@@ -1067,14 +1789,15 @@ pub(super) fn transcribe(
     Ok(join_entries(entries, origin_ms, &envelope))
 }
 
+/// Transcribes a track's WAV into `transcript`, a new one that may carry
+/// the cuts copies made while recording.
 fn transcribe_file(
-    model: &mut ChunkModel,
+    mut transcribe: impl FnMut(&Chunk) -> Result<Transcript>,
     path: &Path,
-    source: MeetingSource,
-    origin_ms: u64,
+    mut transcript: TrackTranscript,
     envelope: &mut EchoEnvelope,
 ) -> Result<TrackTranscript> {
-    let mut transcript = TrackTranscript::new(source, origin_ms);
+    let (source, origin_ms) = (transcript.source, transcript.origin_ms);
     let mut reader =
         WavReader::open(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
     if reader.duration() == 0 {
@@ -1087,7 +1810,7 @@ fn transcribe_file(
     let mut block = Vec::with_capacity(source_rate as usize);
     let mut fed = 0;
     let mut transcribe_chunk = |chunk: Chunk, transcript: &mut TrackTranscript| -> Result<()> {
-        let result = model.transcribe_blocking(&chunk.samples)?;
+        let result = transcribe(&chunk)?;
         transcript.accept(&chunk, result);
         Ok(())
     };
@@ -1114,6 +1837,7 @@ fn transcribe_file(
     if let Some(chunk) = chunker.finish() {
         transcribe_chunk(chunk, &mut transcript)?;
     }
+    transcript.finish();
     Ok(transcript)
 }
 
@@ -1187,8 +1911,9 @@ pub(super) fn echo_report(
         chunks.extend(chunker.finish());
         if let Some(selection) = &selection {
             for chunk in chunks {
-                let transcript = load_model(&mut model, selection)?
-                    .transcribe_segments(chunk.samples.clone())?;
+                let transcript = transcribe_speech(&chunk.samples, || {
+                    load_model(&mut model, selection)?.transcribe_segments(chunk.samples.clone())
+                })?;
                 old_track.accept(
                     &chunk,
                     Transcript {
@@ -1199,68 +1924,9 @@ pub(super) fn echo_report(
                 new_track.accept(&chunk, transcript);
             }
         }
+        new_track.finish();
         old_entries.extend(old_track.entries);
         new_entries.extend(new_track.entries);
-    }
-
-    let live_path = directory.join("transcript.live.ndjson");
-    if live_path.exists() {
-        let mut events = super::live::latest_events(&live_path)?;
-        let before = events
-            .iter()
-            .filter(|event| event.source == MeetingSource::Microphone)
-            .count();
-        for event in &mut events {
-            if event.source == MeetingSource::Microphone {
-                event.signal = envelope.assess(event.start_ms, event.end_ms);
-            }
-        }
-        let shown = super::live::live_view(&RollingView::default(), events.iter());
-        let after = shown
-            .iter()
-            .filter(|entry| entry.source == MeetingSource::Microphone)
-            .count();
-        let text_only = events
-            .iter()
-            .cloned()
-            .map(|mut event| {
-                event.signal = None;
-                event
-            })
-            .collect::<Vec<_>>();
-        let words_only = super::live::live_view(&RollingView::default(), text_only.iter())
-            .iter()
-            .filter(|entry| entry.source == MeetingSource::Microphone)
-            .count();
-        writeln!(
-            report,
-            "live draft (microphone offset {offset_ms} ms): {before} You lines shown before, \
-             {words_only} with word matching only, {after} with signal and words"
-        )?;
-        events.sort_by_key(|event| event.start_ms);
-        for event in events
-            .iter()
-            .filter(|event| event.source == MeetingSource::Microphone)
-        {
-            let kept = shown
-                .iter()
-                .any(|entry| entry.source == event.source && entry.start_ms == event.start_ms);
-            writeln!(
-                report,
-                "  {} {:>7} {:<6} {:>4} {}",
-                if kept { "KEEP" } else { "drop" },
-                event.start_ms,
-                match event.signal {
-                    Some(Signal::Bleed) => "bleed",
-                    Some(Signal::Local) => "local",
-                    None => "?",
-                },
-                envelope
-                    .locality(event.start_ms, event.end_ms)
-                    .map_or("-".into(), |locality| format!("{:.2}", locality.share)),
-                event.text
-            )?;
-        }
     }
 
     if transcribe {
@@ -1405,6 +2071,20 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
     if let Some(app) = &manifest.app {
         markdown.push_str(&format!("- **App:** {app}\n"));
     }
+    if let Some(calendar) = &manifest.calendar {
+        if calendar.title.trim() != manifest.title.trim() && !calendar.title.trim().is_empty() {
+            markdown.push_str(&format!("- **Calendar:** {}\n", calendar.title.trim()));
+        }
+        let attendees = calendar
+            .attendees
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>();
+        if !attendees.is_empty() {
+            markdown.push_str(&format!("- **Attendees:** {}\n", attendees.join(", ")));
+        }
+    }
     markdown.push_str("\n## Transcript\n\n");
     let turns = coalesce_transcript(entries.iter().cloned());
     if turns.is_empty() {
@@ -1479,6 +2159,8 @@ pub(super) fn export_markdown(
 pub(super) struct ReplayChunk {
     start: usize,
     overlap: usize,
+    #[serde(default)]
+    tail: usize,
     len: usize,
     transcript: Transcript,
 }
@@ -1508,8 +2190,12 @@ pub(super) fn replay_transcribe(model: &mut Transcriber, audio: &[f32]) -> Vec<R
         .map(|chunk| ReplayChunk {
             start: chunk.start,
             overlap: chunk.overlap,
+            tail: chunk.tail,
             len: chunk.samples.len(),
-            transcript: model.transcribe_segments(chunk.samples).unwrap(),
+            transcript: transcribe_speech(&chunk.samples, || {
+                model.transcribe_segments(chunk.samples.clone())
+            })
+            .unwrap(),
         })
         .collect()
 }
@@ -1530,6 +2216,7 @@ pub(super) fn replay_track(
         let chunk = Chunk {
             start: cached.start,
             overlap: cached.overlap,
+            tail: cached.tail,
             samples: vec![0.0; cached.len],
         };
         track.accept(&chunk, cached.transcript.clone());
@@ -1559,7 +2246,7 @@ pub(super) fn replay_views(
     microphone: &TrackTranscript,
     envelope: &EchoEnvelope,
 ) -> (RollingView, Vec<TranscriptEntry>, Vec<TranscriptEntry>) {
-    let view = rolling_view([Some(system), Some(microphone)], true, envelope);
+    let view = rolling_view([Some(system), Some(microphone)], true, 0, envelope);
     let entries = system
         .entries
         .iter()
@@ -1599,7 +2286,7 @@ mod tests {
 
     #[test]
     fn continuous_speech_is_hard_cut_with_overlap_and_covers_every_sample() {
-        let audio = speech(65);
+        let audio = speech(25);
         let chunks = chunks_of(&audio, 4_410);
         let spans = chunks
             .iter()
@@ -1611,7 +2298,14 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(spans, [(0, 0, 30), (28, 2, 32), (58, 2, 7)]);
+        assert_eq!(spans, [(0, 0, 10), (8, 2, 12), (18, 2, 7)]);
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|chunk| chunk.tail / RATE)
+                .collect::<Vec<_>>(),
+            [2, 2, 0]
+        );
         let covered: usize = chunks
             .iter()
             .map(|chunk| chunk.samples.len() - chunk.overlap)
@@ -1628,7 +2322,7 @@ mod tests {
     #[test]
     fn chunks_end_at_the_first_pause_after_the_target_length() {
         let audio = crate::pause_segmenter::tests::utterance(
-            &[(12_000, 800), (9_000, 800), (6_000, 800), (4_000, 0)],
+            &[(4_000, 800), (3_000, 800), (5_000, 800), (2_000, 0)],
             -70.0,
         );
         let chunks = chunks_of(&audio, 1_024);
@@ -1640,8 +2334,9 @@ mod tests {
         );
         assert_eq!(chunks[0].overlap, 0);
         assert_eq!(chunks[1].overlap, 0);
-        // The 12.3 s cut is too early; the pause at 21.8 s ends the chunk.
-        assert_eq!(chunks[1].start * 1_000 / RATE, 21_950);
+        assert_eq!(chunks[0].tail, 0);
+        // The cut in the 4 s pause is too early; the pause at 7.8 s ends the chunk.
+        assert_eq!(chunks[1].start * 1_000 / RATE, 8_100);
     }
 
     #[test]
@@ -1669,11 +2364,88 @@ mod tests {
     }
 
     #[test]
+    fn a_speechless_chunk_skips_the_shared_model() {
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let mut model = ChunkModel::new(TranscriptionSelection::default());
+        let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
+            panic!("a speechless chunk must not reach the model");
+        };
+        assert!(transcript.text.is_empty() && transcript.segments.is_empty());
+        assert!(model.owned.is_none());
+    }
+
+    #[test]
+    fn speechless_chunks_skip_the_model_and_still_advance_coverage() {
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let mut track = TrackTranscript::new(MeetingSource::Microphone, 1_000);
+        let chunk = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 30 * RATE],
+        };
+        let result = transcribe_speech(&chunk.samples, || {
+            panic!("a chunk without speech must not reach the model")
+        })
+        .unwrap();
+        track.accept(&chunk, result);
+        assert!(track.entries.is_empty());
+        assert_eq!(track.settled_ms, 31_000);
+    }
+
+    #[test]
+    fn a_speechless_chunk_after_an_overlap_keeps_earlier_entries() {
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        let first = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 30 * RATE],
+        };
+        let spoken = Transcript {
+            text: String::new(),
+            segments: vec![TranscriptSegment {
+                start_ms: 28_000,
+                end_ms: 29_900,
+                text: "see you on Friday".into(),
+            }],
+            words: Vec::new(),
+        };
+        track.accept(
+            &first,
+            transcribe_speech(&first.samples, || Ok(spoken)).unwrap(),
+        );
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let second = Chunk {
+            start: 28 * RATE,
+            overlap: 2 * RATE,
+            tail: 0,
+            samples: vec![0.1; 10 * RATE],
+        };
+        let result = transcribe_speech(&second.samples, || {
+            panic!("a chunk without speech must not reach the model")
+        })
+        .unwrap();
+        track.accept(&second, result);
+        assert_eq!(
+            track.entries,
+            [entry(
+                MeetingSource::System,
+                28_000,
+                29_900,
+                "see you on Friday"
+            )]
+        );
+        assert_eq!(track.settled_ms, 38_000);
+    }
+
+    #[test]
     fn overlapping_chunks_join_at_the_middle_of_the_overlap() {
         let mut track = TrackTranscript::new(MeetingSource::System, 1_000);
         let first = Chunk {
             start: 0,
             overlap: 0,
+            tail: 2 * RATE,
             samples: vec![0.0; 30 * RATE],
         };
         track.accept(
@@ -1698,6 +2470,7 @@ mod tests {
         let second = Chunk {
             start: 28 * RATE,
             overlap: 2 * RATE,
+            tail: 0,
             samples: vec![0.0; 10 * RATE],
         };
         track.accept(
@@ -1728,6 +2501,814 @@ mod tests {
             texts,
             [(21_000, "we should ship the beta"), (30_200, "on Friday.")]
         );
+    }
+
+    #[test]
+    fn rolling_publishes_only_entries_a_later_seam_cannot_replace() {
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        let segment = |start_ms, end_ms, text: &str| TranscriptSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        };
+        let transcript = |segments| Transcript {
+            segments,
+            ..Transcript::default()
+        };
+        // A hard cut at 10 s: the next chunk starts at 8 s, its seam at 9 s.
+        track.accept(
+            &Chunk {
+                start: 0,
+                overlap: 0,
+                tail: 2 * RATE,
+                samples: vec![0.0; 10 * RATE],
+            },
+            transcript(vec![
+                segment(1_000, 5_000, "Settled words."),
+                segment(9_200, 10_000, "maybe"),
+            ]),
+        );
+        let envelope = EchoEnvelope::default();
+        let view = |track: &TrackTranscript| {
+            rolling_view([Some(track), None], true, 0, &envelope)
+                .entries
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(view(&track), ["Settled words."]);
+        track.accept(
+            &Chunk {
+                start: 8 * RATE,
+                overlap: 2 * RATE,
+                tail: 0,
+                samples: vec![0.0; 6 * RATE],
+            },
+            transcript(vec![segment(1_200, 2_500, "Maybe Friday.")]),
+        );
+        assert_eq!(view(&track), ["Settled words.", "Maybe Friday."]);
+    }
+
+    pub(super) static MODEL_LOADS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    const QUIT_CHILD: &str = "HEX_MEETING_QUIT_CHILD";
+
+    /// The child half of `quitting_mid_meeting_loads_no_model_and_finishes_in_time`.
+    #[test]
+    fn quitting_mid_meeting_child() {
+        let Some(mode) = std::env::var_os(QUIT_CHILD) else {
+            return;
+        };
+        let directory =
+            std::env::temp_dir().join(format!("hex-meeting-quit-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut rolling = Rolling::start(directory.clone(), TranscriptionSelection::default());
+        let mut feed = rolling.feed().unwrap();
+        // Set before any audio arrives so no chunk can start a load first.
+        if mode == "quit" {
+            crate::process_exit::begin_quitting_for_test();
+        }
+        let quit = Instant::now();
+        let audio = speech(30);
+        for (index, block) in audio.chunks(RATE).enumerate() {
+            let position = (index * RATE) as u64;
+            feed.offer(&packet(MeetingSource::System, position, block.to_vec()));
+            feed.offer(&packet(MeetingSource::Microphone, position, block.to_vec()));
+        }
+        feed.flush();
+        drop(feed);
+        rolling.finish().unwrap();
+        println!(
+            "loads={} elapsed_ms={} error_file={}",
+            MODEL_LOADS.load(Ordering::SeqCst),
+            quit.elapsed().as_millis(),
+            directory.join(ERROR_FILE).exists(),
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    fn quitting_mid_meeting_report(mode: &str) -> std::collections::HashMap<String, String> {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "meeting::transcript::tests::quitting_mid_meeting_child",
+                "--nocapture",
+            ])
+            .env(QUIT_CHILD, mode)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .filter_map(|field| field.split_once('='))
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn quitting_mid_meeting_loads_no_model_and_finishes_in_time() {
+        // Without quitting, the same audio with no engine tries to load one.
+        let staying = quitting_mid_meeting_report("stay");
+        assert_ne!(staying["loads"], "0", "{staying:?}");
+        let quitting = quitting_mid_meeting_report("quit");
+        assert_eq!(quitting["loads"], "0", "{quitting:?}");
+        assert_eq!(quitting["error_file"], "false", "{quitting:?}");
+        let elapsed_ms: u64 = quitting["elapsed_ms"].parse().unwrap();
+        assert!(elapsed_ms < 2_000, "{quitting:?}");
+    }
+
+    fn packet(source: MeetingSource, position: u64, samples: Vec<f32>) -> AudioPacket {
+        AudioPacket {
+            source,
+            pts_us: None,
+            arrival_us: 0,
+            position,
+            sample_rate: RATE as u32,
+            samples,
+        }
+    }
+
+    const WORD_SLOT: usize = RATE / 2;
+    const WORD_LENGTH: usize = RATE * 3 / 10;
+
+    /// Hears a word in every loud 500 ms slot of the track, `w<slot>`, and
+    /// every fourth ends a sentence. The same audio always gives the same
+    /// words at the same track times, and a word the chunk cuts off is not
+    /// heard. `preempt` chunks are refused first, as while dictation holds
+    /// the model.
+    #[derive(Default)]
+    struct SlotWords {
+        preempt: usize,
+        calls: Vec<Instant>,
+    }
+
+    impl ChunkTranscriber for SlotWords {
+        fn transcribe_chunk(&mut self, chunk: &Chunk) -> Result<Chunked> {
+            self.calls.push(Instant::now());
+            if self.preempt > 0 {
+                self.preempt -= 1;
+                return Ok(Chunked::Preempted);
+            }
+            let end = chunk.start + chunk.samples.len();
+            let words = (chunk.start.div_ceil(WORD_SLOT)..)
+                .map(|slot| slot * WORD_SLOT)
+                .take_while(|&at| at + WORD_LENGTH <= end)
+                .filter(|&at| {
+                    let heard = &chunk.samples[at - chunk.start..at - chunk.start + WORD_LENGTH];
+                    heard.iter().map(|sample| sample * sample).sum::<f32>() / WORD_LENGTH as f32
+                        > 1e-4
+                })
+                .map(|at| {
+                    let slot = at / WORD_SLOT;
+                    TranscriptSegment {
+                        start_ms: samples_ms(at - chunk.start) as i64,
+                        end_ms: samples_ms(at - chunk.start + WORD_LENGTH) as i64,
+                        text: format!("w{slot}{}", if slot % 4 == 3 { "." } else { "" }),
+                    }
+                })
+                .collect();
+            Ok(Chunked::Done(Transcript {
+                words,
+                ..Transcript::default()
+            }))
+        }
+    }
+
+    /// Them for the first 12 s, then You from 15 s to 30 s: far enough
+    /// apart that echo suppression keeps both.
+    fn call_audio(source: MeetingSource, at: usize) -> f32 {
+        let speaks = match source {
+            MeetingSource::System => at < 12 * RATE,
+            MeetingSource::Microphone => (15 * RATE..30 * RATE).contains(&at),
+        };
+        if speaks {
+            0.1 * (at as f32 * std::f32::consts::TAU * 220.0 / RATE as f32).sin()
+        } else {
+            0.0
+        }
+    }
+
+    /// Every slot either source speaks a whole word in.
+    fn call_slots() -> Vec<usize> {
+        (0..12 * 2).chain(30..30 + 15 * 2).collect()
+    }
+
+    struct Call {
+        directory: PathBuf,
+        incomplete: [AtomicBool; 2],
+        fed: usize,
+        /// Each source's capture-clock arrival of its first packet.
+        arrival_us: [u64; 2],
+        audio: fn(MeetingSource, usize) -> f32,
+    }
+
+    impl Call {
+        fn new(name: &str) -> Self {
+            let directory = std::env::temp_dir()
+                .join(format!("hex-meeting-flush-{name}-{}", std::process::id()));
+            fs::create_dir_all(&directory).unwrap();
+            Self {
+                directory,
+                incomplete: [AtomicBool::new(false), AtomicBool::new(false)],
+                fed: 0,
+                arrival_us: [0, 0],
+                audio: call_audio,
+            }
+        }
+
+        /// Captures both sources through `seconds`, in 100 ms packets.
+        fn capture(&mut self, worker: &mut RollingWorker<SlotWords>, seconds: f32) {
+            let until = (seconds * RATE as f32) as usize;
+            while self.fed < until {
+                let length = (RATE / 10).min(until - self.fed);
+                for source in [MeetingSource::System, MeetingSource::Microphone] {
+                    let samples = (self.fed..self.fed + length)
+                        .map(|at| (self.audio)(source, at))
+                        .collect();
+                    worker.ingest(
+                        &self.incomplete,
+                        AudioPacket {
+                            arrival_us: self.arrival_us[source_index(source)]
+                                + samples_ms(self.fed) * 1_000,
+                            ..packet(source, self.fed as u64, samples)
+                        },
+                    );
+                }
+                self.fed += length;
+            }
+        }
+
+        /// What a plain read of the in-call transcript finds.
+        fn snapshot(&self) -> Vec<TranscriptEntry> {
+            super::super::read_ndjson::<RollingLine>(&self.directory.join(ROLLING_FILE))
+                .map(|lines| lines.into_iter().collect::<RollingView>().entries)
+                .unwrap_or_default()
+        }
+    }
+
+    impl Drop for Call {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    fn transcribe_queued(worker: &mut RollingWorker<SlotWords>) {
+        while !worker.pending.is_empty() {
+            assert!(worker.transcribe_next());
+        }
+        worker.write_snapshot();
+    }
+
+    fn flush(
+        worker: &mut RollingWorker<SlotWords>,
+        wait: Duration,
+    ) -> Option<Vec<TranscriptEntry>> {
+        let (reply, replies) = mpsc::sync_channel(1);
+        worker.serve_flush(FlushRequest {
+            deadline: Instant::now() + wait,
+            reply,
+        });
+        replies.try_recv().ok()
+    }
+
+    /// Stop: the rest of each track, then everything published.
+    fn stop(worker: &mut RollingWorker<SlotWords>) -> Vec<TranscriptEntry> {
+        for (index, track) in worker.tracks.iter_mut().enumerate() {
+            if let Some(track) = track {
+                track.end(index, &mut worker.envelope, &mut worker.pending);
+            }
+        }
+        transcribe_queued(worker);
+        for track in worker.tracks.iter_mut().flatten() {
+            track.transcript.finish();
+        }
+        rolling_view(
+            worker
+                .tracks
+                .each_ref()
+                .map(|track| track.as_ref().map(|track| &track.transcript)),
+            false,
+            0,
+            &worker.envelope,
+        )
+        .entries
+    }
+
+    fn slots(text: &str) -> Vec<usize> {
+        text.split_whitespace()
+            .filter_map(|word| {
+                word.trim_start_matches(|character: char| !character.is_ascii_digit())
+                    .trim_end_matches('.')
+                    .parse()
+                    .ok()
+            })
+            .collect()
+    }
+
+    /// Copies through the shared cursor's rules, returning the slots copied.
+    fn copy(
+        cursor: &mut super::super::MeetingPasteCursor,
+        entries: &[TranscriptEntry],
+    ) -> Vec<usize> {
+        let mut copied = Vec::new();
+        let _ = cursor.consume_entries("call", entries, |text| {
+            copied = slots(text);
+            Ok(())
+        });
+        copied
+    }
+
+    /// The last slot a source speaks a whole word in by `seconds`.
+    fn last_slot_by(seconds: f32) -> usize {
+        let at = (seconds * RATE as f32) as usize;
+        call_slots()
+            .into_iter()
+            .filter(|slot| slot * WORD_SLOT + WORD_LENGTH <= at)
+            .max()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_copy_includes_speech_up_to_the_click() {
+        let mut call = Call::new("click");
+        let directory = call.directory.clone();
+        let mut worker = RollingWorker::new(&directory, SlotWords::default());
+        let mut cursor = super::super::MeetingPasteCursor::default();
+        for click in [9.3, 22.4] {
+            call.capture(&mut worker, click);
+            transcribe_queued(&mut worker);
+            let shown = call.snapshot();
+            let entries = flush(&mut worker, Duration::from_secs(3)).expect("flushed in time");
+            let newest = last_slot_by(click);
+            assert!(
+                shown
+                    .iter()
+                    .all(|entry| !slots(&entry.text).contains(&newest)),
+                "a plain read at {click} s already had w{newest}"
+            );
+            let copied = copy(&mut cursor, &entries);
+            assert_eq!(
+                copied.last(),
+                Some(&newest),
+                "copy at {click} s: {copied:?}"
+            );
+            // The flush is a copy: the in-call transcript is unchanged.
+            assert_eq!(call.snapshot(), shown);
+        }
+        // Both sources are in the copy, You only once Them is covered.
+        let entries = flush(&mut worker, Duration::from_secs(3)).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.source == MeetingSource::System)
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.source == MeetingSource::Microphone)
+        );
+    }
+
+    #[test]
+    fn repeated_copies_neither_repeat_nor_drop_words_as_later_chunks_overlap_them() {
+        copy_repeatedly(Call::new("repeated"));
+    }
+
+    /// On the capture clock, where each source starts at its own first
+    /// arrival, not at zero.
+    #[test]
+    fn repeated_copies_cut_tracks_that_start_at_different_capture_times() {
+        let mut call = Call::new("arrivals");
+        call.arrival_us = [5_000_000_000, 5_000_040_000];
+        copy_repeatedly(call);
+    }
+
+    fn copy_repeatedly(mut call: Call) {
+        let directory = call.directory.clone();
+        let mut worker = RollingWorker::new(&directory, SlotWords::default());
+        let mut cursor = super::super::MeetingPasteCursor::default();
+        let mut copied = Vec::new();
+        // Mid-word, mid-sentence, right after a hard cut, in a pause, twice
+        // in a row, and with chunks still queued (odd clicks skip the
+        // ordinary transcription, so the flush runs the queue first).
+        for (index, click) in [3.7, 9.3, 10.1, 12.75, 16.2, 16.3, 21.05, 27.6]
+            .into_iter()
+            .enumerate()
+        {
+            call.capture(&mut worker, click);
+            if index % 2 == 0 {
+                transcribe_queued(&mut worker);
+            }
+            let entries = flush(&mut worker, Duration::from_secs(3)).expect("flushed in time");
+            let new = copy(&mut cursor, &entries);
+            if let Some(&last) = new.last() {
+                assert_eq!(last, last_slot_by(click), "copy at {click} s: {new:?}");
+            }
+            copied.extend(new);
+        }
+        call.capture(&mut worker, 35.0);
+        let final_entries = stop(&mut worker);
+        copied.extend(copy(&mut cursor, &final_entries));
+        let mut sorted = copied.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, call_slots(), "copied {copied:?}");
+        assert_eq!(sorted, copied, "copies come in order");
+        let final_slots = final_entries
+            .iter()
+            .flat_map(|entry| slots(&entry.text))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            final_slots,
+            call_slots(),
+            "the final transcript keeps every word once"
+        );
+    }
+
+    #[test]
+    fn a_copy_that_runs_out_of_time_gets_no_reply() {
+        let mut call = Call::new("timeout");
+        let directory = call.directory.clone();
+        // Dictation keeps the model the whole time.
+        let mut worker = RollingWorker::new(
+            &directory,
+            SlotWords {
+                preempt: usize::MAX,
+                ..SlotWords::default()
+            },
+        );
+        call.capture(&mut worker, 9.3);
+        let wait = Duration::from_millis(400);
+        let started = Instant::now();
+        assert!(flush(&mut worker, wait).is_none());
+        assert!(started.elapsed() >= wait);
+        assert!(
+            started.elapsed() < wait + PREEMPTED_RETRY * 2,
+            "{:?}",
+            started.elapsed()
+        );
+        // Nothing was lost: the audio is still there for the next attempt.
+        worker.model.preempt = 0;
+        let entries = flush(&mut worker, Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            slots(
+                &entries
+                    .iter()
+                    .map(|entry| entry.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            (0..=18).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_copy_waits_out_dictation_and_a_preempted_chunk() {
+        let mut call = Call::new("dictation");
+        let directory = call.directory.clone();
+        let mut worker = RollingWorker::new(
+            &directory,
+            SlotWords {
+                preempt: 1,
+                ..SlotWords::default()
+            },
+        );
+        call.capture(&mut worker, 5.0);
+        let busy = crate::parakeet::dictation_busy_for_test();
+        let released = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(400));
+            let at = Instant::now();
+            drop(busy);
+            at
+        });
+        let entries = flush(&mut worker, Duration::from_secs(3)).expect("flushed in time");
+        let released = released.join().unwrap();
+        assert!(!worker.model.calls.is_empty());
+        assert!(
+            worker.model.calls.iter().all(|&call| call >= released),
+            "the model ran while dictation was busy"
+        );
+        assert!(
+            worker.model.calls.len() >= 2,
+            "the preempted chunk was retried"
+        );
+        assert!(!entries.is_empty());
+    }
+
+    #[test]
+    fn a_copy_reaches_only_the_recording_this_process_runs() {
+        assert!(matches!(
+            transcribe_up_to_now("not-recording", Duration::from_secs(3)),
+            Flushed::NotRecording
+        ));
+        // A recording whose worker never answers runs out of time.
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let registration = register_flusher("silent", RollingFlusher(sender));
+        let started = Instant::now();
+        assert!(matches!(
+            transcribe_up_to_now("silent", Duration::from_millis(200)),
+            Flushed::TimedOut
+        ));
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        drop(registration);
+        assert!(matches!(
+            transcribe_up_to_now("silent", Duration::from_secs(3)),
+            Flushed::NotRecording
+        ));
+    }
+
+    fn tone(at: usize) -> f32 {
+        0.1 * (at as f32 * std::f32::consts::TAU * 220.0 / RATE as f32).sin()
+    }
+
+    #[test]
+    fn a_copy_just_after_a_hard_cut_keeps_you_while_them_is_silent() {
+        let mut call = Call::new("hard-cut");
+        call.audio = |source, at| match source {
+            MeetingSource::System => 0.0,
+            MeetingSource::Microphone => tone(at),
+        };
+        let directory = call.directory.clone();
+        let mut worker = RollingWorker::new(&directory, SlotWords::default());
+        call.capture(&mut worker, 10.1);
+        transcribe_queued(&mut worker);
+        // Neither track has a pause, so both were cut hard at 10 s, and the
+        // system track is settled only to the middle of the overlap.
+        let system = &worker.tracks[0].as_ref().unwrap().transcript;
+        assert!(system.settled_ms <= 9_000, "{}", system.settled_ms);
+        let entries = flush(&mut worker, Duration::from_secs(3)).expect("flushed in time");
+        let copied = copy(&mut super::super::MeetingPasteCursor::default(), &entries);
+        assert_eq!(copied, (0..=19).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_copy_cut_holds_when_a_later_chunk_moves_the_words_slightly() {
+        let word = |slot: i64, shift: i64| TranscriptSegment {
+            start_ms: slot * 300 - shift,
+            end_ms: (slot + 1) * 300 - shift,
+            text: format!("w{slot}"),
+        };
+        let heard = |words: Vec<TranscriptSegment>, ms: usize| {
+            let chunk = Chunk {
+                start: 0,
+                overlap: 0,
+                tail: 0,
+                samples: vec![0.0; RATE * ms / 1_000],
+            };
+            let transcript = Transcript {
+                words,
+                ..Transcript::default()
+            };
+            (chunk, transcript)
+        };
+        // The copy took w0 to w2, spoken back to back.
+        let mut copied = TrackTranscript::new(MeetingSource::Microphone, 0);
+        let (chunk, transcript) = heard((0..3).map(|slot| word(slot, 0)).collect(), 900);
+        copied.accept(&chunk, transcript);
+        copied.finish();
+        let mut cursor = super::super::MeetingPasteCursor::default();
+        assert_eq!(copy(&mut cursor, &copied.entries), [0, 1, 2]);
+        // With more context the track hears every word 40 ms earlier, so w3
+        // now starts before the cut at the end of w2.
+        let mut track = TrackTranscript::new(MeetingSource::Microphone, 0);
+        track.breaks.push(900);
+        let (chunk, transcript) = heard((0..6).map(|slot| word(slot, 40)).collect(), 1_800);
+        track.accept(&chunk, transcript);
+        track.finish();
+        assert_eq!(copy(&mut cursor, &track.entries), [3, 4, 5]);
+    }
+
+    #[test]
+    fn a_track_rebuilt_from_its_wav_after_stop_keeps_the_copies_cuts() {
+        let mut call = Call::new("rebuild");
+        let directory = call.directory.clone();
+        let mut worker = RollingWorker::new(&directory, SlotWords::default());
+        let mut cursor = super::super::MeetingPasteCursor::default();
+        let mut copied = Vec::new();
+        // The second copy ends after the first word of a sentence.
+        for click in [9.3, 22.4] {
+            call.capture(&mut worker, click);
+            transcribe_queued(&mut worker);
+            let entries = flush(&mut worker, Duration::from_secs(3)).expect("flushed in time");
+            copied.extend(copy(&mut cursor, &entries));
+        }
+        call.capture(&mut worker, 35.0);
+        let rolled = stop(&mut worker);
+        // The microphone track fell behind, so Stop rebuilds it from its WAV.
+        let wav = directory.join("microphone.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: RATE as u32,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create(&wav, spec).unwrap();
+        for at in 0..35 * RATE {
+            writer
+                .write_sample(call_audio(MeetingSource::Microphone, at))
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+        let mut model = SlotWords::default();
+        let cuts = std::mem::take(&mut worker.cuts[1]);
+        assert_eq!(cuts.len(), 1, "{cuts:?}");
+        let rebuilt = transcribe_file(
+            |chunk| match model.transcribe_chunk(chunk)? {
+                Chunked::Done(transcript) => Ok(transcript),
+                Chunked::Preempted | Chunked::Unavailable(_) => unreachable!(),
+            },
+            &wav,
+            TrackTranscript {
+                breaks: cuts,
+                ..TrackTranscript::new(MeetingSource::Microphone, 0)
+            },
+            &mut EchoEnvelope::default(),
+        )
+        .unwrap();
+        let final_entries = rolled
+            .into_iter()
+            .filter(|entry| entry.source == MeetingSource::System)
+            .chain(rebuilt.entries)
+            .collect::<Vec<_>>();
+        copied.extend(copy(&mut cursor, &final_entries));
+        assert_eq!(copied, call_slots());
+    }
+
+    #[test]
+    fn a_copy_waiting_when_capture_ends_is_still_answered() {
+        let call = Call::new("feed-end");
+        let mut rolling = Rolling::start(call.directory.clone(), TranscriptionSelection::default());
+        let mut feed = rolling.feed().unwrap();
+        feed.offer(&packet(MeetingSource::System, 0, vec![0.0; RATE / 2]));
+        let flusher = rolling.flusher();
+        let asking = thread::spawn(move || flusher.transcribe_up_to_now(Duration::from_secs(30)));
+        thread::sleep(Duration::from_millis(100));
+        // Capture ends before another packet arrives.
+        feed.flush();
+        drop(feed);
+        assert!(asking.join().unwrap().is_some());
+        rolling.finish().unwrap();
+    }
+
+    const COPY_QUIT_CHILD: &str = "HEX_MEETING_COPY_QUIT_CHILD";
+
+    /// The child half of `a_copy_stops_waiting_when_hex_quits`.
+    #[test]
+    fn a_copy_stops_waiting_when_hex_quits_child() {
+        if std::env::var_os(COPY_QUIT_CHILD).is_none() {
+            return;
+        }
+        // A worker that never answers.
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let flusher = RollingFlusher(sender);
+        thread::spawn(|| {
+            thread::sleep(Duration::from_millis(200));
+            crate::process_exit::begin_quitting_for_test();
+        });
+        let started = Instant::now();
+        let answered = flusher.transcribe_up_to_now(Duration::from_secs(3));
+        let waited = started.elapsed();
+        let started = Instant::now();
+        let again = flusher.transcribe_up_to_now(Duration::from_secs(3));
+        println!(
+            "answered={} waited_ms={} again={} again_ms={}",
+            answered.is_some(),
+            waited.as_millis(),
+            again.is_some(),
+            started.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn a_copy_stops_waiting_when_hex_quits() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "meeting::transcript::tests::a_copy_stops_waiting_when_hex_quits_child",
+                "--nocapture",
+            ])
+            .env(COPY_QUIT_CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let report = String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .filter_map(|field| field.split_once('='))
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(report["answered"], "false", "{report:?}");
+        let waited: u64 = report["waited_ms"].parse().unwrap();
+        assert!((200..1_000).contains(&waited), "{report:?}");
+        assert_eq!(report["again"], "false", "{report:?}");
+        let again: u64 = report["again_ms"].parse().unwrap();
+        assert!(again < 50, "{report:?}");
+    }
+
+    #[test]
+    fn the_feed_forwards_a_copy_after_the_audio_before_it() {
+        let call = Call::new("feed");
+        let directory = call.directory.clone();
+        let mut rolling = Rolling::start(directory.clone(), TranscriptionSelection::default());
+        let mut feed = rolling.feed().unwrap();
+        let flusher = rolling.flusher();
+        let asking = thread::spawn(move || flusher.transcribe_up_to_now(Duration::from_secs(30)));
+        // Half a second, less than a block: only a flush sends it.
+        thread::sleep(Duration::from_millis(100));
+        feed.offer(&packet(MeetingSource::System, 0, vec![0.0; RATE / 2]));
+        let entries = asking.join().unwrap().expect("answered");
+        assert!(entries.is_empty(), "silence has no words");
+        drop(feed);
+        let outcome = rolling.finish().unwrap();
+        let system = outcome.tracks[0].as_ref().unwrap();
+        assert_eq!(system.breaks, Vec::<i64>::new(), "no words, no cut");
+    }
+
+    #[test]
+    fn a_capture_gap_restarts_the_track_after_it_instead_of_dropping_it() {
+        let mut tracks = [None, None];
+        let mut pending = VecDeque::new();
+        let mut envelope = EchoEnvelope::default();
+        let incomplete = [AtomicBool::new(false), AtomicBool::new(false)];
+        let audio = speech(8);
+        for (index, block) in audio.chunks(RATE).enumerate() {
+            let position = (index * RATE) as u64;
+            let packet = packet(MeetingSource::Microphone, position, block.to_vec());
+            ingest(
+                &mut tracks,
+                &mut pending,
+                &mut envelope,
+                &incomplete,
+                packet,
+            );
+        }
+        // Twenty seconds of silence padded into the WAV, then more speech.
+        let resumed = (28 * RATE) as u64;
+        for (index, block) in audio.chunks(RATE).enumerate() {
+            let position = resumed + (index * RATE) as u64;
+            let packet = packet(MeetingSource::Microphone, position, block.to_vec());
+            ingest(
+                &mut tracks,
+                &mut pending,
+                &mut envelope,
+                &incomplete,
+                packet,
+            );
+        }
+        let track = tracks[1].as_mut().unwrap();
+        assert!(!track.failed);
+        assert!(!incomplete[1].load(Ordering::Relaxed));
+        track.end(1, &mut envelope, &mut pending);
+        let spans = pending
+            .iter()
+            .map(|(_, chunk)| (chunk.start, chunk.start + chunk.samples.len()))
+            .collect::<Vec<_>>();
+        assert!(
+            spans.iter().any(|(_, end)| *end <= 8 * RATE)
+                && spans.iter().any(|(start, _)| *start >= 28 * RATE)
+                && !spans
+                    .iter()
+                    .any(|(start, end)| *start < 28 * RATE && *end > 8 * RATE),
+            "{spans:?}"
+        );
+        assert!(spans.iter().all(|(_, end)| *end <= 36 * RATE), "{spans:?}");
+    }
+
+    #[test]
+    fn a_backlog_skips_the_oldest_audio_and_marks_the_track_for_rebuilding() {
+        let mut tracks = [None, None];
+        let mut pending = VecDeque::new();
+        let mut envelope = EchoEnvelope::default();
+        let incomplete = [AtomicBool::new(false), AtomicBool::new(false)];
+        let audio = speech(MAX_PENDING_AUDIO / RATE + 30);
+        for (index, block) in audio.chunks(RATE).enumerate() {
+            let packet = packet(MeetingSource::System, (index * RATE) as u64, block.to_vec());
+            ingest(
+                &mut tracks,
+                &mut pending,
+                &mut envelope,
+                &incomplete,
+                packet,
+            );
+        }
+        let track = tracks[0].as_ref().unwrap();
+        assert!(!track.failed);
+        assert!(incomplete[0].load(Ordering::Relaxed));
+        assert!(track.pending <= MAX_PENDING_AUDIO);
+        // What remains is the newest audio.
+        assert!(pending.iter().all(|(_, chunk)| chunk.start > 30 * RATE));
+    }
+
+    #[test]
+    fn silent_chunks_are_not_transcribed() {
+        let chunk = |samples| Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples,
+        };
+        assert!(chunk(vec![0.0; 6 * RATE]).is_silent());
+        assert!(chunk(vec![0.0005; 6 * RATE]).is_silent());
+        assert!(!chunk(speech(6)).is_silent());
     }
 
     #[test]
@@ -1914,7 +3495,7 @@ mod tests {
         entries: &[(u64, u64, &str)],
     ) -> TrackTranscript {
         let mut track = TrackTranscript::new(source, 0);
-        track.through_ms = through_ms;
+        track.settled_ms = through_ms;
         track.entries = entries
             .iter()
             .map(|(start, end, text)| entry(source, *start, *end, text))
@@ -1941,7 +3522,7 @@ mod tests {
             ],
         );
         let envelope = EchoEnvelope::default();
-        let view = rolling_view([Some(&system), Some(&microphone)], true, &envelope);
+        let view = rolling_view([Some(&system), Some(&microphone)], true, 0, &envelope);
         assert_eq!(
             view.entries
                 .iter()
@@ -1959,12 +3540,12 @@ mod tests {
 
         // Before any system chunk, the microphone covers nothing yet.
         let pending = track(MeetingSource::System, 0, &[]);
-        let view = rolling_view([Some(&pending), Some(&microphone)], true, &envelope);
+        let view = rolling_view([Some(&pending), Some(&microphone)], true, 0, &envelope);
         assert!(view.entries.is_empty());
         assert_eq!(view.covered_ms.microphone, Some(0));
 
         // A system track that stopped advancing is not waited for.
-        let view = rolling_view([Some(&system), Some(&microphone)], false, &envelope);
+        let view = rolling_view([Some(&system), Some(&microphone)], false, 0, &envelope);
         assert_eq!(view.entries.len(), 3);
         assert_eq!(view.covered_ms.microphone, Some(20_000));
     }
@@ -1978,7 +3559,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(view.covered_ms.get(MeetingSource::Microphone), Some(28_000));
+        assert_eq!(view.covered_ms.microphone, Some(28_000));
         assert_eq!(view.entries.len(), 1);
         let legacy: RollingView = [line(
             r#"{"source":"microphone","start_ms":1,"end_ms":2,"text":"Hi."}"#,
@@ -1996,18 +3577,31 @@ mod tests {
             end_ms,
             text: text.into(),
         };
-        let grouped = sentences(vec![
-            word(0, 300, " Basically,"),
-            word(320, 500, "yes."),
-            word(560, 800, "Then"),
-            word(820, 1_000, "this"),
-            word(2_000, 2_300, "Later"),
-            word(2_320, 2_600, "words"),
-        ]);
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        track.accept(
+            &Chunk {
+                start: 0,
+                overlap: 0,
+                tail: 0,
+                samples: vec![0.0; 3 * RATE],
+            },
+            Transcript {
+                words: vec![
+                    word(0, 300, " Basically,"),
+                    word(320, 500, "yes."),
+                    word(560, 800, "Then"),
+                    word(820, 1_000, "this"),
+                    word(2_000, 2_300, "Later"),
+                    word(2_320, 2_600, "words"),
+                ],
+                ..Transcript::default()
+            },
+        );
         assert_eq!(
-            grouped
+            track
+                .entries
                 .iter()
-                .map(|sentence| (sentence.start_ms, sentence.end_ms, sentence.text.as_str()))
+                .map(|entry| (entry.start_ms, entry.end_ms, entry.text.as_str()))
                 .collect::<Vec<_>>(),
             [
                 (0, 500, "Basically, yes."),
@@ -2015,6 +3609,200 @@ mod tests {
                 (2_000, 2_600, "Later words"),
             ]
         );
+    }
+
+    #[test]
+    fn a_sentence_across_a_hard_cut_keeps_every_word() {
+        let word = |start_ms, text: &str| TranscriptSegment {
+            start_ms,
+            end_ms: start_ms + 250,
+            text: text.into(),
+        };
+        let mut track = TrackTranscript::new(MeetingSource::Microphone, 0);
+        // Cut at 10 s; the next chunk starts at 8 s, so its seam is at 9 s.
+        track.accept(
+            &Chunk {
+                start: 0,
+                overlap: 0,
+                tail: 2 * RATE,
+                samples: vec![0.0; 10 * RATE],
+            },
+            Transcript {
+                words: vec![
+                    word(1_000, "Done."),
+                    word(8_500, "Interface"),
+                    word(8_800, "elements"),
+                    word(9_100, "don't"),
+                    word(9_700, "interf"),
+                ],
+                ..Transcript::default()
+            },
+        );
+        assert_eq!(track.entries.len(), 1, "the open sentence waits");
+        track.accept(
+            &Chunk {
+                start: 8 * RATE,
+                overlap: 2 * RATE,
+                tail: 0,
+                samples: vec![0.0; 6 * RATE],
+            },
+            Transcript {
+                words: vec![
+                    word(500, "Interface"),
+                    word(800, "elements"),
+                    word(1_100, "don't"),
+                    word(1_400, "pop"),
+                    word(1_700, "in."),
+                ],
+                ..Transcript::default()
+            },
+        );
+        assert_eq!(
+            track
+                .entries
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Done.", "Interface elements don't pop in."]
+        );
+    }
+
+    fn hard_cut_track(old: &[(i64, &str)], new: &[(i64, &str)]) -> TrackTranscript {
+        let words = |words: &[(i64, &str)], offset: i64| {
+            words
+                .iter()
+                .map(|&(start_ms, text)| TranscriptSegment {
+                    start_ms: start_ms - offset,
+                    end_ms: start_ms - offset + 200,
+                    text: text.into(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        // Cut at 10 s; the next chunk starts at 8 s, so its seam is at 9 s.
+        track.accept(
+            &Chunk {
+                start: 0,
+                overlap: 0,
+                tail: 2 * RATE,
+                samples: vec![0.0; 10 * RATE],
+            },
+            Transcript {
+                words: words(old, 0),
+                ..Transcript::default()
+            },
+        );
+        if !new.is_empty() {
+            track.accept(
+                &Chunk {
+                    start: 8 * RATE,
+                    overlap: 2 * RATE,
+                    tail: 0,
+                    samples: vec![0.0; 4 * RATE],
+                },
+                Transcript {
+                    words: words(new, 8_000),
+                    ..Transcript::default()
+                },
+            );
+        }
+        track
+    }
+
+    fn texts(track: &TrackTranscript) -> Vec<&str> {
+        track
+            .entries
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_word_whose_time_shifts_across_the_seam_appears_once() {
+        // The two chunks place "nine" on opposite sides of the 9 s middle.
+        let earlier = [
+            (8_400, "We"),
+            (8_700, "said"),
+            (9_050, "nine"),
+            (9_500, "times"),
+        ];
+        let later = [
+            (8_400, "We"),
+            (8_700, "said"),
+            (8_950, "nine"),
+            (9_500, "times."),
+        ];
+        assert_eq!(
+            texts(&hard_cut_track(&earlier, &later)),
+            ["We said nine times."]
+        );
+        let earlier = [
+            (8_400, "We"),
+            (8_700, "said"),
+            (8_950, "nine"),
+            (9_500, "times"),
+        ];
+        let later = [
+            (8_400, "We"),
+            (8_700, "said"),
+            (9_050, "nine"),
+            (9_500, "times."),
+        ];
+        assert_eq!(
+            texts(&hard_cut_track(&earlier, &later)),
+            ["We said nine times."]
+        );
+    }
+
+    #[test]
+    fn stopping_right_after_a_hard_cut_publishes_the_pending_words() {
+        let mut track = hard_cut_track(&[(1_000, "Done."), (8_500, "One"), (9_200, "more")], &[]);
+        assert_eq!(texts(&track), ["Done."]);
+        track.finish();
+        assert_eq!(texts(&track), ["Done.", "One more"]);
+        assert!(
+            track
+                .entries
+                .iter()
+                .all(|entry| entry.start_ms < track.settled_ms)
+        );
+    }
+
+    #[test]
+    fn a_model_without_word_timings_does_not_discard_its_text() {
+        let mut track = hard_cut_track(&[(8_500, "One"), (9_200, "more")], &[]);
+        track.accept(
+            &Chunk {
+                start: 8 * RATE,
+                overlap: 2 * RATE,
+                tail: 0,
+                samples: vec![0.0; 4 * RATE],
+            },
+            Transcript {
+                text: "One more thing.".into(),
+                segments: vec![TranscriptSegment {
+                    start_ms: 1_500,
+                    end_ms: 3_000,
+                    text: "thing.".into(),
+                }],
+                ..Transcript::default()
+            },
+        );
+        assert_eq!(texts(&track), ["One more", "thing."]);
+    }
+
+    #[test]
+    fn microphone_text_already_shown_stays_shown() {
+        let system = track(MeetingSource::System, 10_000, &[]);
+        let microphone = track(
+            MeetingSource::Microphone,
+            20_000,
+            &[(12_000, 14_000, "Ship the beta on Friday.")],
+        );
+        let envelope = EchoEnvelope::default();
+        let view = rolling_view([Some(&system), Some(&microphone)], true, 15_000, &envelope);
+        assert_eq!(view.entries.len(), 1);
+        assert_eq!(view.covered_ms.microphone, Some(15_000));
     }
 
     #[test]
@@ -2086,6 +3874,20 @@ mod tests {
         assert!(markdown.contains("- **Duration:** 02:05\n- **App:** Zoom\n"));
         assert!(markdown.contains("**You** · 00:01\nHi. Can you hear me?\n\n"));
         assert!(markdown.contains("**Them** · 00:04\nLoud and clear.\n"));
+        assert!(!markdown.contains("Attendees"));
+    }
+
+    #[test]
+    fn markdown_lists_the_calendar_attendees() {
+        let mut manifest = manifest();
+        manifest.title = "Q4 launch sync".into();
+        manifest.calendar = Some(crate::meeting::MeetingCalendar {
+            title: "Q4 launch sync".into(),
+            attendees: vec!["Ana Ruiz".into(), "Ben Ito".into()],
+        });
+        let markdown = render_markdown(&manifest, &[]);
+        assert!(markdown.contains("- **App:** Zoom\n- **Attendees:** Ana Ruiz, Ben Ito\n"));
+        assert!(!markdown.contains("**Calendar:**"));
     }
 
     #[test]

@@ -17,5 +17,5 @@ for ((attempt = 0; attempt < 30; attempt++)); do
   sleep 1
 done
 
-echo "HEX: no ready graphical session. Import its display environment into the systemd user manager; retrying." >&2
+echo "Hex: no ready graphical session. Import its display environment into the systemd user manager; retrying." >&2
 exit 1

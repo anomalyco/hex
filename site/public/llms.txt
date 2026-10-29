@@ -2,13 +2,13 @@
 
 > Hex is local voice dictation for Mac, Windows, and Linux. Hold a shortcut, speak, and Hex transcribes on the device and pastes the text wherever the cursor is.
 
-- Mac (Apple silicon, macOS 15 or later): https://downloads.hex.kitlangton.com/releases/HEX-latest-arm64.dmg, or `brew install --cask anomalyco/tap/hex`
-- Windows 10 or 11 beta, x64 and ARM64: per-user Setup.exe installers at https://hex.kitlangton.com/
-- Linux beta, x86_64 Arch with glibc 2.44 or later: `curl -fsSL https://downloads.hex.kitlangton.com/install-linux.sh | sh`
+- Mac (Apple silicon, macOS 15 or later): https://anoma.ly/hex/files/releases/HEX-latest-arm64.dmg, or `brew install --cask anomalyco/tap/hex`
+- Windows 10 or 11 beta, x64 and ARM64: per-user Setup.exe installers at __ORIGIN__/
+- Linux beta, x86_64 Arch with glibc 2.44 or later: `curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`
 
 ## Docs
 
-- [README](https://github.com/anomalyco/hex/blob/main/README.md): features, settings, privacy, and troubleshooting
-- [Windows guide](https://github.com/anomalyco/hex/blob/main/docs/windows.md)
-- [Linux guide](https://github.com/anomalyco/hex/blob/main/docs/linux.md)
-- [TypeScript SDK](https://github.com/anomalyco/hex/blob/main/sdk/typescript/README.md): local transcription for other apps
+- [README](https://github.com/anomalyco/hex/blob/dev/README.md): features, settings, privacy, and troubleshooting
+- [Windows guide](https://github.com/anomalyco/hex/blob/dev/docs/windows.md)
+- [Linux guide](https://github.com/anomalyco/hex/blob/dev/docs/linux.md)
+- [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): local transcription for other apps

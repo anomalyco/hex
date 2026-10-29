@@ -1,7 +1,7 @@
 use std::io::Cursor;
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -10,7 +10,20 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use rodio::buffer::SamplesBuffer;
 use rodio::cpal::BufferSize;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Source};
+use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
+use serde::{Deserialize, Serialize};
+
+/// Which set of feedback sounds plays.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SoundTheme {
+    /// Hex's own sounds, one voice and motif (2026-10-27).
+    #[default]
+    Signature,
+    /// The sounds Hex played before: the start clicks, stop swish and cancel
+    /// thud, macOS Basso for errors, and no done sound.
+    Classic,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
@@ -22,7 +35,25 @@ pub enum Tone {
     Error,
     DictationStart,
     DictationStop,
+    /// A dictation or Voice Action reply was pasted.
+    DictationDone,
     Cancel,
+    /// The first-run tour reached its last step.
+    OnboardingSuccess,
+    /// A Scrawl capture started recording.
+    #[cfg(hex_capture)]
+    CaptureStart,
+    /// It stopped and is being written.
+    #[cfg(hex_capture)]
+    CaptureStop,
+    /// Its auto-send went, once Undo ran out.
+    #[cfg(hex_capture)]
+    CaptureSent,
+    /// A send was taken back, or a recording cancelled.
+    #[cfg(hex_capture)]
+    CaptureUndo,
+    #[cfg(hex_capture)]
+    CaptureFailed,
 }
 
 /// A request to the playback worker. The start tone of a shortcut press is
@@ -40,6 +71,7 @@ static DICTATION_PLAYER: OnceLock<SyncSender<Request>> = OnceLock::new();
 static LOADER_STARTED: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
+static THEME: AtomicU8 = AtomicU8::new(SoundTheme::Signature as u8);
 
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
@@ -47,6 +79,17 @@ pub fn set_enabled(enabled: bool) {
 
 pub fn set_volume(volume: f32) {
     VOLUME.store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+}
+
+pub fn set_theme(theme: SoundTheme) {
+    THEME.store(theme as u8, Ordering::Relaxed);
+}
+
+fn theme() -> SoundTheme {
+    match THEME.load(Ordering::Relaxed) {
+        1 => SoundTheme::Classic,
+        _ => SoundTheme::Signature,
+    }
 }
 
 fn volume() -> f32 {
@@ -148,25 +191,13 @@ pub fn preload() -> Result<()> {
     let (sender, receiver) = mpsc::sync_channel::<Request>(8);
     let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
-        let result = (|| -> Result<_> {
-            let start = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/startRecording.mp3"
-            )))?;
-            let stop = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/stopRecording.mp3"
-            )))?;
-            let cancel = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/cancel.mp3"
-            )))?;
-            Ok((start, stop, cancel))
-        })();
-        let Ok((start, stop, cancel)) = result else {
-            let _ = ready_sender.send(result.map(|_| ()));
-            LOADER_STARTED.store(false, Ordering::Release);
-            return;
+        let sounds = match Sounds::load() {
+            Ok(sounds) => sounds,
+            Err(error) => {
+                let _ = ready_sender.send(Err(error));
+                LOADER_STARTED.store(false, Ordering::Release);
+                return;
+            }
         };
         let mut output = FeedbackOutput::new();
         // The device opens for the first tone, not at startup, so an idle app
@@ -213,18 +244,13 @@ pub fn preload() -> Result<()> {
                 None => None,
             };
             if let Some(tone) = tone {
-                let sound = match tone {
-                    Tone::DictationStart => &start,
-                    Tone::DictationStop => &stop,
-                    Tone::Cancel => &cancel,
-                    #[cfg(target_os = "macos")]
-                    Tone::Wake | Tone::Sleep | Tone::Error => continue,
-                };
-                output.play(sound.clone(), tone);
+                if let Some(sound) = sounds.get(theme(), tone) {
+                    output.play(sound.clone(), tone);
+                }
             } else if timed_out && start_tone.is_due(Instant::now()) {
                 // Only an empty queue reaches here, so a retraction sent while
                 // the device opened always wins over the tone.
-                let (sound, retracted) = Retractable::new(start.clone());
+                let (sound, retracted) = Retractable::new(sounds.set(theme()).start.clone());
                 if output.play(sound, Tone::DictationStart) {
                     start_tone.sounding(retracted);
                 } else {
@@ -243,12 +269,152 @@ pub fn play(tone: Tone) {
         return;
     }
     match tone {
-        Tone::DictationStart | Tone::DictationStop | Tone::Cancel => {
-            enqueue(DICTATION_PLAYER.get(), Request::Play(tone));
-        }
         #[cfg(target_os = "macos")]
-        Tone::Wake | Tone::Sleep | Tone::Error => play_system_sound(tone),
+        Tone::Wake | Tone::Sleep => play_system_sound(tone),
+        #[cfg(target_os = "macos")]
+        Tone::Error if theme() == SoundTheme::Classic => play_system_sound(tone),
+        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
     }
+}
+
+/// Hex's own sounds, one voice and motif made by `scripts/sounds/synth.py`,
+/// which regenerates these files.
+macro_rules! bundled_sound {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/audio/",
+            $name,
+            ".wav"
+        ))
+        .as_slice()
+    };
+}
+
+const START_SOUND: &[u8] = bundled_sound!("dictationStart");
+const STOP_SOUND: &[u8] = bundled_sound!("dictationStop");
+const DONE_SOUND: &[u8] = bundled_sound!("dictationDone");
+const CANCEL_SOUND: &[u8] = bundled_sound!("dictationCancel");
+#[cfg(any(target_os = "macos", test))]
+const ERROR_SOUND: &[u8] = bundled_sound!("error");
+const ONBOARDING_SUCCESS_SOUND: &[u8] = bundled_sound!("onboardingSuccess");
+
+/// The classic sounds, restored unchanged from before the signature set.
+macro_rules! classic_sound {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/audio/",
+            $name,
+            ".mp3"
+        ))
+        .as_slice()
+    };
+}
+
+const CLASSIC_START_SOUND: &[u8] = classic_sound!("startRecording");
+const CLASSIC_STOP_SOUND: &[u8] = classic_sound!("stopRecording");
+const CLASSIC_CANCEL_SOUND: &[u8] = classic_sound!("cancel");
+
+/// One theme's dictation sounds. The classic set has no done sound, and its
+/// macOS error is the Basso system sound.
+struct ThemeSounds {
+    start: SamplesBuffer,
+    stop: SamplesBuffer,
+    done: Option<SamplesBuffer>,
+    cancel: SamplesBuffer,
+    #[cfg(target_os = "macos")]
+    error: Option<SamplesBuffer>,
+}
+
+/// The decoded sounds the playback worker plays. Wake and sleep stay the
+/// quieter macOS system sounds; the onboarding chime and capture tones are
+/// the same in every theme.
+struct Sounds {
+    signature: ThemeSounds,
+    classic: ThemeSounds,
+    onboarding_success: SamplesBuffer,
+    #[cfg(hex_capture)]
+    capture: [SamplesBuffer; 5],
+}
+
+impl Sounds {
+    fn load() -> Result<Self> {
+        Ok(Self {
+            signature: ThemeSounds {
+                start: decode_wav(START_SOUND)?,
+                stop: decode_wav(STOP_SOUND)?,
+                done: Some(decode_wav(DONE_SOUND)?),
+                cancel: decode_wav(CANCEL_SOUND)?,
+                #[cfg(target_os = "macos")]
+                error: Some(decode_wav(ERROR_SOUND)?),
+            },
+            classic: ThemeSounds {
+                start: decode(CLASSIC_START_SOUND)?,
+                stop: decode(CLASSIC_STOP_SOUND)?,
+                done: None,
+                cancel: decode(CLASSIC_CANCEL_SOUND)?,
+                #[cfg(target_os = "macos")]
+                error: None,
+            },
+            onboarding_success: decode_wav(ONBOARDING_SUCCESS_SOUND)?,
+            #[cfg(hex_capture)]
+            capture: capture_sounds()?,
+        })
+    }
+
+    fn set(&self, theme: SoundTheme) -> &ThemeSounds {
+        match theme {
+            SoundTheme::Signature => &self.signature,
+            SoundTheme::Classic => &self.classic,
+        }
+    }
+
+    fn get(&self, theme: SoundTheme, tone: Tone) -> Option<&SamplesBuffer> {
+        let set = self.set(theme);
+        Some(match tone {
+            Tone::DictationStart => &set.start,
+            Tone::DictationStop => &set.stop,
+            Tone::DictationDone => return set.done.as_ref(),
+            Tone::Cancel => &set.cancel,
+            Tone::OnboardingSuccess => &self.onboarding_success,
+            #[cfg(target_os = "macos")]
+            Tone::Error => return set.error.as_ref(),
+            #[cfg(target_os = "macos")]
+            Tone::Wake | Tone::Sleep => return None,
+            #[cfg(hex_capture)]
+            Tone::CaptureStart => &self.capture[0],
+            #[cfg(hex_capture)]
+            Tone::CaptureStop => &self.capture[1],
+            #[cfg(hex_capture)]
+            Tone::CaptureSent => &self.capture[2],
+            #[cfg(hex_capture)]
+            Tone::CaptureUndo => &self.capture[3],
+            #[cfg(hex_capture)]
+            Tone::CaptureFailed => &self.capture[4],
+        })
+    }
+}
+
+/// The capture tones, in [`Tone`]'s order: start, stop, sent, undo, failed.
+#[cfg(hex_capture)]
+fn capture_sounds() -> Result<[SamplesBuffer; 5]> {
+    macro_rules! sound {
+        ($name:literal) => {
+            decode(include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/resources/audio/",
+                $name
+            )))?
+        };
+    }
+    Ok([
+        sound!("captureStart.mp3"),
+        sound!("captureStop.mp3"),
+        sound!("captureSent.mp3"),
+        sound!("captureUndo.mp3"),
+        sound!("captureFailed.mp3"),
+    ])
 }
 
 /// Plays the start tone for a shortcut press that may still become a chord or
@@ -282,7 +448,7 @@ fn enqueue(player: Option<&SyncSender<Request>>, request: Request) {
 /// How long a provisional start tone waits before sounding. Modifiers pressed
 /// together for another application's shortcut arrive within this window, so
 /// those chords stay silent while a deliberate press still sounds at once.
-const CHORD_GRACE: Duration = Duration::from_millis(40);
+pub(crate) const CHORD_GRACE: Duration = Duration::from_millis(40);
 /// How quickly a retracted start tone fades out instead of clicking off.
 const RETRACT_FADE: Duration = Duration::from_millis(20);
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(250);
@@ -447,7 +613,7 @@ fn play_system_sound(tone: Tone) {
         Tone::Wake => "Pop",
         Tone::Sleep => "Tink",
         Tone::Error => "Basso",
-        Tone::DictationStart | Tone::DictationStop | Tone::Cancel => return,
+        _ => return,
     };
     let volume = volume().to_string();
     let child = Command::new("/usr/bin/afplay")
@@ -467,8 +633,26 @@ fn play_system_sound(tone: Tone) {
     }
 }
 
+/// Decodes one of Hex's bundled 16-bit PCM sounds.
+fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
+    let reader =
+        hound::WavReader::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
+    let spec = reader.spec();
+    let channels = std::num::NonZero::new(spec.channels)
+        .ok_or_else(|| eyre!("feedback audio has no channels"))?;
+    let sample_rate = std::num::NonZero::new(spec.sample_rate)
+        .ok_or_else(|| eyre!("feedback audio has no sample rate"))?;
+    let samples = reader
+        .into_samples::<i16>()
+        .map(|sample| sample.map(|sample| f32::from(sample) / f32::from(i16::MAX)))
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err("could not decode feedback audio")?;
+    Ok(SamplesBuffer::new(channels, sample_rate, samples))
+}
+
 fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
-    let decoder = Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
+    let decoder =
+        rodio::Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
     let channels = decoder.channels();
     let sample_rate = decoder.sample_rate();
     Ok(SamplesBuffer::new(
@@ -488,35 +672,41 @@ mod tests {
         }
     }
 
-    fn leading_silence_ms(bytes: &'static [u8]) -> u128 {
-        let sound = decode(bytes).unwrap();
+    /// Every bundled sound with the longest it may run.
+    const BUNDLED: [(&str, &[u8], Duration); 6] = [
+        ("start", START_SOUND, Duration::from_millis(130)),
+        ("stop", STOP_SOUND, Duration::from_millis(250)),
+        ("done", DONE_SOUND, Duration::from_millis(350)),
+        ("cancel", CANCEL_SOUND, Duration::from_millis(250)),
+        ("error", ERROR_SOUND, Duration::from_millis(300)),
+        (
+            "onboarding success",
+            ONBOARDING_SUCCESS_SOUND,
+            Duration::from_millis(1_200),
+        ),
+    ];
+
+    fn leading_silence(sound: SamplesBuffer) -> Duration {
         let channels = usize::from(sound.channels().get());
-        let rate = sound.sample_rate().get() as usize;
+        let rate = sound.sample_rate().get();
         let samples = sound.collect::<Vec<f32>>();
         let first = samples
             .iter()
             .position(|sample| sample.abs() > 0.01)
             .unwrap_or(samples.len());
-        (first / channels * 1_000 / rate) as u128
+        Duration::from_secs_f64((first / channels) as f64 / f64::from(rate))
     }
 
     #[test]
-    fn feedback_tones_sound_immediately() {
-        for (name, bytes) in [
-            (
-                "start",
-                include_bytes!("../resources/audio/startRecording.mp3").as_slice(),
-            ),
-            (
-                "stop",
-                include_bytes!("../resources/audio/stopRecording.mp3").as_slice(),
-            ),
-        ] {
-            let silence = leading_silence_ms(bytes);
-            eprintln!("{name} tone leading silence: {silence} ms");
+    fn bundled_sounds_are_short_and_sound_immediately() {
+        for (name, bytes, budget) in BUNDLED {
+            let sound = decode_wav(bytes).unwrap();
+            let length = sound.total_duration().unwrap();
+            assert!(length <= budget, "{name} runs {length:?}, over {budget:?}");
+            let silence = leading_silence(sound);
             assert!(
-                silence < 40,
-                "{name} tone starts after {silence} ms of silence"
+                silence <= Duration::from_millis(1),
+                "{name} starts after {silence:?} of silence"
             );
         }
     }
@@ -778,7 +968,7 @@ mod tests {
                 .and_then(|device| rodio::DeviceTrait::description(&device).ok())
                 .map(|description| description.name().to_owned());
         eprintln!("default output: {device:?}");
-        let start = decode(include_bytes!("../resources/audio/startRecording.mp3")).unwrap();
+        let start = decode_wav(START_SOUND).unwrap();
         let open = || {
             if legacy {
                 let mut sink = DeviceSinkBuilder::open_default_sink().unwrap();
@@ -834,15 +1024,34 @@ mod tests {
     }
 
     #[test]
-    fn bundled_recording_sounds_decode_without_an_audio_device() {
+    fn bundled_sounds_decode_without_an_audio_device() {
+        let sounds = Sounds::load().unwrap();
+        for (name, bytes, _) in BUNDLED {
+            let mut sound = decode_wav(bytes).unwrap();
+            assert!(sound.total_duration().unwrap() > Duration::ZERO, "{name}");
+            assert!(sound.any(|sample| sample.abs() > 0.0), "{name}");
+        }
         for bytes in [
-            include_bytes!("../resources/audio/startRecording.mp3").as_slice(),
-            include_bytes!("../resources/audio/stopRecording.mp3").as_slice(),
-            include_bytes!("../resources/audio/cancel.mp3").as_slice(),
+            CLASSIC_START_SOUND,
+            CLASSIC_STOP_SOUND,
+            CLASSIC_CANCEL_SOUND,
         ] {
             let mut sound = decode(bytes).unwrap();
             assert!(sound.total_duration().unwrap() > Duration::ZERO);
             assert!(sound.any(|sample| sample.abs() > 0.0));
+        }
+        assert!(
+            sounds
+                .get(SoundTheme::Signature, Tone::DictationDone)
+                .is_some()
+        );
+        assert!(
+            sounds
+                .get(SoundTheme::Classic, Tone::DictationDone)
+                .is_none()
+        );
+        for theme in [SoundTheme::Signature, SoundTheme::Classic] {
+            assert!(sounds.get(theme, Tone::OnboardingSuccess).is_some());
         }
     }
 

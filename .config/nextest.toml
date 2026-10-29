@@ -1,0 +1,33 @@
+# Each test runs in its own process. A test still running after
+# `period * terminate-after` is killed and reported by name as TIMEOUT.
+[profile.default]
+slow-timeout = { period = "15s", terminate-after = 2 }
+status-level = "slow"
+final-status-level = "fail"
+failure-output = "final"
+fail-fast = false
+
+[profile.default.junit]
+path = "junit.xml"
+
+[test-groups]
+gpu = { max-threads = 2 }
+
+# Rune scenes render on the GPU; the driver test compiles the C plug-in.
+[[profile.default.overrides]]
+filter = "test(/scene|golden|rune_ui::/) | test(driver_plugin_loopback)"
+test-group = "gpu"
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# CI runners are slower and render on software Vulkan.
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 2 }
+failure-output = "immediate-final"
+
+[[profile.ci.overrides]]
+filter = "test(/scene|golden|rune_ui::/) | test(driver_plugin_loopback)"
+test-group = "gpu"
+slow-timeout = { period = "90s", terminate-after = 2 }
+
+[profile.ci.junit]
+path = "junit.xml"

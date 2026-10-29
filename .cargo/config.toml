@@ -6,9 +6,17 @@ rustflags = ["-C", "target-feature=+crt-static"]
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
+# transcribe-cpp-sys reads CMAKE_ARGS beside TRANSCRIBE_CMAKE_ARGS, which stays
+# free for per-build flags such as -DGGML_NATIVE=OFF.
+#
 # transcribe-cpp's CMake build defaults to the DLL runtime (/MD) even when Rust
-# links statically, so pin its MSVC runtime to match. transcribe-cpp-sys reads
-# CMAKE_ARGS beside TRANSCRIBE_CMAKE_ARGS, which stays free for per-build flags
-# such as -DGGML_NATIVE=OFF. Compilers other than MSVC ignore this define.
+# links statically, so pin its MSVC runtime to match. Compilers other than MSVC
+# ignore this define.
+#
+# Every catalog model stores only f32, f16, and q8_0 tensors and none uses
+# MUL_MAT_ID, so the Vulkan backend embeds shaders for just those (about 7 MB
+# of SPIR-V instead of 44 MB). ggml aborts a Vulkan run whose weights use any
+# other type, so add a type here before the catalog gains a model that needs it
+# (`gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset` guards the catalog).
 [env]
-CMAKE_ARGS = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+CMAKE_ARGS = "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DGGML_VULKAN_SHADER_TYPES=f32,f16,q8_0 -DGGML_VULKAN_MUL_MAT_ID=OFF"
