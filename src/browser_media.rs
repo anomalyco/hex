@@ -462,11 +462,15 @@ mod tests {
     #[test]
     #[ignore = "needs a browser playing audio for 15 s and System Audio Recording"]
     fn native_resume_after_a_long_pause_plays_the_browser() {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let paused = pause(&mut NativeBrowserAudio::for_pause()).expect("paused the browser");
         std::thread::sleep(Duration::from_secs(15));
         let mut audio = NativeBrowserAudio::for_resume();
         eprintln!("output closed after 15 s: {}", audio.output_closed());
         resume(&mut audio, paused);
+        // One browser tap per process at a time: its aggregate UID is per pid.
+        drop(audio);
+        std::thread::sleep(Duration::from_millis(500));
         let peak = NativeBrowserAudio::for_pause().peak_dbfs(WINDOW);
         eprintln!("browser peak after resume: {peak:?} dBFS");
         assert!(peak.is_some_and(|peak| peak > SOUND_DBFS));
