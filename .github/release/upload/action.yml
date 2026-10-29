@@ -1,0 +1,33 @@
+name: Upload a release artifact
+description: Writes SHA256SUMS for a directory, uploads it, and outputs the manifest's digest for the job's outputs.
+inputs:
+  name:
+    description: Artifact name
+    required: true
+  path:
+    description: Directory to upload
+    required: true
+  retention-days:
+    description: Days to keep the artifact (0 keeps the repository default)
+    required: false
+    default: "0"
+outputs:
+  digest:
+    description: SHA-256 of the artifact's SHA256SUMS
+    value: ${{ steps.checksum.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - id: checksum
+      shell: bash
+      run: echo "digest=$(bash "${GITHUB_ACTION_PATH//\\//}/../write-checksums.sh" "$UPLOAD_PATH")" >> "$GITHUB_OUTPUT"
+      env:
+        UPLOAD_PATH: ${{ inputs.path }}
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: error
+        # SHA256SUMS lists every file, hidden ones too (the AUR package's .SRCINFO).
+        include-hidden-files: true

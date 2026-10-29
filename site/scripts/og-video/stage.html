@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Inter Variable";
+        src: url("/node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      html, body { margin: 0; background: #111; }
+      canvas { display: block; width: 1200px; height: 630px; }
+      #hud { position: fixed; right: 8px; bottom: 8px; color: #888; font: 12px ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1200" height="630"></canvas>
+    <div id="hud"></div>
+    <script src="/node_modules/matter-js/build/matter.min.js"></script>
+    <script src="common.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search)
+      const name = params.get("c")
+      const capture = params.has("capture")
+      let concept
+      window.register = (c) => (concept = c)
+      const s = document.createElement("script")
+      s.src = `${name}.js`
+      s.onload = async () => {
+        await document.fonts.load('600 40px "Inter Variable"')
+        await document.fonts.load('400 40px "Inter Variable"')
+        await document.fonts.ready
+        const canvas = document.getElementById("c")
+        const ctx = canvas.getContext("2d")
+        await concept.init(ctx)
+        window.frameCount = concept.frames
+        window.renderFrame = (f) => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.save()
+          concept.draw(ctx, ((f % concept.frames) + concept.frames) % concept.frames)
+          ctx.restore()
+        }
+        window.ready = true
+        if (capture) return
+        const fixed = params.get("f")
+        if (fixed != null) return renderFrame(+fixed)
+        const t0 = performance.now()
+        const slow = +(params.get("slow") || 1)
+        const hud = document.getElementById("hud")
+        const loop = () => {
+          const f = Math.floor(((performance.now() - t0) / 1000) * FPS / slow) % concept.frames
+          renderFrame(f)
+          hud.textContent = `${name} ${f}/${concept.frames}`
+          requestAnimationFrame(loop)
+        }
+        loop()
+      }
+      document.body.appendChild(s)
+    </script>
+  </body>
+</html>

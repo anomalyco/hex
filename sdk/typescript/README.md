@@ -158,7 +158,10 @@ void (async () => {
 const { transcript, durationMs } = await recording.finish()
 ```
 
-Call `recording.cancel()` to discard. Subscribing to `recording.audio` enables a
+Call `recording.cancel()` to discard; Escape doesn't cancel a recording, so the
+key stays with your app. If the microphone fails mid-recording, `finish()` still
+transcribes the audio captured before the failure, or rejects with remote code
+`microphone-lost` when there was none. Subscribing to `recording.audio` enables a
 bounded best-effort mono Float32 PCM tap at `recording.sampleRate`. Desktop capture
 returns raw text and never pastes. `capabilities().serviceCapture` distinguishes
 desktop capture from the transcription-only helper. The recording handle renews
@@ -177,7 +180,7 @@ observations automatically.
 - Encode PCM WAV in the host. Do not send compressed recordings such as M4A or
   WebM and label them as WAV. The service accepts 8-192 kHz audio with 1-8 channels,
   subject to a 64 MiB upload limit and separate source-frame and normalized-audio
-  budgets. See the [service spec](https://github.com/anomalyco/hex/blob/main/docs/specs/local-transcription-service.md#wire-protocol-api-2)
+  budgets. See the [service spec](https://github.com/anomalyco/hex/blob/dev/docs/specs/local-transcription-service.md#wire-protocol-api-2)
   for the exact limits; there is no promise of unlimited clip length.
 - Persist the host's model selection in the host, not in HEX desktop preferences.
 - Spawn the signed helper directly. Do not use LaunchServices, `open`, or

@@ -157,6 +157,27 @@ impl ContextSnapshot {
         Ok(Self::default())
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
+        if canonical_bundle_id == "com.brave.Browser"
+            && let Some((browser_url, window_title)) = capture_brave_meeting_tab()?
+        {
+            return Ok(Self {
+                application: Some("Brave Browser".into()),
+                browser_url: Some(browser_url),
+                window_title,
+                selected_text: None,
+                input_revision: None,
+            });
+        }
+        capture_macos()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn capture_for_meeting(_canonical_bundle_id: &str) -> Result<Self> {
+        Self::capture()
+    }
+
     pub fn browser_host(&self) -> Option<&str> {
         self.browser_url.as_ref().and_then(Url::host_str)
     }
@@ -213,20 +234,33 @@ fn capture_macos() -> Result<ContextSnapshot> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn frontmost_bundle_identifier() -> Option<String> {
+pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     autoreleasepool(|_| {
         NSWorkspace::sharedWorkspace()
             .frontmostApplication()?
-            .bundleIdentifier()
-            .map(|identifier| identifier.to_string())
+            .bundleURL()?
+            .path()
+            .map(|path| path.to_string().into())
     })
 }
 
 #[cfg(target_os = "macos")]
 fn capture_brave_url() -> Result<Option<Url>> {
+    let url = run_osascript(BRAVE_URL_SCRIPT)?;
+    Ok(Url::parse(url.trim()).ok())
+}
+
+#[cfg(target_os = "macos")]
+fn capture_brave_meeting_tab() -> Result<Option<(Url, Option<String>)>> {
+    let output = run_osascript(BRAVE_MEETING_TAB_SCRIPT)?;
+    Ok(parse_brave_tab_output(&output))
+}
+
+#[cfg(target_os = "macos")]
+fn run_osascript(script: &str) -> Result<String> {
     const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
     let mut child = Command::new("/usr/bin/osascript")
-        .args(["-e", BRAVE_URL_SCRIPT])
+        .args(["-e", script])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -256,8 +290,16 @@ fn capture_brave_url() -> Result<Option<Url>> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let url = String::from_utf8_lossy(&output.stdout);
-    Ok(Url::parse(url.trim()).ok())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_brave_tab_output(output: &str) -> Option<(Url, Option<String>)> {
+    let mut lines = output.lines();
+    let url = Url::parse(lines.next()?.trim()).ok()?;
+    let title = lines.collect::<Vec<_>>().join(" ");
+    let title = title.trim();
+    Some((url, (!title.is_empty()).then(|| title.to_string())))
 }
 
 fn normalize_browser_host(host: &str) -> String {
@@ -294,6 +336,18 @@ tell application "Brave Browser"
     if (count of windows) > 0 then return URL of active tab of front window
 end tell
 return ""
+"#;
+
+/// The active tab of Brave's front window, even when another app is in
+/// front. Background tabs are deliberately not searched: a call open in one
+/// says nothing about which tab is using the microphone.
+#[cfg(target_os = "macos")]
+const BRAVE_MEETING_TAB_SCRIPT: &str = r#"
+tell application "Brave Browser"
+    if (count of windows) is 0 then return ""
+    set activeTab to active tab of front window
+    return (URL of activeTab) & linefeed & (title of activeTab)
+end tell
 "#;
 
 #[cfg(test)]
@@ -369,5 +423,32 @@ mod tests {
                 .unwrap(),
             ContextSnapshot::default()
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_meeting_tab_query_reads_only_the_active_tab() {
+        assert!(!BRAVE_MEETING_TAB_SCRIPT.contains("repeat"));
+    }
+
+    #[test]
+    fn parses_brave_tab_url_and_title_output() {
+        assert_eq!(
+            parse_brave_tab_output(
+                "https://meet.google.com/abc-defg-hij\nDesign sync - Google Meet\n"
+            ),
+            Some((
+                Url::parse("https://meet.google.com/abc-defg-hij").unwrap(),
+                Some("Design sync - Google Meet".into()),
+            ))
+        );
+        assert_eq!(
+            parse_brave_tab_output("https://meet.google.com/abc-defg-hij\n"),
+            Some((
+                Url::parse("https://meet.google.com/abc-defg-hij").unwrap(),
+                None,
+            ))
+        );
+        assert_eq!(parse_brave_tab_output(""), None);
     }
 }

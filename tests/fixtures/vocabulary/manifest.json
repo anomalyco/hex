@@ -1,0 +1,756 @@
+{
+  "vocabulary": [
+    "Hex",
+    "Abattoir",
+    "OpenCode",
+    "Rune",
+    "Scrawl",
+    "Effect",
+    "Anomaly",
+    "Dax",
+    "Aiden",
+    "Kit",
+    "Parakeet",
+    "Moonshine",
+    "GPUI",
+    "Sparkle",
+    "Argon",
+    "Astra",
+    "HiveMind"
+  ],
+  "provenance": {
+    "provider": "ElevenLabs",
+    "model": "eleven_v4",
+    "voice": "8olojUk4IXpvKgaOCHXj",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "sample_rate": 16000,
+    "reference": "TTS input, not human-audited speech",
+    "synthetic": true
+  },
+  "clips": [
+    {
+      "id": "term-hex-1",
+      "audio": "audio/term-hex-1.wav",
+      "expected": "I use Hex to dictate my notes.",
+      "expected_terms": [
+        "Hex"
+      ],
+      "group": "target",
+      "sha256": "01211cba2a40f03f914a92d761332dfef9ecb166e6031cc4378303b7f51e261d",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-hex-2",
+      "audio": "audio/term-hex-2.wav",
+      "expected": "Please check whether Hex heard that correctly.",
+      "expected_terms": [
+        "Hex"
+      ],
+      "group": "target",
+      "sha256": "a655ddb0236f23514cb80f99ad69d7a0f16f4a7544e0b4372beb571ae40eca02",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-hex-3",
+      "audio": "audio/term-hex-3.wav",
+      "expected": "The latest Hex build is ready to test.",
+      "expected_terms": [
+        "Hex"
+      ],
+      "group": "target",
+      "sha256": "df9d6e3e31e5de1e840b19ba8e0930634596f3c853861975b51f1a2b1eaefb55",
+      "duration_s": 2.64
+    },
+    {
+      "id": "term-abattoir-1",
+      "audio": "audio/term-abattoir-1.wav",
+      "expected": "Open Abattoir and run the next experiment.",
+      "expected_terms": [
+        "Abattoir"
+      ],
+      "group": "target",
+      "sha256": "8d7f8942cd90e0fc691154b3768f83011eff0bc694a89f1cfbb9a70f7cc68372",
+      "duration_s": 2.64
+    },
+    {
+      "id": "term-abattoir-2",
+      "audio": "audio/term-abattoir-2.wav",
+      "expected": "I want to change the settings in Abattoir.",
+      "expected_terms": [
+        "Abattoir"
+      ],
+      "group": "target",
+      "sha256": "648338604e9ae740fe573e683a77c1cdd804ade29fcdd608bc0a6215d9f13c17",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-abattoir-3",
+      "audio": "audio/term-abattoir-3.wav",
+      "expected": "We should test Abattoir before the release.",
+      "expected_terms": [
+        "Abattoir"
+      ],
+      "group": "target",
+      "sha256": "2a3f5a08e8571fbb5dfbd68028cf980e7d51b33dcf42e446287b593ca09c47da",
+      "duration_s": 2.4
+    },
+    {
+      "id": "term-opencode-1",
+      "audio": "audio/term-opencode-1.wav",
+      "expected": "OpenCode is running on my desktop.",
+      "expected_terms": [
+        "OpenCode"
+      ],
+      "group": "target",
+      "sha256": "f8e2a9dd700fe504e9332e01e5a9b5a2b01a6b27d943daa52a8f6a3ef1f74524",
+      "duration_s": 2.24
+    },
+    {
+      "id": "term-opencode-2",
+      "audio": "audio/term-opencode-2.wav",
+      "expected": "Send the patch to OpenCode for review.",
+      "expected_terms": [
+        "OpenCode"
+      ],
+      "group": "target",
+      "sha256": "ef5383953cba7cce0053837d9d387cdaab564a7b77c1793d8bd4a921006089fa",
+      "duration_s": 2.56
+    },
+    {
+      "id": "term-opencode-3",
+      "audio": "audio/term-opencode-3.wav",
+      "expected": "I started a new session in OpenCode.",
+      "expected_terms": [
+        "OpenCode"
+      ],
+      "group": "target",
+      "sha256": "5851147f6708e52a913f2a6eb0e10a85fcc094b517f02af83ce12afba7b17eef",
+      "duration_s": 2.32
+    },
+    {
+      "id": "term-rune-1",
+      "audio": "audio/term-rune-1.wav",
+      "expected": "Build the settings panel with Rune.",
+      "expected_terms": [
+        "Rune"
+      ],
+      "group": "target",
+      "sha256": "a657df70d8f516fcf91fdf651a83ab25581121f0e86738c345839651aae8d5e2",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-rune-2",
+      "audio": "audio/term-rune-2.wav",
+      "expected": "The Rune window should stay open.",
+      "expected_terms": [
+        "Rune"
+      ],
+      "group": "target",
+      "sha256": "578423e9d1608e48d403d66712082671f7b10d77a04bbca7e491089a2018c251",
+      "duration_s": 1.6
+    },
+    {
+      "id": "term-rune-3",
+      "audio": "audio/term-rune-3.wav",
+      "expected": "We moved the interface to Rune last week.",
+      "expected_terms": [
+        "Rune"
+      ],
+      "group": "target",
+      "sha256": "6e61bd782f819962ebb1367835915aca42986a8abc50c864a5b11cf0f6b3ebaa",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-scrawl-1",
+      "audio": "audio/term-scrawl-1.wav",
+      "expected": "Use Scrawl to capture that feedback.",
+      "expected_terms": [
+        "Scrawl"
+      ],
+      "group": "target",
+      "sha256": "f7fb4f012ff9515e62d27827dfa202716ce4370bb97634256c2506749f8b5936",
+      "duration_s": 2.0
+    },
+    {
+      "id": "term-scrawl-2",
+      "audio": "audio/term-scrawl-2.wav",
+      "expected": "I left a note in Scrawl about the button.",
+      "expected_terms": [
+        "Scrawl"
+      ],
+      "group": "target",
+      "sha256": "8884bf36b03d8e54471ac8fdf2432c200f01cac941de99793b580be4dba9e7c4",
+      "duration_s": 2.32
+    },
+    {
+      "id": "term-scrawl-3",
+      "audio": "audio/term-scrawl-3.wav",
+      "expected": "Scrawl should send the recording to this session.",
+      "expected_terms": [
+        "Scrawl"
+      ],
+      "group": "target",
+      "sha256": "0b89cd731b493e83ef1a6c7223642b3c14b925aee548a4de18474c188dd2f264",
+      "duration_s": 2.64
+    },
+    {
+      "id": "term-effect-1",
+      "audio": "audio/term-effect-1.wav",
+      "expected": "Use Effect to manage the background task.",
+      "expected_terms": [
+        "Effect"
+      ],
+      "group": "target",
+      "sha256": "428ad43754969687527e27648f290c1d6e19c7e7c17e0dccd32b77e829f517a8",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-effect-2",
+      "audio": "audio/term-effect-2.wav",
+      "expected": "The Effect service owns the connection.",
+      "expected_terms": [
+        "Effect"
+      ],
+      "group": "target",
+      "sha256": "0758e1a6a4844100c3a9ea9b38c162a84d8bc0c7e27aba5d3c2c570fdd0812a1",
+      "duration_s": 2.0
+    },
+    {
+      "id": "term-effect-3",
+      "audio": "audio/term-effect-3.wav",
+      "expected": "I wrote the new client with Effect.",
+      "expected_terms": [
+        "Effect"
+      ],
+      "group": "target",
+      "sha256": "5dcb954804f8d0f6c25d51f3f6c0ef87cb810288b2853d501580bf0112f29c47",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-anomaly-1",
+      "audio": "audio/term-anomaly-1.wav",
+      "expected": "Anomaly builds tools for developers.",
+      "expected_terms": [
+        "Anomaly"
+      ],
+      "group": "target",
+      "sha256": "584efe6ed6d37e61c4905d54d5f43881530644188f49bda1629c3832eb445700",
+      "duration_s": 2.32
+    },
+    {
+      "id": "term-anomaly-2",
+      "audio": "audio/term-anomaly-2.wav",
+      "expected": "Send the update to the team at Anomaly.",
+      "expected_terms": [
+        "Anomaly"
+      ],
+      "group": "target",
+      "sha256": "376649adef08ebd60d07addc821cb3b80a103700a3941dcd04a791d6042b161d",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-anomaly-3",
+      "audio": "audio/term-anomaly-3.wav",
+      "expected": "We should use the Anomaly account for this.",
+      "expected_terms": [
+        "Anomaly"
+      ],
+      "group": "target",
+      "sha256": "e6ded04e7f66a231ae7fc97115ba05c5ac007463e3228147188d6ba10a00b6f6",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-dax-1",
+      "audio": "audio/term-dax-1.wav",
+      "expected": "Dax reviewed the new interface.",
+      "expected_terms": [
+        "Dax"
+      ],
+      "group": "target",
+      "sha256": "9cf692f80904abf169fb6b8c9a3a88baed7df177237b7ed6104f2eb7ad3e1124",
+      "duration_s": 2.0
+    },
+    {
+      "id": "term-dax-2",
+      "audio": "audio/term-dax-2.wav",
+      "expected": "Please ask Dax about that change.",
+      "expected_terms": [
+        "Dax"
+      ],
+      "group": "target",
+      "sha256": "a3c2e9d6c0681a89c9000c33bcb93faca33dcd3f7cc8ee0d1e4b4713db38d4a0",
+      "duration_s": 1.92
+    },
+    {
+      "id": "term-dax-3",
+      "audio": "audio/term-dax-3.wav",
+      "expected": "I think Dax already fixed this issue.",
+      "expected_terms": [
+        "Dax"
+      ],
+      "group": "target",
+      "sha256": "79a977640202de0b70b3a156b614b975c3ca8743d4ced6bb4dc531d3ee3dbeab",
+      "duration_s": 2.56
+    },
+    {
+      "id": "term-aiden-1",
+      "audio": "audio/term-aiden-1.wav",
+      "expected": "Aiden is working on the installer.",
+      "expected_terms": [
+        "Aiden"
+      ],
+      "group": "target",
+      "sha256": "6c4cb7ce1b718ad3d9bff3c5d957af6827de8d47070be6d1f0146a79812c3d3f",
+      "duration_s": 1.52
+    },
+    {
+      "id": "term-aiden-2",
+      "audio": "audio/term-aiden-2.wav",
+      "expected": "Can Aiden review the latest build?",
+      "expected_terms": [
+        "Aiden"
+      ],
+      "group": "target",
+      "sha256": "1a81f13625e270e57d69aac22a63750add65189f1482607154e380a87f6a1098",
+      "duration_s": 1.92
+    },
+    {
+      "id": "term-aiden-3",
+      "audio": "audio/term-aiden-3.wav",
+      "expected": "I sent Aiden the notes from our meeting.",
+      "expected_terms": [
+        "Aiden"
+      ],
+      "group": "target",
+      "sha256": "42af4a2747790a8469989cbb8cd49f9a8e520fef491271ea98ec4d0e58ce1020",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-kit-1",
+      "audio": "audio/term-kit-1.wav",
+      "expected": "Kit wants the animation to feel faster.",
+      "expected_terms": [
+        "Kit"
+      ],
+      "group": "target",
+      "sha256": "0f8a3ed3b11af6381092a5f15a1e851f94a57388979c5d577ac3459317cb440d",
+      "duration_s": 2.88
+    },
+    {
+      "id": "term-kit-2",
+      "audio": "audio/term-kit-2.wav",
+      "expected": "Please send Kit the comparison.",
+      "expected_terms": [
+        "Kit"
+      ],
+      "group": "target",
+      "sha256": "770f6e9b29ff18b264153cbd73f7f82a36d82743eccceefba70797b8ae2481bc",
+      "duration_s": 1.6
+    },
+    {
+      "id": "term-kit-3",
+      "audio": "audio/term-kit-3.wav",
+      "expected": "I think Kit already approved that plan.",
+      "expected_terms": [
+        "Kit"
+      ],
+      "group": "target",
+      "sha256": "9dde21aec5a4cd3a04eee8bef0060414bfd39a3dde75845a731b1828e7b3c667",
+      "duration_s": 2.24
+    },
+    {
+      "id": "term-parakeet-1",
+      "audio": "audio/term-parakeet-1.wav",
+      "expected": "Parakeet transcribes the audio locally.",
+      "expected_terms": [
+        "Parakeet"
+      ],
+      "group": "target",
+      "sha256": "984d3e30e79b1ccf0b6d0bc6269363eecfbb2d024c59c73655800a25dc4494a2",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-parakeet-2",
+      "audio": "audio/term-parakeet-2.wav",
+      "expected": "Load Parakeet before starting the benchmark.",
+      "expected_terms": [
+        "Parakeet"
+      ],
+      "group": "target",
+      "sha256": "52d6381239f85fe14cdc6424fab12640299818bb6e33577f9e8421d500b0862e",
+      "duration_s": 2.32
+    },
+    {
+      "id": "term-parakeet-3",
+      "audio": "audio/term-parakeet-3.wav",
+      "expected": "The default model is Parakeet.",
+      "expected_terms": [
+        "Parakeet"
+      ],
+      "group": "target",
+      "sha256": "5ca6c5fb89f0bb8373e6376e51eeef367d1e5cefd28d8f3c104a587d2b183cfb",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-moonshine-1",
+      "audio": "audio/term-moonshine-1.wav",
+      "expected": "Moonshine listens for voice commands.",
+      "expected_terms": [
+        "Moonshine"
+      ],
+      "group": "target",
+      "sha256": "95006abf726b42f45d9b9914179bdf7dca4fa88c1094759e86d1726f6f8275ce",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-moonshine-2",
+      "audio": "audio/term-moonshine-2.wav",
+      "expected": "We should compare Moonshine with the other model.",
+      "expected_terms": [
+        "Moonshine"
+      ],
+      "group": "target",
+      "sha256": "242284c896bb358d8d63f2be56630fe54296d79564a85e05b2123ab17fad8faf",
+      "duration_s": 2.4
+    },
+    {
+      "id": "term-moonshine-3",
+      "audio": "audio/term-moonshine-3.wav",
+      "expected": "Unload Moonshine when commands are disabled.",
+      "expected_terms": [
+        "Moonshine"
+      ],
+      "group": "target",
+      "sha256": "9510ec3e140abfeba1544a68b9e48989be504fb86f1883847e2c9344ef06aeaf",
+      "duration_s": 2.4
+    },
+    {
+      "id": "term-gpui-1",
+      "audio": "audio/term-gpui-1.wav",
+      "expected": "The old interface used GPUI.",
+      "expected_terms": [
+        "GPUI"
+      ],
+      "group": "target",
+      "sha256": "040899b0e924a40555d6c86891635037147c1b383e42829f299ea666e12fe2b2",
+      "duration_s": 2.64
+    },
+    {
+      "id": "term-gpui-2",
+      "audio": "audio/term-gpui-2.wav",
+      "expected": "We removed GPUI from the application.",
+      "expected_terms": [
+        "GPUI"
+      ],
+      "group": "target",
+      "sha256": "bf4668cb90fdd71abd683640911de2aef6c5f340748a18da5a4de5cbdc3adbbf",
+      "duration_s": 2.64
+    },
+    {
+      "id": "term-gpui-3",
+      "audio": "audio/term-gpui-3.wav",
+      "expected": "Does GPUI support this kind of window?",
+      "expected_terms": [
+        "GPUI"
+      ],
+      "group": "target",
+      "sha256": "3aa2e54f2677ad63cc70da603de695230b9e9f817f660665244029ceb10d3bc5",
+      "duration_s": 2.4
+    },
+    {
+      "id": "term-sparkle-1",
+      "audio": "audio/term-sparkle-1.wav",
+      "expected": "Sparkle handles updates on the Mac.",
+      "expected_terms": [
+        "Sparkle"
+      ],
+      "group": "target",
+      "sha256": "ba1b0c4602f227b135276be971254f3e3905a17ae7f89b5c202405afe6a1e8f1",
+      "duration_s": 1.84
+    },
+    {
+      "id": "term-sparkle-2",
+      "audio": "audio/term-sparkle-2.wav",
+      "expected": "The Sparkle feed has the new release.",
+      "expected_terms": [
+        "Sparkle"
+      ],
+      "group": "target",
+      "sha256": "23bf770c74303d7b1cf68663f93b2bcbad90edcb03dfe1ab4ee0b2f884c586ae",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-sparkle-3",
+      "audio": "audio/term-sparkle-3.wav",
+      "expected": "Check whether Sparkle found an update.",
+      "expected_terms": [
+        "Sparkle"
+      ],
+      "group": "target",
+      "sha256": "1e4b5111d676715529304d8e5601d8c66afdff54368bf4dffc4867331067ff72",
+      "duration_s": 2.08
+    },
+    {
+      "id": "term-argon-1",
+      "audio": "audio/term-argon-1.wav",
+      "expected": "Ask Argon to review the implementation.",
+      "expected_terms": [
+        "Argon"
+      ],
+      "group": "target",
+      "sha256": "c1da02576a210db25b49038dfe03241570dddc27519a2f6b38b3045334876c9d",
+      "duration_s": 2.16
+    },
+    {
+      "id": "term-argon-2",
+      "audio": "audio/term-argon-2.wav",
+      "expected": "Argon is working on the next patch.",
+      "expected_terms": [
+        "Argon"
+      ],
+      "group": "target",
+      "sha256": "b5e3406c900186e82da4d1efcb66a51863e69d7e3db1af0216cb7d9f17c604ac",
+      "duration_s": 1.84
+    },
+    {
+      "id": "term-argon-3",
+      "audio": "audio/term-argon-3.wav",
+      "expected": "Run the research task with Argon.",
+      "expected_terms": [
+        "Argon"
+      ],
+      "group": "target",
+      "sha256": "477aeb139eb9d3d1c1304f74a35d669347dfc0386a0553aa875bb326610c4765",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-astra-1",
+      "audio": "audio/term-astra-1.wav",
+      "expected": "Astra found the problem in the decoder.",
+      "expected_terms": [
+        "Astra"
+      ],
+      "group": "target",
+      "sha256": "2d3590a44272c27dec06fffa1b639a7b4d1d50a7b9e5a261e9f476daafd8c6a3",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-astra-2",
+      "audio": "audio/term-astra-2.wav",
+      "expected": "Give Astra the benchmark results.",
+      "expected_terms": [
+        "Astra"
+      ],
+      "group": "target",
+      "sha256": "36b386681e9d60621944f5fa981e288740c88de46024451886ca207afe0c7afd",
+      "duration_s": 2.0
+    },
+    {
+      "id": "term-astra-3",
+      "audio": "audio/term-astra-3.wav",
+      "expected": "I want Astra to check this change.",
+      "expected_terms": [
+        "Astra"
+      ],
+      "group": "target",
+      "sha256": "654f688fca865bef7574fbe56b74a8482208776902293d2f33d146aa89c43f0a",
+      "duration_s": 2.24
+    },
+    {
+      "id": "term-hivemind-1",
+      "audio": "audio/term-hivemind-1.wav",
+      "expected": "Route the build through HiveMind.",
+      "expected_terms": [
+        "HiveMind"
+      ],
+      "group": "target",
+      "sha256": "a2c47cd81c94eb830e3f5a616c9401c38befd7fff34d902c1d963395c3a73a14",
+      "duration_s": 1.92
+    },
+    {
+      "id": "term-hivemind-2",
+      "audio": "audio/term-hivemind-2.wav",
+      "expected": "HiveMind should choose an available worker.",
+      "expected_terms": [
+        "HiveMind"
+      ],
+      "group": "target",
+      "sha256": "6375554de9e9ddab1b7393972dd0bee8a4728bf3d057949ac6a92cb94148707a",
+      "duration_s": 2.48
+    },
+    {
+      "id": "term-hivemind-3",
+      "audio": "audio/term-hivemind-3.wav",
+      "expected": "The HiveMind job finished successfully.",
+      "expected_terms": [
+        "HiveMind"
+      ],
+      "group": "target",
+      "sha256": "16b591ae5b055f20c5931a2ff11b985b72e7739319c4e4d1979f1807aa7a9024",
+      "duration_s": 2.48
+    },
+    {
+      "id": "distractor-01",
+      "audio": "audio/distractor-01.wav",
+      "expected": "Tom Hanks starred in that movie.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "2888a2220be34810571c7bc7bb0d379281ec12864d6b07ec91cf197a55d78533",
+      "duration_s": 1.84
+    },
+    {
+      "id": "distractor-02",
+      "audio": "audio/distractor-02.wav",
+      "expected": "I watched Avatar at the cinema.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "11356cee82fb6b0c0e69da23fa0cb70f97c06e8c8a0b5e99dbc2e0eb1438b939",
+      "duration_s": 2.08
+    },
+    {
+      "id": "distractor-03",
+      "audio": "audio/distractor-03.wav",
+      "expected": "The stone has a rune carved into it.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "b40003ee9a2cdc94728f63bf81a88f77a8b798c202a05b67ac1c6a9521b353f4",
+      "duration_s": 2.32
+    },
+    {
+      "id": "distractor-04",
+      "audio": "audio/distractor-04.wav",
+      "expected": "She bought two hanks of wool for the scarf.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "0c1ba6c9f2c825ca72302cd4236806a8843ddd4d1366d6fe9b6401dfbac5f0c6",
+      "duration_s": 2.56
+    },
+    {
+      "id": "distractor-05",
+      "audio": "audio/distractor-05.wav",
+      "expected": "Choose an avatar for your profile.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "1d8f9156439d5c2ba75e4b3a9031bb7dc3269cadfdc875e17d378302a29c9267",
+      "duration_s": 1.92
+    },
+    {
+      "id": "distractor-06",
+      "audio": "audio/distractor-06.wav",
+      "expected": "The ancient rune was difficult to read.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "a67023ff9f400be02cdb25a824e6ef8cac15d0990889c7fdc3f4fa971c5f6e80",
+      "duration_s": 2.72
+    },
+    {
+      "id": "distractor-07",
+      "audio": "audio/distractor-07.wav",
+      "expected": "Please check the text before you send it.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "bc2a7ee73893f43a364adfe0334427b13b3162b5b22dcb0a0edcbdcffe5c783a",
+      "duration_s": 2.24
+    },
+    {
+      "id": "distractor-08",
+      "audio": "audio/distractor-08.wav",
+      "expected": "The checks arrived in the mail today.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "efa0c35fce6b698abf42dca085c3a46105e4139672f8c4eb76c923898b0d189d",
+      "duration_s": 1.76
+    },
+    {
+      "id": "distractor-09",
+      "audio": "audio/distractor-09.wav",
+      "expected": "They stretched their necks to see the stage.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "ad9a45fdefbcd29f71cdfec3ab0f25021e35e4e984390ae95fbb57ec33a56791",
+      "duration_s": 2.96
+    },
+    {
+      "id": "distractor-10",
+      "audio": "audio/distractor-10.wav",
+      "expected": "The hexadecimal number begins with a letter.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "306fca31696762e8d8287e563e564a619a8b8e7930a739b9b14504cf0eedb1d0",
+      "duration_s": 2.72
+    },
+    {
+      "id": "distractor-11",
+      "audio": "audio/distractor-11.wav",
+      "expected": "Put the toolkit back on the shelf.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "e3395ab2d70c9855dbfd1ac96b45fe2d4434d2b96cf91e23af76c550b40dffed",
+      "duration_s": 2.08
+    },
+    {
+      "id": "distractor-12",
+      "audio": "audio/distractor-12.wav",
+      "expected": "The side effects should go away soon.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "c6460ebcdd4f39770aad8172ff048475c481262600453d5cbc8a08b3f56d08b9",
+      "duration_s": 2.0
+    },
+    {
+      "id": "distractor-13",
+      "audio": "audio/distractor-13.wav",
+      "expected": "There was an anomaly in the weather report.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "51a419b4d5fd163a285dfbff42bb12877b6144d90e0e942bfa99dff0d92b7dc4",
+      "duration_s": 2.24
+    },
+    {
+      "id": "distractor-14",
+      "audio": "audio/distractor-14.wav",
+      "expected": "The water began to sparkle in the sunlight.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "c44b7da084e1e3a13215fff0ef1aa84c70effa3574944e4a05c18ae9202a327d",
+      "duration_s": 2.96
+    },
+    {
+      "id": "distractor-15",
+      "audio": "audio/distractor-15.wav",
+      "expected": "Her handwriting was a hurried scrawl.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "4e897c2f6ce8e98e6da7809477d5e0861af48ce272ac2a04d14de8b684ef274b",
+      "duration_s": 2.24
+    },
+    {
+      "id": "distractor-16",
+      "audio": "audio/distractor-16.wav",
+      "expected": "The parakeet sat on its perch.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "fffa25846b594cfcb66d5a65e66f54aa06d06ce9c64c447ee5b28ba3f9e55796",
+      "duration_s": 2.4
+    },
+    {
+      "id": "distractor-17",
+      "audio": "audio/distractor-17.wav",
+      "expected": "We packed a first aid kit for the hike.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "5fc2ed2bbb75a1cbe1a226ee7a23032b9a6a7773b7d186fb6ebd4a6526e9be1d",
+      "duration_s": 2.72
+    },
+    {
+      "id": "distractor-18",
+      "audio": "audio/distractor-18.wav",
+      "expected": "The moonshine lit the path through the trees.",
+      "expected_terms": [],
+      "group": "distractor",
+      "sha256": "2d489b873613b6312707a1d1c816d6ca45087bd2051b8d5e13a9a7e42fe9587c",
+      "duration_s": 2.8
+    }
+  ]
+}

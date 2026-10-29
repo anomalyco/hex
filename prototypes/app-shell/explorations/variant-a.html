@@ -1632,7 +1632,7 @@
             <div class="session-ribbon" aria-label="Current device and context">
               <div class="session-fact"><div class="session-fact-label">Input</div><div class="session-fact-value" id="activity-device">Universal Audio Thunderbolt</div></div>
               <div class="session-fact"><div class="session-fact-label">Recognizer</div><div class="session-fact-value">Moonshine Medium Streaming</div></div>
-              <div class="session-fact"><div class="session-fact-label">Foreground context</div><div class="session-fact-value">Slack · #voice-control</div></div>
+              <div class="session-fact"><div class="session-fact-label">Foreground context</div><div class="session-fact-value">Slack · #hex</div></div>
               <div class="session-fact"><div class="session-fact-label">Session log</div><div class="session-fact-value mono">logs/live.ndjson</div></div>
             </div>
             <div class="activity-workspace">
@@ -1738,7 +1738,7 @@
           source: "Google Meet",
           duration: "18:42",
           status: "recording",
-          location: "~/Library/Application Support/voice-control/meetings/",
+          location: "~/Library/Application Support/hex/meetings/",
           transcript: [
             ["00:06", "Computer", "Let’s make the desktop app feel like one place to work, rather than a collection of utilities."],
             ["00:18", "You", "The meeting library should be the anchor. Commands and diagnostics can sit alongside it as tools."],
@@ -1756,7 +1756,7 @@
           source: "Zoom",
           duration: "42:18",
           status: "complete",
-          location: "~/Library/Application Support/voice-control/meetings/1752571860000-4492/",
+          location: "~/Library/Application Support/hex/meetings/1752571860000-4492/",
           transcript: [
             ["00:11", "You", "I grouped the notes around trust, speed, and knowing where the audio went."],
             ["00:26", "Computer", "The local-first story is strongest when it’s visible in the product, not hidden in a privacy page."],
@@ -1773,7 +1773,7 @@
           source: "Slack Huddle",
           duration: "31:02",
           status: "complete",
-          location: "~/Library/Application Support/voice-control/meetings/1752519300000-4028/",
+          location: "~/Library/Application Support/hex/meetings/1752519300000-4028/",
           transcript: [
             ["00:03", "Computer", "The bounded worker is holding up. The next concern is making queue occupancy observable."],
             ["00:16", "You", "Activity should distinguish capture, recognition, resolution, and action execution."],
@@ -1789,7 +1789,7 @@
           source: "Microsoft Teams",
           duration: "07:13",
           status: "interrupted",
-          location: "~/Library/Application Support/voice-control/meetings/1752220800000-3881/",
+          location: "~/Library/Application Support/hex/meetings/1752220800000-3881/",
           transcript: [
             ["00:00", "System", "Recording was interrupted before transcription completed."],
           ],
@@ -1818,8 +1818,8 @@
       const events = [
         { id: 1, time: "10:20:41", type: "command", heard: "go to threads", context: "Brave Browser · x.com", latency: 74, outcome: "ignored", command: "no match", detail: "The Slack-only command was not in the candidate set for the foreground browser context.", pipeline: [["Capture", "Universal Audio Thunderbolt · 16 kHz mono", true], ["Recognize", "Completed ‘go to threads’ in 74 ms", true], ["Context", "Brave Browser · x.com", true], ["Resolve", "No available command matched", false]] },
         { id: 2, time: "10:20:18", type: "command", heard: "open slack", context: "Brave Browser · x.com", latency: 68, outcome: "executed", command: "app.open.slack", detail: "Opened Slack through the macOS application action.", pipeline: [["Capture", "Universal Audio Thunderbolt · 16 kHz mono", true], ["Recognize", "Completed ‘open slack’ in 68 ms", true], ["Resolve", "Matched app.open.slack", true], ["Action", "macOS open completed", true]] },
-        { id: 3, time: "10:18:57", type: "dictation", heard: "Paste the launch notes here", context: "Slack · #voice-control", latency: 412, outcome: "pasted", command: "dictation", detail: "Option dictation transcribed locally with Parakeet and pasted into Slack.", pipeline: [["Capture", "Option held 3.8 s · pre-roll protected", true], ["Transcribe", "Parakeet v2 · 412 ms", true], ["Paste", "Accessibility action completed", true]] },
-        { id: 4, time: "10:17:05", type: "command", heard: "go to console", context: "Slack · #voice-control", latency: 71, outcome: "executed", command: "slack.channel.console", detail: "Opened Slack quick switcher and selected console.", pipeline: [["Capture", "Universal Audio Thunderbolt", true], ["Context", "Application predicate: Slack", true], ["Resolve", "Matched slack.channel.console", true], ["Action", "Quick switch completed", true]] },
+        { id: 3, time: "10:18:57", type: "dictation", heard: "Paste the launch notes here", context: "Slack · #hex", latency: 412, outcome: "pasted", command: "dictation", detail: "Option dictation transcribed locally with Parakeet and pasted into Slack.", pipeline: [["Capture", "Option held 3.8 s · pre-roll protected", true], ["Transcribe", "Parakeet v2 · 412 ms", true], ["Paste", "Accessibility action completed", true]] },
+        { id: 4, time: "10:17:05", type: "command", heard: "go to console", context: "Slack · #hex", latency: 71, outcome: "executed", command: "slack.channel.console", detail: "Opened Slack quick switcher and selected console.", pipeline: [["Capture", "Universal Audio Thunderbolt", true], ["Context", "Application predicate: Slack", true], ["Resolve", "Matched slack.channel.console", true], ["Action", "Quick switch completed", true]] },
         { id: 5, time: "10:14:22", type: "failure", heard: "command three", context: "Zed", latency: 63, outcome: "failed", command: "shortcut.command-three", detail: "The command resolved, but macOS rejected the keyboard event because Accessibility access was temporarily unavailable.", pipeline: [["Capture", "Universal Audio Thunderbolt", true], ["Recognize", "Completed ‘command three’ in 63 ms", true], ["Resolve", "Matched shortcut.command-three", true], ["Action", "Accessibility permission denied", false]] },
         { id: 6, time: "10:12:09", type: "command", heard: "go to sleep", context: "Zed", latency: 59, outcome: "slept", command: "mode.sleep", detail: "Voice Control entered Sleeping mode. Option dictation remained available.", pipeline: [["Recognize", "Completed ‘go to sleep’", true], ["Resolve", "Matched mode.sleep", true], ["Mode", "Listening → Sleeping", true]] },
         { id: 7, time: "10:11:44", type: "dictation", heard: "", context: "Zed", latency: 0, outcome: "discarded", command: "dictation", detail: "Option was held for 184 ms, below the 300 ms intent threshold. No audio was persisted.", pipeline: [["Input", "Option held 184 ms", true], ["Capture", "Discarded before transcription", true]] },
@@ -2103,7 +2103,7 @@
       });
 
       $$(".permission-action").forEach((button) => button.addEventListener("click", () => showToast("Would open macOS Privacy & Security")));
-      $("#open-data-folder").addEventListener("click", () => showToast("Would open ~/Library/Application Support/voice-control/"));
+      $("#open-data-folder").addEventListener("click", () => showToast("Would open ~/Library/Application Support/hex/"));
 
       setInterval(() => {
         if (!recordingActive) return;

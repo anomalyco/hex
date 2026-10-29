@@ -16,12 +16,12 @@ offer a download link; downloading and installing remains an explicit user actio
 
 The Rust app is called **Hex**, packaged as **Hex.app**, with
 bundle identifier `com.kitlangton.hex2` and executable `hex`. Its Application Support
-root remains `voice-control`. The supported platform remains Apple silicon with
+root is `hex`. The supported platform remains Apple silicon with
 macOS 15 or newer. The new bundle identity requires fresh macOS permission grants;
 changing the display name alone does not change signing ownership.
 
 Kit's personal Developer ID Application certificate (team `QC99C9JE59`) is approved
-for this app. Explicitly provide `VOICE_CONTROL_TEAM_ID` and the matching
+for this app. Explicitly provide `HEX_TEAM_ID` and the matching
 `HEX_NOTARY_PROFILE` before release; an Anomaly signing account is not required.
 
 Swift retains its own bundle identity, sandbox data, and S3 update feed. Intel

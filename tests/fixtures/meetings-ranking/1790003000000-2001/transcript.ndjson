@@ -1,0 +1,22 @@
+{"source": "system", "start_ms": 0, "end_ms": 4000, "text": "Morning. I made a short agenda for today."}
+{"source": "microphone", "start_ms": 10000, "end_ms": 14000, "text": "Great. Bob made the slides for the review, I believe."}
+{"source": "system", "start_ms": 20000, "end_ms": 24000, "text": "I made a blog post about the launch last night."}
+{"source": "microphone", "start_ms": 30000, "end_ms": 34000, "text": "Nice, I believe the blog post is already getting traffic."}
+{"source": "system", "start_ms": 40000, "end_ms": 44000, "text": "Bob said he made the onboarding video too."}
+{"source": "microphone", "start_ms": 50000, "end_ms": 54000, "text": "We made good progress on the editor this week."}
+{"source": "system", "start_ms": 60000, "end_ms": 64000, "text": "Bob is out on Friday, so plan around that."}
+{"source": "microphone", "start_ms": 70000, "end_ms": 74000, "text": "Who made the decision about the pricing page?"}
+{"source": "system", "start_ms": 80000, "end_ms": 84000, "text": "I believe it was the two of us, honestly."}
+{"source": "microphone", "start_ms": 90000, "end_ms": 94000, "text": "Fine. The search box still feels slow on large projects."}
+{"source": "system", "start_ms": 100000, "end_ms": 104000, "text": "Let's profile it after lunch."}
+{"source": "microphone", "start_ms": 110000, "end_ms": 114000, "text": "Okay, next topic is where uploads should live."}
+{"source": "system", "start_ms": 120000, "end_ms": 124000, "text": "We should keep the images out of the database and put them in blob storage instead."}
+{"source": "microphone", "start_ms": 130000, "end_ms": 134000, "text": "Right, the media files are huge, so blob storage with a CDN in front makes sense."}
+{"source": "system", "start_ms": 140000, "end_ms": 144000, "text": "Then the database only keeps a key for each image plus its media type."}
+{"source": "microphone", "start_ms": 150000, "end_ms": 154000, "text": "Thumbnails for the images can sit in the same bucket, generated on upload."}
+{"source": "system", "start_ms": 160000, "end_ms": 164000, "text": "And the storage costs stay predictable because old renders expire."}
+{"source": "microphone", "start_ms": 170000, "end_ms": 174000, "text": "Good. Back to the blog: who reviews the next post?"}
+{"source": "system", "start_ms": 180000, "end_ms": 184000, "text": "Bob made a list of reviewers, I believe he shared it."}
+{"source": "microphone", "start_ms": 190000, "end_ms": 194000, "text": "Also someone made a mess of the staging deploy yesterday."}
+{"source": "system", "start_ms": 200000, "end_ms": 204000, "text": "That was me, I made a typo in the config."}
+{"source": "microphone", "start_ms": 210000, "end_ms": 214000, "text": "No worries. Separately, someone asked whether the old blob left over from the prototype can be deleted, and I said yes once the migration finishes next week. Let's wrap up and write the notes."}

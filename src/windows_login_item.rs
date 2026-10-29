@@ -6,7 +6,7 @@ use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const VALUE_NAME: &str = "HEX";
+const VALUE_NAME: &str = "Hex";
 
 /// Return the Windows-owned startup registration state.
 pub fn is_enabled() -> Result<bool> {
@@ -19,21 +19,17 @@ pub fn is_enabled() -> Result<bool> {
     match key.get_value::<String, _>(VALUE_NAME) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).wrap_err("could not read the HEX startup registration"),
+        Err(error) => Err(error).wrap_err("could not read the Hex startup registration"),
     }
 }
 
 /// Register or unregister the current executable for the current Windows user.
 pub fn set_enabled(enabled: bool) -> Result<()> {
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
     if enabled {
-        let (key, _) = current_user
-            .create_subkey(RUN_KEY)
-            .wrap_err("could not open Windows startup applications")?;
-        let executable = std::env::current_exe().wrap_err("could not locate the HEX executable")?;
-        key.set_value(VALUE_NAME, &startup_command(&executable))
-            .wrap_err("could not register HEX to launch at login")?;
+        let executable = std::env::current_exe().wrap_err("could not locate the Hex executable")?;
+        write_startup_command(&executable, "could not register Hex to launch at login")?;
     } else {
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
         let key = match current_user.open_subkey_with_flags(RUN_KEY, KEY_WRITE) {
             Ok(key) => key,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -44,7 +40,7 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
         if let Err(error) = key.delete_value(VALUE_NAME)
             && error.kind() != ErrorKind::NotFound
         {
-            return Err(error).wrap_err("could not unregister HEX from Windows startup");
+            return Err(error).wrap_err("could not unregister Hex from Windows startup");
         }
     }
     Ok(())
@@ -57,12 +53,15 @@ pub fn repoint(executable: &Path) -> Result<()> {
     if !is_enabled()? {
         return Ok(());
     }
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = current_user
+    write_startup_command(executable, "could not repoint the Hex startup registration")
+}
+
+fn write_startup_command(executable: &Path, context: &'static str) -> Result<()> {
+    let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
         .create_subkey(RUN_KEY)
         .wrap_err("could not open Windows startup applications")?;
     key.set_value(VALUE_NAME, &startup_command(executable))
-        .wrap_err("could not repoint the HEX startup registration")?;
+        .wrap_err(context)?;
     Ok(())
 }
 
@@ -77,8 +76,8 @@ mod tests {
     #[test]
     fn startup_command_quotes_paths_with_spaces() {
         assert_eq!(
-            startup_command(Path::new(r"C:\Program Files\HEX\hex.exe")),
-            r#""C:\Program Files\HEX\hex.exe" app --hidden"#
+            startup_command(Path::new(r"C:\Program Files\Hex\hex.exe")),
+            r#""C:\Program Files\Hex\hex.exe" app --hidden"#
         );
     }
 }

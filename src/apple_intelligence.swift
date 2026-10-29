@@ -18,8 +18,20 @@ private struct BridgeError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+private struct BridgeChapter: Codable {
+    let title: String
+    let summary: String
+    let same_topic: Bool
+}
+
+private struct BridgeChapterLines: Codable {
+    let lines: [Int]
+}
+
 /// Distinguishes an oversized prompt so Rust can shorten the excerpt once.
 private let contextWindowMarker = "context-window:"
+/// A refused or guardrail-blocked transcript, which retrying won't change.
+private let refusalMarker = "refused:"
 
 #if canImport(FoundationModels)
 @available(macOS 26.0, *)
@@ -36,6 +48,53 @@ private struct GeneratedNotes {
 private struct GeneratedTitle {
     @Guide(description: "A short, specific meeting title of at most eight words, without dates or the word meeting")
     let title: String
+}
+
+/// Field order is generation order: the new lines are named on their own
+/// before the model compares them with the current chapter.
+@available(macOS 26.0, *)
+@Generable
+private struct GeneratedChapter {
+    @Guide(description: "A short name of two to five words for what the new lines are about, lowercase except names, without the word meeting")
+    let title: String
+    @Guide(description: "One short sentence on what the new lines cover")
+    let summary: String
+    @Guide(description: "true when the new lines are still about the current chapter, false when the conversation moved to a different topic")
+    let sameTopic: Bool
+}
+
+@available(macOS 26.0, *)
+@Generable
+private struct GeneratedChapterLines {
+    @Guide(description: "The L numbers of every line about the chapter after, in order")
+    let lines: [Int]
+}
+
+@available(macOS 26.0, *)
+private func respond<Content: Generable>(
+    instructions: String,
+    prompt: String,
+    generating type: Content.Type,
+    maximumResponseTokens: Int
+) async throws -> Content {
+    let model = SystemLanguageModel(
+        useCase: .general,
+        guardrails: .permissiveContentTransformations
+    )
+    let session = LanguageModelSession(model: model, instructions: instructions)
+    do {
+        return try await session.respond(
+            to: prompt,
+            generating: type,
+            options: GenerationOptions(temperature: 0.2, maximumResponseTokens: maximumResponseTokens)
+        ).content
+    } catch LanguageModelSession.GenerationError.exceededContextWindowSize(let context) {
+        throw BridgeError("\(contextWindowMarker) \(context.debugDescription)")
+    } catch LanguageModelSession.GenerationError.refusal(_, let context) {
+        throw BridgeError("\(refusalMarker) \(context.debugDescription)")
+    } catch LanguageModelSession.GenerationError.guardrailViolation(let context) {
+        throw BridgeError("\(refusalMarker) \(context.debugDescription)")
+    }
 }
 
 @available(macOS 26.0, *)
@@ -172,6 +231,96 @@ public func hexAppleIntelligenceNotes(
     case .failure(let failure):
         writeError(failure, to: errorOutput)
         return nil
+    }
+    #else
+    writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
+    return nil
+    #endif
+}
+
+/// Runs one guided generation and returns its JSON, or nil with `errorOutput` set.
+private func bridgeCall<Value: Encodable & Sendable>(
+    _ instructions: UnsafePointer<CChar>?,
+    _ prompt: UnsafePointer<CChar>?,
+    _ timeoutMs: UInt64,
+    _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?,
+    _ operation: @escaping @Sendable (String, String) async throws -> Value
+) -> UnsafeMutablePointer<CChar>? {
+    guard let instructions, let prompt else {
+        writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
+        return nil
+    }
+    let instructionText = String(cString: instructions)
+    let promptText = String(cString: prompt)
+    let result = blocking(timeout: TimeInterval(timeoutMs) / 1_000) {
+        try await operation(instructionText, promptText)
+    }
+    switch result {
+    case .success(let value):
+        do {
+            let data = try JSONEncoder().encode(value)
+            return strdup(String(decoding: data, as: UTF8.self))
+        } catch {
+            writeError(error, to: errorOutput)
+            return nil
+        }
+    case .failure(let failure):
+        writeError(failure, to: errorOutput)
+        return nil
+    }
+}
+
+@_cdecl("hex_apple_intelligence_chapter")
+public func hexAppleIntelligenceChapter(
+    _ instructions: UnsafePointer<CChar>?,
+    _ prompt: UnsafePointer<CChar>?,
+    _ timeoutMs: UInt64,
+    _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutablePointer<CChar>? {
+    #if canImport(FoundationModels)
+    guard #available(macOS 26.0, *) else {
+        writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
+        return nil
+    }
+    return bridgeCall(instructions, prompt, timeoutMs, errorOutput) { instructions, prompt in
+        let chapter = try await respond(
+            instructions: instructions,
+            prompt: prompt,
+            generating: GeneratedChapter.self,
+            maximumResponseTokens: 120
+        )
+        return BridgeChapter(
+            title: chapter.title,
+            summary: chapter.summary,
+            same_topic: chapter.sameTopic
+        )
+    }
+    #else
+    writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
+    return nil
+    #endif
+}
+
+@_cdecl("hex_apple_intelligence_chapter_lines")
+public func hexAppleIntelligenceChapterLines(
+    _ instructions: UnsafePointer<CChar>?,
+    _ prompt: UnsafePointer<CChar>?,
+    _ timeoutMs: UInt64,
+    _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutablePointer<CChar>? {
+    #if canImport(FoundationModels)
+    guard #available(macOS 26.0, *) else {
+        writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
+        return nil
+    }
+    return bridgeCall(instructions, prompt, timeoutMs, errorOutput) { instructions, prompt in
+        let lines = try await respond(
+            instructions: instructions,
+            prompt: prompt,
+            generating: GeneratedChapterLines.self,
+            maximumResponseTokens: 240
+        )
+        return BridgeChapterLines(lines: lines.lines)
     }
     #else
     writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)

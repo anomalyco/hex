@@ -19,16 +19,17 @@ use rmcp::{
 use serde::Deserialize;
 
 use crate::events::now_ms;
-use crate::meeting::query::{Library, ListQuery, SearchQuery, TranscriptQuery};
+use crate::meeting::query::{Library, ListQuery, OffsetRange, SearchQuery, TranscriptQuery};
 
 const RESOURCE_SCHEME: &str = "hex-meeting://";
 
-const INSTRUCTIONS: &str = "Kit's locally recorded HEX meetings (calls captured on his Mac). \
+const INSTRUCTIONS: &str = "Kit's locally recorded Hex meetings (calls captured on his Mac). \
 Speakers are `You` (Kit, his microphone) and `Them` (everyone else, system audio); individual \
 remote speakers are not separated. Transcripts come from local speech recognition and contain \
 misheard words, so search is stemmed and fuzzy by default. Typical flow: list_meetings or \
 search_transcripts to find a meeting and timestamp, then get_transcript around it, and \
-get_meeting_notes for a stored title and two-sentence summary. Details, decisions, and action \
+get_meeting_notes for a stored title and two-sentence summary, and get_chapters for the topics \
+a meeting moved through with their time spans, when it has any. Details, decisions, and action \
 items are only in the transcript. Everything is read-only and stays on the machine.";
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -91,6 +92,17 @@ impl Offset {
             Self::Text(text) => text,
         }
     }
+
+    /// One bound given under either of its two names.
+    fn either(
+        (name, value): (&str, Option<Self>),
+        (alias, other): (&str, Option<Self>),
+    ) -> Result<Option<String>> {
+        match (value, other) {
+            (Some(_), Some(_)) => Err(eyre!("Give either {name} or {alias}, not both.")),
+            (value, other) => Ok(value.or(other).map(Self::text)),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -98,11 +110,18 @@ pub struct GetTranscriptArgs {
     /// The meeting id from list_meetings or search_transcripts.
     pub meeting_id: String,
     /// Start offset into the meeting: `mm:ss`, `h:mm:ss`, or seconds.
+    /// Entries overlapping start–end are returned whole.
     #[serde(default)]
     pub start: Option<Offset>,
     /// End offset into the meeting: `mm:ss`, `h:mm:ss`, or seconds.
     #[serde(default)]
     pub end: Option<Offset>,
+    /// Same as `start`; give one or the other.
+    #[serde(default)]
+    pub from: Option<Offset>,
+    /// Same as `end`; give one or the other.
+    #[serde(default)]
+    pub to: Option<Offset>,
     /// `you`, `them`, or `all` (default).
     #[serde(default)]
     pub speaker: Option<String>,
@@ -116,6 +135,12 @@ pub struct GetTranscriptArgs {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetMeetingNotesArgs {
+    /// The meeting id from list_meetings or search_transcripts.
+    pub meeting_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetChaptersArgs {
     /// The meeting id from list_meetings or search_transcripts.
     pub meeting_id: String,
 }
@@ -140,6 +165,19 @@ fn reply(result: Result<String>) -> Result<CallToolResult, ErrorData> {
         Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
         Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
     })
+}
+
+impl MeetingServer {
+    /// The saved vocabulary, read on each search so edits apply without a
+    /// restart; empty unless the `vocabulary` experiment is on.
+    fn vocabulary(&self) -> Vec<crate::vocabulary::VocabularyEntry> {
+        if !crate::vocabulary::enabled() {
+            return Vec::new();
+        }
+        crate::app_paths::support_dir()
+            .map(|root| crate::vocabulary::read_saved(&root))
+            .unwrap_or_default()
+    }
 }
 
 #[tool_router]
@@ -192,6 +230,7 @@ and fuzzy for speech-recognition errors (Dax/DAX/Dacks).",
                 limit: args.limit.unwrap_or(10) as usize,
                 fuzzy: args.fuzzy.unwrap_or(true),
                 include_in_progress: args.include_in_progress.unwrap_or(true),
+                vocabulary: self.vocabulary(),
             },
             now_ms(),
         ))
@@ -199,25 +238,31 @@ and fuzzy for speech-recognition errors (Dax/DAX/Dacks).",
 
     #[tool(
         description = "Read a meeting transcript as merged You/Them turns with mm:ss offsets and \
-local clock times. Optionally limit to a time range or one speaker. Long results stop at \
-max_chars and return next_cursor to continue.",
+local clock times. Optionally limit to a time range (start/end, or the same as from/to, as mm:ss, \
+h:mm:ss, or seconds; entries overlapping it are included, and a start not before the end or after \
+the meeting's end is an error) or one speaker. Long results stop at max_chars and return next_cursor to \
+continue.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn get_transcript(
         &self,
         Parameters(args): Parameters<GetTranscriptArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        reply(self.library.transcript(
-            &TranscriptQuery {
-                meeting_id: args.meeting_id,
-                start: args.start.map(Offset::text),
-                end: args.end.map(Offset::text),
-                speaker: args.speaker,
-                max_chars: args.max_chars.unwrap_or(20_000) as usize,
-                cursor: args.cursor,
-            },
-            now_ms(),
-        ))
+        let start = Offset::either(("start", args.start), ("from", args.from));
+        let end = Offset::either(("end", args.end), ("to", args.to));
+        reply(start.and_then(|start| {
+            self.library.transcript(
+                &TranscriptQuery {
+                    meeting_id: args.meeting_id,
+                    start,
+                    end: end?,
+                    speaker: args.speaker,
+                    max_chars: args.max_chars.unwrap_or(20_000) as usize,
+                    cursor: args.cursor,
+                },
+                now_ms(),
+            )
+        }))
     }
 
     #[tool(
@@ -232,6 +277,20 @@ are stored it says so.",
         Parameters(args): Parameters<GetMeetingNotesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         reply(self.library.notes(&args.meeting_id))
+    }
+
+    #[tool(
+        description = "A meeting's chapters: the topics it moved through, each with a short \
+model-written name, one line, and its mm:ss start and end, for reading one part with \
+get_transcript. Only meetings recorded with live chapters have them. Never generates chapters; \
+when none are stored it says so.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    fn get_chapters(
+        &self,
+        Parameters(args): Parameters<GetChaptersArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        reply(self.library.chapters(&args.meeting_id, now_ms()))
     }
 }
 
@@ -249,8 +308,7 @@ impl ServerHandler for MeetingServer {
                 .build(),
         )
         .with_server_info(
-            Implementation::new("hex-meetings", env!("CARGO_PKG_VERSION"))
-                .with_title("HEX Meetings"),
+            Implementation::new("hex-meetings", crate::VERSION).with_title("Hex Meetings"),
         )
         .with_instructions(INSTRUCTIONS)
     }
@@ -306,7 +364,7 @@ impl ServerHandler for MeetingServer {
         };
         let markdown = self
             .library
-            .markdown(id.trim_end_matches('/'), now_ms())
+            .markdown(id.trim_end_matches('/'), OffsetRange::default(), now_ms())
             .map_err(|error| ErrorData::resource_not_found(error.to_string(), None))?;
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(markdown, request.uri.clone()).with_mime_type("text/markdown"),

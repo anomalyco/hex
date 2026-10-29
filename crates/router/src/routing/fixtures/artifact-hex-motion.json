@@ -1,0 +1,691 @@
+{
+  "capture": "scrawl-1792524740501-170ef-9.scrawl",
+  "savedDecision": "send CANVAS",
+  "page": {
+    "url": "https://studio.example.ts.net:8444/raw/2026-10-20-hex-motion/index.html",
+    "served": "https://studio.example.ts.net:8444/raw/",
+    "file": "2026-10-20-hex-motion/index.html",
+    "modifiedMs": 1792526983885,
+    "writes": [
+      {
+        "session": "ses_000000000008Fixture0000008",
+        "root": "ses_000000000023Fixture0000035",
+        "tool": "shell",
+        "ran": 1792526934905,
+        "done": 1792526940087
+      },
+      {
+        "session": "ses_000000000008Fixture0000008",
+        "root": "ses_000000000023Fixture0000035",
+        "tool": "read",
+        "ran": 1792526954581,
+        "done": 1792526954882
+      },
+      {
+        "session": "ses_000000000008Fixture0000008",
+        "root": "ses_000000000023Fixture0000035",
+        "tool": "read",
+        "ran": 1792526954910,
+        "done": 1792526955275
+      },
+      {
+        "session": "ses_000000000008Fixture0000008",
+        "root": "ses_000000000023Fixture0000035",
+        "tool": "edit",
+        "ran": 1792526982484,
+        "done": 1792526982503
+      },
+      {
+        "session": "ses_000000000008Fixture0000008",
+        "root": "ses_000000000023Fixture0000035",
+        "tool": "edit",
+        "ran": 1792526983875,
+        "done": 1792526983886
+      }
+    ]
+  },
+  "bundle": {
+    "version": 1,
+    "id": "scrawl-1792524740501-170ef-9",
+    "createdAtMs": 1792524755559,
+    "durationMs": 14811,
+    "target": {
+      "mode": "display",
+      "app": "Brave Browser",
+      "bundleId": "com.brave.Browser",
+      "windowTitle": "Hex Motion & Metal Rendering — Before / After",
+      "displayId": 3,
+      "frame": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 2560.0,
+        "height": 1440.0,
+        "scale": 2.0
+      }
+    },
+    "transcript": {
+      "source": "speech-analyzer",
+      "model": "SpeechTranscriber en_US",
+      "text": "We don't need pain transitions, that's for sure. That's not great. Oh, that's nice. It's faster. Um, There's some jumps, though, in the animation.",
+      "segments": [],
+      "words": [
+        {
+          "t0": 360,
+          "t1": 660,
+          "text": "We"
+        },
+        {
+          "t0": 660,
+          "t1": 900,
+          "text": "don't"
+        },
+        {
+          "t0": 900,
+          "t1": 960,
+          "text": "need"
+        },
+        {
+          "t0": 960,
+          "t1": 1200,
+          "text": "pain"
+        },
+        {
+          "t0": 1200,
+          "t1": 2160,
+          "text": "transitions,"
+        },
+        {
+          "t0": 2160,
+          "t1": 2400,
+          "text": "that's"
+        },
+        {
+          "t0": 2400,
+          "t1": 2520,
+          "text": "for"
+        },
+        {
+          "t0": 2520,
+          "t1": 2760,
+          "text": "sure."
+        },
+        {
+          "t0": 2820,
+          "t1": 3060,
+          "text": "That's"
+        },
+        {
+          "t0": 3060,
+          "t1": 3120,
+          "text": "not"
+        },
+        {
+          "t0": 3120,
+          "t1": 3720,
+          "text": "great."
+        },
+        {
+          "t0": 5520,
+          "t1": 6060,
+          "text": "Oh,"
+        },
+        {
+          "t0": 6060,
+          "t1": 6300,
+          "text": "that's"
+        },
+        {
+          "t0": 6300,
+          "t1": 6540,
+          "text": "nice."
+        },
+        {
+          "t0": 6600,
+          "t1": 6900,
+          "text": "It's"
+        },
+        {
+          "t0": 6900,
+          "t1": 7560,
+          "text": "faster."
+        },
+        {
+          "t0": 8460,
+          "t1": 9120,
+          "text": "Um,"
+        },
+        {
+          "t0": 9120,
+          "t1": 11700,
+          "text": "There's"
+        },
+        {
+          "t0": 11700,
+          "t1": 11760,
+          "text": "some"
+        },
+        {
+          "t0": 11760,
+          "t1": 12120,
+          "text": "jumps,"
+        },
+        {
+          "t0": 12120,
+          "t1": 12300,
+          "text": "though,"
+        },
+        {
+          "t0": 12300,
+          "t1": 12420,
+          "text": "in"
+        },
+        {
+          "t0": 12420,
+          "t1": 12540,
+          "text": "the"
+        },
+        {
+          "t0": 12540,
+          "t1": 13080,
+          "text": "animation."
+        }
+      ]
+    },
+    "strokes": [],
+    "marks": [
+      {
+        "id": "m1",
+        "strokes": [
+          0
+        ],
+        "t0": 1469,
+        "t1": 1817,
+        "boxNorm": [
+          0.3599,
+          0.6987,
+          0.421,
+          0.7746
+        ],
+        "shape": "mark",
+        "on": "scroll area in index.html",
+        "description": "marked region x 0.36–0.42, y 0.70–0.77 over “scroll area in index.html”",
+        "frame": "frames/frame-01.png"
+      },
+      {
+        "id": "m2",
+        "strokes": [
+          1
+        ],
+        "t0": 5964,
+        "t1": 6180,
+        "boxNorm": [
+          0.4206,
+          0.3724,
+          0.4501,
+          0.4095
+        ],
+        "shape": "mark",
+        "on": "scroll area in index.html",
+        "description": "marked region x 0.42–0.45, y 0.37–0.41 over “scroll area in index.html”",
+        "frame": "frames/frame-03.png"
+      },
+      {
+        "id": "m3",
+        "strokes": [
+          2
+        ],
+        "t0": 11336,
+        "t1": 11839,
+        "boxNorm": [
+          0.3268,
+          0.4113,
+          0.4183,
+          0.429
+        ],
+        "shape": "mark",
+        "on": "scroll area in index.html",
+        "description": "marked region x 0.33–0.42, y 0.41–0.43 over “scroll area in index.html”",
+        "frame": "frames/frame-04.png"
+      }
+    ],
+    "events": [
+      {
+        "kind": "scroll",
+        "t": 2087,
+        "x": 0.3731064,
+        "y": 0.6736247,
+        "dx": 0.0,
+        "dy": 1.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2112,
+        "x": 0.3731064,
+        "y": 0.6736247,
+        "dx": 0.0,
+        "dy": 1.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2137,
+        "x": 0.3731064,
+        "y": 0.6736247,
+        "dx": 0.0,
+        "dy": 3.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2182,
+        "x": 0.3731064,
+        "y": 0.6736247,
+        "dx": 0.0,
+        "dy": 4.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2220,
+        "x": 0.3731064,
+        "y": 0.6736247,
+        "dx": 0.0,
+        "dy": 5.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2421,
+        "x": 0.37035066,
+        "y": 0.6454888,
+        "dx": 0.0,
+        "dy": 1.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2437,
+        "x": 0.37035066,
+        "y": 0.64299315,
+        "dx": 0.0,
+        "dy": 1.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2454,
+        "x": 0.37035066,
+        "y": 0.6404975,
+        "dx": 0.0,
+        "dy": 3.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2487,
+        "x": 0.37081757,
+        "y": 0.6353651,
+        "dx": 0.0,
+        "dy": 5.0
+      },
+      {
+        "kind": "scroll",
+        "t": 2520,
+        "x": 0.371051,
+        "y": 0.627596,
+        "dx": 0.0,
+        "dy": 6.0
+      },
+      {
+        "kind": "scroll",
+        "t": 3570,
+        "x": 0.2516907,
+        "y": 0.5198161,
+        "dx": 0.0,
+        "dy": 1.0
+      },
+      {
+        "kind": "click",
+        "t": 13270,
+        "x": 0.16645661,
+        "y": 0.42432183,
+        "button": "left",
+        "label": "in index.html",
+        "role": "scroll area"
+      },
+      {
+        "kind": "click",
+        "t": 14713,
+        "x": 0.53234255,
+        "y": 0.051163737,
+        "button": "left",
+        "role": "group"
+      }
+    ],
+    "keyframes": [],
+    "contactSheet": "contact-sheet.png"
+  },
+  "evidence": {
+    "clues": [
+      {
+        "source": "port",
+        "pointer": {
+          "kind": "folder",
+          "path": "/Users/example/code/open-source/gpu-gallery",
+          "root": "/Users/example/code/open-source/gpu-gallery",
+          "tree": true,
+          "repo": "/Users/example/code/open-source/gpu-gallery"
+        },
+        "note": "https://studio.example.ts.net:8444 (port 8460 here) is served from /Users/example/code/open-source/gpu-gallery"
+      },
+      {
+        "source": "title",
+        "pointer": {
+          "kind": "words",
+          "words": [
+            "hex",
+            "motion",
+            "metal",
+            "rendering"
+          ]
+        },
+        "note": "window title \"Hex Motion & Metal Rendering — Before / After\""
+      },
+      {
+        "source": "speech",
+        "pointer": {
+          "kind": "words",
+          "words": [
+            "pain",
+            "transitions",
+            "great",
+            "faster",
+            "jumps",
+            "though",
+            "animation"
+          ]
+        },
+        "note": "said"
+      }
+    ],
+    "candidates": [
+      {
+        "id": "ses_000000000017Fixture0000023",
+        "title": "FLIT",
+        "directory": "/Users/example/code/open-source/flit",
+        "repo": "/Users/example/code/open-source/flit",
+        "updatedMs": 1792524728204,
+        "viewedMs": 1792523687397
+      },
+      {
+        "id": "ses_000000000028Fixture0000040",
+        "title": "DESKTOP",
+        "directory": "/Users/example/code/open-source/opencode",
+        "repo": "/Users/example/code/open-source/opencode",
+        "updatedMs": 1792524692147,
+        "viewedMs": 1792524529675
+      },
+      {
+        "id": "ses_000000000023Fixture0000035",
+        "title": "HEX",
+        "directory": "/Users/example/code/open-source/hex",
+        "repo": "/Users/example/code/open-source/hex",
+        "updatedMs": 1792524691979,
+        "viewedMs": 1792522910999
+      },
+      {
+        "id": "ses_000000000026Fixture0000038",
+        "title": "KNOBS",
+        "directory": "/Users/example/code/open-source/knobs",
+        "repo": "/Users/example/code/open-source/knobs",
+        "updatedMs": 1792524428015,
+        "viewedMs": 1792524428209
+      },
+      {
+        "id": "ses_00000000002eFixture0000046",
+        "title": "OPENCODE IOS",
+        "directory": "/Users/example/code/open-source/opencode-ios-oc380-loading",
+        "repo": "/Users/example/code/open-source/opencode-ios-sf-picks",
+        "updatedMs": 1792524312168,
+        "viewedMs": 1792524312237
+      },
+      {
+        "id": "ses_00000000002bFixture0000043",
+        "title": "HOME",
+        "directory": "/Users/example/code/home",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792524271353,
+        "viewedMs": 1792524271390
+      },
+      {
+        "id": "ses_000000000021Fixture0000033",
+        "title": "CANVAS",
+        "directory": "/Users/example/code/open-source/gpu-gallery",
+        "repo": "/Users/example/code/open-source/gpu-gallery",
+        "updatedMs": 1792524265979,
+        "viewedMs": 1792477150781
+      },
+      {
+        "id": "ses_000000000027Fixture0000039",
+        "title": "PROBLEMS",
+        "directory": "/Users/example/code/worktrees/team-board/task-page",
+        "repo": "/Users/example/code/worktrees/team-board/rewrite",
+        "updatedMs": 1792524255031,
+        "viewedMs": 1792524255129
+      },
+      {
+        "id": "ses_000000000029Fixture0000041",
+        "title": "SCRAWL",
+        "directory": "/Users/example/code/open-source/scrawl",
+        "repo": "/Users/example/code/open-source/scrawl",
+        "updatedMs": 1792523771831,
+        "viewedMs": 1792519144207
+      },
+      {
+        "id": "ses_000000000018Fixture0000024",
+        "title": "KIT MOTION",
+        "directory": "/Users/example/code/home/research/2026-10-16-motion-v3",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792523767105,
+        "viewedMs": 1792517287142
+      },
+      {
+        "id": "ses_00000000002aFixture0000042",
+        "title": "GAME ENGINE",
+        "directory": "/Users/example/code/open-source/arcade",
+        "repo": "/Users/example/code/open-source/arcade",
+        "updatedMs": 1792523704532,
+        "viewedMs": 1792523704725
+      },
+      {
+        "id": "ses_00000000000aFixture0000010",
+        "title": "DEPENDENCY AUDIT",
+        "directory": "/Users/example/.local/share/opencode/worktree/46555d/stellar-star",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792520348990,
+        "viewedMs": 1792478242962
+      },
+      {
+        "id": "ses_00000000002dFixture0000045",
+        "title": "SLACKBOT",
+        "directory": "/Users/example/code/open-source/opencode-slack",
+        "repo": "/Users/example/code/open-source/opencode-slack",
+        "updatedMs": 1792478486144,
+        "viewedMs": 1792440889443
+      },
+      {
+        "id": "ses_000000000019Fixture0000025",
+        "title": "SERVER VOICE",
+        "directory": "/Users/example/worktrees/opencode/server-voice",
+        "repo": "/Users/example/code/open-source/opencode",
+        "updatedMs": 1792478486119,
+        "viewedMs": 1792442360125
+      },
+      {
+        "id": "ses_00000000000dFixture0000013",
+        "title": "Feedback synonym",
+        "directory": "/Users/example/code/open-source/arcade",
+        "repo": "/Users/example/code/open-source/arcade",
+        "updatedMs": 1792474285630,
+        "viewedMs": 1792473284006
+      },
+      {
+        "id": "ses_000000000012Fixture0000018",
+        "title": "Quick check-in",
+        "directory": "/Users/example/code/open-source/scrawl",
+        "repo": "/Users/example/code/open-source/scrawl",
+        "updatedMs": 1792472119901,
+        "viewedMs": 1792302248443
+      },
+      {
+        "id": "ses_00000000002cFixture0000044",
+        "title": "UP DOWN APP",
+        "directory": "/Users/example/code/open-source/tracker-uikit",
+        "repo": "/Users/example/code/open-source/tracker-uikit",
+        "updatedMs": 1792454885370,
+        "viewedMs": 1792454885390
+      },
+      {
+        "id": "ses_00000000001cFixture0000028",
+        "title": "CONSOLE VORTEX",
+        "directory": "/Users/example/code/open-source/opencode-console",
+        "repo": "/Users/example/code/open-source/opencode-console",
+        "updatedMs": 1792438810776,
+        "viewedMs": 1792438810783
+      },
+      {
+        "id": "ses_00000000000fFixture0000015",
+        "title": "Streaming Markdown Profiling & Library",
+        "directory": "/Users/example/code/open-source/streaming-markdown-lab",
+        "updatedMs": 1792437625175,
+        "viewedMs": 1792392138105
+      },
+      {
+        "id": "ses_000000000010Fixture0000016",
+        "title": "JEVAL",
+        "directory": "/Users/example/code/home",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792436507580,
+        "viewedMs": 1792389692797
+      },
+      {
+        "id": "ses_00000000001bFixture0000027",
+        "title": "OPENCODE CONSOLE",
+        "directory": "/Users/example/code/open-source/opencode-console",
+        "repo": "/Users/example/code/open-source/opencode-console",
+        "updatedMs": 1792431356040,
+        "viewedMs": 1792187291153
+      },
+      {
+        "id": "ses_000000000014Fixture0000020",
+        "title": "Public-site audit fixes",
+        "directory": "/Users/example/.local/share/opencode/worktree/012780/lucky-rocket",
+        "repo": "/Users/example/code/open-source/opencode",
+        "updatedMs": 1792429760607,
+        "viewedMs": 1792358813510
+      },
+      {
+        "id": "ses_000000000011Fixture0000017",
+        "title": "MODEL PICKER",
+        "directory": "/Users/example/code/open-source/opencode-ios-model-picker",
+        "repo": "/Users/example/code/open-source/opencode-ios-sf-picks",
+        "updatedMs": 1792424967210,
+        "viewedMs": 1792363784492
+      },
+      {
+        "id": "ses_00000000000cFixture0000012",
+        "title": "SCRAWL RECORDER",
+        "directory": "/Users/example/code/open-source/scrawl",
+        "repo": "/Users/example/code/open-source/scrawl",
+        "updatedMs": 1792391837251,
+        "viewedMs": 1792391837366
+      },
+      {
+        "id": "ses_00000000000eFixture0000014",
+        "title": "Claude typo",
+        "directory": "/Users/example/code",
+        "updatedMs": 1792386980319,
+        "viewedMs": 1792386977838
+      },
+      {
+        "id": "ses_000000000013Fixture0000019",
+        "title": "SPR good to go?",
+        "directory": "/Users/example/.local/share/opencode/worktree/012780/quick-tiger",
+        "repo": "/Users/example/code/open-source/opencode",
+        "updatedMs": 1792269008625,
+        "viewedMs": 1792268816383
+      },
+      {
+        "id": "ses_000000000022Fixture0000034",
+        "title": "BUDGET APP",
+        "directory": "/Users/example/code/open-source/budget-app",
+        "repo": "/Users/example/code/open-source/budget-app",
+        "updatedMs": 1792251233509,
+        "viewedMs": 1792251233513
+      },
+      {
+        "id": "ses_000000000015Fixture0000021",
+        "title": "Project screenshots",
+        "directory": "/Users/example/code/home",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792206962866,
+        "viewedMs": 1792206962871
+      },
+      {
+        "id": "ses_000000000016Fixture0000022",
+        "title": "Chat compaction algorithm",
+        "directory": "/Users/example/code/home",
+        "repo": "/Users/example/code/home",
+        "updatedMs": 1792206712130,
+        "viewedMs": 1792206712132
+      },
+      {
+        "id": "ses_00000000001aFixture0000026",
+        "title": "DEADBOLT",
+        "directory": "/Users/example/code/open-source/deadbolt",
+        "repo": "/Users/example/code/open-source/deadbolt",
+        "updatedMs": 1792177126854,
+        "viewedMs": 1792172591104
+      },
+      {
+        "id": "ses_000000000024Fixture0000036",
+        "title": "AI TALK",
+        "directory": "/Users/example/code/open-source/ai-talk",
+        "repo": "/Users/example/code/open-source/ai-talk",
+        "updatedMs": 1792171656850,
+        "viewedMs": 1792123145000
+      },
+      {
+        "id": "ses_00000000001dFixture0000029",
+        "title": "BROWSER CONTROL",
+        "directory": "/Users/example/code/open-source/browser-control",
+        "repo": "/Users/example/code/open-source/browser-control",
+        "updatedMs": 1792094949860,
+        "viewedMs": 1792094949875
+      },
+      {
+        "id": "ses_00000000001eFixture0000030",
+        "title": "free-tier read-only test 3 (delete me)",
+        "directory": "/private/var/folders/xx/example/T/opencode/freetier-test",
+        "updatedMs": 1792031486314,
+        "viewedMs": 1792031486324
+      },
+      {
+        "id": "ses_00000000001fFixture0000031",
+        "title": "free-tier read-only test 2 (delete me)",
+        "directory": "/private/var/folders/xx/example/T/opencode/freetier-test",
+        "updatedMs": 1792031462829,
+        "viewedMs": 1792031462855
+      },
+      {
+        "id": "ses_000000000020Fixture0000032",
+        "title": "free-tier read-only test (delete me)",
+        "directory": "/private/var/folders/xx/example/T/opencode/freetier-test",
+        "updatedMs": 1792031446084,
+        "viewedMs": 1792031446101
+      },
+      {
+        "id": "ses_000000000025Fixture0000037",
+        "title": "CHOOSER",
+        "directory": "/Users/example/code/experiments/typescript/choose-gpu",
+        "repo": "/Users/example/code/experiments/typescript/choose-gpu",
+        "updatedMs": 1791956676331,
+        "viewedMs": 1791953219243
+      }
+    ],
+    "nowMs": 1792524755559
+  }
+}

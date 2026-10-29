@@ -1,0 +1,20 @@
+name: Download release artifacts
+description: Downloads artifacts into $RUNNER_TEMP/in/<name> and verifies each against the digest its job reported.
+inputs:
+  pattern:
+    description: Artifact name pattern
+    required: true
+  digests:
+    description: Space-separated name=digest pairs, from the outputs of the jobs that made the artifacts
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      with:
+        pattern: ${{ inputs.pattern }}
+        path: ${{ runner.temp }}/in
+    - shell: bash
+      run: bash "${GITHUB_ACTION_PATH//\\//}/../verify-artifacts.sh" "$RUNNER_TEMP/in"
+      env:
+        HEX_DIGESTS: ${{ inputs.digests }}

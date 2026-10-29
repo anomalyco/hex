@@ -12,9 +12,8 @@ use serde_json::{Value, json};
 #[test]
 fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
-    let support =
-        std::env::temp_dir().join(format!("voice-control-mcp-support-{}", std::process::id()));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_voice-control"))
+    let support = std::env::temp_dir().join(format!("hex-mcp-support-{}", std::process::id()));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hex"))
         .arg("mcp")
         .arg("--meetings-dir")
         .arg(&fixtures)
@@ -75,6 +74,7 @@ fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
     assert_eq!(
         names,
         [
+            "get_chapters",
             "get_meeting_notes",
             "get_transcript",
             "list_meetings",
@@ -90,6 +90,16 @@ fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
         .find(|tool| tool["name"] == "search_transcripts")
         .unwrap();
     assert_eq!(search["inputSchema"]["required"], json!(["query"]));
+    let transcript = tools
+        .iter()
+        .find(|tool| tool["name"] == "get_transcript")
+        .unwrap();
+    for bound in ["start", "end", "from", "to"] {
+        assert!(
+            transcript["inputSchema"]["properties"][bound].is_object(),
+            "{transcript}"
+        );
+    }
 
     send(
         json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
@@ -113,6 +123,53 @@ fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
     assert!(text.contains("Showing 00:16–00:31"), "{text}");
 
     send(
+        json!({"jsonrpc": "2.0", "id": 41, "method": "tools/call", "params": {
+            "name": "get_transcript",
+            "arguments": {
+                "meeting_id": "1790000000000-1001", "start": null, "end": null,
+                "from": "0:20", "to": 30
+            }
+        }}),
+    );
+    let result = receive(41);
+    let text = result["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Showing 00:16–00:31"), "{text}");
+    assert!(!text.contains("write the spec"), "{text}");
+
+    for (id, arguments, error) in [
+        (
+            42,
+            json!({"meeting_id": "1790000000000-1001", "from": "0:30", "to": "0:20"}),
+            "The range start 00:30 must be earlier than its end 00:20.",
+        ),
+        (
+            43,
+            json!({"meeting_id": "1790000000000-1001", "start": "5:00"}),
+            "The range starts at 05:00, after the meeting's end at 00:40.",
+        ),
+        (
+            44,
+            json!({"meeting_id": "1790000000000-1001", "to": 0}),
+            "The range start 00:00 must be earlier than its end 00:00.",
+        ),
+        (
+            45,
+            json!({"meeting_id": "1790000000000-1001", "start": "0:10", "from": "0:20"}),
+            "Give either start or from, not both.",
+        ),
+    ] {
+        send(
+            json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
+                "name": "get_transcript", "arguments": arguments
+            }}),
+        );
+        let result = receive(id);
+        assert_eq!(result["result"]["isError"], true, "{result}");
+        let text = result["result"]["content"][0]["text"].as_str().unwrap();
+        assert_eq!(text, error);
+    }
+
+    send(
         json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
             "name": "get_meeting_notes",
             "arguments": {"meeting_id": "missing"}
@@ -120,6 +177,19 @@ fn mcp_server_initializes_lists_tools_and_answers_calls_over_stdio() {
     );
     let result = receive(5);
     assert_eq!(result["result"]["isError"], true, "{result}");
+
+    send(
+        json!({"jsonrpc": "2.0", "id": 51, "method": "tools/call", "params": {
+            "name": "get_chapters",
+            "arguments": {"meeting_id": "1790000000000-1001"}
+        }}),
+    );
+    let result = receive(51);
+    let text = result["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("No chapters are stored for this meeting."),
+        "{text}"
+    );
 
     send(
         json!({"jsonrpc": "2.0", "id": 6, "method": "resources/read", "params": {

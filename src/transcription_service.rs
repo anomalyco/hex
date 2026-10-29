@@ -3,12 +3,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::Result;
 use hound::{Sample, SampleFormat, WavReader};
 
-use crate::transcription::WarmTranscriber;
+use crate::transcription::{Transcriber, WarmTranscriber};
 use crate::transcription_models::TranscriptionSelection;
 
 const COMMAND_CAPACITY: usize = 1;
@@ -17,6 +17,14 @@ const MAX_SAMPLE_RATE: u32 = 192_000;
 const MAX_CHANNELS: u16 = 8;
 const MAX_NORMALIZED_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NORMALIZED_SAMPLES: usize = MAX_NORMALIZED_AUDIO_BYTES / size_of::<f32>();
+/// Pause before asking again while dictation holds the shared engine.
+const SHARED_RETRY: Duration = Duration::from_millis(50);
+/// How long host audio waits out a dictation, such as a locked one, before
+/// using a copy of the service's own.
+const SHARED_WAIT: Duration = Duration::from_secs(20);
+/// Longer host audio would hold a dictation released during it behind it on
+/// the shared engine, so it runs on a copy of the service's own.
+const SHARED_MAX_SAMPLES: usize = 30 * 16_000;
 
 pub struct TranscriptionService {
     commands: Option<SyncSender<Command>>,
@@ -61,6 +69,7 @@ pub enum TranscriptionServiceError {
 enum Command {
     Prepare {
         selection: TranscriptionSelection,
+        canceled: Arc<AtomicBool>,
         response: SyncSender<std::result::Result<(), TranscriptionServiceError>>,
     },
     Transcribe {
@@ -118,10 +127,12 @@ impl TranscriptionServiceHandle {
     pub fn prepare(
         &self,
         selection: TranscriptionSelection,
+        canceled: Arc<AtomicBool>,
     ) -> std::result::Result<(), TranscriptionServiceError> {
         let (response, result) = mpsc::sync_channel(1);
         self.submit(Command::Prepare {
             selection,
+            canceled,
             response,
         })?;
         result
@@ -290,9 +301,10 @@ fn run(commands: Receiver<Command>) {
         match command {
             Command::Prepare {
                 selection,
+                canceled,
                 response,
             } => {
-                let _ = response.send(prepare(&mut active, &selection).map(drop));
+                let _ = response.send(prepare(&mut active, &selection, &canceled));
             }
             Command::Transcribe {
                 selection,
@@ -316,27 +328,166 @@ fn check_canceled(canceled: &AtomicBool) -> std::result::Result<(), Transcriptio
     }
 }
 
-fn prepare<'a>(
+/// Loads `selection`, or prewarms it when it is already loaded, so a host can
+/// prepare when it starts recording and its clips skip the idle restore.
+/// When the dictation engine holds the model, prepare uses that copy and never
+/// loads its own; a dictation in progress means it is warm already.
+fn prepare(
+    active: &mut WarmTranscriber,
+    selection: &TranscriptionSelection,
+    canceled: &Arc<AtomicBool>,
+) -> std::result::Result<(), TranscriptionServiceError> {
+    if let Some(engine) = crate::transcription_engine::TranscriptionEngine::shared()
+        && engine.holds(selection)
+    {
+        *active = WarmTranscriber::default();
+        if crate::parakeet::dictation_busy() {
+            return Ok(());
+        }
+        return match with_shared_model(selection, canceled, Duration::ZERO, Transcriber::prewarm)? {
+            Some(prewarmed) => {
+                prewarmed.map_err(|error| TranscriptionServiceError::Model(error.to_string()))
+            }
+            // Dictation claimed the engine first, so the model is running.
+            None if engine.holds(selection) => Ok(()),
+            None => prepare_own(active, selection, canceled),
+        };
+    }
+    prepare_own(active, selection, canceled)
+}
+
+/// Loads `selection` into the service's own copy, or prewarms that copy.
+fn prepare_own(
+    active: &mut WarmTranscriber,
+    selection: &TranscriptionSelection,
+    canceled: &Arc<AtomicBool>,
+) -> std::result::Result<(), TranscriptionServiceError> {
+    check_canceled(canceled)?;
+    let loaded = active
+        .active()
+        .is_some_and(|model| model.matches_selection(selection));
+    let model = load(active, selection)?;
+    if loaded {
+        model
+            .prewarm()
+            .map_err(|error| TranscriptionServiceError::Model(error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn load<'a>(
     active: &'a mut WarmTranscriber,
     selection: &TranscriptionSelection,
-) -> std::result::Result<&'a mut crate::transcription::Transcriber, TranscriptionServiceError> {
+) -> std::result::Result<&'a mut Transcriber, TranscriptionServiceError> {
     active
         .activate(selection)
         .map_err(|error| TranscriptionServiceError::Model(error.to_string()))
+}
+
+/// Runs `work` on the dictation engine's loaded model when it is the GGUF
+/// model `selection` asks for, so the app never holds a second copy for host
+/// audio. `None` when there is no engine (a direct-child service) or it holds
+/// another model, or when dictation stays busy for `wait`. Like meeting
+/// chunks, it starts only while no dictation is capturing or transcribing.
+fn with_shared_model<R: Send + 'static>(
+    selection: &TranscriptionSelection,
+    canceled: &Arc<AtomicBool>,
+    wait: Duration,
+    work: impl FnOnce(&mut Transcriber) -> R + Send + Clone + 'static,
+) -> std::result::Result<Option<R>, TranscriptionServiceError> {
+    enum Shared<R> {
+        Busy,
+        Canceled,
+        Other,
+        Ran(R),
+    }
+    let Some(engine) = crate::transcription_engine::TranscriptionEngine::shared() else {
+        return Ok(None);
+    };
+    let started = Instant::now();
+    loop {
+        check_canceled(canceled)?;
+        let give_up = || {
+            if started.elapsed() >= wait {
+                return true;
+            }
+            thread::sleep(SHARED_RETRY);
+            false
+        };
+        if crate::parakeet::dictation_busy() {
+            if give_up() {
+                return Ok(None);
+            }
+            continue;
+        }
+        let selection = selection.clone();
+        let canceled = canceled.clone();
+        let work = work.clone();
+        let ran = engine.background(move |model| {
+            if crate::parakeet::dictation_busy() {
+                return Shared::Busy;
+            }
+            if canceled.load(Ordering::Acquire) {
+                return Shared::Canceled;
+            }
+            match model.active() {
+                Some(transcriber @ Transcriber::Gguf(_))
+                    if transcriber.matches_selection(&selection) =>
+                {
+                    Shared::Ran(work(transcriber))
+                }
+                _ => Shared::Other,
+            }
+        });
+        match ran {
+            Ok(Some(Shared::Ran(result))) => return Ok(Some(result)),
+            Ok(Some(Shared::Canceled)) => return Err(TranscriptionServiceError::Cancelled),
+            Ok(Some(Shared::Other)) | Err(_) => return Ok(None),
+            Ok(None | Some(Shared::Busy)) => {
+                if give_up() {
+                    return Ok(None);
+                }
+            }
+        }
+    }
 }
 
 fn transcribe(
     active: &mut WarmTranscriber,
     selection: &TranscriptionSelection,
     clip: AudioClip,
-    canceled: &AtomicBool,
+    canceled: &Arc<AtomicBool>,
 ) -> std::result::Result<String, TranscriptionServiceError> {
     check_canceled(canceled)?;
-    let model = prepare(active, selection)?;
+    let mut samples = clip.samples;
+    let engine_has_model = if samples.len() <= SHARED_MAX_SAMPLES {
+        let audio = Arc::new(samples);
+        let shared = {
+            let audio = audio.clone();
+            with_shared_model(selection, canceled, SHARED_WAIT, move |model| {
+                model.transcribe(audio.as_ref().clone())
+            })?
+        };
+        if let Some(transcript) = shared {
+            *active = WarmTranscriber::default();
+            check_canceled(canceled)?;
+            return transcript
+                .map_err(|error| TranscriptionServiceError::Inference(error.to_string()));
+        }
+        samples = Arc::unwrap_or_clone(audio);
+        false
+    } else {
+        with_shared_model(selection, canceled, SHARED_WAIT, |_| ())?.is_some()
+    };
+    let model = load(active, selection)?;
     check_canceled(canceled)?;
-    let transcript = model
-        .transcribe(clip.samples)
-        .map_err(|error| TranscriptionServiceError::Inference(error.to_string()))?;
+    let transcript = model.transcribe(samples);
+    // A long clip's copy is only temporary when the engine holds the model.
+    if engine_has_model {
+        *active = WarmTranscriber::default();
+    }
+    let transcript =
+        transcript.map_err(|error| TranscriptionServiceError::Inference(error.to_string()))?;
     check_canceled(canceled)?;
     Ok(transcript)
 }

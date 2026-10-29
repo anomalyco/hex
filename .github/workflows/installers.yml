@@ -1,0 +1,81 @@
+name: Installers
+
+# Serves the current install scripts at the production URLs the README names,
+# https://anoma.ly/hex/files/install-linux.sh and install-windows.ps1, from
+# the hex-production-files bucket. Those keys held the 2.3.1 installers;
+# nothing reads them but people following install instructions (the 2.3.1
+# updaters read the feeds and appcast, which stay frozen). The installers read
+# the release service, so they install the stable release, or the newest dev
+# build until there is one.
+#
+# Split like Release: check runs the installers' tests without secrets and
+# uploads them with a digest; publish runs in the release environment, checks
+# out only .github/release/, verifies the artifact, and uploads it as data
+# with .github/release/r2-put.sh.
+on:
+  push:
+    branches: [dev]
+    paths:
+      - scripts/install-linux-release.sh
+      - scripts/install-windows.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the installers
+        run: |
+          sh scripts/test-install-linux-release.sh
+          pwsh -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw scripts/install-windows.ps1))"
+          mkdir -p "$RUNNER_TEMP/installers"
+          cp scripts/install-linux-release.sh "$RUNNER_TEMP/installers/install-linux.sh"
+          cp scripts/install-windows.ps1 "$RUNNER_TEMP/installers/install-windows.ps1"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: installers
+          path: ${{ runner.temp }}/installers
+          retention-days: 7
+
+  publish:
+    needs: check
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      HEX_RELEASE_BUCKET: hex-production-files
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: installers
+          digests: installers=${{ needs.check.outputs.digest }}
+      - name: Upload them
+        env:
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          in="$RUNNER_TEMP/in/installers"
+          sh .github/release/r2-put.sh install-linux.sh "$in/install-linux.sh" text/x-shellscript "public, max-age=300"
+          sh .github/release/r2-put.sh install-windows.ps1 "$in/install-windows.ps1" "text/plain; charset=utf-8" "public, max-age=300"
+          for name in install-linux.sh install-windows.ps1; do
+            curl -fsS -H 'Cache-Control: no-cache' "https://anoma.ly/hex/files/$name?check=$GITHUB_RUN_ID" | cmp - "$in/$name"
+            echo "https://anoma.ly/hex/files/$name is the current installer." >> "$GITHUB_STEP_SUMMARY"
+          done

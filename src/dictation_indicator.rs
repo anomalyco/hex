@@ -1,37 +1,23 @@
+//! The dictation HUD's lifecycle and animation, the same on every OS: the
+//! event vocabulary the listener reports, the phase and job bookkeeping, the
+//! springs, and Dot scope's simulation (experiment `dot-scope`). Each step
+//! yields what to draw; `rune_hud` draws it with `rune_hud.wgsl` through a
+//! Rune overlay.
+//!
+//! Time is passed in, never read, so a recorded schedule replays exactly
+//! (`rune_hud`'s frame captures).
+
 use std::collections::BTreeMap;
-use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use core_graphics_types::geometry::CGSize;
-use core_video::base::{CVOptionFlags, CVTimeStamp};
-use core_video::display_link::{CVDisplayLink, CVDisplayLinkRef};
-use core_video::r#return::CVReturn;
-use gpui::App;
-use metal::{
-    CommandQueue, Device, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLStoreAction,
-    MetalLayer, RenderPassDescriptor, RenderPipelineDescriptor, RenderPipelineState,
-};
-use objc2::MainThreadMarker;
-use objc2::rc::Retained;
-use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusWindowLevel, NSView,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
-};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-use objc2_quartz_core::CALayer;
+use crate::dot_scope::{self, Pose, Scope, Stage, Tuning};
+use crate::hud_placement::Island;
+use crate::spring::{REDUCED_FADE, Spec, Spring};
 
-use crate::app_settings::IndicatorPosition;
-
-const WINDOW_WIDTH: f32 = 112.0;
-const WINDOW_HEIGHT: f32 = 64.0;
+pub const WINDOW_WIDTH: f32 = 112.0;
+pub const WINDOW_HEIGHT: f32 = 64.0;
 const CAPSULE_WIDTH: f32 = 56.0;
 const CAPSULE_HEIGHT: f32 = 16.0;
-const TOP_OFFSET: f64 = 12.0;
-/// The capsule's gap above the Dock or the screen's bottom edge.
-const BOTTOM_OFFSET: f64 = 24.0;
 const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
 const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
 const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
@@ -40,24 +26,73 @@ const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
+/// Dot scope's loudness before any meter arrives, dBFS.
+const SILENT: f32 = -120.0;
+/// Dot scope's done wipe (0.3 s) and a beat of the dark plate after it.
+const DOT_SCOPE_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
 
+pub fn dot_scope_enabled() -> bool {
+    crate::experiments::enabled(crate::experiments::Experiment::DotScope)
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
     Configure(HudTuning),
+    /// Dot scope's tuning (experiment `dot-scope`).
+    ConfigureDotScope(dot_scope::Tuning),
+    /// HUD Lab: Dot scope follows a synthetic voice instead of the meter
+    /// until the next `Reset`.
+    DemoVoice,
     Started,
     EditingStarted,
     PromotedToVoiceAction,
-    Meter { average: f32, peak: f32 },
-    Submitted { job_id: u64 },
-    Transcribing { job_id: u64 },
-    Processing { job_id: u64 },
+    Meter {
+        average: f32,
+        peak: f32,
+    },
+    Submitted {
+        job_id: u64,
+    },
+    Transcribing {
+        job_id: u64,
+    },
+    Processing {
+        job_id: u64,
+    },
     Discarded,
     Cancelled,
-    JobCompleted { job_id: u64 },
-    JobCancelled { job_id: u64 },
-    JobFailed { job_id: u64 },
+    JobCompleted {
+        job_id: u64,
+    },
+    JobCancelled {
+        job_id: u64,
+    },
+    JobFailed {
+        job_id: u64,
+    },
     Failed,
+}
+
+impl DictationIndicatorEvent {
+    /// A `Meter` event from captured samples: their RMS and absolute peak;
+    /// `None` for no samples.
+    pub fn meter(samples: &[f32]) -> Option<Self> {
+        if samples.is_empty() {
+            return None;
+        }
+        let mut sum_of_squares = 0.0;
+        let mut peak = 0.0_f32;
+        for sample in samples {
+            sum_of_squares += sample * sample;
+            peak = peak.max(sample.abs());
+        }
+        Some(Self::Meter {
+            average: (sum_of_squares / samples.len() as f32).sqrt(),
+            peak,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -89,300 +124,89 @@ impl Default for HudTuning {
     }
 }
 
-#[derive(Clone)]
-pub struct DictationIndicatorSender(Sender<DictationIndicatorEvent>);
+#[cfg(target_os = "macos")]
+pub use macos::*;
 
-impl DictationIndicatorSender {
-    pub fn send(&self, event: DictationIndicatorEvent) {
-        let _ = self.0.send(event);
-    }
+/// macOS reports through a channel the main thread's pump drains into the
+/// HUD (`rune_hud::macos`); the window's practice dictation reads the meter.
+#[cfg(target_os = "macos")]
+mod macos {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::time::Instant;
 
-    pub fn meter(&self, samples: &[f32]) {
-        if samples.is_empty() {
-            return;
+    use super::DictationIndicatorEvent;
+
+    #[derive(Clone)]
+    pub struct DictationIndicatorSender(Sender<DictationIndicatorEvent>);
+
+    impl DictationIndicatorSender {
+        pub fn send(&self, event: DictationIndicatorEvent) {
+            let _ = self.0.send(event);
         }
-        let mut sum_of_squares = 0.0;
-        let mut peak = 0.0_f32;
-        for sample in samples {
-            sum_of_squares += sample * sample;
-            peak = peak.max(sample.abs());
-        }
-        self.send(DictationIndicatorEvent::Meter {
-            average: (sum_of_squares / samples.len() as f32).sqrt(),
-            peak,
-        });
-    }
-}
 
-pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
-    let (sender, receiver) = mpsc::channel();
-    (DictationIndicatorSender(sender), receiver)
-}
-
-pub struct DictationIndicatorUi {
-    indicator: Option<MetalIndicator>,
-}
-
-impl DictationIndicatorUi {
-    pub fn new() -> Self {
-        let started = Instant::now();
-        let indicator = match MetalIndicator::new() {
-            Ok(indicator) => {
-                tracing::info!(
-                    initialization_ms = started.elapsed().as_millis(),
-                    "Metal dictation indicator prewarmed"
-                );
-                Some(indicator)
-            }
-            Err(error) => {
-                tracing::error!(%error, "could not prewarm Metal dictation indicator");
-                None
-            }
-        };
-        Self { indicator }
-    }
-
-    pub fn handle(&mut self, event: DictationIndicatorEvent, _cx: &mut App) {
-        if self.indicator.is_none()
-            && matches!(
-                event,
-                DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
-            )
-        {
-            match MetalIndicator::new() {
-                Ok(indicator) => self.indicator = Some(indicator),
-                Err(error) => {
-                    tracing::error!(%error, "could not create Metal dictation indicator");
-                    return;
+        pub fn meter(&self, samples: &[f32]) {
+            if let Some(event) = DictationIndicatorEvent::meter(samples) {
+                if let DictationIndicatorEvent::Meter { peak, .. } = event {
+                    record_peak(peak);
                 }
-            }
-        }
-        if let Some(indicator) = &mut self.indicator {
-            indicator.handle(event);
-        }
-    }
-
-    pub fn follow_pointer(&mut self, _cx: &mut App) {
-        if let Some(indicator) = &mut self.indicator {
-            indicator.maintain();
-        }
-    }
-}
-
-struct MetalIndicator {
-    window: Retained<NSPanel>,
-    renderer: Arc<SharedRenderer>,
-    display_link: CVDisplayLink,
-    display_link_context: *const SharedRenderer,
-    ordered: bool,
-}
-
-impl MetalIndicator {
-    fn new() -> Result<Self, String> {
-        let mtm = MainThreadMarker::new().ok_or("indicator must be created on the main thread")?;
-        let renderer = Arc::new(SharedRenderer::new()?);
-        let frame = NSRect::new(
-            NSPoint::new(0.0, 0.0),
-            NSSize::new(f64::from(WINDOW_WIDTH), f64::from(WINDOW_HEIGHT)),
-        );
-        let window = NSPanel::initWithContentRect_styleMask_backing_defer(
-            mtm.alloc(),
-            frame,
-            NSWindowStyleMask::Borderless
-                | NSWindowStyleMask::UtilityWindow
-                | NSWindowStyleMask::NonactivatingPanel
-                | NSWindowStyleMask::FullSizeContentView,
-            NSBackingStoreType::Buffered,
-            false,
-        );
-        let view = NSView::initWithFrame(mtm.alloc(), frame);
-        view.setWantsLayer(true);
-        let metal_layer = renderer.layer();
-        let cocoa_layer = unsafe { &*metal_layer.cast::<CALayer>() };
-        cocoa_layer.setOpaque(false);
-        view.setLayer(Some(cocoa_layer));
-        window.setContentView(Some(&view));
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
-        window.setIgnoresMouseEvents(true);
-        window.setHasShadow(false);
-        window.setHidesOnDeactivate(false);
-        window.setCanHide(false);
-        window.setLevel(NSStatusWindowLevel);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::CanJoinAllApplications
-                | NSWindowCollectionBehavior::FullScreenAuxiliary
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        unsafe { window.setReleasedWhenClosed(false) };
-
-        let display_link = CVDisplayLink::from_active_cg_displays()
-            .map_err(|status| format!("could not create display link: {status}"))?;
-        let display_link_context = Arc::into_raw(renderer.clone());
-        unsafe {
-            display_link.set_output_callback(
-                display_link_callback,
-                display_link_context.cast_mut().cast::<c_void>(),
-            )
-        }
-        .map_err(|status| format!("could not configure display link: {status}"))?;
-
-        let mut indicator = Self {
-            window,
-            renderer,
-            display_link,
-            display_link_context,
-            ordered: false,
-        };
-        indicator.position_on_pointer_screen();
-        Ok(indicator)
-    }
-
-    fn handle(&mut self, event: DictationIndicatorEvent) {
-        self.renderer.handle(event);
-        if matches!(
-            event,
-            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
-        ) && crate::app_settings::indicator_position() != IndicatorPosition::Hidden
-        {
-            self.position_on_pointer_screen();
-            self.window.orderFrontRegardless();
-            self.ordered = true;
-            tracing::info!("Metal dictation indicator shown");
-        }
-        if !self.display_link.is_running()
-            && let Err(status) = self.display_link.start()
-        {
-            tracing::error!(status, "could not start indicator display link");
-        }
-    }
-
-    fn maintain(&mut self) {
-        let hidden = crate::app_settings::indicator_position() == IndicatorPosition::Hidden;
-        if self.renderer.is_active() && !hidden {
-            self.position_on_pointer_screen();
-            if !self.ordered {
-                self.window.orderFrontRegardless();
-                self.ordered = true;
-            }
-        } else {
-            if self.display_link.is_running() {
-                let _ = self.display_link.stop();
-            }
-            if self.ordered {
-                self.window.orderOut(None);
-                self.ordered = false;
+                self.send(event);
             }
         }
     }
 
-    fn position_on_pointer_screen(&mut self) {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        let pointer = NSEvent::mouseLocation();
-        let screens = NSScreen::screens(mtm);
-        let Some(screen) = screens.iter().find(|screen| {
-            let frame = screen.frame();
-            pointer.x >= frame.origin.x
-                && pointer.x < frame.origin.x + frame.size.width
-                && pointer.y >= frame.origin.y
-                && pointer.y < frame.origin.y + frame.size.height
-        }) else {
-            return;
-        };
-        let screen_frame = screen.frame();
-        let visible = screen.visibleFrame();
-        let capsule_margin = f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0);
-        let top = match crate::app_settings::indicator_position() {
-            IndicatorPosition::Bottom => {
-                visible.origin.y + BOTTOM_OFFSET - capsule_margin + f64::from(WINDOW_HEIGHT)
-            }
-            IndicatorPosition::Top | IndicatorPosition::Hidden => {
-                visible.origin.y + visible.size.height + capsule_margin - TOP_OFFSET
-            }
-        };
-        let top_left = NSPoint::new(
-            screen_frame.origin.x + (screen_frame.size.width - f64::from(WINDOW_WIDTH)) / 2.0,
-            top,
-        );
-        let frame = self.window.frame();
-        if (frame.origin.x - top_left.x).abs() > 0.5
-            || (frame.origin.y + frame.size.height - top_left.y).abs() > 0.5
-        {
-            self.window.setFrameTopLeftPoint(top_left);
+    /// The latest metered peak (high 32 bits) and when, in milliseconds since
+    /// `meter_epoch` plus one (low 32 bits, zero before any meter), for the
+    /// window's practice dictation.
+    static LATEST_METER: AtomicU64 = AtomicU64::new(0);
+    /// How long a metered peak stays current.
+    const METER_FRESH_MS: u32 = 250;
+
+    fn meter_epoch() -> Instant {
+        static EPOCH: OnceLock<Instant> = OnceLock::new();
+        *EPOCH.get_or_init(Instant::now)
+    }
+
+    fn meter_clock() -> u32 {
+        (meter_epoch().elapsed().as_millis() as u32).wrapping_add(1)
+    }
+
+    fn record_peak(peak: f32) {
+        let packed = (u64::from(peak.to_bits()) << 32) | u64::from(meter_clock());
+        LATEST_METER.store(packed, Ordering::Relaxed);
+    }
+
+    /// The peak of the dictation audio metered in the last quarter second, 0 to
+    /// 1, or silence when none arrived.
+    pub fn recent_peak() -> f32 {
+        let packed = LATEST_METER.load(Ordering::Relaxed);
+        let at = packed as u32;
+        if at == 0 || meter_clock().wrapping_sub(at) > METER_FRESH_MS {
+            return 0.0;
         }
-        self.renderer.set_scale(screen.backingScaleFactor() as f32);
-    }
-}
-
-impl Drop for MetalIndicator {
-    fn drop(&mut self) {
-        let _ = self.display_link.stop();
-        unsafe { drop(Arc::from_raw(self.display_link_context)) };
-        self.window.close();
-    }
-}
-
-extern "C" fn display_link_callback(
-    _display_link: CVDisplayLinkRef,
-    _now: *const CVTimeStamp,
-    _output_time: *const CVTimeStamp,
-    _flags_in: CVOptionFlags,
-    _flags_out: *mut CVOptionFlags,
-    context: *mut c_void,
-) -> CVReturn {
-    let renderer = unsafe { &*context.cast::<SharedRenderer>() };
-    renderer.draw();
-    0
-}
-
-struct SharedRenderer {
-    renderer: Mutex<MetalRenderer>,
-    active: AtomicBool,
-}
-
-// Metal command queues and layers are designed for cross-thread submission. Access to mutable
-// renderer state is serialized, and AppKit objects never leave the main thread.
-unsafe impl Send for SharedRenderer {}
-unsafe impl Sync for SharedRenderer {}
-
-impl SharedRenderer {
-    fn new() -> Result<Self, String> {
-        Ok(Self {
-            renderer: Mutex::new(MetalRenderer::new()?),
-            active: AtomicBool::new(false),
-        })
+        f32::from_bits((packed >> 32) as u32).clamp(0.0, 1.0)
     }
 
-    fn layer(&self) -> *const metal::MetalLayerRef {
-        self.renderer.lock().unwrap().layer.as_ref()
+    pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
+        let (sender, receiver) = mpsc::channel();
+        (DictationIndicatorSender(sender), receiver)
     }
 
-    fn handle(&self, event: DictationIndicatorEvent) {
-        let mut renderer = self.renderer.lock().unwrap();
-        renderer.handle(event);
-        self.active.store(true, Ordering::Release);
-    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
 
-    fn set_scale(&self, scale: f32) {
-        self.renderer.lock().unwrap().set_scale(scale);
-    }
-
-    fn draw(&self) {
-        if !self.active.load(Ordering::Acquire) {
-            return;
+        #[test]
+        fn meter_reports_rms_and_peak() {
+            let (sender, receiver) = channel();
+            sender.meter(&[-0.5, 0.5]);
+            let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
+                panic!("expected meter event");
+            };
+            assert!((average - 0.5).abs() < f32::EPSILON);
+            assert!((peak - 0.5).abs() < f32::EPSILON);
         }
-        let mut renderer = self.renderer.lock().unwrap();
-        if !renderer.draw() {
-            self.active.store(false, Ordering::Release);
-        }
-    }
-
-    fn is_active(&self) -> bool {
-        self.active.load(Ordering::Acquire)
     }
 }
 
@@ -424,38 +248,58 @@ impl Phase {
     }
 }
 
+/// The capsule's shader inputs, `Uniforms` in `rune_hud.wgsl`.
 #[repr(C, align(8))]
-#[derive(Clone, Copy)]
-struct Uniforms {
-    resolution: [f32; 2],
-    time: f32,
-    width: f32,
-    height: f32,
-    opacity: f32,
-    scale: f32,
-    softness: f32,
-    average: f32,
-    peak: f32,
-    processing: f32,
-    post_processing: f32,
-    capturing: f32,
-    editing: f32,
-    queued_count: f32,
-    line_style: f32,
-    line_count: f32,
-    line_curvature: f32,
-    line_speed: f32,
-    line_sharpness: f32,
-    line_glow: f32,
-    sphere_depth: f32,
-    light_angle: f32,
-    sphere_outline: f32,
-    completion: f32,
-    recording_flash: f32,
-    _padding: f32,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Uniforms {
+    /// Set by the renderer to the target's size in pixels.
+    pub resolution: [f32; 2],
+    pub time: f32,
+    pub width: f32,
+    pub height: f32,
+    pub opacity: f32,
+    pub scale: f32,
+    pub softness: f32,
+    pub average: f32,
+    pub peak: f32,
+    pub processing: f32,
+    pub post_processing: f32,
+    pub capturing: f32,
+    pub editing: f32,
+    pub queued_count: f32,
+    pub line_style: f32,
+    pub line_count: f32,
+    pub line_curvature: f32,
+    pub line_speed: f32,
+    pub line_sharpness: f32,
+    pub line_glow: f32,
+    pub sphere_depth: f32,
+    pub light_angle: f32,
+    pub sphere_outline: f32,
+    pub completion: f32,
+    pub recording_flash: f32,
+    pub _padding: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<Uniforms>() == 112);
+
+/// One Dot scope frame: the plate's pose and every dot's light.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DotFrame {
+    pub pose: Pose,
+    pub tuning: Tuning,
+    pub columns: usize,
+    pub rows: usize,
+    /// (brightness, freshness) per dot, row by row, as normalized u16s.
+    pub dots: Vec<[u16; 2]>,
+}
+
+/// What one step draws.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Drawn {
+    Capsule(Uniforms),
+    Dots(DotFrame),
+}
 
 fn recording_flash(elapsed: Duration) -> f32 {
     2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
@@ -469,20 +313,42 @@ fn recording_flash_for(phase: Phase, editing: bool, elapsed: Duration) -> f32 {
     }
 }
 
-struct MetalRenderer {
-    layer: MetalLayer,
-    command_queue: CommandQueue,
-    pipeline: RenderPipelineState,
+/// Dot scope's simulation and the stage it last showed.
+struct DotScope {
+    scope: Scope,
+    stage: Stage,
+    /// The tuning as set, before [`fill_island`].
+    tuning: Tuning,
+    /// The notch island the HUD sits in, if any.
+    island: Option<Island>,
+}
+
+/// The tuning that fills an island: the field as wide as the island minus
+/// its corners, recording and processing alike, with as many more columns
+/// as keep the dot spacing.
+fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
+    let Some(island) = island else {
+        return tuning;
+    };
+    let width = island.plate_width();
+    Tuning {
+        columns: (tuning.columns * width / tuning.width).round(),
+        width,
+        processing_width: width,
+        ..tuning
+    }
+}
+
+/// The HUD's state: what the listener reported and every spring.
+pub struct IndicatorModel {
     phase: Phase,
     capturing: bool,
     editing: bool,
     jobs: BTreeMap<u64, JobPhase>,
     phase_started: Instant,
-    render_started: Instant,
-    last_frame: Instant,
+    shader_time: f32,
     exiting: bool,
     completion_pending: bool,
-    scale: f32,
     target_average: f32,
     target_peak: f32,
     average: Spring,
@@ -494,77 +360,76 @@ struct MetalRenderer {
     processing: Spring,
     post_processing: Spring,
     tuning: HudTuning,
+    /// Drawn instead of the capsule while the `dot-scope` experiment is on.
+    dot_scope: Option<DotScope>,
+    /// The microphone's loudness for Dot scope, dBFS.
+    loudness: f32,
+    /// HUD Lab's synthetic voice and how far into it Dot scope is.
+    demo_voice: Option<f32>,
+    /// Since an event, until a step finds everything settled out of sight.
+    active: bool,
 }
 
-impl MetalRenderer {
-    fn new() -> Result<Self, String> {
-        let device = Device::system_default().ok_or("Metal is unavailable")?;
-        let layer = MetalLayer::new();
-        layer.set_device(&device);
-        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        layer.set_opaque(false);
-        layer.set_presents_with_transaction(false);
-        layer.set_display_sync_enabled(true);
-        layer.set_contents_scale(2.0);
-        layer.set_drawable_size(CGSize::new(
-            f64::from(WINDOW_WIDTH * 2.0),
-            f64::from(WINDOW_HEIGHT * 2.0),
-        ));
-
-        let library = device
-            .new_library_with_data(include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/dictation_indicator.metallib"
-            )))
-            .map_err(|error| format!("could not load indicator shader: {error}"))?;
-        let vertex = library
-            .get_function("indicator_vertex", None)
-            .map_err(|error| format!("could not load indicator vertex shader: {error}"))?;
-        let fragment = library
-            .get_function("indicator_fragment", None)
-            .map_err(|error| format!("could not load indicator fragment shader: {error}"))?;
-        let descriptor = RenderPipelineDescriptor::new();
-        descriptor.set_vertex_function(Some(&vertex));
-        descriptor.set_fragment_function(Some(&fragment));
-        descriptor
-            .color_attachments()
-            .object_at(0)
-            .ok_or("indicator pipeline has no color attachment")?
-            .set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        let pipeline = device
-            .new_render_pipeline_state(&descriptor)
-            .map_err(|error| format!("could not create indicator pipeline: {error}"))?;
-        let now = Instant::now();
-        Ok(Self {
-            command_queue: device.new_command_queue(),
-            layer,
-            pipeline,
+impl IndicatorModel {
+    /// `dot_scope` draws Dot scope with `tuning` instead of the capsule.
+    pub fn new(dot_scope: Option<Tuning>, now: Instant) -> Self {
+        Self {
             phase: Phase::Hidden,
             capturing: false,
             editing: false,
             jobs: BTreeMap::new(),
             phase_started: now,
-            render_started: now,
-            last_frame: now,
+            shader_time: 0.0,
             exiting: true,
             completion_pending: false,
-            scale: 2.0,
             target_average: 0.0,
             target_peak: 0.0,
-            average: Spring::new(0.0),
-            peak: Spring::new(0.0),
-            width: Spring::new(CAPSULE_WIDTH),
-            opacity: Spring::new(0.0),
-            visual_scale: Spring::new(HIDDEN_SCALE),
-            softness: Spring::new(HIDDEN_SOFTNESS),
-            processing: Spring::new(0.0),
-            post_processing: Spring::new(0.0),
+            average: Spring::at(0.0),
+            peak: Spring::at(0.0),
+            width: Spring::at(CAPSULE_WIDTH),
+            opacity: Spring::at(0.0),
+            visual_scale: Spring::at(HIDDEN_SCALE),
+            softness: Spring::at(HIDDEN_SOFTNESS),
+            processing: Spring::at(0.0),
+            post_processing: Spring::at(0.0),
             tuning: HudTuning::default(),
-        })
+            dot_scope: dot_scope.map(|tuning| DotScope {
+                scope: Scope::new(tuning),
+                stage: Stage::Recording,
+                tuning,
+                island: None,
+            }),
+            loudness: SILENT,
+            demo_voice: None,
+            active: false,
+        }
     }
 
-    fn handle(&mut self, event: DictationIndicatorEvent) {
-        let now = Instant::now();
+    /// Whether the HUD wants frames: from an event until a step finds it
+    /// settled out of sight.
+    pub fn active(&self) -> bool {
+        self.active
+    }
+
+    /// Dot scope's tuning, when it draws Dot scope.
+    #[cfg(target_os = "macos")]
+    pub fn dot_scope_tuning(&self) -> Option<Tuning> {
+        self.dot_scope.as_ref().map(|dots| dots.tuning)
+    }
+
+    /// Spreads Dot scope's field across the notch island it now sits in.
+    #[cfg(target_os = "macos")]
+    pub fn set_island(&mut self, island: Option<Island>) {
+        if let Some(dots) = &mut self.dot_scope
+            && dots.island != island
+        {
+            dots.island = island;
+            dots.scope.tune(fill_island(dots.tuning, island));
+        }
+    }
+
+    pub fn handle(&mut self, event: DictationIndicatorEvent, now: Instant, reduce: bool) {
+        self.active = true;
         let editing_started = matches!(event, DictationIndicatorEvent::EditingStarted);
         match event {
             DictationIndicatorEvent::Reset => {
@@ -573,30 +438,49 @@ impl MetalRenderer {
                 self.jobs.clear();
                 self.phase = Phase::Hidden;
                 self.completion_pending = false;
+                self.loudness = SILENT;
+                self.demo_voice = None;
                 self.freeze_visual_state();
             }
             DictationIndicatorEvent::Configure(tuning) => {
                 self.tuning = tuning;
             }
+            DictationIndicatorEvent::ConfigureDotScope(tuning) => {
+                if let Some(dots) = &mut self.dot_scope {
+                    dots.tuning = tuning;
+                    dots.scope.tune(fill_island(tuning, dots.island));
+                }
+            }
+            DictationIndicatorEvent::DemoVoice => {
+                self.demo_voice = Some(0.0);
+            }
             DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted => {
+                // HUD Lab and the playground send `DemoVoice` after this.
+                self.demo_voice = None;
                 self.capturing = true;
                 self.editing = editing_started;
                 self.phase = Phase::Recording;
                 self.phase_started = now;
-                self.render_started = now;
-                self.last_frame = now;
+                self.shader_time = 0.0;
                 self.exiting = false;
                 self.completion_pending = false;
                 self.target_average = 0.0;
                 self.target_peak = 0.0;
-                self.average.reset(0.0);
-                self.peak.reset(0.0);
-                self.width.reset(CAPSULE_WIDTH);
-                self.opacity.reset(0.0);
-                self.visual_scale.reset(HIDDEN_SCALE);
-                self.softness.reset(HIDDEN_SOFTNESS);
-                self.processing.reset(0.0);
-                self.post_processing.reset(0.0);
+                self.average.jump(0.0);
+                self.peak.jump(0.0);
+                self.width.jump(CAPSULE_WIDTH);
+                self.opacity.jump(0.0);
+                self.visual_scale
+                    .jump(if reduce { 1.0 } else { HIDDEN_SCALE });
+                self.softness
+                    .jump(if reduce { 0.0 } else { HIDDEN_SOFTNESS });
+                self.processing.jump(0.0);
+                self.post_processing.jump(0.0);
+                self.loudness = SILENT;
+                if let Some(dots) = &mut self.dot_scope {
+                    dots.stage = Stage::Recording;
+                    dots.scope.restart(reduce);
+                }
             }
             DictationIndicatorEvent::PromotedToVoiceAction => {
                 self.editing = true;
@@ -604,6 +488,7 @@ impl MetalRenderer {
             DictationIndicatorEvent::Meter { average, peak } => {
                 self.target_average = (average * 9.0).clamp(0.0, 1.0);
                 self.target_peak = (peak * 3.0).clamp(0.0, 1.0);
+                self.loudness = dot_scope::loudness(average);
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -694,67 +579,56 @@ impl MetalRenderer {
     }
 
     fn freeze_visual_state(&mut self) {
-        self.target_average = self.average.value;
-        self.target_peak = self.peak.value;
-        self.average.velocity = 0.0;
-        self.peak.velocity = 0.0;
-        self.width.velocity = 0.0;
-        self.processing.velocity = 0.0;
-        self.post_processing.velocity = 0.0;
+        self.target_average = self.average.x;
+        self.target_peak = self.peak.x;
+        self.average.v = 0.0;
+        self.peak.v = 0.0;
+        self.width.v = 0.0;
+        self.processing.v = 0.0;
+        self.post_processing.v = 0.0;
     }
 
-    fn set_scale(&mut self, scale: f32) {
-        if (self.scale - scale).abs() < f32::EPSILON {
-            return;
-        }
-        self.scale = scale;
-        self.layer.set_contents_scale(f64::from(scale));
-        self.layer.set_drawable_size(CGSize::new(
-            f64::from(WINDOW_WIDTH * scale),
-            f64::from(WINDOW_HEIGHT * scale),
-        ));
-    }
-
-    fn draw(&mut self) -> bool {
-        let now = Instant::now();
+    /// Advances `dt` seconds to `now` and returns what to draw. Once
+    /// everything has settled out of sight, [`Self::active`] turns false.
+    pub fn step(&mut self, now: Instant, dt: f32, reduce: bool) -> Drawn {
+        let dt = dt.clamp(1.0 / 240.0, 1.0 / 20.0);
         if self.completion_pending
             && now.duration_since(self.phase_started) >= PROCESSING_MORPH_DURATION
         {
-            self.width.reset(CAPSULE_HEIGHT);
-            self.processing.reset(1.0);
+            self.width.jump(CAPSULE_HEIGHT);
+            self.processing.jump(1.0);
             self.phase = Phase::Completed;
             self.phase_started = now;
             self.completion_pending = false;
             self.freeze_visual_state();
         }
-        let dt = now
-            .duration_since(self.last_frame)
-            .as_secs_f32()
-            .min(1.0 / 20.0);
-        self.last_frame = now;
+        if !reduce {
+            self.shader_time += dt;
+        }
         let elapsed = now.duration_since(self.phase_started);
-        let terminal_finished = self
-            .phase
-            .visible_duration()
-            .is_some_and(|duration| elapsed >= duration);
+        let visible_duration = match self.phase {
+            Phase::Completed if self.dot_scope.is_some() => {
+                Some(DOT_SCOPE_COMPLETED_VISIBLE_DURATION)
+            }
+            phase => phase.visible_duration(),
+        };
+        let terminal_finished = visible_duration.is_some_and(|duration| elapsed >= duration);
         let visible = !matches!(self.phase, Phase::Hidden) && !terminal_finished;
+        if self.dot_scope.is_some() {
+            return self.step_dot_scope(dt, visible, reduce);
+        }
         if !visible && !self.exiting {
             // Reversing an in-flight entrance velocity would briefly grow or sharpen the HUD.
-            self.opacity.velocity = 0.0;
-            self.visual_scale.velocity = 0.0;
-            self.softness.velocity = 0.0;
+            self.opacity.v = 0.0;
+            self.visual_scale.v = 0.0;
+            self.softness.v = 0.0;
             self.exiting = true;
         }
-        let target_width = match self.phase {
-            Phase::Recording => CAPSULE_WIDTH,
-            Phase::Transcribing => CAPSULE_HEIGHT,
-            Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => self.width.value,
-        };
-        let target_processing = match self.phase {
-            Phase::Recording => 0.0,
-            Phase::Transcribing => 1.0,
+        let (target_width, target_processing) = match self.phase {
+            Phase::Recording => (CAPSULE_WIDTH, 0.0),
+            Phase::Transcribing => (CAPSULE_HEIGHT, 1.0),
             Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => {
-                self.processing.value
+                (self.width.x, self.processing.x)
             }
         };
         let target_post_processing = if self
@@ -767,58 +641,60 @@ impl MetalRenderer {
             0.0
         };
 
-        self.average.step_critical(self.target_average, dt, 22.0);
-        self.peak.step_critical(self.target_peak, dt, 26.0);
-        self.width
-            .step_critical(target_width, dt, GEOMETRY_ANGULAR_FREQUENCY);
-        self.processing
-            .step_critical(target_processing, dt, GEOMETRY_ANGULAR_FREQUENCY);
-        self.post_processing
-            .step_critical(target_post_processing, dt, GEOMETRY_ANGULAR_FREQUENCY);
+        let meter_average_spec = Spec::from_omega(22.0);
+        let meter_peak_spec = Spec::from_omega(26.0);
+        let geometry_spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
         let visibility_frequency = if visible {
             ENTRANCE_ANGULAR_FREQUENCY
         } else {
             EXIT_ANGULAR_FREQUENCY
         };
-        self.opacity
-            .step_critical(if visible { 1.0 } else { 0.0 }, dt, visibility_frequency);
-        self.visual_scale.step_critical(
-            if visible { 1.0 } else { HIDDEN_SCALE },
-            dt,
-            visibility_frequency,
-        );
-        self.softness.step_critical(
-            if visible { 0.0 } else { HIDDEN_SOFTNESS },
-            dt,
-            visibility_frequency,
-        );
+        let visibility_spec = Spec::from_omega(visibility_frequency);
+
+        self.average
+            .step_to(self.target_average, meter_average_spec, dt);
+        self.peak.step_to(self.target_peak, meter_peak_spec, dt);
+        if reduce {
+            self.width.jump(target_width);
+            self.processing.jump(target_processing);
+            self.post_processing.jump(target_post_processing);
+            self.opacity
+                .step_to(if visible { 1.0 } else { 0.0 }, REDUCED_FADE, dt);
+            self.visual_scale.jump(1.0);
+            self.softness.jump(0.0);
+        } else {
+            self.width.step_to(target_width, geometry_spec, dt);
+            self.processing
+                .step_to(target_processing, geometry_spec, dt);
+            self.post_processing
+                .step_to(target_post_processing, geometry_spec, dt);
+            self.opacity
+                .step_to(if visible { 1.0 } else { 0.0 }, visibility_spec, dt);
+            self.visual_scale.step_to(
+                if visible { 1.0 } else { HIDDEN_SCALE },
+                visibility_spec,
+                dt,
+            );
+            self.softness.step_to(
+                if visible { 0.0 } else { HIDDEN_SOFTNESS },
+                visibility_spec,
+                dt,
+            );
+        }
         self.target_peak *= 0.91_f32.powf(dt * 60.0);
 
-        let Some(drawable) = self.layer.next_drawable() else {
-            return true;
-        };
-        let descriptor = RenderPassDescriptor::new();
-        let attachment = descriptor.color_attachments().object_at(0).unwrap();
-        attachment.set_texture(Some(drawable.texture()));
-        attachment.set_load_action(MTLLoadAction::Clear);
-        attachment.set_clear_color(metal::MTLClearColor::new(0.0, 0.0, 0.0, 0.0));
-        attachment.set_store_action(MTLStoreAction::Store);
-
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_render_command_encoder(descriptor);
-        encoder.set_render_pipeline_state(&self.pipeline);
         let uniforms = Uniforms {
-            resolution: [WINDOW_WIDTH * self.scale, WINDOW_HEIGHT * self.scale],
-            time: now.duration_since(self.render_started).as_secs_f32(),
-            width: self.width.value,
+            resolution: [WINDOW_WIDTH, WINDOW_HEIGHT],
+            time: self.shader_time,
+            width: self.width.x,
             height: CAPSULE_HEIGHT,
-            opacity: self.opacity.value.clamp(0.0, 1.0),
-            scale: self.visual_scale.value.max(0.01),
-            softness: self.softness.value.clamp(0.0, HIDDEN_SOFTNESS),
-            average: self.average.value.clamp(0.0, 1.0),
-            peak: self.peak.value.clamp(0.0, 1.0),
-            processing: self.processing.value.clamp(0.0, 1.0),
-            post_processing: self.post_processing.value.clamp(0.0, 1.0),
+            opacity: self.opacity.x.clamp(0.0, 1.0),
+            scale: self.visual_scale.x.max(0.01),
+            softness: self.softness.x.clamp(0.0, HIDDEN_SOFTNESS),
+            average: self.average.x.clamp(0.0, 1.0),
+            peak: self.peak.x.clamp(0.0, 1.0),
+            processing: self.processing.x.clamp(0.0, 1.0),
+            post_processing: self.post_processing.x.clamp(0.0, 1.0),
             capturing: if self.capturing { 1.0 } else { 0.0 },
             editing: if self.editing { 1.0 } else { 0.0 },
             queued_count: if self.capturing {
@@ -829,7 +705,7 @@ impl MetalRenderer {
             line_style: self.tuning.style,
             line_count: self.tuning.line_count,
             line_curvature: self.tuning.curvature,
-            line_speed: self.tuning.speed,
+            line_speed: if reduce { 0.0 } else { self.tuning.speed },
             line_sharpness: self.tuning.sharpness,
             line_glow: self.tuning.glow,
             sphere_depth: self.tuning.depth,
@@ -843,56 +719,60 @@ impl MetalRenderer {
             recording_flash: recording_flash_for(self.phase, self.editing, elapsed),
             _padding: 0.0,
         };
-        encoder.set_fragment_bytes(
-            0,
-            std::mem::size_of::<Uniforms>() as u64,
-            (&raw const uniforms).cast::<c_void>(),
-        );
-        encoder.draw_primitives(MTLPrimitiveType::Triangle, 0, 3);
-        encoder.end_encoding();
-        command_buffer.present_drawable(drawable);
-        command_buffer.commit();
 
-        visible
-            || !self.opacity.is_settled(0.0, 0.002, EXIT_ANGULAR_FREQUENCY)
-            || !self
-                .visual_scale
-                .is_settled(HIDDEN_SCALE, 0.002, EXIT_ANGULAR_FREQUENCY)
-            || !self
-                .softness
-                .is_settled(HIDDEN_SOFTNESS, 0.02, EXIT_ANGULAR_FREQUENCY)
+        let exit_spec = if reduce {
+            REDUCED_FADE
+        } else {
+            Spec::from_omega(EXIT_ANGULAR_FREQUENCY)
+        };
+        self.active = visible
+            || !self.opacity.settled(exit_spec, 0.002)
+            || (!reduce && !self.visual_scale.settled(exit_spec, 0.002))
+            || (!reduce && !self.softness.settled(exit_spec, 0.02));
+        Drawn::Capsule(uniforms)
     }
-}
 
-struct Spring {
-    value: f32,
-    velocity: f32,
-}
-
-impl Spring {
-    fn new(value: f32) -> Self {
-        Self {
-            value,
-            velocity: 0.0,
+    fn step_dot_scope(&mut self, dt: f32, visible: bool, reduce: bool) -> Drawn {
+        let stage = match self.phase {
+            Phase::Recording => Some(Stage::Recording),
+            Phase::Transcribing => Some(Stage::Processing),
+            Phase::Completed => Some(Stage::Done),
+            Phase::Failed => Some(Stage::Failed),
+            Phase::Hidden | Phase::Cancelled => None,
+        };
+        let loudness = match &mut self.demo_voice {
+            Some(time) => {
+                *time += dt;
+                dot_scope::demo_loudness(*time)
+            }
+            None => self.loudness,
+        };
+        let dots = self.dot_scope.as_mut().expect("drawing Dot scope");
+        if let Some(stage) = stage {
+            dots.stage = stage;
         }
-    }
-
-    fn reset(&mut self, value: f32) {
-        self.value = value;
-        self.velocity = 0.0;
-    }
-
-    fn step_critical(&mut self, target: f32, dt: f32, angular_frequency: f32) {
-        let displacement = self.value - target;
-        let coefficient = self.velocity + angular_frequency * displacement;
-        let decay = (-angular_frequency * dt).exp();
-        self.value = target + (displacement + coefficient * dt) * decay;
-        self.velocity = (self.velocity - angular_frequency * coefficient * dt) * decay;
-    }
-
-    fn is_settled(&self, target: f32, value_epsilon: f32, angular_frequency: f32) -> bool {
-        (self.value - target).abs() <= value_epsilon
-            && self.velocity.abs() <= value_epsilon * angular_frequency
+        dots.scope.advance(
+            dt,
+            dot_scope::Frame {
+                stage: dots.stage,
+                visible,
+                loudness,
+                reduce_motion: reduce,
+            },
+        );
+        self.active = visible || !dots.scope.settled();
+        Drawn::Dots(DotFrame {
+            pose: dots.scope.pose(),
+            tuning: dots.scope.tuning(),
+            columns: dots.scope.columns(),
+            rows: dots.scope.rows(),
+            dots: dots
+                .scope
+                .dots()
+                .iter()
+                .map(|value| value.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))
+                .collect(),
+        })
     }
 }
 
@@ -901,32 +781,100 @@ mod tests {
     use super::*;
 
     #[test]
-    fn meter_reports_rms_and_peak() {
-        let (sender, receiver) = channel();
-        sender.meter(&[-0.5, 0.5]);
-        let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
+    fn an_island_spreads_the_field_across_it_at_the_same_spacing() {
+        let tuning = Tuning::default();
+        assert_eq!(fill_island(tuning, None), tuning);
+        let island = Island {
+            notch: [185.0, 32.0],
+            width: 241.0,
+            top: -64.0,
+        };
+        let filled = fill_island(tuning, Some(island)).clamped();
+        assert_eq!((filled.width, filled.processing_width), (209.0, 209.0));
+        assert_eq!((filled.columns, filled.rows), (80.0, tuning.rows));
+    }
+
+    #[test]
+    fn meter_helper_reports_rms_and_peak() {
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[-0.5, 0.5])
+        else {
             panic!("expected meter event");
         };
         assert!((average - 0.5).abs() < f32::EPSILON);
         assert!((peak - 0.5).abs() < f32::EPSILON);
+        assert!(DictationIndicatorEvent::meter(&[]).is_none());
+    }
+
+    fn run(model: &mut IndicatorModel, start: Instant, from: f32, seconds: f32) -> Vec<Drawn> {
+        (0..(seconds * 60.0) as usize)
+            .map(|n| {
+                let at = start + Duration::from_secs_f32(from + n as f32 / 60.0);
+                model.step(at, 1.0 / 60.0, false)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_dictation_records_morphs_blooms_and_settles() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(None, start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        let recording = run(&mut model, start, 0.0, 0.5);
+        let Drawn::Capsule(last) = recording.last().unwrap() else {
+            panic!("capsule");
+        };
+        assert!(last.opacity > 0.98 && last.processing == 0.0 && last.capturing == 1.0);
+        let at = start + Duration::from_millis(500);
+        model.handle(DictationIndicatorEvent::Submitted { job_id: 1 }, at, false);
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at,
+            false,
+        );
+        let rest = run(&mut model, start, 0.5, 2.0);
+        assert!(
+            rest.iter()
+                .any(|drawn| matches!(drawn, Drawn::Capsule(u) if u.completion > 0.0))
+        );
+        assert!(!model.active(), "settled out of sight");
+    }
+
+    #[test]
+    fn dot_scope_records_and_settles() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(Some(Tuning::default()), start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        model.handle(DictationIndicatorEvent::DemoVoice, start, false);
+        let frames = run(&mut model, start, 0.0, 1.0);
+        let Drawn::Dots(frame) = frames.last().unwrap() else {
+            panic!("dots");
+        };
+        assert_eq!(frame.dots.len(), frame.columns * frame.rows);
+        assert!(frame.dots.iter().any(|[power, _]| *power > 30_000));
+        let at = start + Duration::from_secs(1);
+        model.handle(DictationIndicatorEvent::Cancelled, at, false);
+        run(&mut model, start, 1.0, 2.0);
+        assert!(!model.active());
     }
 
     #[test]
     fn entrance_reaches_recording_state_in_about_250ms_without_overshoot() {
+        let spec = Spec::from_omega(ENTRANCE_ANGULAR_FREQUENCY);
         let simulate = |frame_rate: usize| {
-            let mut opacity = Spring::new(0.0);
-            let mut scale = Spring::new(HIDDEN_SCALE);
-            let mut softness = Spring::new(HIDDEN_SOFTNESS);
+            let mut opacity = Spring::at(0.0);
+            let mut scale = Spring::at(HIDDEN_SCALE);
+            let mut softness = Spring::at(HIDDEN_SOFTNESS);
             for _ in 0..frame_rate / 4 {
                 let dt = 1.0 / frame_rate as f32;
-                opacity.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
-                scale.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
-                softness.step_critical(0.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
-                assert!((0.0..=1.0).contains(&opacity.value));
-                assert!((HIDDEN_SCALE..=1.0).contains(&scale.value));
-                assert!((0.0..=HIDDEN_SOFTNESS).contains(&softness.value));
+                opacity.step_to(1.0, spec, dt);
+                scale.step_to(1.0, spec, dt);
+                softness.step_to(0.0, spec, dt);
+                assert!((0.0..=1.0).contains(&opacity.x));
+                assert!((HIDDEN_SCALE..=1.0).contains(&scale.x));
+                assert!((0.0..=HIDDEN_SOFTNESS).contains(&softness.x));
             }
-            (opacity.value, scale.value, softness.value)
+            (opacity.x, scale.x, softness.x)
         };
 
         let at_60_hz = simulate(60);
@@ -941,24 +889,25 @@ mod tests {
 
     #[test]
     fn lifecycle_exit_is_monotonic_and_visually_gone_in_about_250ms() {
-        let mut opacity = Spring::new(1.0);
-        let mut scale = Spring::new(1.0);
-        let mut softness = Spring::new(0.0);
-        let mut previous = (opacity.value, scale.value, softness.value);
+        let spec = Spec::from_omega(EXIT_ANGULAR_FREQUENCY);
+        let mut opacity = Spring::at(1.0);
+        let mut scale = Spring::at(1.0);
+        let mut softness = Spring::at(0.0);
+        let mut previous = (opacity.x, scale.x, softness.x);
 
         for _ in 0..15 {
-            opacity.step_critical(0.0, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
-            scale.step_critical(HIDDEN_SCALE, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
-            softness.step_critical(HIDDEN_SOFTNESS, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
-            assert!((0.0..=previous.0).contains(&opacity.value));
-            assert!((HIDDEN_SCALE..=previous.1).contains(&scale.value));
-            assert!((previous.2..=HIDDEN_SOFTNESS).contains(&softness.value));
-            previous = (opacity.value, scale.value, softness.value);
+            opacity.step_to(0.0, spec, 1.0 / 60.0);
+            scale.step_to(HIDDEN_SCALE, spec, 1.0 / 60.0);
+            softness.step_to(HIDDEN_SOFTNESS, spec, 1.0 / 60.0);
+            assert!((0.0..=previous.0).contains(&opacity.x));
+            assert!((HIDDEN_SCALE..=previous.1).contains(&scale.x));
+            assert!((previous.2..=HIDDEN_SOFTNESS).contains(&softness.x));
+            previous = (opacity.x, scale.x, softness.x);
         }
 
-        assert!(opacity.value < 0.02);
-        assert!((scale.value - HIDDEN_SCALE).abs() < 0.004);
-        assert!((softness.value - HIDDEN_SOFTNESS).abs() < 0.08);
+        assert!(opacity.x < 0.02);
+        assert!((scale.x - HIDDEN_SCALE).abs() < 0.004);
+        assert!((softness.x - HIDDEN_SOFTNESS).abs() < 0.08);
     }
 
     #[test]
@@ -994,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn rust_uniform_layout_matches_metal() {
+    fn uniform_layout_matches_the_shader() {
         assert_eq!(std::mem::size_of::<Uniforms>(), 112);
         assert_eq!(std::mem::align_of::<Uniforms>(), 8);
         assert_eq!(std::mem::offset_of!(Uniforms, sphere_outline), 92);
@@ -1012,28 +961,15 @@ mod tests {
 
     #[test]
     fn processing_morph_duration_matches_geometry_spring() {
-        let mut width = Spring::new(CAPSULE_WIDTH);
+        let spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
+        let mut width = Spring::at(CAPSULE_WIDTH);
+        let mut previous_width = width.x;
         for _ in 0..15 {
-            width.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
+            width.step_to(CAPSULE_HEIGHT, spec, 1.0 / 60.0);
+            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.x));
+            previous_width = width.x;
         }
-        assert!(width.value < CAPSULE_HEIGHT + 0.7);
+        assert!(width.x < CAPSULE_HEIGHT + 0.7);
         assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
-    }
-
-    #[test]
-    fn processing_morph_only_contracts_the_capsule() {
-        let mut width = Spring::new(CAPSULE_WIDTH);
-        let mut height = Spring::new(CAPSULE_HEIGHT);
-        let mut previous_width = width.value;
-
-        for _ in 0..15 {
-            width.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
-            height.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
-            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.value));
-            assert_eq!(height.value, CAPSULE_HEIGHT);
-            previous_width = width.value;
-        }
-
-        assert!(width.value < CAPSULE_HEIGHT + 0.7);
     }
 }

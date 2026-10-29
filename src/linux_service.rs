@@ -1,13 +1,22 @@
-//! Per-user dictation service transport and lifecycle. No UI or audio work runs here.
+//! The single-instance socket: one Hex process per user and data root.
+//!
+//! The running process binds `service.sock` next to its `service.lock`. A
+//! later `hex` forwards `Activate` (with the launcher's activation token) and
+//! exits; `hex dictation …`, `hex voice-action …`, `hex paste-last`,
+//! `hex status`, and `hex quit` forward over the same socket. Shortcut
+//! commands go straight from the socket worker to the listener's command
+//! queue, never through the window's thread. This module also owns the
+//! per-user systemd lifecycle (`Type=notify` readiness, the session
+//! environment, start, stop, and restart).
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -15,67 +24,89 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::desktop_host::{DesktopAction, DesktopSnapshot};
-use crate::transcription_models::TranscriptionModelId;
+use crate::desktop_host::DesktopSnapshot;
+use crate::linux_input::ShortcutCommand;
 
-const VERSION: u32 = 1;
+/// Version 1 was the service/Settings-client protocol; its clients get a
+/// version error and exit.
+const VERSION: u32 = 2;
 const MAX_FRAME: usize = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
 const UNIT: &str = "hex.service";
+/// How long a launch waits for a started unit's socket. `Type=notify`
+/// units are ready when `systemctl start` returns; units an older installer
+/// wrote are `Type=simple` and need the wait.
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Request {
-    Snapshot,
-    Desktop(DesktopAction),
-    /// Records the dictation shortcut.
-    CaptureShortcut,
-    CaptureShortcutFor(ShortcutTarget),
-    CancelShortcut,
-    /// The chord Settings recorded on X11, for the service to register.
-    SetShortcut {
-        target: ShortcutTarget,
-        shortcut: crate::desktop_host::DesktopShortcut,
+pub(crate) enum Request {
+    /// A relaunch: open or focus the window when `show`. A launcher's
+    /// activation token rides along for the compositor.
+    Activate {
+        activation: Activation,
+        show: bool,
+        session: Session,
     },
-    ChooseModel {
-        model: TranscriptionModelId,
-        language: String,
-    },
-    CancelModel,
-    /// Settings saved `settings.json`; adopt it.
-    ReloadSettings,
-    Shutdown,
+    /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
+    Shortcut(ShortcutCommand),
+    /// `hex capture start|stop|cancel` (the `capture` experiment).
+    Capture(crate::control::ScrawlCaptureAction),
+    Status,
+    /// Drain accepted work and exit.
+    Quit,
 }
 
-/// A shortcut the service registers.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ShortcutTarget {
-    #[default]
-    Dictation,
-    PasteLast,
-    VoiceAction,
+/// What a launcher handed the process that asked for the window.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Activation {
+    /// Wayland `xdg_activation_v1` token (`XDG_ACTIVATION_TOKEN`).
+    pub(crate) token: Option<String>,
+    /// X11 startup notification id (`DESKTOP_STARTUP_ID`).
+    pub(crate) startup_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub desktop: DesktopSnapshot,
-    pub settings: crate::app_settings::AppSettings,
-    pub editing: bool,
-    pub capturing: bool,
-    pub hud_limitation: Option<String>,
-    pub pid: u32,
-    pub session: Session,
+impl Activation {
+    /// Takes this process's activation environment so nothing it starts
+    /// reuses a token meant for one window.
+    pub(crate) fn take_from_environment() -> Self {
+        let take = |key: &str| {
+            let value = std::env::var(key).ok().filter(|value| !value.is_empty());
+            // Called on the main thread before Hex starts any other thread.
+            unsafe { std::env::remove_var(key) };
+            value
+        };
+        Self {
+            token: take("XDG_ACTIVATION_TOKEN"),
+            startup_id: take("DESKTOP_STARTUP_ID"),
+        }
+    }
+}
+
+/// What `hex status` prints and every reply carries.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Status {
+    pub(crate) desktop: DesktopSnapshot,
+    pub(crate) settings: crate::app_settings::AppSettings,
+    pub(crate) editing: bool,
+    pub(crate) hud_limitation: Option<String>,
+    pub(crate) window_open: bool,
+    pub(crate) pid: u32,
+    pub(crate) session: Session,
+    /// The experiments this Hex read at its launch.
+    #[serde(default)]
+    pub(crate) experiments: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Session {
+pub(crate) struct Session {
     backend: String,
     display: String,
     runtime: String,
 }
 
 impl Session {
-    pub fn current() -> Self {
+    pub(crate) fn current() -> Self {
         let session = crate::linux_session::LinuxSession::detect();
         Self {
             backend: session.as_str().into(),
@@ -90,6 +121,46 @@ impl Session {
     }
 }
 
+/// Where the socket hands a `hex` shortcut command: the running listener's
+/// queue, once it reports its session.
+#[derive(Clone)]
+pub(crate) struct ShortcutRoute {
+    pub(crate) commands: SyncSender<ShortcutCommand>,
+    pub(crate) voice_action: bool,
+}
+
+/// Routes one command, failing fast when nothing listens.
+pub(crate) fn route_shortcut(
+    route: Option<&ShortcutRoute>,
+    command: ShortcutCommand,
+) -> Result<()> {
+    let route = route
+        .ok_or_else(|| eyre!("Hex is not listening; enable it in Settings or run `hex start`"))?;
+    if command.is_voice_action() && !route.voice_action {
+        bail!("Voice Action is off; turn it on in Settings");
+    }
+    route
+        .commands
+        .try_send(command)
+        .map_err(|_| eyre!("Hex is busy; try again"))
+}
+
+/// What the socket reads without waiting on the host or the window: the
+/// latest status and the listener's command queue, both published by the
+/// host thread.
+#[derive(Default)]
+pub(crate) struct Published {
+    pub(crate) status: Mutex<Option<Status>>,
+    pub(crate) shortcuts: Mutex<Option<ShortcutRoute>>,
+}
+
+/// Requests for the main thread, which owns the window.
+#[derive(Debug)]
+pub(crate) enum Control {
+    Activate(Activation),
+    Quit,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Message {
     version: u32,
@@ -99,17 +170,9 @@ struct Message {
 #[derive(Serialize, Deserialize)]
 struct Reply {
     version: u32,
-    state: Option<Snapshot>,
+    #[serde(default)]
+    status: Option<Status>,
     error: Option<String>,
-}
-
-pub enum Event {
-    Request {
-        client: u64,
-        request: Request,
-        reply: SyncSender<(Snapshot, Option<String>)>,
-    },
-    Disconnected(u64),
 }
 
 fn socket_path() -> Result<PathBuf> {
@@ -120,7 +183,7 @@ fn private_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path)?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
-        bail!("HEX requires a user-owned, non-symlink service directory");
+        bail!("Hex requires a user-owned, non-symlink data directory");
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -139,7 +202,7 @@ fn check_peer(stream: &UnixStream) -> Result<()> {
         )
     };
     if result != 0 || credentials.uid != unsafe { libc::geteuid() } {
-        bail!("HEX only accepts local IPC from the same user");
+        bail!("Hex only accepts local IPC from the same user");
     }
     Ok(())
 }
@@ -148,11 +211,11 @@ fn read_exact(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) 
     while !bytes.is_empty() {
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .ok_or_else(|| eyre!("HEX service read timed out"))?;
+            .ok_or_else(|| eyre!("Hex read timed out"))?;
         stream.set_read_timeout(Some(remaining))?;
         let count = stream.read(bytes)?;
         if count == 0 {
-            bail!("HEX service disconnected");
+            bail!("Hex disconnected");
         }
         bytes = &mut bytes[count..];
     }
@@ -165,7 +228,7 @@ fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
     read_exact(stream, &mut header, deadline)?;
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > MAX_FRAME {
-        bail!("Invalid HEX service frame size");
+        bail!("Invalid Hex frame size");
     }
     let mut body = vec![0; length];
     read_exact(stream, &mut body, deadline)?;
@@ -175,7 +238,7 @@ fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
 fn write_frame<T: Serialize>(stream: &mut UnixStream, message: &T) -> Result<()> {
     let body = serde_json::to_vec(message)?;
     if body.len() > MAX_FRAME {
-        bail!("HEX service message exceeds the size limit");
+        bail!("Hex message exceeds the size limit");
     }
     let deadline = Instant::now() + IO_TIMEOUT;
     write_all(stream, &(body.len() as u32).to_be_bytes(), deadline)?;
@@ -186,198 +249,277 @@ fn write_all(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) -> Re
     while !bytes.is_empty() {
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .ok_or_else(|| eyre!("HEX service write timed out"))?;
+            .ok_or_else(|| eyre!("Hex write timed out"))?;
         stream.set_write_timeout(Some(remaining))?;
         let count = stream.write(bytes)?;
         if count == 0 {
-            bail!("HEX service disconnected");
+            bail!("Hex disconnected");
         }
         bytes = &bytes[count..];
     }
     Ok(())
 }
 
-fn connect() -> Result<UnixStream> {
-    let path = socket_path()?;
-    let metadata =
-        fs::symlink_metadata(&path).wrap_err("HEX service is not running; run `hex start`")?;
+/// Why a request did not reach a current instance.
+#[derive(Debug)]
+pub(crate) enum RequestError {
+    /// Nothing listens on the socket.
+    NotRunning,
+    /// An older Hex (the service/Settings protocol) owns the socket.
+    Outdated,
+    Failed(color_eyre::Report),
+}
+
+impl std::fmt::Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotRunning => write!(f, "Hex is not running; run `hex start`"),
+            Self::Outdated => write!(
+                f,
+                "An older Hex is running; quit it or run `hex restart`, then try again"
+            ),
+            Self::Failed(error) => write!(f, "{error:#}"),
+        }
+    }
+}
+
+impl std::error::Error for RequestError {}
+
+fn connect() -> std::result::Result<UnixStream, RequestError> {
+    let path = socket_path().map_err(RequestError::Failed)?;
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        return Err(RequestError::NotRunning);
+    };
     if !metadata.file_type().is_socket()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        bail!("Refusing an insecure HEX service socket");
+        return Err(RequestError::Failed(eyre!(
+            "Refusing an insecure Hex socket"
+        )));
     }
-    let stream = UnixStream::connect(path)?;
-    check_peer(&stream)?;
+    // A crashed instance leaves its socket behind.
+    let stream = UnixStream::connect(path).map_err(|_| RequestError::NotRunning)?;
+    check_peer(&stream).map_err(RequestError::Failed)?;
     Ok(stream)
 }
 
-fn exchange(stream: &mut UnixStream, request: Request) -> Result<(Snapshot, Option<String>)> {
+/// `hex capture`'s recording commands, handed to the running listener.
+pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::control::ControlReply {
+    use crate::control::{ControlReply, ScrawlCaptureAction};
+    if action == ScrawlCaptureAction::Status {
+        return ControlReply::error(
+            "unsupported",
+            "`hex capture status` is macOS-only for now; the capsule shows a recording capture",
+        );
+    }
+    match request(Request::Capture(action)) {
+        Ok(_) => ControlReply::done("Sent to Hex"),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
+/// Sends one request to the running instance. Never starts one.
+pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestError> {
+    let mut stream = connect()?;
     write_frame(
-        stream,
+        &mut stream,
         &Message {
             version: VERSION,
             request,
         },
-    )?;
-    let reply: Reply = read_frame(stream)?;
+    )
+    .map_err(RequestError::Failed)?;
+    let reply: Reply = read_frame(&mut stream).map_err(RequestError::Failed)?;
     if reply.version != VERSION {
-        bail!("HEX service version mismatch; restart the service");
+        return Err(RequestError::Outdated);
     }
-    let state = reply.state.ok_or_else(|| {
-        eyre!(
-            "{}",
-            reply.error.as_deref().unwrap_or("Invalid service reply")
-        )
-    })?;
-    Ok((state, reply.error))
+    if let Some(error) = reply.error {
+        return Err(RequestError::Failed(eyre!(error)));
+    }
+    reply
+        .status
+        .ok_or_else(|| RequestError::Failed(eyre!("Invalid Hex reply")))
 }
 
-pub fn request(request: Request) -> Result<Snapshot> {
-    let (state, error) = exchange(&mut connect()?, request)?;
-    if let Some(error) = error {
-        bail!(error);
-    }
-    Ok(state)
-}
-
-pub struct Server {
+pub(crate) struct Server {
     path: PathBuf,
     inode: u64,
-    listener: UnixListener,
-    connections: Option<SyncSender<(u64, UnixStream)>>,
-    next_client: u64,
+    listener: Option<UnixListener>,
+    acceptor: Option<JoinHandle<()>>,
     workers: Vec<JoinHandle<()>>,
     stop: Arc<AtomicBool>,
-    pub events: Receiver<Event>,
     _lock: crate::instance::InstanceLock,
 }
 
 impl Server {
-    pub fn bind() -> Result<Self> {
+    /// Claims the data root. Fails when another instance holds it.
+    pub(crate) fn bind() -> Result<Self> {
         if unsafe { libc::geteuid() } == 0 {
-            bail!("Run HEX as a desktop user, never root");
+            bail!("Run Hex as a desktop user, never root");
         }
         let path = socket_path()?;
         private_directory(path.parent().unwrap())?;
         let lock = crate::instance::acquire("service")?;
         if let Ok(metadata) = fs::symlink_metadata(&path) {
             if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
-                bail!("Refusing to replace an unmanaged HEX service path");
+                bail!("Refusing to replace an unmanaged Hex socket path");
             }
             fs::remove_file(&path)?;
         }
         let listener = UnixListener::bind(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-        listener.set_nonblocking(true)?;
         let inode = fs::metadata(&path)?.ino();
-        let (connections, pending) = mpsc::sync_channel::<(u64, UnixStream)>(CLIENTS);
+        Ok(Self {
+            path,
+            inode,
+            listener: Some(listener),
+            acceptor: None,
+            workers: Vec::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+            _lock: lock,
+        })
+    }
+
+    /// Starts answering once the host has published its first status.
+    /// `Quit` sets `shutdown`, which the host thread drains on.
+    pub(crate) fn serve(
+        &mut self,
+        published: Arc<Published>,
+        control: SyncSender<Control>,
+        shutdown: &'static AtomicBool,
+    ) {
+        let Some(listener) = self.listener.take() else {
+            return;
+        };
+        let (connections, pending) = mpsc::sync_channel::<UnixStream>(CLIENTS);
         let pending = Arc::new(Mutex::new(pending));
-        let (sender, events) = mpsc::sync_channel(32);
-        let stop = Arc::new(AtomicBool::new(false));
-        let workers = (0..CLIENTS)
+        let session = Session::current();
+        self.workers = (0..CLIENTS)
             .map(|_| {
                 let pending = pending.clone();
-                let sender = sender.clone();
-                let stop = stop.clone();
+                let published = published.clone();
+                let control = control.clone();
+                let stop = self.stop.clone();
+                let session = session.clone();
                 thread::spawn(move || {
                     loop {
-                        let Ok((client, mut stream)) = pending.lock().unwrap().recv() else {
+                        let Ok(stream) = pending.lock().unwrap().recv() else {
                             break;
                         };
                         if stop.load(Ordering::Acquire) {
                             break;
                         }
-                        if check_peer(&stream).is_err() {
-                            continue;
-                        }
-                        while !stop.load(Ordering::Acquire) {
-                            let Ok(message) = read_frame::<Message>(&mut stream) else {
-                                break;
-                            };
-                            if message.version != VERSION {
-                                let _ = write_frame(
-                                    &mut stream,
-                                    &Reply {
-                                        version: VERSION,
-                                        state: None,
-                                        error: Some(
-                                            "HEX service version mismatch; restart the service"
-                                                .into(),
-                                        ),
-                                    },
-                                );
-                                break;
-                            }
-                            let (reply, receiver) = mpsc::sync_channel(1);
-                            if sender
-                                .try_send(Event::Request {
-                                    client,
-                                    request: message.request,
-                                    reply,
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                            let Ok((state, error)) = receiver.recv_timeout(IO_TIMEOUT) else {
-                                break;
-                            };
-                            if write_frame(
-                                &mut stream,
-                                &Reply {
-                                    version: VERSION,
-                                    state: Some(state),
-                                    error,
-                                },
-                            )
-                            .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        // A full queue is safe: the runtime also bounds shortcut capture by time.
-                        let _ = sender.try_send(Event::Disconnected(client));
+                        serve_client(stream, &published, &control, &session, &stop, shutdown);
                     }
                 })
             })
             .collect();
-        Ok(Self {
-            path,
-            inode,
-            listener,
-            connections: Some(connections),
-            next_client: 0,
-            workers,
-            stop,
-            events,
-            _lock: lock,
-        })
-    }
-
-    pub fn accept(&mut self) -> Result<()> {
-        for _ in 0..CLIENTS {
-            match self.listener.accept() {
-                Ok((stream, _)) => {
-                    self.next_client += 1;
-                    let _ = self
-                        .connections
-                        .as_ref()
-                        .unwrap()
-                        .try_send((self.next_client, stream));
+        let stop = self.stop.clone();
+        self.acceptor = Some(thread::spawn(move || {
+            for stream in listener.incoming() {
+                if stop.load(Ordering::Acquire) {
+                    break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(error) => return Err(error.into()),
+                // A full pool drops the connection; its client fails fast.
+                if let Ok(stream) = stream {
+                    let _ = connections.try_send(stream);
+                }
             }
+        }));
+    }
+}
+
+fn serve_client(
+    mut stream: UnixStream,
+    published: &Published,
+    control: &SyncSender<Control>,
+    session: &Session,
+    stop: &AtomicBool,
+    shutdown: &AtomicBool,
+) {
+    if check_peer(&stream).is_err() {
+        return;
+    }
+    while !stop.load(Ordering::Acquire) {
+        // The version is read first: older clients send requests this
+        // protocol no longer has.
+        let Ok(frame) = read_frame::<serde_json::Value>(&mut stream) else {
+            break;
+        };
+        let message = (frame.get("version").and_then(serde_json::Value::as_u64)
+            == Some(VERSION.into()))
+        .then(|| serde_json::from_value::<Message>(frame).ok())
+        .flatten();
+        let Some(message) = message else {
+            let _ = write_frame(
+                &mut stream,
+                &Reply {
+                    version: VERSION,
+                    status: None,
+                    error: Some("Unsupported Hex request; restart Hex".into()),
+                },
+            );
+            break;
+        };
+        let result = match message.request {
+            Request::Activate {
+                activation,
+                show,
+                session: caller,
+            } => {
+                // A caller from another desktop session decides from the reply.
+                if show && caller == *session {
+                    control
+                        .try_send(Control::Activate(activation))
+                        .map_err(|_| eyre!("Hex is busy; try again"))
+                } else {
+                    Ok(())
+                }
+            }
+            Request::Shortcut(command) => {
+                route_shortcut(published.shortcuts.lock().unwrap().as_ref(), command)
+            }
+            Request::Capture(action) => crate::capture_host::send_to_listener(
+                crate::capture_host::CaptureControl::Scrawl(action),
+            ),
+            Request::Status => Ok(()),
+            Request::Quit => {
+                shutdown.store(true, Ordering::Release);
+                // The host thread also wakes the main thread when it sees the flag.
+                let _ = control.try_send(Control::Quit);
+                Ok(())
+            }
+        };
+        let status = published.status.lock().unwrap().clone();
+        let error = match (&result, &status) {
+            (Err(error), _) => Some(format!("{error:#}")),
+            (Ok(()), None) => Some("Hex is starting; try again".into()),
+            (Ok(()), Some(_)) => None,
+        };
+        if write_frame(
+            &mut stream,
+            &Reply {
+                version: VERSION,
+                status,
+                error,
+            },
+        )
+        .is_err()
+        {
+            break;
         }
-        Ok(())
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        self.connections.take();
+        if let Some(acceptor) = self.acceptor.take() {
+            // Wakes the blocking accept.
+            let _ = UnixStream::connect(&self.path);
+            let _ = acceptor.join();
+        }
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
@@ -387,106 +529,74 @@ impl Drop for Server {
     }
 }
 
-pub struct Client {
-    pub state: Option<Snapshot>,
-    pub error: Option<String>,
-    sender: SyncSender<Request>,
-    updates: Receiver<Result<(Snapshot, Option<String>), String>>,
-    stop: Arc<AtomicBool>,
-}
-
-impl Client {
-    pub fn new() -> Self {
-        let (sender, requests) = mpsc::sync_channel(16);
-        let (updates_sender, updates) = mpsc::sync_channel(1);
-        let stop = Arc::new(AtomicBool::new(false));
-        let stopping = stop.clone();
-        thread::spawn(move || {
-            let startup = ensure_started();
-            if let Err(error) = startup {
-                let _ = updates_sender.try_send(Err(format!("{error:#}")));
-            }
-            let mut stream = None;
-            while !stopping.load(Ordering::Acquire) {
-                let request = match requests.recv_timeout(Duration::from_millis(250)) {
-                    Ok(request) => request,
-                    Err(mpsc::RecvTimeoutError::Timeout) => Request::Snapshot,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                };
-                let result = (|| {
-                    if stream.is_none() {
-                        if matches!(request, Request::Desktop(DesktopAction::StartListening)) {
-                            ensure_started()?;
-                        }
-                        stream = Some(connect()?);
-                    }
-                    let result = exchange(stream.as_mut().unwrap(), request)?;
-                    if result.0.session != Session::current() {
-                        bail!(
-                            "HEX belongs to a different desktop session; run `hex start` to hand it over"
-                        );
-                    }
-                    Ok(result)
-                })();
-                if result.is_err() {
-                    stream = None;
-                }
-                let _ = updates_sender.try_send(result.map_err(|e| format!("{e:#}")));
-            }
-        });
-        Self {
-            state: None,
-            error: None,
-            sender,
-            updates,
-            stop,
+/// Tells systemd (`Type=notify`) the socket answers. Without
+/// `NOTIFY_SOCKET` (no unit, or an older `Type=simple` unit) it does nothing.
+pub(crate) fn notify(state: &str) {
+    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
+        return;
+    };
+    let result = (|| -> std::io::Result<()> {
+        let socket = UnixDatagram::unbound()?;
+        let bytes = std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str());
+        if let Some(name) = bytes.strip_prefix(b"@") {
+            use std::os::linux::net::SocketAddrExt;
+            let address = std::os::unix::net::SocketAddr::from_abstract_name(name)?;
+            socket.send_to_addr(state.as_bytes(), &address)?;
+        } else {
+            socket.send_to(state.as_bytes(), &path)?;
         }
-    }
-
-    pub fn send(&mut self, request: Request) -> Result<()> {
-        self.sender
-            .try_send(request)
-            .map_err(|_| eyre!("HEX service command queue is busy"))?;
         Ok(())
-    }
-
-    pub fn refresh(&mut self) {
-        while let Ok(update) = self.updates.try_recv() {
-            match update {
-                Ok((state, error)) => {
-                    self.state = Some(state);
-                    self.error = error;
-                }
-                Err(error) => {
-                    self.state = None;
-                    self.error = Some(error);
-                }
-            }
-        }
+    })();
+    if let Err(error) = result {
+        tracing::warn!(%error, state, "could not notify systemd");
     }
 }
 
-impl Drop for Client {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+fn unit() -> String {
+    std::env::var("HEX_SYSTEMD_UNIT")
+        .ok()
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or_else(|| UNIT.into())
+}
+
+/// Whether launches start Hex through its systemd user unit: the unit is
+/// installed (by the installer or Home Manager) and this process uses the
+/// default data root. `HEX_SYSTEMD_UNIT` names another unit, for isolated
+/// tests with a custom data root.
+fn supervised() -> bool {
+    if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
+        && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
+    {
+        return false;
     }
+    Command::new("systemctl")
+        .args(["--user", "show", &unit(), "--property=LoadState", "--value"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "loaded"
+        })
 }
 
 fn systemctl(arguments: &[&str]) -> Result<()> {
+    let unit = unit();
     let mut child = Command::new("systemctl")
         .arg("--user")
         .args(arguments)
+        .arg(&unit)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .wrap_err("Could not run systemctl; run `hex service` in a graphical session")?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+        .wrap_err("Could not run systemctl")?;
+    // `start` waits for READY=1, which follows model-free startup.
+    let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         if let Some(status) = child.try_wait()? {
             if !status.success() {
                 bail!(
-                    "systemctl --user {} failed; inspect `systemctl --user status hex.service`",
+                    "systemctl --user {} {unit} failed; inspect `systemctl --user status {unit}`",
                     arguments.join(" ")
                 );
             }
@@ -495,84 +605,120 @@ fn systemctl(arguments: &[&str]) -> Result<()> {
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("Timed out controlling hex.service");
+            bail!("Timed out controlling {unit}");
         }
         thread::sleep(Duration::from_millis(25));
     }
 }
 
-fn ensure_started() -> Result<()> {
-    if let Ok(state) = request(Request::Snapshot) {
-        if state.session != Session::current() {
-            bail!(
-                "HEX belongs to a different desktop session; run `hex start` or `hex restart` to hand it over"
-            );
-        }
-        return Ok(());
-    }
-    if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some() {
-        bail!(
-            "For a custom data directory, start `hex service` explicitly before opening Settings"
-        );
-    }
-    write_session_environment()?;
-    systemctl(&["start", UNIT])?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+/// Waits until the started unit answers.
+fn wait_ready() -> Result<Status> {
+    let deadline = Instant::now() + READY_TIMEOUT;
     loop {
-        if let Ok(state) = request(Request::Snapshot) {
-            if state.session != Session::current() {
-                bail!(
-                    "hex.service did not load the current desktop environment; check its EnvironmentFile configuration"
-                );
+        match request(Request::Status) {
+            Ok(status) => return Ok(status),
+            Err(RequestError::Outdated) => return Err(RequestError::Outdated.into()),
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                return Err(eyre!(
+                    "Hex did not become ready ({error}); inspect `journalctl --user -u {}`",
+                    unit()
+                ));
             }
-            return Ok(());
         }
-        if Instant::now() >= deadline {
-            bail!("HEX service did not become ready; inspect `journalctl --user -u hex.service`");
+    }
+}
+
+/// What a launch found.
+pub(crate) enum Launch {
+    /// The running instance took the request.
+    Forwarded,
+    /// Nothing runs and no unit supervises Hex: this process becomes it.
+    BecomeInstance,
+}
+
+/// After losing the data root to a concurrent launch, waits for that
+/// instance to answer.
+pub(crate) fn another_instance_answers() -> bool {
+    let deadline = Instant::now() + READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if request(Request::Status).is_ok() {
+            return true;
+        }
+        if crate::instance::acquire("service").is_ok() {
+            // Nobody holds the root: the failure was this process's own.
+            return false;
         }
         thread::sleep(Duration::from_millis(50));
     }
+    false
 }
 
-pub fn start() -> Result<()> {
-    match request(Request::Snapshot) {
-        Ok(state) if state.session == Session::current() => {}
-        Ok(_) => {
+/// `hex`, `hex app`, and `hex start`: forward to the running instance, start
+/// the systemd unit, or tell the caller to become the instance.
+pub(crate) fn launch(activation: &Activation, show: bool) -> Result<Launch> {
+    let activate = || Request::Activate {
+        activation: activation.clone(),
+        show,
+        session: Session::current(),
+    };
+    match request(activate()) {
+        Ok(status) if status.session == Session::current() => return Ok(Launch::Forwarded),
+        Ok(_) if supervised() => {
+            // Hand the instance over to this desktop session.
             restart()?;
-            ensure_started()?;
         }
-        Err(_) => ensure_started()?,
+        Ok(_) => {
+            bail!("Hex is running in another desktop session; run `hex quit`, then launch it again")
+        }
+        Err(RequestError::Outdated) if supervised() => restart()?,
+        Err(RequestError::NotRunning) if supervised() => {
+            write_session_environment()?;
+            systemctl(&["start"])?;
+        }
+        Err(RequestError::NotRunning) => return Ok(Launch::BecomeInstance),
+        Err(error) => return Err(error.into()),
     }
-    request(Request::Desktop(DesktopAction::StartListening))?;
-    Ok(())
+    let status = wait_ready()?;
+    if status.session != Session::current() {
+        bail!(
+            "{} did not load this desktop's environment; check its EnvironmentFile",
+            unit()
+        );
+    }
+    request(activate())?;
+    Ok(Launch::Forwarded)
 }
 
-pub fn stop() -> Result<()> {
-    if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some() {
-        request(Request::Shutdown)?;
-        return Ok(());
+/// `hex quit` and `hex stop`.
+pub(crate) fn quit() -> Result<()> {
+    match request(Request::Quit) {
+        Ok(_) => Ok(()),
+        // An older service stops through its unit.
+        Err(RequestError::Outdated) if supervised() => systemctl(&["stop"]),
+        Err(RequestError::NotRunning) => Ok(()),
+        Err(error) => Err(error.into()),
     }
-    // Also works for a foreground development service with no systemd unit.
-    if let Err(error) = systemctl(&["stop", UNIT])
-        && request(Request::Shutdown).is_err()
-    {
-        return Err(error);
-    }
-    Ok(())
 }
 
-pub fn restart() -> Result<()> {
-    if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some() {
-        bail!("Restart a custom-data service through its foreground process or supervisor");
+pub(crate) fn restart() -> Result<()> {
+    if !supervised() {
+        bail!("Only Hex started by its systemd unit restarts; run `hex quit`, then launch it");
     }
-    write_session_environment()?;
-    systemctl(&["restart", UNIT])
+    // Without a desktop (over SSH), keep the one Hex last ran in.
+    if graphical_session() || !session_environment_path()?.exists() {
+        write_session_environment()?;
+    }
+    systemctl(&["restart"])
 }
 
-pub fn schedule_restart() -> Result<()> {
-    systemctl(&["--no-block", "restart", UNIT])
+pub(crate) fn schedule_restart() -> Result<()> {
+    systemctl(&["--no-block", "restart"])
 }
 
+/// The display the process connects to. Absent values are written empty
+/// so they override a stale user-manager environment from an earlier
+/// desktop.
 const SESSION_KEYS: &[&str] = &[
     "DISPLAY",
     "WAYLAND_DISPLAY",
@@ -581,6 +727,23 @@ const SESSION_KEYS: &[&str] = &[
     "DBUS_SESSION_BUS_ADDRESS",
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_TYPE",
+    // The window's cursor theme and input method.
+    "XCURSOR_THEME",
+    "XCURSOR_SIZE",
+    "XMODIFIERS",
+    "GTK_IM_MODULE",
+    "QT_IM_MODULE",
+];
+
+/// Written only when set: clearing them would break the user manager's own
+/// locale and data directories.
+const INHERITED_KEYS: &[&str] = &[
+    "XDG_DATA_DIRS",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
 ];
 
 fn environment_line(key: &str, value: &str) -> Result<String> {
@@ -593,24 +756,36 @@ fn environment_line(key: &str, value: &str) -> Result<String> {
     ))
 }
 
+fn session_environment(get: impl Fn(&str) -> Option<String>) -> Result<String> {
+    let mut body = String::new();
+    for key in SESSION_KEYS {
+        body.push_str(&environment_line(key, &get(key).unwrap_or_default())?);
+    }
+    for key in INHERITED_KEYS {
+        if let Some(value) = get(key).filter(|value| !value.is_empty()) {
+            body.push_str(&environment_line(key, &value)?);
+        }
+    }
+    Ok(body)
+}
+
+fn graphical_session() -> bool {
+    ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|key| !std::env::var(key).unwrap_or_default().is_empty())
+}
+
+fn session_environment_path() -> Result<PathBuf> {
+    Ok(crate::app_paths::support_dir()?.join("session.env"))
+}
+
 fn write_session_environment() -> Result<()> {
-    if std::env::var("DISPLAY").unwrap_or_default().is_empty()
-        && std::env::var("WAYLAND_DISPLAY")
-            .unwrap_or_default()
-            .is_empty()
-    {
-        bail!("Start HEX from your graphical login session");
+    if !graphical_session() {
+        bail!("Start Hex from your graphical login session");
     }
     let directory = crate::app_paths::support_dir()?;
     private_directory(&directory)?;
-    let mut body = String::new();
-    for key in SESSION_KEYS {
-        // Empty values override stale user-manager environment from an earlier desktop.
-        body.push_str(&environment_line(
-            key,
-            &std::env::var(key).unwrap_or_default(),
-        )?);
-    }
+    let body = session_environment(|key| std::env::var(key).ok())?;
     let temporary = directory.join(format!(".session-{}.env", std::process::id()));
     let mut file = OpenOptions::new()
         .write(true)
@@ -620,7 +795,7 @@ fn write_session_environment() -> Result<()> {
     let result = (|| -> Result<()> {
         file.write_all(body.as_bytes())?;
         file.sync_all()?;
-        fs::rename(&temporary, directory.join("session.env"))?;
+        fs::rename(&temporary, session_environment_path()?)?;
         Ok(())
     })();
     if result.is_err() {
@@ -641,9 +816,13 @@ mod tests {
             &mut client,
             &Message {
                 version: VERSION,
-                request: Request::ChooseModel {
-                    model: TranscriptionModelId::default(),
-                    language: "pl".into(),
+                request: Request::Activate {
+                    activation: Activation {
+                        token: Some("token".into()),
+                        startup_id: None,
+                    },
+                    show: true,
+                    session: Session::current(),
                 },
             },
         )
@@ -652,7 +831,7 @@ mod tests {
         assert_eq!(message.version, VERSION);
         assert!(matches!(
             message.request,
-            Request::ChooseModel { language, .. } if language == "pl"
+            Request::Activate { activation, show: true, .. } if activation.token.as_deref() == Some("token")
         ));
         client
             .write_all(&((MAX_FRAME + 1) as u32).to_be_bytes())
@@ -680,15 +859,55 @@ mod tests {
     }
 
     #[test]
-    fn session_environment_clears_absent_values_and_rejects_injection() {
+    fn version_one_replies_parse_as_outdated() {
+        let reply: Reply = serde_json::from_str(
+            r#"{"version":1,"state":null,"error":"Hex service version mismatch; restart the service"}"#,
+        )
+        .unwrap();
+        assert_eq!(reply.version, 1);
+        assert!(reply.status.is_none());
+    }
+
+    #[test]
+    fn commands_reach_only_a_listening_route() {
+        let error = route_shortcut(None, ShortcutCommand::DictationToggle).unwrap_err();
+        assert!(error.to_string().contains("not listening"), "{error}");
+        let (commands, received) = mpsc::sync_channel(2);
+        let mut route = ShortcutRoute {
+            commands,
+            voice_action: false,
+        };
+        route_shortcut(Some(&route), ShortcutCommand::DictationStart).unwrap();
+        let error = route_shortcut(Some(&route), ShortcutCommand::VoiceActionStart).unwrap_err();
+        assert!(error.to_string().contains("Voice Action is off"), "{error}");
+        route.voice_action = true;
+        route_shortcut(Some(&route), ShortcutCommand::VoiceActionToggle).unwrap();
+        let error = route_shortcut(Some(&route), ShortcutCommand::PasteLast).unwrap_err();
+        assert!(error.to_string().contains("busy"), "{error}");
         assert_eq!(
-            environment_line("WAYLAND_DISPLAY", "").unwrap(),
-            "WAYLAND_DISPLAY=\"\"\n"
+            received.try_iter().collect::<Vec<_>>(),
+            [
+                ShortcutCommand::DictationStart,
+                ShortcutCommand::VoiceActionToggle
+            ]
         );
-        assert_eq!(
-            environment_line("DISPLAY", ":0").unwrap(),
-            "DISPLAY=\":0\"\n"
-        );
+    }
+
+    #[test]
+    fn session_environment_clears_display_keys_and_keeps_locale_unset() {
+        let body = session_environment(|key| match key {
+            "DISPLAY" => Some(":0".into()),
+            "XCURSOR_THEME" => Some("Adwaita".into()),
+            "LANG" => Some("de_DE.UTF-8".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(body.contains("DISPLAY=\":0\"\n"));
+        assert!(body.contains("WAYLAND_DISPLAY=\"\"\n"));
+        assert!(body.contains("XCURSOR_THEME=\"Adwaita\"\n"));
+        assert!(body.contains("LANG=\"de_DE.UTF-8\"\n"));
+        assert!(!body.contains("XDG_DATA_DIRS"));
+        assert!(!body.contains("LC_ALL"));
         assert!(environment_line("DISPLAY", ":0\nEVIL=yes").is_err());
     }
 }

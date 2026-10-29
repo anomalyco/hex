@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>HexMicrophoneDriver</string>
     <key>CFBundleIdentifier</key>
-    <string>com.kitlangton.hex.microphone.driver</string>
+    <string>anomaly.hex.microphone.driver</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -15,13 +15,13 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>2.3.1</string>
     <key>CFBundleSupportedPlatforms</key>
     <array>
         <string>MacOSX</string>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>20301</string>
     <key>CFPlugIn</key>
     <string>YES</string>
     <key>CFPlugInFactories</key>

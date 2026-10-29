@@ -97,7 +97,7 @@ function Button({ href, mark, children }: { href: string; mark: ReactNode; child
 function SendLink() {
   const [copied, copy] = useCopy()
   const send = () => {
-    const url = location.origin + "/"
+    const url = location.origin + import.meta.env.BASE_URL
     if (navigator.share) {
       void navigator.share({ title: "Hex", text: "Voice dictation for Mac, Windows, and Linux", url }).catch(() => {})
     } else {
@@ -241,7 +241,7 @@ function rows(platform: Platform): Row[] {
 
 export default function Download({ platform }: { platform: Platform }) {
   return (
-    <div className="hero__action">
+    <div className="hero__action" data-avoid>
       <Primary platform={platform} />
       <details className="platforms">
         <summary>Other platforms</summary>

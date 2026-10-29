@@ -1,7 +1,8 @@
-import { useLayoutEffect, useState } from "react"
-import ChatteringTeeth from "./ChatteringTeeth"
+import { useLayoutEffect, useRef, useState } from "react"
 import Download, { PLATFORM_NAMES, SHORTCUTS } from "./Download"
 import { guessPlatform, refinePlatform, type Platform } from "./platform"
+import { OptionKey, SoundToggle, useShout } from "./Shout"
+import signature from "./footer-signature.svg"
 
 function HexMark() {
   return (
@@ -37,33 +38,66 @@ export default function App() {
     }
   }, [])
 
-  return (
-    <main className="page">
-      <header className="header">
-        <a className="wordmark" href="/" aria-label="Hex home">
-          <HexMark />
-          <span>HEX</span>
-        </a>
-        <a className="header__github" href="https://github.com/anomalyco/hex">
-          <GitHubMark />
-          <span>GitHub</span>
-        </a>
-      </header>
+  const root = useRef<HTMLElement>(null)
+  const canvas = useRef<HTMLCanvasElement>(null)
+  const head = useRef<HTMLDivElement>(null)
+  const shout = useShout(root, canvas, head)
 
-      <section className="hero">
-        <div className="hero__copy">
-          <div className="hero__title">
-            <h1>Speak. It appears.</h1>
-            <ChatteringTeeth />
+  return (
+    <>
+      <main className="page" ref={root} data-phase={shout.phase}>
+        <canvas ref={canvas} className="stage" aria-hidden="true" />
+        <header className="header">
+          <a className="wordmark" href={import.meta.env.BASE_URL} aria-label="Hex home" data-avoid>
+            <HexMark />
+            <span>Hex</span>
+          </a>
+          <div className="header__tools" data-avoid>
+            {shout.phase === "started" && <SoundToggle muted={shout.muted} onToggle={shout.toggleMuted} />}
+            <a className="header__github" href="https://github.com/anomalyco/hex">
+              <GitHubMark />
+              <span>GitHub</span>
+            </a>
           </div>
-          <p>
-            Local voice dictation for {PLATFORM_NAMES[platform]}. Hold {SHORTCUTS[platform]}, say what you mean, and
-            Hex pastes it where you are.
-          </p>
+        </header>
+
+        <div className="show">
+          <div className="show__head" ref={head}>
+            <img src={`${import.meta.env.BASE_URL}shout-idle.webp`} alt="" width="640" height="640" decoding="async" fetchPriority="high" />
+          </div>
+          <OptionKey phase={shout.phase} onStart={shout.start} onIntent={shout.load} onPress={shout.pressKey} />
         </div>
 
-        <Download platform={platform} />
-      </section>
-    </main>
+        <section className="hero">
+          <div className="hero__copy" data-avoid>
+            <h1 aria-label="Speak. It appears.">
+              <span className="hero__word" data-title-word="0">
+                Speak.
+              </span>{" "}
+              <span className="hero__word" data-title-word="1">
+                It
+              </span>{" "}
+              <span className="hero__word" data-title-word="2">
+                appears.
+              </span>
+            </h1>
+            <p>
+              Local voice dictation for {PLATFORM_NAMES[platform]}. Hold {SHORTCUTS[platform]}, say what you mean, and
+              Hex pastes it where you are.
+            </p>
+          </div>
+
+          <Download platform={platform} />
+        </section>
+      </main>
+      <footer className="site-footer">
+        <div className="copyright">
+          <img src={signature} alt="" aria-hidden="true" width={163} height={64} />
+          <p>
+            ©2026 <a href="https://anoma.ly">Anomaly</a>. All rights reserved.
+          </p>
+        </div>
+      </footer>
+    </>
   )
 }

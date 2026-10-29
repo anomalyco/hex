@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VoiceEvent {
     SessionStarted {
@@ -44,6 +44,10 @@ pub enum VoiceEvent {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         processing: Option<DictationProcessing>,
+        /// Why a press was discarded as a chord: `key`, `hid-key`, `mouse`, or
+        /// `extra-modifier`. Absent for other phases and short taps.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     Context {
         timestamp_ms: u64,
@@ -62,6 +66,16 @@ pub enum VoiceEvent {
         method: String,
         path: String,
     },
+    /// One Smart Turn end-of-turn check in a hands-free dictation.
+    SmartTurn {
+        timestamp_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        probability: Option<f32>,
+        silence_ms: u64,
+        decision: SmartTurnDecision,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inference_ms: Option<u64>,
+    },
 }
 
 impl VoiceEvent {
@@ -75,7 +89,8 @@ impl VoiceEvent {
             | Self::Context { timestamp_ms, .. }
             | Self::ApiServerStarted { timestamp_ms, .. }
             | Self::ApiServerStopped { timestamp_ms }
-            | Self::ApiAuthFailed { timestamp_ms, .. } => *timestamp_ms,
+            | Self::ApiAuthFailed { timestamp_ms, .. }
+            | Self::SmartTurn { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -90,8 +105,24 @@ impl VoiceEvent {
             Self::ApiServerStarted { .. } => "api_server_started",
             Self::ApiServerStopped { .. } => "api_server_stopped",
             Self::ApiAuthFailed { .. } => "api_auth_failed",
+            Self::SmartTurn { .. } => "smart_turn",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartTurnDecision {
+    /// The model heard the end of the turn; dictation finished.
+    Stop,
+    /// The model heard more to come; dictation kept listening.
+    Continue,
+    /// The silence outlasted the fallback; dictation finished.
+    Fallback,
+    /// The answer arrived after speech resumed or the capture ended.
+    Stale,
+    /// Inference failed; dictation kept listening.
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -236,6 +267,45 @@ impl EventLog {
         }
     }
 
+    /// Like [`Self::flush`], but gives up after `deadline`, so quitting
+    /// never waits on a stalled disk.
+    pub fn flush_within(&self, deadline: Duration) -> io::Result<()> {
+        self.check_error()?;
+        let started = Instant::now();
+        let sender = self
+            .inner
+            .sender
+            .as_ref()
+            .ok_or_else(|| self.writer_stopped_error())?;
+        let (reply, flushed) = mpsc::sync_channel(1);
+        let mut message = WriterMessage::Flush(reply);
+        loop {
+            match sender.try_send(message) {
+                Ok(()) => break,
+                Err(TrySendError::Full(returned)) if started.elapsed() < deadline => {
+                    message = returned;
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(TrySendError::Full(_)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "event log flush timed out",
+                    ));
+                }
+                Err(TrySendError::Disconnected(_)) => return Err(self.writer_stopped_error()),
+            }
+        }
+        match flushed.recv_timeout(deadline.saturating_sub(started.elapsed())) {
+            Ok(Some((kind, message))) => Err(io::Error::new(kind, message)),
+            Ok(None) => Ok(()),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "event log flush timed out",
+            )),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(self.writer_stopped_error()),
+        }
+    }
+
     fn check_error(&self) -> io::Result<()> {
         match self
             .inner
@@ -261,6 +331,18 @@ impl EventLog {
             phase,
             text: text.into(),
             processing: None,
+            reason: None,
+        })
+    }
+
+    /// A capture discarded as a chord, with its cause when known.
+    pub fn discarded_dictation(&self, reason: Option<&str>) -> io::Result<()> {
+        self.emit(&VoiceEvent::Dictation {
+            timestamp_ms: now_ms(),
+            phase: DictationPhase::Discarded,
+            text: String::new(),
+            processing: None,
+            reason: reason.map(Into::into),
         })
     }
 
@@ -275,6 +357,7 @@ impl EventLog {
             phase,
             text: text.into(),
             processing,
+            reason: None,
         })
     }
 }
@@ -420,10 +503,17 @@ impl EventReader {
         &self.events
     }
 
+    /// Takes the events read so far, so the next `refresh` yields only newer ones.
+    #[cfg(target_os = "macos")]
+    pub fn drain(&mut self) -> impl Iterator<Item = VoiceEvent> + '_ {
+        self.events.drain(..)
+    }
+
     pub fn recent(&self, limit: usize) -> Vec<VoiceEvent> {
         self.events.iter().rev().take(limit).cloned().collect()
     }
 
+    #[cfg(test)]
     pub fn current_context(&self) -> Option<&(Option<String>, Option<String>)> {
         self.current_context.as_ref()
     }
@@ -543,6 +633,7 @@ mod tests {
                 latency_ms: 321,
                 fallback: Some("deadline exceeded".into()),
             }),
+            reason: None,
         };
 
         let decoded: VoiceEvent =
@@ -562,9 +653,39 @@ mod tests {
     }
 
     #[test]
+    fn discard_reason_is_additive() {
+        let old: VoiceEvent = serde_json::from_str(
+            r#"{"kind":"dictation","timestamp_ms":1,"phase":"discarded","text":""}"#,
+        )
+        .unwrap();
+        assert!(matches!(old, VoiceEvent::Dictation { reason: None, .. }));
+
+        let event = VoiceEvent::Dictation {
+            timestamp_ms: 1,
+            phase: DictationPhase::Discarded,
+            text: String::new(),
+            processing: None,
+            reason: Some("hid-key".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""reason":"hid-key""#), "{json}");
+        assert_eq!(serde_json::from_str::<VoiceEvent>(&json).unwrap(), event);
+
+        let without = serde_json::to_string(&VoiceEvent::Dictation {
+            timestamp_ms: 1,
+            phase: DictationPhase::Discarded,
+            text: String::new(),
+            processing: None,
+            reason: None,
+        })
+        .unwrap();
+        assert!(!without.contains("reason"), "{without}");
+    }
+
+    #[test]
     fn reopening_log_preserves_existing_events() {
         let path = std::env::temp_dir().join(format!(
-            "voice-control-events-{}-{}.ndjson",
+            "hex-events-{}-{}.ndjson",
             std::process::id(),
             now_ms()
         ));
@@ -583,7 +704,7 @@ mod tests {
     #[test]
     fn reader_tails_complete_records_and_resets_at_session_boundaries() {
         let path = std::env::temp_dir().join(format!(
-            "voice-control-event-reader-{}-{}.ndjson",
+            "hex-event-reader-{}-{}.ndjson",
             std::process::id(),
             now_ms()
         ));
@@ -620,6 +741,23 @@ mod tests {
             Some(VoiceEvent::SessionStarted { timestamp_ms: 3 })
         ));
         assert_eq!(reader.current_context(), None);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_bounded_flush_writes_every_queued_event() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-bounded-flush-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let log = EventLog::create(&path).unwrap();
+        for timestamp_ms in 1..=500 {
+            log.dictation(DictationPhase::Pasted, format!("{timestamp_ms}"))
+                .unwrap();
+        }
+        log.flush_within(Duration::from_secs(5)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 500);
         fs::remove_file(path).unwrap();
     }
 

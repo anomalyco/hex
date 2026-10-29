@@ -1,0 +1,8 @@
+{"source": "system", "start_ms": 2000, "end_ms": 9000, "text": "First up, where do uploaded images live?"}
+{"source": "microphone", "start_ms": 10000, "end_ms": 18000, "text": "In one bucket, kept for thirty days unless someone pins them."}
+{"source": "system", "start_ms": 95000, "end_ms": 101000, "text": "Thirty days sounds right for drafts."}
+{"source": "microphone", "start_ms": 181000, "end_ms": 188000, "text": "Next, the motion lint. It flags animations that snap."}
+{"source": "system", "start_ms": 240000, "end_ms": 247000, "text": "Can it run in CI on every pull request?"}
+{"source": "microphone", "start_ms": 300000, "end_ms": 306000, "text": "Yes, it reads the recorded traces."}
+{"source": "system", "start_ms": 391000, "end_ms": 397000, "text": "Last thing: we still need a name for the chat app."}
+{"source": "microphone", "start_ms": 460000, "end_ms": 466000, "text": "Let's each bring three names on Monday."}

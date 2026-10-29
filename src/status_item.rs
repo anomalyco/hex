@@ -4,13 +4,17 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use color_eyre::eyre::{Result, eyre};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
-use objc2::{DefinedClass, MainThreadOnly, msg_send, sel};
+use objc2::{AnyThread, DefinedClass, MainThreadOnly, msg_send, sel};
 use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
-use objc2_foundation::{MainThreadMarker, NSObject, NSString};
+use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::AppSettings;
 use crate::transcription_models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
 use crate::transcription_preparation::PreparationStatus;
+
+const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
+const RECORDING_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-recording@2x.png");
+const STATUS_ICON_POINTS: f64 = 18.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusItemAction {
@@ -21,8 +25,15 @@ pub enum StatusItemAction {
     PasteLast,
     StartMeeting,
     StopMeeting,
+    CopyLastMeetingTranscript,
+    /// Copy chapter `n` of the recording meeting (experiment `live-chapters`).
+    CopyChapter(usize),
     OpenMeetings,
-    CheckForUpdates,
+    /// Flips `capture.show_overlays_in_recordings`.
+    #[cfg(hex_capture)]
+    ToggleOverlaysInRecordings,
+    /// The update item: check, download, or restart into an update.
+    Update,
     Quit,
 }
 
@@ -77,9 +88,33 @@ objc2::define_class!(
             let _ = self.ivars().actions.try_send(StatusItemAction::StopMeeting);
         }
 
+        #[unsafe(method(copyLastMeetingTranscript:))]
+        fn copy_last_meeting_transcript(&self, _sender: &AnyObject) {
+            let _ = self
+                .ivars()
+                .actions
+                .try_send(StatusItemAction::CopyLastMeetingTranscript);
+        }
+
+        #[unsafe(method(copyChapter:))]
+        fn copy_chapter(&self, sender: &NSMenuItem) {
+            if let Ok(index) = usize::try_from(sender.tag()) {
+                let _ = self.ivars().actions.try_send(StatusItemAction::CopyChapter(index));
+            }
+        }
+
         #[unsafe(method(openMeetings:))]
         fn open_meetings(&self, _sender: &AnyObject) {
             let _ = self.ivars().actions.try_send(StatusItemAction::OpenMeetings);
+        }
+
+        #[unsafe(method(toggleOverlaysInRecordings:))]
+        fn toggle_overlays_in_recordings(&self, _sender: &AnyObject) {
+            #[cfg(hex_capture)]
+            let _ = self
+                .ivars()
+                .actions
+                .try_send(StatusItemAction::ToggleOverlaysInRecordings);
         }
 
         #[unsafe(method(checkForUpdates:))]
@@ -87,7 +122,7 @@ objc2::define_class!(
             let _ = self
                 .ivars()
                 .actions
-                .try_send(StatusItemAction::CheckForUpdates);
+                .try_send(StatusItemAction::Update);
         }
 
         #[unsafe(method(quit:))]
@@ -107,15 +142,25 @@ impl StatusItemTarget {
 struct StatusItemController {
     item: Retained<NSStatusItem>,
     idle_symbol: Retained<NSImage>,
-    recording_symbol: Option<Retained<NSImage>>,
+    recording_symbol: Retained<NSImage>,
     meeting_status: Retained<NSMenuItem>,
     meeting_start: Retained<NSMenuItem>,
     meeting_stop: Retained<NSMenuItem>,
+    meeting_copy_last: Retained<NSMenuItem>,
+    meeting_sections: Retained<NSMenuItem>,
+    meeting_sections_menu: Retained<NSMenu>,
+    meeting_section_labels: RefCell<Vec<String>>,
     meeting_open: Retained<NSMenuItem>,
     meeting_separator: Retained<NSMenuItem>,
-    meeting_title: RefCell<String>,
+    meeting_button: RefCell<(String, bool)>,
+    update: Option<Retained<NSMenuItem>>,
+    update_title: RefCell<String>,
+    /// A checkmark for `capture.show_overlays_in_recordings`, in builds
+    /// that can capture with the experiment on.
+    #[cfg(hex_capture)]
+    overlays_in_recordings: Option<Retained<NSMenuItem>>,
     _menu: Retained<NSMenu>,
-    _target: Retained<StatusItemTarget>,
+    target: Retained<StatusItemTarget>,
     model_items: Vec<(TranscriptionModelId, Retained<NSMenuItem>)>,
     model_empty: Retained<NSMenuItem>,
     model_preparing: Retained<NSMenuItem>,
@@ -141,14 +186,28 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         mtm,
     );
     let meeting_stop = add_item(&menu, &target, "Stop & Transcribe", sel!(stopMeeting:), mtm);
+    let meeting_sections_menu =
+        NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Copy Section"));
+    let meeting_sections = plain_item("Copy Section", mtm);
+    meeting_sections.setSubmenu(Some(&meeting_sections_menu));
+    menu.addItem(&meeting_sections);
     let meeting_start = add_item(&menu, &target, "Record Meeting", sel!(startMeeting:), mtm);
+    let meeting_copy_last = add_item(
+        &menu,
+        &target,
+        "Copy Last Meeting Transcript",
+        sel!(copyLastMeetingTranscript:),
+        mtm,
+    );
     let meeting_open = add_item(&menu, &target, "Meetings…", sel!(openMeetings:), mtm);
     let meeting_separator = NSMenuItem::separatorItem(mtm);
     menu.addItem(&meeting_separator);
     for item in [
         &meeting_status,
         &meeting_stop,
+        &meeting_sections,
         &meeting_start,
+        &meeting_copy_last,
         &meeting_open,
         &meeting_separator,
     ] {
@@ -163,19 +222,24 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         mtm,
     );
     add_item(&menu, &target, "Settings…", sel!(openSettings:), mtm);
+    #[cfg(hex_capture)]
+    let overlays_in_recordings = crate::app_settings::capture_available().then(|| {
+        let item = add_item(
+            &menu,
+            &target,
+            "Show Hex in Screen Recordings",
+            sel!(toggleOverlaysInRecordings:),
+            mtm,
+        );
+        item.setState(isize::from(crate::capture_host::own_windows_recorded()));
+        item
+    });
     let models = NSMenu::initWithTitle(
         NSMenu::alloc(mtm),
         &NSString::from_str("Transcription Model"),
     );
     models.setAutoenablesItems(false);
-    let heading = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            &NSString::from_str("Transcription Model"),
-            None,
-            &NSString::new(),
-        )
-    };
+    let heading = plain_item("Transcription Model", mtm);
     heading.setSubmenu(Some(&models));
     menu.addItem(&heading);
     let model_items = MODELS
@@ -219,48 +283,36 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     model_error.setHidden(true);
     add_item(&models, &target, "Manage Models…", sel!(openModels:), mtm);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    if crate::sparkle::updates_managed() {
+    let update = if crate::updater::managed_by_policy() {
         // An item without an action is shown disabled.
-        let managed = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(crate::sparkle::MANAGED_UPDATES_LABEL),
-                None,
-                &NSString::new(),
-            )
-        };
-        menu.addItem(&managed);
+        menu.addItem(&plain_item(crate::updater::MANAGED_LABEL, mtm));
+        None
     } else {
-        add_item(
+        Some(add_item(
             &menu,
             &target,
-            "Check for Updates…",
+            &update_title(&crate::desktop_host::DesktopUpdateStatus::Checking),
             sel!(checkForUpdates:),
             mtm,
-        );
-    }
+        ))
+    };
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add_item(&menu, &target, "Quit Hex", sel!(quit:), mtm);
+    add_item(
+        &menu,
+        &target,
+        &format!("Quit {}", crate::app_paths::app_name()),
+        sel!(quit:),
+        mtm,
+    );
 
     let item = NSStatusBar::systemStatusBar().statusItemWithLength(-2.0);
     let button = item
         .button(mtm)
         .ok_or_else(|| eyre!("status item button is unavailable"))?;
-    let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-        &NSString::from_str("hexagon"),
-        Some(&NSString::from_str("Hex")),
-    )
-    .ok_or_else(|| eyre!("Hex status symbol is unavailable"))?;
-    symbol.setTemplate(true);
+    let symbol = status_bar_icon(IDLE_ICON_PNG, "Hex")?;
+    let recording_symbol = status_bar_icon(RECORDING_ICON_PNG, "Hex is recording a meeting")?;
     button.setImage(Some(&symbol));
     item.setMenu(Some(&menu));
-    let recording_symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-        &NSString::from_str("record.circle"),
-        Some(&NSString::from_str("Hex is recording a meeting")),
-    );
-    if let Some(recording_symbol) = &recording_symbol {
-        recording_symbol.setTemplate(true);
-    }
 
     STATUS_ITEM.with(|status_item| {
         *status_item.borrow_mut() = Some(StatusItemController {
@@ -270,11 +322,19 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_status,
             meeting_start,
             meeting_stop,
+            meeting_copy_last,
+            meeting_sections,
+            meeting_sections_menu,
+            meeting_section_labels: RefCell::new(Vec::new()),
             meeting_open,
             meeting_separator,
-            meeting_title: RefCell::new(String::new()),
+            meeting_button: RefCell::new((String::new(), false)),
+            update,
+            update_title: RefCell::new("Check for Updates…".into()),
+            #[cfg(hex_capture)]
+            overlays_in_recordings,
             _menu: menu,
-            _target: target,
+            target,
             model_items,
             model_empty,
             model_preparing,
@@ -283,6 +343,27 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         });
     });
     Ok(receiver)
+}
+
+fn status_bar_icon(png: &[u8], accessibility_description: &str) -> Result<Retained<NSImage>> {
+    let data = NSData::with_bytes(png);
+    let image = NSImage::initWithData(NSImage::alloc(), &data)
+        .ok_or_else(|| eyre!("could not decode Hex status item icon"))?;
+    image.setSize(NSSize::new(STATUS_ICON_POINTS, STATUS_ICON_POINTS));
+    image.setTemplate(true);
+    image.setAccessibilityDescription(Some(&NSString::from_str(accessibility_description)));
+    Ok(image)
+}
+
+fn plain_item(title: &str, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
+    unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            NSMenuItem::alloc(mtm),
+            &NSString::from_str(title),
+            None,
+            &NSString::new(),
+        )
+    }
 }
 
 fn add_item(
@@ -386,6 +467,8 @@ struct MeetingMenu {
     recording: bool,
     can_start: bool,
     can_stop: bool,
+    /// One Copy Section item per live chapter.
+    sections: Vec<String>,
 }
 
 fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool) -> MeetingMenu {
@@ -397,6 +480,7 @@ fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool)
             recording: false,
             can_start: enabled,
             can_stop: false,
+            sections: Vec::new(),
         },
         MeetingMenuState::Starting => MeetingMenu {
             status: Some("Starting meeting recording…".into()),
@@ -404,8 +488,14 @@ fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool)
             recording: true,
             can_start: false,
             can_stop: false,
+            sections: Vec::new(),
         },
-        MeetingMenuState::Recording { started, title } => {
+        MeetingMenuState::Recording {
+            started,
+            title,
+            chapters,
+            ..
+        } => {
             let elapsed = crate::meeting::format_duration(started.elapsed().as_millis() as u64);
             MeetingMenu {
                 status: Some(format!("Recording · {} · {elapsed}", menu_title(title))),
@@ -413,6 +503,16 @@ fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool)
                 recording: true,
                 can_start: false,
                 can_stop: true,
+                sections: chapters
+                    .iter()
+                    .map(|chapter| {
+                        format!(
+                            "{} · {}",
+                            crate::meeting::format_duration(chapter.start_ms),
+                            menu_title(&chapter.title)
+                        )
+                    })
+                    .collect(),
             }
         }
         MeetingMenuState::Transcribing => MeetingMenu {
@@ -421,6 +521,7 @@ fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool)
             recording: false,
             can_start: false,
             can_stop: false,
+            sections: Vec::new(),
         },
     }
 }
@@ -434,6 +535,50 @@ fn menu_title(title: &str) -> String {
     }
     let cut = title.chars().take(MAX_CHARS - 1).collect::<String>();
     format!("{}…", cut.trim_end())
+}
+
+fn update_title(status: &crate::desktop_host::DesktopUpdateStatus) -> String {
+    use crate::desktop_host::DesktopUpdateStatus;
+    match status {
+        DesktopUpdateStatus::ReadyToRestart => "Restart to Update".into(),
+        DesktopUpdateStatus::Available => "Download Update…".into(),
+        DesktopUpdateStatus::SwitchAvailable { channel, version } => {
+            format!("{}…", crate::updater::switch_label(channel, version))
+        }
+        _ => "Check for Updates…".into(),
+    }
+}
+
+/// Checks or unchecks Show Hex in Screen Recordings.
+#[cfg(hex_capture)]
+pub fn update_overlays_in_recordings(shown: bool) {
+    STATUS_ITEM.with(|controller| {
+        if let Some(item) = controller
+            .borrow()
+            .as_ref()
+            .and_then(|controller| controller.overlays_in_recordings.as_ref())
+        {
+            item.setState(isize::from(shown));
+        }
+    });
+}
+
+/// Retitles the update item after the updater's status, so an update ready
+/// or available stays reachable from the menu bar.
+pub fn update_software(status: &crate::desktop_host::DesktopUpdateStatus) {
+    let title = update_title(status);
+    STATUS_ITEM.with(|controller| {
+        let controller = controller.borrow();
+        let Some(controller) = controller.as_ref() else {
+            return;
+        };
+        if let Some(item) = &controller.update
+            && *controller.update_title.borrow() != title
+        {
+            item.setTitle(&NSString::from_str(&title));
+            controller.update_title.replace(title);
+        }
+    });
 }
 
 /// Mirrors the meeting recorder into the menu bar so an active recording
@@ -450,26 +595,47 @@ pub fn update_meeting(state: &crate::meeting_watcher::MeetingMenuState, enabled:
         let menu = meeting_menu(state, enabled);
         let visible = enabled || menu.status.is_some();
         controller.meeting_separator.setHidden(!visible);
+        controller.meeting_copy_last.setHidden(!visible);
         controller.meeting_open.setHidden(!visible);
         controller.meeting_start.setHidden(!menu.can_start);
         controller.meeting_stop.setHidden(!menu.can_stop);
         controller.meeting_status.setHidden(menu.status.is_none());
+        controller
+            .meeting_sections
+            .setHidden(menu.sections.is_empty());
+        let mut labels = controller.meeting_section_labels.borrow_mut();
+        if *labels != menu.sections {
+            controller.meeting_sections_menu.removeAllItems();
+            for (index, label) in menu.sections.iter().enumerate() {
+                let item = add_item(
+                    &controller.meeting_sections_menu,
+                    &controller.target,
+                    label,
+                    sel!(copyChapter:),
+                    mtm,
+                );
+                item.setTag(index as isize);
+            }
+            labels.clone_from(&menu.sections);
+        }
+        drop(labels);
         if let Some(status) = &menu.status {
             controller
                 .meeting_status
                 .setTitle(&NSString::from_str(status));
         }
-        let mut title = controller.meeting_title.borrow_mut();
-        if *title != menu.button_title
+        let mut button_state = controller.meeting_button.borrow_mut();
+        if (*button_state != (menu.button_title.clone(), menu.recording))
             && let Some(button) = controller.item.button(mtm)
         {
             button.setTitle(&NSString::from_str(&menu.button_title));
-            let symbol = match (&controller.recording_symbol, menu.recording) {
-                (Some(recording), true) => recording,
-                _ => &controller.idle_symbol,
+            let symbol = if menu.recording {
+                &controller.recording_symbol
+            } else {
+                &controller.idle_symbol
             };
             button.setImage(Some(symbol));
-            *title = menu.button_title;
+            *button_state = (menu.button_title, menu.recording);
         }
     });
 }
@@ -486,20 +652,47 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let title = "Zoom call — 2:30 PM".to_string();
-        let recording = meeting_menu(&MeetingMenuState::Recording { started, title }, false);
+        let recording_state = |title: &str, chapters| MeetingMenuState::Recording {
+            started,
+            id: "1".into(),
+            title: title.into(),
+            chapters,
+        };
+        let recording = meeting_menu(&recording_state("Zoom call — 2:30 PM", Vec::new()), false);
         assert_eq!(
             recording.status.as_deref(),
             Some("Recording · Zoom call — 2:30 PM · 12:34")
         );
-        let title = "A very long provisional title that keeps going past the limit".to_string();
-        let long = meeting_menu(&MeetingMenuState::Recording { started, title }, false);
+        let long = meeting_menu(
+            &recording_state(
+                "A very long provisional title that keeps going past the limit",
+                Vec::new(),
+            ),
+            false,
+        );
         assert_eq!(
             long.status.as_deref(),
             Some("Recording · A very long provisional title that keeps going… · 12:34")
         );
         assert_eq!(recording.button_title, " 12:34");
         assert!(recording.can_stop && !recording.can_start);
+        assert!(recording.sections.is_empty());
+        let chapter = |title: &str, start_ms| crate::meeting::Chapter {
+            title: title.into(),
+            summary: String::new(),
+            start_ms,
+        };
+        let chaptered = meeting_menu(
+            &recording_state(
+                "Team sync",
+                vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
+            ),
+            false,
+        );
+        assert_eq!(
+            chaptered.sections,
+            ["00:00 · Image storage", "03:10 · Motion lint"]
+        );
         let transcribing = meeting_menu(&MeetingMenuState::Transcribing, true);
         assert!(!transcribing.can_start && !transcribing.can_stop);
         assert_eq!(
@@ -550,6 +743,28 @@ mod tests {
                 model_from_tag(index as isize),
                 model.available().then_some(model.id)
             );
+        }
+    }
+
+    #[test]
+    fn status_bar_icons_load_as_18pt_retina_templates() {
+        for (png, description) in [
+            (IDLE_ICON_PNG, "Hex"),
+            (RECORDING_ICON_PNG, "Hex is recording a meeting"),
+        ] {
+            let icon = status_bar_icon(png, description).unwrap();
+            assert!(icon.isTemplate());
+            assert_eq!(
+                icon.size(),
+                NSSize::new(STATUS_ICON_POINTS, STATUS_ICON_POINTS)
+            );
+            assert_eq!(
+                icon.accessibilityDescription().unwrap().to_string(),
+                description
+            );
+            let rep = icon.representations().firstObject().unwrap();
+            assert_eq!(rep.pixelsWide(), 36);
+            assert_eq!(rep.pixelsHigh(), 36);
         }
     }
 }
