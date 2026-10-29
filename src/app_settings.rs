@@ -46,9 +46,7 @@ static CAPTURE_ON: AtomicBool = AtomicBool::new(false);
 /// [`CaptureSettings::capsule_flow`] for the capsule, without a lock.
 #[cfg(hex_capture)]
 static CAPSULE_FLOW: AtomicU8 = AtomicU8::new(0);
-/// The send-to list shortcut's keycaps once settings are applied; empty
-/// while it has none.
-#[cfg(hex_capture)]
+
 #[derive(Default)]
 struct RuntimeTranscriptionSelection {
     revision: u64,
