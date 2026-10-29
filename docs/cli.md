@@ -312,7 +312,8 @@ settings but do not observe input-source changes or show these controls.
 - `microphone` takes a device name exactly as Settings lists it, or
   `system-default` (or `none`) to follow the OS default input.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
-  `control+space`, `fn`, or `f5`. Key names resolve on the active keyboard
+  `control+space`, `fn`, or `f5`. On macOS, Windows and X11, `mouse4` and `option+mouse4`
+  also work (Mouse 1/2/3 are left/right/middle). Key names resolve on the active keyboard
   layout, the OS's rules for Settings' recorder apply, and a binding another
   Hex shortcut uses is refused with `shortcut-in-use`. `double_tap_only`
   needs a key chord, as in Settings.
@@ -341,9 +342,13 @@ settings but do not observe input-source changes or show these controls.
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
 
+`recording_audio_behavior` also accepts `duck` on macOS.
+`recording_duck_volume` sets the fraction of the original output volume (0–1,
+default 0.2), applied on the next intentional capture when ducking is selected.
+
 Writable keys: `commands_enabled`, `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
-`recording_audio_behavior`, `double_tap_lock`, `double_tap_only`,
+`recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `edit_hotkey`, `paste_last_hotkey`,
 `show_dock_icon`, `transcription.recognition_hints`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,

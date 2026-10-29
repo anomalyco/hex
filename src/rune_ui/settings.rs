@@ -12,6 +12,8 @@ use super::controls::{
     link_row, note, page, pulsing_dot, section, section_with, segmented, select, select_sized,
     setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
 };
+use super::lists::{PermissionControl, permission_control, slider};
+use super::platform::PlatformRequest;
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
 use crate::app_settings::{
@@ -24,6 +26,7 @@ use crate::desktop_host::{
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
 use crate::keyboard_model_switching::InputSource;
+use crate::onboarding::PermissionKind;
 use crate::transcription_models::{self, ModelPreparationStage};
 
 static CHECK: &rune::Icon = &rune_theme_opencode::icons::CHECK_SMALL;
@@ -642,7 +645,11 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
         .then(|| {
             note(
                 "refused",
-                tr("Your desktop kept a shortcut for itself. Record another one, or free it in your desktop's keyboard settings (on niri, remove its bind from config.kdl)."),
+                if binding(&ui.settings, target).is_some_and(|binding| binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)) {
+                    tr("Configure mouse shortcuts in your Wayland desktop using the hex commands")
+                } else {
+                    tr("Your desktop kept a shortcut for itself. Record another one, or free it in your desktop's keyboard settings (on niri, remove its bind from config.kdl).")
+                },
                 p.danger(),
             )
         })
@@ -1411,6 +1418,50 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
         .collect()
 }
 
+/// "Also pause the browser", under Pause media on macOS. Hex hears the
+/// browser through System Audio Recording, so turning it on asks for that
+/// here: never while you dictate.
+fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
+    let on = ui.settings.pause_browser_media;
+    let mut rows = vec![toggle_row(
+        p,
+        "pause-browser",
+        tr("Also pause the browser"),
+        tr("YouTube and other tabs, resumed only if Hex paused them"),
+        on,
+        |ui: &mut Ui| {
+            let on = !ui.settings.pause_browser_media;
+            ui.update(|settings| settings.pause_browser_media = on);
+            if on && !ui.platform.system_audio {
+                ui.ask(PlatformRequest::SystemAudio);
+            }
+        },
+    )];
+    if on {
+        let permitted = ui.platform.system_audio;
+        rows.push(setting_row(
+            p,
+            "pause-browser-audio",
+            tr("Screen & System Audio Recording"),
+            Some(tr("Lets Hex hear whether a tab is playing")),
+            permission_control(
+                p,
+                "pause-browser-allow",
+                if permitted {
+                    PermissionControl::Allowed
+                } else if ui.platform.asked(PermissionKind::SystemAudio) {
+                    PermissionControl::Waiting
+                } else {
+                    PermissionControl::Allow
+                },
+                ButtonKind::Secondary,
+                |ui: &mut Ui| ui.ask(PlatformRequest::SystemAudio),
+            ),
+        ));
+    }
+    rows
+}
+
 /// Where dictation goes and what happens around it.
 fn output_section(ui: &Ui, p: Paint) -> El {
     let settings = &ui.settings;
@@ -1419,11 +1470,15 @@ fn output_section(ui: &Ui, p: Paint) -> El {
         rows.push(shortcut_row(ui, p, ShortcutTarget::PasteLast));
         rows.extend(refused_note(ui, p, ShortcutTarget::PasteLast));
     }
-    let audio_labels: Vec<&str> = RecordingAudioBehavior::ALL
+    let behaviors: Vec<_> = RecordingAudioBehavior::ALL
+        .into_iter()
+        .filter(|behavior| *behavior != RecordingAudioBehavior::Duck || ui.platform.caps.duck_audio)
+        .collect();
+    let audio_labels: Vec<&str> = behaviors
         .iter()
         .map(|behavior| tr(behavior.label()))
         .collect();
-    let audio_index = RecordingAudioBehavior::ALL
+    let audio_index = behaviors
         .iter()
         .position(|behavior| *behavior == settings.recording_audio_behavior)
         .unwrap_or(2);
@@ -1437,14 +1492,50 @@ fn output_section(ui: &Ui, p: Paint) -> El {
             "while-dictating-control",
             &audio_labels,
             audio_index,
-            |ui, index| {
-                let behavior = RecordingAudioBehavior::ALL[index];
+            move |ui, index| {
+                let behavior = behaviors[index];
                 if ui.settings.recording_audio_behavior != behavior {
                     ui.update(|settings| settings.recording_audio_behavior = behavior);
                 }
             },
         ),
     ));
+    if ui.platform.caps.duck_audio
+        && settings.recording_audio_behavior == RecordingAudioBehavior::Duck
+    {
+        rows.push(setting_row(
+            p,
+            "recording-duck-volume",
+            tr("Lower to"),
+            Some(tr("Percent of the current output volume")),
+            slider(
+                p,
+                "recording-duck-slider",
+                tr("Volume while recording"),
+                ui.duck_volume_drag
+                    .unwrap_or(settings.recording_duck_volume),
+                format!(
+                    "{:.0}%",
+                    ui.duck_volume_drag
+                        .unwrap_or(settings.recording_duck_volume)
+                        * 100.0
+                ),
+                200.0,
+                |ui, value, done| {
+                    let value = (value * 100.0).round() / 100.0;
+                    ui.duck_volume_drag = if done { None } else { Some(value) };
+                    if done {
+                        ui.update(|settings| settings.recording_duck_volume = value);
+                    }
+                },
+            ),
+        ));
+    }
+    if ui.platform.caps.os == super::platform::Os::Macos
+        && settings.recording_audio_behavior == RecordingAudioBehavior::PauseMedia
+    {
+        rows.extend(pause_browser_rows(ui, p));
+    }
     let indicator_index = match settings.indicator_position {
         IndicatorPosition::Top => 0,
         IndicatorPosition::Bottom => 1,

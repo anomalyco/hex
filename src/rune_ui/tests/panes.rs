@@ -329,6 +329,50 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 }
 
 #[test]
+fn the_browser_switch_shows_only_with_pause_media() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    assert!(rt.find("pause-browser").is_none());
+    rt.state.settings.recording_audio_behavior =
+        crate::app_settings::RecordingAudioBehavior::PauseMedia;
+    refresh(&mut rt);
+    assert!(rt.find("pause-browser").is_some());
+    assert!(
+        rt.find("pause-browser-audio").is_none(),
+        "the permission row waits for the switch"
+    );
+}
+
+#[test]
+fn the_browser_switch_turns_on_and_asks_for_system_audio() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
+    assert!(
+        rt.find("pause-browser-allow-control/mark/dot").is_some(),
+        "the permission row waits with a dot"
+    );
+}
+
+#[test]
+fn an_allowed_browser_switch_asks_nothing() {
+    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    rt.state.settings.pause_browser_media = false;
+    rt.state.platform.system_audio = true;
+    refresh(&mut rt);
+    tap(&mut rt, "pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert!(asked(&rt).is_empty());
+    assert!(
+        rt.find("pause-browser-allow-control/mark/ink/check")
+            .is_some(),
+        "shows Allowed"
+    );
+}
+
+#[test]
 fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     assert!(rt.find("microphone-mode").is_none());
@@ -1733,4 +1777,53 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
         }
         settle(&mut rt);
     }
+}
+
+#[test]
+fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
+    use crate::app_settings::RecordingAudioBehavior;
+    let mut rt = runtime("mac-settings", true, (1100.0, 1000.0));
+    assert!(rt.find("recording-duck-slider").is_none());
+    tap(&mut rt, "while-dictating-control/segment2");
+    assert_eq!(
+        rt.state.settings.recording_audio_behavior,
+        RecordingAudioBehavior::Duck
+    );
+    let before = rt.state.saved;
+    let (x, y) = rt.find("recording-duck-slider/track").unwrap();
+    rt.pointer_down(x + 60.0, y);
+    assert_eq!(
+        rt.state.saved, before,
+        "dragging does not persist each movement"
+    );
+    rt.pointer_up(x + 60.0, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.saved, before + 1);
+    let volume = rt.state.settings.recording_duck_volume;
+    assert!(volume > 0.2 && volume <= 1.0);
+    tap(&mut rt, "while-dictating-control/segment3");
+    assert!(rt.find("recording-duck-slider").is_none());
+    tap(&mut rt, "while-dictating-control/segment2");
+    assert_eq!(rt.state.settings.recording_duck_volume, volume);
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (1100.0, 1000.0));
+        if scene == "portal" {
+            rt.state.platform.caps = platform::Capabilities::LINUX;
+            refresh(&mut rt);
+        }
+        assert!(rt.find("while-dictating-control/segment3").is_none());
+        assert!(rt.find("recording-duck-slider").is_none());
+    }
+}
+
+#[test]
+fn ducking_goldens() {
+    let _goldens = Goldens::collect();
+    for dark in [true, false] {
+        check_golden("mac-settings-ducking", dark, PANE_SIZE);
+        check_golden("mac-settings", dark, PANE_SIZE);
+    }
+    check_golden("mac-settings-permissions", true, PANE_SIZE);
+    check_golden("mac-settings-advanced", false, PANE_SIZE);
+    check_golden("mac-settings-sides", true, PANE_SIZE);
 }

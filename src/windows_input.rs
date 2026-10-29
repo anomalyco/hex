@@ -15,9 +15,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, PeekMessageW,
-    PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN,
-    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
+    PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -144,7 +144,7 @@ impl WindowsHotkey {
             .or_else(|| key.strip_prefix('F'))
             .and_then(|number| number.parse::<u8>().ok())
             .is_some_and(|number| (1..=24).contains(&number));
-        if !function_key && modifier_count == 0 {
+        if !function_key && HotkeyKey::mouse_number(key).is_none() && modifier_count == 0 {
             return Err(eyre!(
                 "Windows dictation shortcuts require a modifier or a function key"
             ));
@@ -498,9 +498,25 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
         )));
         return;
     }
+    let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), ptr::null_mut(), 0) };
+    if mouse.is_null() {
+        let error = std::io::Error::last_os_error();
+        unsafe {
+            UnhookWindowsHookEx(hook);
+        }
+        CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        let _ = ready.send(Err(format!(
+            "could not install the Windows mouse hook: {error}"
+        )));
+        return;
+    }
     if ready.send(Ok(thread_id)).is_err() {
         unsafe {
             UnhookWindowsHookEx(hook);
+            UnhookWindowsHookEx(mouse);
         }
         CALLBACK_STATE
             .lock()
@@ -524,6 +540,7 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
     }
     unsafe {
         UnhookWindowsHookEx(hook);
+        UnhookWindowsHookEx(mouse);
     }
     CALLBACK_STATE
         .lock()
@@ -541,6 +558,54 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
     let event = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+    if process_button(event.vkCode, is_down, event.time) {
+        1
+    } else {
+        unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
+    }
+}
+
+fn mouse_message(message: u32, data: u32) -> Option<(u32, bool)> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP,
+        WM_XBUTTONDOWN, WM_XBUTTONUP,
+    };
+    let (button, down) = match message {
+        WM_LBUTTONDOWN => (0x01, true),
+        WM_LBUTTONUP => (0x01, false),
+        WM_RBUTTONDOWN => (0x02, true),
+        WM_RBUTTONUP => (0x02, false),
+        WM_MBUTTONDOWN => (0x04, true),
+        WM_MBUTTONUP => (0x04, false),
+        WM_XBUTTONDOWN | WM_XBUTTONUP => (
+            match data >> 16 {
+                1 => 0x05,
+                2 => 0x06,
+                _ => return None,
+            },
+            message == WM_XBUTTONDOWN,
+        ),
+        _ => return None,
+    };
+    Some((button, down))
+}
+
+unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        // SAFETY: Windows supplies a live MSLLHOOKSTRUCT for this callback.
+        let event = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
+        if let Some((vk, down)) = mouse_message(wparam as u32, event.mouseData)
+            && process_button(vk, down, event.time)
+        {
+            return 1;
+        }
+    }
+    unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
+}
+
+// Both low-level hooks feed exactly the same capture and suppression rules.
+fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
+    let is_up = !is_down;
     let mut suppressed = false;
     {
         let mut guard = CALLBACK_STATE
@@ -554,14 +619,14 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             // every event: the asynchronous key state does not include this
             // event yet, so `update` applies it on top.
             state.modifiers = ModifierState::current();
-            let modifier_event = state.modifiers.update(event.vkCode, is_down);
+            let modifier_event = state.modifiers.update(vk, is_down);
             // During a chord capture the hook only tracks modifier state;
             // it neither triggers actions nor suppresses keys, so the
             // capture can observe every key through GetAsyncKeyState.
             if CAPTURE_INHIBIT.load(Ordering::Relaxed) {
-                return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
+                return false;
             }
-            let voice_event = state.voice_trigger_vk == Some(event.vkCode)
+            let voice_event = state.voice_trigger_vk == Some(vk)
                 && (state.voice_trigger_down
                     || (is_down
                         && !state.capture.active
@@ -571,7 +636,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                             .voice_action
                             .as_ref()
                             .is_some_and(|binding| state.modifiers.matches(binding))));
-            let paste_event = state.paste_trigger_vk == Some(event.vkCode)
+            let paste_event = state.paste_trigger_vk == Some(vk)
                 && (state.paste_trigger_down
                     || (is_down
                         && !state.capture.active
@@ -585,24 +650,24 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 suppressed = true;
                 if is_down && !state.voice_trigger_down {
                     state.voice_trigger_down = true;
-                    if let Some(action) = state.voice_capture.press(false, false, event.time) {
-                        send_event(state, voice_action_variant(action), event.time);
+                    if let Some(action) = state.voice_capture.press(false, false, time) {
+                        send_event(state, voice_action_variant(action), time);
                     }
                 } else if is_up && state.voice_trigger_down {
                     state.voice_trigger_down = false;
-                    if let Some(action) = state.voice_capture.release(false, event.time) {
-                        send_event(state, voice_action_variant(action), event.time);
+                    if let Some(action) = state.voice_capture.release(false, time) {
+                        send_event(state, voice_action_variant(action), time);
                     }
                 }
             } else if paste_event {
                 suppressed = true;
                 if is_down && !state.paste_trigger_down {
                     state.paste_trigger_down = true;
-                    send_event(state, HotkeyAction::PasteLast, event.time);
+                    send_event(state, HotkeyAction::PasteLast, time);
                 } else if is_up {
                     state.paste_trigger_down = false;
                 }
-            } else if state.trigger_vk == Some(event.vkCode) {
+            } else if state.trigger_vk == Some(vk) {
                 if is_down {
                     if state.trigger_down {
                         suppressed = !state.share_trigger;
@@ -616,27 +681,25 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                         if let Some(action) = state.capture.press(
                             state.double_tap_enabled,
                             state.double_tap_only,
-                            event.time,
+                            time,
                         ) {
                             if was_locked {
                                 state.dirty = true;
                             }
-                            send_event(state, action, event.time);
+                            send_event(state, action, time);
                         }
                     }
                 } else if state.trigger_down {
                     state.trigger_down = false;
                     suppressed = !state.share_trigger;
-                    if let Some(action) =
-                        state.capture.release(state.double_tap_enabled, event.time)
-                    {
-                        send_event(state, action, event.time);
+                    if let Some(action) = state.capture.release(state.double_tap_enabled, time) {
+                        send_event(state, action, time);
                     }
                     if state.dirty && !state.modifiers.any_required_down(&state.binding) {
                         state.dirty = false;
                     }
                 }
-            } else if event.vkCode == u32::from(VK_ESCAPE) {
+            } else if vk == u32::from(VK_ESCAPE) {
                 if is_down
                     && (state.capture.active || state.capture.locked || state.voice_capture.active)
                 {
@@ -644,11 +707,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     state.escape_down = true;
                     suppressed = true;
                     if let Some(action) = state.capture.cancel() {
-                        send_event(state, action, event.time);
+                        send_event(state, action, time);
                     }
                     if let Some(action) = state.voice_capture.cancel() {
                         state.voice_trigger_down = false;
-                        send_event(state, voice_action_variant(action), event.time);
+                        send_event(state, voice_action_variant(action), time);
                     }
                 } else if is_up && state.escape_down {
                     state.escape_down = false;
@@ -667,9 +730,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                         .as_ref()
                         .is_some_and(|binding| state.modifiers.matches(binding))
                 {
-                    if let Some(action) = state.voice_capture.release(false, event.time) {
+                    if let Some(action) = state.voice_capture.release(false, time) {
                         state.voice_trigger_down = false;
-                        send_event(state, voice_action_variant(action), event.time);
+                        send_event(state, voice_action_variant(action), time);
                     }
                 } else if state.trigger_vk.is_none()
                     && state.capture.locked
@@ -681,20 +744,18 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     // press. A key chord such as Ctrl+Space finishes on its
                     // key, so resting a finger on Ctrl never ends a locked
                     // or toggled capture.
-                    if let Some(action) = state.capture.press(
-                        state.double_tap_enabled,
-                        state.double_tap_only,
-                        event.time,
-                    ) {
+                    if let Some(action) =
+                        state
+                            .capture
+                            .press(state.double_tap_enabled, state.double_tap_only, time)
+                    {
                         state.dirty = true;
-                        send_event(state, action, event.time);
+                        send_event(state, action, time);
                     }
                 } else if state.capture.active && !state.modifiers.matches(&state.binding) {
-                    if let Some(action) =
-                        state.capture.release(state.double_tap_enabled, event.time)
-                    {
+                    if let Some(action) = state.capture.release(state.double_tap_enabled, time) {
                         state.dirty = state.modifiers.any_required_down(&state.binding);
-                        send_event(state, action, event.time);
+                        send_event(state, action, time);
                     }
                 } else if state.trigger_vk.is_none()
                     && !state.capture.active
@@ -703,13 +764,12 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)
-                    && let Some(action) = state.capture.press(
-                        state.double_tap_enabled,
-                        state.double_tap_only,
-                        event.time,
-                    )
+                    && let Some(action) =
+                        state
+                            .capture
+                            .press(state.double_tap_enabled, state.double_tap_only, time)
                 {
-                    send_event(state, action, event.time);
+                    send_event(state, action, time);
                 }
                 if state.dirty && !state.modifiers.any_required_down(&state.binding) {
                     state.dirty = false;
@@ -717,11 +777,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             }
         }
     }
-    if suppressed {
-        1
-    } else {
-        unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
-    }
+    suppressed
 }
 
 fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32) {
@@ -818,6 +874,7 @@ pub(crate) enum ChordPoll {
 /// accumulated modifier is released; Escape cancels.
 #[derive(Default)]
 pub(crate) struct ChordCapture {
+    mouse_armed: bool,
     seen_control: bool,
     seen_windows: bool,
     seen_alt: bool,
@@ -845,9 +902,20 @@ const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
 ];
 
 impl ChordCapture {
+    fn arm_mouse(&mut self, held: bool) -> bool {
+        self.mouse_armed |= !held;
+        self.mouse_armed
+    }
+
     pub fn poll(&mut self) -> ChordPoll {
         if key_down(VK_ESCAPE) {
             return ChordPoll::Cancelled;
+        }
+        if !self.mouse_armed {
+            // Do not bind the click that opened the recorder.
+            if !self.arm_mouse(MOUSE_KEYS.iter().any(|&(vk, _)| key_down(vk))) {
+                return ChordPoll::Pending;
+            }
         }
         let control = key_down(VK_CONTROL);
         let windows = key_down(VK_LWIN) || key_down(VK_RWIN);
@@ -925,7 +993,18 @@ fn unsupported_key_down() -> bool {
     false
 }
 
+const MOUSE_KEYS: [(u16, &str); 5] = [
+    (0x01, "mouse1"),
+    (0x02, "mouse2"),
+    (0x04, "mouse3"),
+    (0x05, "mouse4"),
+    (0x06, "mouse5"),
+];
+
 fn pressed_capture_key() -> Option<String> {
+    if let Some((_, name)) = MOUSE_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
+        return Some(name.into());
+    }
     if let Some((_, name)) = CAPTURE_NAMED_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
         return Some(name.to_string());
     }
@@ -952,6 +1031,12 @@ fn pressed_capture_key() -> Option<String> {
 
 pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     let normalized = key.trim().to_ascii_lowercase();
+    if let Some(number) = HotkeyKey::mouse_number(&normalized) {
+        return MOUSE_KEYS
+            .get(usize::from(number - 1))
+            .map(|&(vk, _)| u32::from(vk))
+            .ok_or_else(|| eyre!("Windows supports Mouse 1 through Mouse 5"));
+    }
     if let Some((vk, _)) = CAPTURE_NAMED_KEYS
         .into_iter()
         .find(|&(_, name)| name == normalized)
@@ -987,6 +1072,53 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mouse_recorder_waits_for_the_opening_click_to_be_released() {
+        let mut capture = ChordCapture::default();
+        assert!(!capture.arm_mouse(true));
+        assert!(!capture.arm_mouse(true));
+        assert!(capture.arm_mouse(false));
+        assert!(capture.arm_mouse(true), "the next click can be recorded");
+    }
+
+    #[test]
+    fn mouse_buttons_validate_and_round_trip_without_modifiers() {
+        for number in 1..=5 {
+            let binding = WindowsHotkey {
+                control: false,
+                windows: false,
+                alt: false,
+                shift: false,
+                key: Some(format!("mouse{number}")),
+            };
+            assert!(binding.validate().is_ok());
+            assert_eq!(WindowsHotkey::from(&HotkeyBinding::from(&binding)), binding);
+            assert_eq!(
+                virtual_key(binding.key.as_ref().unwrap()).unwrap(),
+                u32::from(MOUSE_KEYS[number - 1].0)
+            );
+        }
+        assert!(virtual_key("mouse6").is_err());
+        assert!(virtual_key("mouse0").is_err());
+    }
+
+    #[test]
+    fn mouse_hook_decodes_both_auxiliary_buttons_and_ignores_wheel_messages() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        for (down, up, data, vk) in [
+            (WM_LBUTTONDOWN, WM_LBUTTONUP, 0, 1),
+            (WM_RBUTTONDOWN, WM_RBUTTONUP, 0, 2),
+            (WM_MBUTTONDOWN, WM_MBUTTONUP, 0, 4),
+            (WM_XBUTTONDOWN, WM_XBUTTONUP, 1 << 16, 5),
+            (WM_XBUTTONDOWN, WM_XBUTTONUP, 2 << 16, 6),
+        ] {
+            assert_eq!(mouse_message(down, data), Some((vk, true)));
+            assert_eq!(mouse_message(up, data), Some((vk, false)));
+        }
+        assert_eq!(mouse_message(WM_MOUSEWHEEL, 120 << 16), None);
+        assert_eq!(mouse_message(WM_XBUTTONDOWN, 3 << 16), None);
+    }
 
     #[test]
     fn default_binding_is_ctrl_space() {

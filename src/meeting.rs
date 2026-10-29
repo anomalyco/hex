@@ -24,6 +24,7 @@ const FINAL_PENDING_FILE: &str = "final.pending";
 mod capture;
 #[path = "meeting_chapters.rs"]
 mod chapters;
+pub(crate) use capture::create_tap_aggregate;
 pub use capture::{
     SystemAudioAuthorization, request_system_audio_access, system_audio_authorization,
 };

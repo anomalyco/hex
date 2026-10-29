@@ -19,25 +19,22 @@ const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
 
 const EVENT_LEFT_MOUSE_DOWN: u32 = 1;
+const EVENT_LEFT_MOUSE_UP: u32 = 2;
 const EVENT_RIGHT_MOUSE_DOWN: u32 = 3;
+const EVENT_RIGHT_MOUSE_UP: u32 = 4;
 const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEY_UP: u32 = 11;
 const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_OTHER_MOUSE_DOWN: u32 = 25;
-#[cfg(hex_capture)]
-const EVENT_LEFT_MOUSE_UP: u32 = 2;
-#[cfg(hex_capture)]
-const EVENT_RIGHT_MOUSE_UP: u32 = 4;
+const EVENT_OTHER_MOUSE_UP: u32 = 26;
+const EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
+const EVENT_RIGHT_MOUSE_DRAGGED: u32 = 7;
+const EVENT_OTHER_MOUSE_DRAGGED: u32 = 27;
+const MOUSE_EVENT_BUTTON_NUMBER: u32 = 3;
 #[cfg(hex_capture)]
 const EVENT_MOUSE_MOVED: u32 = 5;
 #[cfg(hex_capture)]
-const EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
-#[cfg(hex_capture)]
-const EVENT_RIGHT_MOUSE_DRAGGED: u32 = 7;
-#[cfg(hex_capture)]
 const EVENT_SCROLL_WHEEL: u32 = 22;
-#[cfg(hex_capture)]
-const EVENT_OTHER_MOUSE_DRAGGED: u32 = 27;
 #[cfg(hex_capture)]
 const KEYBOARD_EVENT_AUTOREPEAT: u32 = 8;
 #[cfg(hex_capture)]
@@ -74,6 +71,7 @@ type EventTapCallback = unsafe extern "C" fn(
 unsafe extern "C" {
     fn CGEventSourceFlagsState(state_id: u32) -> u64;
     fn CGEventSourceKeyState(state_id: u32, key: u16) -> bool;
+    fn CGEventSourceButtonState(state_id: u32, button: u32) -> bool;
     fn CGEventTapCreate(
         tap: u32,
         place: u32,
@@ -421,23 +419,57 @@ impl Drop for AttachedTap {
     }
 }
 
-const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN) | (1_u64 << EVENT_KEY_UP);
-const OBSERVATION_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_DOWN)
+const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN)
+    | (1_u64 << EVENT_KEY_UP)
+    | (1_u64 << EVENT_LEFT_MOUSE_DOWN)
+    | (1_u64 << EVENT_LEFT_MOUSE_UP)
     | (1_u64 << EVENT_RIGHT_MOUSE_DOWN)
-    | (1_u64 << EVENT_FLAGS_CHANGED)
-    | (1_u64 << EVENT_OTHER_MOUSE_DOWN);
-/// What the observation tap adds in builds with captures, while the
-/// `capture` experiment is on: the pointer moving, dragging, coming up, and
-/// scrolling. The callback drops them at once unless a capture records
-/// (`capture_host::wants_input`); they never reach the listener.
-#[cfg(hex_capture)]
-const CAPTURE_POINTER_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_UP)
     | (1_u64 << EVENT_RIGHT_MOUSE_UP)
-    | (1_u64 << EVENT_MOUSE_MOVED)
+    | (1_u64 << EVENT_OTHER_MOUSE_DOWN)
+    | (1_u64 << EVENT_OTHER_MOUSE_UP)
     | (1_u64 << EVENT_LEFT_MOUSE_DRAGGED)
     | (1_u64 << EVENT_RIGHT_MOUSE_DRAGGED)
-    | (1_u64 << EVENT_SCROLL_WHEEL)
     | (1_u64 << EVENT_OTHER_MOUSE_DRAGGED);
+const OBSERVATION_MASK: u64 = 1_u64 << EVENT_FLAGS_CHANGED;
+
+/// Translate only configured mouse triggers into the shared shortcut reducer.
+/// Ordinary clicks retain their cancellation/activity semantics.
+fn mouse_input(button: u16, down: bool, flags: u64, hotkeys: RuntimeHotkeys) -> Option<InputEvent> {
+    let code = crate::app_settings::HotkeyKey::mouse_code(button)?;
+    let bound = [
+        Some(hotkeys.dictation),
+        hotkeys.edit,
+        hotkeys.paste_last,
+        hotkeys.paste_meeting,
+    ]
+    .iter()
+    .flatten()
+    .any(|binding| binding.key_code == Some(code));
+    if bound {
+        Some(InputEvent::Key { code, down, flags })
+    } else {
+        down.then_some(InputEvent::MouseDown)
+    }
+}
+
+fn input_is_down(state: u32, code: u16) -> bool {
+    // SAFETY: both functions are read-only CoreGraphics state queries; mouse
+    // codes are decoded before crossing the native keyboard API boundary.
+    unsafe {
+        match crate::app_settings::HotkeyKey::mouse_button(code) {
+            Some(button) => CGEventSourceButtonState(state, u32::from(button)),
+            None => CGEventSourceKeyState(state, code),
+        }
+    }
+}
+
+/// What the observation tap adds in builds with captures, while the
+/// `capture` experiment is on: the pointer moving and scrolling. Clicks and
+/// drags already reach the key tap, for mouse shortcuts. The callback drops
+/// them at once unless a capture records (`capture_host::wants_input`); they
+/// never reach the listener.
+#[cfg(hex_capture)]
+const CAPTURE_POINTER_MASK: u64 = (1_u64 << EVENT_MOUSE_MOVED) | (1_u64 << EVENT_SCROLL_WHEEL);
 
 fn observation_mask() -> u64 {
     #[cfg(hex_capture)]
@@ -490,7 +522,8 @@ fn run_event_tap(
         }
     };
     // A modifying tap disrupts Finder's Option-driven alternate menu items even when it returns
-    // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
+    // flagsChanged events unchanged. Observe modifiers with a passive tap;
+    // bound mouse clicks use the filtering tap.
     let _observation_tap = match unsafe {
         AttachedTap::create(
             ANNOTATED_SESSION_EVENT_TAP,
@@ -700,6 +733,23 @@ unsafe extern "C" fn event_callback(
     {
         crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::Press);
     }
+    if matches!(
+        event_type,
+        EVENT_LEFT_MOUSE_DRAGGED | EVENT_RIGHT_MOUSE_DRAGGED | EVENT_OTHER_MOUSE_DRAGGED
+    ) {
+        // A swallowed press must not leak a drag into the foreground app.
+        // SAFETY: CoreGraphics supplied a valid mouse event.
+        let button = unsafe { CGEventGetIntegerValueField(event, MOUSE_EVENT_BUTTON_NUMBER) };
+        let suppress = !crate::app_settings::hotkey_capture_active()
+            && u16::try_from(button).ok().is_some_and(|button| {
+                context
+                    .shortcut_suppression
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .suppresses_mouse_drag(button)
+            });
+        return if suppress { ptr::null_mut() } else { event };
+    }
     let input = match event_type {
         EVENT_FLAGS_CHANGED => {
             // SAFETY: CoreGraphics supplied a valid event to this callback.
@@ -712,8 +762,41 @@ unsafe extern "C" fn event_callback(
             // SAFETY: CoreGraphics supplied a valid event.
             flags: unsafe { CGEventGetFlags(event) },
         },
-        EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN | EVENT_OTHER_MOUSE_DOWN => {
-            InputEvent::MouseDown
+        EVENT_LEFT_MOUSE_DOWN
+        | EVENT_RIGHT_MOUSE_DOWN
+        | EVENT_OTHER_MOUSE_DOWN
+        | EVENT_LEFT_MOUSE_UP
+        | EVENT_RIGHT_MOUSE_UP
+        | EVENT_OTHER_MOUSE_UP => {
+            // SAFETY: CoreGraphics supplied a valid mouse event.
+            let button = unsafe { CGEventGetIntegerValueField(event, MOUSE_EVENT_BUTTON_NUMBER) };
+            let Ok(button) = u16::try_from(button) else {
+                return event;
+            };
+            let down = matches!(
+                event_type,
+                EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN | EVENT_OTHER_MOUSE_DOWN
+            );
+            // SAFETY: CoreGraphics supplied a valid event.
+            let flags = unsafe { CGEventGetFlags(event) };
+            let input = mouse_input(button, down, flags, crate::app_settings::runtime_hotkeys())
+                .or_else(|| {
+                    // A settings change can remove the binding before release.
+                    // Finish the original press's bookkeeping and suppression.
+                    (!down)
+                        .then(|| {
+                            context
+                                .shortcut_suppression
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .tracked_mouse_release(button, flags)
+                        })
+                        .flatten()
+                });
+            let Some(input) = input else {
+                return event;
+            };
+            input
         }
         _ => return event,
     };
@@ -997,6 +1080,24 @@ struct ShortcutSuppression {
 }
 
 impl ShortcutSuppression {
+    fn tracked_mouse_release(&self, button: u16, flags: u64) -> Option<InputEvent> {
+        let code = crate::app_settings::HotkeyKey::mouse_code(button)?;
+        self.key_presses
+            .contains_key(&code)
+            .then_some(InputEvent::Key {
+                code,
+                down: false,
+                flags,
+            })
+    }
+
+    fn suppresses_mouse_drag(&self, button: u16) -> bool {
+        crate::app_settings::HotkeyKey::mouse_code(button)
+            .and_then(|code| self.key_presses.get(&code))
+            .copied()
+            .unwrap_or(false)
+    }
+
     fn reset(&mut self) {
         self.key_presses.clear();
     }
@@ -1367,7 +1468,7 @@ impl DictationHotkey {
         let key_down = self
             .binding
             .key_code
-            .is_some_and(|code| unsafe { CGEventSourceKeyState(HID_SYSTEM_STATE, code) });
+            .is_some_and(|code| input_is_down(HID_SYSTEM_STATE, code));
         self.wait_for_release_with_state(now, flags, key_down);
     }
 
@@ -1383,7 +1484,7 @@ impl DictationHotkey {
             CaptureInstant::now,
             // Match the annotated-session tap, including assistive keyboard input.
             || unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) },
-            |code| unsafe { CGEventSourceKeyState(COMBINED_SESSION_STATE, code) },
+            |code| input_is_down(COMBINED_SESSION_STATE, code),
         );
     }
 
@@ -1417,6 +1518,11 @@ impl DictationHotkey {
             || (!self.pressed_keys.is_empty()
                 && self.pressed_keys.iter().all(|&code| key_down(code)))
             || (0..128).any(&mut key_down)
+            // Mouse triggers share pressed_keys; a stale keyboard entry must
+            // not cause recovery while a tracked mouse button is still down.
+            || self.pressed_keys.iter().any(|&code| {
+                crate::app_settings::HotkeyKey::mouse_button(code).is_some() && key_down(code)
+            })
             || flags() & modifiers_mask != 0
         {
             self.stale_keys_neutral_since = None;
@@ -2056,7 +2162,7 @@ fn trigger_is_physically_down(binding: RuntimeHotkey) -> bool {
             && binding.exact_modifiers(CGEventSourceFlagsState(HID_SYSTEM_STATE))
             && binding
                 .key_code
-                .is_none_or(|code| CGEventSourceKeyState(HID_SYSTEM_STATE, code))
+                .is_none_or(|code| input_is_down(HID_SYSTEM_STATE, code))
     }
 }
 
@@ -2432,6 +2538,172 @@ mod tests {
                 hotkey.process(edge.event, edge.capture_at);
             }
             assert_eq!(hotkey.is_recording(), duration_ms < 300);
+        }
+    }
+
+    fn mouse_hotkeys() -> RuntimeHotkeys {
+        RuntimeHotkeys {
+            dictation: HotkeyBinding {
+                modifiers: Default::default(),
+                key: crate::app_settings::HotkeyKey::mouse(3),
+            }
+            .runtime(),
+            edit: None,
+            paste_last: None,
+            paste_meeting: None,
+        }
+    }
+
+    #[test]
+    fn mouse_hold_and_release_use_the_dictation_state_machine() {
+        let now = capture_time();
+        let bindings = mouse_hotkeys();
+        let mut hotkey = DictationHotkey::new(now, false, bindings.dictation);
+        assert_eq!(
+            hotkey.process(mouse_input(3, true, 0, bindings).unwrap(), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                mouse_input(3, false, 0, bindings).unwrap(),
+                now + Duration::from_secs(1)
+            ),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(matches!(
+            mouse_input(0, true, 0, bindings),
+            Some(InputEvent::MouseDown)
+        ));
+        assert!(mouse_input(0, false, 0, bindings).is_none());
+    }
+
+    #[test]
+    fn mouse_toggle_and_escape_use_the_same_capture_controls() {
+        let now = capture_time();
+        let bindings = mouse_hotkeys();
+        let mut hotkey = DictationHotkey::new(now, false, bindings.dictation);
+        hotkey.set_toggle(true);
+        assert_eq!(
+            hotkey.process(mouse_input(3, true, 0, bindings).unwrap(), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                mouse_input(3, false, 0, bindings).unwrap(),
+                now + Duration::from_millis(100)
+            ),
+            None
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: ESCAPE_KEY_CODE,
+                    down: true,
+                    flags: 0
+                },
+                now + Duration::from_secs(1)
+            ),
+            Some(HotkeyAction::Cancel)
+        );
+    }
+
+    #[test]
+    fn mouse_held_during_stale_keyboard_recovery_is_not_forgotten() {
+        let now = capture_time();
+        let bindings = mouse_hotkeys();
+        let mut hotkey = DictationHotkey::new(now, false, bindings.dictation);
+        let code = bindings.dictation.key_code.unwrap();
+        hotkey.state = State::Dirty;
+        hotkey.pressed_keys.extend([0, code]);
+        for millis in [0, 200] {
+            hotkey.recover_stale_keys_with(
+                || now + Duration::from_millis(millis),
+                || 0,
+                |key| key == code,
+            );
+        }
+        assert!(hotkey.pressed_keys.contains(&code));
+        assert!(matches!(hotkey.state, State::Dirty));
+        recover_after_neutral_window(&mut hotkey, now + Duration::from_secs(1), 0);
+        assert!(hotkey.pressed_keys.is_empty());
+    }
+
+    #[test]
+    fn mouse_double_tap_locks_and_a_fresh_press_finishes() {
+        let now = capture_time();
+        let bindings = mouse_hotkeys();
+        let mut hotkey = DictationHotkey::new(now, true, bindings.dictation);
+        for (millis, down, expected) in [
+            (0, true, Some(HotkeyAction::Start)),
+            (50, false, Some(HotkeyAction::Finish)),
+            (100, true, Some(HotkeyAction::Start)),
+            (150, false, None),
+            (1000, true, Some(HotkeyAction::Finish)),
+        ] {
+            assert_eq!(
+                hotkey.process(
+                    mouse_input(3, down, 0, bindings).unwrap(),
+                    now + Duration::from_millis(millis)
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn mouse_release_stays_balanced_after_its_binding_is_removed() {
+        let bindings = mouse_hotkeys();
+        let mut suppression = ShortcutSuppression::default();
+        assert!(suppression.process_all(
+            mouse_input(3, true, 0, bindings).unwrap(),
+            bindings,
+            true,
+            false
+        ));
+        let removed = RuntimeHotkeys::default();
+        assert!(mouse_input(3, false, 0, removed).is_none());
+        let release = suppression.tracked_mouse_release(3, 0).unwrap();
+        assert!(suppression.process_all(release, removed, true, false));
+        assert!(suppression.tracked_mouse_release(3, 0).is_none());
+        assert!(!suppression.suppresses_mouse_drag(3));
+    }
+
+    #[test]
+    fn mouse_suppression_balances_release_and_drag_even_after_modifiers_change() {
+        let mut bindings = mouse_hotkeys();
+        bindings.dictation.modifiers = crate::app_settings::HotkeyModifiers::option();
+        let mut suppression = ShortcutSuppression::default();
+        let activity = InputActivity::default();
+        let down = mouse_input(3, true, OPTION_KEY_MASK, bindings).unwrap();
+        let suppressed = suppression.process_all(down, bindings, true, false);
+        assert!(suppressed);
+        activity.observe(down, suppressed);
+        assert_eq!(activity.revision(), 0);
+        assert!(suppression.suppresses_mouse_drag(3));
+        assert!(!suppression.suppresses_mouse_drag(0));
+        assert!(suppression.process_all(
+            mouse_input(3, false, 0, bindings).unwrap(),
+            bindings,
+            true,
+            false
+        ));
+        assert!(!suppression.suppresses_mouse_drag(3));
+        // Wrong modifiers and failed delivery must leave the ordinary click alone.
+        for (flags, delivered) in [(0, true), (OPTION_KEY_MASK, false)] {
+            assert!(!suppression.process_all(
+                mouse_input(3, true, flags, bindings).unwrap(),
+                bindings,
+                delivered,
+                false
+            ));
+            assert!(!suppression.suppresses_mouse_drag(3));
+            assert!(!suppression.process_all(
+                mouse_input(3, false, flags, bindings).unwrap(),
+                bindings,
+                true,
+                false
+            ));
         }
     }
 

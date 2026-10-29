@@ -9,7 +9,8 @@ use objc2_core_audio::{
     AudioObjectPropertyAddress, AudioObjectPropertySelector,
     kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
-    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyPID,
+    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput,
+    kAudioProcessPropertyPID,
 };
 use objc2_core_foundation::{CFRetained, CFString};
 use objc2_foundation::NSString;
@@ -27,16 +28,7 @@ impl ActiveMicrophoneApplication {
     }
 
     pub fn is_browser(&self) -> bool {
-        matches!(
-            self.canonical_bundle_id(),
-            Some(
-                "com.google.Chrome"
-                    | "com.brave.Browser"
-                    | "com.apple.Safari"
-                    | "org.mozilla.firefox"
-                    | "com.microsoft.edgemac"
-            )
-        )
+        is_browser_id(self.canonical_bundle_id())
     }
 
     pub fn detection_priority(&self) -> u8 {
@@ -50,6 +42,79 @@ impl ActiveMicrophoneApplication {
     fn dedup_key(&self) -> &str {
         self.canonical_bundle_id().unwrap_or(&self.bundle_id)
     }
+}
+
+fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
+    matches!(
+        canonical_bundle_id,
+        Some(
+            "com.google.Chrome"
+                | "com.brave.Browser"
+                | "com.apple.Safari"
+                | "org.mozilla.firefox"
+                | "com.microsoft.edgemac"
+        )
+    )
+}
+
+/// One of the browsers Hex knows, or one of their audio helpers.
+pub(crate) fn browser_bundle(bundle_id: &str, name: Option<&str>) -> bool {
+    is_browser_id(canonical_bundle_id_for(bundle_id, name))
+}
+
+/// Which browser processes to hear.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BrowserProcesses {
+    /// Only those with open output; unknown counts as open.
+    Playing,
+    All,
+}
+
+impl BrowserProcesses {
+    fn includes(self, running_output: Option<bool>) -> bool {
+        match self {
+            Self::Playing => running_output.unwrap_or(true),
+            Self::All => true,
+        }
+    }
+}
+
+/// The Core Audio process objects of the running browsers, Hex excluded.
+pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<AudioObjectID>> {
+    objc2::rc::autoreleasepool(|_| {
+        let own_pid = std::process::id() as i32;
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        Ok(process_objects
+            .into_iter()
+            .filter(|&process_object| {
+                let Ok(pid) = property_value::<i32>(process_object, kAudioProcessPropertyPID)
+                else {
+                    return false;
+                };
+                let Some(bundle_id) =
+                    property_cf_string(process_object, kAudioProcessPropertyBundleID)
+                else {
+                    return false;
+                };
+                // Safari plays through a WebKit process told apart only by its name.
+                let name = bundle_id
+                    .eq_ignore_ascii_case("com.apple.WebKit.GPU")
+                    .then(|| running_application_info(pid))
+                    .flatten()
+                    .and_then(|(_, name)| name);
+                pid != own_pid
+                    && browser_bundle(&bundle_id, name.as_deref())
+                    && which.includes(
+                        property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
+                            .ok()
+                            .map(|running| running != 0),
+                    )
+            })
+            .collect())
+    })
 }
 
 fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'static str> {
@@ -601,6 +666,30 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_pause_taps_only_browsers_with_open_output() {
+        assert!(BrowserProcesses::Playing.includes(Some(true)));
+        assert!(!BrowserProcesses::Playing.includes(Some(false)));
+        assert!(BrowserProcesses::Playing.includes(None));
+        assert!(BrowserProcesses::All.includes(Some(false)));
+    }
+
+    #[test]
+    fn browser_bundles_include_helpers() {
+        assert!(browser_bundle("com.brave.Browser.helper", None));
+        assert!(browser_bundle("com.google.Chrome.helper", None));
+        assert!(browser_bundle(
+            "com.apple.WebKit.GPU",
+            Some("Safari Graphics and Media")
+        ));
+        assert!(!browser_bundle(
+            "com.apple.WebKit.GPU",
+            Some("Mail Graphics and Media")
+        ));
+        assert!(!browser_bundle("com.spotify.client", None));
+        assert!(!browser_bundle("com.kitlangton.hex2", None));
     }
 
     #[test]

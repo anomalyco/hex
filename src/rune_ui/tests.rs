@@ -94,6 +94,18 @@ fn portal_desktops_show_what_they_granted_beside_each_recorder() {
 }
 
 #[test]
+fn a_mouse_shortcut_on_wayland_explains_the_desktop_command_route() {
+    let rt = runtime("portal-mouse", true, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.contains("Wayland desktop using the hex commands"))
+    );
+    assert!(!shown.iter().any(|text| text.contains("config.kdl")));
+}
+
+#[test]
 fn a_refused_portal_shortcut_says_how_to_free_it() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     if let Some(view) = &mut rt.state.view {

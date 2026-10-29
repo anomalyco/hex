@@ -20,7 +20,46 @@ injects a failed shortcut save yet.
 **Shortcut:** Option by default, after macOS permissions and the selected local
 model are ready. Commands and OpenCode are not required. General > Dictation >
 Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
-standalone function-key bindings. Capturing a replacement suspends global matching.
+standalone function-key bindings. On macOS, Windows and Linux/X11 it also accepts mouse buttons,
+alone or with modifiers: click Record, then press the desired mouse button.
+Mouse 1/2/3 are left/right/middle; Mouse 4 and higher are auxiliary buttons.
+Escape cancels recording a binding. Mouse bindings use the same hold, toggle,
+and double-tap rules and conflict checks as keyboard bindings. A consumed
+mouse press, drag and release do not reach the foreground app; ordinary clicks
+retain their existing behavior. Capturing a replacement suspends global matching.
+The CLI accepts the same bindings, for example `mouse4` or `option+mouse4`.
+Windows supports the five mouse buttons exposed by its low-level mouse hook.
+Linux/X11 maps Mouse 4/5 to native buttons 8/9, skipping wheel events; the
+recorder temporarily grabs the pointer while its window has focus and releases
+it on save, cancellation, focus loss or window close. Windows waits for the
+click that opened the recorder to be released before accepting a mouse button.
+
+Wayland's XDG shortcut syntax has no mouse-button trigger. Use the desktop's
+mouse bindings to run `hex dictation start`/`stop` (hold) or `hex dictation toggle`
+(toggle), or the matching Voice Action / paste-last commands. Existing mouse
+bindings from X11 appear ungranted on Wayland; they do not prevent keyboard
+shortcuts from registering. Hex does not use raw input devices or XWayland to
+bypass the compositor. See the [XDG shortcut specification](https://specifications.freedesktop.org/shortcuts/latest/).
+
+Checks: `mouse_buttons_record_with_or_without_modifiers`,
+`mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
+`mouse_hold_and_release_use_the_dictation_state_machine`,
+`mouse_double_tap_locks_and_a_fresh_press_finishes`,
+`mouse_toggle_and_escape_use_the_same_capture_controls`,
+`mouse_held_during_stale_keyboard_recovery_is_not_forgotten`,
+`mouse_release_stays_balanced_after_its_binding_is_removed`, and
+`mouse_suppression_balances_release_and_drag_even_after_modifiers_change`.
+These reducer/recorder checks passed on October 25, 2026, with the full macOS
+`scripts/check` suite. The locally signed macOS build was installed and the user
+confirmed it worked. Linux input-module tests and Xvfb button injection checks
+(`x11_mouse_grab_delivers_hold_and_release` and
+`x11_mouse_recorder_captures_auxiliary_button_and_releases_its_grab`) passed in
+an isolated Linux container. The full Linux app passed `cargo check` with the
+transcription Vulkan backend disabled for the container's older shader compiler.
+Windows input code and tests were cross-checked for `x86_64-pc-windows-gnu` in
+an isolated input-module harness; no full Windows app build or physical Windows
+mouse test was run. Xvfb does not establish physical Linux desktop behavior.
+
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
 the macOS side picker and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed

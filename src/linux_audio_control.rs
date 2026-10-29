@@ -131,7 +131,7 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
             }
         },
         RecordingAudioBehavior::PauseMedia => Suppressed::Paused(pause_players()),
-        RecordingAudioBehavior::DoNothing => Suppressed::Nothing,
+        RecordingAudioBehavior::DoNothing | RecordingAudioBehavior::Duck => Suppressed::Nothing,
     }
 }
 

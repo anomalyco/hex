@@ -444,7 +444,7 @@ worker readiness; a later worker-load failure does not roll back saved selection
 ## Dictate
 
 ```ts
-Saved shortcut                           // dictation; Option by default
+Saved shortcut                           // dictation; Option by default; macOS, Windows and X11 also accept mouse buttons
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
 └── Escape
@@ -536,13 +536,35 @@ General                                  // settings
 │   └── Release when idle -> Open on press; no pre-roll; startup delay
 │       └── Commands enabled? -> Confirm turning Commands off
 ├── Output card -> Paste last shortcut, While dictating, Dictation HUD
-├── While dictating -> Mute / Pause media / Do nothing
+├── While dictating -> Mute / Pause media / Lower audio (macOS) / Do nothing
+│   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
-│   └── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
+│   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
+│   └── Also pause the browser (macOS, Pause media only; off by default)
+│       ├── Turning it on without System Audio Recording -> ask now, never while dictating
+│       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
+│       └── Dictation -> browser_media sequence below
 ├── Application card -> Sound volume: immediate feedback; zero suppresses tones
 ├── Application card -> Sounds: Signature (default) / Classic; previews start
 └── Voice Action shortcut -> Voice Action pane; Meetings -> Meetings › Settings
+
+Pause media + Also pause the browser     // browser_media
+├── A browser uses the microphone (a call) -> leave it alone
+├── No browser process has its audio output open -> leave it alone (no tap)
+├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
+│   └── Any window at or below -60 dBFS, or no level -> leave it alone
+├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Poll 5 windows of 100 ms
+│   ├── 2 windows in a row below -90 dBFS -> Hex paused it
+│   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
+└── Dictation ends and Hex paused it -> first, before the players: listen 300 ms to every browser process
+    ├── Above -60 dBFS (you started it again) -> no play
+    ├── No level (browser quit, tap failed) -> no play
+    └── Otherwise -> send the system play command (MediaRemote 0), then poll 20 windows of 100 ms
+        ├── A window above -60 dBFS -> resumed
+        ├── No level -> stop listening
+        └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 
 Intentional recording                    // recording.environment
 ├── Acquire native macOS no-idle-sleep assertion
@@ -550,6 +572,39 @@ Intentional recording                    // recording.environment
 └── Finish/cancel -> Release the assertion
     // no caffeinate child process or executable-policy dialog
 ```
+
+On macOS, **Lower audio** (`recording.environment.duck`) is an explicit fourth
+choice, off by default. The slider appears only while selected and saves on
+release. It remembers its value across behavior changes. Intentional captures
+(including Voice Action) ramp the original output channels to that fraction over
+one second, preserving balance and silent channels, then restore on finish,
+cancel, or orderly shutdown. Changes apply to the next capture. The stop tone
+waits for restoration. A manually changed volume after settling is left alone;
+a newly selected output device is not lowered. Fixed-volume devices and outputs
+whose channel balance cannot be safely restored are left unchanged. Meetings do
+not acquire this dictation environment. Linux and Windows do not offer ducking.
+
+HEX snapshots the output channels and applies a smooth volume ramp in
+[ducking.rs](../../src/recording_environment/ducking.rs), managed by the recording
+environment. The worker runs inside the app and cannot restore volume after a
+hard process crash or SIGKILL. Changes during the ramp itself cannot be
+distinguished from delayed Bluetooth acknowledgements.
+Fake-device tests cover relative volume, balance, silence, interrupted ramps,
+manual changes after settling, and partial-write rollback; settings/UI tests
+cover defaults, bounds, persistence, conditional visibility and platform gating.
+On 2026-10-25, the macOS logic/settings checks and strict Clippy passed.
+The seven reference images were regenerated on Ubuntu 24.04 ARM64 with Mesa
+lavapipe, using the unmodified Linux-only Rune test module and
+`HEX_UPDATE_GOLDENS=1 scripts/check ducking`. A subsequent
+`scripts/check rune_ui --nocapture` without the update flag passed all 113 tests,
+including the unchanged control goldens; no golden skipped for lack of a GPU
+adapter. The five existing images differ from the base branch above the existing
+12-level channel tolerance only within the While dictating control; the sidebar,
+Quit Hex, and shortcut layouts remain unchanged. Dark and light ducking previews
+were visually inspected. The earlier macOS-generated references were replaced
+because these fixtures retain build-OS-dependent layout and defaults. This
+verifies headless Linux rendering, not audible playback, physical devices,
+crash recovery, or native Windows execution.
 
 Successful settings saves persist and project changes at safe runtime boundaries.
 Immediate settings controls commit a candidate before changing the saved UI
@@ -568,7 +623,20 @@ not a managed-device policy or native power assertion. The pause-script regressi
 checks that inactive players are absent before AppleScript application resolution;
 when no supported player is running, acquisition skips AppleScript entirely.
 The script check does not prove subprocess avoidance or exercise Music, Spotify,
-or VLC through Automation. An opt-in native
+or VLC through Automation.
+The browser pause runs after the AppleScript players and only when System Audio
+Recording is reported granted (an unknown answer skips it, because the tap would
+open the macOS dialog mid-dictation). macOS 15.4 and later no longer tell other apps
+what is playing, so Hex hears the browsers through a private process tap
+(aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
+play only after it saw the browser go silent right after its own pause. The
+sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
+`a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
+`a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
+`no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`; the ignored `native_tap_hears_a_playing_browser`
+heard Brave at -25.4 dBFS on macOS 27.0.1 (2026-10-28). Which app receives the
+system command is macOS's Now Playing choice; Safari is heard only when its
+WebKit process reports Safari's name. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
 
 **Changed after 2.3.1:** Automatic was a compiled preference list (Universal

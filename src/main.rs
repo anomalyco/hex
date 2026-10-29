@@ -15,6 +15,8 @@ mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
 mod background_process;
+#[cfg(target_os = "macos")]
+mod browser_media;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]

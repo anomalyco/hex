@@ -77,7 +77,7 @@ impl AudioSuppressor {
                             undo = match mode {
                                 WhileDictating::Mute => mute_other_sessions(),
                                 WhileDictating::PauseMedia => pause_playing_media(),
-                                WhileDictating::DoNothing => None,
+                                WhileDictating::DoNothing | WhileDictating::Duck => None,
                             };
                         }
                         Command::Suppress => {}

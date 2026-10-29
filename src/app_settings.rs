@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
@@ -12,11 +12,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
 
+static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static SHORTCUT_TOGGLE: AtomicBool = AtomicBool::new(false);
 static MEETINGS_ENABLED: AtomicBool = AtomicBool::new(false);
+static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
 static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -294,10 +296,42 @@ pub struct HotkeyKey {
     pub label: String,
 }
 
+/// Reserved input codes for the 32 mouse buttons CoreGraphics can report.
+const MOUSE_INPUT_CODES: std::ops::Range<u16> = 0x8000..0x8020;
+
 impl HotkeyKey {
+    /// macOS mouse buttons occupy a separate input-code range, beyond every
+    /// native keyboard code used by macOS. A shared trigger code lets keyboard
+    /// and mouse bindings use the same hold, toggle, conflict and persistence
+    /// rules. UI labels are one-based (Mouse 1 = left, Mouse 2 = right, Mouse 3 = middle).
+    pub fn mouse(button: u16) -> Option<Self> {
+        Self::mouse_code(button).map(|code| Self {
+            code,
+            label: format!("Mouse {}", button + 1),
+        })
+    }
+
+    /// Allocation-free encoding for the event tap.
+    pub fn mouse_code(button: u16) -> Option<u16> {
+        (button < 32).then(|| MOUSE_INPUT_CODES.start + button)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn mouse_button(code: u16) -> Option<u16> {
+        code.checked_sub(MOUSE_INPUT_CODES.start)
+            .filter(|button| *button < 32)
+    }
+
+    pub fn is_mouse(&self) -> bool {
+        MOUSE_INPUT_CODES.contains(&self.code)
+    }
+
     /// A key identified by name on Windows and Linux.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn named(name: &str) -> Self {
+        if let Some(button) = Self::mouse_number(name) {
+            return Self::mouse(button - 1).expect("validated mouse number");
+        }
         Self {
             code: 0,
             label: key_label(name),
@@ -307,7 +341,21 @@ impl HotkeyKey {
     /// The lowercase key name Windows and Linux input layers resolve.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn name(&self) -> String {
+        if self.is_mouse() {
+            return format!("mouse{}", self.code - MOUSE_INPUT_CODES.start + 1);
+        }
         self.label.to_ascii_lowercase()
+    }
+
+    /// One-based logical button number shared by every platform.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn mouse_number(name: &str) -> Option<u16> {
+        name.to_ascii_lowercase()
+            .strip_prefix("mouse")?
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|number| (1..=32).contains(number))
     }
 
     fn same_key(&self, other: &Self) -> bool {
@@ -1023,6 +1071,7 @@ pub struct UpdateSettings {
 #[serde(rename_all = "snake_case")]
 pub enum RecordingAudioBehavior {
     Mute,
+    Duck,
     PauseMedia,
     #[default]
     DoNothing,
@@ -1264,11 +1313,12 @@ impl CaptureTranscriber {
 pub use crate::text_replacements::TextReplacement;
 
 impl RecordingAudioBehavior {
-    pub const ALL: [Self; 3] = [Self::Mute, Self::PauseMedia, Self::DoNothing];
+    pub const ALL: [Self; 4] = [Self::Mute, Self::PauseMedia, Self::Duck, Self::DoNothing];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Mute => "Mute",
+            Self::Duck => "Lower audio",
             Self::PauseMedia => "Pause media",
             Self::DoNothing => "Do nothing",
         }
@@ -1277,6 +1327,7 @@ impl RecordingAudioBehavior {
     const fn encoded(self) -> u8 {
         match self {
             Self::Mute => 0,
+            Self::Duck => 3,
             Self::PauseMedia => 1,
             Self::DoNothing => 2,
         }
@@ -1284,6 +1335,7 @@ impl RecordingAudioBehavior {
 
     fn decode(value: u8) -> Self {
         match value {
+            3 => Self::Duck,
             1 => Self::PauseMedia,
             2 => Self::DoNothing,
             _ => Self::Mute,
@@ -1301,6 +1353,10 @@ pub struct AppSettings {
     pub sound_theme: crate::feedback::SoundTheme,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
+    /// Fraction of the original output volume while ducking (macOS).
+    pub recording_duck_volume: f32,
+    /// With Pause media on macOS, also pause a browser that is audibly playing.
+    pub pause_browser_media: bool,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
@@ -1382,6 +1438,8 @@ impl Default for AppSettings {
             sound_theme: crate::feedback::SoundTheme::default(),
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
+            recording_duck_volume: 0.2,
+            pause_browser_media: false,
             double_tap_lock: true,
             double_tap_only: false,
             shortcut_mode: crate::dictation::ShortcutMode::Hold,
@@ -1690,6 +1748,7 @@ impl AppSettings {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 let loaded = serde_json::to_value(&settings)?;
+                settings.validate_recording_duck_volume()?;
                 settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
@@ -1724,8 +1783,18 @@ impl AppSettings {
         Ok(())
     }
 
+    fn validate_recording_duck_volume(&self) -> Result<()> {
+        if !self.recording_duck_volume.is_finite()
+            || !(0.0..=1.0).contains(&self.recording_duck_volume)
+        {
+            return Err(eyre!("recording_duck_volume must be between 0 and 1"));
+        }
+        Ok(())
+    }
+
     fn write_to(&self, path: &std::path::Path) -> Result<()> {
         self.validate_microphone_policy()?;
+        self.validate_recording_duck_volume()?;
         let parent = path
             .parent()
             .ok_or_else(|| eyre!("settings path has no parent"))?;
@@ -1754,7 +1823,9 @@ impl AppSettings {
         crate::feedback::set_theme(self.sound_theme);
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
+        RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
+        PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
         DOUBLE_TAP_ONLY.store(
             self.double_tap_lock && self.double_tap_only && self.dictation_hotkey.key.is_some(),
@@ -2113,8 +2184,17 @@ pub fn transcription_selection() -> (u64, TranscriptionSelection) {
     (state.revision, state.selection.clone())
 }
 
+#[cfg(target_os = "macos")]
+pub fn recording_duck_volume() -> f32 {
+    f32::from_bits(RECORDING_DUCK_VOLUME.load(Ordering::Relaxed))
+}
+
 pub fn recording_audio_behavior() -> RecordingAudioBehavior {
     RecordingAudioBehavior::decode(RECORDING_AUDIO_BEHAVIOR.load(Ordering::Relaxed))
+}
+
+pub fn pause_browser_media() -> bool {
+    PAUSE_BROWSER_MEDIA.load(Ordering::Relaxed)
 }
 
 pub fn commands_enabled() -> bool {
@@ -2561,6 +2641,48 @@ mod tests {
     }
 
     #[test]
+    fn ducking_settings_are_opt_in_bounded_and_round_trip() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            settings.recording_audio_behavior,
+            RecordingAudioBehavior::DoNothing
+        );
+        assert_eq!(settings.recording_duck_volume, 0.2);
+        settings.recording_audio_behavior = RecordingAudioBehavior::Duck;
+        settings.recording_duck_volume = 0.37;
+        let decoded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            decoded.recording_audio_behavior,
+            RecordingAudioBehavior::Duck
+        );
+        assert_eq!(decoded.recording_duck_volume, 0.37);
+        for invalid in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
+            settings.recording_duck_volume = invalid;
+            assert!(settings.validate_recording_duck_volume().is_err());
+        }
+        for value in [0.0, 0.2, 1.0] {
+            settings.recording_duck_volume = value;
+            assert!(settings.validate_recording_duck_volume().is_ok());
+        }
+    }
+
+    #[test]
+    fn mouse_names_have_one_portable_representation() {
+        for number in 1..=32 {
+            let label = format!("Mouse {number}");
+            let key = HotkeyKey::named(&label);
+            assert!(key.is_mouse());
+            assert_eq!(key.name(), format!("mouse{number}"));
+            assert_eq!(key, HotkeyKey::mouse(number - 1).unwrap());
+            assert_eq!(HotkeyKey::named(&key.name()), key);
+        }
+        for invalid in ["mouse0", "mouse33", "mouse", "mouse-1"] {
+            assert_eq!(HotkeyKey::mouse_number(invalid), None);
+        }
+    }
+
+    #[test]
     fn the_setting_the_experiment_or_an_installed_driver_turns_the_voice_filter_on() {
         if env_hex_experimental_mic() {
             return;
@@ -2583,6 +2705,7 @@ mod tests {
             settings.recording_audio_behavior,
             RecordingAudioBehavior::DoNothing
         );
+        assert!(!settings.pause_browser_media);
         assert!(settings.double_tap_lock);
         assert!(!settings.double_tap_only);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());

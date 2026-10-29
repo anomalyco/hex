@@ -138,8 +138,18 @@ const KEYS: &[Key] = &[
     ),
     key(
         "recording_audio_behavior",
-        Kind::Choice(&["mute", "pause_media", "do_nothing"]),
+        Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
         "What other audio does while you dictate",
+    ),
+    key(
+        "recording_duck_volume",
+        UNIT,
+        "Fraction of original output volume while lowering audio (macOS), from 0 to 1",
+    ),
+    key(
+        "pause_browser_media",
+        Kind::Bool,
+        "Also pause a playing browser tab while dictating (macOS, with Pause media)",
     ),
     key(
         "double_tap_lock",
@@ -845,7 +855,7 @@ pub fn parse_hotkey(
         if modifiers.function {
             return Err("fn can't be combined with a key".into());
         }
-        if modifiers.is_empty() && !is_function_key(&key.label) {
+        if modifiers.is_empty() && !is_function_key(&key.label) && !key.is_mouse() {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
     } else if modifiers.is_empty() {
