@@ -667,6 +667,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
   (read from its bundle's framework version) gets the text typed, because
   those versions can drop a ⌘V that races their pasteboard notification.
+- `hex dictation stop --print` (macOS and Linux) stops through the listener's
+  own queue with a one-shot reply: recording stops at once and only that
+  command waits, at most 60 s, for the text, processed as a paste. It never
+  pastes, even on failure or timeout; no speech exits 4. History records it as
+  Printed and Paste Last skips it.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
 - Do not persist captured audio by default. Explicit foreground meeting

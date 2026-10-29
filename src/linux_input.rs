@@ -367,10 +367,13 @@ pub(crate) fn connect_x11() -> Result<(RustConnection, Window, Keymap)> {
     Ok((connection, root, keymap))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HotkeyEvent {
     Start,
     Finish,
+    /// `hex dictation stop --print` finished the dictation: its transcript
+    /// goes to the reply instead of being pasted.
+    FinishPrinting(crate::control::PrintReply),
     Cancel,
     PasteLast,
     /// The Voice Action shortcut went down: record an instruction.
@@ -398,6 +401,20 @@ pub(crate) enum ShortcutCommand {
     VoiceActionStop,
     VoiceActionToggle,
     PasteLast,
+}
+
+/// What the listener's command queue carries: a `hex` command, or a
+/// printing stop with the reply only its own connection waits on.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum ListenerCommand {
+    Shortcut(ShortcutCommand),
+    StopAndPrint(crate::control::PrintReply),
+}
+
+impl From<ShortcutCommand> for ListenerCommand {
+    fn from(command: ShortcutCommand) -> Self {
+        Self::Shortcut(command)
+    }
 }
 
 impl ShortcutCommand {
@@ -800,10 +817,10 @@ impl ShortcutState {
 /// `hex` commands for whichever monitor runs now. The listener keeps one
 /// queue while it registers its shortcuts again after a settings change.
 #[derive(Clone)]
-pub(crate) struct CommandQueue(Arc<Mutex<Receiver<ShortcutCommand>>>);
+pub(crate) struct CommandQueue(Arc<Mutex<Receiver<ListenerCommand>>>);
 
-impl From<Receiver<ShortcutCommand>> for CommandQueue {
-    fn from(receiver: Receiver<ShortcutCommand>) -> Self {
+impl From<Receiver<ListenerCommand>> for CommandQueue {
+    fn from(receiver: Receiver<ListenerCommand>) -> Self {
         Self(Arc::new(Mutex::new(receiver)))
     }
 }
@@ -852,7 +869,14 @@ impl Dispatcher {
         drop(commands);
         for command in queued {
             self.keys.command();
-            self.input(Input::Command(command));
+            match command {
+                ListenerCommand::Shortcut(command) => self.input(Input::Command(command)),
+                // Recording stops now, so a following start isn't blocked.
+                ListenerCommand::StopAndPrint(reply) => match self.state.stop_dictation() {
+                    Some(_) => self.pending.push(HotkeyEvent::FinishPrinting(reply)),
+                    None => reply.send(crate::control::PrintedTranscript::NotRecording),
+                },
+            }
         }
     }
 
@@ -2331,7 +2355,7 @@ mod tests {
         binding: LinuxHotkey,
         options: HotkeyOptions,
         status: HotkeyStatus,
-    ) -> (LinuxHotkeyMonitor, SyncSender<ShortcutCommand>) {
+    ) -> (LinuxHotkeyMonitor, SyncSender<ListenerCommand>) {
         let (commands, receiver) = mpsc::sync_channel(4);
         let monitor = LinuxHotkeyMonitor::start_for(
             binding,
@@ -2506,12 +2530,52 @@ mod tests {
         });
         readiness.recv().unwrap().unwrap();
         assert_eq!(status.shortcuts(), DesktopShortcuts::Commands);
-        commands.send(Command::DictationToggle).unwrap();
-        commands.send(Command::DictationToggle).unwrap();
+        commands.send(Command::DictationToggle.into()).unwrap();
+        commands.send(Command::DictationToggle.into()).unwrap();
         let wait = || events.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!([wait(), wait()], [Start, Finish]);
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn a_printing_stop_rides_the_command_queue_with_its_reply() {
+        use crate::control::{PrintReply, PrintedTranscript};
+        let (sender, events) = mpsc::sync_channel(4);
+        let (commands, receiver) = mpsc::sync_channel(4);
+        let mut dispatcher = Dispatcher::new(
+            &HotkeyOptions::default(),
+            sender,
+            receiver.into(),
+            ShortcutKeys::default(),
+        );
+        // Nothing records: the reply is answered at once.
+        let (reply, idle) = PrintReply::channel();
+        commands.send(ListenerCommand::StopAndPrint(reply)).unwrap();
+        dispatcher.commands();
+        assert_eq!(idle.try_recv().unwrap(), PrintedTranscript::NotRecording);
+        // The stop finishes in queue order and a later start isn't blocked.
+        let (reply, printed) = PrintReply::channel();
+        commands.send(Command::DictationStart.into()).unwrap();
+        commands.send(ListenerCommand::StopAndPrint(reply)).unwrap();
+        commands.send(Command::DictationStart.into()).unwrap();
+        dispatcher.commands();
+        assert!(dispatcher.flush().unwrap());
+        let received: Vec<_> = events.try_iter().collect();
+        assert!(matches!(
+            received.as_slice(),
+            [Start, HotkeyEvent::FinishPrinting(_), Start]
+        ));
+        // The listener owns the reply now; nothing has answered it yet.
+        assert!(printed.try_recv().is_err());
+        let Some(HotkeyEvent::FinishPrinting(reply)) = received.into_iter().nth(1) else {
+            unreachable!()
+        };
+        reply.send(PrintedTranscript::Text("Ship it.".into()));
+        assert_eq!(
+            printed.try_recv().unwrap(),
+            PrintedTranscript::Text("Ship it.".into())
+        );
     }
 
     #[test]
@@ -2575,7 +2639,7 @@ mod tests {
         harness.send_key(KEY_PRESS, harness.alt);
         harness.send_key(KEY_PRESS, harness.space);
         assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
-        commands.send(Command::DictationStop).unwrap();
+        commands.send(Command::DictationStop.into()).unwrap();
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
         // Releasing the held shortcut afterwards finishes nothing twice.
         harness.send_key(KEY_RELEASE, harness.space);
@@ -2586,7 +2650,7 @@ mod tests {
                 .recv_timeout(Duration::from_millis(150))
                 .is_err()
         );
-        commands.send(Command::DictationStart).unwrap();
+        commands.send(Command::DictationStart.into()).unwrap();
         assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
         // Escape is grabbed while the command's capture records.
         harness.send_key(KEY_PRESS, harness.escape);

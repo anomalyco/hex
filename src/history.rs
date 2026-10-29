@@ -71,6 +71,8 @@ pub enum HistoryKind {
     Dictation,
     Send,
     VoiceAction,
+    /// `hex dictation stop --print`: never pasted, so Paste Last skips it.
+    Printed,
 }
 
 impl HistoryKind {
@@ -79,6 +81,7 @@ impl HistoryKind {
             Self::Dictation => "Dictation",
             Self::Send => "Send",
             Self::VoiceAction => "Voice Action",
+            Self::Printed => "Printed",
         }
     }
 }

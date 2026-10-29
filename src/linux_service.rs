@@ -2,7 +2,8 @@
 //!
 //! The running process binds `service.sock` next to its `service.lock`. A
 //! later `hex` forwards `Activate` (with the launcher's activation token) and
-//! exits; `hex dictation …`, `hex voice-action …`, `hex paste-last`,
+//! exits; `hex dictation …` (including `stop --print`, whose connection
+//! waits for the transcript), `hex voice-action …`, `hex paste-last`,
 //! `hex status`, and `hex quit` forward over the same socket. Shortcut
 //! commands go straight from the socket worker to the listener's command
 //! queue, never through the window's thread. This module also owns the
@@ -25,7 +26,7 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::desktop_host::DesktopSnapshot;
-use crate::linux_input::ShortcutCommand;
+use crate::linux_input::{ListenerCommand, ShortcutCommand};
 
 /// Version 1 was the service/Settings-client protocol; its clients get a
 /// version error and exit.
@@ -52,6 +53,9 @@ pub(crate) enum Request {
     },
     /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
     Shortcut(ShortcutCommand),
+    /// `hex dictation stop --print`: replies with the transcript, which is
+    /// not pasted.
+    DictationPrint,
     /// `hex annotate start|stop|cancel`.
     Capture(crate::control::ScrawlCaptureAction),
     /// `hex annotate send`: the listener's router sends it and says how.
@@ -137,7 +141,7 @@ impl Session {
 /// queue, once it reports its session.
 #[derive(Clone)]
 pub(crate) struct ShortcutRoute {
-    pub(crate) commands: SyncSender<ShortcutCommand>,
+    pub(crate) commands: SyncSender<ListenerCommand>,
     pub(crate) voice_action: bool,
 }
 
@@ -153,8 +157,46 @@ pub(crate) fn route_shortcut(
     }
     route
         .commands
-        .try_send(command)
+        .try_send(command.into())
         .map_err(|_| eyre!("Hex is busy; try again"))
+}
+
+/// Stops the dictation through the listener's queue and waits for its
+/// transcript. Only this caller waits; the listener stops recording at once.
+pub(crate) fn route_print(route: Option<&ShortcutRoute>) -> crate::control::ControlReply {
+    use crate::control::{ControlReply, PrintReply};
+    let Some(route) = route else {
+        return ControlReply::error(
+            "not-ready",
+            "Hex is not listening; enable it in Settings or run `hex start`",
+        );
+    };
+    let (reply, printed) = PrintReply::channel();
+    if route
+        .commands
+        .try_send(ListenerCommand::StopAndPrint(reply))
+        .is_err()
+    {
+        return ControlReply::error("busy", "Hex is busy; try again");
+    }
+    crate::control::await_printed(&printed, crate::control::PRINT_WAIT)
+}
+
+/// `hex dictation stop --print`, answered by the running Hex.
+pub(crate) fn print_dictation() -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    match exchange(
+        Request::DictationPrint,
+        crate::control::PRINT_WAIT + Duration::from_secs(5),
+    ) {
+        Ok(reply) => reply
+            .control
+            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+        Err(RequestError::NotRunning) => {
+            ControlReply::error("not-running", "Hex is not running; run `hex start`")
+        }
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
 }
 
 /// What the socket reads without waiting on the host or the window: the
@@ -547,6 +589,11 @@ fn serve_client(
             }
             Request::Shortcut(command) => {
                 route_shortcut(published.shortcuts.lock().unwrap().as_ref(), command)
+            }
+            Request::DictationPrint => {
+                let route = published.shortcuts.lock().unwrap().clone();
+                answer = Some(route_print(route.as_ref()));
+                Ok(())
             }
             Request::Capture(action) => crate::capture_host::send_to_listener(
                 crate::capture_host::CaptureControl::Scrawl(action),
@@ -975,8 +1022,8 @@ mod tests {
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
             [
-                ShortcutCommand::DictationStart,
-                ShortcutCommand::VoiceActionToggle
+                ListenerCommand::from(ShortcutCommand::DictationStart),
+                ListenerCommand::from(ShortcutCommand::VoiceActionToggle)
             ]
         );
     }

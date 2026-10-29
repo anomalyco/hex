@@ -330,6 +330,14 @@ bindsym --release F9 exec hex dictation stop
 bindsym Ctrl+Alt+d exec hex dictation toggle
 ```
 
+`hex dictation stop --print` stops the same way, then waits up to 60 s and
+writes the transcript to stdout instead of pasting it, after the same
+processing a paste gets. Only that command waits; the listener stops
+recording at once, so a following `start` isn't blocked. No speech exits 4
+and prints nothing; a failure, cancel, or timeout prints nothing, exits 1,
+and never pastes. History keeps the text as Printed, and Paste Last skips it.
+See `docs/cli.md`.
+
 The commands are safe to bind anywhere, including X11 beside the grabs. They
 talk to the running Hex and never start it: without one, or while Hex is
 not listening, they print a one-line error and exit non-zero. Starting while recording,

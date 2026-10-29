@@ -25,7 +25,7 @@ use crate::desktop_host::{
 };
 use crate::events::EventReader;
 use crate::linux_dictation::ListenerUpdate;
-use crate::linux_input::{LinuxHotkey, ShortcutCommand};
+use crate::linux_input::{LinuxHotkey, ListenerCommand};
 use crate::linux_service::{self, Activation, Control, Published, ShortcutRoute, Status};
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -73,7 +73,7 @@ struct Listener {
     startup: ListenerStartup,
     hotkey_status: crate::linux_input::HotkeyStatus,
     /// `hex` commands for the listener's shortcut state machine.
-    commands: mpsc::SyncSender<ShortcutCommand>,
+    commands: mpsc::SyncSender<ListenerCommand>,
     /// Settings, models, and shortcut suspension the listener applies in place.
     updates: mpsc::Sender<crate::linux_dictation::ListenerUpdate>,
 }
@@ -1423,12 +1423,15 @@ mod tests {
         host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
         let route = host.shortcut_route().unwrap();
         assert!(!route.voice_action);
-        linux_service::route_shortcut(Some(&route), ShortcutCommand::PasteLast).unwrap();
+        linux_service::route_shortcut(Some(&route), crate::linux_input::ShortcutCommand::PasteLast)
+            .unwrap();
         host.settings.voice_action.enabled = true;
         assert!(host.shortcut_route().unwrap().voice_action);
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
-            [ShortcutCommand::PasteLast]
+            [ListenerCommand::from(
+                crate::linux_input::ShortcutCommand::PasteLast
+            )]
         );
     }
 

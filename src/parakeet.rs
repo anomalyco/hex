@@ -98,6 +98,9 @@ pub enum TranscriptionTarget {
     Send,
     VoiceAction,
     Service,
+    /// `hex dictation stop --print`: processed as a paste, then handed to
+    /// the waiting command instead of pasted.
+    Print,
 }
 
 struct InferenceJob {
@@ -179,6 +182,9 @@ struct JobControl {
     /// A programmatic dictation's job: its owner app cancels it through the
     /// API, so Escape never does.
     owner_cancels: bool,
+    /// A printing stop's reply; dropping the job unanswered tells it the
+    /// dictation was cancelled or failed.
+    print: Mutex<Option<crate::control::PrintReply>>,
 }
 
 impl JobControl {
@@ -204,6 +210,17 @@ impl JobControl {
 
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn answer_print(&self, transcript: crate::control::PrintedTranscript) {
+        if let Some(reply) = self
+            .print
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            reply.send(transcript);
+        }
     }
 
     fn begin_output(&self) -> bool {
@@ -373,7 +390,24 @@ impl DictationWorker {
         protocol: Option<Arc<DictationProtocol>>,
         context: ContextSnapshot,
     ) -> Result<DictationJobId, &'static str> {
-        self.submit(clip, target, protocol, false, context)
+        self.submit(clip, target, protocol, false, context, None)
+    }
+
+    /// Like a paste, but the processed transcript goes to `print`.
+    pub fn transcribe_printed(
+        &self,
+        clip: DictationClip,
+        print: crate::control::PrintReply,
+        context: ContextSnapshot,
+    ) -> Result<DictationJobId, &'static str> {
+        self.submit(
+            clip,
+            TranscriptionTarget::Print,
+            None,
+            false,
+            context,
+            Some(print),
+        )
     }
 
     /// A voice capture Smart Turn finished before any control phrase was
@@ -391,6 +425,7 @@ impl DictationWorker {
             Some(protocol),
             true,
             context,
+            None,
         )
     }
 
@@ -401,6 +436,7 @@ impl DictationWorker {
         protocol: Option<Arc<DictationProtocol>>,
         obeys_spoken_control: bool,
         context: ContextSnapshot,
+        print: Option<crate::control::PrintReply>,
     ) -> Result<DictationJobId, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let job_id = DictationJobId(state.next_output_sequence()?);
@@ -409,6 +445,7 @@ impl DictationWorker {
         };
         let control = Arc::new(JobControl {
             owner_cancels: matches!(target, TranscriptionTarget::Service),
+            print: Mutex::new(print),
             ..JobControl::default()
         });
         let (_, selection) = crate::app_settings::transcription_selection();
@@ -890,6 +927,7 @@ fn run_inference_worker(
                     TranscriptionTarget::Paste
                         | TranscriptionTarget::Send
                         | TranscriptionTarget::VoiceAction
+                        | TranscriptionTarget::Print
                 ) && !text.trim().is_empty() =>
             {
                 if processor_jobs
@@ -1094,7 +1132,7 @@ fn finish_output(
                         TranscriptionTarget::VoiceAction => {
                             paste(&completed.text, PasteMode::Standalone, &commit)
                         }
-                        TranscriptionTarget::Service => commit()
+                        TranscriptionTarget::Service | TranscriptionTarget::Print => commit()
                             .then_some(())
                             .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
@@ -1120,6 +1158,15 @@ fn finish_output(
                 );
                 Ok(completed.text)
             });
+            if matches!(target, TranscriptionTarget::Print) && !control.is_cancelled() {
+                control.answer_print(match &result {
+                    Ok(text) if text.trim().is_empty() => {
+                        crate::control::PrintedTranscript::NoSpeech
+                    }
+                    Ok(text) => crate::control::PrintedTranscript::Text(text.clone()),
+                    Err(error) => crate::control::PrintedTranscript::Failed(error.clone()),
+                });
+            }
             if control.is_cancelled() {
                 WorkerEvent::Cancelled { job_id }
             } else {
@@ -1160,6 +1207,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         TranscriptionTarget::Paste => HistoryKind::Dictation,
         TranscriptionTarget::Send => HistoryKind::Send,
         TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
+        TranscriptionTarget::Print => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
     };
     let draft = HistoryDraft {
@@ -1920,7 +1968,9 @@ mod tests {
                             TranscriptionTarget::Paste => HistoryKind::Dictation,
                             TranscriptionTarget::Send => HistoryKind::Send,
                             TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
-                            TranscriptionTarget::Service => unreachable!(),
+                            TranscriptionTarget::Service | TranscriptionTarget::Print => {
+                                unreachable!()
+                            }
                         }
                     );
                 }

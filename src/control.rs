@@ -8,7 +8,8 @@
 pub mod cli;
 pub mod settings;
 
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +77,9 @@ pub enum ControlCommand {
     },
     Dictation {
         action: CaptureAction,
+        /// `stop` only: answer with the transcript instead of pasting it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        print: bool,
     },
     VoiceAction {
         action: CaptureAction,
@@ -216,6 +220,10 @@ pub enum ControlReply {
     ScrawlCaptureDetail(Box<ScrawlCaptureDetail>),
     ScrawlCaptureRoute {
         explanation: String,
+    },
+    /// `hex dictation stop --print`: the processed transcript.
+    Transcript {
+        text: String,
     },
     Error {
         code: String,
@@ -363,6 +371,97 @@ impl ControlError {
             message: message.into(),
         }
     }
+}
+
+/// How long `hex dictation stop --print` waits for its transcript.
+pub const PRINT_WAIT: Duration = Duration::from_secs(60);
+/// How long the app may take to carry out any other control command.
+const CONTROL_DEADLINE: Duration = Duration::from_secs(10);
+
+impl ControlCommand {
+    /// How long a transport waits for the app's answer to this command.
+    pub fn deadline(&self) -> Duration {
+        match self {
+            Self::Dictation { print: true, .. } => PRINT_WAIT + Duration::from_secs(5),
+            _ => CONTROL_DEADLINE,
+        }
+    }
+}
+
+/// What a printing stop gets back from the listener once its dictation
+/// finishes: the transcript, processed as a paste would be, or why there is
+/// none. A printed transcript is never pasted.
+#[derive(Debug, Eq, PartialEq)]
+pub enum PrintedTranscript {
+    Text(String),
+    NoSpeech,
+    NotRecording,
+    Failed(String),
+}
+
+/// The one-shot channel a printing stop rides through the listener's queue.
+#[derive(Clone, Debug)]
+pub struct PrintReply(SyncSender<PrintedTranscript>);
+
+impl PrintReply {
+    pub fn channel() -> (Self, Receiver<PrintedTranscript>) {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        (Self(sender), receiver)
+    }
+
+    /// Answers the waiting command; one that gave up is not told.
+    pub fn send(self, transcript: PrintedTranscript) {
+        let _ = self.0.send(transcript);
+    }
+}
+
+/// Shortcut events compare by kind; where a reply goes is not part of it.
+impl PartialEq for PrintReply {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for PrintReply {}
+
+/// Waits up to `wait` for a printing stop's transcript. A dropped reply
+/// means the dictation was cancelled or failed before it had text.
+pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> ControlReply {
+    match receiver.recv_timeout(wait) {
+        Ok(PrintedTranscript::Text(text)) => ControlReply::Transcript { text },
+        Ok(PrintedTranscript::NoSpeech) => {
+            ControlReply::error("no-speech", "no speech was recorded; nothing to print")
+        }
+        Ok(PrintedTranscript::NotRecording) => ControlReply::error(
+            "not-recording",
+            "dictation isn't recording; nothing to print",
+        ),
+        Ok(PrintedTranscript::Failed(error)) => {
+            ControlReply::error("failed", format!("couldn't transcribe it: {error}"))
+        }
+        Err(RecvTimeoutError::Timeout) => ControlReply::error(
+            "failed",
+            format!(
+                "no transcript within {} s; nothing was printed or pasted",
+                wait.as_secs()
+            ),
+        ),
+        Err(RecvTimeoutError::Disconnected) => ControlReply::error(
+            "failed",
+            "the dictation was cancelled or failed; nothing to print",
+        ),
+    }
+}
+
+/// `print` applies only to `stop`.
+pub fn check_print(action: CaptureAction, print: bool) -> Result<(), ControlError> {
+    if print && action != CaptureAction::Stop {
+        return Err(ControlError::new(
+            "invalid-value",
+            "--print works only with `hex dictation stop`",
+        ));
+    }
+    Ok(())
 }
 
 /// One request from a transport to the app's control host.
@@ -704,6 +803,51 @@ pub fn memory_footprint() -> Option<u64> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_printing_stop_answers_through_its_reply_channel() {
+        let wait = Duration::from_millis(50);
+        let (reply, printed) = PrintReply::channel();
+        reply.send(PrintedTranscript::Text("Ship it.".into()));
+        assert_eq!(
+            await_printed(&printed, wait),
+            ControlReply::Transcript {
+                text: "Ship it.".into()
+            }
+        );
+        let (reply, printed) = PrintReply::channel();
+        reply.send(PrintedTranscript::NoSpeech);
+        assert!(matches!(
+            await_printed(&printed, wait),
+            ControlReply::Error { code, .. } if code == "no-speech"
+        ));
+        // A dictation cancelled or failed before it had text drops the reply.
+        let (reply, printed) = PrintReply::channel();
+        drop(reply);
+        assert!(matches!(
+            await_printed(&printed, wait),
+            ControlReply::Error { code, .. } if code == "failed"
+        ));
+        let (_reply, printed) = PrintReply::channel();
+        assert!(matches!(
+            await_printed(&printed, wait),
+            ControlReply::Error { code, .. } if code == "failed"
+        ));
+        // Only `stop` prints, and older requests without the field still parse.
+        assert!(check_print(CaptureAction::Start, true).is_err());
+        assert!(check_print(CaptureAction::Stop, true).is_ok());
+        assert_eq!(
+            serde_json::from_str::<ControlRequest>(
+                r#"{"version":2,"command":"dictation","action":"stop"}"#
+            )
+            .unwrap()
+            .command,
+            ControlCommand::Dictation {
+                action: CaptureAction::Stop,
+                print: false
+            }
+        );
+    }
+
     fn round_trip_request(command: ControlCommand) {
         let request = ControlRequest::new(command);
         let json = serde_json::to_string(&request).unwrap();
@@ -721,6 +865,11 @@ mod tests {
             ControlCommand::Restart { force: false },
             ControlCommand::Dictation {
                 action: CaptureAction::Toggle,
+                print: false,
+            },
+            ControlCommand::Dictation {
+                action: CaptureAction::Stop,
+                print: true,
             },
             ControlCommand::VoiceAction {
                 action: CaptureAction::Cancel,
@@ -919,6 +1068,9 @@ mod tests {
             ControlReply::ScrawlCaptureRoute {
                 explanation: "Capture   1.scrawl".into(),
             },
+            ControlReply::Transcript {
+                text: "Ship it.".into(),
+            },
             ControlReply::error("busy", "Hex is busy"),
         ] {
             let response = ControlResponse::from(reply);
@@ -928,6 +1080,14 @@ mod tests {
                 response
             );
         }
+        let json = serde_json::to_value(ControlResponse::from(ControlReply::Transcript {
+            text: "Ship it.".into(),
+        }))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"version": 2, "status": "transcript", "text": "Ship it."})
+        );
         let json =
             serde_json::to_value(ControlResponse::from(ControlReply::error("busy", "x"))).unwrap();
         assert_eq!(

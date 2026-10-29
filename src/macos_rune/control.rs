@@ -98,13 +98,38 @@ impl Pump {
                 });
                 None
             }
-            ControlCommand::Dictation { action } | ControlCommand::VoiceAction { action } => {
+            ControlCommand::Dictation {
+                action,
+                print: true,
+            } => {
+                background(reply, move || {
+                    control::check_print(action, true)?;
+                    listener_ready(&runtime)?;
+                    let (print, printed) = control::PrintReply::channel();
+                    // The listener answers once the recording stopped; only
+                    // this command then waits for the transcript.
+                    match ask(&runtime, |reply| RecognitionControl::Capture {
+                        voice_action: false,
+                        action,
+                        print: Some(print),
+                        reply,
+                    })? {
+                        ControlReply::Done { .. } => {
+                            Ok(control::await_printed(&printed, control::PRINT_WAIT))
+                        }
+                        refused => Ok(refused),
+                    }
+                });
+                None
+            }
+            ControlCommand::Dictation { action, .. } | ControlCommand::VoiceAction { action } => {
                 let voice_action = matches!(command, ControlCommand::VoiceAction { .. });
                 background(reply, move || {
                     listener_ready(&runtime)?;
                     ask(&runtime, |reply| RecognitionControl::Capture {
                         voice_action,
                         action,
+                        print: None,
                         reply,
                     })
                 });

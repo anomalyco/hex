@@ -20,7 +20,13 @@ Agent or terminal                                  // control.cli; macOS release
 │   ├── Idle cancel while the other capture records -> busy (Escape's order:
 │   │   the recording before any job)
 │   ├── Repeat a command -> unchanged, exit 0
-│   └── voice-action with Voice Action off -> feature-off, exit 1
+│   ├── voice-action with Voice Action off -> feature-off, exit 1
+│   └── dictation stop --print -> stops at once, then waits ≤ 60 s and prints
+│       the transcript (processed as a paste) instead of pasting it
+│       ├── No speech -> no-speech, exit 4, prints nothing
+│       ├── Not recording -> not-recording, exit 1
+│       ├── Failure, cancel, or timeout -> exit 1, prints nothing, never pastes
+│       └── History keeps it as Printed; Paste Last skips it (also on Linux)
 ├── hex paste-last -> pastes the last dictation
 │   ├── Setup gates the listener -> not-ready
 │   └── Recording or shortcut gesture in progress -> busy (menu bar: nothing)
@@ -67,7 +73,8 @@ the `/control` route in [local_api.rs](../../src/local_api.rs), and early
 dispatch in [main.rs](../../src/main.rs).
 [Command and JSON contracts](../cli.md) document flags, exit codes, and schema.
 
-Checks: `control::tests` round-trip every command and reply, refuse other
+Checks: `control::tests` round-trip every command and reply (including
+`a_printing_stop_answers_through_its_reply_channel`), refuse other
 protocol versions, and cover the quit rules (an unanswered listener refuses)
 and `model_selection` (remembered hints, wildcard-language validation); `control::settings::tests` include
 `every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts, the

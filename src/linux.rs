@@ -102,7 +102,12 @@ enum DictationAction {
     /// Start recording; does nothing while recording. Bind to a key press.
     Start,
     /// Stop and transcribe; does nothing while idle. Bind to the key's release.
-    Stop,
+    Stop {
+        /// Wait for the transcript and print it instead of pasting it.
+        /// Exits 4, printing nothing, when no speech was heard.
+        #[arg(long)]
+        print: bool,
+    },
     /// Start when idle, stop and transcribe while recording.
     Toggle,
     /// Discard the recording.
@@ -173,9 +178,15 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             crate::experiments::log_launch();
             listen(&event_path, device.as_deref(), shutdown)
         }
+        Command::Dictation {
+            action: DictationAction::Stop { print: true },
+        } => crate::control::cli::finish(crate::control::cli::print(
+            crate::linux_service::print_dictation(),
+            Default::default(),
+        )),
         Command::Dictation { action } => shortcut(match action {
             DictationAction::Start => ShortcutCommand::DictationStart,
-            DictationAction::Stop => ShortcutCommand::DictationStop,
+            DictationAction::Stop { .. } => ShortcutCommand::DictationStop,
             DictationAction::Toggle => ShortcutCommand::DictationToggle,
             DictationAction::Cancel => ShortcutCommand::DictationCancel,
         }),

@@ -10,7 +10,7 @@ use color_eyre::Result;
 use crate::audio::CaptureInstant;
 use crate::commands::{Action, ActionExecutor, ActionOutcome, CommandConfig, Decision, Mode};
 use crate::context::{ContextMonitor, ContextSnapshot};
-use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply};
+use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
 use crate::dictation::{
     ControlStability, DictationClip, DictationControl, DictationProtocol, Finish,
     MINIMUM_HOLD_DURATION, POST_RELEASE_TAIL,
@@ -110,9 +110,12 @@ pub enum RecognitionControl {
     RetryCommands,
     /// `hex dictation` and `hex voice-action`: drives the shortcut machine
     /// as a press would, so the shortcut and Escape still finish or cancel.
+    /// A dictation `stop` with `print` answers `reply` once recording stops
+    /// and sends the transcript to `print` instead of pasting it.
     Capture {
         voice_action: bool,
         action: CaptureAction,
+        print: Option<PrintReply>,
         reply: SyncSender<ControlReply>,
     },
     /// What is recording, for `hex status`.
@@ -575,6 +578,7 @@ pub fn listen(
                     RecognitionControl::Capture {
                         voice_action,
                         action,
+                        print,
                         reply,
                     } => {
                         let release_while_idle = microphone_policy.release_while_idle;
@@ -609,6 +613,7 @@ pub fn listen(
                         } else {
                             control_dictation(
                                 action,
+                                print,
                                 other_recording,
                                 suspended,
                                 &mut hotkeys,
@@ -1626,6 +1631,7 @@ pub fn listen(
                         &mut events,
                         indicator.as_ref(),
                         microphone_policy.release_while_idle,
+                        None,
                     )?;
                     // Unlock only now: a shortcut press during the stop's
                     // tail meant to finish this capture, so it is ignored
@@ -2096,6 +2102,7 @@ fn handle_hotkey_action(
             events,
             indicator,
             release_while_idle,
+            None,
         )
         .map(drop),
         HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
@@ -2147,22 +2154,34 @@ fn finish_hotkey_dictation(
     events: &mut EventLog,
     indicator: Option<&DictationIndicatorSender>,
     release_while_idle: bool,
+    print: Option<PrintReply>,
 ) -> Result<FinishResult> {
     if dictation.become_intentional(action_at)? && release_while_idle {
         feedback::play(Tone::DictationStart);
     }
-    let finished = finish_dictation(
-        dictation,
-        action_at,
-        POST_RELEASE_TAIL,
-        worker,
-        TranscriptionTarget::Paste,
-        None,
-        context,
-        device,
-        events,
-        indicator,
-    )?;
+    let finished = match print {
+        None => finish_dictation(
+            dictation,
+            action_at,
+            POST_RELEASE_TAIL,
+            worker,
+            TranscriptionTarget::Paste,
+            None,
+            context,
+            device,
+            events,
+            indicator,
+        )?,
+        Some(print) => finish_dictation_with(
+            dictation,
+            action_at,
+            POST_RELEASE_TAIL,
+            |clip| worker.transcribe_printed(clip, print, context.clone()),
+            device,
+            events,
+            indicator,
+        )?,
+    };
     if matches!(finished, FinishResult::Discarded) {
         feedback::retract_start();
     }
@@ -2267,6 +2286,7 @@ fn finish_reply(finished: Option<FinishResult>, submitted: &str) -> ControlReply
 #[allow(clippy::too_many_arguments)]
 fn control_dictation(
     action: CaptureAction,
+    print: Option<PrintReply>,
     other_recording: bool,
     suspended: bool,
     hotkeys: &mut Hotkeys,
@@ -2324,9 +2344,14 @@ fn control_dictation(
                 ControlReply::error("busy", "the microphone is busy; try again")
             }
         }
+        CaptureAction::Stop if !recording && print.is_some() => ControlReply::error(
+            "not-recording",
+            "dictation isn't recording; nothing to print",
+        ),
         CaptureAction::Stop if !recording => ControlReply::unchanged("Dictation isn't recording"),
         CaptureAction::Stop => {
             hotkeys.dictation.suspend();
+            let printing = print.is_some();
             let finished = finish_hotkey_dictation(
                 capture_boundary(input, release_while_idle),
                 recognizer,
@@ -2338,11 +2363,21 @@ fn control_dictation(
                 events,
                 indicator,
                 release_while_idle,
+                print,
             )?;
-            finish_reply(
-                Some(finished),
-                "Finished recording; Hex pastes the text when it's ready",
-            )
+            match finished {
+                FinishResult::Discarded | FinishResult::Silent if printing => {
+                    ControlReply::error("no-speech", "no speech was recorded; nothing to print")
+                }
+                finished if printing => finish_reply(
+                    Some(finished),
+                    "Finished recording; printing the transcript",
+                ),
+                finished => finish_reply(
+                    Some(finished),
+                    "Finished recording; Hex pastes the text when it's ready",
+                ),
+            }
         }
         CaptureAction::Cancel if recording => {
             hotkeys.dictation.suspend();
@@ -3247,6 +3282,7 @@ fn handle_dictation_event(
             let phase = match target {
                 TranscriptionTarget::VoiceAction => DictationPhase::VoiceAction,
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
+                TranscriptionTarget::Print => DictationPhase::Printed,
                 TranscriptionTarget::Service => return Ok(()),
             };
             feedback::play(Tone::DictationDone);

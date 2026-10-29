@@ -35,8 +35,6 @@ const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_BYTES: usize = 64 * 1024;
-/// How long the app may take to carry out one `hex` control command.
-const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_DICTATION_SOURCE_BYTES: usize = 128;
 
@@ -1127,6 +1125,7 @@ fn control(
     let Some(controls) = controls else {
         return HttpResponse::code(404, "control-unavailable");
     };
+    let deadline = request.command.deadline();
     let (reply, response) = mpsc::sync_channel(1);
     match controls.try_send(ControlCall { request, reply }) {
         Ok(()) => {}
@@ -1135,7 +1134,7 @@ fn control(
             return HttpResponse::code(503, "control-unavailable");
         }
     }
-    match response.recv_timeout(CONTROL_TIMEOUT) {
+    match response.recv_timeout(deadline) {
         Ok(reply) => HttpResponse::json(200, &reply),
         Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "control-timeout"),
         Err(RecvTimeoutError::Disconnected) => HttpResponse::code(503, "control-unavailable"),
@@ -1934,11 +1933,11 @@ pub fn call_control(
     request: &crate::control::ControlRequest,
 ) -> Result<crate::control::ControlResponse> {
     let body = serde_json::to_vec(request)?;
-    // The app answers within CONTROL_TIMEOUT or the server replies 504.
+    // The app answers within the command's deadline or the server replies 504.
     let (status, body) = post_json(
         "/control",
         &body,
-        CONTROL_TIMEOUT + Duration::from_secs(5),
+        request.command.deadline() + Duration::from_secs(5),
         1024 * 1024,
     )?;
     if status != 200 {

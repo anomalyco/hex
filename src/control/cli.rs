@@ -2,8 +2,8 @@
 //! and prints the answer for a person or, with `--json`, the versioned reply.
 //!
 //! Exit codes: 0 when the command ran (or there was nothing to change), 1
-//! when Hex refused or failed it, 2 for usage errors (clap), and 3 when Hex
-//! isn't running. Nothing here launches Hex except `start` and `restart`.
+//! when Hex refused or failed it, 2 for usage errors (clap), 3 when Hex
+//! isn't running, and 4 when `dictation stop --print` heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
 
@@ -18,6 +18,7 @@ use crate::vocabulary::VocabularyEntry;
 
 pub const EXIT_REFUSED: u8 = 1;
 pub const EXIT_NOT_RUNNING: u8 = 3;
+pub const EXIT_NO_SPEECH: u8 = 4;
 
 #[derive(Args, Clone, Copy, Debug, Default)]
 pub struct Output {
@@ -67,6 +68,10 @@ pub enum ControlCli {
     Dictation {
         #[arg(value_enum)]
         action: CaptureAction,
+        /// With `stop`: wait for the transcript and print it instead of
+        /// pasting it. Exits 4, printing nothing, when no speech was heard.
+        #[arg(long)]
+        print: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -280,8 +285,16 @@ pub fn run(command: ControlCli) -> u8 {
                 start(output)
             }
         }
-        ControlCli::Dictation { action, output } => {
-            send(ControlCommand::Dictation { action }, output)
+        ControlCli::Dictation {
+            action,
+            print,
+            output,
+        } => {
+            if let Err(error) = super::check_print(action, print) {
+                eprintln!("hex: {}", error.message);
+                return 2;
+            }
+            send(ControlCommand::Dictation { action, print }, output)
         }
         ControlCli::VoiceAction { action, output } => {
             send(ControlCommand::VoiceAction { action }, output)
@@ -768,7 +781,7 @@ fn fail(message: &str) -> u8 {
 }
 
 /// Prints `reply` and returns its exit code.
-fn print(reply: ControlReply, output: Output) -> u8 {
+pub(crate) fn print(reply: ControlReply, output: Output) -> u8 {
     let code = exit_code(&reply);
     if output.json {
         let response = ControlResponse {
@@ -791,6 +804,7 @@ fn print(reply: ControlReply, output: Output) -> u8 {
         ControlReply::ScrawlCaptures { captures } => print!("{}", human_captures(&captures)),
         ControlReply::ScrawlCaptureDetail(detail) => print!("{}", human_capture_detail(&detail)),
         ControlReply::ScrawlCaptureRoute { explanation } => print!("{explanation}"),
+        ControlReply::Transcript { text } => println!("{text}"),
         ControlReply::Error { message, .. } => eprintln!("hex: {message}"),
     }
     code
@@ -929,6 +943,7 @@ fn local_minute(ms: u64) -> String {
 pub fn exit_code(reply: &ControlReply) -> u8 {
     match reply {
         ControlReply::Error { code, .. } if code == "not-running" => EXIT_NOT_RUNNING,
+        ControlReply::Error { code, .. } if code == "no-speech" => EXIT_NO_SPEECH,
         ControlReply::Error { .. } => EXIT_REFUSED,
         _ => 0,
     }
@@ -1150,6 +1165,10 @@ mod tests {
         assert_eq!(exit_code(&ControlReply::unchanged("ok")), 0);
         assert_eq!(exit_code(&ControlReply::error("busy", "x")), EXIT_REFUSED);
         assert_eq!(exit_code(&not_running()), EXIT_NOT_RUNNING);
+        assert_eq!(
+            exit_code(&ControlReply::error("no-speech", "x")),
+            EXIT_NO_SPEECH
+        );
     }
 
     #[cfg(target_os = "macos")]

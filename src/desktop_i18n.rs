@@ -393,6 +393,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Remove", ["Usuń", "移除", "削除", "Entfernen", "Quitar", "Вилучити"]),
     ("Dictation", ["Dyktowanie", "听写", "音声入力", "Diktat", "Dictado", "Диктування"]),
     ("Send", ["Wysłano", "发送", "送信", "Senden", "Enviar", "Надсилання"]),
+    ("Printed", ["Wypisano", "已输出", "出力", "Ausgegeben", "Impreso", "Виведено"]),
     ("Voice Action", ["Voice Action", "Voice Action", "Voice Action", "Voice Action", "Voice Action", "Voice Action"]),
     ("Application", ["Aplikacja", "应用", "アプリ", "Anwendung", "Aplicación", "Програма"]),
     ("Global", ["Globalny", "全局", "グローバル", "Global", "Global", "Глобальний"]),

@@ -22,6 +22,7 @@ hex
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
 ├── dictation start|stop|cancel|toggle
+│   └── stop --print               print the transcript instead of pasting it (below)
 ├── voice-action start|stop|cancel|toggle   needs voice_action.enabled
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
 ├── meetings
@@ -73,6 +74,19 @@ stream start as they do after a held shortcut. `voice-action start` behaves
 the same way. A `stop` replies `done` only when the clip went to
 transcription; a clip with no audio yet (the microphone was still opening) or
 a silent one is dropped with `discarded`, and nothing shows as transcribing.
+
+`dictation stop --print` stops the recording at once, exactly as `stop`
+does, so a following `start` isn't blocked; only this command then waits, up
+to 60 s, for the transcript and writes it to stdout instead of pasting it. The
+text gets the same processing as a paste (global replacements, the mode's
+corrections, OpenCode rewriting, and transformations). History keeps it as
+`printed`, and Paste Last skips it. No speech (nothing recorded yet, a silent
+clip, or an empty transcript) exits 4 with code `no-speech` and prints
+nothing; with nothing recording it refuses with `not-recording`. A failure,
+a cancel (Escape), or the 60 s timeout prints nothing, exits 1, and never
+falls back to pasting. `--print` with any other action is a usage error
+(exit 2). The command is the same on Linux (see `docs/linux.md`); Windows has
+no `hex dictation` command yet.
 
 `dictation cancel` with nothing recording cancels the newest unfinished
 dictation, like Escape. Escape cancels an active recording before any job, so
@@ -143,6 +157,7 @@ state, the recording capsule, and Stop & Transcribe all apply to it.
 1  Hex refused or failed it (an error reply), or the transport failed
 2  usage error (clap)
 3  Hex isn't running (code `not-running`); control commands never launch it
+4  `dictation stop --print` heard no speech (code `no-speech`); nothing printed
 ```
 
 ## Transport
@@ -156,7 +171,7 @@ offer it.
 
 - Request bodies are JSON up to 64 KiB; replies are at most 1 MiB.
 - The app answers within 10 s (`504 control-timeout` otherwise); the CLI waits
-  15 s.
+  15 s. `dictation stop --print` gets 65 s, and the CLI waits 70 s.
 - Every answer the app gives is `200` with a `ControlResponse`, refusals
   included. Transport-level failures use HTTP status codes:
   `400 invalid-control-command` (malformed or unknown command),
@@ -173,11 +188,13 @@ Requests are flat objects tagged by `command` (kebab-case):
 {"version": 2, "command": "meeting-record", "title": "Design sync"}
 {"version": 2, "command": "settings-set", "key": "sound_effects", "value": "off", "confirm": false}
 {"version": 2, "command": "dictation", "action": "start"}
+{"version": 2, "command": "dictation", "action": "stop", "print": true}
 ```
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action} | voice-action {action}       action: start | stop | cancel | toggle
+dictation {action, print?} | voice-action {action}  action: start | stop | cancel | toggle;
+                                                 print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last
 settings-get {key?} | settings-set {key, value, confirm}
@@ -219,6 +236,7 @@ Replies are tagged by `status`:
   "marks": 2, "keyframes": 3, "video": "…/video.mp4", "audio": null,
   "contact_sheet": "…/contact-sheet.jpg"}
 {"version": 2, "status": "scrawl-capture-route", "explanation": "Capture   …"}
+{"version": 2, "status": "transcript", "text": "Ship it."}
 ```
 
 `done.changed` is `false` when the command found things already so ("Already
@@ -284,6 +302,8 @@ meeting-active         quit/restart while a meeting records (pass --force)
 busy                   something is in progress (recording, transcribing, a full queue),
                        or the listener couldn't confirm it's idle
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
+no-speech              `dictation stop --print` heard no speech; nothing printed (exit 4)
+not-recording          `dictation stop --print` with nothing recording
 unavailable            a part of Hex the command needs isn't available
 unsupported            this build or OS can't do it (e.g. restart from a development binary)
 failed                 Hex tried and failed (the message has the cause)
