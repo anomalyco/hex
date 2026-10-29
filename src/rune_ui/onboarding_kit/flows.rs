@@ -1,8 +1,8 @@
-//! The three options, each composed from the kit's pieces on the tour's
+//! The onboarding options, each composed from the kit's pieces on the
 //! full-window page.
 
-use rune::{Beat, El, Sequence, Transition, col, el, row, text};
-use rune_kit::{Button, ButtonVariant};
+use rune::{Beat, El, Sequence, Transition, col, el, icon, row, text};
+use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
 use super::cards::{ADAM, DAX, FRANK, JAY, Notice, Reply, floating, notice};
@@ -18,7 +18,6 @@ use super::words::shout;
 const TOP_BAR: f32 = 48.0;
 const ACTION_H: f32 = 32.0;
 const LINE_FONT: rune::TextStyle = rune::TextStyle::new(20.0, 500.0);
-/// Cards arrive one after another, this far apart.
 const STAGGER: f64 = 0.07;
 const SENTENCE_W: f32 = 640.0;
 const METER: f32 = 132.0;
@@ -48,13 +47,10 @@ fn middle() -> El {
     col().key("middle").grow(1.0).shrink().w_full().center()
 }
 
-/// A fixed-height row for the one action under a heading, so the page
-/// above it never shifts as the action changes.
 fn action(content: El) -> El {
     row().key("action").h(ACTION_H).center().child(content)
 }
 
-/// The clock floating cards drift on, or `None` to hold them still.
 fn drift(s: &Onboard) -> Option<f64> {
     (!s.reduced.get()).then_some(s.now)
 }
@@ -63,17 +59,23 @@ fn download(s: &Onboard) -> Download {
     s.download.expect("the download starts at the pick")
 }
 
-/// A Continue the person would press; the story moves on by itself.
+/// Primary onward button (`Continue →`), matching the tour's forward CTA.
 pub(super) fn continue_button(p: Paint) -> El {
     Button::new("Continue")
         .variant(ButtonVariant::Contrast)
+        .label_with(|font, ink| {
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(text("Continue").key("label").font(font).color(ink))
+                .child(icon(&glyphs::ARROW_RIGHT, 15.0).key("arrow").color(ink))
+        })
         .on_press(|_: &mut Onboard| {})
         .build_push(p.k)
         .key("continue")
         .transition(arrives())
 }
 
-/// The heading's "Hold ⌥ and …" line, with the keys in it.
 fn hold(p: Paint, s: &Onboard, rest: &str) -> El {
     row()
         .key("hold")
@@ -108,9 +110,6 @@ fn example(s: &Onboard, index: usize) -> Reply<'_> {
     }
 }
 
-/// Option A. Example replies type themselves; Download English becomes
-/// the pill, which parks in the top bar while you answer Jay, then flies
-/// to the top to say Ready.
 fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Ready {
         return vec![
@@ -182,15 +181,11 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     ]
 }
 
-/// A card that arrives `index` places into the stagger.
 fn arriving(card: El, index: usize) -> El {
     card.sequence(Sequence::new(ARRIVE).delay(index as f64 * STAGGER))
         .transition(Transition::scale(0.96))
 }
 
-/// Option B. The mark grows into a meter that fills as the model
-/// downloads, over messages to answer; full, it closes into the mark and
-/// flies into Ready.
 fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Pick {
         return vec![
@@ -230,13 +225,12 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
         .items_center()
         .child(shared_meter(p, METER, d.fraction(), s.closed))
         .child(if d.done() {
-            super::super::lists::allowed(p, "status", "Ready")
-                .transition(Transition::blur_replace())
+            super::super::lists::allowed(p, "status", "Ready").transition(Transition::opacity())
         } else {
-            text(d.megabytes())
+            text(format!("{}%", (d.fraction() * 100.0).round() as u32))
                 .key("status")
                 .font(p.k.ty.small.features("'tnum' 1"))
-                .color(p.faint())
+                .color(p.muted())
         });
     let lead = if s.can_hear() {
         hold(p, s, "to answer any of these.")
@@ -254,11 +248,10 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
         .child(
             text("Answer one while it downloads")
                 .key("title")
-                .font(super::landing::TITLE)
+                .font(super::landing::title_font(p))
                 .color(p.text()),
         )
         .child(row().key("lead-row").h(ACTION_H).center().child(lead));
-    // Side by side in the Hex window; stacked on a narrow stage.
     let cards = row()
         .key("cards")
         .w_full()
@@ -287,8 +280,6 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     ]
 }
 
-/// The meter as the shared element that grows from the intro's mark and
-/// flies into Ready's.
 fn shared_meter(p: Paint, size: f32, progress: f32, closed: f32) -> El {
     el().key(PILL)
         .matched(PILL)
@@ -296,7 +287,6 @@ fn shared_meter(p: Paint, size: f32, progress: f32, closed: f32) -> El {
         .child(hex_meter(p, "meter", size, progress, closed))
 }
 
-/// What you said, shouted word by word and settling into a centred line.
 fn sentence(p: Paint, s: &Onboard, finished: bool) -> El {
     shout(p, "words", s.partial, finished, LINE_FONT, 28.0)
         .w_full()
@@ -304,9 +294,6 @@ fn sentence(p: Paint, s: &Onboard, finished: bool) -> El {
         .px(32.0)
 }
 
-/// Option C. Say anything: the microphone shows Hex hears you from the
-/// start, each word rises in big and settles into a line, and Ready lands
-/// under your first sentence.
 fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
     let parked = s.step >= Step::Parked;
     let top = top_bar().justify_end().child(if parked {

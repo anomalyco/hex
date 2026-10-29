@@ -1,8 +1,7 @@
 //! The onboarding options as playground stories (the `playground`
 //! experiment, ⇧⌘D, group Onboarding). Each plays itself on open and on R,
 //! from a fake host that reports what the real one would: download bytes,
-//! the microphone's meter, and partial transcripts. Variants switch what
-//! the platform can do before the download finishes.
+//! the microphone's meter, and partial transcripts.
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -13,20 +12,16 @@ use super::super::controls::Paint;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
-use super::{flows, typing};
+use super::{flows, permissions, typing};
 
-/// How long the stories' download takes. A real one runs at the
-/// connection's speed; the fixture only keeps the clip short.
 const DOWNLOAD_SECS: f64 = 9.0;
-/// First run's download, long enough to run under the demo and finish
-/// during the permissions; a slow one is still going after them.
-const FIRST_RUN_SECS: f64 = 21.0;
-const SLOW_SECS: f64 = 28.0;
-/// How long the download holds the middle before the demo starts.
-const DOWNLOAD_HOLD: f64 = 2.6;
-/// How long the meter takes to close into the mark once it's full.
+/// First run's download runs behind the slower typing demo (~8.6 s) and
+/// finishes during Permissions (~25 s); a slow download is still going after
+/// Permissions so `"Almost ready"` shows.
+const FIRST_RUN_SECS: f64 = 26.0;
+const SLOW_SECS: f64 = 34.0;
+const DOWNLOAD_HOLD: f64 = 2.8;
 const CLOSE_SECS: f64 = 0.65;
-/// Example replies type a word this often, about a fast speaker's pace.
 const WORD_SECS: f64 = 0.22;
 const EXAMPLE_START: f64 = 0.6;
 const EXAMPLE_GAP: f64 = 0.5;
@@ -35,42 +30,24 @@ const SIDE_W: f32 = 240.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Flow {
-    /// The button becomes the download pill, which parks in the top bar
-    /// while you answer a message, then flies up to say Ready.
     Pill,
-    /// The mark fills in the middle while messages float around it to
-    /// answer.
     Fill,
-    /// Say anything: each word rises in big and settles into a line.
     Shout,
-    /// Answer Jay on the keyboard while the model downloads, then by
-    /// voice, the words flying in as on the site.
     Versus,
-    /// The whole first run: the download in the middle, the Versus demo
-    /// while it runs, the permissions, a wait if it's still going, then
-    /// your turn.
     FirstRun,
 }
 
-/// Where the flow is, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Step {
     Pick,
-    /// The download started where the button was.
     Started,
-    /// The pill moved out of the way; waiting until Hex can hear.
     Parked,
-    /// Hex can hear: hold the shortcut.
     YourTurn,
     Hearing,
     Heard,
-    /// Heard, and the download's done: Continue.
     Done,
-    /// First run: Microphone and Accessibility.
     Permissions,
-    /// First run: waiting on the download, which nothing can hear without.
     Waiting,
-    /// First run: your turn, hold the shortcut and say anything.
     Try,
     TryHearing,
     TryHeard,
@@ -80,33 +57,30 @@ pub(crate) enum Step {
 pub(crate) struct Onboard {
     pub(crate) flow: Flow,
     pub(crate) speech: Speech,
-    /// What the script picks, as a person would press it.
     pub(crate) wants: Language,
     pub(crate) caps: Vec<String>,
+    shortcut_index: usize,
     pub(crate) step: Step,
     pub(crate) language: Option<Language>,
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
-    /// When typing the reply by hand started.
     pub(crate) typing_from: Option<f64>,
     pub(crate) take_from: Option<f64>,
     pub(crate) partial: &'static str,
-    /// What's being said: Jay's answer, then the try's.
     pub(crate) take: &'static Take,
     pub(crate) meter: (f32, f32),
     examples_from: Option<f64>,
     closed_from: Option<f64>,
     pub(crate) closed: f32,
     download_secs: f64,
-    /// First run: the model was already on this Mac.
     pub(crate) had_model: bool,
-    /// First run: both permissions were already granted.
     pub(crate) granted: bool,
-    /// When the permissions step started.
     pub(crate) permissions_from: Option<f64>,
 }
+
+const PRESET_SHORTCUTS: &[&[&str]] = &[&["⌥"], &["fn"], &["⌃", "Space"], &["R⌘"]];
 
 impl Onboard {
     fn new(flow: Flow) -> Self {
@@ -117,6 +91,7 @@ impl Onboard {
             caps: crate::app_settings::AppSettings::default()
                 .dictation_hotkey
                 .keycaps(),
+            shortcut_index: 0,
             step: Step::Pick,
             language: None,
             now: 0.0,
@@ -142,7 +117,6 @@ impl Onboard {
         }
     }
 
-    /// Starts the download for `language`.
     pub(crate) fn pick(&mut self, language: Language) {
         if self.step != Step::Pick {
             return;
@@ -157,34 +131,53 @@ impl Onboard {
         });
     }
 
+    /// Toggles the inline language capsule button (`English` ↔ `French`) on
+    /// `"Setting up Hex"`.
+    pub(crate) fn cycle_language(&mut self) {
+        let next = match self.language.unwrap_or(self.wants) {
+            Language::English => Language::Other,
+            Language::Other => Language::English,
+        };
+        self.wants = next;
+        self.language = Some(next);
+        if let Some(d) = self.download.as_mut() {
+            let ratio = d.fraction();
+            d.language = next;
+            d.total = next.bytes();
+            d.downloaded = (d.total as f64 * f64::from(ratio)).round() as u64;
+        }
+    }
+
+    /// Cycles the shortcut capsule on `"Your turn"` so clicking it previews
+    /// changing the dictation key.
+    pub(crate) fn cycle_shortcut(&mut self) {
+        self.shortcut_index = (self.shortcut_index + 1) % PRESET_SHORTCUTS.len();
+        self.caps = PRESET_SHORTCUTS[self.shortcut_index]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+    }
+
     pub(crate) fn downloaded(&self) -> bool {
         self.download.is_some_and(Download::done)
     }
 
-    /// The meter's peak while Hex is listening.
     pub(crate) fn listening_peak(&self) -> Option<f32> {
         matches!(self.step, Step::Hearing | Step::TryHearing).then_some(self.meter.1)
     }
 
-    /// Whether the demo's "With Hex" half can play: first run's is a
-    /// demonstration, so it never waits on the model.
     pub(crate) fn demo_hears(&self) -> bool {
         self.flow == Flow::FirstRun || self.can_hear()
     }
 
-    /// Whether anything can turn speech into words yet.
     pub(crate) fn can_hear(&self) -> bool {
         self.speech == Speech::Apple || self.downloaded()
     }
 
-    /// Whether words show while you speak: Apple Speech streams, and so
-    /// does the English model once it's down; the multilingual one shows
-    /// the whole reply when you let go.
     pub(crate) fn streams(&self) -> bool {
         self.speech == Speech::Apple || self.language.is_some_and(Language::streams)
     }
 
-    /// The example reply `index` as typed so far, and whether it's done.
     pub(crate) fn example(&self, index: usize) -> (&'static str, bool) {
         let Some(from) = self.examples_from else {
             return ("", false);
@@ -209,7 +202,6 @@ impl Onboard {
     }
 }
 
-/// Adds every option to `playground`.
 pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
     playground
         .story(story("Onboarding/Option · Pill", || {
@@ -227,8 +219,6 @@ pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
         .story(first_run())
 }
 
-/// The first run Kit and Dax agreed on (t405): no language pick, the
-/// download up front, how Hex works while it runs, permissions, then a try.
 fn first_run() -> Story<Onboard> {
     Story::new(
         "Onboarding/First run",
@@ -278,8 +268,6 @@ fn view(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
     flows::view(p, s)
 }
 
-/// Plays the flow from the top: the examples, a pick, the download, an
-/// answer, Ready.
 fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     s.now = play.now();
     s.examples_from = Some(play.now());
@@ -291,8 +279,6 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     play.wake_after(Duration::ZERO);
 }
 
-/// First run starts its download on open, for the Mac's language, unless
-/// the model's already here; then the demo starts.
 fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     s.pick(s.wants);
     if s.had_model {
@@ -303,15 +289,14 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         s.closed = 1.0;
         s.closed_from = None;
         s.step = Step::Parked;
-        s.typing_from = Some(play.now() + 0.6);
-        play.after(0.6 + typing::duration() + 1.0, advance);
+        s.typing_from = Some(play.now() + 0.65);
+        play.after(0.65 + typing::duration() + 1.0, advance);
     } else {
         play.after(DOWNLOAD_HOLD, advance);
     }
     play.wake_after(Duration::ZERO);
 }
 
-/// Moves the flow one step on, or waits where it needs the host.
 fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     const WAIT: f64 = 0.25;
     s.now = play.now();
@@ -330,9 +315,8 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         Step::Started => {
             s.step = Step::Parked;
             if s.flow == Flow::Versus {
-                // Type the reply by hand first.
-                s.typing_from = Some(play.now() + 0.4);
-                Some(0.4 + typing::duration() + 1.0)
+                s.typing_from = Some(play.now() + 0.55);
+                Some(0.55 + typing::duration() + 1.0)
             } else {
                 Some(0.5)
             }
@@ -349,7 +333,6 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         }
         Step::Hearing => {
             s.step = Step::Heard;
-            // Long enough for the last word to land and cool.
             Some(if s.flow == Flow::Versus { 1.6 } else { 1.2 })
         }
         Step::Heard if s.downloaded() => {
@@ -369,14 +352,13 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     play.wake_after(Duration::ZERO);
 }
 
-/// Moves first run one step on at `now`, and how long until the next.
 fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
     const WAIT: f64 = 0.25;
     match s.step {
         Step::Pick | Step::Started => {
             s.step = Step::Parked;
-            s.typing_from = Some(now + 0.5);
-            Some(0.5 + typing::duration() + 1.0)
+            s.typing_from = Some(now + 0.6);
+            Some(0.6 + typing::duration() + 1.0)
         }
         Step::Parked => {
             s.step = Step::YourTurn;
@@ -390,23 +372,22 @@ fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::Hearing => {
             s.step = Step::Heard;
-            Some(1.6)
+            Some(1.5)
         }
         Step::Heard => {
             s.step = Step::Done;
-            Some(1.4)
+            Some(1.3)
         }
         Step::Done if !s.granted => {
             s.step = Step::Permissions;
             s.permissions_from = Some(now);
-            Some(super::first_run::PERMISSIONS_SECS)
+            Some(permissions::PERMISSIONS_SECS)
         }
         Step::Done | Step::Permissions if !s.can_hear() => {
             s.step = Step::Waiting;
             Some(WAIT)
         }
         Step::Waiting if !s.can_hear() => Some(WAIT),
-        // Long enough to see it land before the try.
         Step::Waiting if s.closed < 1.0 => Some(0.9),
         Step::Done | Step::Permissions | Step::Waiting => {
             s.step = Step::Try;
@@ -422,7 +403,7 @@ fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::TryHearing => {
             s.step = Step::TryHeard;
-            Some(2.4)
+            Some(2.2)
         }
         Step::TryHeard => {
             s.step = Step::Ready;
@@ -432,7 +413,6 @@ fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
     }
 }
 
-/// Reads the fake host at `now`: bytes, the meter, the partial transcript.
 fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
     let mut moving = s.examples_from.is_some() && s.step < Step::Ready;
@@ -465,7 +445,6 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             moving |= !done;
         }
         None => {
-            // A quiet room: what an open microphone reads between words.
             let hum = ((now * 9.0).sin() * (now * 4.3).sin()).abs() as f32;
             s.meter = (0.03 + 0.04 * hum, 0.05 + 0.06 * hum);
         }
@@ -481,7 +460,6 @@ fn smooth(u: f32) -> f32 {
     u * u * (3.0 - 2.0 * u)
 }
 
-/// What the story needs from the platform, beside the stage.
 fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let line = |key: &str, copy: &str| {
@@ -510,7 +488,7 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
         .child(line("words", words))
         .child(line(
             "model",
-            "English: Parakeet Unified English, 731 MB, streams. Other: Parakeet v3, 740 MB, whole reply on release.",
+            "English: Parakeet Unified English, 731 MB, streams. French: Parakeet v3, 740 MB, whole reply on release.",
         ))
 }
 

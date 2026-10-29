@@ -1892,6 +1892,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "url",
+ "wayland-client",
  "wgpu",
  "windows 0.62.2",
  "windows-future 0.3.2",

@@ -61,12 +61,6 @@ impl Download {
     pub(crate) fn done(self) -> bool {
         self.downloaded >= self.total
     }
-
-    /// "312 of 731 MB".
-    pub(crate) fn megabytes(self) -> String {
-        let mb = |bytes: u64| (bytes as f64 / 1_000_000.0).round() as u64;
-        format!("{} of {} MB", mb(self.downloaded), mb(self.total))
-    }
 }
 
 /// The bytes a download `elapsed` seconds in has, when the whole takes

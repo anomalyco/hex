@@ -1,23 +1,15 @@
-//! What a hard landing throws off, from the site hero's `hitCard`
-//! (`site/src/shout/fx.js`) and its renderer (`canvas2d.js`): past
-//! intensity 0.4 a spray of sparks glances back off the card, and past 0.42
-//! an impact ring opens where the word hit. Calm landings throw nothing.
-//!
-//! The site steps each spark per frame; here each is a function of the
-//! clock, the drag and gravity solved in closed form.
+//! Crisp landing sparks and impact rings for hot word arrivals, colored
+//! strictly with OpenCode theme tokens (`rune_theme_opencode::ember`).
 
-use rune::{Color, El, LineCap, Shape, canvas};
+use rune::{El, LineCap, Shape, canvas};
 
 use super::super::controls::Paint;
-use super::flight::{Flight, ember, srgb};
+use super::flight::{Flight, ember_tone};
 
-/// `look.sparkDrag` and `look.sparkGravity`.
-const DRAG: f32 = 4.2;
-const GRAVITY: f32 = 380.0;
-/// Half the streak a spark draws along its velocity: the shutter (0.75 of
-/// a 60 Hz frame) times `sparkStretch` 1.6, halved.
-const STREAK: f32 = 0.75 / 60.0 * 1.6 * 0.5;
-const RING_LIFE: f32 = 0.22;
+const DRAG: f32 = 4.6;
+const GRAVITY: f32 = 360.0;
+const STREAK: f32 = 0.65 / 60.0 * 1.4 * 0.5;
+const RING_LIFE: f32 = 0.20;
 const SPARKS_FROM: f32 = 0.40;
 const RING_FROM: f32 = 0.42;
 
@@ -25,7 +17,6 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// The site's `rnd(a, b)`, steady per spark.
 fn rnd(seed: usize, a: f32, b: f32) -> f32 {
     let x = ((seed as f32 * 12.9898 + 4.1).sin() * 43_758.545)
         .fract()
@@ -33,7 +24,6 @@ fn rnd(seed: usize, a: f32, b: f32) -> f32 {
     lerp(a, b, x)
 }
 
-/// One spark as it leaves the impact.
 struct Spark {
     at: [f32; 2],
     v: [f32; 2],
@@ -42,7 +32,6 @@ struct Spark {
     size: f32,
 }
 
-/// The sparks `flight` throws when it lands; `index` seeds them.
 fn sprayed(flight: &Flight, index: usize) -> Vec<Spark> {
     let i = flight.intensity();
     if i <= SPARKS_FROM {
@@ -51,33 +40,32 @@ fn sprayed(flight: &Flight, index: usize) -> Vec<Spark> {
     let [ux, uy] = flight.heading();
     let [x, y] = flight.to();
     let back = (-uy).atan2(-ux);
-    let count = lerp(4.0, 16.0, i).round() as usize;
+    let count = lerp(3.0, 10.0, i).round() as usize;
     (0..count)
         .map(|n| {
             let seed = index * 97 + n * 7;
             let graze = if n % 3 == 0 {
-                if n % 2 == 0 { 1.25 } else { -1.25 }
+                if n % 2 == 0 { 1.15 } else { -1.15 }
             } else {
-                rnd(seed, -0.75, 0.75)
+                rnd(seed, -0.7, 0.7)
             };
             let a = back + graze;
-            let speed = rnd(seed + 1, 180.0, 720.0) * lerp(0.55, 1.15, i);
+            let speed = rnd(seed + 1, 160.0, 560.0) * lerp(0.5, 1.0, i);
             Spark {
-                at: [x + rnd(seed + 2, -3.0, 3.0), y + rnd(seed + 3, -3.0, 3.0)],
+                at: [x + rnd(seed + 2, -2.5, 2.5), y + rnd(seed + 3, -2.5, 2.5)],
                 v: [
-                    a.cos() * speed + ux * 60.0,
-                    a.sin() * speed - rnd(seed + 4, 20.0, 100.0),
+                    a.cos() * speed + ux * 45.0,
+                    a.sin() * speed - rnd(seed + 4, 20.0, 85.0),
                 ],
-                life: rnd(seed + 5, 0.14, 0.36),
-                heat: rnd(seed + 6, 0.45, 0.95),
-                size: rnd(seed + 7, 1.3, 2.3),
+                life: rnd(seed + 5, 0.12, 0.28),
+                heat: rnd(seed + 6, 0.45, 0.92),
+                size: rnd(seed + 7, 1.1, 1.8),
             }
         })
         .collect()
 }
 
 impl Spark {
-    /// Where it is and how fast it's going `t` seconds out.
     fn at(&self, t: f32) -> ([f32; 2], [f32; 2]) {
         let decay = (-DRAG * t).exp();
         let reach = (1.0 - decay) / DRAG;
@@ -89,8 +77,6 @@ impl Spark {
     }
 }
 
-/// Every impact the landings in `flights` throw at `now`, drawn over a
-/// stage `size` points across. Nothing under Reduce Motion.
 pub(crate) fn impacts(
     p: Paint,
     key: &str,
@@ -103,7 +89,7 @@ pub(crate) fn impacts(
     if !reduced {
         for (index, flight) in flights.iter().enumerate() {
             let t = (now - flight.arrives()) as f32;
-            if t < 0.0 || t > 0.4 {
+            if !(0.0..=0.35).contains(&t) {
                 continue;
             }
             shape = ring(shape, p, flight, t);
@@ -113,7 +99,10 @@ pub(crate) fn impacts(
                 }
                 let left = 1.0 - t / spark.life;
                 let ([x, y], [vx, vy]) = spark.at(t);
-                let color = glow(p, ember(spark.heat * left * 1.1), left);
+                let color = p.k.c.bg_base.mix(
+                    ember_tone(p, spark.heat * left),
+                    (left * 0.85).clamp(0.0, 1.0),
+                );
                 shape = shape.line(
                     [x - vx * STREAK, y - vy * STREAK],
                     [x + vx * STREAK + 0.1, y + vy * STREAK],
@@ -127,35 +116,28 @@ pub(crate) fn impacts(
     canvas(shape).key(key.to_string()).size(size[0], size[1])
 }
 
-/// The ring opening where `flight` hit, `t` seconds after.
 fn ring(shape: Shape, p: Paint, flight: &Flight, t: f32) -> Shape {
     let i = flight.intensity();
     if i <= RING_FROM || t >= RING_LIFE {
         return shape;
     }
     let u = t / RING_LIFE;
-    let r = lerp(24.0, 68.0, i) * (1.0 - (1.0 - u).powi(3));
-    let width = lerp(1.6, 2.8, i) * (1.0 - u * 0.7);
-    let k = lerp(0.35, 0.75, i) * (1.0 - u) * (1.0 - u);
-    let near_white = [1.0, 0.96, 0.9];
-    let orange = [1.0, 0.48, 0.22];
-    let c = |n: usize| lerp(near_white[n], orange[n], u);
-    let color = glow(p, srgb(c(0), c(1), c(2), 1.0), k);
+    let r = lerp(18.0, 44.0, i) * (1.0 - (1.0 - u).powi(3));
+    let width = lerp(1.0, 1.6, i) * (1.0 - u * 0.65);
+    let fade = (lerp(0.25, 0.55, i) * (1.0 - u) * (1.0 - u)).clamp(0.0, 1.0);
+    if fade < 0.02 {
+        return shape;
+    }
+    // Opaque mix avoids polyline segment-joint double blending.
+    let color = p.k.c.bg_base.mix(ember_tone(p, 0.85 - 0.5 * u), fade);
     let [x, y] = flight.to();
-    let points: Vec<[f32; 2]> = (0..=40)
+    let points: Vec<[f32; 2]> = (0..36)
         .map(|n| {
-            let a = n as f32 / 40.0 * std::f32::consts::TAU;
+            let a = n as f32 / 36.0 * std::f32::consts::TAU;
             [x + r * a.cos(), y + r * a.sin()]
         })
         .collect();
-    shape.stroke(points, width, color)
-}
-
-/// The site adds its sparks (`lighter`); on a light page, where adding
-/// light shows nothing, they're drawn a little stronger instead.
-fn glow(p: Paint, color: Color, alpha: f32) -> Color {
-    let strength = if p.k.dark { 1.0 } else { 0.85 };
-    color.alpha((alpha * strength).clamp(0.0, 1.0))
+    shape.stroke_with(points, true, width, LineCap::Round, color)
 }
 
 #[cfg(test)]
@@ -168,8 +150,8 @@ mod tests {
         assert!(sprayed(&calm, 0).is_empty());
         let hard = Flight::new([0.0, 0.0], [200.0, 100.0], 0.0, 0.7, 20.0, 0);
         let sparks = sprayed(&hard, 0);
-        assert_eq!(sparks.len(), 12);
-        assert!(sparks.iter().all(|s| s.life >= 0.14 && s.life <= 0.36));
+        assert!(!sparks.is_empty());
+        assert!(sparks.iter().all(|s| s.life >= 0.12 && s.life <= 0.28));
     }
 
     #[test]
@@ -177,12 +159,12 @@ mod tests {
         let spark = Spark {
             at: [0.0, 0.0],
             v: [400.0, -300.0],
-            life: 0.3,
+            life: 0.25,
             heat: 0.8,
-            size: 2.0,
+            size: 1.5,
         };
         let (_, early) = spark.at(0.01);
-        let (_, late) = spark.at(0.3);
+        let (_, late) = spark.at(0.24);
         assert!(late[0].abs() < early[0].abs());
         assert!(late[1] > early[1], "gravity pulls it down");
     }

@@ -1,199 +1,347 @@
-//! The Hex mark as a progress meter: the core fills first, then the inner
-//! ring's six bars, then the outer ring's, each bar sweeping clockwise. When
-//! the download finishes, the gaps between bars close and the meter becomes
-//! the mark itself.
+//! The Hex mark: a thin single-hexagon outline matching Round 3 of the icon
+//! (`t573`, Hairline), built from one swappable [`HexGlyphSpec`] so trying
+//! Soft nut or Flat top later changes a single constant.
+//!
+//! As a loader ([`hex_loader`]), the single outline traces clockwise from its
+//! top apex while a delicate braided calibration wave tunes inside it, with no
+//! heavy glow. At small sizes ([`hex_meter`]), it draws the clean perimeter
+//! sweep alone so 16–20 pt marks stay razor-sharp.
 
-use rune::{Color, El, Shape, canvas};
+use rune::{El, LineCap, Shape, canvas};
 
 use super::super::controls::Paint;
 
-/// The geometry's half extent: points run from -`HALF` to `HALF`.
-const HALF: f32 = 62.0;
-const CORE: f32 = 16.0;
-const RINGS: [f32; 2] = [31.0, 50.0];
-const BAR: f32 = 11.0;
-/// The gap between neighbouring bars while the meter is open.
-const GAP: f32 = 6.0;
-/// The core's share of the whole download.
-const CORE_SHARE: f32 = 0.12;
-
 type Point = [f32; 2];
 
-/// One piece of the mark and the slice of progress it fills over.
-struct Part {
-    points: Vec<Point>,
-    /// The direction it fills along.
-    toward: Point,
-    from: f32,
-    to: f32,
+/// One candidate Hex ring in canonical `[-1, 1]` coordinates, starting at the
+/// top where progress begins and running clockwise.
+#[derive(Clone, Copy)]
+pub(crate) struct HexGlyphSpec {
+    pub(crate) vertices: [Point; 6],
+    /// Stroke width at 16 pt, and its ceiling at display sizes.
+    pub(crate) stroke_16: f32,
+    pub(crate) stroke_max: f32,
+    /// Corner rounding in canonical units (`0.0` keeps crisp hairline corners).
+    pub(crate) corner_radius: f32,
 }
 
-impl Part {
-    fn fill(&self, progress: f32) -> f32 {
-        ((progress - self.from) / (self.to - self.from)).clamp(0.0, 1.0)
+/// Pointy-top hairline hexagon (`t573` option 1 · Hairline): `(8,0)-(15,4)-(15,12)-(8,16)-(1,12)-(1,4)`.
+pub(crate) const HAIRLINE: HexGlyphSpec = HexGlyphSpec {
+    vertices: [
+        [0.0, -0.88],
+        [0.7621, -0.44],
+        [0.7621, 0.44],
+        [0.0, 0.88],
+        [-0.7621, 0.44],
+        [-0.7621, -0.44],
+    ],
+    stroke_16: 1.2,
+    stroke_max: 2.2,
+    corner_radius: 0.0,
+};
+
+/// Pointy-top rounded ring (`t573` option 2 · Soft nut), kept beside
+/// [`HAIRLINE`] so swapping the onboarding mark is a one-line change.
+#[allow(dead_code)]
+pub(crate) const SOFT_NUT: HexGlyphSpec = HexGlyphSpec {
+    vertices: HAIRLINE.vertices,
+    stroke_16: 1.5,
+    stroke_max: 2.8,
+    corner_radius: 0.14,
+};
+
+/// Flat-top hexagon (`t573` option 3 · Flat top).
+#[allow(dead_code)]
+pub(crate) const FLAT_TOP: HexGlyphSpec = HexGlyphSpec {
+    vertices: [
+        [-0.44, -0.7621],
+        [0.44, -0.7621],
+        [0.88, 0.0],
+        [0.44, 0.7621],
+        [-0.44, 0.7621],
+        [-0.88, 0.0],
+    ],
+    stroke_16: 1.35,
+    stroke_max: 2.4,
+    corner_radius: 0.06,
+};
+
+/// The active onboarding mark across every screen, pill, and icon.
+pub(crate) const ACTIVE_GLYPH: HexGlyphSpec = HAIRLINE;
+
+impl HexGlyphSpec {
+    pub(crate) fn stroke_width(self, size: f32) -> f32 {
+        let t = ((size - 16.0) / 108.0).clamp(0.0, 1.0);
+        self.stroke_16 + (self.stroke_max - self.stroke_16) * t
     }
-}
 
-fn corners(radius: f32) -> [Point; 6] {
-    std::array::from_fn(|k| {
-        let angle = (-90.0 + 60.0 * k as f32).to_radians();
-        [radius * angle.cos(), radius * angle.sin()]
-    })
-}
-
-/// Every part, in the order it fills, with the gaps `gap` wide.
-fn parts(gap: f32) -> Vec<Part> {
-    let mut parts = vec![Part {
-        points: corners(CORE).to_vec(),
-        toward: [0.0, -1.0],
-        from: 0.0,
-        to: CORE_SHARE,
-    }];
-    let inner = (1.0 - CORE_SHARE) * RINGS[0] / (RINGS[0] + RINGS[1]);
-    let shares = [
-        (CORE_SHARE, inner),
-        (CORE_SHARE + inner, 1.0 - CORE_SHARE - inner),
-    ];
-    let half = BAR / 2.0 / (std::f32::consts::PI / 6.0).cos();
-    for (ring, (start, share)) in RINGS.into_iter().zip(shares) {
-        let (outer, inner) = (corners(ring + half), corners(ring - half));
-        for k in 0..6 {
-            let j = (k + 1) % 6;
-            let (dx, dy) = (outer[j][0] - outer[k][0], outer[j][1] - outer[k][1]);
-            let length = dx.hypot(dy);
-            let toward = [dx / length, dy / length];
-            let nudge = |p: Point, sign: f32| {
-                [
-                    p[0] + toward[0] * gap / 2.0 * sign,
-                    p[1] + toward[1] * gap / 2.0 * sign,
-                ]
-            };
-            parts.push(Part {
-                points: vec![
-                    nudge(outer[k], 1.0),
-                    nudge(outer[j], -1.0),
-                    nudge(inner[j], -1.0),
-                    nudge(inner[k], 1.0),
-                ],
-                toward,
-                from: start + share / 6.0 * k as f32,
-                to: start + share / 6.0 * (k + 1) as f32,
-            });
+    /// Closed perimeter points in `[0..size, 0..size]`, scaled by `scale`
+    /// around the centre (the last point repeats the first for partial sweeps).
+    pub(crate) fn poly(self, size: f32, scale: f32) -> Vec<Point> {
+        let half = size * 0.5;
+        let map = |[x, y]: Point| [half + x * half * scale, half + y * half * scale];
+        let v = self.vertices;
+        if self.corner_radius <= 0.001 {
+            let mut pts: Vec<Point> = v.into_iter().map(map).collect();
+            pts.push(pts[0]);
+            return pts;
         }
+        let r = self.corner_radius.min(0.35);
+        let mut pts = Vec::with_capacity(32);
+        for i in 0..6 {
+            let prev = v[(i + 5) % 6];
+            let curr = v[i];
+            let next = v[(i + 1) % 6];
+            let to_prev = [prev[0] - curr[0], prev[1] - curr[1]];
+            let to_next = [next[0] - curr[0], next[1] - curr[1]];
+            let lp = to_prev[0].hypot(to_prev[1]).max(1e-4);
+            let ln = to_next[0].hypot(to_next[1]).max(1e-4);
+            let a = [curr[0] + to_prev[0] / lp * r, curr[1] + to_prev[1] / lp * r];
+            let b = [curr[0] + to_next[0] / ln * r, curr[1] + to_next[1] / ln * r];
+            for step in 0..=4 {
+                let u = step as f32 / 4.0;
+                let inv = 1.0 - u;
+                let p = [
+                    inv * inv * a[0] + 2.0 * inv * u * curr[0] + u * u * b[0],
+                    inv * inv * a[1] + 2.0 * inv * u * curr[1] + u * u * b[1],
+                ];
+                pts.push(map(p));
+            }
+        }
+        pts.push(pts[0]);
+        pts
     }
-    parts
 }
 
-/// The part of `points` behind a line across `toward`, `fraction` of the
-/// way along it.
-fn cut(points: &[Point], toward: Point, fraction: f32) -> Vec<Point> {
-    let along: Vec<f32> = points
-        .iter()
-        .map(|p| p[0] * toward[0] + p[1] * toward[1])
+/// Prefix of a closed polyline `poly` covering `fraction` (`0..=1`) of its
+/// arc length, plus its tip point.
+fn sweep_poly(poly: &[Point], fraction: f32) -> (Vec<Point>, Option<Point>) {
+    let f = fraction.clamp(0.0, 1.0);
+    if f <= 0.0 || poly.len() < 2 {
+        return (Vec::new(), None);
+    }
+    if f >= 1.0 {
+        let mut closed = poly.to_vec();
+        closed.pop();
+        return (closed, None);
+    }
+    let segs: Vec<f32> = poly
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]))
         .collect();
-    let (low, high) = along
-        .iter()
-        .fold((f32::MAX, f32::MIN), |(lo, hi), &s| (lo.min(s), hi.max(s)));
-    let line = low + (high - low) * fraction;
-    let mut out = Vec::with_capacity(points.len() + 2);
-    for i in 0..points.len() {
-        let j = (i + 1) % points.len();
-        let (a, b) = (points[i], points[j]);
-        if along[i] <= line {
-            out.push(a);
+    let total: f32 = segs.iter().sum();
+    let target = total * f;
+    let mut acc = 0.0;
+    let mut out = vec![poly[0]];
+    for (i, &len) in segs.iter().enumerate() {
+        if acc + len >= target {
+            let u = if len > 1e-5 {
+                ((target - acc) / len).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let a = poly[i];
+            let b = poly[i + 1];
+            let tip = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+            out.push(tip);
+            return (out, Some(tip));
         }
-        if (along[i] <= line) != (along[j] <= line) {
-            let u = (line - along[i]) / (along[j] - along[i]);
-            out.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]);
-        }
+        acc += len;
+        out.push(poly[i + 1]);
     }
-    out
+    let last = *out.last().unwrap_or(&poly[0]);
+    (out, Some(last))
 }
 
-fn shifted(points: Vec<Point>) -> Vec<Point> {
-    points
-        .into_iter()
-        .map(|[x, y]| [x + HALF, y + HALF])
+/// Regular polygon approximation of a small crisp disc, drawn as a filled
+/// polygon so translucent strokes never double-blend.
+pub(crate) fn disc_points(centre: Point, radius: f32) -> Vec<Point> {
+    (0..16)
+        .map(|i| {
+            let a = i as f32 / 16.0 * std::f32::consts::TAU;
+            [centre[0] + radius * a.cos(), centre[1] + radius * a.sin()]
+        })
         .collect()
 }
 
-/// The meter `size` points square at `progress` (0 to 1). `closed` (0 to
-/// 1) narrows the gaps until the bars join into whole rings.
-pub(crate) fn hex_meter(p: Paint, key: &str, size: f32, progress: f32, closed: f32) -> El {
-    let base = p.k.c.border_base;
-    let lit = p.text();
-    canvas(shape(base, lit, progress, closed))
-        .key(key)
-        .size(size, size)
-        .label(format!("{}%", (progress * 100.0).round()))
+/// Interior acoustic wave (`t573` `glyphs.py` `wave` / `braid`), mapped to
+/// `[0..size, 0..size]`.
+pub(crate) fn wave_pts(size: f32, amp: f32, phase: f32, sign: f32, taper: bool) -> Vec<Point> {
+    const STEPS: usize = 44;
+    let x0 = size * 0.28;
+    let x1 = size * 0.72;
+    let mid_y = size * 0.5;
+    let max_a = size * 0.125 * amp;
+    (0..=STEPS)
+        .map(|i| {
+            let u = i as f32 / STEPS as f32;
+            let env = if taper {
+                (std::f32::consts::PI * u).sin().powf(0.9)
+            } else {
+                1.0
+            };
+            let x = x0 + (x1 - x0) * u;
+            let y = mid_y - sign * max_a * env * (std::f32::consts::TAU * u + phase).sin();
+            [x, y]
+        })
+        .collect()
 }
 
-fn shape(base: Color, lit: Color, progress: f32, closed: f32) -> Shape {
-    let gap = GAP * (1.0 - closed.clamp(0.0, 1.0));
-    let mut shape = Shape::new().view_box(2.0 * HALF, 2.0 * HALF);
-    for part in parts(gap) {
-        let fill = part.fill(progress);
-        if fill < 1.0 {
-            shape = shape.fill(shifted(part.points.clone()), base);
-        }
-        if fill > 0.0 {
-            let points = if fill >= 1.0 {
-                part.points
-            } else {
-                cut(&part.points, part.toward, fill)
-            };
-            if points.len() >= 3 {
-                shape = shape.fill(shifted(points), lit);
-            }
+/// Draws the thin single-hexagon mark or compact progress ring at `size`.
+pub(crate) fn hex_meter(p: Paint, key: &str, size: f32, progress: f32, closed: f32) -> El {
+    canvas(meter_shape(p, size, progress, closed))
+        .key(key)
+        .size(size, size)
+        .label(format!("{}%", (progress.clamp(0.0, 1.0) * 100.0).round()))
+}
+
+fn meter_shape(p: Paint, size: f32, progress: f32, closed: f32) -> Shape {
+    let spec = ACTIVE_GLYPH;
+    let w = spec.stroke_width(size);
+    let poly = spec.poly(size, 1.0);
+    let mut ring = poly.clone();
+    ring.pop();
+
+    let progress = progress.clamp(0.0, 1.0);
+    let closed = closed.clamp(0.0, 1.0);
+    // Opaque colours prevent joint overdraw on multi-segment polylines.
+    let track = p.k.c.bg_deep.mix(p.k.c.border_base, 0.9);
+    let lit = p.text();
+
+    let mut shape = Shape::new();
+    if progress < 1.0 {
+        shape = shape.stroke_with(ring.clone(), true, w, LineCap::Round, track);
+    }
+    if progress >= 1.0 && closed >= 1.0 {
+        shape = shape.stroke_with(ring, true, w, LineCap::Round, lit);
+    } else if progress > 0.002 {
+        let (arc, tip) = sweep_poly(&poly, progress);
+        let closed_loop = progress >= 1.0;
+        shape = shape.stroke_with(arc, closed_loop, w, LineCap::Round, lit);
+        if let Some(pt) = tip.filter(|_| size >= 36.0) {
+            shape = shape.fill(disc_points(pt, w * 1.15), lit);
         }
     }
     shape
+}
+
+/// The centerpiece loader on `"Setting up Hex"` and `"Almost ready"`: the
+/// thin single-hexagon outline sweeping clockwise around a delicate braided
+/// calibration wave that tunes into phase as the model arrives.
+pub(crate) fn hex_loader(
+    p: Paint,
+    key: &str,
+    size: f32,
+    progress: f32,
+    closed: f32,
+    now: f64,
+    reduced: bool,
+) -> El {
+    let spec = ACTIVE_GLYPH;
+    let w = spec.stroke_width(size);
+    let progress = progress.clamp(0.0, 1.0);
+    let closed = closed.clamp(0.0, 1.0);
+    let open = 1.0 - closed;
+    let bg = p.k.c.bg_deep;
+
+    let mut shape = Shape::new();
+
+    // Subtle inner geometric echo hexagon + 6 precision corner ticks while downloading.
+    if open > 0.01 {
+        let echo_scale = 0.76 + 0.24 * closed;
+        let mut echo = spec.poly(size, echo_scale);
+        echo.pop();
+        let echo_ink = bg.mix(p.k.c.border_weak, 0.55 * open);
+        shape = shape.stroke_with(echo, true, 1.0, LineCap::Round, echo_ink);
+
+        let half = size * 0.5;
+        let tick_ink = bg.mix(p.k.c.border_base, 0.75 * open);
+        for v in spec.vertices {
+            let r0 = 0.88 - 0.07 * open;
+            let r1 = 0.88 - 0.02 * open;
+            shape = shape.line(
+                [
+                    half + v[0] * half * (r0 / 0.88),
+                    half + v[1] * half * (r0 / 0.88),
+                ],
+                [
+                    half + v[0] * half * (r1 / 0.88),
+                    half + v[1] * half * (r1 / 0.88),
+                ],
+                1.0,
+                LineCap::Round,
+                tick_ink,
+            );
+        }
+    }
+
+    // Outer perimeter track and clockwise active stroke.
+    let poly = spec.poly(size, 1.0);
+    let mut ring = poly.clone();
+    ring.pop();
+    let track = bg.mix(p.k.c.border_base, 0.85);
+    let lit = p.text();
+
+    if progress < 1.0 {
+        shape = shape.stroke_with(ring.clone(), true, w, LineCap::Round, track);
+    }
+    if progress >= 1.0 {
+        shape = shape.stroke_with(ring, true, w, LineCap::Round, lit);
+    } else if progress > 0.002 {
+        let (arc, tip) = sweep_poly(&poly, progress);
+        shape = shape.stroke_with(arc, false, w, LineCap::Round, lit);
+        if let Some(pt) = tip {
+            shape = shape.fill(disc_points(pt, w * 1.35), lit);
+        }
+    }
+
+    // Interior calibration wave: wakes from a flat horizon as bytes arrive,
+    // then settles into a calm, balanced wave trace when Ready.
+    let phase = if reduced { 0.35 } else { -(now as f32) * 2.4 };
+    let amp = (0.14 + 0.72 * progress) * (1.0 - 0.38 * closed);
+    let primary_ink = bg.mix(p.text(), 0.35 + 0.55 * progress);
+    let secondary_ink = bg.mix(p.muted(), (0.28 + 0.36 * progress) * open);
+    if open > 0.04 {
+        shape = shape.stroke(
+            wave_pts(size, amp * 0.82, phase + 0.9, -1.0, true),
+            1.25,
+            secondary_ink,
+        );
+    }
+    shape = shape.stroke(wave_pts(size, amp, phase, 1.0, true), 1.5, primary_ink);
+
+    canvas(shape)
+        .key(key)
+        .size(size, size)
+        .label(format!("{}%", (progress * 100.0).round()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fills(progress: f32) -> Vec<f32> {
-        parts(GAP).iter().map(|part| part.fill(progress)).collect()
+    #[test]
+    fn sweep_covers_none_half_and_all_of_the_hexagon() {
+        let poly = ACTIVE_GLYPH.poly(100.0, 1.0);
+        assert!(sweep_poly(&poly, 0.0).0.is_empty());
+
+        let (half, tip) = sweep_poly(&poly, 0.5);
+        assert!(half.len() >= 4);
+        let end = tip.expect("an unfinished sweep reports its leading tip");
+        // Halfway clockwise from the top apex lands at the bottom apex.
+        assert!((end[0] - 50.0).abs() < 0.5, "{end:?}");
+        assert!(end[1] > 90.0, "{end:?}");
+
+        let (full, tip_done) = sweep_poly(&poly, 1.0);
+        assert_eq!(full.len(), 6);
+        assert!(tip_done.is_none());
     }
 
     #[test]
-    fn the_core_then_the_inner_ring_then_the_outer_ring_fill() {
-        let early = fills(CORE_SHARE / 2.0);
-        assert!(early[0] > 0.0 && early[0] < 1.0);
-        assert!(early[1..].iter().all(|f| *f == 0.0));
-
-        let middle = fills(0.4);
-        assert_eq!(middle[0], 1.0);
-        assert!(middle[1..7].iter().any(|f| *f > 0.0));
-        assert!(middle[7..].iter().all(|f| *f == 0.0));
-
-        assert!(fills(1.0).iter().all(|f| *f == 1.0));
-        assert!(fills(0.0).iter().all(|f| *f == 0.0));
-    }
-
-    #[test]
-    fn the_parts_cover_the_whole_download_without_overlap() {
-        let parts = parts(GAP);
-        assert_eq!(parts.len(), 13);
-        assert_eq!(parts[0].from, 0.0);
-        for pair in parts.windows(2) {
-            assert!((pair[0].to - pair[1].from).abs() < 1e-5);
-        }
-        assert!((parts.last().unwrap().to - 1.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn a_half_filled_bar_is_cut_across_its_length() {
-        let bar = &parts(GAP)[1];
-        let half = cut(&bar.points, bar.toward, 0.5);
-        assert!(half.len() >= 3);
-        let along = |p: &Point| p[0] * bar.toward[0] + p[1] * bar.toward[1];
-        let full: Vec<f32> = bar.points.iter().map(along).collect();
-        let mid = (full.iter().cloned().fold(f32::MAX, f32::min)
-            + full.iter().cloned().fold(f32::MIN, f32::max))
-            / 2.0;
-        assert!(half.iter().all(|p| along(p) <= mid + 1e-3));
+    fn stroke_stays_thin_from_menu_bar_to_hero() {
+        let small = ACTIVE_GLYPH.stroke_width(16.0);
+        let large = ACTIVE_GLYPH.stroke_width(124.0);
+        assert!((1.1..=1.4).contains(&small), "{small}");
+        assert!((2.0..=2.4).contains(&large), "{large}");
     }
 }

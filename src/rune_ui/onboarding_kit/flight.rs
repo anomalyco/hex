@@ -1,39 +1,24 @@
-//! The site hero's word flight (`site/src/shout/main.js`, `launch`,
-//! `updateWords`, `settleWord`, `updateLanding`), ported number for number:
-//! a word leaves the mouth small, arcs out on a bent quadratic path, grows
-//! then shrinks into its typeset slot with a few points of overshoot,
-//! hands off to the typeset word over 0.12 s, and cools from hot.
-//!
-//! The site steps each word per frame; here every pose is a function of
-//! the clock, so a frame can be drawn from any time. Drawing follows the
-//! site's WebGPU renderer (`gpu.js`), the one its hero runs: ten copies
-//! smeared along the velocity over the shutter, under an ember glow of two
-//! blurred copies, since Rune text has no shadow.
+//! The site hero's word flight (`site/src/shout/main.js`), adapted to OpenCode
+//! theme tokens (`rune_theme_opencode::ember`) with crisp, restrained landing
+//! sheen so typeset words read cleanly without muddy glow.
 
 use rune::{Anim, Color, El, Spring, TextStyle, el, text};
 
 use super::super::controls::Paint;
 
 /// How long the flying word and its typeset self cross-fade.
-pub(crate) const HANDOFF: f64 = 0.12;
-/// The WebGPU renderer's shutter, 0.85 of a 60 Hz frame.
-const SHUTTER: f32 = 0.85 / 60.0;
-/// The WebGPU renderer's ten samples along the velocity.
+pub(crate) const HANDOFF: f64 = 0.11;
+/// Shutter smear across 10 velocity samples.
+const SHUTTER: f32 = 0.72 / 60.0;
 const TAPS: usize = 10;
-/// The glow layers' strength in the word atlas's green channel, 170 / 255.
-const GLOW_INK: f32 = 0.667;
-/// The caret's glide, `1 - exp(-dt * 45)` per frame.
+const GLOW_INK: f32 = 0.42;
 const CARET_RATE: f64 = 45.0;
-/// A calm landing nudges the card: 18 pt/s into a spring of 7 Hz, ζ 0.4.
-const NUDGE: f32 = 18.0;
+const NUDGE: f32 = 14.0;
 const NUDGE_HZ: f32 = 7.0;
-const NUDGE_ZETA: f32 = 0.4;
-/// Any other card springs back at 9.2 Hz, ζ 0.72.
-const HIT_HZ: f32 = 9.2;
-const HIT_ZETA: f32 = 0.72;
-/// The velocity a word starts with, before it has a previous frame.
-const LAUNCH_SPEED: f32 = 1000.0;
-/// Velocity and the angle it sets come from frame to frame.
+const NUDGE_ZETA: f32 = 0.55;
+const HIT_HZ: f32 = 8.5;
+const HIT_ZETA: f32 = 0.52;
+const LAUNCH_SPEED: f32 = 920.0;
 const FRAME: f64 = 1.0 / 60.0;
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -45,7 +30,6 @@ fn smooth(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The site's seeded `rnd(a, b)`, steady per word.
 fn rnd(seed: usize, a: f32, b: f32) -> f32 {
     let x = ((seed as f32 * 78.233 + 1.7).sin() * 43_758.545)
         .fract()
@@ -53,33 +37,26 @@ fn rnd(seed: usize, a: f32, b: f32) -> f32 {
     lerp(a, b, x)
 }
 
-/// One word's flight from `from` to its slot centre `to`, launched at
-/// `start` at intensity `i` (0 calm to 1 furious; the hero opens calm,
-/// under 0.22). `index` alternates the side it fans out on.
+/// One word's flight from `from` to its slot centre `to`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Flight {
     from: [f32; 2],
     to: [f32; 2],
     start: f64,
     i: f32,
-    /// The sprite's size, `lerp(17, 66, i^1.2)`.
     size: f32,
-    /// The typeset size it shrinks to.
     land: f32,
     bend: f32,
     dur: f64,
     back: f32,
 }
 
-/// Where a flying word is drawn this frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Pose {
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) vx: f32,
     pub(crate) vy: f32,
-    /// The size it's drawn at, and the size its text is set at before
-    /// scaling, as the site scales one sprite per word.
     pub(crate) size: f32,
     pub(crate) sprite: f32,
     pub(crate) angle: f32,
@@ -87,8 +64,6 @@ pub(crate) struct Pose {
     pub(crate) alpha: f32,
 }
 
-/// A landed word's typeset self: `fade` in from the handoff, `heat`
-/// cooling from 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Landed {
     pub(crate) fade: f32,
@@ -104,20 +79,19 @@ impl Flight {
         land: f32,
         index: usize,
     ) -> Self {
-        // `fanSide` starts at 1 and flips before each launch.
         let side = if index.is_multiple_of(2) { -1.0 } else { 1.0 };
-        let from = [from[0], from[1] + 4.0];
+        let from = [from[0], from[1] + 2.0];
         let dist = (to[0] - from[0]).hypot(to[1] - from[1]);
         Self {
             from,
             to,
             start,
             i,
-            size: lerp(17.0, 66.0, i.powf(1.2)),
+            size: lerp(16.0, 52.0, i.powf(1.2)),
             land,
-            bend: side * lerp(0.12, 0.3, i) * rnd(index, 0.5, 1.0),
-            dur: f64::from((dist / lerp(800.0, 2600.0, i)).clamp(0.16, 0.9) * 1.25),
-            back: (27.0 * lerp(2.0, 4.0, i) / (4.0 * dist.max(60.0))).cbrt(),
+            bend: side * lerp(0.10, 0.24, i) * rnd(index, 0.55, 1.0),
+            dur: f64::from((dist / lerp(760.0, 2200.0, i)).clamp(0.18, 0.85) * 1.2),
+            back: (22.0 * lerp(1.6, 3.2, i) / (4.0 * dist.max(60.0))).cbrt(),
         }
     }
 
@@ -125,21 +99,19 @@ impl Flight {
         self.start
     }
 
-    /// When it reaches its slot.
     pub(crate) fn arrives(&self) -> f64 {
         self.start + self.dur
-    }
-
-    /// Where it lands.
-    pub(crate) fn to(&self) -> [f32; 2] {
-        self.to
     }
 
     pub(crate) fn intensity(&self) -> f32 {
         self.i
     }
 
-    /// The direction it's heading as it lands, a unit vector.
+    pub(crate) fn to(&self) -> [f32; 2] {
+        self.to
+    }
+
+    /// Unit direction of arrival at the slot.
     pub(crate) fn heading(&self) -> [f32; 2] {
         let [x0, y0] = self.point(self.dur - FRAME);
         let [x1, y1] = self.to;
@@ -148,7 +120,6 @@ impl Flight {
         [dx / d, dy / d]
     }
 
-    /// Ease-out-back: no speed at arrival, a few points past it first.
     fn ease(&self, u: f32) -> f32 {
         let x1 = 1.0 - u;
         1.0 - (self.back + 1.0) * x1 * x1 * x1 + self.back * x1 * x1
@@ -179,8 +150,6 @@ impl Flight {
         [(x1 - x0) / FRAME as f32, (y1 - y0) / FRAME as f32]
     }
 
-    /// The word in flight at `now`, or `None` before launch and once its
-    /// handoff is over. Under Reduce Motion it never flies.
     pub(crate) fn pose(&self, now: f64, reduced: bool) -> Option<Pose> {
         let age = now - self.start;
         if reduced || age < 0.0 || age > self.dur + HANDOFF {
@@ -188,7 +157,6 @@ impl Flight {
         }
         let slot = self.land / self.size;
         if age >= self.dur {
-            // Pinned to its slot while the typeset word fades in under it.
             let k = ((age - self.dur) / HANDOFF).clamp(0.0, 1.0) as f32;
             return Some(Pose {
                 x: self.to[0],
@@ -198,7 +166,7 @@ impl Flight {
                 size: self.land,
                 sprite: self.size,
                 angle: 0.0,
-                heat: self.heat0().max(0.9),
+                heat: self.heat0().max(0.75),
                 alpha: 1.0 - k,
             });
         }
@@ -221,17 +189,16 @@ impl Flight {
             vy,
             size: self.size * lerp(0.3, 1.0, grow) * lerp(1.0, slot, e),
             sprite: self.size,
-            angle: lerp(ang * 0.25, 0.0, e),
-            heat: lerp(self.heat0(), self.heat0().max(0.9), e),
+            angle: lerp(ang * 0.22, 0.0, e),
+            heat: lerp(self.heat0(), self.heat0().max(0.75), e),
             alpha: 1.0,
         })
     }
 
     fn heat0(&self) -> f32 {
-        lerp(0.1, 1.0, self.i)
+        lerp(0.08, 0.9, self.i)
     }
 
-    /// The typeset word at `now`, once the flight has arrived.
     pub(crate) fn landed(&self, now: f64, reduced: bool) -> Option<Landed> {
         let since = now - if reduced { self.start } else { self.arrives() };
         if since < 0.0 {
@@ -244,7 +211,7 @@ impl Flight {
             });
         }
         let fade = (since / HANDOFF).clamp(0.0, 1.0) as f32;
-        let cool = lerp(0.3, 0.6, self.i);
+        let cool = lerp(0.24, 0.42, self.i);
         let h = if fade >= 1.0 {
             (1.0 - ((since - HANDOFF).max(0.0) as f32) / cool).max(0.0)
         } else {
@@ -253,41 +220,30 @@ impl Flight {
         Some(Landed { fade, heat: h * h })
     }
 
-    /// How a landing at `now` nudges the card: a velocity kick along the
-    /// word's last heading into a damped spring, summed over landings.
     pub(crate) fn nudge(&self, now: f64) -> [f32; 2] {
-        self.nudge_by(now, NUDGE)
+        self.spring(now, NUDGE, NUDGE_HZ, NUDGE_ZETA)
     }
 
-    /// [`Flight::nudge`] for a card hit at the word's intensity, as
-    /// `hitCard` pushes one that isn't the OpenCode window: gently while
-    /// calm, hard past 0.36.
     pub(crate) fn hit(&self, now: f64) -> [f32; 2] {
         let push = if self.i < 0.36 {
-            lerp(22.0, 48.0, self.i / 0.36)
+            lerp(16.0, 34.0, self.i / 0.36)
         } else {
-            lerp(75.0, 220.0, self.i)
+            lerp(48.0, 130.0, self.i)
         };
         self.spring(now, push, HIT_HZ, HIT_ZETA)
     }
 
-    /// How brightly the card flashes from this landing at `now`: the
-    /// site's `lerp(0.28, 0.72, i)`, fading at 6.5 a second.
     pub(crate) fn flash(&self, now: f64) -> f32 {
         let t = (now - self.arrives()) as f32;
         if t < 0.0 {
             return 0.0;
         }
         let start = if self.i < 0.36 {
-            0.14
+            0.12
         } else {
-            lerp(0.28, 0.72, self.i)
+            lerp(0.22, 0.55, self.i)
         };
-        (start - t * 6.5).max(0.0)
-    }
-
-    fn nudge_by(&self, now: f64, push: f32) -> [f32; 2] {
-        self.spring(now, push, NUDGE_HZ, NUDGE_ZETA)
+        (start - t * 7.5).max(0.0)
     }
 
     fn spring(&self, now: f64, push: f32, hz: f32, zeta: f32) -> [f32; 2] {
@@ -303,8 +259,6 @@ impl Flight {
     }
 }
 
-/// Where the caret is at `now` as it glides toward each landed word's end:
-/// `targets` are `(when, x)` in landing order, starting at `x0`.
 pub(crate) fn caret_x(x0: f32, targets: &[(f64, f32)], now: f64) -> f32 {
     let mut x = x0;
     let mut goal = x0;
@@ -325,51 +279,45 @@ pub(crate) fn caret_x(x0: f32, targets: &[(f64, f32)], now: f64) -> f32 {
     x
 }
 
-/// The site's ember ramp: deep red, red, orange, near white.
-pub(crate) fn ember(h: f32) -> Color {
-    const STOPS: [[f32; 3]; 4] = [
-        [0.35, 0.02, 0.01],
-        [0.95, 0.16, 0.06],
-        [1.0, 0.55, 0.22],
-        [1.0, 0.95, 0.88],
+/// Brand ember ramp derived strictly from OpenCode theme tokens (`ember` scale 5..12).
+pub(crate) fn ember_tone(p: Paint, h: f32) -> Color {
+    let dark = p.k.dark;
+    let stops = [
+        rune_theme_opencode::ember(dark, 6),
+        rune_theme_opencode::ember(dark, 9),
+        rune_theme_opencode::ember(dark, 11),
+        if dark {
+            p.k.c.text_strong
+        } else {
+            rune_theme_opencode::ember(false, 10)
+        },
     ];
-    let h = h.clamp(0.0, 1.0) * 3.0;
-    let i = (h.floor() as usize).min(2);
-    let f = h - i as f32;
-    let c = |k: usize| lerp(STOPS[i][k], STOPS[i + 1][k], f);
-    srgb(c(0), c(1), c(2), 1.0)
+    let scaled = h.clamp(0.0, 1.0) * 3.0;
+    let idx = (scaled.floor() as usize).min(2);
+    let frac = scaled - idx as f32;
+    stops[idx].mix(stops[idx + 1], frac)
 }
 
-/// A colour from sRGB components in 0..1, as the site writes them.
-pub(crate) fn srgb(r: f32, g: f32, b: f32, a: f32) -> Color {
-    let d = rune::color::srgb_decode;
-    Color {
-        r: d(r),
-        g: d(g),
-        b: d(b),
-        a,
-    }
-}
-
-/// The ink a word is drawn in at `heat`: the site's near white warming
-/// toward cream in dark; in light, the theme's ink warming toward the
-/// ember, as cream wouldn't show on white.
 pub(crate) fn ink(p: Paint, heat: f32) -> Color {
     if p.k.dark {
-        p.k.c.text_base.mix(srgb(1.0, 0.97, 0.88, 1.0), heat)
+        let warm_peak =
+            p.k.c
+                .text_strong
+                .mix(rune_theme_opencode::ember(true, 11), 0.28);
+        p.k.c.text_base.mix(warm_peak, heat)
     } else {
-        p.k.c.text_base.mix(ember(0.5), heat * 0.75)
+        p.k.c
+            .text_base
+            .mix(rune_theme_opencode::ember(false, 9), heat * 0.65)
     }
 }
 
-/// A landed word's glow at `heat`, `rgba(255, 120 + 90(1 - h), 60)`.
 fn landed_glow(p: Paint, heat: f32) -> Color {
-    let g = (120.0 + 90.0 * (1.0 - heat)) / 255.0;
-    let strength = if p.k.dark { 0.9 } else { 0.55 };
-    srgb(1.0, g, 60.0 / 255.0, strength * heat)
+    let base = rune_theme_opencode::ember(p.k.dark, 9);
+    let strength = if p.k.dark { 0.34 } else { 0.20 };
+    base.alpha(strength * heat)
 }
 
-/// Positioned text, its box centred on `(x, y)` in the overlay's points.
 fn word_at(
     key: String,
     word: &str,
@@ -393,14 +341,10 @@ fn word_at(
         .blur_motion(Anim::INSTANT)
 }
 
-/// A word in flight: ten taps smeared along its velocity over the
-/// shutter under its ember glow, set once at the sprite's size and scaled
-/// and turned as one layer.
 pub(crate) fn flying(p: Paint, key: &str, word: &str, weight: f32, pose: Pose) -> El {
     let font = TextStyle::new(pose.sprite, weight).lh(pose.sprite * 1.3);
     let (w, h) = rune::text::measure(word, &[], font, None);
     let k = pose.size / pose.sprite;
-    // A shift along the velocity in the stage, in the turned, scaled sprite.
     let (sin, cos) = pose.angle.sin_cos();
     let local = |s: f32| {
         let (dx, dy) = (-pose.vx * s, -pose.vy * s);
@@ -413,24 +357,19 @@ pub(crate) fn flying(p: Paint, key: &str, word: &str, weight: f32, pose: Pose) -
         .scale(k)
         .rotate(pose.angle)
         .opacity(pose.alpha);
-    if pose.heat > 0.05 {
-        // The WebGPU renderer's glow: the word blurred twice in its atlas,
-        // at 0.15 and 0.34 of its size, tinted and added at 0.28 + 1.15 h.
-        let h = pose.heat;
-        let glow = ember(0.38 + h * 0.45).alpha((GLOW_INK * (0.28 + h * 1.15)).min(1.0));
-        for (n, sigma) in [0.153, 0.34].into_iter().enumerate() {
-            sprite = sprite.child(
-                text(word.to_string())
-                    .key(format!("glow{n}"))
-                    .font(font)
-                    .color(glow)
-                    .absolute(0.0, 0.0)
-                    .blur(sigma * pose.sprite),
-            );
-        }
+    if pose.heat > 0.08 {
+        let h_val = pose.heat;
+        let glow =
+            ember_tone(p, 0.35 + h_val * 0.4).alpha((GLOW_INK * (0.22 + h_val * 0.7)).min(0.65));
+        sprite = sprite.child(
+            text(word.to_string())
+                .key("glow0")
+                .font(font)
+                .color(glow)
+                .absolute(0.0, 0.0)
+                .blur(0.14 * pose.sprite),
+        );
     }
-    // Over-composited, so ten at rest add up to nearly solid ink, as the
-    // shader's average does.
     let tap = 0.25;
     for n in 0..TAPS {
         let [dx, dy] = local(((n as f32 + 0.5) / TAPS as f32 - 0.5) * SHUTTER);
@@ -446,13 +385,10 @@ pub(crate) fn flying(p: Paint, key: &str, word: &str, weight: f32, pose: Pose) -
     sprite
 }
 
-/// The faint shimmer on landed word `index`'s glow at `now`.
 pub(crate) fn flicker(now: f64, index: usize) -> f32 {
-    0.85 + 0.15 * (now as f32 * 37.0 + index as f32 * 1.7).sin()
+    0.88 + 0.12 * (now as f32 * 32.0 + index as f32 * 1.7).sin()
 }
 
-/// A typeset word in its slot, `at` its box's centre, glowing while hot.
-/// `flick` is its glow's shimmer (see [`flicker`]).
 pub(crate) fn typeset(
     p: Paint,
     key: &str,
@@ -464,7 +400,7 @@ pub(crate) fn typeset(
 ) -> Vec<El> {
     let [x, y] = at;
     let mut out = Vec::with_capacity(2);
-    if state.heat > 0.02 {
+    if state.heat > 0.05 {
         let glow = landed_glow(p, state.heat);
         out.push(
             word_at(
@@ -476,7 +412,7 @@ pub(crate) fn typeset(
                 y,
                 0.0,
             )
-            .blur((1.5 + 9.0 * state.heat) / 2.0)
+            .blur(1.0 + 2.6 * state.heat)
             .opacity(state.fade),
         );
     }
@@ -511,7 +447,7 @@ mod tests {
         let mut t = f.start();
         while t < f.arrives() {
             let p = f.pose(t, false).unwrap();
-            past |= p.y < -0.5;
+            past |= p.y < -0.3;
             t += 1.0 / 240.0;
         }
         assert!(past, "ease-out-back carries it past the slot");
