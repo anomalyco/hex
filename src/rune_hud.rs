@@ -21,7 +21,7 @@ use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
 use crate::dictation_indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
-use crate::dot_scope::{self, MAX_DOTS, PLATE_HEIGHT};
+use crate::dot_scope::{self, MAX_DOTS};
 use crate::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
 use crate::rune_ui::live_text::Spot;
 
@@ -149,7 +149,7 @@ impl Hud {
             self.place_live_text_without_hud();
             #[cfg(not(target_os = "macos"))]
             {
-                let plate_start = TOP_OFFSET + (WINDOW.1 - PLATE_HEIGHT) / 2.0;
+                let plate_start = TOP_OFFSET + (WINDOW.1 - dot_scope::PLATE_HEIGHT) / 2.0;
                 set_live_text(Spot::Edge(ScreenEdge::Top, plate_start));
             }
             self.hide();
@@ -165,7 +165,7 @@ impl Hud {
             };
             overlay.place(edge, margin);
             // The plate sits in the middle of the window.
-            let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
+            let past_plate = margin + (WINDOW.1 + dot_scope::PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
             set_live_text(Spot::Edge(edge, past_plate));
         }
         if !self.shown {
