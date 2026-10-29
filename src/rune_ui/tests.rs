@@ -1622,7 +1622,7 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
         ui: &mut renderer,
     });
     target.copy(&mut encoder);
-    gpu.queue.submit([encoder.finish()]);
+    renderer.submit(&gpu.queue, encoder);
     Some((width, height, target.read(&gpu.device)))
 }
 
