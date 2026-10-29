@@ -208,7 +208,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 },
             ),
         );
-        if permitted {
+        // A grant made here stays in place to show Allowed.
+        if permitted && !ui.platform.asked(PermissionKind::SystemAudio) {
             more.push(system_audio);
         } else {
             rows.push(system_audio);

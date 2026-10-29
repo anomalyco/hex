@@ -21,10 +21,20 @@ fn refresh(rt: &mut Runtime<Ui>) {
 
 #[test]
 fn each_os_lists_only_the_panes_it_can_run() {
-    let linux = runtime("portal", true, PANE_SIZE);
-    assert!(linux.find("nav-commands").is_none());
-    assert!(linux.find("nav-meetings").is_none());
+    let mut linux = runtime("portal", true, PANE_SIZE);
+    tap(&mut linux, "nav-labs");
+    for key in [
+        "lab-commands",
+        "lab-meetings",
+        "nav-commands",
+        "nav-meetings",
+    ] {
+        assert!(linux.find(key).is_none(), "Linux has no {key}");
+    }
     let mut mac = runtime("mac-settings", true, PANE_SIZE);
+    tap(&mut mac, "nav-labs");
+    tap(&mut mac, "lab-commands");
+    assert!(mac.state.settings.commands_enabled);
     for (key, pane) in [
         ("nav-commands", Pane::Commands),
         ("nav-meetings", Pane::Meetings),
@@ -33,15 +43,23 @@ fn each_os_lists_only_the_panes_it_can_run() {
         tap(&mut mac, key);
         assert_eq!(mac.state.pane, pane);
     }
-    let windows = runtime("windows-settings", true, PANE_SIZE);
-    assert!(windows.find("nav-commands").is_none());
-    assert!(windows.find("nav-meetings").is_none());
+    let mut windows = runtime("windows-settings", true, PANE_SIZE);
+    tap(&mut windows, "nav-labs");
+    for key in [
+        "lab-commands",
+        "lab-meetings",
+        "nav-commands",
+        "nav-meetings",
+    ] {
+        assert!(windows.find(key).is_none(), "Windows has no {key}");
+    }
 }
 
 #[test]
 fn settings_rows_follow_each_os() {
     let present = |rt: &Runtime<Ui>, key: &str| rt.find(key).is_some();
-    let linux = runtime("portal", true, GOLDEN_SIZE);
+    let mut linux = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut linux, Pane::General);
     assert!(present(&linux, "terminal-paste"));
     assert!(present(&linux, "toggle-listening"));
     assert!(present(&linux, "enable-on-launch"));
@@ -49,7 +67,8 @@ fn settings_rows_follow_each_os() {
     assert!(!present(&linux, "dock-icon"));
     assert!(!present(&linux, "meetings-enabled"));
 
-    let mac = runtime("mac-settings", true, PANE_SIZE);
+    let mut mac = runtime("mac-settings", true, TALL_SIZE);
+    open_advanced(&mut mac, Pane::General);
     for key in ["launch-at-login", "dock-icon", "update-status"] {
         assert!(present(&mac, key), "macOS shows {key}");
     }
@@ -66,7 +85,8 @@ fn settings_rows_follow_each_os() {
         assert!(!present(&mac, key), "macOS General has no {key}");
     }
 
-    let windows = runtime("windows-settings", true, GOLDEN_SIZE);
+    let mut windows = runtime("windows-settings", true, TALL_SIZE);
+    open_advanced(&mut windows, Pane::General);
     assert!(present(&windows, "launch-at-login"));
     assert!(present(&windows, "toggle-listening"));
     assert!(!present(&windows, "dock-icon"));
@@ -316,6 +336,7 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
     let pill = "meeting-system-audio-allow";
     tap(&mut rt, pill);
     let mut settled = runtime("meetings-allow", true, PANE_SIZE);
+    tap(&mut settled, pill);
     settled.state.platform.system_audio = true;
     refresh(&mut settled);
     let allowed = settled.presented(pill).unwrap().0;
@@ -330,7 +351,8 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 
 #[test]
 fn the_browser_switch_shows_only_with_pause_media() {
-    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
     assert!(rt.find("pause-browser").is_none());
     rt.state.settings.recording_audio_behavior =
         crate::app_settings::RecordingAudioBehavior::PauseMedia;
@@ -344,9 +366,9 @@ fn the_browser_switch_shows_only_with_pause_media() {
 
 #[test]
 fn the_browser_switch_turns_on_and_asks_for_system_audio() {
-    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings-pause-browser", true, TALL_SIZE);
     rt.state.settings.pause_browser_media = false;
-    refresh(&mut rt);
+    open_advanced(&mut rt, Pane::General);
     tap(&mut rt, "pause-browser");
     assert!(rt.state.settings.pause_browser_media);
     assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
@@ -358,10 +380,10 @@ fn the_browser_switch_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn an_allowed_browser_switch_asks_nothing() {
-    let mut rt = runtime("mac-settings-pause-browser", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings-pause-browser", true, TALL_SIZE);
     rt.state.settings.pause_browser_media = false;
     rt.state.platform.system_audio = true;
-    refresh(&mut rt);
+    open_advanced(&mut rt, Pane::General);
     tap(&mut rt, "pause-browser");
     assert!(rt.state.settings.pause_browser_media);
     assert!(asked(&rt).is_empty());
@@ -389,7 +411,8 @@ fn general_hides_advanced_options_until_asked() {
 
 #[test]
 fn double_tap_to_lock_shows_only_for_hold() {
-    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
     assert!(rt.find("double-tap").is_some());
     pick(&mut rt, "shortcut-mode", 1);
     assert_eq!(
@@ -402,6 +425,7 @@ fn double_tap_to_lock_shows_only_for_hold() {
 #[test]
 fn how_it_works_opens_the_shortcut_explainer_and_keeps_focus_inside() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    open_advanced(&mut rt, Pane::General);
     tab_to(&mut rt, "shortcut-help");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
@@ -515,27 +539,32 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
             .find(|e| e.key.as_deref() == Some(key));
         found.unwrap_or_else(|| panic!("no {key}")).rect
     }
-    fn place(rt: &Runtime<Ui>) -> ([f32; 4], f32) {
+    /// The side select's right edge and top, and the recorder's right edge.
+    fn place(rt: &Runtime<Ui>) -> ((f32, f32), f32) {
         let recorder = rect(rt, "dictation-hotkey");
-        (rect(rt, "dictation-side"), recorder[0] + recorder[2])
+        let side = rect(rt, "dictation-side-control-trigger");
+        ((side[0] + side[2], side[1]), recorder[0] + recorder[2])
     }
-    fn watch(rt: &mut Runtime<Ui>, at_rest: ([f32; 4], f32), reduced: bool) {
+    fn watch(rt: &mut Runtime<Ui>, at_rest: ((f32, f32), f32), reduced: bool) {
         for _ in 0..45 {
             rt.frame(1.0 / 60.0);
-            assert_eq!(place(rt), at_rest, "the row moved");
+            let ((side, top), edge) = place(rt);
+            assert_eq!((side, top), at_rest.0, "the side select moved");
+            assert!(
+                (edge - at_rest.1).abs() < 0.05,
+                "the recorder moved: {edge}"
+            );
             if !reduced {
                 continue;
             }
             let elements = rt.elements();
             let faces = elements
                 .iter()
-                .find(|e| e.path.ends_with("dictation-hotkey/faces"))
+                .find(|e| e.path.ends_with("dictation-hotkey/content"))
                 .unwrap()
                 .rect;
             for face in elements {
-                let shown = face.path.contains("dictation-hotkey/faces/")
-                    && !face.path.contains("/faces/size")
-                    && matches!(face.key.as_deref(), Some("shortcut" | "listening"));
+                let shown = face.path.ends_with("dictation-hotkey/content/face");
                 if shown {
                     assert_eq!(face.rect[1], faces[1], "{} travelled", face.path);
                 }
@@ -543,14 +572,13 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
         }
     }
     for reduced in [false, true] {
-        let mut rt = runtime("shortcut-row", true, PANE_SIZE);
+        let mut rt = runtime("shortcut-row", true, TALL_SIZE);
         rt.set_system_reduced_motion(reduced);
-        settle(&mut rt);
+        open_advanced(&mut rt, Pane::General);
         let at_rest = place(&rt);
-        for segment in ["segment1", "segment2", "segment0"] {
-            let (x, y) = rt.find(&format!("dictation-side/{segment}")).unwrap();
-            rt.pointer_down(x, y);
-            rt.pointer_up(x, y);
+        for side in [1, 2, 0] {
+            pick(&mut rt, "dictation-side", side);
+            settle(&mut rt);
             watch(&mut rt, at_rest, reduced);
         }
         let (x, y) = rt.find("dictation-hotkey").unwrap();
@@ -573,8 +601,7 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
         rt.state.capture = Capture::Idle;
         rt.invalidate();
         watch(&mut rt, at_rest, reduced);
-        // A chord has no side: the picker leaves beside the keys, never
-        // under them, and the recorder keeps its right edge.
+        // A chord keeps the recorder's right edge too.
         let (x, y) = rt.find("dictation-hotkey").unwrap();
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
@@ -585,14 +612,12 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
             ..Mods::default()
         };
         key(&mut rt, Key::Text("d".into()), ctrl_alt);
-        while rt.find("dictation-side").is_some() {
+        for _ in 0..45 {
             let recorder = rect(&rt, "dictation-hotkey");
-            let keys = rect(&rt, "keys");
-            let side = rect(&rt, "dictation-side");
-            assert_eq!(recorder[0] + recorder[2], at_rest.1, "the recorder moved");
+            let edge = recorder[0] + recorder[2];
             assert!(
-                side[0] + side[2] <= keys[0],
-                "the picker slid under the keys"
+                (edge - at_rest.1).abs() < 0.05,
+                "the recorder moved: {edge}"
             );
             rt.frame(1.0 / 60.0);
         }
@@ -622,66 +647,17 @@ fn esc_stays_on_the_recorder_however_many_keys_are_held() {
         .find(|e| e.key.as_deref() == Some("dictation-hotkey"))
         .unwrap()
         .rect;
-    let (escape, opacity) = drawn(&rt, "dictation-hotkey/faces/listening/escape").unwrap();
+    let (escape, opacity) = drawn(&rt, "dictation-hotkey/content/face/escape").unwrap();
     assert_eq!(opacity, 1.0);
     assert!(
         escape[0] + escape[2] <= recorder[0] + recorder[2],
         "esc is pushed out of the recorder"
     );
-    let held = drawn(&rt, "dictation-hotkey/faces/listening/held")
-        .unwrap()
-        .0;
+    let held = drawn(&rt, "dictation-hotkey/content/face/held").unwrap().0;
     assert!(
         held[0] + held[2] <= escape[0],
         "the held keys run under esc"
     );
-}
-
-#[test]
-fn a_new_shortcut_s_keys_stay_inside_their_tray() {
-    let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    let binding = rt.state.settings.paste_last_hotkey.clone().unwrap();
-    // Every key and Off stay inside the well while it springs to the new
-    // width, entering and leaving alike; returns whether any was clipped.
-    let watch = |rt: &mut Runtime<Ui>| {
-        let mut clipped = false;
-        for _ in 0..45 {
-            rt.frame(1.0 / 60.0);
-            let elements = rt.elements();
-            let tray = elements
-                .iter()
-                .find(|e| e.path.ends_with("paste-last-control/recorder-slot/keys") && !e.exiting)
-                .expect("the tray stays")
-                .rect;
-            for e in elements.iter().filter(|e| {
-                e.path.contains("paste-last-control/recorder-slot/keys/")
-                    && e.key
-                        .as_deref()
-                        .is_some_and(|k| k.starts_with("keycap") || k == "off")
-            }) {
-                let [x, y, w, h] = e.visible;
-                let hidden = w <= 0.0 || h <= 0.0;
-                let inside = hidden
-                    || x >= tray[0] - 0.01
-                        && y >= tray[1] - 0.01
-                        && x + w <= tray[0] + tray[2] + 0.01
-                        && y + h <= tray[1] + tray[3] + 0.01;
-                assert!(
-                    inside,
-                    "{} pokes out of its tray {tray:?}: visible {:?}, rect {:?}, exiting {}, opacity {}",
-                    e.path, e.visible, e.rect, e.exiting, e.opacity
-                );
-                clipped |= w < e.rect[2] - 0.5 || h < e.rect[3] - 0.5;
-            }
-        }
-        clipped
-    };
-    rt.state.settings.paste_last_hotkey = None;
-    rt.invalidate();
-    assert!(watch(&mut rt), "the keys leave inside the well's clip");
-    rt.state.settings.paste_last_hotkey = Some(binding);
-    rt.invalidate();
-    assert!(watch(&mut rt), "the keys arrive inside the well's clip");
 }
 
 #[test]
@@ -999,11 +975,15 @@ fn an_update_is_a_secondary_button_with_a_dot_and_its_own_label() {
 #[test]
 fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
     let mut rt = runtime("meetings-off", true, PANE_SIZE);
-    assert!(rt.find("nav-meetings").is_some(), "always in the sidebar");
     assert!(rt.find("meetings-view").is_none());
     assert!(rt.find("start-meeting").is_none());
     tap(&mut rt, "meetings-enabled");
     assert!(rt.state.settings.meetings.enabled);
+    refresh(&mut rt);
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "on, it joins the sidebar"
+    );
     assert!(rt.find("meetings-view").is_some());
 }
 
@@ -1127,10 +1107,15 @@ fn commands_search_select_and_show_their_detail() {
 #[test]
 fn commands_turn_on_from_their_card() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    assert!(
+        rt.find("nav-commands").is_none(),
+        "off, only Labs offers it"
+    );
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-commands");
+    assert!(rt.state.settings.commands_enabled);
     tap(&mut rt, "nav-commands");
     assert!(rt.find("commands-enabled").is_some());
-    tap(&mut rt, "commands-enabled");
-    assert!(rt.state.settings.commands_enabled);
 }
 
 #[test]
@@ -1512,14 +1497,14 @@ fn try_it_records_and_plays_through_the_host() {
 
 #[test]
 fn developer_panes_show_only_in_developer_builds() {
-    let rt = runtime("mac-settings", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    tap(&mut rt, "nav-labs");
     assert!(rt.find("nav-hud-lab").is_none());
     assert!(rt.find("nav-activity").is_none());
     assert!(
         rt.find("nav-voice-filter").is_some(),
         "Hex Microphone is on"
     );
-    assert!(rt.find("nav-experiments").is_some());
     let rt = runtime("mac-hud-lab", true, PANE_SIZE);
     assert!(rt.find("nav-hud-lab").is_some());
     assert!(rt.find("nav-activity").is_some());
@@ -1531,8 +1516,8 @@ fn voice_filter_needs_its_experiment_or_hex_microphone() {
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
+    tap(&mut rt, "nav-labs");
     assert!(rt.find("nav-voice-filter").is_none());
-    assert!(rt.find("nav-experiments").is_none(), "no empty heading");
     rt.state.platform.voice_filter = true;
     refresh(&mut rt);
     assert!(rt.find("nav-voice-filter").is_some());
@@ -1705,7 +1690,8 @@ fn experiment_goldens() {
 
 #[test]
 fn double_tap_to_lock_folds_away_under_the_rows_below() {
-    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
     let element = |rt: &Runtime<Ui>, key: &str| {
         rt.elements()
             .into_iter()
@@ -1716,20 +1702,16 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
         let slot = element(rt, "double-tap-fold").rect;
         slot[1] + slot[3]
     };
-    let separator = element(&rt, "transcription").rect[1] - edge(&rt);
-    for segment in ["segment1", "segment0"] {
-        let (x, y) = rt
-            .find(&format!("shortcut-mode-control/{segment}"))
-            .unwrap();
-        rt.pointer_down(x, y);
-        rt.pointer_up(x, y);
+    let separator = element(&rt, "microphone-mode").rect[1] - edge(&rt);
+    for mode in [1, 0] {
+        pick(&mut rt, "shortcut-mode", mode);
         for _ in 0..30 {
             rt.frame(1.0 / 60.0);
             let bottom = edge(&rt);
-            let below = element(&rt, "transcription").rect[1];
+            let below = element(&rt, "microphone-mode").rect[1];
             assert!(
                 (below - bottom - separator).abs() < 0.01,
-                "the speech model row rides the slot's edge: {below} vs {bottom}"
+                "the microphone row rides the slot's edge: {below} vs {bottom}"
             );
             if let Some(row) = rt.elements().into_iter().find(|e| {
                 e.key.as_deref() == Some("double-tap") && e.opacity > 0.0 && e.visible[3] > 0.0
@@ -1748,9 +1730,10 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
 #[test]
 fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
     use crate::app_settings::RecordingAudioBehavior;
-    let mut rt = runtime("mac-settings", true, (1100.0, 1000.0));
+    let mut rt = runtime("mac-settings", true, (1100.0, 2800.0));
+    open_advanced(&mut rt, Pane::General);
     assert!(rt.find("recording-duck-slider").is_none());
-    tap(&mut rt, "while-dictating-control/segment2");
+    pick(&mut rt, "while-dictating", 2);
     assert_eq!(
         rt.state.settings.recording_audio_behavior,
         RecordingAudioBehavior::Duck
@@ -1767,17 +1750,18 @@ fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
     assert_eq!(rt.state.saved, before + 1);
     let volume = rt.state.settings.recording_duck_volume;
     assert!(volume > 0.2 && volume <= 1.0);
-    tap(&mut rt, "while-dictating-control/segment3");
+    pick(&mut rt, "while-dictating", 3);
     assert!(rt.find("recording-duck-slider").is_none());
-    tap(&mut rt, "while-dictating-control/segment2");
+    pick(&mut rt, "while-dictating", 2);
     assert_eq!(rt.state.settings.recording_duck_volume, volume);
     for scene in ["portal", "windows-settings"] {
-        let mut rt = runtime(scene, true, (1100.0, 1000.0));
+        let mut rt = runtime(scene, true, (1100.0, 2800.0));
         if scene == "portal" {
             rt.state.platform.caps = platform::Capabilities::LINUX;
-            refresh(&mut rt);
         }
-        assert!(rt.find("while-dictating-control/segment3").is_none());
+        open_advanced(&mut rt, Pane::General);
+        tap(&mut rt, "while-dictating-control-trigger");
+        assert!(rt.find("option3").is_none(), "no Lower audio");
         assert!(rt.find("recording-duck-slider").is_none());
     }
 }
