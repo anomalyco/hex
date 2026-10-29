@@ -324,10 +324,14 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         command.arg(remote);
         command
     } else {
+        let body = data.map(serde_json::to_string).transpose()?;
+        if let Some(body) = body.as_deref().filter(|body| body.len() > CLI_BODY_LIMIT) {
+            return post_to_service(method, path, body.as_bytes());
+        }
         let mut command = Command::new(opencode_binary()?);
         command.args(["api", method, path]);
-        if let Some(data) = data {
-            command.args(["--data", &serde_json::to_string(data)?]);
+        if let Some(body) = &body {
+            command.args(["--data", body]);
         }
         command
     };
@@ -347,6 +351,40 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         });
     }
     Ok(output.stdout)
+}
+
+/// The largest body `opencode api --data` carries; past it (a send's inline
+/// images) the request goes to the service over HTTP, since one argument may
+/// not pass 128 KiB on Linux.
+const CLI_BODY_LIMIT: usize = 64 * 1024;
+/// How long a prompt with inline images may take to post.
+const SERVICE_POST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A large request straight to the local service from its registration. A
+/// service that isn't running is started by one small `opencode api` call,
+/// then the request is tried again.
+fn post_to_service(method: &str, path: &str, body: &[u8]) -> Result<Vec<u8>> {
+    let method = method.to_ascii_uppercase();
+    let post = || {
+        let (address, password) = local_server();
+        http_request(
+            address,
+            password.as_deref(),
+            &method,
+            path,
+            Some(body),
+            SERVICE_POST_TIMEOUT,
+        )
+    };
+    match post() {
+        Err(error)
+            if http_status(&error).is_none() && error.to_string().contains("Could not reach") =>
+        {
+            opencode_api("get", "/api/session?limit=1", None)?;
+            post()
+        }
+        answer => answer,
+    }
 }
 
 /// How much of `opencode api`'s stderr is kept; the rest is read and dropped.
@@ -945,16 +983,57 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     if let Some(host) = agent_host() {
         sync_bundle_to(&host, &directory)?;
     }
-    let files = inline_images(&directory, &bundle);
+    // The agent host has the bundle at the same path (synced above), and an
+    // SSH command line can't carry inline images.
+    let files = if agent_host().is_some() {
+        vec![serde_json::json!({
+            "uri": file_uri(&directory.join(&bundle.contact_sheet)),
+            "name": "contact-sheet.png",
+            "description": "Scrawl contact sheet: the capture's keyframes in order",
+        })]
+    } else {
+        inline_images(&directory, &bundle)
+    };
+    let frames = files.len().saturating_sub(1);
     let text = format!(
-        "{}\n\nAttached: the contact sheet (every keyframe in order) and {} keyframe{} at full size. Everything the capture holds is in this message; it was recorded on another machine at {}.\nThis capture is {} ms long.",
+        "{}\n\nAttached: the contact sheet (every keyframe in order){}. Everything the capture holds is in this message (recorded at {}).\nThis capture is {} ms long.",
         summary.trim_end(),
-        files.len().saturating_sub(1),
-        if files.len() == 2 { "" } else { "s" },
+        match frames {
+            0 => String::new(),
+            1 => " and 1 keyframe at full size".to_owned(),
+            n => format!(" and {n} keyframes at full size"),
+        },
         directory.display(),
         bundle.duration_ms,
     );
     post_prompt(session, serde_json::json!({ "text": text, "files": files }))
+}
+
+/// A `file://` URL for an absolute path, percent-encoding everything but unreserved
+/// characters and `/` ("Application Support" → "Application%20Support"). A Windows path
+/// (`C:\Users\…`, or `\\?\C:\…` after `canonicalize`) becomes `file:///C:/Users/…`.
+fn file_uri(path: &Path) -> String {
+    let mut text = path.to_string_lossy().into_owned();
+    let mut uri = String::from("file://");
+    let windows_path = cfg!(windows) || text.as_bytes().get(1) == Some(&b':');
+    if windows_path {
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            text = rest.to_owned();
+        }
+        text = text.replace('\\', "/");
+        if !text.starts_with('/') {
+            uri.push('/');
+        }
+    }
+    for (index, byte) in text.bytes().enumerate() {
+        let drive_colon = windows_path && index == 1 && byte == b':';
+        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) || drive_colon {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
 }
 
 /// What a send attaches at most, so a long capture never makes a prompt
@@ -985,10 +1064,10 @@ fn inline_images(directory: &Path, bundle: &ScrawlBundle) -> Vec<serde_json::Val
                 .unwrap_or_default();
             (
                 frame.file.clone(),
-                format!("frame-{:02}.png", frame.index + 1),
+                format!("frame-{:02}.png", frame.index),
                 format!(
                     "Keyframe {} at {}:{:02}{}",
-                    frame.index + 1,
+                    frame.index,
                     seconds / 60,
                     seconds % 60,
                     said
@@ -1213,6 +1292,16 @@ mod sync_live_check {
 mod session_lookup {
     use super::fake_api::{serve, session};
     use super::*;
+
+    #[test]
+    fn file_uris_are_percent_encoded() {
+        assert_eq!(
+            file_uri(Path::new(
+                "/Users/example/Library/Application Support/scrawl/captures/a b#1.scrawl/contact-sheet.png"
+            )),
+            "file:///Users/example/Library/Application%20Support/scrawl/captures/a%20b%231.scrawl/contact-sheet.png"
+        );
+    }
 
     #[test]
     fn sessions_read_their_directory_from_v2_location_or_v1_field() {

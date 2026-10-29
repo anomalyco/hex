@@ -498,9 +498,16 @@ What a send carries                      // capture.send (router opencode::send_
 │   left out). Nothing in it depends on the bundle's folder, so an OpenCode
 │   server on another machine reads all of it; the text only names where it
 │   was recorded
+├── A body past 64 KiB goes to the local service over HTTP (service.json),
+│   not `opencode2 api --data`: one argument can't pass 128 KiB on Linux. A
+│   service that isn't up is started by one small `opencode2 api` call first
+├── With an agent host (routing's agentHost) the bundle is synced there and
+│   the contact sheet goes as a `file://` part instead; SSH can't carry the
+│   images
 ├── No video: a capture's movie is too large for a prompt
-└── Check: router opencode tests; a throwaway session on OpenCode V2 stored
-    the parts as inline image/png (2026-10-29)
+└── Check: router opencode tests; a send from apollo to a throwaway session
+    on OpenCode V2 stored the contact sheet and keyframe as inline image/png
+    (2026-10-29)
 
 Where it goes                            // capture.route; capture.routing's autoSend on
 ├── At the stop, beside the writing -> a capture-look thread reads the tab,
