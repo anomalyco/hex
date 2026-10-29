@@ -1,5 +1,6 @@
 use std::io::{ErrorKind, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -15,11 +16,13 @@ use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
 use crate::linux_input::{KEY_PRESS, KEY_RELEASE, XK_CONTROL_L, XK_SHIFT_L, connect_x11};
+use crate::linux_remote_desktop::RemoteDesktop;
 use crate::linux_session::LinuxSession;
 
 const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
+const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
 
 pub(crate) struct LinuxPaster {
     backend: Backend,
@@ -30,16 +33,125 @@ pub(crate) struct LinuxPaster {
 
 enum Backend {
     X11(Box<X11Paster>),
-    /// `wtype`'s virtual keyboard carries its own modifiers, so keys the
-    /// user still holds never turn its Ctrl+V into another chord.
-    Wayland,
+    Wayland(WaylandKeys),
+}
+
+/// How Wayland sends the paste shortcut, chosen at the first paste.
+enum WaylandKeys {
+    Unchosen,
+    /// `wtype`, when the compositor offers the virtual keyboard protocol.
+    /// Its virtual keyboard carries its own modifiers, so keys the user
+    /// still holds never turn its Ctrl+V into another chord.
+    Wtype,
+    /// The desktop's RemoteDesktop portal everywhere else (KWin, Mutter).
+    /// Its session starts at the first paste and lives with the paster.
+    Portal(Option<Box<RemoteDesktop>>),
+}
+
+impl WaylandKeys {
+    fn choose() -> Self {
+        if offers_virtual_keyboard() && on_path("wtype") {
+            Self::Wtype
+        } else {
+            Self::Portal(None)
+        }
+    }
+
+    fn send(&mut self, stop: &AtomicBool, paste_with_shift: bool) -> Result<()> {
+        if matches!(self, Self::Unchosen) {
+            *self = Self::choose();
+        }
+        match self {
+            Self::Unchosen => unreachable!("chosen above"),
+            Self::Wtype => {
+                let mut keys = Command::new("wtype");
+                keys.args(paste_keys(paste_with_shift));
+                run_helper(keys, &[], stop, HELPER_TIMEOUT)
+                    .wrap_err("wtype could not send the paste shortcut")
+            }
+            Self::Portal(session) => {
+                if session.as_mut().is_some_and(|session| session.closed()) {
+                    *session = None;
+                }
+                let started = session.is_none();
+                if started {
+                    *session = Some(Box::new(RemoteDesktop::start(stop)?));
+                    // The approval dialog hands focus back to the target.
+                    thread::sleep(PORTAL_FOCUS_SETTLE);
+                }
+                let result = session
+                    .as_ref()
+                    .expect("started above")
+                    .paste(paste_with_shift);
+                if result.is_err() {
+                    *session = None;
+                }
+                result
+            }
+        }
+    }
+}
+
+/// Whether the compositor advertises `zwp_virtual_keyboard_manager_v1`.
+fn offers_virtual_keyboard() -> bool {
+    use wayland_client::globals::{GlobalListContents, registry_queue_init};
+    use wayland_client::protocol::wl_registry::{self, WlRegistry};
+    use wayland_client::{Connection, Dispatch, QueueHandle};
+
+    struct Globals;
+    impl Dispatch<WlRegistry, GlobalListContents> for Globals {
+        fn event(
+            _: &mut Self,
+            _: &WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+    let Ok(connection) = Connection::connect_to_env() else {
+        return false;
+    };
+    let Ok((globals, _queue)) = registry_queue_init::<Globals>(&connection) else {
+        return false;
+    };
+    globals.contents().with_list(|list| {
+        list.iter()
+            .any(|global| global.interface == "zwp_virtual_keyboard_manager_v1")
+    })
+}
+
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| {
+            std::fs::metadata(dir.join(program))
+                .is_ok_and(|file| file.is_file() && file.permissions().mode() & 0o111 != 0)
+        })
+    })
+}
+
+/// A Wayland paste that only reached the clipboard.
+fn copied_only(
+    error: color_eyre::eyre::Report,
+    paste_with_shift: bool,
+) -> color_eyre::eyre::Report {
+    let shortcut = if paste_with_shift {
+        "Ctrl+Shift+V"
+    } else {
+        "Ctrl+V"
+    };
+    eyre!(
+        "Copied to the clipboard; press {shortcut} to paste. Automatic paste needs the desktop's RemoteDesktop portal ({}), or wtype with a compositor offering the virtual keyboard protocol: {error:#}",
+        crate::linux_remote_desktop::INTERFACE
+    )
 }
 
 impl LinuxPaster {
     pub(crate) fn new(stop: Arc<AtomicBool>, paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
         let backend = match LinuxSession::detect() {
             LinuxSession::X11 => Backend::X11(Box::new(X11Paster::new()?)),
-            LinuxSession::Wayland => Backend::Wayland,
+            LinuxSession::Wayland => Backend::Wayland(WaylandKeys::Unchosen),
         };
         Ok(Self {
             backend,
@@ -64,7 +176,7 @@ impl LinuxPaster {
                     )
                     .ok()?
             }
-            Backend::Wayland => {
+            Backend::Wayland(_) => {
                 let output = Command::new("wl-paste")
                     .args(["--primary", "--no-newline", "--type", "text/plain"])
                     .stdin(Stdio::null())
@@ -89,7 +201,7 @@ impl LinuxPaster {
                     .store(atoms.clipboard, atoms.utf8_string, text.as_bytes())
                     .wrap_err("could not own the X11 clipboard")
             }
-            Backend::Wayland => {
+            Backend::Wayland(_) => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
                 run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
@@ -105,17 +217,15 @@ impl LinuxPaster {
         let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
             Backend::X11(paster) => paster.paste(text, &self.stop, paste_with_shift)?,
-            Backend::Wayland => {
+            Backend::Wayland(keys) => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
                 run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not own the Wayland clipboard; install wl-clipboard and check compositor support")?;
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
-                let mut keys = Command::new("wtype");
-                keys.args(paste_keys(paste_with_shift));
-                run_helper(keys, &[], &self.stop, HELPER_TIMEOUT)
-                    .wrap_err("could not send the Wayland paste shortcut; install wtype and use a compositor supporting virtual keyboards")?;
+                keys.send(&self.stop, paste_with_shift)
+                    .map_err(|error| copied_only(error, paste_with_shift))?;
             }
         }
         // Give the target time to request the selection before the next queued

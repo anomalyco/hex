@@ -267,7 +267,9 @@ The Linux beta targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
 compositors. It supports local hotkey dictation, Modes, Voice Action, History,
 the Hex window, and signed updates for direct installs. With a Vulkan graphics driver, dictation
 streams while you speak, as on macOS and Windows. Native Wayland requires
-compositor support for clipboard, virtual-keyboard, and layer-shell protocols.
+compositor support for clipboard and layer-shell protocols; paste uses `wtype`
+with the virtual keyboard protocol, or the desktop's RemoteDesktop portal (KDE,
+GNOME).
 Shortcuts come from the desktop's GlobalShortcuts portal, or you bind
 `hex dictation start` / `stop` / `toggle` in your compositor; see the
 [Linux guide](docs/linux.md#shortcuts). Voice commands and meetings are not

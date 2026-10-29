@@ -32,6 +32,9 @@ pub(crate) struct DesktopListenerSnapshot {
     pub(crate) warning: Option<String>,
     #[serde(default)]
     pub(crate) shortcuts: DesktopShortcuts,
+    /// The desktop can show its own dialog for Hex's shortcuts.
+    #[serde(default)]
+    pub(crate) shortcuts_configurable: bool,
 }
 
 /// How the running listener receives its shortcuts.
@@ -110,6 +113,8 @@ pub(crate) enum DesktopAction {
     /// The window opened or gained focus; the Dev channel checks then.
     WindowFocused,
     SetDictationShortcut(DesktopShortcut),
+    /// Opens the desktop's dialog for the shortcuts its portal bound.
+    ConfigureShortcuts,
     StartListening,
     StopListening,
 }

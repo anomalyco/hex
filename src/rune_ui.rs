@@ -2434,6 +2434,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             status: "Enabled".into(),
             warning: None,
             shortcuts,
+            shortcuts_configurable: false,
         },
         operation_error: None,
         transcription: DesktopTranscriptionSnapshot {

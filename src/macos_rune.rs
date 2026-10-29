@@ -773,6 +773,7 @@ impl Runtime {
                 .into(),
                 warning: failure,
                 shortcuts: DesktopShortcuts::Registered,
+                shortcuts_configurable: false,
             },
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: preparation.downloaded_bytes,

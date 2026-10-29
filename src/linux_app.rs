@@ -956,6 +956,10 @@ impl LinuxDesktopHost {
                     .as_ref()
                     .map(|listener| listener.hotkey_status.shortcuts())
                     .unwrap_or_default(),
+                shortcuts_configurable: self
+                    .listener
+                    .as_ref()
+                    .is_some_and(|listener| listener.hotkey_status.configurable()),
             },
             operation_error: self
                 .error
@@ -1032,6 +1036,11 @@ impl LinuxDesktopHost {
                 self.start();
             }
             DesktopAction::StopListening => self.stop(),
+            DesktopAction::ConfigureShortcuts => {
+                if let Some(listener) = &self.listener {
+                    listener.hotkey_status.configure();
+                }
+            }
         }
         Ok(())
     }

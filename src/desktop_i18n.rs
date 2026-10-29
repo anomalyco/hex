@@ -306,6 +306,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Connecting…", ["Łączenie…", "正在连接…", "接続中…", "Verbindung wird hergestellt…", "Conectando…", "Підключення…"]),
     ("Esc to cancel", ["Esc, aby anulować", "按 Esc 取消", "Esc でキャンセル", "Esc zum Abbrechen", "Esc para cancelar", "Esc, щоб скасувати"]),
     ("Desktop shortcuts", ["Skróty pulpitu", "桌面快捷键", "デスクトップのショートカット", "Desktop-Tastenkürzel", "Atajos del escritorio", "Системні комбінації клавіш"]),
+    ("Change the keys your desktop gave Hex", ["Zmień klawisze, które pulpit przydzielił Hex", "更改桌面分配给 Hex 的按键", "デスクトップが Hex に割り当てたキーを変更", "Tasten ändern, die der Desktop Hex zugewiesen hat", "Cambia las teclas que el escritorio asignó a Hex", "Змінити клавіші, які система призначила Hex"]),
     ("Granted by your desktop", ["Przyznany przez pulpit", "由桌面授予", "デスクトップが割り当て", "Vom Desktop vergeben", "Concedido por tu escritorio", "Надано системою"]),
     ("Shortcuts", ["Skróty", "快捷键", "ショートカット", "Tastenkürzel", "Atajos", "Комбінації клавіш"]),
     ("Your desktop granted {}", ["Pulpit przyznał {}", "桌面已授予 {}", "デスクトップが {} を割り当て", "Vom Desktop vergeben: {}", "Tu escritorio concedió {}", "Система надала {}"]),

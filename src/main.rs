@@ -89,6 +89,8 @@ mod linux_paste;
 #[cfg(target_os = "linux")]
 mod linux_portal;
 #[cfg(target_os = "linux")]
+mod linux_remote_desktop;
+#[cfg(target_os = "linux")]
 mod linux_rune_hud;
 #[cfg(target_os = "linux")]
 mod linux_service;

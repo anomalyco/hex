@@ -655,6 +655,29 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
         })
 }
 
+/// The desktop's own dialog for the shortcuts its portal bound, where the
+/// user changes a trigger the desktop kept from an earlier binding.
+fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
+    ui.view
+        .as_ref()
+        .is_some_and(|view| view.listener.shortcuts_configurable)
+        .then(|| {
+            setting_row(
+                p,
+                "configure-shortcuts",
+                tr("Desktop shortcuts"),
+                Some(tr("Change the keys your desktop gave Hex")),
+                button(
+                    p,
+                    "configure-shortcuts-control",
+                    tr("Open"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::ConfigureShortcuts)),
+                ),
+            )
+        })
+}
+
 /// One recordable shortcut beside its recorder, with what a shortcuts
 /// portal granted for it.
 fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
@@ -833,6 +856,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     if ui.records_shortcuts() {
         rows.push(shortcut_row(ui, p, ShortcutTarget::Dictation).into());
         rows.extend(refused_note(ui, p, ShortcutTarget::Dictation).map(CardRow::from));
+        rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
     }
     let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
     rows.push(

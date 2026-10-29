@@ -9,9 +9,9 @@ or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes, Voice Action,
 and History. Voice commands, website mode rules, and meetings are macOS-only.
-This is not universal Wayland support: GNOME and KDE are not covered by the
-current clipboard, virtual-keyboard, and overlay protocol contract. Shortcuts
-are general: the desktop's GlobalShortcuts portal when it has one, otherwise
+Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
+protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
+elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts portal when it has one, otherwise
 your desktop's own keybindings running `hex` commands (see
 [Shortcuts](#shortcuts)).
 
@@ -252,8 +252,15 @@ dictation rules:
   shortcuts Settings records. The desktop decides: it may grant them, assign
   another key, or refuse one that it or another binding already uses. Settings
   lists what the desktop granted under **Desktop shortcuts**, with an error for
-  any it refused. The portal identifies Hex by its installed `hex.desktop`
-  entry and by inspecting the Hex process, so run `hex service` directly:
+  any it refused. A desktop may keep an older binding when you record a new
+  shortcut (KDE does); where its portal supports it, **Desktop shortcuts >
+  Open** shows the desktop's own dialog for Hex's shortcuts, and Settings
+  follows what you choose there. The portal identifies Hex by its installed
+  `hex.desktop` entry and by inspecting the Hex process. A downloaded
+  executable has no entry, so Hex writes a minimal
+  `~/.local/share/applications/hex.desktop` that runs it (a managed install
+  replaces it); if the portal still can't find it, restart the portal with
+  `systemctl --user restart xdg-desktop-portal`. Run `hex service` directly:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
   focused application.
@@ -353,10 +360,23 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
 - Export the compositor's nonempty `WAYLAND_DISPLAY` in the launch environment.
   Hex and its window (winit) select the same native backend even when XWayland's
   `DISPLAY` is also present. `XDG_SESSION_TYPE` alone does not select Wayland.
-- Install `wl-clipboard` and `wtype`. The compositor must support their clipboard
-  and virtual-keyboard protocols. There is no silent XWayland, direct-typing, or
-  privileged input-injection fallback. Transcript text travels on stdin, not
-  command-line arguments.
+- Install `wl-clipboard`. Hex copies each transcript, then sends Ctrl+V (or
+  Ctrl+Shift+V with terminal paste) through one of two general paths, chosen at
+  the first paste:
+  - `wtype`, when the compositor offers the virtual keyboard protocol
+    (`zwp_virtual_keyboard_manager_v1`; wlroots compositors and niri) and
+    `wtype` is installed.
+  - Otherwise the desktop's RemoteDesktop portal
+    (`org.freedesktop.portal.RemoteDesktop`; KDE, GNOME). The first paste asks
+    you to allow Hex to control the keyboard; Hex keeps the portal's restore
+    token (`remote-desktop-token` in Hex's data folder), so it asks once. Revoke
+    it in the desktop's settings.
+  - With neither, the dictation fails with "Copied to the clipboard; press
+    Ctrl+V to paste" and the transcript stays on the clipboard.
+
+  There is no silent XWayland, direct-typing, uinput, or privileged
+  input-injection fallback. Transcript text travels on stdin, not command-line
+  arguments.
 - The overlay requires layer-shell. Settings reports when the HUD is unavailable
   rather than presenting a normal focus-taking window as an overlay.
 - Shortcuts come from the GlobalShortcuts portal or from your own keybindings
@@ -365,7 +385,9 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
   desktop closes the portal session, the listener stops with an error and an
   active recording is cancelled; enable it again from Settings or `hex start`.
 - Paste does not wait for held keys: `wtype`'s virtual keyboard sends its own
-  modifiers, so Ctrl+V stays Ctrl+V while you still hold a shortcut.
+  modifiers, so Ctrl+V stays Ctrl+V while you still hold a shortcut. The
+  RemoteDesktop portal shares the desktop's keyboard, so release the shortcut
+  before the transcript arrives.
 
 ## Updates And Validation
 

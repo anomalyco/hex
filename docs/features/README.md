@@ -1047,7 +1047,11 @@ Linux beta                               // not macOS feature parity
 │   │   ├── General > Change shortcut -> Press chord (Esc cancels)
 │   │   │   └── Saved -> New portal session asks for it as preferred_trigger
 │   │   │       // observed on the niri fork: a new session gets it, a rebind in the same one fails
-│   │   ├── Each row: "Your desktop granted <trigger>" (it may assign another)
+│   │   ├── Each row: "Your desktop granted <trigger>" (it may assign another);
+│   │   │   an empty trigger (KDE's for one it keeps unbound) counts as refused
+│   │   ├── Portal version 2 -> Desktop shortcuts > Open -> ConfigureShortcuts,
+│   │   │   the desktop's own dialog; ShortcutsChanged updates each row
+│   │   │   // a desktop may keep an older binding over a new preferred_trigger (KDE)
 │   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
 │   │       under that shortcut's own row (Dictation, Output, Voice Action pane);
 │   │       the rest keep working
@@ -1079,8 +1083,24 @@ Linux beta                               // not macOS feature parity
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 │   └── Overload (Xrun) glitch -> Logged; not a failure
-└── Paste -> Retain transcript clipboard, not restore previous contents
+├── Paste -> Retain transcript clipboard, not restore previous contents
+│   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
+│       ├── Compositor offers zwp_virtual_keyboard_manager_v1 and wtype is installed -> wtype
+│       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
+│       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms; session lives with Hex
+│       └── Neither works -> Failed: "Copied to the clipboard; press Ctrl+V…" naming
+│           the RemoteDesktop portal; the clipboard keeps the transcript
+└── Portal identity -> No hex.desktop in XDG data dirs (a loose binary) ->
+    Hex writes ~/.local/share/applications/hex.desktop (X-Hex-Managed) for itself
 ```
+
+The Wayland paste choice lives in [linux_paste.rs](../../src/linux_paste.rs) and
+[linux_remote_desktop.rs](../../src/linux_remote_desktop.rs). Observed: the
+wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri
+(apollo). niri's portal frontend advertises RemoteDesktop but its GNOME
+backend fails CreateSession, so wtype stays first there. The RemoteDesktop
+paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
+yet observed on a real desktop.
 
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)

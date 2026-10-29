@@ -428,6 +428,10 @@ pub(crate) const ESCAPE_CANCEL_WARNING: &str =
 pub(crate) struct HotkeyStatus {
     escape_unavailable: Arc<AtomicBool>,
     shortcuts: Arc<Mutex<DesktopShortcuts>>,
+    /// Whether the shortcuts portal can show the desktop's dialog for them.
+    configurable: Arc<AtomicBool>,
+    /// Settings asked for that dialog.
+    configure: Arc<AtomicBool>,
 }
 
 impl HotkeyStatus {
@@ -447,6 +451,15 @@ impl HotkeyStatus {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    pub(crate) fn configurable(&self) -> bool {
+        self.configurable.load(Ordering::Acquire)
+    }
+
+    /// Opens the desktop's dialog for Hex's shortcuts, when it has one.
+    pub(crate) fn configure(&self) {
+        self.configure.store(true, Ordering::Release);
     }
 
     fn set_shortcuts(&self, shortcuts: DesktopShortcuts) {
@@ -906,19 +919,27 @@ impl Backend {
         } else {
             portal.bind(&shortcuts, &self.stop)?
         };
-        let granted = requested
-            .iter()
-            .flatten()
-            .map(|(shortcut, _)| DesktopGrantedShortcut {
-                name: shortcut.portal_id().1.into(),
-                trigger: granted
-                    .get(shortcut.portal_id().0)
-                    .map(|trigger| crate::linux_portal::readable_trigger(trigger)),
-            })
-            .collect::<Vec<_>>();
+        let project = |granted: &std::collections::HashMap<String, Option<String>>| {
+            requested
+                .iter()
+                .flatten()
+                .map(|(shortcut, _)| DesktopGrantedShortcut {
+                    name: shortcut.portal_id().1.into(),
+                    trigger: granted
+                        .get(shortcut.portal_id().0)
+                        .and_then(Option::as_deref)
+                        .map(crate::linux_portal::readable_trigger),
+                })
+                .collect::<Vec<_>>()
+        };
+        let granted = project(&granted);
         for shortcut in granted.iter().filter(|shortcut| shortcut.trigger.is_none()) {
             tracing::warn!(name = %shortcut.name, "the desktop did not grant a Hex shortcut");
         }
+        self.status
+            .configurable
+            .store(portal.configurable(), Ordering::Release);
+        self.status.configure.store(false, Ordering::Release);
         self.mark_ready(DesktopShortcuts::Portal(granted));
         // Escape while the recording shortcut is still held carries its modifiers.
         let held_escape = |shortcut: Shortcut| -> Option<String> {
@@ -952,6 +973,11 @@ impl Backend {
                         Some(shortcut) => Input::Released(shortcut),
                         None => continue,
                     },
+                    crate::linux_portal::Event::Changed(changed) => {
+                        self.status
+                            .set_shortcuts(DesktopShortcuts::Portal(project(&changed)));
+                        continue;
+                    }
                     crate::linux_portal::Event::Closed => {
                         dispatcher.input(Input::Lost);
                         let _ = dispatcher.flush();
@@ -961,6 +987,14 @@ impl Backend {
                 dispatcher.input(input);
             }
             dispatcher.commands();
+            if self.status.configure.swap(false, Ordering::AcqRel)
+                && let Err(error) = portal.configure()
+            {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not open the desktop's shortcut settings"
+                );
+            }
             // Escape belongs to Hex only while something records.
             let wants_escape = dispatcher.state.wants_escape();
             if wants_escape && !escape_bound {

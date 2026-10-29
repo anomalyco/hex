@@ -242,7 +242,7 @@ impl WindowsDesktopHost {
                 }
             }
             // Windows saves shortcuts from the window.
-            DesktopAction::SetDictationShortcut(_) => {}
+            DesktopAction::SetDictationShortcut(_) | DesktopAction::ConfigureShortcuts => {}
         }
         false
     }
@@ -593,6 +593,7 @@ impl WindowsDesktopHost {
                 status: self.status.clone(),
                 warning: visible_failure(&self.activity, self.last_completed_at),
                 shortcuts: DesktopShortcuts::Registered,
+                shortcuts_configurable: false,
             },
             operation_error: self.error.clone(),
             transcription: DesktopTranscriptionSnapshot {

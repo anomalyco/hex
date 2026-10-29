@@ -220,10 +220,15 @@ substitute for source inspection or a second roadmap.
   double-tap only, Escape, Paste Last, Voice Action, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
   or, without the portal, the `hex` commands alone.
-- `linux_portal`: the GlobalShortcuts portal client on a private zbus
-  connection: `Register("hex")`, one session for Hex's shortcuts, a second
-  session binding Escape only while recording, granted-trigger descriptions,
-  and session-closed reporting.
+- `linux_portal`: the portal bus (a private zbus connection, `Register("hex")`
+  after writing a managed `hex.desktop` for a loose binary, requests and
+  sessions) and the GlobalShortcuts client on it: one session for Hex's
+  shortcuts, a second session binding Escape only while recording,
+  granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
+  session-closed reporting.
+- `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
+  without the virtual keyboard protocol: a keyboard-only session with a
+  persisted owner-only restore token, and Ctrl+V as keysyms.
 - `linux_context`: the frontmost X11 application for modes; Wayland has none.
 - `linux_audio_control`: While-dictating mute through `wpctl`/`pactl` and
   MPRIS pause over D-Bus (zbus), restoring only what it changed.
@@ -920,14 +925,22 @@ CoreAudio formats, AppleScript details, or event serialization.
   staging; macOS unpacks beside the bundle and swaps it in with
   `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes
   the old bundle at launch.
-- The Wayland beta requires compatible clipboard, virtual-keyboard, and
-  layer-shell protocols. Shortcuts come from the GlobalShortcuts portal when the
+- The Wayland beta requires compatible clipboard and layer-shell protocols.
+  Paste sends its shortcut through `wtype` when the compositor advertises
+  `zwp_virtual_keyboard_manager_v1`, and otherwise through the
+  RemoteDesktop portal, the general injection path: one keyboard-only session
+  approved once (restore token, persist mode 2) and kept with the paster.
+  With neither, the transcript stays copied and the failure names the
+  missing portal. Shortcuts come from the GlobalShortcuts portal when the
   desktop offers it; otherwise the user binds the `hex dictation`,
   `hex voice-action`, and `hex paste-last` commands in the desktop's own
   keybindings. One general path: no compositor-specific code, no raw input
   devices, no input-group requirement, and no silent fallback to XWayland or
-  privileged input injection. The desktop may grant a different trigger or
-  refuse one; Settings shows what it granted. Escape is bound only while
+  privileged input injection (uinput). The desktop may grant a different
+  trigger, keep an older one, or refuse one; Settings shows what it granted,
+  follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
+  A loose binary writes its own managed `hex.desktop` so the portal can
+  identify it. Escape is bound only while
   something records. Modifier-only shortcuts stay unsupported on Linux.
 - Every Linux shortcut source (X11 grabs, portal presses, `hex` commands) feeds
   the same `linux_input` state machine and emits the same events. Commands are
@@ -965,7 +978,8 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Linux paste keeps transcripts off helper argv and bounds helper I/O. X11 waits
   for physical modifiers without discarding accepted output, and shutdown
   cancels that wait; on Wayland, `wtype`'s virtual keyboard carries its own
-  modifiers, so held keys never change its Ctrl+V. New installs use Ctrl-V;
+  modifiers, so held keys never change its Ctrl+V (the RemoteDesktop portal
+  shares the desktop's keyboard). New installs use Ctrl-V;
   the terminal-paste preference selects Ctrl-Shift-V and defaults on for
   persisted legacy X11 settings. The beta retains
   the transcript clipboard; arbitrary MIME restoration and consumption
