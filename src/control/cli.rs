@@ -208,7 +208,7 @@ pub enum WindowCommand {
         output: Output,
     },
     /// Experiment: open the window on a playground story by its path, name,
-    /// or slug (`HUD/Processing`, `hud-processing`; `hex experiments enable
+    /// or slug (`Prototypes/HUD/Processing`, `prototypes-hud-processing`; `hex experiments enable
     /// playground`).
     Story {
         story: String,

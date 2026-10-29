@@ -1,5 +1,5 @@
 //! Dot scope's HUD as playground stories (the `playground` experiment, ⇧⌘D,
-//! group HUD). The HUD is a Rune overlay of its
+//! group Prototypes › HUD). The HUD is a Rune overlay of its
 //! own, not a view in the window, so a story can't draw it: each one drives the real
 //! HUD at the top of the screen through the same events dictation sends,
 //! and its stage says what it's showing. Every story starts from HUD Lab's
@@ -25,7 +25,7 @@ const JOB: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Flow {
-    /// Records, then processes and is done, or is cancelled.
+    /// Records, then processes and is done or fails, or is cancelled.
     Whole,
     Processing,
     YourVoice,
@@ -35,6 +35,8 @@ enum Flow {
 enum Ending {
     Done,
     Cancel,
+    /// Processing fails: the transcription or its paste.
+    Fail,
 }
 
 pub(crate) struct HudStory {
@@ -53,14 +55,15 @@ pub(crate) struct HudStory {
 
 /// The placement stories: each plays a whole dictation from one placement.
 const PLACEMENTS: [(&str, Placement, bool); 4] = [
-    ("HUD/Notch", Placement::Notch, false),
-    ("HUD/Pretend notch", Placement::Notch, true),
-    ("HUD/Menu bar", Placement::MenuBar, false),
-    ("HUD/Below the menu bar", Placement::Below, false),
+    ("Prototypes/HUD/Notch", Placement::Notch, false),
+    ("Prototypes/HUD/Pretend notch", Placement::Notch, true),
+    ("Prototypes/HUD/Menu bar", Placement::MenuBar, false),
+    ("Prototypes/HUD/Below the menu bar", Placement::Below, false),
 ];
 
 /// Adds the HUD's stories to `playground`. A placement story's variants
-/// are each look with each ending (`flow-done`, `sweep-cancel`, …); the
+/// are each look with each ending (`flow-done`, `sweep-cancel`,
+/// `pulse-fail`, …); the
 /// Processing and Your voice stories' variants are placements (`notch`,
 /// `menu-bar`, …). Links name both, so these names stay put.
 pub(crate) fn add<S: 'static>(mut playground: Playground<S>) -> Playground<S> {
@@ -71,10 +74,10 @@ pub(crate) fn add<S: 'static>(mut playground: Playground<S>) -> Playground<S> {
         })));
     }
     playground
-        .story(placements(story("HUD/Processing", || {
+        .story(placements(story("Prototypes/HUD/Processing", || {
             HudStory::new(Flow::Processing)
         })))
-        .story(placements(story("HUD/Your voice", || {
+        .story(placements(story("Prototypes/HUD/Your voice", || {
             HudStory::new(Flow::YourVoice)
         })))
 }
@@ -122,6 +125,9 @@ fn endings(story: Story<HudStory>) -> Story<HudStory> {
         ("flow-cancel", Processing::Flow, Ending::Cancel),
         ("pulse-cancel", Processing::Pulse, Ending::Cancel),
         ("sweep-cancel", Processing::Sweep, Ending::Cancel),
+        ("flow-fail", Processing::Flow, Ending::Fail),
+        ("pulse-fail", Processing::Pulse, Ending::Fail),
+        ("sweep-fail", Processing::Sweep, Ending::Fail),
     ] {
         story = story.variant(name, move |s| {
             s.look = Some(look);
@@ -223,6 +229,15 @@ fn done(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
     });
 }
 
+fn fail(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
+    send(Event::JobFailed { job_id: JOB });
+    s.showing = "Failed";
+    then(s, play, SETTLE_SECS, |s, _| {
+        send(Event::Reset);
+        s.showing = "Hidden";
+    });
+}
+
 fn play(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
     s.run += 1;
     match s.flow {
@@ -232,6 +247,10 @@ fn play(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
                 Ending::Done => {
                     process(s);
                     then(s, play, PROCESS_SECS, done);
+                }
+                Ending::Fail => {
+                    process(s);
+                    then(s, play, PROCESS_SECS, fail);
                 }
                 Ending::Cancel => {
                     send(Event::Cancelled);
@@ -290,6 +309,7 @@ fn view(s: &HudStory, cx: &mut Cx<HudStory>) -> El {
                 match s.ending {
                     Ending::Done => "done",
                     Ending::Cancel => "cancel",
+                    Ending::Fail => "fail",
                 },
                 if tuning.auto_level { "on" } else { "off" },
             ))

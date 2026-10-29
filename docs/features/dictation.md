@@ -1093,14 +1093,15 @@ The playground (⇧⌘D, experiment `playground`) lists HUD stories
 so every combination plays without HUD Lab:
 
 ```ts
-HUD stories                                  // R plays, P next look, A auto level, S stop
+Prototypes › HUD                             // R plays, P next look, A auto level, S stop
 ├── Notch, Pretend notch, Menu bar, Below the menu bar -> A whole dictation
-│   from that placement; variants flow-done, pulse-done, sweep-done,
-│   flow-cancel, pulse-cancel, sweep-cancel (keys 1–6)
+│   from that placement; variants <look>-<ending>: flow, pulse, or sweep
+│   with done, cancel (while recording), or fail (while processing)
 ├── Processing -> Records, then holds processing 12 s
 ├── Your voice -> Waits for your shortcut and meters your microphone
 │   └── Both: variants hud-lab, notch, pretend-notch, menu-bar, below
-└── Links name the story's slug and variant: hud-notch, pulse-cancel
+└── Links name the story and variant:
+    hex://story/prototypes/hud/notch?variant=pulse-fail&play=1
 ```
 
 The HUD is its own Rune overlay, not a view in the window, so a story drives

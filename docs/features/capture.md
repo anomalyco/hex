@@ -341,7 +341,9 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 └── After a capture, one of five flows (`capture.capsule_flow`, the
     playground's "Flow after a capture"; prototypes to compare, clips in
     r22-flows). Only the guesses' look changes; rules, Undo, ✕ and the
-    keys the capsule takes stay the same
+    keys the capsule takes stay the same. Each capsule story's variants
+    pick one, so a link opens a state in a flow:
+    `hex://story/prototypes/capture-capsule/suggestions?variant=toast`
     ├── list (default) -> today's list under the capsule, as above
     ├── toast -> one line "Send to X ⏎" with "Next ⇥" for more than one
     │   guess; ⇥/⇧⇥ cycle (CapsuleKeys::Suggest { cycle }), ⏎ or a click on
@@ -354,10 +356,10 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     └── notch -> a black shape grows out of the notch (185 pt wide; on a
         flat display a pretend one the menu bar's height) into the pill and
         the same card, its content under the notch, and shrinks back into it
-        (capture_capsule/notch.rs). The playground's "Capture capsule/notch"
+        (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
-    The playground's "Capture capsule/family" story (playground/family.rs)
+    The playground's "Prototypes/Capture capsule/family" story (playground/family.rs)
     plays a dictation and then a capture in one shape on the same springs:
     from the notch on a 14-inch MacBook Pro, and on a flat 27-inch display
     inside the menu bar (hud_placement's 3 pt inset) or floating 6 pt under

@@ -84,24 +84,43 @@ The known experiments are compiled into
   `without_the_modes_experiment_the_profile_is_global_replacements_only`,
   `the_sidebar_has_no_modes_without_the_experiment`; scene `modes-off`.
 - `playground`: Rune's playground in the window (every OS). ⇧⌘D (View ›
-  Playground on macOS) or Ctrl+Shift+D swaps the window for every fixture
-  scene, grouped by pane (the tour, the model picker, and the shortcut
-  explainer each get their own group), and, in builds with captures, the
-  capture capsule's states as stories with its flow, tuning, and log. Each
+  Playground on macOS) or Ctrl+Shift+D swaps the window for a list of
+  folded groups, nested by path:
+
+  ```ts
+  Prototypes        stories that aren't the window
+  ├── Onboarding    the options and First run
+  ├── HUD           (macOS) each placement × look × ending, Processing, Your voice
+  └── Capture capsule   (macOS) whole flow and each state × flow, notch, family
+  Window            every macOS-window fixture scene by pane, under a readable name
+  ├── General       Settings, Microphone missing, Shortcut/…, Updates/…
+  ├── Modes … Activity, Transcription model, Shortcut explainer, Onboarding tour
+  Linux & Windows   the portal and Windows fixtures
+  ```
+
+  Every group starts folded; opening a story, from the list or a link,
+  unfolds the groups above it, and folds hold until Hex quits. The list
+  keeps only its own keys (arrows, Return, J/K, a story's trigger letters,
+  Tab, Esc, `/` to filter) and ⇧⌘D; every other key, ⌘-chords and digits
+  included, reaches the open story. Each
   story starts from a fresh fixture; the real window keeps running
   underneath. While it is on, the window resizes everywhere (Linux and the
   macOS tour otherwise keep one fixed size), so the stage beside the
   playground's columns has room. Off, nothing is attached: no shortcut, menu item, or scene list.
   Headless renders take `--playground [story]` while it is on, e.g.
   `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
-  "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
-  in [playground.rs](../../src/rune_ui/playground.rs).
+  "Window/General/Settings"`. Checks: `every_scene_but_live_has_a_path_under_a_group`,
+  `the_playgrounds_keys_work_with_a_story_open`, and
+  `a_scene_opened_from_the_list_hears_command_digits` in
+  [playground.rs](../../src/rune_ui/playground.rs).
   On macOS a story opens from a link or the CLI:
 
   ```ts
-  open 'hex://story/hud/recording-your-voice?play=1'   // hex-test:// in Hex Test.app
-  hex window story HUD/Processing [--variant 2] [--play]
-  ├── the window opens on the story: its path, name, or slug, `/` or `-` between group and name
+  open 'hex://story/prototypes/hud/notch?variant=pulse-fail&play=1'   // hex-test:// in Hex Test.app
+  open 'hex://story/prototypes/capture-capsule/suggestions?variant=toast'
+  hex window story Prototypes/HUD/Processing [--variant 2] [--play]
+  ├── the window opens on the story: its path, name, or slug, `/` or `-` between groups and name
+  ├── a link from before the groups nested (`hud/processing`, `General/mac-settings`, `mac-settings`) → that story now
   ├── variant=<n|name> → that variant
   ├── play=1 → its `r` trigger runs, as pressing R does
   ├── experiment off → only the window opens; process.log says why, the CLI answers feature-off
@@ -109,9 +128,12 @@ The known experiments are compiled into
   ```
 
   An unknown story opens the list and an unknown variant the story; Rune
-  logs which to stderr. Checks: `reads_story_links`, `ignores_other_links`
-  in [story_link.rs](../../src/rune_ui/story_link.rs); the URL handler and
-  the replay have no automated end-to-end check.
+  logs which to stderr. Checks: `reads_story_links`, `links_from_before_the_list_nested_still_open_their_story`, `ignores_other_links`
+  in [story_link.rs](../../src/rune_ui/story_link.rs);
+  `every_hud_story_and_variant_opens_from_its_link` and
+  `every_capsule_story_and_flow_opens_from_its_link` in
+  playground.rs open every HUD and capsule link headlessly. The URL
+  handler and the replay have no automated end-to-end check.
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The

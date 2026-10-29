@@ -19,7 +19,7 @@ use super::{
 const SIDE_W: f32 = 240.0;
 /// Leaves room under the side column for the story's triggers.
 const SIDE_H: f32 = 440.0;
-const GROUP: &str = "Capture capsule";
+const GROUP: &str = "Prototypes/Capture capsule";
 
 // One story per scene below; adding a scene means adding its index too.
 const _: () = assert!(SCENES.len() == 9);
@@ -27,11 +27,13 @@ const _: () = assert!(SCENES.len() == 9);
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
     playground
-        .story(story("Capture capsule/whole flow", init_flow).trigger(
-            'r',
-            "Play the whole flow",
-            play,
-        ))
+        .story(
+            story("Prototypes/Capture capsule/whole flow", init_flow).trigger(
+                'r',
+                "Play the whole flow",
+                play,
+            ),
+        )
         .story(scene::<0>())
         .story(scene::<1>())
         .story(scene::<2>())
@@ -50,20 +52,43 @@ fn scene<const I: usize>() -> Story<CapsuleState> {
     story(name, init_scene::<I>).trigger('p', "Play the whole flow", play)
 }
 
+/// A story on the capsule's overlay frame. Its first variant keeps the
+/// flow the Flow card picked; the rest are each flow after a capture, so a
+/// link names one (`?variant=toast`).
 fn story(name: &'static str, init: fn() -> CapsuleState) -> Story<CapsuleState> {
     let frame = OverlaySpec::new("Hex capture", (PANEL_W, PANEL_H), stage);
-    controls(Story::overlay(name, &frame, init))
+    let mut story = controls(Story::overlay(name, &frame, init)).variant("tuned", |_| {});
+    for (variant, flow) in FLOWS {
+        story = story.variant(variant, move |s| {
+            toggle(s, |pg| pg.set_tuning(Tuning { flow, ..pg.tuning }))
+        });
+    }
+    story
 }
+
+/// Each flow after a capture, by the variant that shows it.
+const FLOWS: [(&str, CapsuleFlow); 5] = [
+    ("list", CapsuleFlow::List),
+    ("toast", CapsuleFlow::Toast),
+    ("menu-bar", CapsuleFlow::MenuBar),
+    ("cursor", CapsuleFlow::Cursor),
+    ("notch", CapsuleFlow::Notch),
+];
+const _: () = assert!(FLOWS.len() == CapsuleFlow::ALL.len());
 
 /// The capsule's notch flow on a MacBook's notch and on a flat display's
 /// pretend one, at their real sizes in points.
 fn notch_story() -> Story<CapsuleState> {
     let pick = |screens| move |s: &mut CapsuleState| toggle(s, |pg| pg.screens = screens);
-    controls(Story::new("Capture capsule/notch", init_notch, screens))
-        .trigger('r', "Play the whole flow", play)
-        .variant("Side by side", pick(Screens::Both))
-        .variant(MACBOOK_PRO_14.name, pick(Screens::One(MACBOOK_PRO_14)))
-        .variant(DISPLAY_27.name, pick(Screens::One(DISPLAY_27)))
+    controls(Story::new(
+        "Prototypes/Capture capsule/notch",
+        init_notch,
+        screens,
+    ))
+    .trigger('r', "Play the whole flow", play)
+    .variant("Side by side", pick(Screens::Both))
+    .variant(MACBOOK_PRO_14.name, pick(Screens::One(MACBOOK_PRO_14)))
+    .variant(DISPLAY_27.name, pick(Screens::One(DISPLAY_27)))
 }
 
 /// The triggers and side column every capsule story has.

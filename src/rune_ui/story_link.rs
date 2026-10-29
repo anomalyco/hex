@@ -78,19 +78,21 @@ pub(crate) fn parse(link: &str, scheme: &str) -> Result<StoryLink, String> {
     Ok(StoryLink::new(&segments.join("/"), variant, play))
 }
 
-/// Rune finds a story by path, name, or slug, and its slugs join the group
+/// Rune finds a story by path, name, or slug, and its slugs join the groups
 /// and name with `-`; a slug-shaped link may use `/` there
-/// (`hud/recording-your-voice`).
+/// (`hud/recording-your-voice`). A link made before the list nested finds
+/// the story where it lists now.
 fn story_name(story: &str) -> String {
     let slug_shaped = story.contains('/')
         && story
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '/');
-    if slug_shaped && story.contains('-') {
+    let story = if slug_shaped && story.contains('-') {
         story.replace('/', "-")
     } else {
         story.to_owned()
-    }
+    };
+    playground::alias(&story).unwrap_or(story)
 }
 
 fn percent_decode(segment: &str) -> Option<String> {
@@ -142,27 +144,65 @@ mod tests {
     #[test]
     fn reads_story_links() {
         assert_eq!(
-            parse("hex://story/hud/recording-your-voice?play=1", "hex"),
-            Ok(link("hud-recording-your-voice", None, true))
+            parse(
+                "hex://story/prototypes/hud/recording-your-voice?play=1",
+                "hex"
+            ),
+            Ok(link("prototypes-hud-recording-your-voice", None, true))
         );
         assert_eq!(
-            parse("hex://story/HUD/Processing?variant=2", "hex"),
-            Ok(link("HUD/Processing", Some("2"), false))
+            parse("hex://story/Prototypes/HUD/Processing?variant=2", "hex"),
+            Ok(link("Prototypes/HUD/Processing", Some("2"), false))
         );
         assert_eq!(
-            parse("hex://story/hud/processing?play", "hex"),
-            Ok(link("hud/processing", None, true))
+            parse("hex://story/Window/General/Microphone%20missing", "hex"),
+            Ok(link("Window/General/Microphone missing", None, false))
         );
         assert_eq!(
             parse(
-                "hex://story/HUD/Recording%20%C2%B7%20your%20voice?variant=Quiet&play=0",
+                "hex://story/Prototypes/HUD/Recording%20%C2%B7%20your%20voice?variant=Quiet&play=0",
                 "hex"
             ),
-            Ok(link("HUD/Recording · your voice", Some("Quiet"), false))
+            Ok(link(
+                "Prototypes/HUD/Recording · your voice",
+                Some("Quiet"),
+                false
+            ))
         );
         assert_eq!(
             parse("hex://story/processing/", "hex"),
             Ok(link("processing", None, false))
+        );
+    }
+
+    #[test]
+    fn links_from_before_the_list_nested_still_open_their_story() {
+        for (old, now) in [
+            (
+                "hex://story/hud/recording-your-voice?play=1",
+                "prototypes-hud-recording-your-voice",
+            ),
+            ("hex://story/HUD/Processing", "Prototypes/HUD/Processing"),
+            ("hex://story/hud/processing", "Prototypes/hud/processing"),
+            (
+                "hex://story/onboarding/option-pill",
+                "prototypes-onboarding-option-pill",
+            ),
+            ("hex://story/mac-settings", "Window/General/Settings"),
+            (
+                "hex://story/Meetings/meetings-calendar",
+                "Window/Meetings/Calendar",
+            ),
+            (
+                "hex://story/general/mac-settings",
+                "Window/General/Settings",
+            ),
+        ] {
+            assert_eq!(parse(old, "hex").map(|link| link.story), Ok(now.into()));
+        }
+        assert_eq!(
+            StoryLink::new("HUD/Processing", None, false).story,
+            "Prototypes/HUD/Processing"
         );
     }
 

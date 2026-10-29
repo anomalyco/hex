@@ -1,4 +1,4 @@
-//! Permissions step for `"Onboarding/First run"`:
+//! Permissions step for `"Prototypes/Onboarding/First run"`:
 //!
 //! - One `440 pt` column shared by Hex's setup card, System Settings, and the
 //!   floating drag guide, with every app icon aligned on one vertical spine

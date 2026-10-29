@@ -204,24 +204,25 @@ impl Onboard {
 
 pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
     playground
-        .story(story("Onboarding/Option · Pill", || {
+        .story(story("Prototypes/Onboarding/Option · Pill", || {
             Onboard::new(Flow::Pill)
         }))
-        .story(story("Onboarding/Option · Fill", || {
+        .story(story("Prototypes/Onboarding/Option · Fill", || {
             Onboard::new(Flow::Fill)
         }))
-        .story(story("Onboarding/Option · Shout", || {
+        .story(story("Prototypes/Onboarding/Option · Shout", || {
             Onboard::new(Flow::Shout)
         }))
-        .story(story("Onboarding/Without Hex · With Hex", || {
-            Onboard::new(Flow::Versus)
-        }))
+        .story(story(
+            "Prototypes/Onboarding/Without Hex · With Hex",
+            || Onboard::new(Flow::Versus),
+        ))
         .story(first_run())
 }
 
 fn first_run() -> Story<Onboard> {
     Story::new(
-        "Onboarding/First run",
+        "Prototypes/Onboarding/First run",
         || {
             let mut s = Onboard::new(Flow::FirstRun);
             s.speech = Speech::AfterDownload;

@@ -177,7 +177,7 @@ impl Family {
 
 pub(super) fn story() -> Story<Family> {
     let voice = |voice| move |s: &mut Family| s.voice = voice;
-    Story::new("Capture capsule/family", Family::new, view)
+    Story::new("Prototypes/Capture capsule/family", Family::new, view)
         .poll(poll)
         .trigger(
             'r',
