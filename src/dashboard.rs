@@ -522,7 +522,7 @@ fn dictation_label(phase: &DictationPhase) -> &'static str {
         DictationPhase::Discarded => "discarded",
         DictationPhase::Cancelled => "cancelled",
         DictationPhase::Transcribing => "transcribing",
-        DictationPhase::Pasted => "pasted",
+        DictationPhase::Pasted => "paste sent",
         DictationPhase::Edited => "edited",
         DictationPhase::VoiceAction => "voice action",
         DictationPhase::Logged => "logged",

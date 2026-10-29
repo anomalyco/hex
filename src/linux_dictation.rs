@@ -217,11 +217,12 @@ pub(crate) fn run(
         crate::linux_audio_control::AudioSuppressor::new(settings.recording_audio_behavior);
     let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
     let worker_paste_with_shift = paste_with_shift.clone();
+    let paste_keys = hotkey_status.keys();
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker_stop = output.stop.clone();
     output.worker = Some(thread::spawn(move || {
-        let mut paster = LinuxPaster::new(worker_stop.clone(), worker_paste_with_shift);
+        let mut paster = LinuxPaster::new(worker_stop.clone(), worker_paste_with_shift, paste_keys);
         let mut last_dictation: Option<String> = None;
         while let Ok(job) = job_receiver.recv() {
             if worker_stop.load(Ordering::Acquire) {

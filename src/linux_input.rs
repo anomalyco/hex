@@ -432,6 +432,7 @@ pub(crate) struct HotkeyStatus {
     configurable: Arc<AtomicBool>,
     /// Settings asked for that dialog.
     configure: Arc<AtomicBool>,
+    keys: ShortcutKeys,
 }
 
 impl HotkeyStatus {
@@ -453,6 +454,11 @@ impl HotkeyStatus {
             .clone()
     }
 
+    /// When the shortcut that asked for a paste has let go of its keys.
+    pub(crate) fn keys(&self) -> ShortcutKeys {
+        self.keys.clone()
+    }
+
     pub(crate) fn configurable(&self) -> bool {
         self.configurable.load(Ordering::Acquire)
     }
@@ -467,6 +473,99 @@ impl HotkeyStatus {
             .shortcuts
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = shortcuts;
+    }
+}
+
+/// How long after a Wayland shortcut's last event its modifiers may still be
+/// down. Hex cannot see them there, so this is the bounded estimate.
+const MODIFIER_GRACE: Duration = Duration::from_millis(250);
+/// The longest a press without its release holds a paste back, for desktops
+/// that drop the release.
+const HELD_LIMIT: Duration = Duration::from_secs(2);
+
+/// When the keys of a Hex shortcut may still be down. Some Wayland
+/// compositors (Hyprland) add every held physical modifier to virtual
+/// keyboard input, turning a paste's Ctrl+V into Ctrl+Alt+V. Hex reads no
+/// input devices, so the paste waits on the shortcut's own events: until a
+/// modifier shortcut's release (portal Deactivated) plus [`MODIFIER_GRACE`],
+/// and [`MODIFIER_GRACE`] after a `hex` command, whose keybinding is unknown.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ShortcutKeys(Arc<Mutex<HeldKeys>>);
+
+#[derive(Debug, Default)]
+struct HeldKeys {
+    /// Modifier shortcuts pressed without their release, by [`Shortcut::index`].
+    held: u8,
+    last: Option<Instant>,
+}
+
+impl HeldKeys {
+    /// When a paste may send its shortcut, or `None` for now.
+    fn quiet_at(&self) -> Option<Instant> {
+        let last = self.last?;
+        Some(
+            last + if self.held != 0 {
+                HELD_LIMIT
+            } else {
+                MODIFIER_GRACE
+            },
+        )
+    }
+}
+
+impl ShortcutKeys {
+    fn update(&self, change: impl FnOnce(&mut HeldKeys)) {
+        let mut keys = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        change(&mut keys);
+        keys.last = Some(Instant::now());
+    }
+
+    fn pressed(&self, shortcut: Shortcut) {
+        self.update(|keys| keys.held |= 1 << shortcut.index());
+    }
+
+    fn released(&self, shortcut: Shortcut) {
+        self.update(|keys| keys.held &= !(1 << shortcut.index()));
+    }
+
+    fn command(&self) {
+        self.update(|_| {});
+    }
+
+    fn released_all(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .held = 0;
+    }
+
+    /// Waits until the shortcut that asked for a paste has plausibly let
+    /// go of its modifiers, or a release ends the wait early.
+    pub(crate) fn settle(&self, stop: &AtomicBool) -> Result<()> {
+        loop {
+            if stop.load(Ordering::Acquire) {
+                return Err(eyre!("paste cancelled while stopping the listener"));
+            }
+            let quiet_at = self
+                .0
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .quiet_at();
+            let Some(wait) = quiet_at.and_then(|at| at.checked_duration_since(Instant::now()))
+            else {
+                return Ok(());
+            };
+            thread::sleep(wait.min(Duration::from_millis(20)));
+        }
+    }
+}
+
+/// Whether a portal trigger holds modifiers: the one the desktop granted,
+/// else the one Hex asked for.
+fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool {
+    match granted.map(str::trim).filter(|trigger| !trigger.is_empty()) {
+        Some(trigger) => crate::linux_portal::readable_trigger(trigger).contains('+'),
+        None => requested.control || requested.alt || requested.shift || requested.super_key,
     }
 }
 
@@ -705,6 +804,7 @@ struct Dispatcher {
     state: ShortcutState,
     sender: SyncSender<HotkeyEvent>,
     commands: CommandQueue,
+    keys: ShortcutKeys,
     pending: Vec<HotkeyEvent>,
 }
 
@@ -713,11 +813,13 @@ impl Dispatcher {
         options: &HotkeyOptions,
         sender: SyncSender<HotkeyEvent>,
         commands: CommandQueue,
+        keys: ShortcutKeys,
     ) -> Self {
         Self {
             state: ShortcutState::new(options),
             sender,
             commands,
+            keys,
             pending: Vec::new(),
         }
     }
@@ -738,6 +840,7 @@ impl Dispatcher {
         let queued: Vec<_> = commands.try_iter().collect();
         drop(commands);
         for command in queued {
+            self.keys.command();
             self.input(Input::Command(command));
         }
     }
@@ -787,13 +890,14 @@ impl LinuxHotkeyMonitor {
         let worker_stop = stop.clone();
         let worker_started = started.clone();
         let worker = thread::spawn(move || {
+            let keys = status.keys();
             let backend = Backend {
                 stop: worker_stop,
                 ready: ready_sender.clone(),
                 started: worker_started.clone(),
                 status,
             };
-            let dispatcher = Dispatcher::new(&options, sender, commands);
+            let dispatcher = Dispatcher::new(&options, sender, commands, keys);
             let result = match session {
                 LinuxSession::X11 => backend.run_x11(dispatcher, binding, options),
                 LinuxSession::Wayland => backend.run_wayland(dispatcher, binding, options),
@@ -932,6 +1036,20 @@ impl Backend {
                 })
                 .collect::<Vec<_>>()
         };
+        let modifiers = |granted: &std::collections::HashMap<String, Option<String>>| {
+            Shortcut::ALL.map(|shortcut| {
+                requested.iter().flatten().any(|(requested, key)| {
+                    *requested == shortcut
+                        && trigger_has_modifiers(
+                            granted
+                                .get(shortcut.portal_id().0)
+                                .and_then(Option::as_deref),
+                            key,
+                        )
+                })
+            })
+        };
+        let mut with_modifiers = modifiers(&granted);
         let granted = project(&granted);
         for shortcut in granted.iter().filter(|shortcut| shortcut.trigger.is_none()) {
             tracing::warn!(name = %shortcut.name, "the desktop did not grant a Hex shortcut");
@@ -966,19 +1084,31 @@ impl Backend {
                         Input::Escape
                     }
                     crate::linux_portal::Event::Pressed(id) => match shortcut_for(&id) {
-                        Some(shortcut) => Input::Pressed(shortcut),
+                        Some(shortcut) => {
+                            if with_modifiers[shortcut.index()] {
+                                dispatcher.keys.pressed(shortcut);
+                            }
+                            Input::Pressed(shortcut)
+                        }
                         None => continue,
                     },
                     crate::linux_portal::Event::Released(id) => match shortcut_for(&id) {
-                        Some(shortcut) => Input::Released(shortcut),
+                        Some(shortcut) => {
+                            if with_modifiers[shortcut.index()] {
+                                dispatcher.keys.released(shortcut);
+                            }
+                            Input::Released(shortcut)
+                        }
                         None => continue,
                     },
                     crate::linux_portal::Event::Changed(changed) => {
+                        with_modifiers = modifiers(&changed);
                         self.status
                             .set_shortcuts(DesktopShortcuts::Portal(project(&changed)));
                         continue;
                     }
                     crate::linux_portal::Event::Closed => {
+                        dispatcher.keys.released_all();
                         dispatcher.input(Input::Lost);
                         let _ = dispatcher.flush();
                         return Err(eyre!("the desktop closed Hex's shortcuts portal session"));
@@ -2265,6 +2395,43 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_waits_for_a_modifier_shortcut_to_let_go() {
+        let keys = HeldKeys::default();
+        assert_eq!(keys.quiet_at(), None);
+        let now = Instant::now();
+        let held = HeldKeys {
+            held: 1 << Shortcut::PasteLast.index(),
+            last: Some(now),
+        };
+        assert_eq!(held.quiet_at(), Some(now + HELD_LIMIT));
+        let released = HeldKeys {
+            held: 0,
+            last: Some(now),
+        };
+        assert_eq!(released.quiet_at(), Some(now + MODIFIER_GRACE));
+    }
+
+    #[test]
+    fn granted_triggers_decide_whether_a_shortcut_holds_modifiers() {
+        let alt_space = LinuxHotkey::default();
+        assert!(trigger_has_modifiers(None, &alt_space));
+        assert!(trigger_has_modifiers(Some(""), &alt_space));
+        assert!(!trigger_has_modifiers(Some("Press End"), &alt_space));
+        assert!(trigger_has_modifiers(
+            Some("Press <ctrl><alt>v"),
+            &alt_space
+        ));
+        let end = LinuxHotkey {
+            control: false,
+            alt: false,
+            shift: false,
+            super_key: false,
+            key: "End".into(),
+        };
+        assert!(!trigger_has_modifiers(None, &end));
+    }
+
+    #[test]
     fn escape_warning_is_logged_once_per_episode_and_clears_on_recovery() {
         let status = HotkeyStatus::default();
         let observer = status.clone();
@@ -2321,6 +2488,7 @@ mod tests {
                 &HotkeyOptions::default(),
                 sender,
                 receiver.into(),
+                ShortcutKeys::default(),
             ))
         });
         readiness.recv().unwrap().unwrap();

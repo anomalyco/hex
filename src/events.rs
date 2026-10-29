@@ -142,6 +142,8 @@ pub enum DictationPhase {
     Discarded,
     Cancelled,
     Transcribing,
+    /// The paste shortcut was sent. No platform confirms that the focused
+    /// application accepted it, so this does not prove the text landed.
     Pasted,
     Edited,
     VoiceAction,

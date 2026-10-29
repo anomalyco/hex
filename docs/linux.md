@@ -266,20 +266,21 @@ dictation rules:
   focused application.
 - **Hyprland** has the portal but takes every shortcut without a key, so
   nothing happens until you bind one in your config, and the key Settings
-  records is not used. Hex can't tell whether your config binds it. For
-  example:
+  records is not used. Hex can't tell whether your config binds it. Prefer
+  keys without modifiers, because Hyprland adds every modifier you still hold
+  to Hex's paste (see [Native Wayland Requirements](#native-wayland-requirements)). For example:
 
 ```lua
-hl.bind("ALT + Z", hl.dsp.global("hex:dictation"))
-hl.bind("CTRL + ALT + V", hl.dsp.global("hex:paste-last"))
+hl.bind("End", hl.dsp.global("hex:dictation"))
+hl.bind("F9", hl.dsp.global("hex:paste-last"))
 ```
 
-  Older Hyprland configs write `bind = ALT, Z, global, hex:dictation`.
+  Older Hyprland configs write `bind = , End, global, hex:dictation`.
   Escape-cancel can't be bound this way; bind `hex dictation cancel` to a key
   instead. Hyprland 0.56's Lua binds send no release when the modifier comes
-  up before the key (Alt before Z). Toggle is unaffected: the next press still
-  finishes. In Hold, recording continues until the next press and release, so
-  lift the key first or use Toggle.
+  up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
+  unaffected: the next press still finishes. In Hold, recording continues
+  until the next press and release, so lift the key first or use Toggle.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
   keyboard configuration:
@@ -384,10 +385,18 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
   and needs no `input` group membership or other device permission. If the
   desktop closes the portal session, the listener stops with an error and an
   active recording is cancelled; enable it again from Settings or `hex start`.
-- Paste does not wait for held keys: `wtype`'s virtual keyboard sends its own
-  modifiers, so Ctrl+V stays Ctrl+V while you still hold a shortcut. The
-  RemoteDesktop portal shares the desktop's keyboard, so release the shortcut
-  before the transcript arrives.
+- Hex can't see which keys are down on Wayland, and some compositors merge
+  held physical modifiers into its paste: on Hyprland, Alt still held from
+  Alt+Z turns `wtype`'s Ctrl+V into Ctrl+Alt+V, and a paste-last bound to
+  Ctrl+Alt+V is matched by Hyprland again and never reaches the app. The
+  RemoteDesktop portal shares the desktop's keyboard the same way. So when a
+  shortcut with modifiers asks for a paste, Hex waits for its release (the
+  portal's Deactivated) plus 250 ms, at most 2 s after a press whose release
+  never comes. After a `hex` command, whose keybinding Hex can't see, it waits
+  250 ms. A modifier still held past that changes the paste, so bind keys
+  without modifiers (End, F-keys) or let go of the modifiers before the
+  transcript arrives. Hex logs a dictation as pasted once it sent the paste
+  shortcut; it can't confirm the application accepted it.
 
 ## Updates And Validation
 

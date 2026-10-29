@@ -2825,8 +2825,12 @@ fn with_linux_paster(
             .map(|settings| settings.paste_with_shift)
             .unwrap_or(false);
         *paster = Some(
-            crate::linux_paste::LinuxPaster::new(Arc::default(), Arc::new(AtomicBool::new(shift)))
-                .map_err(|error| anyhow::anyhow!("{error:#}"))?,
+            crate::linux_paste::LinuxPaster::new(
+                Arc::default(),
+                Arc::new(AtomicBool::new(shift)),
+                Default::default(),
+            )
+            .map_err(|error| anyhow::anyhow!("{error:#}"))?,
         );
     }
     use_it(paster.as_mut().expect("made above")).map_err(|error| anyhow::anyhow!("{error:#}"))

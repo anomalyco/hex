@@ -1085,6 +1085,9 @@ Linux beta                               // not macOS feature parity
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 ├── Paste -> Retain transcript clipboard, not restore previous contents
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
+│       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
+│       │   (2 s cap without a release); after a hex command -> 250 ms
+│       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
 │       ├── Compositor offers zwp_virtual_keyboard_manager_v1 and wtype is installed -> wtype
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
 │       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms; session lives with Hex
@@ -1100,7 +1103,10 @@ wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri
 (apollo). niri's portal frontend advertises RemoteDesktop but its GNOME
 backend fails CreateSession, so wtype stays first there. The RemoteDesktop
 paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
-yet observed on a real desktop.
+yet observed on a real desktop. The modifier wait (`ShortcutKeys` in
+[linux_input.rs](../../src/linux_input.rs)) has unit tests for its timing only;
+it is not yet observed on Hyprland, and a modifier held past the wait still
+changes the paste.
 
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)

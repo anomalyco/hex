@@ -977,9 +977,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   exit. HUD teardown only hides that listener's HUD.
 - Linux paste keeps transcripts off helper argv and bounds helper I/O. X11 waits
   for physical modifiers without discarding accepted output, and shutdown
-  cancels that wait; on Wayland, `wtype`'s virtual keyboard carries its own
-  modifiers, so held keys never change its Ctrl+V (the RemoteDesktop portal
-  shares the desktop's keyboard). New installs use Ctrl-V;
+  cancels that wait. Wayland hides held keys, and some compositors (Hyprland)
+  merge held physical modifiers into `wtype`'s virtual keyboard, as the
+  RemoteDesktop portal shares the desktop's keyboard. So Wayland paste waits on
+  `ShortcutKeys`: a modifier shortcut's portal release plus 250 ms (at most
+  2 s after a press without release), or 250 ms after a `hex` command. Docs
+  recommend modifier-free binds there. A sent paste is not a verified one.
+  New installs use Ctrl-V;
   the terminal-paste preference selects Ctrl-Shift-V and defaults on for
   persisted legacy X11 settings. The beta retains
   the transcript clipboard; arbitrary MIME restoration and consumption

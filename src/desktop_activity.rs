@@ -105,7 +105,7 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
                 DictationPhase::Discarded => "A brief dictation was discarded".into(),
                 DictationPhase::Cancelled => "Dictation was cancelled".into(),
                 DictationPhase::Transcribing => "Dictation is being transcribed".into(),
-                DictationPhase::Pasted => text_or("Dictation was pasted", text),
+                DictationPhase::Pasted => text_or("Dictation paste sent", text),
                 DictationPhase::Edited => text_or("Selected text was edited", text),
                 DictationPhase::VoiceAction => text_or("Voice Action completed", text),
                 DictationPhase::Logged => text_or("Journal entry was saved", text),
