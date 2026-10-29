@@ -76,7 +76,17 @@ fn main() {
 /// `-dirty` for uncommitted changes (`0.0.0-dev-local` without git, as in Nix).
 /// It counts as a dev build, so it follows the dev channel's current release.
 fn build_version() {
+    println!("cargo:rerun-if-env-changed=HEX_VERSION");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+    // CI builds name their version in HEX_VERSION and check `hex --version`
+    // against it, test builds included (their crate version stays 0.0.0).
+    if let Some(named) = std::env::var("HEX_VERSION")
+        .ok()
+        .filter(|named| !named.is_empty())
+    {
+        println!("cargo:rustc-env=HEX_BUILD_VERSION={named}");
+        return;
+    }
     if version != "0.0.0" {
         println!("cargo:rustc-env=HEX_BUILD_VERSION={version}");
         return;
