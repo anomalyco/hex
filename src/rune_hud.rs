@@ -392,8 +392,9 @@ impl Compositor<Hud> for HudCompositor {
         self.animating.load(Ordering::Acquire)
     }
 
+    /// The view is empty, so Rune's UI pass is skipped: Hex's own pass
+    /// clears the target.
     fn render(&mut self, f: &mut Frame<'_, Hud>) {
-        f.draw_ui();
         let reduce = f.rt.reduced_motion;
         let target = Target {
             size: f.size,
@@ -409,9 +410,11 @@ impl Compositor<Hud> for HudCompositor {
         self.animating.store(active, Ordering::Release);
         if !active {
             hud.hide();
+            drop(clear_pass(f.encoder, f.target));
             return;
         }
         let (Some(drawn), layout) = (&hud.drawn, hud.layout) else {
+            drop(clear_pass(f.encoder, f.target));
             return;
         };
         if self.gpu.as_ref().is_none_or(|gpu| gpu.format != f.format) {
@@ -527,7 +530,7 @@ impl Gpu {
         }
     }
 
-    /// Draws `drawn` over `view`, which holds what is under it.
+    /// Clears `view` and draws `drawn` into it.
     fn draw(
         &self,
         queue: &wgpu::Queue,
@@ -553,26 +556,34 @@ impl Gpu {
                 &self.dot_pipeline
             }
         };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("hex hud"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
+        let mut pass = clear_pass(encoder, view);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..3, 0..1);
     }
+}
+
+/// A pass over `view` that starts transparent.
+fn clear_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("hex hud"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    })
 }
 
 #[cfg(test)]
