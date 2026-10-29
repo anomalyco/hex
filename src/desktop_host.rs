@@ -22,6 +22,8 @@ pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) preparation_stage: Option<ModelPreparationStage>,
     pub(crate) selection: TranscriptionSelection,
     pub(crate) preparing: Option<TranscriptionModelId>,
+    /// Every model downloading, whether or not it is the one `preparing`.
+    pub(crate) downloads: Vec<crate::model_downloads::DownloadStatus>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

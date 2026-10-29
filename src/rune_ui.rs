@@ -2442,6 +2442,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             preparation_stage: None,
             selection: ui.settings.transcription.clone(),
             preparing: None,
+            downloads: Vec::new(),
         },
         update_status: DesktopUpdateStatus::Current,
         editing: false,

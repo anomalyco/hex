@@ -126,6 +126,8 @@ struct LinuxDesktopHost {
     shortcut_edit: Option<ShortcutEdit>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
+    /// The latest model choice, waiting for a replaced one's worker to exit.
+    pending_transcription: Option<crate::transcription_models::TranscriptionSelection>,
     transcription_error: Option<String>,
     updater: crate::updater::Updater,
     output: crate::linux_dictation::DictationOutput,
@@ -160,7 +162,10 @@ pub(crate) enum HostRequest {
         model: crate::transcription_models::TranscriptionModelId,
         language: String,
     },
+    /// The model being prepared, and its download.
     CancelModel,
+    /// One model's download, chosen or not.
+    CancelDownload(crate::transcription_models::TranscriptionModelId),
 }
 
 struct Shared {
@@ -222,7 +227,11 @@ impl HostHandle {
                     host.choose_transcription(model, language)
                 }
                 HostRequest::CancelModel => {
-                    host.cancel_transcription_preparation();
+                    host.cancel_model();
+                    Ok(())
+                }
+                HostRequest::CancelDownload(model) => {
+                    host.cancel_download(model);
                     Ok(())
                 }
             }
@@ -467,6 +476,7 @@ impl LinuxDesktopHost {
             shortcut_edit: None,
             prepared_transcriber: None,
             transcription_preparation: None,
+            pending_transcription: None,
             transcription_error: None,
             updater,
             output,
@@ -646,6 +656,7 @@ impl LinuxDesktopHost {
                 }
             }
         }
+        self.start_pending_transcription();
         if start_listener {
             self.start();
         }
@@ -845,12 +856,6 @@ impl LinuxDesktopHost {
             self.transcription_error = Some(error.clone());
             return Err(color_eyre::eyre::eyre!(error));
         }
-        if self.transcription_preparation.is_some() {
-            self.cancel_transcription_preparation();
-            let error = "The previous model preparation is still stopping".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -863,6 +868,22 @@ impl LinuxDesktopHost {
             },
         };
         crate::transcription_models::validate(&selection)?;
+        // The previous choice is canceled but its model keeps downloading;
+        // this one starts once that choice's worker exits.
+        self.cancel_transcription_preparation();
+        self.pending_transcription = Some(selection);
+        self.start_pending_transcription();
+        Ok(())
+    }
+
+    fn start_pending_transcription(&mut self) {
+        if self.transcription_preparation.is_some() {
+            return;
+        }
+        let Some(selection) = self.pending_transcription.take() else {
+            return;
+        };
+        let model = selection.model;
         // A running listener keeps the current model until the new one is ready.
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
@@ -874,12 +895,9 @@ impl LinuxDesktopHost {
         let worker_stage = stage.clone();
         let worker = std::thread::spawn(move || {
             (|| {
-                crate::transcription_models::download_with_stage_progress(
-                    definition,
-                    &worker_canceled,
-                    &worker_progress,
-                    &worker_stage,
-                )?;
+                crate::model_downloads::shared()
+                    .wait(model, &worker_canceled, &worker_progress, &worker_stage)
+                    .map_err(|error| color_eyre::eyre::eyre!(error))?;
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
@@ -903,14 +921,44 @@ impl LinuxDesktopHost {
             worker,
         });
         self.transcription_error = None;
-        Ok(())
     }
 
+    /// Cancels the model choice; its model keeps downloading.
     fn cancel_transcription_preparation(&mut self) {
+        self.pending_transcription = None;
         if let Some(preparation) = &self.transcription_preparation {
             preparation.canceled.store(true, Ordering::Relaxed);
         }
         self.transcription_error = None;
+    }
+
+    /// The model choice waiting or preparing, unless canceled.
+    fn preparing_model(&self) -> Option<crate::transcription_models::TranscriptionModelId> {
+        self.pending_transcription
+            .as_ref()
+            .map(|selection| selection.model)
+            .or_else(|| {
+                self.transcription_preparation
+                    .as_ref()
+                    .filter(|preparation| !preparation.canceled.load(Ordering::Relaxed))
+                    .map(|preparation| preparation.model)
+            })
+    }
+
+    /// Cancels the model choice and stops its download.
+    fn cancel_model(&mut self) {
+        if let Some(model) = self.preparing_model() {
+            crate::model_downloads::shared().cancel(model);
+        }
+        self.cancel_transcription_preparation();
+    }
+
+    /// Stops `model`'s download, and the choice when it waits on it.
+    fn cancel_download(&mut self, model: crate::transcription_models::TranscriptionModelId) {
+        crate::model_downloads::shared().cancel(model);
+        if self.preparing_model() == Some(model) {
+            self.cancel_transcription_preparation();
+        }
     }
 }
 
@@ -968,24 +1016,33 @@ impl LinuxDesktopHost {
                         .filter(|(at, _)| Some(*at) != self.dismissed_failure_at)
                         .map(|(_, message)| message.clone())
                 }),
-            transcription: DesktopTranscriptionSnapshot {
-                downloaded_bytes: self
-                    .transcription_preparation
-                    .as_ref()
-                    .map_or(0, |preparation| {
-                        preparation.progress.load(Ordering::Relaxed)
-                    }),
-                error: self.transcription_error.clone(),
-                preparation_stage: self.transcription_preparation.as_ref().map(|preparation| {
-                    crate::transcription_models::ModelPreparationStage::load(&preparation.stage)
-                }),
-                selection: self.settings.transcription.clone(),
-                preparing: self
-                    .transcription_preparation
-                    .as_ref()
-                    .map(|preparation| preparation.model),
-            },
+            transcription: self.transcription_snapshot(),
             update_status,
+        }
+    }
+
+    fn transcription_snapshot(&self) -> DesktopTranscriptionSnapshot {
+        // A pending choice has not started; the worker it waits on is canceled.
+        let preparation = self
+            .transcription_preparation
+            .as_ref()
+            .filter(|_| self.pending_transcription.is_none());
+        DesktopTranscriptionSnapshot {
+            downloaded_bytes: preparation.map_or(0, |preparation| {
+                preparation.progress.load(Ordering::Relaxed)
+            }),
+            error: self.transcription_error.clone(),
+            preparation_stage: self.preparing_model().map(|_| {
+                preparation.map_or(
+                    crate::transcription_models::ModelPreparationStage::Downloading,
+                    |preparation| {
+                        crate::transcription_models::ModelPreparationStage::load(&preparation.stage)
+                    },
+                )
+            }),
+            selection: self.settings.transcription.clone(),
+            preparing: self.preparing_model(),
+            downloads: crate::model_downloads::shared().status(),
         }
     }
 
@@ -1452,6 +1509,43 @@ mod tests {
         );
         host.dispatch(DesktopAction::StartListening).unwrap();
         assert!(host.snapshot().operation_error.is_none());
+    }
+
+    #[test]
+    fn a_new_model_choice_waits_for_the_replaced_one_instead_of_failing() {
+        let mut host = host_for_edit(false);
+        let (release, held) = mpsc::channel::<()>();
+        let replaced = Arc::new(AtomicBool::new(false));
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: replaced.clone(),
+            model: TranscriptionModelId::ParakeetV2,
+            progress: Arc::new(AtomicU64::new(0)),
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
+            worker: std::thread::spawn(move || {
+                let _ = held.recv_timeout(Duration::from_secs(5));
+                Err("fixture preparation".into())
+            }),
+        });
+        let chosen = TranscriptionModelId::WhisperLargeV3Turbo;
+
+        host.choose_transcription(chosen, "en".into()).unwrap();
+
+        assert!(replaced.load(Ordering::Relaxed));
+        let snapshot = host.snapshot().transcription;
+        assert_eq!(snapshot.preparing, Some(chosen));
+        assert_eq!(snapshot.downloaded_bytes, 0);
+        assert!(snapshot.error.is_none());
+        assert_eq!(
+            host.pending_transcription
+                .as_ref()
+                .map(|choice| choice.model),
+            Some(chosen)
+        );
+
+        host.cancel_model();
+        assert!(host.pending_transcription.is_none());
+        assert_eq!(host.snapshot().transcription.preparing, None);
+        release.send(()).unwrap();
     }
 
     #[test]

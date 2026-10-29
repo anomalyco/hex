@@ -235,10 +235,30 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Detail line -> "Transcribes while you speak" (non-macOS: "… on a GPU"),
 │                  coverage, benchmark, timestamps, Installed
 ├── Saved language unsupported -> Warning line naming the language it switches to
-├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
+├── Trailing edge -> Active as dot + label; Cancel while preparing or downloading; else Use/Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
+├── Downloading, not chosen -> Its own bar and Cancel     // setup.parallel-downloads
+│   ├── Pressing the card -> Chooses it; waits on the same download
+│   └── Fails -> "Model could not be installed." + reason; Download retries
 └── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
 ```
+
+Choosing another model replaces only the choice: the replaced model keeps
+downloading beside the new one, and once it finishes it is installed without
+becoming active. Only the latest choice is loaded and saved.
+Each model has one transfer, which every choice of it joins; Cancel on a card
+stops that model's transfer, and Cancel on the chosen card also cancels the
+choice. Transfers of different models hold the models directory's lock shared
+and their own artifact's lock exclusively, so they run at once, while an older
+Hex, which takes the directory lock exclusively, still excludes them. Sources:
+[model_downloads.rs](../../src/model_downloads.rs),
+[transcription_preparation.rs](../../src/transcription_preparation.rs), and the
+Linux host in [linux_app.rs](../../src/linux_app.rs). Checks:
+`models_download_at_once_and_a_replaced_choice_leaves_its_transfer_running`,
+`cancel_stops_only_that_model`, `an_unwatched_failure_stays_until_retried_or_dismissed`,
+`different_models_download_at_once_but_one_model_and_an_older_hex_exclude`, and
+`a_model_downloading_beside_the_chosen_one_shows_its_own_progress_and_cancel`.
+No live download was observed, and no golden shows two bars yet.
 
 Only Parakeet Unified English is marked `streams`
 (`only_the_buffered_parakeet_artifact_is_marked_streaming`). The mark describes
@@ -329,7 +349,7 @@ Menu bar > Transcription Model            // setup.quick-model-switch; macOS
 ├── Choose -> Verify installed artifact -> Prewarm -> Save selection
 │   ├── Success -> Checkmark moves; Settings reflects the saved selection
 │   └── Failure -> Previous selection remains; open Settings for the error
-├── Preparing -> Cancel Model Switch      // never cancels dictation/output jobs
+├── Preparing -> Cancel Model Switch      // stops its download; never dictation/output jobs
 └── Manage Models… -> Settings picker      // downloads; languages in the Language row
 ```
 
@@ -426,8 +446,9 @@ Settings picker > Downloaded model card   // setup.delete-model; macOS
 └── Model choice or closing the picker -> Confirmation cleared
 ```
 
-Deletion takes the shared model-directory download lock without waiting, so it
-cannot race a Settings, menu-bar, or local API download. The menu bar drops a
+Deletion takes the model's download lock without waiting, so it cannot race a
+Settings, menu-bar, or local API download of that model; other models' downloads
+do not block it. The menu bar drops a
 deleted model because it reads installation state when it builds the menu. Linux
 Settings does not offer deletion: the service owns model files and has no delete
 request yet.
@@ -1360,7 +1381,7 @@ macOS debug runtime                      // not release navigation
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Calls the host directly: saves settings through it; woken on host changes
 ├── Sidebar: General, Modes, Voice Action, History
-├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
+├── Transcription picker -> ChooseModel / CancelModel / CancelDownload; progress from the snapshot
 ├── First-run setup -> onboarding::Flow without permissions or practice
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
 ├── Modes: app icons (hicolor theme or pixmaps, PNG or SVG) in the picker,

@@ -214,7 +214,8 @@ impl WindowsDesktopHost {
                 }
             }
             Request::ChooseModel { model, language } => self.choose_model(model, language),
-            Request::CancelModel => self.preparation.cancel(),
+            Request::CancelModel => self.preparation.cancel_with_download(),
+            Request::CancelDownload(model) => self.preparation.cancel_download(model),
             Request::Quit => return true,
             Request::ReloadSettings => match AppSettings::load() {
                 Ok(settings) => self.apply_settings(&settings),
@@ -603,6 +604,7 @@ impl WindowsDesktopHost {
                     .map(|_| ModelPreparationStage::Downloading),
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
+                downloads: crate::model_downloads::shared().status(),
             },
             update_status: self.updater.status(),
             settings: self.settings.clone(),

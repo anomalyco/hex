@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 
 use crate::transcription_models::{ModelRuntime, TranscriptionModelId, TranscriptionSelection};
@@ -12,6 +12,8 @@ type Prepare = dyn Fn(&TranscriptionSelection, bool, &AtomicBool, &AtomicU64) ->
 
 /// Application-owned preparation shared by Settings and the menu bar.
 /// At most one worker runs; a newer request replaces the single pending request.
+/// Downloads belong to [`crate::model_downloads`]: a replaced choice leaves
+/// its model downloading, and only Cancel stops it.
 #[derive(Clone)]
 pub struct TranscriptionPreparation(Rc<RefCell<State>>);
 
@@ -73,6 +75,22 @@ impl TranscriptionPreparation {
         state.pending = None;
         if let Some(task) = &state.active {
             task.canceled.store(true, Ordering::Release);
+        }
+    }
+
+    /// Cancels the choice and stops its model's download.
+    pub fn cancel_with_download(&self) {
+        if let Some(model) = self.status().model {
+            crate::model_downloads::shared().cancel(model);
+        }
+        self.cancel();
+    }
+
+    /// Stops `model`'s download, and the choice when it waits on it.
+    pub fn cancel_download(&self, model: TranscriptionModelId) {
+        crate::model_downloads::shared().cancel(model);
+        if self.status().model == Some(model) {
+            self.cancel();
         }
     }
 
@@ -185,7 +203,9 @@ fn prepare_selection(
                 crate::transcription_models::verify_installed(model, canceled)?;
                 progress.store(model.download_bytes().unwrap_or(0), Ordering::Relaxed);
             } else {
-                crate::transcription_models::download_with_progress(model, canceled, progress)?;
+                crate::model_downloads::shared()
+                    .wait(model.id, canceled, progress, &AtomicU8::new(0))
+                    .map_err(|error| color_eyre::eyre::eyre!(error))?;
             }
         }
         check_canceled()?;
@@ -321,6 +341,39 @@ mod tests {
             completion(&preparation).unwrap().model,
             TranscriptionModelId::WhisperLargeV3Turbo
         );
+    }
+
+    #[test]
+    fn cancelling_another_models_download_keeps_the_choice() {
+        let (release, releases) = mpsc::channel();
+        let releases = Mutex::new(releases);
+        let preparation = TranscriptionPreparation::with_prepare(Arc::new(move |_, _, _, _| {
+            releases.lock().unwrap().recv().unwrap();
+            Ok(())
+        }));
+        preparation.start(selection(TranscriptionModelId::ParakeetV2), false);
+        preparation.cancel_download(TranscriptionModelId::ParakeetV3);
+        release.send(()).unwrap();
+        assert_eq!(
+            completion(&preparation).unwrap().model,
+            TranscriptionModelId::ParakeetV2
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        for with_download in [false, true] {
+            preparation.start(selection(TranscriptionModelId::ParakeetV2), false);
+            if with_download {
+                preparation.cancel_with_download();
+            } else {
+                preparation.cancel_download(TranscriptionModelId::ParakeetV2);
+            }
+            assert!(preparation.status().model.is_none());
+            release.send(()).unwrap();
+            while preparation.0.borrow().active.is_some() {
+                assert!(preparation.poll().is_none(), "a canceled choice escaped");
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 
     #[test]

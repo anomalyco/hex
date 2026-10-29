@@ -5,8 +5,9 @@
 //! the model's default language when it does not support that one; changing
 //! only the language prepares the same model again. Progress comes back in
 //! the service snapshot, and the service saves the selection when it is
-//! ready. Downloaded models other than the active one can be deleted after a
-//! confirmation.
+//! ready. A model keeps downloading when another is chosen, so several can
+//! download at once, each with its own progress and Cancel. Downloaded
+//! models other than the active one can be deleted after a confirmation.
 
 use rune::{El, col, el, row, text};
 use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress};
@@ -86,9 +87,14 @@ pub(super) fn close(ui: &mut Ui) {
     ui.picker.clear_deletion();
 }
 
-fn cancel(ui: &mut Ui) {
-    if ui.preparing.is_some() {
+fn cancel(ui: &mut Ui, model: TranscriptionModelId) {
+    if ui
+        .preparing
+        .is_some_and(|(preparing, _)| preparing == model)
+    {
         ui.send(Request::CancelModel);
+    } else {
+        ui.send(Request::CancelDownload(model));
     }
 }
 
@@ -326,33 +332,27 @@ fn model_card(
     let installed = ui.picker.installed(model, model.language_for(language));
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     let preparing = transcription.and_then(|t| t.preparing) == Some(model.id);
+    // A download no choice waits on: running, or failed.
+    let background = transcription
+        .and_then(|t| {
+            t.downloads
+                .iter()
+                .find(|download| download.model == model.id)
+        })
+        .filter(|_| !preparing);
+    let failure = background.and_then(|download| download.error.as_deref());
+    let downloading = background.filter(|_| failure.is_none());
     let active = transcription_selection_is_active(&ui.settings.transcription, model, installed);
     let status = if preparing {
         let transcription = transcription.expect("preparing comes from the snapshot");
-        match transcription.preparation_stage {
-            Some(ModelPreparationStage::Verifying) => Status::Preparing {
-                label: tr("Verifying model").into(),
-                progress: None,
-            },
-            Some(ModelPreparationStage::Loading) => {
-                let elapsed = ui
-                    .preparing
-                    .map_or(0, |(_, since)| since.elapsed().as_secs());
-                Status::Preparing {
-                    label: tr_fill("Loading model · {}s", &elapsed.to_string()),
-                    progress: None,
-                }
-            }
-            _ => {
-                let fraction = model.download_bytes().map_or(0.0, |bytes| {
-                    (transcription.downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
-                });
-                Status::Preparing {
-                    label: tr_fill("Downloading {}%", &format!("{:.0}", fraction * 100.0)),
-                    progress: matches!(model.runtime, ModelRuntime::Gguf(_)).then_some(fraction),
-                }
-            }
-        }
+        preparation_status(
+            ui,
+            model,
+            transcription.preparation_stage,
+            transcription.downloaded_bytes,
+        )
+    } else if let Some(download) = downloading {
+        preparation_status(ui, model, Some(download.stage), download.downloaded_bytes)
     } else if active {
         Status::Active
     } else {
@@ -360,6 +360,7 @@ fn model_card(
     };
     let deletable = installed
         && !preparing
+        && downloading.is_none()
         && matches!(model.runtime, ModelRuntime::Gguf(_))
         && ui.settings.transcription.model != model.id;
     let confirming = ui.picker.deletion == Some(model.id);
@@ -434,7 +435,7 @@ fn model_card(
                 "cancel-model",
                 tr("Cancel"),
                 ButtonKind::Secondary,
-                |ui: &mut Ui, _| cancel(ui),
+                move |ui: &mut Ui, _| cancel(ui, model.id),
             ));
         }
     }
@@ -525,6 +526,15 @@ fn model_card(
             .wrap(),
         );
     }
+    if let Some(error) = failure {
+        card = card.child(
+            text(format!("{} {error}", tr("Model could not be installed.")))
+                .key("download-error")
+                .font(p.k.ty.small)
+                .color(p.danger())
+                .wrap(),
+        );
+    }
     if model.id == TranscriptionModelId::ParakeetV3 {
         card = card.child(
             text(
@@ -548,6 +558,8 @@ fn model_card(
         };
         card = card.child(bar.build(p.k).key("progress"));
     }
+    // Pressing a model downloading in the background chooses it, which
+    // waits on the same download.
     if !active && !preparing {
         card = card
             .role("button")
@@ -556,6 +568,39 @@ fn model_card(
             .on_press(move |ui: &mut Ui| choose(ui, model));
     }
     card
+}
+
+/// A preparing card's bar: download progress, then verifying and loading.
+fn preparation_status(
+    ui: &Ui,
+    model: &ModelDefinition,
+    stage: Option<ModelPreparationStage>,
+    downloaded_bytes: u64,
+) -> Status {
+    match stage {
+        Some(ModelPreparationStage::Verifying) => Status::Preparing {
+            label: tr("Verifying model").into(),
+            progress: None,
+        },
+        Some(ModelPreparationStage::Loading) => {
+            let elapsed = ui
+                .preparing
+                .map_or(0, |(_, since)| since.elapsed().as_secs());
+            Status::Preparing {
+                label: tr_fill("Loading model · {}s", &elapsed.to_string()),
+                progress: None,
+            }
+        }
+        _ => {
+            let fraction = model.download_bytes().map_or(0.0, |bytes| {
+                (downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
+            });
+            Status::Preparing {
+                label: tr_fill("Downloading {}%", &format!("{:.0}", fraction * 100.0)),
+                progress: matches!(model.runtime, ModelRuntime::Gguf(_)).then_some(fraction),
+            }
+        }
+    }
 }
 
 /// The picker open with English and Parakeet saved; `downloading` shows a

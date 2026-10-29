@@ -1263,6 +1263,42 @@ fn a_download_in_progress_can_be_cancelled() {
     assert!(matches!(sent(&rt), [Request::CancelModel]));
 }
 
+#[test]
+fn a_model_downloading_beside_the_chosen_one_shows_its_own_progress_and_cancel() {
+    let mut rt = runtime("picker-downloading", true, PANE_SIZE);
+    let whisper = TranscriptionModelId::WhisperLargeV3Turbo;
+    let bytes = crate::transcription_models::definition(whisper)
+        .download_bytes()
+        .unwrap();
+    let download = |error: Option<&str>| crate::model_downloads::DownloadStatus {
+        model: whisper,
+        downloaded_bytes: bytes / 2,
+        stage: crate::transcription_models::ModelPreparationStage::Downloading,
+        error: error.map(Into::into),
+    };
+    rt.state.view.as_mut().unwrap().transcription.downloads = vec![download(None)];
+    rt.invalidate();
+    settle(&mut rt);
+    let card = picker_card("en", whisper);
+    assert!(texts(&rt).contains(&"Downloading 50%".to_owned()));
+    assert!(
+        rt.find("model1/top/actions/cancel-model").is_some(),
+        "the chosen model keeps its bar"
+    );
+    tap(&mut rt, &format!("{card}/top/actions/cancel-model"));
+    assert!(matches!(sent(&rt), [Request::CancelDownload(model)] if *model == whisper));
+
+    // A failure nobody waits on stays on its card, which offers a retry.
+    rt.state.view.as_mut().unwrap().transcription.downloads = vec![download(Some("offline"))];
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(texts(&rt).contains(&"Model could not be installed. offline".to_owned()));
+    assert!(
+        rt.find(&format!("{card}/top/actions/choose-model"))
+            .is_some()
+    );
+}
+
 fn focused(rt: &Runtime<Ui>) -> String {
     rt.elements()
         .into_iter()

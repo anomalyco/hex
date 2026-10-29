@@ -129,6 +129,10 @@ substitute for source inspection or a second roadmap.
   Settings and the menu bar on macOS and by the Windows runtime, with one
   worker, latest-choice pending admission, cancellation fences, and an
   installed-only path that never downloads a model.
+- `model_downloads`: the process's model transfers, one per catalog model,
+  which every choice of it joins; a replaced choice detaches and leaves the
+  transfer running, only an explicit cancel stops it, and a failure no choice
+  waited on stays for the picker.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,

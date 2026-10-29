@@ -101,7 +101,10 @@ pub(crate) enum Request {
     UseInstalledSelection(TranscriptionSelection),
     /// Snapshot from the main-thread TIS observer, not a shortcut event.
     InputSourceChanged(Option<String>),
+    /// The model being prepared, and its download.
     CancelModel,
+    /// One model's download, chosen or not.
+    CancelDownload(TranscriptionModelId),
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }
@@ -172,6 +175,7 @@ impl RuntimeHandle {
                 | Request::SelectInstalledModel(_)
                 | Request::UseInstalledSelection(_)
                 | Request::CancelModel
+                | Request::CancelDownload(_)
                 | Request::ReloadSettings
         ) && let Some(mtm) = MainThreadMarker::new()
             && let Some(source) = crate::keyboard_input_sources::take_change(mtm)
@@ -666,7 +670,11 @@ impl Runtime {
             }
             Request::CancelModel => {
                 self.manual_choice();
-                self.preparation.cancel();
+                self.preparation.cancel_with_download();
+            }
+            Request::CancelDownload(model) => {
+                self.manual_choice();
+                self.preparation.cancel_download(model);
             }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
@@ -782,6 +790,7 @@ impl Runtime {
                     .map(|_| ModelPreparationStage::Downloading),
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
+                downloads: crate::model_downloads::shared().status(),
             },
             update_status: update_status(),
             settings: self.settings.clone(),

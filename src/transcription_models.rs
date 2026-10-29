@@ -81,7 +81,6 @@ impl ModelPreparationStage {
         stage.store(self as u8, Ordering::Release);
     }
 
-    #[cfg(not(target_os = "windows"))]
     pub fn load(stage: &AtomicU8) -> Self {
         match stage.load(Ordering::Acquire) {
             value if value == Self::Downloading as u8 => Self::Downloading,
@@ -789,7 +788,7 @@ fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBo
             model.name
         );
     }
-    let _lock = lock_downloads(path.parent().expect("model directory"), canceled)?;
+    let _lock = lock_downloads(path, canceled)?;
     if !verification_receipt_matches(path, model) {
         verify_file_with_cancel(path, model, canceled)?;
         write_verification_receipt(path, model)?;
@@ -798,7 +797,7 @@ fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBo
 }
 
 /// Deletes a downloaded model with its verification receipt and any partial
-/// download. Refuses instead of waiting while a download owns the directory.
+/// download. Refuses instead of waiting while that model downloads.
 pub fn remove_installed(model: &ModelDefinition) -> Result<()> {
     if !matches!(model.runtime, ModelRuntime::Gguf(_)) {
         bail!("{} is managed by macOS and cannot be deleted", model.name);
@@ -811,10 +810,12 @@ fn remove_installed_at(path: &Path) -> Result<()> {
     if !directory.is_dir() {
         return Ok(());
     }
-    let lock = File::create(directory.join(".download.lock"))?;
-    match lock.try_lock_exclusive() {
+    let (directory_lock, artifact_lock) = download_locks(path)?;
+    match FileExt::try_lock_shared(&directory_lock)
+        .and_then(|()| artifact_lock.try_lock_exclusive())
+    {
         Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+        Err(error) if is_contended(&error) => {
             bail!("A model download is in progress. Try again when it finishes.")
         }
         Err(error) => return Err(error.into()),
@@ -894,18 +895,53 @@ fn delete_set_aside_in(directory: &Path) {
     }
 }
 
-fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
-    let lock = File::create(directory.join(".download.lock"))?;
-    loop {
-        check_canceled(canceled)?;
-        match lock.try_lock_exclusive() {
-            Ok(()) => return Ok(lock),
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(100));
+/// The models directory's lock and `path`'s own. Each transfer holds the
+/// directory lock shared, so different artifacts download at once, while an
+/// older Hex, which holds it exclusively for every transfer, still excludes
+/// them all. The artifact lock is exclusive.
+fn download_locks(path: &Path) -> Result<(File, File)> {
+    let directory = path.parent().expect("model directory");
+    let mut name = path.file_name().expect("artifact name").to_os_string();
+    name.push(".lock");
+    // Never truncate: another process may hold the lock (Windows locks
+    // are mandatory).
+    let open = |path: PathBuf| {
+        File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+    };
+    Ok((
+        open(directory.join(".download.lock"))?,
+        open(directory.join(name))?,
+    ))
+}
+
+/// Windows reports a held lock as a lock violation, not `WouldBlock`.
+fn is_contended(error: &std::io::Error) -> bool {
+    error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+}
+
+fn lock_downloads(path: &Path, canceled: &AtomicBool) -> Result<(File, File)> {
+    let (directory_lock, artifact_lock) = download_locks(path)?;
+    for (lock, shared) in [(&directory_lock, true), (&artifact_lock, false)] {
+        loop {
+            check_canceled(canceled)?;
+            let locked = if shared {
+                FileExt::try_lock_shared(lock)
+            } else {
+                lock.try_lock_exclusive()
+            };
+            match locked {
+                Ok(()) => break,
+                Err(error) if is_contended(&error) => thread::sleep(Duration::from_millis(100)),
+                Err(error) => return Err(error.into()),
             }
-            Err(error) => return Err(error.into()),
         }
     }
+    Ok((directory_lock, artifact_lock))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -931,6 +967,7 @@ fn artifact_receipt_matches(path: &Path, artifact: &GgufArtifact) -> bool {
         && modified_ns(&metadata).is_some_and(|modified| modified == receipt.modified_ns)
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 pub fn download_with_progress(
     model: &ModelDefinition,
     canceled: &AtomicBool,
@@ -998,10 +1035,10 @@ fn download_artifact(
     check_canceled(canceled)?;
     let directory = models_dir()?;
     fs::create_dir_all(&directory)?;
-    let _lock = lock_downloads(&directory, canceled)?;
+    let destination = directory.join(artifact.filename);
+    let _lock = lock_downloads(&destination, canceled)?;
     check_canceled(canceled)?;
     delete_set_aside_in(&directory);
-    let destination = directory.join(artifact.filename);
     if destination.exists() {
         if artifact_receipt_matches(&destination, artifact) {
             downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
@@ -1888,6 +1925,7 @@ mod tests {
         fs::remove_file(verification_receipt_path(&path)).unwrap();
         fs::remove_file(path).unwrap();
         fs::remove_file(directory.join(".download.lock")).unwrap();
+        fs::remove_file(directory.join("fixture.gguf.lock")).unwrap();
         fs::remove_dir(directory).unwrap();
     }
 
@@ -1912,10 +1950,14 @@ mod tests {
         for artifact in &artifacts {
             fs::write(artifact, b"model").unwrap();
         }
-        let download = lock_downloads(&directory, &AtomicBool::new(false)).unwrap();
+        let download = lock_downloads(&path, &AtomicBool::new(false)).unwrap();
         let error = remove_installed_at(&path).unwrap_err().to_string();
         assert!(error.contains("download is in progress"), "{error}");
         assert!(artifacts.iter().all(|artifact| artifact.exists()));
+        let other = directory.join("other.gguf");
+        fs::write(&other, b"other model").unwrap();
+        remove_installed_at(&other).unwrap();
+        assert!(!other.exists(), "another model's download blocked deletion");
         drop(download);
 
         // A child another test thread forks before it execs holds a copy of the
@@ -1928,6 +1970,31 @@ mod tests {
         assert!(artifacts.iter().all(|artifact| !artifact.exists()));
         remove_installed_at(&path).unwrap();
         remove_installed_at(&directory.join("missing").join("fixture.gguf")).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn different_models_download_at_once_but_one_model_and_an_older_hex_exclude() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-parallel-models-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let a = directory.join("a.gguf");
+        let not_canceled = AtomicBool::new(false);
+        let first = lock_downloads(&a, &not_canceled).unwrap();
+        let second = lock_downloads(&directory.join("b.gguf"), &not_canceled).unwrap();
+        let (_, same_artifact) = download_locks(&a).unwrap();
+        assert!(is_contended(
+            &same_artifact.try_lock_exclusive().unwrap_err()
+        ));
+        // An older Hex takes the directory lock exclusively for any transfer.
+        let (older_hex, _) = download_locks(&a).unwrap();
+        assert!(is_contended(&older_hex.try_lock_exclusive().unwrap_err()));
+        drop((first, second));
+        older_hex.try_lock_exclusive().unwrap();
+        drop((older_hex, same_artifact));
         fs::remove_dir_all(directory).unwrap();
     }
 

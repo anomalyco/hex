@@ -67,7 +67,10 @@ pub(crate) enum Request {
         model: TranscriptionModelId,
         language: String,
     },
+    /// The model being prepared, and its download.
     CancelModel,
+    /// One model's download, chosen or not.
+    CancelDownload(TranscriptionModelId),
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
