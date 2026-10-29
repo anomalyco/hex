@@ -24,6 +24,8 @@ pub enum TranscriptionModelId {
     Qwen3Asr06B,
     SenseVoiceSmall,
     CohereTranscribe,
+    UnderdogBark3Pro,
+    UnderdogBark3Clean,
     AppleSpeech,
 }
 
@@ -37,6 +39,8 @@ impl TranscriptionModelId {
             Self::Qwen3Asr06B => "qwen3_asr06_b",
             Self::SenseVoiceSmall => "sense_voice_small",
             Self::CohereTranscribe => "cohere_transcribe",
+            Self::UnderdogBark3Pro => "underdog_bark_3_pro",
+            Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::AppleSpeech => "apple_speech",
         }
     }
@@ -54,6 +58,8 @@ impl FromStr for TranscriptionModelId {
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
+            "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
+            "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => Err(eyre!("unknown transcription model: {value}")),
         }
@@ -347,6 +353,27 @@ const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "cohere_asr",
     variant: "cohere-transcribe-03-2026",
 };
+// Conway Research's Parakeet TDT v3 fine-tunes (CC-BY-4.0), converted to
+// Q8_0 with transcribe.cpp's Parakeet converter; each repository holds the
+// recipe.
+const UNDERDOG_BARK_3_PRO_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "underdog-bark-3.0-pro-Q8_0.gguf",
+    revision: "5c10586263806666c0a8b4905a3346a7c679803e",
+    repository: "joshthomasdev/underdog-bark-3.0-pro-gguf",
+    bytes: 739_508_480,
+    sha256: "472d151cc1546bd30629c4c25df3a8e555e8990845843ddafe76800c640e9865",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-bark-3.0-pro",
+};
+const UNDERDOG_BARK_3_CLEAN_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "underdog-bark-3.0-clean-Q8_0.gguf",
+    revision: "868701fd53d62c59d759ed1d79e095118f3fa7b9",
+    repository: "joshthomasdev/underdog-bark-3.0-clean-gguf",
+    bytes: 739_508_480,
+    sha256: "42ec2f70a3d14842e322391baf5186b2829f271cc7e396aed25580135ae46fae",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-bark-3.0-clean",
+};
 /// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
 /// because models hallucinate closing phrases such as "thank you" on silence
 /// and room noise. It downloads with every transcription model.
@@ -466,6 +493,37 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&COHERE_ARTIFACT),
         languages: COHERE_LANGUAGES,
         accepts_language_hint: true,
+        supports_language_detection: false,
+        supports_recognition_hints: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::UnderdogBark3Pro,
+        name: "Underdog Bark 3.0 Pro",
+        realtime: "~33x",
+        quality: "1.38%",
+        quality_context: "English benchmark",
+        coverage: "English",
+        timestamps: "Token timestamps",
+        streams: false,
+        runtime: ModelRuntime::Gguf(&UNDERDOG_BARK_3_PRO_ARTIFACT),
+        languages: &["en"],
+        // Like Parakeet v3, its base, the artifact has no language input.
+        accepts_language_hint: false,
+        supports_language_detection: false,
+        supports_recognition_hints: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::UnderdogBark3Clean,
+        name: "Underdog Bark 3.0 Clean",
+        realtime: "~33x",
+        quality: "1.71%",
+        quality_context: "English benchmark",
+        coverage: "English, without filler words",
+        timestamps: "Token timestamps",
+        streams: false,
+        runtime: ModelRuntime::Gguf(&UNDERDOG_BARK_3_CLEAN_ARTIFACT),
+        languages: &["en"],
+        accepts_language_hint: false,
         supports_language_detection: false,
         supports_recognition_hints: false,
     },
@@ -1363,6 +1421,14 @@ mod tests {
             (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
             (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
             (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
+            (
+                TranscriptionModelId::UnderdogBark3Pro,
+                "underdog_bark_3_pro",
+            ),
+            (
+                TranscriptionModelId::UnderdogBark3Clean,
+                "underdog_bark_3_clean",
+            ),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);

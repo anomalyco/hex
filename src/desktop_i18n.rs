@@ -733,6 +733,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("30 languages", ["30 języków", "30 种语言", "30 言語", "30 Sprachen", "30 idiomas", "30 мов"]),
     ("5 languages", ["5 języków", "5 种语言", "5 言語", "5 Sprachen", "5 idiomas", "5 мов"]),
     ("English", ["Angielski", "英语", "英語", "Englisch", "Inglés", "Англійська"]),
+    ("English, without filler words", ["Angielski, bez wtrąceń", "英语，去除填充词", "英語、フィラーなし", "Englisch, ohne Füllwörter", "Inglés, sin muletillas", "Англійська, без слів-паразитів"]),
     ("System locales", ["Języki systemu", "系统区域设置", "システムのロケール", "Systemsprachen", "Idiomas del sistema", "Мови системи"]),
     ("Apple managed", ["Zarządzany przez Apple", "由 Apple 管理", "Apple が管理", "Von Apple verwaltet", "Gestionado por Apple", "Керується Apple"]),
     ("English benchmark", ["Test dla angielskiego", "英语基准测试", "英語ベンチマーク", "Englisch-Benchmark", "Prueba en inglés", "Тестовано для англійської"]),

@@ -6,6 +6,8 @@ export const MODEL_IDS = [
   "qwen3_asr06_b",
   "sense_voice_small",
   "cohere_transcribe",
+  "underdog_bark_3_pro",
+  "underdog_bark_3_clean",
   "apple_speech",
 ] as const
 
