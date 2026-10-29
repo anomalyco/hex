@@ -676,7 +676,8 @@ fn switching_panes_is_instant() {
         !panel.iter().any(|e| e.key.as_deref() == Some("lede")),
         "Labs left at once"
     );
-    for element in panel {
+    // Output's agent card breathes on its own; it is not a pane transition.
+    for element in panel.iter().filter(|e| e.key.as_deref() != Some("glow")) {
         assert!(
             element.opacity >= 0.999 && !element.moving,
             "{} is still animating",
