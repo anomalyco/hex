@@ -891,6 +891,7 @@ fn begin_finishing(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_capture(
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,

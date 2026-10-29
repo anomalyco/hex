@@ -395,6 +395,8 @@ impl ControlCommand {
 pub enum PrintedTranscript {
     Text(String),
     NoSpeech,
+    /// Only the Linux listener stops by itself without a recording.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     NotRecording,
     Failed(String),
 }
