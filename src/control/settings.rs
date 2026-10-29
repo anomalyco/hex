@@ -841,6 +841,9 @@ pub fn parse_hotkey(
         if modifiers.function {
             return Err("fn can't be combined with a key".into());
         }
+        if binding.is_bare_primary_click() {
+            return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
+        }
         if modifiers.is_empty() && !is_function_key(&key.label) && !key.is_mouse() {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -1253,6 +1256,15 @@ mod tests {
                 .code,
             "invalid-value"
         );
+    }
+
+    #[test]
+    fn a_bare_left_click_is_refused_but_other_mouse_buttons_are_not() {
+        let named: fn(&str) -> Result<HotkeyKey, String> = |name| Ok(HotkeyKey::named(name));
+        assert!(parse_hotkey("mouse1", named).is_err());
+        assert!(parse_hotkey("option+mouse1", named).is_ok());
+        assert!(parse_hotkey("mouse2", named).is_ok());
+        assert!(parse_hotkey("mouse4", named).is_ok());
     }
 
     #[test]

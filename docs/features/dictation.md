@@ -23,6 +23,13 @@ Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
 standalone function-key bindings. On macOS, Windows and Linux/X11 it also accepts mouse buttons,
 alone or with modifiers: click Record, then press the desired mouse button.
 Mouse 1/2/3 are left/right/middle; Mouse 4 and higher are auxiliary buttons.
+Mouse 1 (left click) needs a modifier: alone it would swallow every click,
+Settings' own included, so the recorder answers "Add a modifier", the CLI
+refuses `mouse1`, and a saved bare left-click shortcut goes back to its
+default when settings load (issue 411; checks
+`a_saved_bare_left_click_shortcut_returns_to_the_default_on_load` and
+`a_bare_left_click_is_refused_but_other_mouse_buttons_are_not`, constructed
+settings only, no physical mouse run).
 Escape cancels recording a binding. Mouse bindings use the same hold, toggle,
 and double-tap rules and conflict checks as keyboard bindings. A consumed
 mouse press, drag and release do not reach the foreground app; ordinary clicks

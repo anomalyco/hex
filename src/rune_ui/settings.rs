@@ -279,6 +279,10 @@ pub(super) fn validate(
     target: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
+    // A bare left click would swallow every click, this window's included.
+    if binding.is_bare_primary_click() {
+        return Err(tr("Add a modifier"));
+    }
     host::validate_hotkey(target, binding)?;
     if conflicts(settings, target, binding) {
         return Err(tr("Already in use"));

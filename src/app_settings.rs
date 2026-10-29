@@ -574,6 +574,16 @@ impl HotkeyBinding {
             .collect()
     }
 
+    /// A left click (Mouse 1) with no modifier. Matching it would swallow
+    /// every click, Settings' own included, so no shortcut may be one.
+    pub fn is_bare_primary_click(&self) -> bool {
+        self.modifiers.is_empty()
+            && self.key.as_ref().is_some_and(|key| {
+                key.code == MOUSE_INPUT_CODES.start
+                    || HotkeyKey::mouse_number(&key.label) == Some(1)
+            })
+    }
+
     pub fn runtime(&self) -> RuntimeHotkey {
         RuntimeHotkey {
             modifiers: self.modifiers,
@@ -1761,6 +1771,7 @@ impl AppSettings {
                 settings.validate_recording_duck_volume()?;
                 settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
+                settings.repair_bare_primary_clicks();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
@@ -2049,6 +2060,33 @@ impl AppSettings {
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
         self.capture.enabled
+    }
+
+    /// A shortcut saved as a bare left click swallowed every click, so its
+    /// owner couldn't change it in Settings. Such a shortcut goes back to its
+    /// default when settings load.
+    fn repair_bare_primary_clicks(&mut self) {
+        if self.dictation_hotkey.is_bare_primary_click() {
+            tracing::warn!("replaced a left-click dictation shortcut with the default");
+            self.dictation_hotkey = HotkeyBinding::default();
+        }
+        if self.edit_hotkey.is_bare_primary_click() {
+            tracing::warn!("replaced a left-click Voice Action shortcut with the default");
+            self.edit_hotkey = HotkeyBinding::edit_default();
+        }
+        if self
+            .paste_last_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("replaced a left-click paste-last shortcut with the default");
+            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
+        }
+        #[cfg(hex_capture)]
+        if self.capture.hotkey.is_bare_primary_click() {
+            tracing::warn!("replaced a left-click capture shortcut with the default");
+            self.capture.hotkey = HotkeyBinding::capture_default();
+        }
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -2589,6 +2627,42 @@ mod tests {
         for invalid in ["mouse0", "mouse33", "mouse", "mouse-1"] {
             assert_eq!(HotkeyKey::mouse_number(invalid), None);
         }
+    }
+
+    #[test]
+    fn a_saved_bare_left_click_shortcut_returns_to_the_default_on_load() {
+        let left_click = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: HotkeyKey::mouse(0),
+        };
+        assert!(left_click.is_bare_primary_click());
+        let option_click = HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key: HotkeyKey::mouse(0),
+        };
+        assert!(!option_click.is_bare_primary_click());
+        let back_button = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: HotkeyKey::mouse(3),
+        };
+        assert!(!back_button.is_bare_primary_click());
+
+        let dir = TestSettingsDir::new("left-click-shortcut");
+        let settings = AppSettings {
+            dictation_hotkey: left_click,
+            ..AppSettings::default()
+        };
+        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(loaded.dictation_hotkey, HotkeyBinding::default());
+
+        let settings = AppSettings {
+            dictation_hotkey: back_button.clone(),
+            ..AppSettings::default()
+        };
+        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(loaded.dictation_hotkey, back_button);
     }
 
     #[test]
