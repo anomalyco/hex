@@ -31,7 +31,11 @@ line_icon!(
         "M7 16h10",
     ]
 );
-line_icon!(BLUETOOTH, "hex-row-bluetooth", ["m7 7 10 10-5 5V2l5 5L7 17"]);
+line_icon!(
+    BLUETOOTH,
+    "hex-row-bluetooth",
+    ["m7 7 10 10-5 5V2l5 5L7 17"]
+);
 line_icon!(
     WAVE,
     "hex-row-wave",

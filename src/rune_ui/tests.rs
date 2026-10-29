@@ -1504,11 +1504,9 @@ fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
 #[test]
 fn a_passed_over_bluetooth_default_names_the_input_in_use() {
     let note = "Kit Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
-    let mut rt = runtime("mac-microphone-bluetooth", true, PANE_SIZE);
+    let mut rt = runtime("mac-microphone-bluetooth", true, TALL_SIZE);
     assert_eq!(
-        element(&rt, "microphone-control-field-trigger")
-            .label
-            .as_deref(),
+        element(&rt, "microphone-control").label.as_deref(),
         Some("System default, MacBook Pro Microphone")
     );
     assert!(texts(&rt).contains(&note.to_owned()), "{:?}", texts(&rt));
