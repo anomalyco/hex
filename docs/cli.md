@@ -48,7 +48,7 @@ hex
 │   ├── hide                       close the window; Hex stays in the menu bar
 │   └── story <story> [--variant V] [--play]  the `playground` experiment: open a story
 ├── history clear --yes            delete every retained dictation
-├── vocabulary                     needs the `vocabulary` experiment (marked so in --help)
+├── vocabulary                     the shared vocabulary (features/vocabulary.md)
 │   ├── list [--json]              every term and its "sounds like" spellings
 │   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
 │   └── remove <term>              any case
@@ -106,9 +106,7 @@ overrides only the language, and must be one the model supports.
 `vocabulary` edits the [shared vocabulary](features/vocabulary.md) through the
 running Hex, which saves settings and reloads them as a window edit would.
 Terms match in any case; `add` of a term already listed only merges new
-spellings, and replies `changed: false` when there are none. While the
-`vocabulary` experiment is off in the running Hex, every `vocabulary` command
-is refused with `feature-off`.
+spellings, and replies `changed: false` when there are none.
 
 `quit` and `restart` without `--force` are refused with `busy` when the
 listener doesn't answer whether it's recording; no listener, or one waiting for
@@ -295,7 +293,6 @@ not-found              no such capture, or it has no scrawl.json yet
 unknown-model          no such model id (`hex model list`)
 not-installed          `model use` on a model that isn't downloaded (`hex model install`)
 feature-off            the command needs an opt-in that is off (Meetings, commands)
-                       or an experiment the running Hex didn't read (vocabulary)
 not-ready              Hex is waiting for setup (permissions or the dictation model)
 meeting-active         quit/restart while a meeting records (pass --force)
 busy                   something is in progress (recording, transcribing, a full queue),

@@ -327,13 +327,11 @@ impl Pump {
                     Err(error) => ControlReply::error("unavailable", format!("{error:#}")),
                 },
             }),
-            ControlCommand::VocabularyList => Some(reply_with(
-                control::check_vocabulary()
-                    .and_then(|()| load())
-                    .map(|settings| ControlReply::Vocabulary {
-                        entries: settings.vocabulary,
-                    }),
-            )),
+            ControlCommand::VocabularyList => Some(reply_with(load().map(|settings| {
+                ControlReply::Vocabulary {
+                    entries: settings.vocabulary,
+                }
+            }))),
             ControlCommand::VocabularyAdd { .. } | ControlCommand::VocabularyRemove { .. } => {
                 Some(reply_with(self.edit_vocabulary(&command)))
             }
@@ -343,7 +341,6 @@ impl Pump {
     /// Saves a vocabulary edit as the window would, then lets the runtime and
     /// an open window adopt it.
     fn edit_vocabulary(&mut self, command: &ControlCommand) -> Result<ControlReply, ControlError> {
-        control::check_vocabulary()?;
         let mut settings = load()?;
         let reply = control::edit_vocabulary(&mut settings.vocabulary, command)?;
         if matches!(reply, ControlReply::Done { changed: true, .. }) {

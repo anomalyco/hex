@@ -28,7 +28,7 @@ pub const ENV: &str = "HEX_EXPERIMENTS";
 
 /// Experiments that became the default: an old file or env variable may
 /// still name them.
-const RETIRED: [&str; 2] = ["capture", "dot-scope"];
+const RETIRED: [&str; 3] = ["capture", "dot-scope", "vocabulary"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Experiment {
@@ -37,18 +37,16 @@ pub enum Experiment {
     Modes,
     Playground,
     SmartTurn,
-    Vocabulary,
     VoiceFilter,
 }
 
 impl Experiment {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 6] = [
         Self::LiveChapters,
         Self::LiveText,
         Self::Modes,
         Self::Playground,
         Self::SmartTurn,
-        Self::Vocabulary,
         Self::VoiceFilter,
     ];
 
@@ -64,7 +62,6 @@ impl Experiment {
             Self::Modes => "modes",
             Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
-            Self::Vocabulary => "vocabulary",
             Self::VoiceFilter => "voice-filter",
         }
     }
@@ -84,7 +81,6 @@ impl Experiment {
             Self::SmartTurn => {
                 "Stop hands-free dictation when Smart Turn hears you finish (macOS)."
             }
-            Self::Vocabulary => "A shared vocabulary list that guides transcription.",
             Self::VoiceFilter => {
                 "The Voice Filter pane: the Hex Microphone driver and its filters (macOS)."
             }
@@ -505,15 +501,15 @@ mod tests {
             Some(
                 "# Hex experiments\n\
                  \n\
-                 vocabulary   # shared list\n\
+                 smart-turn   # hands-free stop\n\
                  live-chapters\n\
-                 vocabulary\n\
+                 smart-turn\n\
                  # disabled-thing\n\
                  nope\r\n",
             ),
         );
         assert!(snapshot.enabled(Experiment::LiveChapters));
-        assert!(snapshot.enabled(Experiment::Vocabulary));
+        assert!(snapshot.enabled(Experiment::SmartTurn));
         assert_eq!(
             snapshot.sources[Experiment::LiveChapters.index()],
             Sources {
@@ -522,7 +518,7 @@ mod tests {
             }
         );
         assert_eq!(
-            snapshot.sources[Experiment::Vocabulary.index()].labels(),
+            snapshot.sources[Experiment::SmartTurn.index()].labels(),
             ["file"]
         );
         assert_eq!(
@@ -542,11 +538,14 @@ mod tests {
 
     #[test]
     fn retired_experiments_are_ignored_silently() {
-        let snapshot = Snapshot::parse(Some("dot-scope"), Some("dot-scope\nvocabulary\n"));
+        let snapshot = Snapshot::parse(
+            Some("dot-scope"),
+            Some("dot-scope\nvocabulary\nsmart-turn\n"),
+        );
         assert!(snapshot.unknown.is_empty());
         assert_eq!(
             snapshot.active().collect::<Vec<_>>(),
-            [Experiment::Vocabulary]
+            [Experiment::SmartTurn]
         );
     }
 
@@ -563,31 +562,31 @@ mod tests {
 
     #[test]
     fn enabling_appends_once_under_a_header() {
-        let created = edit(None, "vocabulary", true).unwrap();
+        let created = edit(None, "smart-turn", true).unwrap();
         assert!(created.starts_with("# Hex experiments"));
-        assert!(created.ends_with("\nvocabulary\n"));
-        assert_eq!(edit(Some(&created), "vocabulary", true), None);
+        assert!(created.ends_with("\nsmart-turn\n"));
+        assert_eq!(edit(Some(&created), "smart-turn", true), None);
 
         assert_eq!(
-            edit(Some("# mine\nlive-chapters"), "vocabulary", true).unwrap(),
-            "# mine\nlive-chapters\nvocabulary\n"
+            edit(Some("# mine\nlive-chapters"), "smart-turn", true).unwrap(),
+            "# mine\nlive-chapters\nsmart-turn\n"
         );
-        assert_eq!(edit(Some("vocabulary # yes\n"), "vocabulary", true), None);
+        assert_eq!(edit(Some("smart-turn # yes\n"), "smart-turn", true), None);
     }
 
     #[test]
     fn disabling_removes_every_line_naming_it_and_keeps_the_rest() {
         assert_eq!(
             edit(
-                Some("# mine\nvocabulary\nlive-chapters # keep\nvocabulary  # again\n"),
-                "vocabulary",
+                Some("# mine\nsmart-turn\nlive-chapters # keep\nsmart-turn  # again\n"),
+                "smart-turn",
                 false
             )
             .unwrap(),
             "# mine\nlive-chapters # keep\n"
         );
-        assert_eq!(edit(Some("# vocabulary\n"), "vocabulary", false), None);
-        assert_eq!(edit(None, "vocabulary", false), None);
+        assert_eq!(edit(Some("# smart-turn\n"), "smart-turn", false), None);
+        assert_eq!(edit(None, "smart-turn", false), None);
     }
 
     #[test]
@@ -595,18 +594,18 @@ mod tests {
         let directory = temp_dir("set");
         let path = directory.join("hex-test/experiments");
 
-        assert!(!set(&path, Experiment::Vocabulary, false).unwrap());
+        assert!(!set(&path, Experiment::SmartTurn, false).unwrap());
         assert!(!path.exists());
-        assert!(set(&path, Experiment::Vocabulary, true).unwrap());
+        assert!(set(&path, Experiment::SmartTurn, true).unwrap());
         assert!(set(&path, Experiment::LiveChapters, true).unwrap());
         assert!(!set(&path, Experiment::LiveChapters, true).unwrap());
         let snapshot = Snapshot::parse(None, read_optional(&path).unwrap().as_deref());
         assert_eq!(
             snapshot.active().collect::<Vec<_>>(),
-            [Experiment::LiveChapters, Experiment::Vocabulary]
+            [Experiment::LiveChapters, Experiment::SmartTurn]
         );
 
-        assert!(set(&path, Experiment::Vocabulary, false).unwrap());
+        assert!(set(&path, Experiment::SmartTurn, false).unwrap());
         let snapshot = Snapshot::parse(None, read_optional(&path).unwrap().as_deref());
         assert_eq!(
             snapshot.active().collect::<Vec<_>>(),
@@ -631,20 +630,20 @@ mod tests {
         let link = directory.join("experiments");
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
-        assert!(set(&link, Experiment::Vocabulary, true).unwrap());
+        assert!(set(&link, Experiment::SmartTurn, true).unwrap());
         assert!(
             fs::symlink_metadata(&link)
                 .unwrap()
                 .file_type()
                 .is_symlink()
         );
-        assert_eq!(fs::read_to_string(&target).unwrap(), "# kept\nvocabulary\n");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "# kept\nsmart-turn\n");
         fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn list_reports_each_source() {
-        let snapshot = Snapshot::parse(Some("vocabulary"), Some("vocabulary\nmystery\n"));
+        let snapshot = Snapshot::parse(Some("smart-turn"), Some("smart-turn\nmystery\n"));
         let path = Path::new("/home/kit/.config/hex/experiments");
         let json = serde_json::to_value(list_json(&snapshot, path)).unwrap();
         assert_eq!(
@@ -680,12 +679,6 @@ mod tests {
                     {
                         "name": "smart-turn",
                         "description": Experiment::SmartTurn.description(),
-                        "enabled": false,
-                        "sources": [],
-                    },
-                    {
-                        "name": "vocabulary",
-                        "description": Experiment::Vocabulary.description(),
                         "enabled": true,
                         "sources": ["env", "file"],
                     },
@@ -704,7 +697,7 @@ mod tests {
         print_list(&mut text, &snapshot, path).unwrap();
         let text = String::from_utf8(text).unwrap();
         assert!(text.contains("live-chapters  off  -"));
-        assert!(text.contains("vocabulary     on   env+file"));
+        assert!(text.contains("smart-turn     on   env+file"));
         assert!(text.contains("unknown experiment \"mystery\" in file"));
     }
 }

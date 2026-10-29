@@ -3,9 +3,6 @@
 //! like"). Search uses it to find a term's likely mis-transcriptions,
 //! prompts can read it through [`terms`], and Parakeet biases its
 //! transcripts toward it through [`transcription_bias`].
-//!
-//! Dormant behind the `vocabulary` experiment: while it is off, nothing reads
-//! the saved list and every accessor here returns nothing.
 
 use std::io::Read as _;
 use std::path::Path;
@@ -13,8 +10,6 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
-
-use crate::experiments::{self, Experiment};
 
 /// Longest term or "sounds like" entry, in characters.
 const MAX_TERM_CHARS: usize = 64;
@@ -94,23 +89,13 @@ impl VocabularyBoost {
 static SAVED: OnceLock<RwLock<Vec<VocabularyEntry>>> = OnceLock::new();
 static BOOST: AtomicU8 = AtomicU8::new(VocabularyBoost::Normal as u8);
 
-/// Whether the `vocabulary` experiment is on for this process.
-pub fn enabled() -> bool {
-    experiments::enabled(Experiment::Vocabulary)
-}
-
-/// The saved terms, as last applied from settings; empty while the
-/// experiment is off.
+/// The saved terms, as last applied from settings.
 pub fn terms() -> Vec<String> {
     entries().into_iter().map(|entry| entry.term).collect()
 }
 
-/// The saved entries, as last applied from settings; empty while the
-/// experiment is off.
+/// The saved entries, as last applied from settings.
 pub fn entries() -> Vec<VocabularyEntry> {
-    if !enabled() {
-        return Vec::new();
-    }
     SAVED
         .get_or_init(Default::default)
         .read()
@@ -120,8 +105,7 @@ pub fn entries() -> Vec<VocabularyEntry> {
 
 /// The terms and options a Parakeet run biases its transcript with, read
 /// at the start of each run and live stream so settings changes apply to the
-/// next one. `None` while the experiment is off, the list is empty, or the
-/// boost is off.
+/// next one. `None` while the list is empty or the boost is off.
 pub(crate) fn transcription_bias()
 -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
     let boost = VocabularyBoost::from_index(BOOST.load(Ordering::Relaxed));
@@ -169,11 +153,8 @@ pub(crate) fn apply(entries: &[VocabularyEntry], boost: VocabularyBoost) {
 
 /// The entries saved in `root/settings.json`, read without loading
 /// `AppSettings` (which migrates and writes), for read-only commands. Empty
-/// while the experiment is off, or when the file is missing or unreadable.
+/// when the file is missing or unreadable.
 pub fn read_saved(root: &Path) -> Vec<VocabularyEntry> {
-    if !enabled() {
-        return Vec::new();
-    }
     match read_from(&root.join("settings.json")) {
         Ok(entries) => entries,
         Err(error) => {

@@ -107,7 +107,7 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
-    /// Experiment: list, add, and remove vocabulary terms (`hex experiments enable vocabulary`).
+    /// List, add, and remove vocabulary terms.
     Vocabulary {
         #[command(subcommand)]
         command: VocabularyCommand,
@@ -1254,18 +1254,18 @@ mod tests {
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
         assert!(!text.contains("Experiments"));
 
-        report.experiments = vec!["live-chapters".into(), "vocabulary".into()];
-        assert!(human_status(&report).ends_with("Experiments  live-chapters, vocabulary\n"));
+        report.experiments = vec!["live-chapters".into(), "smart-turn".into()];
+        assert!(human_status(&report).ends_with("Experiments  live-chapters, smart-turn\n"));
     }
 
     #[test]
     fn status_reports_experiments_and_reads_older_replies_without_them() {
         let report = StatusReport {
-            experiments: vec!["vocabulary".into()],
+            experiments: vec!["smart-turn".into()],
             ..Default::default()
         };
         let mut json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["experiments"], serde_json::json!(["vocabulary"]));
+        assert_eq!(json["experiments"], serde_json::json!(["smart-turn"]));
         json.as_object_mut().unwrap().remove("experiments");
         let older: StatusReport = serde_json::from_value(json).unwrap();
         assert!(older.experiments.is_empty());

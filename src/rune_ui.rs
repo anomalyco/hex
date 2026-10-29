@@ -709,7 +709,6 @@ impl Ui {
             ui.modes.load_personal_commands();
         }
         ui.platform.developer = crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.vocabulary = crate::vocabulary::enabled();
         ui.platform.modes = crate::experiments::enabled(crate::experiments::Experiment::Modes);
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
@@ -826,9 +825,7 @@ impl Ui {
             candidate.transcription.recognition_hints = self.hints.text.clone();
         }
         self.modes.project(&mut candidate);
-        if self.platform.vocabulary {
-            candidate.vocabulary = self.vocabulary.project();
-        }
+        candidate.vocabulary = self.vocabulary.project();
         candidate
     }
 
@@ -846,8 +843,7 @@ impl Ui {
             hints: self.hints_shown(settings)
                 && self.hints.text != settings.transcription.recognition_hints,
             modes: modes.dictation_processing != settings.dictation_processing,
-            vocabulary: self.platform.vocabulary
-                && self.vocabulary.project() != settings.vocabulary,
+            vocabulary: self.vocabulary.project() != settings.vocabulary,
         }
     }
 

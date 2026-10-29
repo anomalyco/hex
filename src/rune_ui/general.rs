@@ -40,11 +40,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     }
     content = content
         .child(basics(ui, p, layer))
-        .children(
-            ui.platform
-                .vocabulary
-                .then(|| super::vocabulary::section_view(ui, p)),
-        )
+        .child(super::vocabulary::section_view(ui, p))
         .child(advanced_toggle(ui, p, Pane::General));
     if advanced_open(ui, Pane::General) {
         content = content

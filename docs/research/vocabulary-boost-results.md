@@ -2,7 +2,7 @@
 
 **Status:** Measured, 2026-10-28; whole-clip RNN-T runs moved to decoder
 biasing on 2026-10-29 ([below](#decoder-biasing-whole-clip-rnn-t)). Shipped
-dormant behind the `vocabulary` experiment. Follows [`custom-vocabulary.md`](custom-vocabulary.md),
+on by default (no experiment) on 2026-10-29. Follows [`custom-vocabulary.md`](custom-vocabulary.md),
 [`vocabulary-real-clips.md`](vocabulary-real-clips.md) and the no-ship
 `spike/parakeet-boost` branch.
 
@@ -184,8 +184,7 @@ streaming exists to save.
 ## Settings
 
 Vocabulary › Boost: Off (0), Light (2.0), Normal (2.5, default), Strong (4.0).
-CLI: `hex settings set vocabulary_boost normal`. The boost exists only while the
-`vocabulary` experiment is on (`hex experiments enable vocabulary`).
+CLI: `hex settings set vocabulary_boost normal`.
 
 ## Next
 

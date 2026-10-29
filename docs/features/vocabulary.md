@@ -1,17 +1,11 @@
-# Vocabulary (experiment)
+# Vocabulary
 
 One shared list of names Hex should know (people, projects, products), each
-with optional "sounds like" spellings a transcript may show instead. It is the
-`vocabulary` [experiment](experiments.md): with it off, nothing reads the list,
-no Settings card shows it, `hex vocabulary` (listed in `--help` as an
-experiment) is refused, and Hex behaves as before. macOS only for now.
+with optional "sounds like" spellings a transcript may show instead. An empty
+list (the default) changes nothing. The `hex vocabulary` commands are macOS
+only for now.
 
 ```ts
-Turn it on                               // vocabulary.gate
-├── hex experiments enable vocabulary -> restart Hex
-└── Off -> no Settings card, `hex vocabulary` refused (feature-off),
-           transcription, prompts and search see an empty list   // vocabulary::entries / read_saved
-
 General › Vocabulary › Names and terms   // vocabulary.settings; after Dictation
 ├── Each row -> Term | Sounds like (comma-separated) | ×
 ├── + -> New empty row; saved once the term has text
@@ -44,7 +38,7 @@ Transcription (Parakeet: RNN-T and TDT)  // vocabulary.transcription; gguf_sessi
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
 └── Whisper, Qwen3, SenseVoice, Cohere, Apple Speech -> no biasing
 
-hex vocabulary                           // vocabulary.cli; marked as an experiment in --help
+hex vocabulary                           // vocabulary.cli
 ├── list [--json]
 ├── add <term> [--sounds-like a,b] -> New term, or new spellings merged into it
 │   └── Already there, nothing new -> changed: false
@@ -101,7 +95,7 @@ Sources: [vocabulary.rs](../../src/vocabulary.rs),
 [meeting_query.rs](../../src/meeting_query.rs) (`vocabulary_aliases`,
 `sounds_alike`), [dictation_processor.rs](../../src/dictation_processor.rs)
 (`vocabulary_lines`), and [control.rs](../../src/control.rs)
-(`check_vocabulary`, `edit_vocabulary`).
+(`edit_vocabulary`).
 
 Checks: `vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 suggestions, comma splitting, reading the saved list without settings, the

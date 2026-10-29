@@ -130,7 +130,7 @@ pub enum ControlCommand {
         #[serde(default)]
         enabled: Option<bool>,
     },
-    /// The shared vocabulary (the `vocabulary` experiment).
+    /// The shared vocabulary.
     VocabularyList,
     VocabularyAdd {
         term: String,
@@ -723,18 +723,6 @@ pub fn check_quit(
             ),
         )),
     }
-}
-
-/// Refuses vocabulary commands while the `vocabulary` experiment is off.
-pub fn check_vocabulary() -> Result<(), ControlError> {
-    if vocabulary::enabled() {
-        return Ok(());
-    }
-    Err(ControlError::new(
-        "feature-off",
-        "the vocabulary is an experiment; turn it on with `hex experiments enable vocabulary` \
-         and restart Hex",
-    ))
 }
 
 /// Carries out `hex vocabulary add|remove` on the saved list. The reply's

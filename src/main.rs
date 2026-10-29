@@ -1184,11 +1184,11 @@ mod tests {
             }))
         ));
         assert!(matches!(
-            Cli::try_parse_from(["hex", "experiments", "enable", "vocabulary"])
+            Cli::try_parse_from(["hex", "experiments", "enable", "smart-turn"])
                 .map(|cli| cli.command),
             Ok(Some(Command::Experiments {
                 command: ExperimentsCommand::Enable { name }
-            })) if name == "vocabulary"
+            })) if name == "smart-turn"
         ));
         assert!(Cli::try_parse_from(["hex", "experiments", "disable"]).is_err());
     }

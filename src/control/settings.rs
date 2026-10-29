@@ -218,7 +218,7 @@ const KEYS: &[Key] = &[
     key(
         "vocabulary_boost",
         Kind::Choice(&["off", "light", "normal", "strong"]),
-        "How readily transcription swaps heard words for a vocabulary term (the vocabulary experiment)",
+        "How readily transcription swaps heard words for a vocabulary term",
     ),
     key(
         "dictation_processing.default_mode",

@@ -9,7 +9,7 @@ while Labs or one of them is open.
 
 ```ts
 Turn an experiment on                    // experiments.sources
-├── HEX_EXPERIMENTS=live-chapters,vocabulary  // commas or spaces; this process and its children
+├── HEX_EXPERIMENTS=live-chapters,smart-turn  // commas or spaces; this process and its children
 ├── ~/.config/hex/experiments            // one name per line, # comments; every launch
 │   ├── Hex Test.app -> ~/.config/hex-test/experiments
 │   └── Windows / Linux -> %USERPROFILE%\.config\hex, ~/.config/hex
@@ -34,6 +34,9 @@ The known experiments are compiled into
 
 - `capture` is retired: [Annotate](capture.md) is on by default on macOS
   and Linux since 2026-10-29. A file or variable naming it is ignored.
+- `vocabulary` is retired: [Vocabulary](vocabulary.md) became a General
+  card and the `hex vocabulary` commands on 2026-10-29. A file or variable
+  naming it is ignored silently.
 - `dot-scope` is retired: [Dot scope](dictation.md#dot-scope) became the
   HUD on every OS on 2026-10-29, and the capsule it replaced is gone. A file
   or `HEX_EXPERIMENTS` that still names it is ignored silently. Check:
@@ -142,9 +145,6 @@ The known experiments are compiled into
   reads no settings, so nothing downloads, loads, or runs while it is off.
   Until the model is ready, and if it fails, dictation behaves as if it were
   off.
-- `vocabulary`: a shared list of names and their likely mis-transcriptions,
-  for transcription, rewriting and search ([Vocabulary](vocabulary.md)). It adds a Settings
-  card and the `hex vocabulary` commands, which appear only while it is on.
 - `voice-filter`: the Voice Filter pane (macOS), the only home of the Hex
   Microphone driver, its filter modes, and Try it
   ([Hex Microphone](README.md#experimental-hex-microphone-and-voice-filter)).

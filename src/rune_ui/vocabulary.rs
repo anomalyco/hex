@@ -1,4 +1,4 @@
-//! The Vocabulary card under Dictation (the `vocabulary` experiment): one
+//! The Vocabulary card under Dictation: one
 //! row per term with its "sounds like" spellings, edited in place and saved
 //! when typing pauses, like a mode's corrections.
 
@@ -182,7 +182,6 @@ pub(super) fn section_view(ui: &Ui, p: Paint) -> El {
 
 /// A few terms, one with spellings, and the suggestions not yet added.
 pub(super) fn fixture(ui: &mut Ui, filled: bool) {
-    ui.platform.vocabulary = true;
     ui.settings.vocabulary = if filled {
         let mut entries = Vec::new();
         for (term, sounds_like) in [
