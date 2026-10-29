@@ -1069,7 +1069,7 @@ Linux beta                               // not macOS feature parity
 │   └── X11 grab conflict / portal refusal -> Warn without stopping dictation
 ├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
 │   └── Selected text from the primary selection -> OpenCode -> Paste the reply
-├── Recording HUD -> The macOS capsule (or Dot scope with `dot-scope` on) on the
+├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
 │   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
@@ -1179,7 +1179,8 @@ listener's generation slot (an old listener cannot hide a restarted HUD) and
 turns its reports into [rune_hud.rs](../../src/rune_hud.rs)'s events;
 reports before the window's app exists are dropped. The shaders render
 offscreen with `cargo test --bin hex rune_hud_frames -- --ignored`
-(2026-10-28 on apollo: capsule and Dot scope frames match the Metal look).
+(2026-10-28 on apollo: Dot scope frames match the Metal look; 2026-10-29 on
+apollo: recording, processing, and done after Dot scope became the default).
 The GTK HUD it replaced is deleted. The text pill was observed on
 2026-10-22 in a headless sway on apollo (isolated data root, real microphone,
 `hex service`): `hex dictation start` showed the pill at the top edge and it
@@ -1380,7 +1381,7 @@ microphone behavior.
 macOS debug runtime                      // not release navigation
 ├── Meetings -> Always available; release builds need the Meetings opt-in (its pane's card or Meetings › Settings)
 ├── Activity / HUD Lab / hex dev -> Observation and developer controls
-└── HUD Lab in release -> Only while dot-scope is on, Dot scope's section only
+└── HUD Lab in release -> Only while the playground experiment is on
 
 `hex app -- --snap OUT --scene NAME` -> Rendered fixtures    // not proof capture/download/update happened
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui

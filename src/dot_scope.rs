@@ -1,5 +1,5 @@
-//! Dot scope (experiment `dot-scope`): the recording indicator as a field of
-//! dots lit by a braided pair of oscilloscope traces that follow the voice.
+//! Dot scope: the recording indicator, on every OS, as a field of dots lit by
+//! a braided pair of oscilloscope traces that follow the voice.
 //! Ported from the t422 prototype (look A), itself a port of the OpenCode iOS
 //! dot scope (`DotScopeSimulation.swift`).
 //!

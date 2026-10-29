@@ -41,15 +41,11 @@ The known experiments are compiled into
   default off) is the second gate. Check:
   `capture_exists_only_where_it_has_a_host` in
   [experiments.rs](../../src/experiments.rs).
-- `dot-scope`: the recording HUD (macOS, Linux, and Windows) as Dot scope, a plate of dots lit
-  by a braided pair of oscilloscope traces that follow the microphone level
-  (auto-levelled), with a choice of processing looks and of placement below
-  the menu bar, in it, or out of the notch (see
-  [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
-  where the work starts: the HUD builds no Dot scope pipeline or simulation
-  and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
-  instead of the capsule's styles, and release builds show HUD Lab too
-  (only its Dot scope section); with `playground` on, ⇧⌘D lists HUD stories.
+- `dot-scope` is retired: [Dot scope](dictation.md#dot-scope) became the
+  HUD on every OS on 2026-10-29, and the capsule it replaced is gone. A file
+  or `HEX_EXPERIMENTS` that still names it is ignored silently. Check:
+  `retired_experiments_are_ignored_silently` in
+  [experiments.rs](../../src/experiments.rs).
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The

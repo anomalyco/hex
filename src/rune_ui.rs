@@ -502,11 +502,8 @@ impl Pane {
                             .is_some_and(|status| status.driver_bundle_installed),
                     )
             }
-            // Release builds too while the `dot-scope` experiment is on, when
-            // HUD Lab tunes only Dot scope.
-            Pane::HudLab => {
-                caps.hud_lab && (ui.platform.developer || ui.platform.hud.dot_scope.is_some())
-            }
+            // Release builds too while the `playground` experiment is on.
+            Pane::HudLab => caps.hud_lab && (ui.platform.developer || ui.platform.playground),
             Pane::Activity => ui.platform.developer,
             #[cfg(hex_capture)]
             Pane::Scrawl => ui.platform.scrawl.is_some(),
@@ -694,9 +691,8 @@ impl Ui {
         ui.platform.modes = crate::experiments::enabled(crate::experiments::Experiment::Modes);
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
-        if crate::experiments::enabled(crate::experiments::Experiment::DotScope) {
-            ui.platform.hud.dot_scope = Some(crate::dot_scope::lab());
-        }
+        ui.platform.playground = playground::enabled();
+        ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
         ui
@@ -2186,13 +2182,12 @@ const SCENES: &[Scene] = &[
     ("mac-hud-lab", |ui| {
         *ui = mac_fixture();
         ui.platform.developer = true;
-        ui.platform.hud.queued = 2;
         ui.pane = Pane::HudLab;
     }),
-    // A release build with the `dot-scope` experiment on.
-    ("mac-hud-lab-dot-scope", |ui| {
+    // A release build with the `playground` experiment on.
+    ("mac-hud-lab-playground", |ui| {
         *ui = mac_fixture();
-        ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::default());
+        ui.platform.playground = true;
         ui.pane = Pane::HudLab;
     }),
     ("mac-activity", |ui| {

@@ -18,7 +18,7 @@ raised, rounded content panel. Hex keeps its own information, sections, and
 copy; the look comes from the kit.
 
 The dictation HUD ([`rune_hud.rs`](../src/rune_hud.rs)) is outside the
-system: its glossy capsule and Dot scope are shaders (`rune_hud.wgsl`) drawn
+system: Dot scope is a shader (`rune_hud.wgsl`) drawn
 by a Rune overlay's compositor on every OS, hand-tuned in HUD Lab.
 
 ## Rules

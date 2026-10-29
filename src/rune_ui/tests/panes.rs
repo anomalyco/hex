@@ -1538,68 +1538,45 @@ fn voice_filter_needs_its_experiment_or_hex_microphone() {
 }
 
 #[test]
-fn hud_lab_drives_the_indicator() {
+fn hud_lab_tunes_dot_scope() {
     let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
-    tap(&mut rt, "hud-style2");
+    assert!(rt.find("dot-glow").is_some());
+    rt.state.platform.hud.tuning = crate::dot_scope::Tuning {
+        glow: 2.0,
+        ..Default::default()
+    };
+    refresh(&mut rt);
     tap(&mut rt, "hud-demo/segment2");
     let Some(PlatformRequest::ConfigureHud(lab)) = asked(&rt).last().cloned() else {
         panic!("{:?}", asked(&rt));
     };
-    assert_eq!(lab.tuning, hud_lab::style(2));
+    assert_eq!(lab.tuning.glow, 2.0);
     assert_eq!(lab.demo, platform::HudDemo::Processing);
-    assert_eq!(lab.queued, 2);
-    tap(&mut rt, "copy-hud-preset");
+    tap(&mut rt, "dot-scope-copy");
     assert!(
         rt.copy_request
             .as_deref()
-            .is_some_and(|preset| preset.starts_with("hud-v1 style=2 lines=3"))
-    );
-    assert!(rt.state.hud_copied);
-}
-
-#[test]
-fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
-    let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
-    assert!(rt.find("dot-columns").is_none(), "the styles without it");
-    let mut rt2 = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
-    assert!(rt2.find("hud-styles").is_none());
-    assert!(rt2.find("dot-glow").is_some());
-    rt2.state.platform.hud.dot_scope = Some(crate::dot_scope::Tuning {
-        glow: 2.0,
-        ..Default::default()
-    });
-    refresh(&mut rt2);
-    tap(&mut rt2, "hud-demo/segment1");
-    let Some(PlatformRequest::ConfigureHud(lab)) = asked(&rt2).last().cloned() else {
-        panic!("{:?}", asked(&rt2));
-    };
-    assert_eq!(lab.dot_scope.map(|t| t.glow), Some(2.0));
-    tap(&mut rt2, "dot-scope-copy");
-    assert!(
-        rt2.copy_request
-            .as_deref()
             .is_some_and(|json| json.contains("\"glow\": 2.0"))
     );
-    tap(&mut rt2, "dot-scope-save");
+    assert!(rt.state.hud_copied);
+    tap(&mut rt, "dot-scope-save");
     assert!(matches!(
-        asked(&rt2).last(),
+        asked(&rt).last(),
         Some(PlatformRequest::SaveDotScope(tuning)) if tuning.glow == 2.0
     ));
-    assert!(rt2.state.hud_saved);
-    tap(&mut rt2, "dot-scope-reset");
+    assert!(rt.state.hud_saved);
+    tap(&mut rt, "dot-scope-reset");
     assert_eq!(
-        rt2.state.platform.hud.dot_scope,
-        Some(crate::dot_scope::Tuning::default())
+        rt.state.platform.hud.tuning,
+        crate::dot_scope::Tuning::default()
     );
-    assert!(!rt2.state.hud_saved);
-    tap(&mut rt, "hud-style0");
-    assert_eq!(rt.state.platform.hud.dot_scope, None);
+    assert!(!rt.state.hud_saved);
 }
 
 #[test]
 fn hud_lab_picks_dot_scope_processing_placement_and_level() {
     use crate::dot_scope::{Placement, Processing};
-    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
     tap(&mut rt, "dot-processing/segments/segment2");
     tap(&mut rt, "dot-placement/segments/segment2");
     tap(&mut rt, "dot-auto-level");
@@ -1607,7 +1584,7 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
     let Some(PlatformRequest::TuneHud(lab)) = asked(&rt).last().cloned() else {
         panic!("{:?}", asked(&rt));
     };
-    let tuning = lab.dot_scope.unwrap();
+    let tuning = lab.tuning;
     assert_eq!(tuning.processing, Processing::Pulse);
     assert_eq!(tuning.placement, Placement::Notch);
     assert!(!tuning.auto_level && tuning.pretend_notch);
@@ -1615,9 +1592,9 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 }
 
 #[test]
-fn release_builds_show_hud_lab_only_for_dot_scope() {
+fn release_builds_show_hud_lab_with_the_playground() {
     // The scene is a release build (no developer panes) with the experiment on.
-    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    let mut rt = runtime("mac-hud-lab-playground", true, PANE_SIZE);
     assert!(!rt.state.platform.developer);
     assert!(rt.find("nav-hud-lab").is_some());
     assert!(rt.find("nav-activity").is_none());
@@ -1635,20 +1612,10 @@ fn release_builds_show_hud_lab_only_for_dot_scope() {
         asked(&rt).last(),
         Some(PlatformRequest::EndHudDemo)
     ));
-    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
-    rt.state.platform.hud.dot_scope = None;
+    let mut rt = runtime("mac-hud-lab-playground", true, PANE_SIZE);
+    rt.state.platform.playground = false;
     refresh(&mut rt);
     assert!(rt.find("nav-hud-lab").is_none());
-}
-
-#[test]
-fn hud_lab_controls_round_trip() {
-    use hud_lab::Control;
-    let mut tuning = platform::HudTuning::default();
-    for (control, _, _) in Control::ALL {
-        control.set(&mut tuning, 0.6);
-        assert!((control.value(&tuning) - 0.6).abs() < 1e-4, "{control:?}");
-    }
 }
 
 #[test]
@@ -1727,7 +1694,6 @@ fn experiment_goldens() {
     for dark in [true, false] {
         check_golden("mac-voice-filter", dark, PANE_SIZE);
         check_golden("mac-hud-lab", dark, PANE_SIZE);
-        check_golden("mac-hud-lab-dot-scope", dark, PANE_SIZE);
     }
     check_golden("mac-voice-filter-muted", true, PANE_SIZE);
     check_golden("mac-voice-filter-driver-missing", false, PANE_SIZE);

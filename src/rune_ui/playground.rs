@@ -36,11 +36,7 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
         .sizes(&[("Hex window", WINDOW_SIZE)]);
     let playground = super::onboarding_kit::stories(playground);
     #[cfg(target_os = "macos")]
-    let playground = if experiments::enabled(Experiment::DotScope) {
-        super::hud_stories::add(playground)
-    } else {
-        playground
-    };
+    let playground = super::hud_stories::add(playground);
     #[cfg(all(hex_capture, target_os = "macos"))]
     let playground = super::capture_capsule::playground::stories(playground);
     app.playground(playground)

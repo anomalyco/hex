@@ -341,10 +341,11 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Developer builds: the Activity pane, and HUD Lab without the
-    /// `dot-scope` experiment (`crate::DEVELOPER_FEATURES_ENABLED` on a
-    /// native host).
+    /// Developer builds: the Activity pane and HUD Lab
+    /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
+    /// The `playground` experiment: release builds show HUD Lab too.
+    pub(super) playground: bool,
     /// The `vocabulary` experiment: the Vocabulary card under Dictation
     /// (`crate::vocabulary::enabled` on a native host).
     pub(super) vocabulary: bool,
@@ -376,39 +377,6 @@ pub(super) struct PlatformState {
     pub(super) scrawl: Option<ScrawlView>,
 }
 
-/// The dictation indicator's look, as `dictation_indicator::HudTuning`
-/// (macOS-only) has it. All values are the indicator's own units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct HudTuning {
-    /// 0, 1, or 2: moving light, meridians, ribbons.
-    pub(super) style: f32,
-    pub(super) line_count: f32,
-    pub(super) curvature: f32,
-    pub(super) speed: f32,
-    pub(super) sharpness: f32,
-    pub(super) glow: f32,
-    pub(super) depth: f32,
-    pub(super) light_angle: f32,
-    pub(super) outline: f32,
-}
-
-impl Default for HudTuning {
-    /// Style B, as `HudTuning::default()`.
-    fn default() -> Self {
-        Self {
-            style: 1.0,
-            line_count: 2.0,
-            curvature: 0.47,
-            speed: 17.08,
-            sharpness: 0.29,
-            glow: 0.77,
-            depth: 0.65,
-            light_angle: 0.35,
-            outline: 1.0,
-        }
-    }
-}
-
 /// The indicator state HUD Lab demonstrates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum HudDemo {
@@ -418,16 +386,12 @@ pub(super) enum HudDemo {
     Processing,
 }
 
-/// Everything HUD Lab drives: the tuning, the demonstrated state, and how
-/// many dictations wait behind it (0 through 3).
+/// Everything HUD Lab drives: Dot scope's tuning and the demonstrated
+/// state.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct HudLab {
-    pub(super) tuning: HudTuning,
+    pub(super) tuning: crate::dot_scope::Tuning,
     pub(super) demo: HudDemo,
-    pub(super) queued: usize,
-    /// Dot scope's tuning while the `dot-scope` experiment is on, when HUD
-    /// Lab tunes Dot scope instead of the capsule's styles.
-    pub(super) dot_scope: Option<crate::dot_scope::Tuning>,
 }
 
 /// The Voice Filter pane's demo controls (`hex_microphone`'s demo functions).
@@ -465,6 +429,7 @@ impl PlatformState {
             calendar: CalendarView::default(),
             relaunch_failed: false,
             developer: false,
+            playground: false,
             vocabulary: false,
             modes: true,
             voice_filter: false,
@@ -696,11 +661,11 @@ pub(super) enum PlatformRequest {
     SetTuning(TunedFilterConfig),
     HexMicrophoneDemo(DemoRequest),
     /// Show this on the dictation indicator: `DictationIndicatorEvent::
-    /// Configure` with the tuning, then `Reset` and the demonstrated state
-    /// with `queued` jobs behind it.
+    /// ConfigureDotScope` with the tuning, then `Reset` and the
+    /// demonstrated state.
     ConfigureHud(HudLab),
     /// Only the tuning, live on whatever the indicator shows (a dictation
-    /// or the demo): `Configure` and `ConfigureDotScope`, no `Reset`.
+    /// or the demo): `ConfigureDotScope`, no `Reset`.
     TuneHud(HudLab),
     /// Leaving HUD Lab: `Reset` hides its demo.
     EndHudDemo,

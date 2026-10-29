@@ -202,9 +202,8 @@ hex app
   runtime saves the selection when it is ready and restarts the listener.
 - Enable on launch waits until first-run setup has recorded completion.
 - The dictation HUD is a Rune overlay (`rune_hud.rs`, shared with Linux): a
-  HUD thread steps the shared indicator model (and Dot scope with its
-  experiment on) and the overlay's compositor draws each frame on the GPU with
-  `rune_hud.wgsl`, the WGSL port of the macOS shaders; Rune shows it in a topmost tool window
+  HUD thread steps the shared indicator model and Dot scope, and the
+  overlay's compositor draws each frame on the GPU with `rune_hud.wgsl`; Rune shows it in a topmost tool window
   with `WS_EX_NOACTIVATE|WS_EX_TRANSPARENT|WS_EX_LAYERED`, shown with
   `SW_SHOWNOACTIVATE`, 12 pt from the top or 24 pt above the taskbar. The
   same model, shaders, and overlay run on Linux; on Windows it is only

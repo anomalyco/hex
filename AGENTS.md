@@ -36,8 +36,7 @@ persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
 Meetings pane, menu-bar recording controls, and meeting paste in release builds.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
 keeps the meeting CLI, Activity, and HUD Lab debug-only. One exception: while
-the `dot-scope` experiment is on, release builds show HUD Lab with only its
-Dot scope section.
+the `playground` experiment is on, release builds show HUD Lab too.
 
 ## Feature Map
 
@@ -244,7 +243,7 @@ substitute for source inspection or a second roadmap.
   the window is open (layer-shell on Wayland, override-redirect on X11).
 - `rune_hud`: the dictation HUD on every OS: a click-through Rune overlay
   whose compositor steps `dictation_indicator`'s model on Rune's frame clock
-  (the display's refresh) and draws the capsule or Dot scope on the GPU with
+  (the display's refresh) and draws Dot scope on the GPU with
   `rune_hud.wgsl`. `rune_hud/macos` places it on the pointer's screen
   through `hud_placement` (below the menu bar, in it, or out of the notch);
   Linux and Windows place it at the top or bottom edge.
@@ -298,8 +297,8 @@ substitute for source inspection or a second roadmap.
   `rune-kit` and the OpenCode theme: General, Modes with mode-owned
   corrections and processing, Voice Action, opt-in Commands, Meetings (each
   feature owns its settings), History, and under Experiments the Voice Filter
-  and developer-only HUD Lab (release too while `dot-scope` is on, Dot scope
-  only) and Activity, the transcription
+  and developer-only HUD Lab (release too while `playground` is on) and
+  Activity, the transcription
   picker, the onboarding tour, the macOS meeting capsules, the `--snap`
   fixture scenes, and the macOS `hex://story/…` playground links
   (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist;
@@ -320,9 +319,10 @@ substitute for source inspection or a second roadmap.
 - `hud_placement`: pure geometry for where a HUD sits on its screen (below
   the menu bar, in it, or as an island grown out of the notch), shared by
   the dictation HUD and, later, the capture capsule.
-- `dictation_indicator`, `spring`: the HUD's events, phases, jobs, springs,
-  and Dot scope stepping, the same on every OS and drawn by `rune_hud`;
-  `spring` holds the frame-rate-independent springs.
+- `dictation_indicator`, `dot_scope`, `spring`: the HUD's events, phases,
+  jobs, and Dot scope (the one HUD look: a plate of dots lit by a braided,
+  auto-levelled oscilloscope trace), the same on every OS and drawn by
+  `rune_hud`; `spring` holds the frame-rate-independent springs.
 - `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
   artifacts, Screen Recording permission checks, final local-model publication,
   the user-facing Markdown copy, and recovery.

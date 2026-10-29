@@ -995,22 +995,23 @@ behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
-At the top position the capsule sits 6 pt below the menu bar (`hud_placement::TOP_OFFSET`), or below the
+At the top position the HUD sits 6 pt below the menu bar (`hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
 and normal Spaces keep their position. Check: `scripts/check
 dictation_indicator::tests::top_capsule` covers the math only; placement over a
 fullscreen app on a notched Mac is not yet observed.
 
-### Dot scope (experiment `dot-scope`)
+### Dot scope
 
-With the `dot-scope` experiment on, the HUD draws Dot scope instead of
-the capsule ([dot_scope.rs](../../src/dot_scope.rs),
+The HUD is Dot scope on every OS ([dot_scope.rs](../../src/dot_scope.rs),
 `dot_scope_fragment` in [rune_hud.wgsl](../../src/rune_hud.wgsl), drawn by
-a Rune overlay on every OS). It is the t422 prototype's look A with its
-values. Linux and Windows draw it in a 176×80 pt window at the HUD's edge
-(no menu-bar or notch placement). Every OS takes dark or light and Reduce
-Motion from Rune, and loads `dot-scope.json` at launch.
+a Rune overlay). It was the `dot-scope` experiment (#264) until 2026-10-29,
+when it replaced the glossy capsule, which Omarchy users on X called a
+"static red thingy"; the capsule's shader and HUD Lab styles are deleted. It is the t422 prototype's look A with its values.
+Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no
+menu-bar or notch placement). Every OS takes dark or light and Reduce Motion
+from Rune, and loads `dot-scope.json` at launch.
 
 ```ts
 Dot scope                                    // dot_scope
@@ -1018,14 +1019,18 @@ Dot scope                                    // dot_scope
 │   ├── Auto level (default) -> 24 dB below the recent peak (3 s release),
 │   │   at least 16 dB above the room and the −60 dB noise floor   // AutoLevel
 │   ├── Auto level off -> Fixed RMS window, −40 to −10 dB
-│   └── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
-├── Transcribing / Processing -> Processing look:
+│   ├── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
+│   └── Voice Action (started or promoted) -> Green instead of pearl
+├── Locked / hands-free -> Same as recording; the HUD draws no lock
+├── Transcribing / Processing -> Processing look, at least 200 ms so a fast
+│   transcription still shows it (PROCESSING_MIN_DURATION):
 │   ├── Flow (default) -> The braid keeps turning; bands of light travel right
 │   ├── Pulse -> Rings leave the middle
 │   └── Sweep -> Braid irons flat; a cool beam sweeps 76 pt (round 1)
 ├── Completed -> Every look clears from the middle out as it collapses
 │   (0.3 s; Sweep's dark field shows only the two fronts); then it fades
-├── Failed -> Coral, then fades
+├── Failed -> Coral for 0.6 s, then fades
+├── Cancelled / discarded -> Fades at once
 ├── Reduce Motion -> A still braid; opacity fades only
 ├── Dark / light -> Read from AppleInterfaceStyle at each capture start
 └── Queued jobs -> Not drawn                // gap
@@ -1038,7 +1043,7 @@ pointer:
 
 ```ts
 Placement                                     // hud_placement::place
-├── Below the menu bar (default) -> Where the capsule sits, or above the Dock
+├── Below the menu bar (default) -> 6 pt under the menu bar, or above the Dock
 ├── In the menu bar -> A plate fitted to the bar's height, centred on a flat
 │   screen, just right of the notch on a notched one
 ├── From the notch -> A black island grows out of the notch, 28 pt wider
@@ -1052,13 +1057,12 @@ Placement                                     // hud_placement::place
 The window is 320×128 pt so the widest plate, its shadow, and the widest
 island fit. Notch metrics come from `safeAreaInsets.top` and
 `auxiliaryTopLeftArea`/`auxiliaryTopRightArea`; the bar's height from
-`NSStatusBar.systemStatusBar.thickness`. HUD Lab tunes it live, in release
-builds too while the experiment is on (Settings › Experiments › HUD Lab,
-showing only Dot scope's section; debug builds alone keep the capsule's
-styles):
+`NSStatusBar.systemStatusBar.thickness`. HUD Lab tunes it live in debug
+builds, and in release builds while the `playground` experiment is on
+(Settings › Experiments › HUD Lab):
 
 ```ts
-HUD Lab (dot-scope on)
+HUD Lab
 ├── Open -> The HUD shows a demo: Recording follows a synthetic voice
 ├── Move a slider -> Applies live to whatever the HUD shows, a real
 │   dictation included; the demo doesn't restart
@@ -1071,8 +1075,8 @@ HUD Lab (dot-scope on)
     stay on the HUD until Hex restarts
 ```
 
-The playground (⇧⌘D, experiment `playground`) lists HUD stories while
-`dot-scope` is on ([hud_stories.rs](../../src/rune_ui/hud_stories.rs)),
+The playground (⇧⌘D, experiment `playground`) lists HUD stories
+([hud_stories.rs](../../src/rune_ui/hud_stories.rs)),
 so every combination plays without HUD Lab:
 
 ```ts
@@ -1095,14 +1099,17 @@ Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
 
 Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
-Reduce Motion, the stages, auto level, each processing look settling dark),
+Reduce Motion, the stages, auto level, Voice Action green, each processing
+look settling dark), `scripts/check dictation_indicator` (phases, the
+processing minimum, failure and cancel, a hot microphone still moving),
 `scripts/check hud_placement` (each placement on flat and notched screens),
 and `rune_hud::tests::rune_hud_frames` (ignored; renders a fixed
 dictation through the real shaders offscreen into PNG frames, with
 `HEX_HUD_TUNING` for the look and placement over a pretend 14-inch MacBook
-Pro's menu bar). On 2026-10-28 its capsule, Dot scope, and notch frames
-matched the retired Metal HUD's render of the same inputs on hailmary to
-within 3/255 per channel.
+Pro's menu bar). On 2026-10-28 its Dot scope and notch frames matched the
+retired Metal HUD's render of the same inputs on hailmary to within 3/255
+per channel; on 2026-10-29 a headless capture on apollo showed recording,
+processing, and done after Dot scope became the default.
 Not yet observed on a real notched display, over a fullscreen app, or with
 a hidden menu bar.
 

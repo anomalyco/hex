@@ -5,7 +5,8 @@
 //! Two sources are unioned: `HEX_EXPERIMENTS` (names separated by commas or
 //! spaces) and the `experiments` file in Hex's per-user config folder (one
 //! name per line, `#` comments). The process reads them once, on first use,
-//! so changes apply at the next launch. Unknown names are logged and ignored.
+//! so changes apply at the next launch. Unknown names are logged and ignored;
+//! [`RETIRED`] names, experiments that shipped, are ignored silently.
 //! Debug builds read the same sources; `DEVELOPER_FEATURES_ENABLED` turns
 //! nothing on. An experiment a platform has no code for (`capture` on
 //! Windows) is not listed there, cannot be enabled, and its name is unknown.
@@ -26,10 +27,13 @@ use serde::Serialize;
 
 pub const ENV: &str = "HEX_EXPERIMENTS";
 
+/// Experiments that became the default: an old file or env variable may
+/// still name them.
+const RETIRED: [&str; 1] = ["dot-scope"];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Experiment {
     Capture,
-    DotScope,
     LiveChapters,
     LiveText,
     Modes,
@@ -42,9 +46,8 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those a platform lacks;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 8] = [
         Self::Capture,
-        Self::DotScope,
         Self::LiveChapters,
         Self::LiveText,
         Self::Modes,
@@ -72,7 +75,6 @@ impl Experiment {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Capture => "capture",
-            Self::DotScope => "dot-scope",
             Self::LiveChapters => "live-chapters",
             Self::LiveText => "live-text",
             Self::Modes => "modes",
@@ -86,9 +88,6 @@ impl Experiment {
     pub const fn description(self) -> &'static str {
         match self {
             Self::Capture => "Scrawl's capture engine (`hex capture`; macOS and Linux).",
-            Self::DotScope => {
-                "Dot scope: the recording indicator as a braided dot oscilloscope (macOS, Linux, Windows; tuned in HUD Lab)."
-            }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
             Self::LiveText => {
                 "Live text: a streaming model publishes what you have said so far while you dictate."
@@ -233,7 +232,7 @@ impl Snapshot {
                     .flat_map(|file| file.lines().filter_map(file_name))
                     .map(|name| (name, Source::File)),
             );
-        for (name, source) in names {
+        for (name, source) in names.filter(|(name, _)| !RETIRED.contains(name)) {
             match Experiment::from_name(name) {
                 Some(experiment) => {
                     let sources = &mut snapshot.sources[experiment.index()];
@@ -561,6 +560,16 @@ mod tests {
     }
 
     #[test]
+    fn retired_experiments_are_ignored_silently() {
+        let snapshot = Snapshot::parse(Some("dot-scope"), Some("dot-scope\nvocabulary\n"));
+        assert!(snapshot.unknown.is_empty());
+        assert_eq!(
+            snapshot.active().collect::<Vec<_>>(),
+            [Experiment::Vocabulary]
+        );
+    }
+
+    #[test]
     fn capture_exists_only_where_it_has_a_host() {
         let built = cfg!(hex_capture);
         let offered = Experiment::available().any(|experiment| experiment == Experiment::Capture);
@@ -689,12 +698,6 @@ mod tests {
                 "version": 1,
                 "file": "/home/kit/.config/hex/experiments",
                 "experiments": [
-                    {
-                        "name": "dot-scope",
-                        "description": Experiment::DotScope.description(),
-                        "enabled": false,
-                        "sources": [],
-                    },
                     {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),

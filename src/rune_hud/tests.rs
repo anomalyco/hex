@@ -22,19 +22,19 @@ fn dot_scope_window_fits_the_largest_plate() {
             .unwrap()
     };
     let widest = largest("dot-width").max(largest("dot-processing-width"));
-    assert!(widest + 24.0 <= DOT_SCOPE_WINDOW.0);
+    assert!(widest + 24.0 <= WINDOW.0);
     // The plate's middle sits in the window's; its shadow reaches about
     // 16 pt below it.
-    assert!(largest("dot-height") / 2.0 + 19.0 <= DOT_SCOPE_WINDOW.1 / 2.0);
+    assert!(largest("dot-height") / 2.0 + 19.0 <= WINDOW.1 / 2.0);
 }
 
-/// The macOS HUD's Dot scope window, which the captures use on every OS so
-/// they line up with the Metal reference frames.
+/// The macOS HUD's window, which the captures use on every OS so they line
+/// up with the Metal reference frames.
 const CAPTURE_DOT_WINDOW: (f32, f32) = (320.0, 128.0);
 
 /// A dictation, as the listener reports it, at 60 fps: HUD Lab's synthetic
 /// voice for 3 s, then transcribing, processing, and done.
-fn schedule(model: &mut IndicatorModel, start: Instant) -> Vec<Drawn> {
+fn schedule(model: &mut IndicatorModel, start: Instant) -> Vec<DotFrame> {
     let mut events = vec![
         (0.0, HudEvent::Started),
         (3.0, HudEvent::Submitted { job_id: 1 }),
@@ -101,21 +101,18 @@ fn macbook_layout(tuning: Tuning) -> Layout {
 /// at 60 fps over a desktop colour, from a fixed schedule:
 ///
 /// ```sh
-/// HEX_HUD_FRAMES=/tmp/frames HEX_HUD_DOT_SCOPE=1 \
-///   cargo test --bin hex rune_hud_frames -- --ignored
+/// HEX_HUD_FRAMES=/tmp/frames cargo test --bin hex rune_hud_frames -- --ignored
 /// ```
 ///
-/// `HEX_HUD_DOT_SCOPE=1` draws Dot scope (`HEX_HUD_TUNING` overrides its
-/// tuning as JSON, such as `{"processing": "pulse", "placement": "notch"}`,
-/// placed on a pretend 14-inch MacBook Pro), otherwise the capsule;
-/// `HEX_HUD_THEME=light` a light desktop. `HEX_HUD_DUMP=<file>` also writes
+/// `HEX_HUD_TUNING` overrides Dot scope's tuning as JSON, such as
+/// `{"processing": "pulse", "placement": "notch"}`, placed on a pretend
+/// 14-inch MacBook Pro; `HEX_HUD_THEME=light` draws over a light desktop. `HEX_HUD_DUMP=<file>` also writes
 /// every frame's shader inputs, for rendering the same frames elsewhere.
 #[test]
 #[ignore = "writes frames for a review clip"]
 fn rune_hud_frames() {
     let out = std::path::PathBuf::from(std::env::var("HEX_HUD_FRAMES").expect("HEX_HUD_FRAMES"));
     std::fs::create_dir_all(&out).unwrap();
-    let dots = std::env::var("HEX_HUD_DOT_SCOPE").as_deref() == Ok("1");
     let dark = std::env::var("HEX_HUD_THEME").as_deref() != Ok("light");
     let mut fields = serde_json::to_value(Tuning::default()).unwrap();
     if let Ok(json) = std::env::var("HEX_HUD_TUNING") {
@@ -126,13 +123,9 @@ fn rune_hud_frames() {
     }
     let tuning: Tuning = serde_json::from_value(fields).unwrap();
     let start = Instant::now();
-    let mut model = IndicatorModel::new(dots.then_some(tuning), start);
+    let mut model = IndicatorModel::new(tuning, start);
     let frames = schedule(&mut model, start);
-    let layout = if dots {
-        macbook_layout(tuning)
-    } else {
-        Layout::default()
-    };
+    let layout = macbook_layout(tuning);
 
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -141,11 +134,7 @@ fn rune_hud_frames() {
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let gpu = Gpu::new(&device, format);
     let scale = 2.0;
-    let window = if dots {
-        CAPTURE_DOT_WINDOW
-    } else {
-        (WINDOW_WIDTH, WINDOW_HEIGHT)
-    };
+    let window = CAPTURE_DOT_WINDOW;
     let size = ((window.0 * scale) as u32, (window.1 * scale) as u32);
     let extent = wgpu::Extent3d {
         width: size.0,
@@ -174,29 +163,16 @@ fn rune_hud_frames() {
     let mut dump = Vec::new();
     dump.extend(size.0.to_le_bytes());
     dump.extend(size.1.to_le_bytes());
-    for (n, drawn) in frames.iter().enumerate() {
-        match drawn {
-            Drawn::Capsule(uniforms) => {
-                let uniforms = Uniforms {
-                    resolution: [size.0 as f32, size.1 as f32],
-                    ..*uniforms
-                };
-                dump.push(0);
-                dump.extend(bytes(&uniforms));
-            }
-            Drawn::Dots(frame) => {
-                dump.push(1);
-                dump.extend(bytes(&DotUniforms::new(frame, layout, target)));
-                let mut packed = packed_dots(frame);
-                packed.resize(DOT_BYTES as usize, 0);
-                dump.extend(packed);
-            }
-        }
+    for (n, frame) in frames.iter().enumerate() {
+        dump.extend(bytes(&DotUniforms::new(frame, layout, target)));
+        let mut packed = packed_dots(frame);
+        packed.resize(DOT_BYTES as usize, 0);
+        dump.extend(packed);
         let mut encoder = device.create_command_encoder(&Default::default());
-        let pipeline = gpu.write(drawn, layout, target, |buffer, data| {
+        gpu.write(frame, layout, target, |buffer, data| {
             queue.write_buffer(buffer, 0, data)
         });
-        gpu.draw(&mut encoder, &view, pipeline);
+        gpu.draw(&mut encoder, &view);
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {

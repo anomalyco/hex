@@ -9,7 +9,7 @@ use objc2_app_kit::{NSEvent, NSScreen, NSStatusBar};
 use objc2_foundation::NSRect;
 use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
 
-use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, plate_height, set_live_text, window};
+use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, WINDOW, set_live_text};
 use crate::app_settings::IndicatorPosition;
 use crate::hud_placement;
 use crate::rune_ui::live_text::Spot;
@@ -54,13 +54,16 @@ fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64)>
     ))
 }
 
-/// The HUD's window and widest plate, and how far Dot scope's island
+/// The HUD's window and widest plate, and how far its island
 /// spreads past the notch.
 fn content(island_spread: f32) -> hud_placement::Content {
-    let (width, height) = window();
+    let (width, height) = WINDOW;
     hud_placement::Content {
         window: (f64::from(width), f64::from(height)),
-        plate: (f64::from(width) - 24.0, f64::from(plate_height())),
+        plate: (
+            f64::from(width) - 24.0,
+            f64::from(crate::dot_scope::PLATE_HEIGHT),
+        ),
         island_spread: f64::from(island_spread),
     }
 }
@@ -137,18 +140,14 @@ impl Hud {
         else {
             return;
         };
-        let tuning = self.model.dot_scope_tuning();
-        let (placement, pretend_notch, island_spread) = tuning
-            .map_or_else(Default::default, |tuning| {
-                (tuning.placement, tuning.pretend_notch, tuning.island_spread)
-            });
-        if pretend_notch {
+        let tuning = self.model.tuning();
+        if tuning.pretend_notch {
             metrics = metrics.pretending_notch();
         }
-        let (width, height) = window();
-        let content = content(island_spread);
+        let (width, height) = WINDOW;
+        let content = content(tuning.island_spread);
         let placed = hud_placement::place(
-            placement,
+            tuning.placement,
             &metrics,
             content,
             self.position == IndicatorPosition::Bottom,

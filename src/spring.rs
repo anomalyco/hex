@@ -1,5 +1,5 @@
-//! Frame-rate independent spring physics for the dictation HUD and Dot
-//! scope's simulation.
+//! Frame-rate independent spring physics for Dot scope's simulation and
+//! other animations.
 
 const CRITICAL_DAMPING_TOLERANCE: f32 = 1e-4;
 
@@ -13,14 +13,6 @@ pub struct Spec {
 impl Spec {
     pub const fn new(duration: f32, bounce: f32) -> Self {
         Self { duration, bounce }
-    }
-
-    /// Constructs a critically damped spring (`bounce = 0`) from its angular frequency `ω` (rad/s).
-    pub fn from_omega(omega: f32) -> Self {
-        Self {
-            duration: std::f32::consts::TAU / omega.max(0.1),
-            bounce: 0.0,
-        }
     }
 
     pub fn omega(self) -> f32 {
@@ -111,12 +103,6 @@ impl Spring {
             self.v = (v0 - omega * c * dt) * exp;
         }
     }
-
-    /// Tests whether both displacement and ω-scaled velocity are within `eps` of `self.target`.
-    pub fn settled(&self, spec: Spec, eps: f32) -> bool {
-        let omega = spec.omega();
-        (self.x - self.target).abs() <= eps && self.v.abs() <= eps * omega
-    }
 }
 
 #[cfg(test)]
@@ -196,22 +182,5 @@ mod tests {
         // Retargeting back to 0.0 keeps momentum: the next millisecond still moves forward.
         s.step_to(0.0, SETTLE, 0.001);
         assert!(s.x > pos_before);
-    }
-
-    #[test]
-    fn settling_requires_both_low_displacement_and_low_velocity() {
-        let moving = Spring {
-            x: 1.0,
-            v: 1.0,
-            target: 1.0,
-        };
-        assert!(!moving.settled(SETTLE, 0.001));
-
-        let resting = Spring {
-            x: 1.0002,
-            v: 0.001,
-            target: 1.0,
-        };
-        assert!(resting.settled(SETTLE, 0.001));
     }
 }

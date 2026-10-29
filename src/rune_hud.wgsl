@@ -1,43 +1,9 @@
 // The dictation HUD on every OS, drawn by `rune_hud.rs` through the HUD
-// overlay's Rune compositor: the capsule (`indicator_fragment`) and Dot scope
-// (`dot_scope_fragment`). Positions are in points from the window's middle,
-// y down; colours are sRGB-encoded, premultiplied.
-//
-// It began as a line-for-line port of the Metal HUD it replaced, and
-// `rune_hud_frames` renders it against those frames. `smoothstep` is spelled
-// out (`sstep`) because `coverage` relies on descending edges, which WGSL
-// leaves to the backend.
-
-struct Uniforms {
-    resolution: vec2f,
-    time: f32,
-    width: f32,
-    height: f32,
-    opacity: f32,
-    scale: f32,
-    softness: f32,
-    average: f32,
-    peak: f32,
-    processing: f32,
-    post_processing: f32,
-    capturing: f32,
-    editing: f32,
-    queued_count: f32,
-    line_style: f32,
-    line_count: f32,
-    line_curvature: f32,
-    line_speed: f32,
-    line_sharpness: f32,
-    line_glow: f32,
-    sphere_depth: f32,
-    light_angle: f32,
-    sphere_outline: f32,
-    completion: f32,
-    recording_flash: f32,
-    _padding: f32,
-}
-
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+// overlay's Rune compositor: Dot scope, a plate of dots lit by
+// `dot_scope.rs`. Positions are in points from the window's middle, y down;
+// colours are sRGB-encoded, premultiplied. `smoothstep` is spelled out
+// (`sstep`) because `coverage` relies on descending edges, which WGSL leaves
+// to the backend.
 
 @vertex
 fn indicator_vertex(@builtin(vertex_index) vertex_id: u32) -> @builtin(position) vec4f {
@@ -59,21 +25,11 @@ fn coverage(distance: f32, softness: f32) -> f32 {
     return sstep(softness, -softness, distance);
 }
 
-fn glow(distance: f32, radius: f32) -> f32 {
-    let outside = max(distance, 0.0);
-    return exp2(-outside * outside / max(radius * radius, 0.001));
-}
-
 fn composite(destination: ptr<function, vec4f>, color: vec3f, alpha_in: f32) {
     let alpha = clamp(alpha_in, 0.0, 1.0);
     (*destination) = vec4f(
         color * alpha + (*destination).rgb * (1.0 - alpha),
         alpha + (*destination).a * (1.0 - alpha));
-}
-
-fn screen(destination: ptr<function, vec4f>, color: vec3f, amount_in: f32) {
-    let amount = clamp(amount_in, 0.0, 1.0);
-    (*destination) = vec4f(1.0 - (1.0 - (*destination).rgb) * (1.0 - color * amount), (*destination).a);
 }
 
 fn dithered(result_in: vec4f, position: vec2f) -> vec4f {
@@ -89,237 +45,6 @@ fn dithered(result_in: vec4f, position: vec2f) -> vec4f {
     return result;
 }
 
-@fragment
-fn indicator_fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
-    let uv = position.xy / uniforms.resolution;
-    let backing_scale = uniforms.resolution.x / 112.0;
-    let point = (uv * uniforms.resolution - uniforms.resolution * 0.5)
-        / backing_scale / max(uniforms.scale, 0.001);
-    let half_size = vec2f(uniforms.width, uniforms.height) * 0.5;
-    let radius = uniforms.height * 0.5;
-    let distance = rounded_box(point, half_size, radius);
-    let lifecycle_softness = max(uniforms.softness, 0.0);
-    let edge = (max(fwidth(distance), 0.32) + lifecycle_softness * 0.72)
-        / max(uniforms.scale, 0.001);
-    let shape = coverage(distance, edge);
-    let detail_clarity = exp2(-lifecycle_softness * 0.34);
-    var result = vec4f(0.0);
-
-    let processing = clamp(uniforms.processing, 0.0, 1.0);
-    let post_processing = clamp(uniforms.post_processing, 0.0, 1.0);
-    let editing = clamp(uniforms.editing, 0.0, 1.0);
-    let completion = clamp(uniforms.completion, 0.0, 1.0);
-    let recording_flash = clamp(uniforms.recording_flash, 0.0, 1.0)
-        * (1.0 - processing);
-    let completion_flash = sstep(0.0, 0.16, completion)
-        * (1.0 - sstep(0.32, 1.0, completion));
-    let recording = 1.0 - processing;
-    let circularity = 1.0 - sstep(0.5, 2.25, abs(uniforms.width - uniforms.height));
-
-    let red_accent = mix(
-        vec3f(1.0, 0.025, 0.035),
-        vec3f(0.05, 0.85, 0.58),
-        editing);
-    let blue_accent = vec3f(0.1, 0.34, 1.0);
-    let violet_accent = vec3f(0.64, 0.2, 1.0);
-    let pipeline_accent = mix(blue_accent, violet_accent, post_processing);
-    let accent = mix(red_accent, pipeline_accent, processing);
-
-    let average_power = clamp(uniforms.average, 0.0, 1.0);
-    let peak_power = clamp(uniforms.peak, 0.0, 1.0);
-    let average_activation = sstep(0.0, 0.1, average_power);
-    var outer = recording * (
-        glow(distance, 4.0 + lifecycle_softness * 0.5) * average_power * 0.72
-        + glow(distance, 8.0 + lifecycle_softness) * average_power * 0.36);
-    outer += processing * glow(distance, 2.6 + lifecycle_softness) * 0.045;
-    outer += glow(distance, 6.0 + lifecycle_softness * 0.5) * completion_flash * 0.22;
-    outer += glow(distance, 7.0 + lifecycle_softness * 0.5) * recording_flash * 0.5;
-    composite(&result, accent, outer * (1.0 - shape));
-
-    var recording_base = mix(
-        vec3f(0.5, 0.0, 0.0),
-        vec3f(1.0, 0.0, 0.0),
-        average_power);
-    recording_base = mix(recording_base, vec3f(0.0, 0.48, 0.3), editing);
-    recording_base = mix(recording_base, vec3f(1.0, 0.08, 0.06), recording_flash * 0.72);
-    let sphere_light = clamp(0.48 - point.x * 0.035 - point.y * 0.045, 0.0, 1.0);
-    let blue_base = mix(
-        vec3f(0.0, 0.02, 0.32),
-        vec3f(0.04, 0.18, 0.68),
-        sphere_light);
-    let violet_base = mix(
-        vec3f(0.12, 0.0, 0.3),
-        vec3f(0.38, 0.04, 0.68),
-        sphere_light);
-    let pipeline_base = mix(blue_base, violet_base, post_processing);
-    let base = mix(recording_base, pipeline_base, processing);
-    composite(&result, base, shape);
-
-    let inside_edge = clamp(-distance / 4.0, 0.0, 1.0);
-    let inner_edge = shape * (1.0 - inside_edge);
-    let inner_edge_strength = mix(0.48, 0.07, processing);
-    composite(&result, accent, inner_edge * inner_edge_strength);
-
-    // Match the original Hex recording stack: a padded red fill, a nearly
-    // full-width white beam, and a broad peak-driven red glow.
-    let beam_point = point - vec2f(0.0, -0.5);
-    let red_fill_distance = rounded_box(beam_point, vec2f(22.0, 2.0), 2.0);
-    let red_fill = glow(red_fill_distance, 2.0) * shape;
-    screen(&result, red_accent, red_fill * average_activation * recording * detail_clarity);
-
-    let white_beam_distance = rounded_box(beam_point, vec2f(21.0, 1.0), 1.0);
-    let white_beam = glow(white_beam_distance, 1.0) * shape;
-    screen(
-        &result,
-        vec3f(1.0),
-        white_beam * average_activation * 0.56 * recording * detail_clarity);
-
-    let peak_half_width = 22.0 * min(peak_power + 0.6, 1.0);
-    let peak_distance = rounded_box(beam_point, vec2f(peak_half_width, 2.0), 2.0);
-    let peak_beam = glow(peak_distance, 4.0) * shape;
-    screen(
-        &result,
-        red_accent,
-        peak_beam * sstep(0.0, 0.1, peak_power) * 0.5 * recording * detail_clarity);
-
-    // Derivatives need uniform control flow, so these are taken before the
-    // branches that use them.
-    let orb_radius = uniforms.height * 0.5 - 0.6;
-    let orb_distance = length(point) - orb_radius;
-    let orb_edge = max(fwidth(orb_distance), 0.26);
-    let curvature = mix(0.0, 3.0, clamp(uniforms.line_curvature, 0.0, 1.0));
-    let sphere_uv = point / max(orb_radius, 0.001);
-    let sweep_coordinate = point.x + sphere_uv.y * sphere_uv.y * curvature;
-    let sweep_coordinate_width = fwidth(sweep_coordinate);
-    if (processing > 0.0) {
-        let orb_mask = coverage(orb_distance, orb_edge) * circularity;
-        let surface_z = sqrt(max(1.0 - dot(sphere_uv, sphere_uv), 0.0));
-        let depth = mix(0.55, 1.45, clamp(uniforms.sphere_depth, 0.0, 1.0));
-        let normal_z = pow(surface_z, depth);
-        let light_phase = uniforms.light_angle * 6.2831853
-            + uniforms.time * uniforms.line_speed * 0.22;
-        let light_direction = vec2f(cos(light_phase), sin(light_phase));
-        let light = clamp(
-            0.32 + dot(sphere_uv, light_direction) * 0.18 + normal_z * 0.28,
-            0.0,
-            1.0);
-        let orb_shadow = mix(vec3f(0.0, 0.015, 0.24), vec3f(0.1, 0.0, 0.26), post_processing);
-        let orb_light = mix(vec3f(0.05, 0.22, 0.72), vec3f(0.4, 0.05, 0.7), post_processing);
-        composite(&result, mix(orb_shadow, orb_light, light), orb_mask * processing * detail_clarity);
-
-        let rim = pow(1.0 - normal_z, 2.4);
-        composite(&result, pipeline_accent, rim * orb_mask * processing * 0.3 * detail_clarity);
-
-        let style = clamp(uniforms.line_style, 0.0, 2.0);
-        let sharpness = clamp(uniforms.line_sharpness, 0.0, 1.0);
-        let blur_amount = 1.0 - sharpness;
-        let highlight_count = clamp(round(uniforms.line_count), 1.0, 6.0);
-        var shine = 0.0;
-        var soft_shine = 0.0;
-        if (style < 0.5) {
-            // A moving area light gives the orb motion without drawing stripes
-            // across its face.
-            let focus = clamp(
-                dot(sphere_uv, light_direction) * 0.55 + normal_z * 0.72,
-                0.0,
-                1.0);
-            shine = pow(focus, mix(3.0, 12.0, sharpness));
-        } else if (style < 1.5) {
-            // Meridian highlights wrap around the sphere instead of crossing
-            // it as flat screen-space lines.
-            let longitude = atan2(sphere_uv.x, normal_z) / 6.2831853;
-            let travel = uniforms.time * uniforms.line_speed * 0.11;
-            for (var index = 0; index < 6; index++) {
-                if (f32(index) >= highlight_count) {
-                    break;
-                }
-                let offset = f32(index) / highlight_count;
-                let angular_delta = fract(longitude - travel - offset + 0.5) - 0.5;
-                let angular_distance = abs(angular_delta);
-                let core = exp2(-pow(angular_distance / 0.018, 2.0));
-                let halo_radius = mix(0.025, 0.14, blur_amount);
-                let halo = exp2(-pow(angular_distance / halo_radius, 2.0));
-                shine = max(shine, core);
-                soft_shine = max(soft_shine, halo);
-            }
-        } else {
-            // Curved ribbons remain available in the lab for comparison, but
-            // are no longer the production default.
-            let sweep_travel = orb_radius * 2.0 + 18.0;
-            let sweep_start = (uniforms.time * 38.0 * uniforms.line_speed) % sweep_travel
-                - orb_radius - 7.0;
-            let spacing = mix(7.0, 2.8, (highlight_count - 1.0) / 5.0);
-            for (var index = 0; index < 6; index++) {
-                if (f32(index) >= highlight_count) {
-                    break;
-                }
-                let line_distance = abs(
-                    sweep_coordinate - (sweep_start - f32(index) * spacing));
-                // fwidth(|c - k|) is fwidth(c) wherever it is differentiable.
-                let aa = max(sweep_coordinate_width, 0.24);
-                let band = 1.0 - sstep(
-                    mix(1.4, 0.25, sharpness) - aa,
-                    mix(4.8, 1.5, sharpness) + aa,
-                    line_distance);
-                shine = max(shine, band);
-            }
-        }
-        let shine_color = mix(vec3f(0.66, 0.84, 1.0), vec3f(0.92, 0.72, 1.0), post_processing);
-        let shine_strength = mix(0.16, 0.68, clamp(uniforms.line_glow, 0.0, 1.0));
-        let surface_wrap = orb_mask * mix(0.28, 1.0, normal_z);
-        let rim_spill = (1.0 - orb_mask) * glow(orb_distance, 2.2);
-        composite(
-            &result,
-            shine_color,
-            soft_shine * (surface_wrap + rim_spill * 0.72) * processing * blur_amount
-                * shine_strength * 0.52
-                * detail_clarity);
-        composite(
-            &result,
-            shine_color,
-            shine * surface_wrap * processing * shine_strength
-                * mix(1.0, 0.36, blur_amount) * detail_clarity);
-    }
-
-    // Pending jobs sit beside the foreground state. Keeping this geometry
-    // stationary prevents queue status from reading as part of the sphere.
-    let queued_count = min(uniforms.queued_count, 4.0);
-    for (var index = 0; index < 4; index++) {
-        if (f32(index) >= queued_count) {
-            break;
-        }
-        let center = vec2f(
-            uniforms.width * 0.5 + 10.0 + f32(index) * 3.4,
-            0.0);
-        let dot_distance = length(point - center) - 0.68;
-        let dot_coverage = coverage(dot_distance, 0.22);
-        var leading_processing = 0.0;
-        if (index == 0) {
-            leading_processing = post_processing * clamp(uniforms.capturing, 0.0, 1.0);
-        }
-        let queued_blue = vec3f(0.12, 0.58, 1.0);
-        let dot_color = mix(queued_blue, violet_accent, leading_processing);
-        composite(&result, dot_color, dot_coverage * select(0.52, 0.92, index == 0));
-    }
-
-    screen(&result, vec3f(0.72, 0.88, 1.0), shape * completion_flash * 0.32);
-    let completion_rim = exp2(-pow(abs(distance) / 0.72, 2.0));
-    screen(&result, vec3f(0.82, 0.93, 1.0), completion_rim * completion_flash * 0.58);
-
-    let sphere_outline = clamp(uniforms.sphere_outline, 0.0, 1.0);
-    let processing_stroke = mix(0.04, 0.4, sphere_outline);
-    let stroke = coverage(
-        abs(distance) - 0.4,
-        0.38 + lifecycle_softness * 0.3) * mix(0.56, processing_stroke, processing) * detail_clarity;
-    composite(&result, mix(accent, vec3f(1.0), 0.1), stroke);
-    screen(&result, vec3f(1.0, 0.2, 0.16), shape * recording_flash * 0.36);
-    let recording_flash_rim = exp2(-pow(abs(distance) / 0.9, 2.0));
-    screen(&result, vec3f(1.0, 0.58, 0.48), recording_flash_rim * recording_flash * 0.82);
-
-    return dithered(result * uniforms.opacity, position.xy);
-}
-
-// Dot scope (experiment `dot-scope`): a plate of dots lit by `dot_scope.rs`.
 // Each dot's (brightness, freshness) arrives as normalized u16s, row by row;
 // the plate, glow, and dot shapes follow the t422 prototype's look A.
 struct DotUniforms {
@@ -368,9 +93,9 @@ fn island_distance(point: vec2f, island: vec4f) -> f32 {
     return min(body, max(square, hollow));
 }
 
-@group(0) @binding(1) var<uniform> u: DotUniforms;
-// `MAX_DOTS` (960) dots, two u16 halves to a u32, four u32 to a vec4.
-@group(0) @binding(2) var<uniform> dots: array<vec4u, 240>;
+@group(0) @binding(0) var<uniform> u: DotUniforms;
+// `MAX_DOTS` (1024) dots, two u16 halves to a u32, four u32 to a vec4.
+@group(0) @binding(1) var<uniform> dots: array<vec4u, 256>;
 
 fn dot_value(index: i32) -> vec2f {
     let word = dots[index / 4][index % 4];

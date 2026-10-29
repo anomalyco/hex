@@ -1,7 +1,7 @@
 //! The dictation HUD on every OS: a click-through Rune overlay whose
 //! compositor steps `dictation_indicator`'s model on Rune's frame clock (the
-//! display's refresh on macOS) and draws it on the GPU with `rune_hud.wgsl`:
-//! the capsule, or Dot scope with its experiment on. The overlay never takes
+//! display's refresh on macOS) and draws Dot scope on the GPU with
+//! `rune_hud.wgsl`. The overlay never takes
 //! focus or a click: a nonactivating panel on macOS, a layer-shell surface on
 //! Wayland, an override-redirect window on X11, and a topmost tool window
 //! that never activates on Windows.
@@ -20,11 +20,8 @@ use rune::compose::{Compositor, Frame};
 use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
-use crate::dictation_indicator::{
-    CAPSULE_HEIGHT, DictationIndicatorEvent, DotFrame, Drawn, IndicatorModel, Uniforms,
-    WINDOW_HEIGHT, WINDOW_WIDTH, dot_scope_enabled,
-};
-use crate::dot_scope::{self, MAX_DOTS};
+use crate::dictation_indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
+use crate::dot_scope::{self, MAX_DOTS, PLATE_HEIGHT};
 use crate::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
 use crate::rune_ui::live_text::Spot;
 
@@ -37,12 +34,12 @@ pub(crate) type HudEvent = DictationIndicatorEvent;
 const TOP_OFFSET: f32 = 12.0;
 #[cfg(not(target_os = "macos"))]
 const BOTTOM_OFFSET: f32 = 24.0;
-/// Dot scope's window: room for its widest plate and drop shadow, and on
-/// macOS for an island grown out of the widest notch.
+/// The HUD window: room for Dot scope's widest plate and drop shadow, and
+/// on macOS for an island grown out of the widest notch.
 #[cfg(target_os = "macos")]
-const DOT_SCOPE_WINDOW: (f32, f32) = (320.0, 128.0);
+const WINDOW: (f32, f32) = (320.0, 128.0);
 #[cfg(not(target_os = "macos"))]
-const DOT_SCOPE_WINDOW: (f32, f32) = (304.0, 80.0);
+const WINDOW: (f32, f32) = (304.0, 80.0);
 /// The notch's own bottom corner radius, which the island starts from.
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
@@ -63,24 +60,6 @@ pub(crate) fn live_text_place() -> Spot {
 
 fn set_live_text(spot: Spot) {
     *LIVE_TEXT.lock().unwrap_or_else(|error| error.into_inner()) = Some(spot);
-}
-
-/// The height of the HUD's plate.
-fn plate_height() -> f32 {
-    if dot_scope_enabled() {
-        dot_scope::PLATE_HEIGHT
-    } else {
-        CAPSULE_HEIGHT
-    }
-}
-
-/// The HUD window, and the widest plate it holds.
-fn window() -> (f32, f32) {
-    if dot_scope_enabled() {
-        DOT_SCOPE_WINDOW
-    } else {
-        (WINDOW_WIDTH, WINDOW_HEIGHT)
-    }
 }
 
 /// How a listener reports to the HUD; sending never waits.
@@ -119,8 +98,8 @@ impl HudSender {
 /// The overlay's state: the model and what it last drew.
 pub(crate) struct Hud {
     model: IndicatorModel,
-    drawn: Option<Drawn>,
-    /// Where Dot scope's plate sits in the window (macOS placements).
+    drawn: Option<DotFrame>,
+    /// Where the plate sits in the window (macOS placements).
     layout: Layout,
     position: IndicatorPosition,
     /// The overlay itself, to show and hide it.
@@ -170,7 +149,7 @@ impl Hud {
             self.place_live_text_without_hud();
             #[cfg(not(target_os = "macos"))]
             {
-                let plate_start = TOP_OFFSET + (window().1 - plate_height()) / 2.0;
+                let plate_start = TOP_OFFSET + (WINDOW.1 - PLATE_HEIGHT) / 2.0;
                 set_live_text(Spot::Edge(ScreenEdge::Top, plate_start));
             }
             self.hide();
@@ -186,7 +165,7 @@ impl Hud {
             };
             overlay.place(edge, margin);
             // The plate sits in the middle of the window.
-            let past_plate = margin + (window().1 + plate_height()) / 2.0 + LIVE_TEXT_GAP;
+            let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
             set_live_text(Spot::Edge(edge, past_plate));
         }
         if !self.shown {
@@ -209,11 +188,11 @@ impl Hud {
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     let animating = Arc::new(AtomicBool::new(false));
     let now = Instant::now();
-    let model = IndicatorModel::new(dot_scope_enabled().then(dot_scope::lab), now);
+    let model = IndicatorModel::new(dot_scope::lab(), now);
     let overlay = app.overlay(
         OverlaySpec {
             name: "hex-hud",
-            size: window(),
+            size: WINDOW,
             edge: ScreenEdge::Top,
             margin: 0.0,
             align: rune::Align::Center,
@@ -421,22 +400,20 @@ impl Compositor<Hud> for HudCompositor {
             self.gpu = Some(Gpu::new(f.device, f.format));
         }
         let gpu = self.gpu.as_ref().expect("created above");
-        let pipeline = gpu.write(&drawn, layout, target, |buffer, data| {
+        gpu.write(&drawn, layout, target, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });
-        gpu.draw(f.encoder, f.target, pipeline);
+        gpu.draw(f.encoder, f.target);
         f.rt.state.drawn = Some(drawn);
     }
 }
 
 struct Gpu {
     format: wgpu::TextureFormat,
-    capsule: wgpu::Buffer,
     dot_uniforms: wgpu::Buffer,
     dots: wgpu::Buffer,
     bind: wgpu::BindGroup,
-    capsule_pipeline: wgpu::RenderPipeline,
-    dot_pipeline: wgpu::RenderPipeline,
+    pipeline: wgpu::RenderPipeline,
 }
 
 impl Gpu {
@@ -453,7 +430,6 @@ impl Gpu {
                 mapped_at_creation: false,
             })
         };
-        let capsule = buffer("hex hud capsule", std::mem::size_of::<Uniforms>() as u64);
         let dot_uniforms = buffer(
             "hex hud dot uniforms",
             std::mem::size_of::<DotUniforms>() as u64,
@@ -471,7 +447,7 @@ impl Gpu {
         };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hex hud"),
-            entries: &[entry(0), entry(1), entry(2)],
+            entries: &[entry(0), entry(1)],
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hex hud"),
@@ -479,14 +455,10 @@ impl Gpu {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: capsule.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
                     resource: dot_uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: dots.as_entire_binding(),
                 },
             ],
@@ -496,80 +468,59 @@ impl Gpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = |fragment: &str| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(fragment),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("indicator_vertex"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(fragment),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dot_scope_fragment"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("indicator_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("dot_scope_fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Gpu {
             format,
-            capsule,
             dot_uniforms,
             dots,
             bind,
-            capsule_pipeline: pipeline("indicator_fragment"),
-            dot_pipeline: pipeline("dot_scope_fragment"),
+            pipeline,
         }
     }
 
-    /// Writes `drawn`'s buffers through `write` and returns the pipeline
-    /// that draws it.
+    /// Writes `frame`'s buffers through `write`.
     fn write(
         &self,
-        drawn: &Drawn,
+        frame: &DotFrame,
         layout: Layout,
         target: Target,
         mut write: impl FnMut(&wgpu::Buffer, &[u8]),
-    ) -> &wgpu::RenderPipeline {
-        match drawn {
-            Drawn::Capsule(uniforms) => {
-                let uniforms = Uniforms {
-                    resolution: [target.size.0 as f32, target.size.1 as f32],
-                    ..*uniforms
-                };
-                write(&self.capsule, bytes(&uniforms));
-                &self.capsule_pipeline
-            }
-            Drawn::Dots(frame) => {
-                let uniforms = DotUniforms::new(frame, layout, target);
-                write(&self.dot_uniforms, bytes(&uniforms));
-                write(&self.dots, &packed_dots(frame));
-                &self.dot_pipeline
-            }
-        }
+    ) {
+        write(
+            &self.dot_uniforms,
+            bytes(&DotUniforms::new(frame, layout, target)),
+        );
+        write(&self.dots, &packed_dots(frame));
     }
 
-    /// Clears `view` and draws with `pipeline` into it.
-    fn draw(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        pipeline: &wgpu::RenderPipeline,
-    ) {
+    /// Clears `view` and draws Dot scope into it.
+    fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut pass = clear_pass(encoder, view);
-        pass.set_pipeline(pipeline);
+        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..3, 0..1);
     }

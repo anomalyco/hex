@@ -1,52 +1,31 @@
 //! The dictation HUD's lifecycle and animation, the same on every OS: the
-//! event vocabulary the listener reports, the phase and job bookkeeping, the
-//! springs, and Dot scope's simulation (experiment `dot-scope`). Each step
-//! yields what to draw; `rune_hud` draws it with `rune_hud.wgsl` through a
-//! Rune overlay.
+//! event vocabulary the listener reports, the phase and job bookkeeping, and
+//! Dot scope's simulation. Each step yields the dots to draw; `rune_hud`
+//! draws them with `rune_hud.wgsl` through a Rune overlay.
 //!
 //! Time is passed in, never read, so a recorded schedule replays exactly
 //! (`rune_hud`'s frame captures).
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use crate::dot_scope::{self, AutoLevel, Pose, Scope, Stage, Tuning};
+use crate::dot_scope::{self, Pose, Scope, Stage, Tuning};
 use crate::hud_placement::Island;
-use crate::spring::{REDUCED_FADE, Spec, Spring};
 
-pub const WINDOW_WIDTH: f32 = 112.0;
-pub const WINDOW_HEIGHT: f32 = 64.0;
-const CAPSULE_WIDTH: f32 = 56.0;
-pub(crate) const CAPSULE_HEIGHT: f32 = 16.0;
-const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
-const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
-const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
-const HIDDEN_SCALE: f32 = 0.82;
-const HIDDEN_SOFTNESS: f32 = 4.0;
-const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
-const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
-const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
 /// The loudness before any meter arrives, dBFS.
 const SILENT: f32 = -120.0;
-/// How far a speech peak sits above its RMS, dB: the capsule's peak beam
-/// reads the peak through the RMS window shifted by this.
-const PEAK_CREST: f32 = 9.5;
-/// The capsule's auto level: Dot scope's default release and noise floor.
-const CAPSULE_AUTO_RELEASE: f32 = 3.0;
-const CAPSULE_NOISE_FLOOR: f32 = -60.0;
-/// Dot scope's done wipe (0.3 s) and a beat of the dark plate after it.
-const DOT_SCOPE_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
-
-pub fn dot_scope_enabled() -> bool {
-    crate::experiments::enabled(crate::experiments::Experiment::DotScope)
-}
+/// The shortest processing look: a fast transcription still shows the field
+/// turning blue before done clears it.
+const PROCESSING_MIN_DURATION: Duration = Duration::from_millis(200);
+/// Done's wipe (0.3 s) and a beat of the dark plate after it.
+const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
+const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(600);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
-    Configure(HudTuning),
-    /// Dot scope's tuning (experiment `dot-scope`).
+    /// HUD Lab's or a playground story's tuning.
     ConfigureDotScope(dot_scope::Tuning),
     /// HUD Lab: Dot scope follows a synthetic voice instead of the meter
     /// until the next `Reset`.
@@ -98,35 +77,6 @@ impl DictationIndicatorEvent {
             average: (sum_of_squares / samples.len() as f32).sqrt(),
             peak,
         })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct HudTuning {
-    pub style: f32,
-    pub line_count: f32,
-    pub curvature: f32,
-    pub speed: f32,
-    pub sharpness: f32,
-    pub glow: f32,
-    pub depth: f32,
-    pub light_angle: f32,
-    pub outline: f32,
-}
-
-impl Default for HudTuning {
-    fn default() -> Self {
-        Self {
-            style: 1.0,
-            line_count: 2.0,
-            curvature: 0.47,
-            speed: 17.08,
-            sharpness: 0.29,
-            glow: 0.77,
-            depth: 0.65,
-            light_angle: 0.35,
-            outline: 1.0,
-        }
     }
 }
 
@@ -236,58 +186,27 @@ fn active_phase(capturing: bool, pending_jobs: usize) -> Option<Phase> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum JobPhase {
-    Queued,
-    Transcribing,
-    Processing,
-}
-
 impl Phase {
     fn visible_duration(self) -> Option<Duration> {
         match self {
             Self::Completed => Some(COMPLETED_VISIBLE_DURATION),
             Self::Cancelled => Some(Duration::ZERO),
-            Self::Failed => Some(Duration::from_millis(600)),
+            Self::Failed => Some(FAILED_VISIBLE_DURATION),
             _ => None,
         }
     }
-}
 
-/// The capsule's shader inputs, `Uniforms` in `rune_hud.wgsl`.
-#[repr(C, align(8))]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Uniforms {
-    /// Set by the renderer to the target's size in pixels.
-    pub resolution: [f32; 2],
-    pub time: f32,
-    pub width: f32,
-    pub height: f32,
-    pub opacity: f32,
-    pub scale: f32,
-    pub softness: f32,
-    pub average: f32,
-    pub peak: f32,
-    pub processing: f32,
-    pub post_processing: f32,
-    pub capturing: f32,
-    pub editing: f32,
-    pub queued_count: f32,
-    pub line_style: f32,
-    pub line_count: f32,
-    pub line_curvature: f32,
-    pub line_speed: f32,
-    pub line_sharpness: f32,
-    pub line_glow: f32,
-    pub sphere_depth: f32,
-    pub light_angle: f32,
-    pub sphere_outline: f32,
-    pub completion: f32,
-    pub recording_flash: f32,
-    pub _padding: f32,
+    /// The look this phase shows; `None` keeps the last one as it fades.
+    fn stage(self) -> Option<Stage> {
+        match self {
+            Self::Recording => Some(Stage::Recording),
+            Self::Transcribing => Some(Stage::Processing),
+            Self::Completed => Some(Stage::Done),
+            Self::Failed => Some(Stage::Failed),
+            Self::Hidden | Self::Cancelled => None,
+        }
+    }
 }
-
-const _: () = assert!(std::mem::size_of::<Uniforms>() == 112);
 
 /// One Dot scope frame: the plate's pose and every dot's light.
 #[derive(Clone, Debug, PartialEq)]
@@ -298,35 +217,6 @@ pub struct DotFrame {
     pub rows: usize,
     /// (brightness, freshness) per dot, row by row, as normalized u16s.
     pub dots: Vec<[u16; 2]>,
-}
-
-/// What one step draws.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Drawn {
-    Capsule(Uniforms),
-    Dots(DotFrame),
-}
-
-fn recording_flash(elapsed: Duration) -> f32 {
-    2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
-}
-
-fn recording_flash_for(phase: Phase, editing: bool, elapsed: Duration) -> f32 {
-    if matches!(phase, Phase::Recording) && !editing {
-        recording_flash(elapsed)
-    } else {
-        0.0
-    }
-}
-
-/// Dot scope's simulation and the stage it last showed.
-struct DotScope {
-    scope: Scope,
-    stage: Stage,
-    /// The tuning as set, before [`fill_island`].
-    tuning: Tuning,
-    /// The notch island the HUD sits in, if any.
-    island: Option<Island>,
 }
 
 /// The tuning that fills an island: the field as wide as the island minus
@@ -345,35 +235,27 @@ fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
     }
 }
 
-/// The HUD's state: what the listener reported and every spring.
+/// The HUD's state: what the listener reported and Dot scope's simulation.
 pub struct IndicatorModel {
     phase: Phase,
     capturing: bool,
+    /// A Voice Action capture.
     editing: bool,
-    jobs: BTreeMap<u64, JobPhase>,
+    jobs: BTreeSet<u64>,
     phase_started: Instant,
-    shader_time: f32,
-    exiting: bool,
+    /// When the processing look began, for [`PROCESSING_MIN_DURATION`].
+    working_since: Instant,
+    /// The last job finished; done shows once processing has had its
+    /// minimum.
     completion_pending: bool,
-    target_average: f32,
-    target_peak: f32,
-    average: Spring,
-    peak: Spring,
-    width: Spring,
-    opacity: Spring,
-    visual_scale: Spring,
-    softness: Spring,
-    processing: Spring,
-    post_processing: Spring,
-    tuning: HudTuning,
-    /// Drawn instead of the capsule while the `dot-scope` experiment is on.
-    dot_scope: Option<DotScope>,
+    scope: Scope,
+    stage: Stage,
+    /// The tuning as set, before [`fill_island`].
+    tuning: Tuning,
+    /// The notch island the HUD sits in, if any.
+    island: Option<Island>,
     /// The microphone's loudness, dBFS.
     loudness: f32,
-    /// The capsule's level window: the speaker's recent peak over the room,
-    /// so a hot microphone moves it as much as a quiet one instead of
-    /// pinning it at full. Kept across dictations, like Dot scope's.
-    auto: AutoLevel,
     /// HUD Lab's synthetic voice and how far into it Dot scope is.
     demo_voice: Option<f32>,
     /// Since an event, until a step finds everything settled out of sight.
@@ -381,36 +263,20 @@ pub struct IndicatorModel {
 }
 
 impl IndicatorModel {
-    /// `dot_scope` draws Dot scope with `tuning` instead of the capsule.
-    pub fn new(dot_scope: Option<Tuning>, now: Instant) -> Self {
+    pub fn new(tuning: Tuning, now: Instant) -> Self {
         Self {
             phase: Phase::Hidden,
             capturing: false,
             editing: false,
-            jobs: BTreeMap::new(),
+            jobs: BTreeSet::new(),
             phase_started: now,
-            shader_time: 0.0,
-            exiting: true,
+            working_since: now,
             completion_pending: false,
-            target_average: 0.0,
-            target_peak: 0.0,
-            average: Spring::at(0.0),
-            peak: Spring::at(0.0),
-            width: Spring::at(CAPSULE_WIDTH),
-            opacity: Spring::at(0.0),
-            visual_scale: Spring::at(HIDDEN_SCALE),
-            softness: Spring::at(HIDDEN_SOFTNESS),
-            processing: Spring::at(0.0),
-            post_processing: Spring::at(0.0),
-            tuning: HudTuning::default(),
-            dot_scope: dot_scope.map(|tuning| DotScope {
-                scope: Scope::new(tuning),
-                stage: Stage::Recording,
-                tuning,
-                island: None,
-            }),
+            scope: Scope::new(tuning),
+            stage: Stage::Recording,
+            tuning,
+            island: None,
             loudness: SILENT,
-            auto: AutoLevel::default(),
             demo_voice: None,
             active: false,
         }
@@ -422,26 +288,23 @@ impl IndicatorModel {
         self.active
     }
 
-    /// Dot scope's tuning, when it draws Dot scope.
+    /// Dot scope's tuning, as set.
     #[cfg(target_os = "macos")]
-    pub fn dot_scope_tuning(&self) -> Option<Tuning> {
-        self.dot_scope.as_ref().map(|dots| dots.tuning)
+    pub fn tuning(&self) -> Tuning {
+        self.tuning
     }
 
     /// Spreads Dot scope's field across the notch island it now sits in.
     #[cfg(target_os = "macos")]
     pub fn set_island(&mut self, island: Option<Island>) {
-        if let Some(dots) = &mut self.dot_scope
-            && dots.island != island
-        {
-            dots.island = island;
-            dots.scope.tune(fill_island(dots.tuning, island));
+        if self.island != island {
+            self.island = island;
+            self.scope.tune(fill_island(self.tuning, island));
         }
     }
 
     pub fn handle(&mut self, event: DictationIndicatorEvent, now: Instant, reduce: bool) {
         self.active = true;
-        let editing_started = matches!(event, DictationIndicatorEvent::EditingStarted);
         match event {
             DictationIndicatorEvent::Reset => {
                 self.capturing = false;
@@ -451,16 +314,10 @@ impl IndicatorModel {
                 self.completion_pending = false;
                 self.loudness = SILENT;
                 self.demo_voice = None;
-                self.freeze_visual_state();
-            }
-            DictationIndicatorEvent::Configure(tuning) => {
-                self.tuning = tuning;
             }
             DictationIndicatorEvent::ConfigureDotScope(tuning) => {
-                if let Some(dots) = &mut self.dot_scope {
-                    dots.tuning = tuning;
-                    dots.scope.tune(fill_island(tuning, dots.island));
-                }
+                self.tuning = tuning;
+                self.scope.tune(fill_island(tuning, self.island));
             }
             DictationIndicatorEvent::DemoVoice => {
                 self.demo_voice = Some(0.0);
@@ -469,55 +326,29 @@ impl IndicatorModel {
                 // HUD Lab and the playground send `DemoVoice` after this.
                 self.demo_voice = None;
                 self.capturing = true;
-                self.editing = editing_started;
+                self.editing = matches!(event, DictationIndicatorEvent::EditingStarted);
                 self.phase = Phase::Recording;
                 self.phase_started = now;
-                self.shader_time = 0.0;
-                self.exiting = false;
                 self.completion_pending = false;
-                self.target_average = 0.0;
-                self.target_peak = 0.0;
-                self.average.jump(0.0);
-                self.peak.jump(0.0);
-                self.width.jump(CAPSULE_WIDTH);
-                self.opacity.jump(0.0);
-                self.visual_scale
-                    .jump(if reduce { 1.0 } else { HIDDEN_SCALE });
-                self.softness
-                    .jump(if reduce { 0.0 } else { HIDDEN_SOFTNESS });
-                self.processing.jump(0.0);
-                self.post_processing.jump(0.0);
                 self.loudness = SILENT;
-                if let Some(dots) = &mut self.dot_scope {
-                    dots.stage = Stage::Recording;
-                    dots.scope.restart(reduce);
-                }
+                self.stage = Stage::Recording;
+                self.scope.restart(reduce);
             }
             DictationIndicatorEvent::PromotedToVoiceAction => {
                 self.editing = true;
             }
-            DictationIndicatorEvent::Meter { average, peak } => {
+            DictationIndicatorEvent::Meter { average, .. } => {
                 self.loudness = dot_scope::loudness(average);
-                if self.capturing {
-                    let peak = dot_scope::loudness(peak) - PEAK_CREST;
-                    self.target_peak = self.auto.level(peak, CAPSULE_NOISE_FLOOR);
-                }
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
                 self.editing = false;
-                self.jobs.insert(job_id, JobPhase::Queued);
+                self.jobs.insert(job_id);
                 self.show_pipeline(now);
             }
-            DictationIndicatorEvent::Transcribing { job_id } => {
-                if let Some(phase) = self.jobs.get_mut(&job_id) {
-                    *phase = JobPhase::Transcribing;
-                    self.show_pipeline(now);
-                }
-            }
-            DictationIndicatorEvent::Processing { job_id } => {
-                if let Some(phase) = self.jobs.get_mut(&job_id) {
-                    *phase = JobPhase::Processing;
+            DictationIndicatorEvent::Transcribing { job_id }
+            | DictationIndicatorEvent::Processing { job_id } => {
+                if self.jobs.contains(&job_id) {
                     self.show_pipeline(now);
                 }
             }
@@ -549,7 +380,6 @@ impl IndicatorModel {
             self.phase_started = now;
         }
         self.completion_pending = false;
-        self.freeze_visual_state();
         if self.jobs.is_empty() {
             self.phase = empty_phase;
         } else {
@@ -561,203 +391,58 @@ impl IndicatorModel {
         let Some(phase) = active_phase(self.capturing, self.jobs.len()) else {
             return;
         };
+        if phase == Phase::Transcribing && self.phase != Phase::Transcribing {
+            self.working_since = now;
+        }
         self.phase = phase;
-        if matches!(phase, Phase::Recording) {
+        if phase == Phase::Recording {
             return;
         }
         self.phase_started = now;
         self.completion_pending = false;
-        self.target_average = 0.0;
-        self.target_peak = 0.0;
     }
 
     fn finish_job(&mut self, job_id: u64, now: Instant, terminal: Phase) {
-        if self.jobs.remove(&job_id).is_none() {
+        if !self.jobs.remove(&job_id) {
             return;
         }
         if active_phase(self.capturing, self.jobs.len()).is_some() {
             self.show_pipeline(now);
             return;
         }
-        if matches!(terminal, Phase::Completed) {
-            self.phase = Phase::Transcribing;
-            self.phase_started = now;
+        if terminal == Phase::Completed {
+            if self.phase != Phase::Transcribing {
+                self.phase = Phase::Transcribing;
+                self.working_since = now;
+            }
             self.completion_pending = true;
         } else {
             self.phase = terminal;
             self.phase_started = now;
             self.completion_pending = false;
-            self.freeze_visual_state();
         }
-    }
-
-    fn freeze_visual_state(&mut self) {
-        self.target_average = self.average.x;
-        self.target_peak = self.peak.x;
-        self.average.v = 0.0;
-        self.peak.v = 0.0;
-        self.width.v = 0.0;
-        self.processing.v = 0.0;
-        self.post_processing.v = 0.0;
     }
 
     /// Advances `dt` seconds to `now` and returns what to draw. Once
     /// everything has settled out of sight, [`Self::active`] turns false.
-    pub fn step(&mut self, now: Instant, dt: f32, reduce: bool) -> Drawn {
+    pub fn step(&mut self, now: Instant, dt: f32, reduce: bool) -> DotFrame {
         let dt = dt.clamp(1.0 / 240.0, 1.0 / 20.0);
         if self.completion_pending
-            && now.duration_since(self.phase_started) >= PROCESSING_MORPH_DURATION
+            && now.duration_since(self.working_since) >= PROCESSING_MIN_DURATION
         {
-            self.width.jump(CAPSULE_HEIGHT);
-            self.processing.jump(1.0);
             self.phase = Phase::Completed;
             self.phase_started = now;
             self.completion_pending = false;
-            self.freeze_visual_state();
-        }
-        if !reduce {
-            self.shader_time += dt;
         }
         let elapsed = now.duration_since(self.phase_started);
-        let visible_duration = match self.phase {
-            Phase::Completed if self.dot_scope.is_some() => {
-                Some(DOT_SCOPE_COMPLETED_VISIBLE_DURATION)
-            }
-            phase => phase.visible_duration(),
-        };
-        let terminal_finished = visible_duration.is_some_and(|duration| elapsed >= duration);
-        let visible = !matches!(self.phase, Phase::Hidden) && !terminal_finished;
-        if self.dot_scope.is_some() {
-            return self.step_dot_scope(dt, visible, reduce);
+        let terminal_finished = self
+            .phase
+            .visible_duration()
+            .is_some_and(|duration| elapsed >= duration);
+        let visible = self.phase != Phase::Hidden && !terminal_finished;
+        if let Some(stage) = self.phase.stage() {
+            self.stage = stage;
         }
-        if !visible && !self.exiting {
-            // Reversing an in-flight entrance velocity would briefly grow or sharpen the HUD.
-            self.opacity.v = 0.0;
-            self.visual_scale.v = 0.0;
-            self.softness.v = 0.0;
-            self.exiting = true;
-        }
-        let (target_width, target_processing) = match self.phase {
-            Phase::Recording => (CAPSULE_WIDTH, 0.0),
-            Phase::Transcribing => (CAPSULE_HEIGHT, 1.0),
-            Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => {
-                (self.width.x, self.processing.x)
-            }
-        };
-        let target_post_processing = if self
-            .jobs
-            .first_key_value()
-            .is_some_and(|(_, phase)| matches!(phase, JobPhase::Processing))
-        {
-            1.0
-        } else {
-            0.0
-        };
-
-        if self.capturing && matches!(self.phase, Phase::Recording) {
-            self.target_average =
-                self.auto
-                    .step(self.loudness, dt, CAPSULE_AUTO_RELEASE, CAPSULE_NOISE_FLOOR);
-        }
-        let meter_average_spec = Spec::from_omega(22.0);
-        let meter_peak_spec = Spec::from_omega(26.0);
-        let geometry_spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
-        let visibility_frequency = if visible {
-            ENTRANCE_ANGULAR_FREQUENCY
-        } else {
-            EXIT_ANGULAR_FREQUENCY
-        };
-        let visibility_spec = Spec::from_omega(visibility_frequency);
-
-        self.average
-            .step_to(self.target_average, meter_average_spec, dt);
-        self.peak.step_to(self.target_peak, meter_peak_spec, dt);
-        if reduce {
-            self.width.jump(target_width);
-            self.processing.jump(target_processing);
-            self.post_processing.jump(target_post_processing);
-            self.opacity
-                .step_to(if visible { 1.0 } else { 0.0 }, REDUCED_FADE, dt);
-            self.visual_scale.jump(1.0);
-            self.softness.jump(0.0);
-        } else {
-            self.width.step_to(target_width, geometry_spec, dt);
-            self.processing
-                .step_to(target_processing, geometry_spec, dt);
-            self.post_processing
-                .step_to(target_post_processing, geometry_spec, dt);
-            self.opacity
-                .step_to(if visible { 1.0 } else { 0.0 }, visibility_spec, dt);
-            self.visual_scale.step_to(
-                if visible { 1.0 } else { HIDDEN_SCALE },
-                visibility_spec,
-                dt,
-            );
-            self.softness.step_to(
-                if visible { 0.0 } else { HIDDEN_SOFTNESS },
-                visibility_spec,
-                dt,
-            );
-        }
-        self.target_peak *= 0.91_f32.powf(dt * 60.0);
-
-        let uniforms = Uniforms {
-            resolution: [WINDOW_WIDTH, WINDOW_HEIGHT],
-            time: self.shader_time,
-            width: self.width.x,
-            height: CAPSULE_HEIGHT,
-            opacity: self.opacity.x.clamp(0.0, 1.0),
-            scale: self.visual_scale.x.max(0.01),
-            softness: self.softness.x.clamp(0.0, HIDDEN_SOFTNESS),
-            average: self.average.x.clamp(0.0, 1.0),
-            peak: self.peak.x.clamp(0.0, 1.0),
-            processing: self.processing.x.clamp(0.0, 1.0),
-            post_processing: self.post_processing.x.clamp(0.0, 1.0),
-            capturing: if self.capturing { 1.0 } else { 0.0 },
-            editing: if self.editing { 1.0 } else { 0.0 },
-            queued_count: if self.capturing {
-                self.jobs.len() as f32
-            } else {
-                self.jobs.len().saturating_sub(1) as f32
-            },
-            line_style: self.tuning.style,
-            line_count: self.tuning.line_count,
-            line_curvature: self.tuning.curvature,
-            line_speed: if reduce { 0.0 } else { self.tuning.speed },
-            line_sharpness: self.tuning.sharpness,
-            line_glow: self.tuning.glow,
-            sphere_depth: self.tuning.depth,
-            light_angle: self.tuning.light_angle,
-            sphere_outline: self.tuning.outline,
-            completion: if matches!(self.phase, Phase::Completed) {
-                (elapsed.as_secs_f32() / COMPLETED_VISIBLE_DURATION.as_secs_f32()).clamp(0.0, 1.0)
-            } else {
-                0.0
-            },
-            recording_flash: recording_flash_for(self.phase, self.editing, elapsed),
-            _padding: 0.0,
-        };
-
-        let exit_spec = if reduce {
-            REDUCED_FADE
-        } else {
-            Spec::from_omega(EXIT_ANGULAR_FREQUENCY)
-        };
-        self.active = visible
-            || !self.opacity.settled(exit_spec, 0.002)
-            || (!reduce && !self.visual_scale.settled(exit_spec, 0.002))
-            || (!reduce && !self.softness.settled(exit_spec, 0.02));
-        Drawn::Capsule(uniforms)
-    }
-
-    fn step_dot_scope(&mut self, dt: f32, visible: bool, reduce: bool) -> Drawn {
-        let stage = match self.phase {
-            Phase::Recording => Some(Stage::Recording),
-            Phase::Transcribing => Some(Stage::Processing),
-            Phase::Completed => Some(Stage::Done),
-            Phase::Failed => Some(Stage::Failed),
-            Phase::Hidden | Phase::Cancelled => None,
-        };
         let loudness = match &mut self.demo_voice {
             Some(time) => {
                 *time += dt;
@@ -765,32 +450,29 @@ impl IndicatorModel {
             }
             None => self.loudness,
         };
-        let dots = self.dot_scope.as_mut().expect("drawing Dot scope");
-        if let Some(stage) = stage {
-            dots.stage = stage;
-        }
-        dots.scope.advance(
+        self.scope.advance(
             dt,
             dot_scope::Frame {
-                stage: dots.stage,
+                stage: self.stage,
                 visible,
                 loudness,
                 reduce_motion: reduce,
+                action: self.editing,
             },
         );
-        self.active = visible || !dots.scope.settled();
-        Drawn::Dots(DotFrame {
-            pose: dots.scope.pose(),
-            tuning: dots.scope.tuning(),
-            columns: dots.scope.columns(),
-            rows: dots.scope.rows(),
-            dots: dots
+        self.active = visible || !self.scope.settled();
+        DotFrame {
+            pose: self.scope.pose(),
+            tuning: self.scope.tuning(),
+            columns: self.scope.columns(),
+            rows: self.scope.rows(),
+            dots: self
                 .scope
                 .dots()
                 .iter()
                 .map(|value| value.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))
                 .collect(),
-        })
+        }
     }
 }
 
@@ -824,26 +506,31 @@ mod tests {
         assert!(DictationIndicatorEvent::meter(&[]).is_none());
     }
 
-    fn run(model: &mut IndicatorModel, start: Instant, from: f32, seconds: f32) -> Vec<Drawn> {
+    fn at(start: Instant, seconds: f32) -> Instant {
+        start + Duration::from_secs_f32(seconds)
+    }
+
+    fn run(model: &mut IndicatorModel, start: Instant, from: f32, seconds: f32) -> Vec<DotFrame> {
         (0..(seconds * 60.0) as usize)
-            .map(|n| {
-                let at = start + Duration::from_secs_f32(from + n as f32 / 60.0);
-                model.step(at, 1.0 / 60.0, false)
-            })
+            .map(|n| model.step(at(start, from + n as f32 / 60.0), 1.0 / 60.0, false))
             .collect()
     }
 
-    /// A hot Linux microphone speaks near −18 dBFS RMS, which the old fixed
-    /// gain (RMS × 9) pinned at full: the capsule sat still.
+    fn lit(frame: &DotFrame) -> u32 {
+        frame.dots.iter().map(|[power, _]| u32::from(*power)).sum()
+    }
+
+    /// A hot Linux microphone speaks near −18 dBFS RMS, which a fixed gain
+    /// pins at full, so the HUD sat still: the auto level keeps it moving.
     #[test]
-    fn a_hot_microphone_still_moves_the_capsule() {
+    fn a_hot_microphone_still_moves_the_scope() {
         let start = Instant::now();
-        let mut model = IndicatorModel::new(None, start);
+        let mut model = IndicatorModel::new(Tuning::default(), start);
         model.handle(DictationIndicatorEvent::Started, start, false);
         let mut levels = Vec::new();
         for n in 0..360 {
             let t = n as f32 / 60.0;
-            let now = start + Duration::from_secs_f32(t);
+            let now = at(start, t);
             // Syllables at 4 Hz between −24 and −12 dBFS.
             let db = -18.0 + 6.0 * (t * 4.0 * std::f32::consts::TAU).sin();
             let rms = 10_f32.powf(db / 20.0);
@@ -855,152 +542,106 @@ mod tests {
                 now,
                 false,
             );
-            if let Drawn::Capsule(uniforms) = model.step(now, 1.0 / 60.0, false)
-                && t > 2.0
-            {
-                levels.push(uniforms.average);
+            model.step(now, 1.0 / 60.0, false);
+            if t > 2.0 {
+                levels.push(model.scope.level());
             }
         }
         let low = levels.iter().copied().fold(f32::MAX, f32::min);
         let high = levels.iter().copied().fold(0.0, f32::max);
-        // The fixed gain swung 0.77..0.96 here.
         assert!(high - low > 0.35, "the level swings {low}..{high}");
     }
 
     #[test]
-    fn a_dictation_records_morphs_blooms_and_settles() {
+    fn a_dictation_records_processes_finishes_and_settles() {
         let start = Instant::now();
-        let mut model = IndicatorModel::new(None, start);
+        let mut model = IndicatorModel::new(Tuning::default(), start);
         model.handle(DictationIndicatorEvent::Started, start, false);
-        let recording = run(&mut model, start, 0.0, 0.5);
-        let Drawn::Capsule(last) = recording.last().unwrap() else {
-            panic!("capsule");
-        };
-        assert!(last.opacity > 0.98 && last.processing == 0.0 && last.capturing == 1.0);
-        let at = start + Duration::from_millis(500);
-        model.handle(DictationIndicatorEvent::Submitted { job_id: 1 }, at, false);
+        model.handle(DictationIndicatorEvent::DemoVoice, start, false);
+        let frames = run(&mut model, start, 0.0, 1.0);
+        let frame = frames.last().unwrap();
+        assert_eq!(frame.dots.len(), frame.columns * frame.rows);
+        assert!(frame.dots.iter().any(|[power, _]| *power > 30_000));
+        assert!(frame.pose.opacity > 0.98 && frame.pose.cool < 0.01);
+
+        // A fast transcription: the job finishes as soon as it is submitted.
         model.handle(
-            DictationIndicatorEvent::JobCompleted { job_id: 1 },
-            at,
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            at(start, 1.0),
             false,
         );
-        let rest = run(&mut model, start, 0.5, 2.0);
-        assert!(
-            rest.iter()
-                .any(|drawn| matches!(drawn, Drawn::Capsule(u) if u.completion > 0.0))
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at(start, 1.0),
+            false,
         );
+        run(&mut model, start, 1.0, 0.15);
+        assert_eq!(model.stage, Stage::Processing, "processing shows briefly");
+        run(&mut model, start, 1.15, 0.1);
+        assert_eq!(model.stage, Stage::Done);
+        run(&mut model, start, 1.25, 2.0);
         assert!(!model.active(), "settled out of sight");
     }
 
     #[test]
-    fn dot_scope_records_and_settles() {
+    fn processing_that_ran_long_enough_finishes_at_once() {
         let start = Instant::now();
-        let mut model = IndicatorModel::new(Some(Tuning::default()), start);
+        let mut model = IndicatorModel::new(Tuning::default(), start);
         model.handle(DictationIndicatorEvent::Started, start, false);
-        model.handle(DictationIndicatorEvent::DemoVoice, start, false);
-        let frames = run(&mut model, start, 0.0, 1.0);
-        let Drawn::Dots(frame) = frames.last().unwrap() else {
-            panic!("dots");
-        };
-        assert_eq!(frame.dots.len(), frame.columns * frame.rows);
-        assert!(frame.dots.iter().any(|[power, _]| *power > 30_000));
-        let at = start + Duration::from_secs(1);
-        model.handle(DictationIndicatorEvent::Cancelled, at, false);
-        run(&mut model, start, 1.0, 2.0);
+        model.handle(
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            at(start, 0.5),
+            false,
+        );
+        run(&mut model, start, 0.5, 0.5);
+        model.handle(
+            DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            at(start, 1.0),
+            false,
+        );
+        run(&mut model, start, 1.0, 1.0 / 60.0);
+        assert_eq!(model.stage, Stage::Done);
+    }
+
+    #[test]
+    fn a_failure_turns_coral_and_a_cancel_just_fades() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(Tuning::default(), start);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        run(&mut model, start, 0.0, 0.5);
+        model.handle(DictationIndicatorEvent::Failed, at(start, 0.5), false);
+        let failed = run(&mut model, start, 0.5, 0.5);
+        assert!(failed.last().unwrap().pose.fail > 0.9);
+        run(&mut model, start, 1.0, 1.5);
+        assert!(!model.active());
+
+        model.handle(DictationIndicatorEvent::Started, at(start, 3.0), false);
+        run(&mut model, start, 3.0, 0.5);
+        model.handle(DictationIndicatorEvent::Cancelled, at(start, 3.5), false);
+        let cancelled = run(&mut model, start, 3.5, 1.5);
+        assert!(cancelled.iter().all(|frame| frame.pose.fail < 0.01));
+        assert!(lit(cancelled.last().unwrap()) == 0 || !model.active());
         assert!(!model.active());
     }
 
     #[test]
-    fn entrance_reaches_recording_state_in_about_250ms_without_overshoot() {
-        let spec = Spec::from_omega(ENTRANCE_ANGULAR_FREQUENCY);
-        let simulate = |frame_rate: usize| {
-            let mut opacity = Spring::at(0.0);
-            let mut scale = Spring::at(HIDDEN_SCALE);
-            let mut softness = Spring::at(HIDDEN_SOFTNESS);
-            for _ in 0..frame_rate / 4 {
-                let dt = 1.0 / frame_rate as f32;
-                opacity.step_to(1.0, spec, dt);
-                scale.step_to(1.0, spec, dt);
-                softness.step_to(0.0, spec, dt);
-                assert!((0.0..=1.0).contains(&opacity.x));
-                assert!((HIDDEN_SCALE..=1.0).contains(&scale.x));
-                assert!((0.0..=HIDDEN_SOFTNESS).contains(&softness.x));
-            }
-            (opacity.x, scale.x, softness.x)
-        };
+    fn voice_action_records_green() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(Tuning::default(), start);
+        model.handle(DictationIndicatorEvent::EditingStarted, start, false);
+        let frames = run(&mut model, start, 0.0, 0.8);
+        assert!(frames.last().unwrap().pose.action > 0.95);
 
-        let at_60_hz = simulate(60);
-        let at_120_hz = simulate(120);
-        assert!((at_60_hz.0 - at_120_hz.0).abs() < 0.000_01);
-        assert!((at_60_hz.1 - at_120_hz.1).abs() < 0.000_01);
-        assert!((at_60_hz.2 - at_120_hz.2).abs() < 0.000_01);
-        assert!(at_60_hz.0 >= 0.98);
-        assert!(at_60_hz.1 >= 0.996);
-        assert!(at_60_hz.2 <= 0.08);
-    }
-
-    #[test]
-    fn lifecycle_exit_is_monotonic_and_visually_gone_in_about_250ms() {
-        let spec = Spec::from_omega(EXIT_ANGULAR_FREQUENCY);
-        let mut opacity = Spring::at(1.0);
-        let mut scale = Spring::at(1.0);
-        let mut softness = Spring::at(0.0);
-        let mut previous = (opacity.x, scale.x, softness.x);
-
-        for _ in 0..15 {
-            opacity.step_to(0.0, spec, 1.0 / 60.0);
-            scale.step_to(HIDDEN_SCALE, spec, 1.0 / 60.0);
-            softness.step_to(HIDDEN_SOFTNESS, spec, 1.0 / 60.0);
-            assert!((0.0..=previous.0).contains(&opacity.x));
-            assert!((HIDDEN_SCALE..=previous.1).contains(&scale.x));
-            assert!((previous.2..=HIDDEN_SOFTNESS).contains(&softness.x));
-            previous = (opacity.x, scale.x, softness.x);
-        }
-
-        assert!(opacity.x < 0.02);
-        assert!((scale.x - HIDDEN_SCALE).abs() < 0.004);
-        assert!((softness.x - HIDDEN_SOFTNESS).abs() < 0.08);
-    }
-
-    #[test]
-    fn completion_has_a_visible_bloom_before_exit() {
-        assert_eq!(
-            Phase::Completed.visible_duration(),
-            Some(Duration::from_millis(240))
+        model.handle(DictationIndicatorEvent::Started, at(start, 1.0), false);
+        let frames = run(&mut model, start, 1.0, 0.8);
+        assert!(frames.last().unwrap().pose.action < 0.05);
+        model.handle(
+            DictationIndicatorEvent::PromotedToVoiceAction,
+            at(start, 1.8),
+            false,
         );
-    }
-
-    #[test]
-    fn recording_flash_starts_bright_and_settles_without_a_second_pulse() {
-        let samples =
-            [0, 70, 280, 560, 1_120].map(|millis| recording_flash(Duration::from_millis(millis)));
-
-        assert_eq!(samples[0], 1.0);
-        assert!(samples.windows(2).all(|pair| pair[0] > pair[1]));
-        assert!((samples[2] - 0.5).abs() < 0.000_1);
-        assert!((samples[3] - 0.25).abs() < 0.000_1);
-        assert!(samples[4] < 0.07);
-    }
-
-    #[test]
-    fn voice_action_starts_green_without_the_dictation_flash() {
-        assert_eq!(
-            recording_flash_for(Phase::Recording, true, Duration::ZERO),
-            0.0
-        );
-        assert_eq!(
-            recording_flash_for(Phase::Recording, false, Duration::ZERO),
-            1.0
-        );
-    }
-
-    #[test]
-    fn uniform_layout_matches_the_shader() {
-        assert_eq!(std::mem::size_of::<Uniforms>(), 112);
-        assert_eq!(std::mem::align_of::<Uniforms>(), 8);
-        assert_eq!(std::mem::offset_of!(Uniforms, sphere_outline), 92);
-        assert_eq!(std::mem::offset_of!(Uniforms, recording_flash), 100);
-        assert_eq!(std::mem::offset_of!(Uniforms, _padding), 104);
+        let frames = run(&mut model, start, 1.8, 0.8);
+        assert!(frames.last().unwrap().pose.action > 0.95);
     }
 
     #[test]
@@ -1009,19 +650,5 @@ mod tests {
         assert_eq!(active_phase(true, 2), Some(Phase::Recording));
         assert_eq!(active_phase(false, 2), Some(Phase::Transcribing));
         assert_eq!(active_phase(false, 0), None);
-    }
-
-    #[test]
-    fn processing_morph_duration_matches_geometry_spring() {
-        let spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
-        let mut width = Spring::at(CAPSULE_WIDTH);
-        let mut previous_width = width.x;
-        for _ in 0..15 {
-            width.step_to(CAPSULE_HEIGHT, spec, 1.0 / 60.0);
-            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.x));
-            previous_width = width.x;
-        }
-        assert!(width.x < CAPSULE_HEIGHT + 0.7);
-        assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
     }
 }

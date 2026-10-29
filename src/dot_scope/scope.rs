@@ -67,6 +67,8 @@ pub struct Frame {
     /// The microphone's loudness, dBFS ([`super::loudness`]).
     pub loudness: f32,
     pub reduce_motion: bool,
+    /// A Voice Action capture: the field turns green.
+    pub action: bool,
 }
 
 /// The plate's pose and the field's global terms, for the shader.
@@ -79,6 +81,8 @@ pub struct Pose {
     pub softness: f32,
     pub cool: f32,
     pub fail: f32,
+    /// How green the field is for Voice Action, 0–1.
+    pub action: f32,
     pub glow: f32,
     pub grid: f32,
     pub live: f32,
@@ -386,6 +390,7 @@ pub struct Scope {
     softness: Spring,
     cool: Spring,
     fail: Spring,
+    action: Spring,
 }
 
 impl Scope {
@@ -425,6 +430,7 @@ impl Scope {
             softness: Spring::at(HIDDEN_SOFTNESS),
             cool: Spring::at(0.0),
             fail: Spring::at(0.0),
+            action: Spring::at(0.0),
         };
         scope.resize();
         scope
@@ -497,6 +503,7 @@ impl Scope {
             softness: self.softness.x.clamp(0.0, HIDDEN_SOFTNESS),
             cool: self.cool.x.clamp(0.0, 1.0),
             fail: self.fail.x.clamp(0.0, 1.0),
+            action: self.action.x.clamp(0.0, 1.0),
             glow: (self.traces[0].glow + self.traces[1].glow) / 2.0 * self.tuning.glow,
             grid: self.grid,
             live: self.live,
@@ -584,6 +591,7 @@ impl Scope {
         } else {
             0.0
         };
+        let action = if frame.action { 1.0 } else { 0.0 };
         let shown = if frame.visible { 1.0 } else { 0.0 };
         let fade = Spec::new(tuning.transition, 0.0);
         let bouncy = Spec::new(tuning.transition, tuning.bounce);
@@ -594,6 +602,7 @@ impl Scope {
             self.opacity.step_to(shown, REDUCED_FADE, h);
             self.cool.step_to(cool, REDUCED_FADE, h);
             self.fail.step_to(fail, REDUCED_FADE, h);
+            self.action.step_to(action, REDUCED_FADE, h);
         } else {
             self.width.step_to(width, bouncy, h);
             self.opacity.step_to(shown, fade, h);
@@ -603,6 +612,7 @@ impl Scope {
                 .step_to(if frame.visible { 0.0 } else { HIDDEN_SOFTNESS }, fade, h);
             self.cool.step_to(cool, fade, h);
             self.fail.step_to(fail, fade, h);
+            self.action.step_to(action, fade, h);
         }
 
         self.elapsed += h;
@@ -880,13 +890,15 @@ fn saturate(color: [f32; 3], amount: f32) -> [f32; 3] {
     color.map(|c| (luma + (c - luma) * amount).clamp(0.0, 1.0))
 }
 
-/// Warm pearl while recording, cooling to agent blue while processing, and
-/// coral on failure.
+/// Warm pearl while recording (green for Voice Action), cooling to agent
+/// blue while processing, and coral on failure.
 pub fn palette(dark: bool, pose: &Pose, saturation: f32) -> Palette {
-    let (you, you_core, agent, agent_core, coral, coral_core) = if dark {
+    let (you, you_core, action, action_core, agent, agent_core, coral, coral_core) = if dark {
         (
             [0.86, 0.83, 0.77],
             [0.98, 0.96, 0.92],
+            [0.36, 0.84, 0.6],
+            [0.78, 1.0, 0.88],
             [0.70, 0.78, 0.90],
             [0.92, 0.95, 1.0],
             [1.0, 0.38, 0.31],
@@ -896,12 +908,16 @@ pub fn palette(dark: bool, pose: &Pose, saturation: f32) -> Palette {
         (
             [0.62, 0.53, 0.40],
             [0.47, 0.38, 0.26],
+            [0.0, 0.55, 0.34],
+            [0.0, 0.4, 0.24],
             [0.40, 0.47, 0.58],
             [0.24, 0.31, 0.43],
             [0.9, 0.27, 0.21],
             [0.7, 0.18, 0.13],
         )
     };
+    let you = mix3(you, action, pose.action);
+    let you_core = mix3(you_core, action_core, pose.action);
     let base = mix3(mix3(you, agent, pose.cool), coral, pose.fail);
     let core = mix3(mix3(you_core, agent_core, pose.cool), coral_core, pose.fail);
     let (plate, rim, shadow) = if dark {
@@ -944,6 +960,7 @@ mod tests {
             visible: true,
             loudness: -40.0 + 30.0 * level,
             reduce_motion: false,
+            action: false,
         }
     }
 
@@ -1206,6 +1223,22 @@ mod tests {
     }
 
     #[test]
+    fn voice_action_turns_the_field_green() {
+        let mut scope = Scope::new(fixed());
+        run(
+            &mut scope,
+            1.0,
+            Frame {
+                action: true,
+                ..recording(0.3)
+            },
+        );
+        assert!(scope.pose().action > 0.99);
+        run(&mut scope, 1.0, recording(0.3));
+        assert!(scope.pose().action < 0.01);
+    }
+
+    #[test]
     fn frame_rate_does_not_change_the_picture() {
         let mut at_60 = Scope::new(fixed());
         let mut at_120 = Scope::new(fixed());
@@ -1261,5 +1294,14 @@ mod tests {
         assert!((grey.base[0] - grey.base[2]).abs() < 1e-6);
         let cool = palette(false, &Pose { cool: 1.0, ..pose }, 1.0);
         assert_eq!(cool.base, [0.40, 0.47, 0.58]);
+        let action = palette(
+            true,
+            &Pose {
+                action: 1.0,
+                ..pose
+            },
+            1.0,
+        );
+        assert_eq!(action.base, [0.36, 0.84, 0.6]);
     }
 }
