@@ -110,6 +110,33 @@ function osOf(platform: Platform): Os {
 
 const archOf = (platform: Platform): Arch => (platform.endsWith("arm64") ? "arm64" : "x64")
 
+const ICON = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const
+
+function CopyIcon() {
+  return (
+    <svg aria-hidden="true" className="stack__icon" {...ICON}>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+      <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" className="stack__icon" {...ICON}>
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
+    </svg>
+  )
+}
+
+function DownloadIcon() {
+  return (
+    <svg aria-hidden="true" className="stack__icon" {...ICON}>
+      <path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14" />
+    </svg>
+  )
+}
+
 function StackRow({ row }: { row: Row }) {
   const [copied, copy] = useCopy()
   return (
@@ -119,12 +146,23 @@ function StackRow({ row }: { row: Row }) {
         {row.command !== undefined ? <code title={row.command}>{row.command}</code> : <span>{row.note}</span>}
       </span>
       {row.command !== undefined ? (
-        <button type="button" className="stack__action" onClick={() => copy(row.command!)}>
-          {copied ? "Copied" : "Copy"}
+        <button
+          type="button"
+          className="stack__action"
+          onClick={() => copy(row.command!)}
+          aria-label={copied ? "Copied" : `Copy ${row.label} command`}
+          title={copied ? "Copied" : "Copy"}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
       ) : (
-        <a className="stack__action stack__action--primary" href={row.file}>
-          Download
+        <a
+          className="stack__action stack__action--primary"
+          href={row.file}
+          aria-label={`Download ${row.label}${row.note ? ` (${row.note})` : ""}`}
+          title="Download"
+        >
+          <DownloadIcon />
         </a>
       )}
     </div>
