@@ -274,7 +274,8 @@ Diagnostics are stored at:
 
 - macOS: `~/Library/Application Support/hex/logs/`
 - Windows: `%APPDATA%\hex\logs\`
-- Linux: `~/.local/share/hex/logs/`, or under `XDG_DATA_HOME`
+- Linux: `$XDG_DATA_HOME/hex/logs/` when `XDG_DATA_HOME` is set to an absolute
+  path, otherwise `~/.local/share/hex/logs/`
 
 ## Windows Beta
 
