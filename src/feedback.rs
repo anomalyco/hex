@@ -89,6 +89,9 @@ struct FeedbackOutput<S> {
     sink: Option<S>,
     retry_at: Instant,
     playing_until: Option<Instant>,
+    /// The output route generation the device was opened (or last tried)
+    /// under. A newer one means the default output changed or disappeared.
+    route: u64,
 }
 
 impl<S> FeedbackOutput<S> {
@@ -97,11 +100,27 @@ impl<S> FeedbackOutput<S> {
             sink: None,
             retry_at: Instant::now(),
             playing_until: None,
+            route: 0,
         }
     }
 
     /// Opens the device for a tone unless a recent failure is still backing off.
-    fn open_for_tone(&mut self, now: Instant, open: impl FnOnce() -> Result<S>) -> Result<()> {
+    /// An output opened under an older `route` is dropped and the current
+    /// default opens at once, without the failure backoff, so tones follow a
+    /// default output that changed or went away instead of feeding a dead one.
+    fn open_for_tone(
+        &mut self,
+        now: Instant,
+        route: u64,
+        open: impl FnOnce() -> Result<S>,
+    ) -> Result<()> {
+        if self.route != route {
+            self.route = route;
+            if self.sink.take().is_some() {
+                tracing::debug!("default output changed; reopening feedback output");
+            }
+            self.retry_at = now;
+        }
         if self.sink.is_none() && now >= self.retry_at {
             self.retry_at = now + OPEN_RETRY_BACKOFF;
             self.sink = Some(open()?);
@@ -803,7 +822,8 @@ impl FeedbackOutput<MixerDeviceSink> {
     fn prepare(&mut self, now: Instant) {
         let opening = Instant::now();
         let cold = self.sink.is_none();
-        if let Err(error) = self.open_for_tone(now, open_output) {
+        let route = crate::audio::output_route_generation();
+        if let Err(error) = self.open_for_tone(now, route, open_output) {
             tracing::warn!(%error, "recording audio output unavailable; retrying");
         }
         if cold && self.sink.is_some() {
@@ -1107,9 +1127,9 @@ mod tests {
         output.release_when_idle(true, now);
         assert_eq!(opens.get(), 0);
 
-        output.open_for_tone(now, open).unwrap();
+        output.open_for_tone(now, 0, open).unwrap();
         output.mark_playing(now, tone);
-        output.open_for_tone(now, open).unwrap();
+        output.open_for_tone(now, 0, open).unwrap();
         assert_eq!((opens.get(), live.get()), (1, 1));
 
         // Retained while playing and through the grace, released afterwards.
@@ -1122,7 +1142,7 @@ mod tests {
 
         // The next tone reopens immediately, without a failure backoff.
         let later = now + tone + IDLE_RELEASE_GRACE;
-        output.open_for_tone(later, open).unwrap();
+        output.open_for_tone(later, 0, open).unwrap();
         assert_eq!((opens.get(), live.get()), (2, 1));
 
         // Turning sounds off releases even while a tone is nominally playing.
@@ -1137,7 +1157,7 @@ mod tests {
     fn overlapping_tones_extend_playback_instead_of_truncating_it() {
         let mut output = FeedbackOutput::new();
         let now = Instant::now();
-        output.open_for_tone(now, || Ok(())).unwrap();
+        output.open_for_tone(now, 0, || Ok(())).unwrap();
         output.mark_playing(now, Duration::from_secs(2));
         output.mark_playing(now + Duration::from_millis(300), Duration::from_secs(1));
         assert_eq!(output.playing_until, Some(now + Duration::from_secs(2)));
@@ -1154,19 +1174,54 @@ mod tests {
         let now = Instant::now();
         assert!(
             output
-                .open_for_tone(now, || Err(eyre!("device unavailable")))
+                .open_for_tone(now, 0, || Err(eyre!("device unavailable")))
                 .is_err()
         );
         output
-            .open_for_tone(now + Duration::from_secs(1), || -> Result<()> {
+            .open_for_tone(now + Duration::from_secs(1), 0, || -> Result<()> {
                 panic!("must not spin on device failure")
             })
             .unwrap();
         assert!(!output.is_open());
         output
-            .open_for_tone(now + OPEN_RETRY_BACKOFF, || Ok(()))
+            .open_for_tone(now + OPEN_RETRY_BACKOFF, 0, || Ok(()))
             .unwrap();
         assert!(output.is_open());
+    }
+
+    /// Unplugging the default output leaves a warm stream feeding a dead
+    /// device. A route change drops it and the next tone opens the current
+    /// default at once, even inside a failure backoff.
+    #[test]
+    fn a_route_change_reopens_the_output_on_the_current_default() {
+        use std::cell::Cell;
+        let opens = Cell::new(0_u32);
+        let open = || {
+            opens.set(opens.get() + 1);
+            Ok(opens.get())
+        };
+        let mut output = FeedbackOutput::new();
+        let now = Instant::now();
+        output.open_for_tone(now, 0, open).unwrap();
+        output.open_for_tone(now, 0, open).unwrap();
+        assert_eq!(output.sink, Some(1));
+
+        // The default output went away: the old stream is dropped and the
+        // new default opens for the next tone.
+        output.open_for_tone(now, 1, open).unwrap();
+        assert_eq!(output.sink, Some(2));
+
+        // A failed reopen backs off, but a later route change retries at once.
+        assert!(
+            output
+                .open_for_tone(now, 2, || Err(eyre!("device unavailable")))
+                .is_err()
+        );
+        assert!(!output.is_open());
+        output
+            .open_for_tone(now + Duration::from_millis(10), 3, open)
+            .unwrap();
+        assert_eq!(output.sink, Some(3));
     }
 
     #[test]

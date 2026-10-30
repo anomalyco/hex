@@ -561,6 +561,7 @@ General                                  // settings
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
 ├── Sound volume -> immediate feedback; zero suppresses tones
+│   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
 ├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
 └── Linux / Windows -> listener card and desktop commands below the basics
 
@@ -592,6 +593,16 @@ Intentional recording                    // recording.environment
 └── Finish/cancel -> Release the assertion
     // no caffeinate child process or executable-policy dialog
 ```
+
+Feedback tones keep their output open for five idle minutes. On macOS the
+CoreAudio listeners on the default output, the device list, and an audio service
+restart advance an output route generation; the next tone drops an output opened
+under an older one and opens the current default at once, so unplugging a USB
+or Bluetooth output no longer silences tones until Hex restarts
+([#428](https://github.com/anomalyco/hex/issues/428)). Check:
+`a_route_change_reopens_the_output_on_the_current_default` in
+[feedback.rs](../../src/feedback.rs), with injected opens; a real unplug has not
+been observed by a test.
 
 On macOS, **Lower audio** (`recording.environment.duck`) is an explicit fourth
 choice, off by default. The slider appears only while selected and saves on

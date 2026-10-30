@@ -55,8 +55,25 @@ fn notify_input_route_changed() {
     INPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
 }
 
+static OUTPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Advances when the OS's default output or its list of devices changes, or
+/// the audio service restarts, so a warm feedback output opened on an older
+/// route reopens on the current default before its next tone. Only macOS
+/// reports these, through the same CoreAudio listeners as the input route.
+pub fn output_route_generation() -> u64 {
+    OUTPUT_ROUTE_GENERATION
+        .load(Ordering::Acquire)
+        .wrapping_add(audio_service_restart_generation())
+}
+
+#[cfg(target_os = "macos")]
+fn notify_output_route_changed() {
+    OUTPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
 /// Registers the CoreAudio listeners behind [`audio_service_restart_generation`]
-/// and [`input_route_generation`]. Their callbacks run on CoreAudio's
+/// [`input_route_generation`], and [`output_route_generation`]. Their callbacks run on CoreAudio's
 /// notification thread, never the audio callback, and only bump a counter.
 #[cfg(target_os = "macos")]
 pub fn watch_input_devices() {
@@ -103,17 +120,40 @@ pub fn watch_input_devices() {
         0
     }
 
+    unsafe extern "C" fn on_outputs_changed(
+        _in_object_id: u32,
+        _in_number_addresses: u32,
+        _in_addresses: *const AudioObjectPropertyAddress,
+        _in_client_data: *mut c_void,
+    ) -> i32 {
+        notify_output_route_changed();
+        0
+    }
+
+    unsafe extern "C" fn on_devices_changed(
+        _in_object_id: u32,
+        _in_number_addresses: u32,
+        _in_addresses: *const AudioObjectPropertyAddress,
+        _in_client_data: *mut c_void,
+    ) -> i32 {
+        notify_input_route_changed();
+        notify_output_route_changed();
+        0
+    }
+
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
         const SYSTEM_OBJECT: u32 = 1;
         const SERVICE_RESTARTED_SELECTOR: u32 = u32::from_be_bytes(*b"srst");
         const DEFAULT_INPUT_SELECTOR: u32 = u32::from_be_bytes(*b"dIn ");
+        const DEFAULT_OUTPUT_SELECTOR: u32 = u32::from_be_bytes(*b"dOut");
         const DEVICES_SELECTOR: u32 = u32::from_be_bytes(*b"dev#");
         const GLOBAL_SCOPE: u32 = u32::from_be_bytes(*b"glob");
-        let listeners: [(u32, PropertyListenerProc); 3] = [
+        let listeners: [(u32, PropertyListenerProc); 4] = [
             (SERVICE_RESTARTED_SELECTOR, on_service_restarted),
             (DEFAULT_INPUT_SELECTOR, on_inputs_changed),
-            (DEVICES_SELECTOR, on_inputs_changed),
+            (DEFAULT_OUTPUT_SELECTOR, on_outputs_changed),
+            (DEVICES_SELECTOR, on_devices_changed),
         ];
         for (selector, listener) in listeners {
             let addr = AudioObjectPropertyAddress {
