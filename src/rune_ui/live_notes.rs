@@ -1,14 +1,17 @@
 //! Live meeting notes as a playground story (the `playground` experiment,
 //! ⇧⌘D, Prototypes › Meetings › Live notes): a canned nine-minute call
 //! plays in accelerated time through a stand-in for the live pipeline, on a
-//! mock screen. The recording capsule's title follows the chapter, the
-//! notes heard so far float under it, and a note opens the transcript lines
-//! it came from. Drag the capsule to another corner and the notes follow.
-//! Stop finishes the call: the last pass, the boundary pass, then the final
-//! title and summary. Nothing here touches a real meeting; it is for
+//! mock screen. The recording capsule's title follows the chapter, and the
+//! chapters so far float under it with the current one's notes; a note
+//! opens the transcript lines it came from. The capsule copies the whole
+//! transcript, then only what is new since; a chapter copies itself or
+//! everything from it on. The chevron hides the notes, and the capsule drags
+//! to another corner with them. Stop finishes the call: the last pass, the
+//! boundary pass, then the final title and summary. Nothing here touches a real meeting; it is for
 //! working out how live notes should look on screen
 //! (`hex://story/prototypes/meetings/live-notes?play=1`).
 
+mod copy;
 mod notes;
 mod pipeline;
 mod script;
@@ -25,19 +28,8 @@ const SPEEDS: [f64; 3] = [15.0, 30.0, 60.0];
 /// How long the notes still being written after Stop take, in real seconds.
 const TRANSCRIBING_SECS: f64 = 1.4;
 const WRITING_SECS: f64 = 1.6;
-/// How long a new note stays under the capsule in [`Under::Fade`].
-const FADE_SECS: f64 = 4.0;
-
-/// What floats under the capsule while it records.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Under {
-    /// The newest notes, always.
-    Stack,
-    /// Each new note for a few seconds, then nothing.
-    Fade,
-    /// Nothing until the pointer is on the capsule; then every note.
-    Hover,
-}
+/// How long the capsule says what a copy did, in real seconds.
+const FLASH_SECS: f64 = 1.6;
 
 /// The screen corner the capsule sits in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +73,8 @@ impl Cue {
 }
 
 pub(crate) struct LiveNotes {
-    under: Under,
+    /// Whether the chapters show under the capsule; its chevron hides them.
+    notes_open: bool,
     corner: Corner,
     /// How far the capsule is dragged from its corner, while it is.
     drag: (f32, f32),
@@ -95,9 +88,16 @@ pub(crate) struct LiveNotes {
     phase_since: f64,
     pipeline: Pipeline,
     hovered: bool,
+    /// The chapter under the pointer, which shows its copy actions.
+    hovered_chapter: Option<usize>,
+    /// An earlier chapter opened to its notes; the current one always is.
+    open_chapter: Option<usize>,
     open_note: Option<usize>,
-    /// The newest note and when [`Under::Fade`] lets it go.
-    fresh: Option<(usize, f64)>,
+    /// How far the transcript is copied, once a copy reached the live
+    /// edge: Copy new copies what came after it, and shows only then.
+    copied_through: Option<u64>,
+    /// What the last copy did, shown in place of the clock, and until when.
+    flash: Option<(String, f64)>,
     autopilot: bool,
     /// Opens the newest note's lines, then closes them.
     show_note: Cue,
@@ -110,7 +110,7 @@ pub(crate) struct LiveNotes {
 impl LiveNotes {
     fn new() -> Self {
         Self {
-            under: Under::Stack,
+            notes_open: true,
             corner: Corner {
                 right: true,
                 bottom: false,
@@ -125,8 +125,11 @@ impl LiveNotes {
             phase_since: 0.0,
             pipeline: Pipeline::default(),
             hovered: false,
+            hovered_chapter: None,
+            open_chapter: None,
             open_note: None,
-            fresh: None,
+            copied_through: None,
+            flash: None,
             autopilot: true,
             show_note: Cue::Waiting,
             hide_note: Cue::Waiting,
@@ -144,11 +147,7 @@ impl LiveNotes {
         while self.clock_ms < target_ms {
             self.clock_ms = (self.clock_ms + 1_000).min(target_ms);
             if self.pipeline.due(script, self.clock_ms, NOTES_INTERVAL_MS) {
-                let found = self.pipeline.found.len();
                 self.pipeline.pass(script, self.clock_ms);
-                if found < self.pipeline.found.len() {
-                    self.fresh = self.newest_note().map(|note| (note, self.now + FADE_SECS));
-                }
             }
         }
         if self.clock_ms >= script.end_ms() {
@@ -166,8 +165,8 @@ impl LiveNotes {
         self.phase_since = self.now;
         self.playing = false;
         self.hovered = false;
+        self.hovered_chapter = None;
         self.open_note = None;
-        self.fresh = None;
     }
 
     /// The notes found so far, newest first.
@@ -193,8 +192,7 @@ impl LiveNotes {
         let now = self.now;
         let mut changed = false;
         let chapters = self.pipeline.chapters.len();
-        // Hover shows nothing to open until the pointer is there.
-        let shown = chapters >= 2 && (self.under != Under::Hover || self.hovered);
+        let shown = chapters >= 2 && self.notes_open;
         if self.show_note.fire(now, shown, 1.0) {
             self.shown_note = self.newest_note();
             self.open_note = self.shown_note;
@@ -244,8 +242,8 @@ fn poll(s: &mut LiveNotes, now: f64, _: &mut Tx) -> bool {
         }
         _ => {}
     }
-    if s.fresh.is_some_and(|(_, until)| now >= until) {
-        s.fresh = None;
+    if s.flash.as_ref().is_some_and(|(_, until)| now >= *until) {
+        s.flash = None;
         changed = true;
     }
     changed
@@ -306,6 +304,19 @@ fn story() -> Story<LiveNotes> {
                 },
             };
         })
+        .trigger('h', "Hide or show the notes", |s, _| {
+            s.take_over();
+            s.notes_open = !s.notes_open;
+        })
+        .trigger('c', "Copy all, then copy new", |s, play| {
+            s.take_over();
+            let what = if s.copied_through.is_some() {
+                copy::Copy::New
+            } else {
+                copy::Copy::All
+            };
+            s.copy(what, play);
+        })
         .trigger('l', "Show the newest note's lines", |s, _| {
             s.take_over();
             let newest = s.newest_note();
@@ -315,9 +326,8 @@ fn story() -> Story<LiveNotes> {
             s.take_over();
             s.stop();
         })
-        .variant("Newest notes", |s| s.under = Under::Stack)
-        .variant("Each note fades", |s| s.under = Under::Fade)
-        .variant("Notes on hover", |s| s.under = Under::Hover)
+        .variant("Notes open", |s| s.notes_open = true)
+        .variant("Notes hidden", |s| s.notes_open = false)
         .side(views::side)
 }
 
@@ -341,9 +351,34 @@ mod tests {
         let app = playground::attach(App::new(playground::spec(spec())));
         let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
         rt.frame(0.0);
-        for variant in ["1", "2", "3"] {
+        for variant in ["1", "2"] {
             rt.open_playground(slug, Some(variant));
             assert!(rt.playground_state::<super::LiveNotes>().is_some());
         }
+    }
+
+    /// The first copy takes the whole transcript; after it, Copy new takes
+    /// only what was said since.
+    #[test]
+    fn copy_new_takes_what_came_after_the_first_copy() {
+        let app = playground::attach(App::new(playground::spec(spec())));
+        let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.open_playground("prototypes-meetings-live-notes", None);
+        rt.playground_trigger('n');
+        rt.playground_trigger('c');
+        let all = rt.copy_request.take().expect("Copy all copies");
+        let all: &str = &all;
+        assert!(all.starts_with("## Lantern onboarding"));
+        let state = rt.playground_state::<super::LiveNotes>().unwrap();
+        let through = state.copied_through.expect("Copy all marks the edge");
+        assert_eq!(through, state.clock_ms);
+
+        rt.playground_trigger('n');
+        rt.playground_trigger('c');
+        let new = rt.copy_request.take().expect("Copy new copies");
+        let new: &str = &new;
+        let first_new = new.lines().find(|line| line.starts_with('[')).unwrap();
+        assert!(!all.contains(first_new), "{first_new} was copied twice");
     }
 }
