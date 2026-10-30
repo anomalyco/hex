@@ -962,6 +962,9 @@ enum Transport {
     /// Bluetooth or Bluetooth LE: opening its microphone switches the
     /// headset into low-quality call audio.
     Bluetooth,
+    /// A virtual or aggregate device, such as Microsoft Teams Audio, which
+    /// may record silence outside its own app, so it never stands in.
+    Virtual,
     Other,
 }
 
@@ -991,7 +994,9 @@ struct InputPlan {
 /// it is passed over the same way. With `avoid_bluetooth`, a Bluetooth
 /// default is passed over for the built-in microphone, else the first other
 /// real input, and kept only when nothing else is usable. Saved microphones
-/// and `--device` are never passed over for being Bluetooth.
+/// and `--device` are never passed over for being Bluetooth. A virtual or
+/// aggregate input never stands in, though a virtual default, saved
+/// microphone, or `--device` is used as named.
 fn resolve_input(
     device_override: Option<&str>,
     selected: Option<&str>,
@@ -1041,7 +1046,13 @@ fn resolve_input(
             selection,
         });
     }
-    let usable = || (0..names.len()).filter(|&index| !is_hex(&names[index]) && !off(index));
+    // A virtual device is used only as the default or by name, never as a
+    // stand-in: it can record silence while its app is idle.
+    let usable = || {
+        (0..names.len()).filter(|&index| {
+            !is_hex(&names[index]) && !off(index) && transport(index) != Transport::Virtual
+        })
+    };
     usable()
         .find(|&index| is_built_in(index))
         .or_else(|| usable().find(|&index| !avoided(index)))
@@ -1466,9 +1477,11 @@ fn transport(device: &Device) -> Transport {
     use objc2_core_audio::{
         AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
         AudioObjectPropertySelector, kAudioDevicePropertyTransportType,
+        kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate,
         kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
-        kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyTranslateUIDToDevice,
-        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+        kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeVirtual,
+        kAudioHardwarePropertyTranslateUIDToDevice, kAudioObjectPropertyElementMain,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
     use objc2_core_foundation::CFString;
 
@@ -1519,6 +1532,13 @@ fn transport(device: &Device) -> Transport {
                 || kind == kAudioDeviceTransportTypeBluetoothLE =>
         {
             Transport::Bluetooth
+        }
+        Some(kind)
+            if kind == kAudioDeviceTransportTypeVirtual
+                || kind == kAudioDeviceTransportTypeAggregate
+                || kind == kAudioDeviceTransportTypeAutoAggregate =>
+        {
+            Transport::Virtual
         }
         _ => Transport::Other,
     }
@@ -1773,6 +1793,108 @@ mod tests {
                 }
             ),
             found(SystemDefault)
+        );
+    }
+
+    #[test]
+    fn a_virtual_input_never_stands_in() {
+        use InputTarget::{Named, StandIn, SystemDefault};
+        use Transport::{Bluetooth, BuiltIn, Other, Virtual};
+        let found = |target, selection| Ok(InputPlan { target, selection });
+        let avoid = Route {
+            lid_closed: false,
+            avoid_bluetooth: true,
+        };
+
+        // Lid closed, only the built-in microphone and Teams: say why.
+        let lid = listed(&["MacBook Pro Microphone", "Microsoft Teams Audio"]);
+        let lid_transports = |index: usize| [BuiltIn, Virtual][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &lid,
+                Some("MacBook Pro Microphone"),
+                lid_transports,
+                CLOSED
+            ),
+            Err(LID_CLOSED_ERROR.into())
+        );
+        // A real input still stands in ahead of it.
+        let with_usb = listed(&["MacBook Pro Microphone", "Microsoft Teams Audio", "USB Mic"]);
+        let usb_transports = |index: usize| [BuiltIn, Virtual, Other][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &with_usb,
+                Some("MacBook Pro Microphone"),
+                usb_transports,
+                CLOSED
+            ),
+            found(StandIn(2), Selection::InUse)
+        );
+        // A Bluetooth default is kept rather than passed over for Teams.
+        let headset = listed(&["Microsoft Teams Audio", "AirPods Pro"]);
+        let headset_transports = |index: usize| [Virtual, Bluetooth][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                avoid
+            ),
+            found(SystemDefault, Selection::InUse)
+        );
+        // Only Hex Microphone and a virtual input: nothing to record from.
+        let virtual_only = listed(&["Hex Microphone", "Microsoft Teams Audio"]);
+        let virtual_transports = |index: usize| [Virtual, Virtual][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &virtual_only,
+                Some("Hex Microphone"),
+                virtual_transports,
+                OPEN
+            ),
+            Err("no microphone is available".into())
+        );
+        // A virtual default, saved microphone, or `--device` is used as named.
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &headset,
+                Some("Microsoft Teams Audio"),
+                headset_transports,
+                OPEN
+            ),
+            found(SystemDefault, Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                None,
+                Some("Microsoft Teams Audio"),
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                OPEN
+            ),
+            found(Named(0), Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                Some("Microsoft Teams Audio"),
+                None,
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                OPEN
+            ),
+            found(Named(0), Selection::InUse)
         );
     }
 

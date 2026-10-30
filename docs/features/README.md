@@ -522,6 +522,9 @@ General                                  // settings
 │   ├── System default -> The OS default input, followed live
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
 │   │   ├── Default is Hex Microphone -> Built-in mic, else first real input; row says so
+│   │   ├── Stand-ins never include virtual or aggregate inputs (macOS: e.g. Microsoft Teams Audio)
+│   │   │   ├── Nothing real left -> "lid is closed" / "no microphone" error, not silence
+│   │   │   └── A virtual default, saved device, or `--device` is still used as named
 │   │   └── Default is Bluetooth (macOS, Advanced switch on) -> Built-in mic, else first wired/USB input
 │   │       ├── Row says "KIT PODS is Bluetooth, so Hex listens to MacBook Pro Microphone"
 │   │       ├── No other usable input (or lid closed, Bluetooth only) -> the Bluetooth default
@@ -676,6 +679,8 @@ don't detect Bluetooth inputs yet and follow the default. Checks in
 [audio.rs](../../src/audio.rs):
 `system_default_passes_over_a_bluetooth_default`,
 `a_bluetooth_default_is_kept_when_nothing_else_is_usable`,
+`a_virtual_input_never_stands_in` (CoreAudio transport Virtual, Aggregate, or
+AutoAggregate; [#429](https://github.com/anomalyco/hex/issues/429)),
 `inputs_resolve_to_the_selection_then_the_system_default`,
 `device_override_wins_and_never_falls_back`,
 `a_default_change_switches_only_while_capture_is_idle`, and
