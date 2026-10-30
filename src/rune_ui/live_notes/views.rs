@@ -6,7 +6,7 @@ use rune_kit::{Button, ButtonVariant, IconButton, IconButtonVariant};
 
 use super::super::controls::{DESCRIPTION, Paint, PushSize, pulsing_dot, status_dot};
 use super::super::lists::{detail_header, detail_title, section_label};
-use super::super::meetings::{Status, Turn, status_tag, turn_bubble};
+use super::super::meetings::{Status, Turn, status_tag, turn_line};
 use super::outline::{Density, ExcerptLine, Note, Outline, Section, kind_label, note_row, outline};
 use super::pipeline::clock;
 use super::script::{NoteKind, Script, lantern};
@@ -407,7 +407,7 @@ fn pane(s: &LiveNotes, p: Paint, notes: &Outline) -> El {
     } else {
         script.end_ms()
     };
-    let mut meta: Vec<El> = status_tag(p, status, false, true).into_iter().collect();
+    let mut meta: Vec<El> = status_tag(p, status, false).into_iter().collect();
     meta.push(
         text(format!(
             "Today · 10:30 · {} · {}",
@@ -505,7 +505,7 @@ fn pane(s: &LiveNotes, p: Paint, notes: &Outline) -> El {
         .iter()
         .enumerate()
     {
-        turns = turns.child(turn_bubble(p, index, turn));
+        turns = turns.children(turn_line(p, index, turn));
     }
     body = body.child(label).child(turns);
 

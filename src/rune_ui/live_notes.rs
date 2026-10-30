@@ -307,3 +307,30 @@ fn story() -> Story<LiveNotes> {
         })
         .side(views::side)
 }
+
+#[cfg(test)]
+mod tests {
+    use rune::App;
+
+    use super::super::{WINDOW_SIZE, playground, spec};
+
+    /// `hex://story/prototypes/meetings/live-notes` opens the story on each
+    /// variant.
+    #[test]
+    fn its_story_link_opens_each_variant() {
+        let slug = "prototypes-meetings-live-notes";
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            super::super::story_link::parse("hex://story/prototypes/meetings/live-notes", "hex")
+                .map(|link| link.story),
+            Ok(slug.to_owned())
+        );
+        let app = playground::attach(App::new(playground::spec(spec())));
+        let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
+        rt.frame(0.0);
+        for variant in ["1", "2", "3"] {
+            rt.open_playground(slug, Some(variant));
+            assert!(rt.playground_state::<super::LiveNotes>().is_some());
+        }
+    }
+}
