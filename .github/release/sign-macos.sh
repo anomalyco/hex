@@ -51,7 +51,7 @@ check_layout "$finder" 0000000142756431
 # Every Mach-O in the bundle must be one this script signs.
 expected=$(printf '%s\n' Contents/MacOS/hex Contents/MacOS/scrawl-helper \
   Contents/Library/HexMicrophone.driver/Contents/MacOS/HexMicrophoneDriver \
-  Contents/Frameworks/libmoonshine.dylib Contents/Frameworks/libonnxruntime.1.23.2.dylib | LC_ALL=C sort)
+  Contents/Frameworks/libonnxruntime.1.23.2.dylib | LC_ALL=C sort)
 found=$(cd "$app" && find . -type f -exec sh -c 'file -b "$1" | grep -q Mach-O && printf "%s\n" "${1#./}"' _ {} \; | LC_ALL=C sort)
 [ "$found" = "$expected" ] || die "Unexpected code in Hex.app: $(diff <(echo "$expected") <(echo "$found") | grep '^[<>]' | tr '\n' ' ')"
 
@@ -63,7 +63,6 @@ notarize() {
 }
 
 sign "$app/Contents/Frameworks/libonnxruntime.1.23.2.dylib"
-sign "$app/Contents/Frameworks/libmoonshine.dylib"
 sign "$app/Contents/Library/HexMicrophone.driver"
 # The capture experiment's movie decoder; Hex runs it, so it needs no entitlement.
 sign --identifier anomaly.hex.scrawl-helper "$app/Contents/MacOS/scrawl-helper"
