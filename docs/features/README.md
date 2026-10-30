@@ -1117,7 +1117,10 @@ Linux beta                               // not macOS feature parity
 │   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
 │       ├── Wayland -> layer-shell overlay layer, no keyboard, empty input region
 │       ├── X11 -> override-redirect window, empty input shape
-│       ├── No layer-shell -> `hex status` reports the HUD limitation
+│       ├── No layer-shell (Rune refused it, or the compositor lacks
+│       │   zwlr_layer_shell_v1, e.g. GNOME) -> process.log warns once;
+│       │   `hex status` reports `hud_limitation` and the listener warning (#465)
+│       │   // no XWayland fallback for the HUD yet
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
