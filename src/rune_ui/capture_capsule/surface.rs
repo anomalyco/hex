@@ -13,7 +13,7 @@ use std::cell::RefCell;
 
 use rune::{Spring, TextStyle};
 
-use super::flow::{Done, Lead, Mode, Pres};
+use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
 use super::tuning::{self, CapsuleFlow, TopLine};
 
@@ -116,6 +116,8 @@ pub(crate) const STRONG: TextStyle = TextStyle::new(13.0, 600.0);
 pub(crate) const TIMER: TextStyle = STRONG.features("'tnum' 1");
 pub(crate) const SMALL: TextStyle = TextStyle::new(11.5, 530.0);
 pub(crate) const PROCESSING: &str = "Processing…";
+/// The hairline between the recording's tools and its stop and cancel.
+pub(crate) const DIVIDER_W: f32 = 1.0;
 
 /// A shortcut as the capsule says it: one quiet word, "⌥⇧V". Symbols run
 /// together, as macOS menus write them; a named key stands apart.
@@ -215,6 +217,11 @@ pub(crate) enum Id {
     CardHints,
     /// The toast's next guess (⇥).
     Next,
+    /// The recording's pen, lit while drawing; a click toggles drawing.
+    Pen,
+    /// A hairline in the recording's bar: after the timer, and between its
+    /// tools and stop and cancel.
+    Divider,
 }
 
 impl Id {
@@ -244,6 +251,8 @@ impl Id {
             Id::Pick(_) => "pick",
             Id::CardHints => "card-hints",
             Id::Next => "next",
+            Id::Pen => "pen",
+            Id::Divider => "divider",
         }
     }
 
@@ -284,12 +293,12 @@ impl Id {
             Id::Lead => 0,
             Id::Processing => 1,
             Id::Done => 2,
-            Id::Why => 3,
+            Id::Why | Id::Pen => 3,
             Id::Mode(Mode::Area) => 4,
             Id::Mode(Mode::Window) => 5,
             Id::Mode(Mode::Screen) => 6,
             Id::Mode(Mode::Iphone) => 7,
-            Id::Record => 8,
+            Id::Record | Id::Divider => 8,
             Id::Cancel | Id::Keep => 9,
             Id::Finish | Id::Discard => 10,
             Id::Field => 11,
@@ -562,9 +571,12 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
             chips,
             phone,
             discarding,
+            pen,
         } => {
             let lead = LEAD_TEXT_X + clock_width(clock) + LEAD_TRAIL;
             raw.push((Id::Lead, String::new(), lead, false));
+            // The chips' row lines up with the picker's, so the pen waits
+            // for them to fold.
             if *discarding {
                 raw.push((
                     Id::Keep,
@@ -583,18 +595,14 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 modes(&mut raw, Mode::Screen, *phone);
                 raw.push((Id::Close, String::new(), CHIP_H, false));
             } else {
-                raw.push((
-                    Id::Cancel,
-                    String::new(),
-                    chip_width(measure("Cancel", MEDIUM)),
-                    false,
-                ));
-                raw.push((
-                    Id::Finish,
-                    String::new(),
-                    chip_width(measure("Finish", STRONG)),
-                    false,
-                ));
+                // Icons only, each a square as tall as the row: the
+                // toolbar (the pen, lit while drawing), a divider, then
+                // stop and cancel.
+                raw.push((Id::Divider, "lead".into(), DIVIDER_W, false));
+                raw.push((Id::Pen, String::new(), CHIP_H, *pen == Pen::On));
+                raw.push((Id::Divider, "tools".into(), DIVIDER_W, false));
+                raw.push((Id::Finish, String::new(), CHIP_H, false));
+                raw.push((Id::Cancel, String::new(), CHIP_H, false));
             }
         }
         Pres::Processing => {
@@ -986,6 +994,7 @@ mod tests {
             chips,
             phone: false,
             discarding: false,
+            pen: super::super::flow::Pen::Off,
         }
     }
 

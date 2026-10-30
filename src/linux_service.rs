@@ -66,7 +66,7 @@ pub(crate) enum Request {
     },
     /// `hex annotate undo`: takes the newest send back.
     CaptureUndo,
-    /// `hex annotate draw`: drawing on or off, as Ctrl+Alt+D.
+    /// `hex annotate draw`: the pen on or off, as the capsule's pen.
     CaptureDraw,
     Status,
     /// Drain accepted work and exit.

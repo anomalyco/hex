@@ -1631,6 +1631,28 @@ fn a_passed_over_bluetooth_default_names_the_input_in_use() {
     assert!(!texts(&rt).contains(&note.to_owned()));
 }
 
+/// `HEX_ANNOTATE_SNAPS=<folder>` writes the Annotate pane, light and dark,
+/// tall enough to show How it works.
+#[cfg(hex_capture)]
+#[test]
+fn annotate_pane_snapshots() {
+    let Some(folder) = std::env::var_os("HEX_ANNOTATE_SNAPS") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    for dark in [false, true] {
+        let Some((width, height, pixels)) = render("mac-scrawl", dark, (PANE_SIZE.0, 1500.0))
+        else {
+            eprintln!("skipping Annotate snapshots: no GPU adapter");
+            return;
+        };
+        let theme = if dark { "dark" } else { "light" };
+        let path = folder.join(format!("annotate-pane-{theme}.png"));
+        rune::render::write_png(&path, width, height, &pixels).unwrap();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Goldens: offscreen GPU renders compared with checked-in PNGs. Set
 // HEX_UPDATE_GOLDENS=1 to rewrite them. Without a GPU adapter they skip.

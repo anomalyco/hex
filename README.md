@@ -153,16 +153,16 @@ you said. It is on by default on macOS and Linux (Settings › Annotate; not on
 Windows yet). Nothing is recorded, and no screen permission is asked for,
 until you first use it.
 
-- **Start and stop:** **Option-Shift-S** on macOS, **Ctrl+Alt+S** on Linux.
-  macOS asks for Screen Recording the first time; Linux asks through the
-  desktop's screen-sharing dialog once, then remembers the screen. While it
-  records, the dictation and Voice Action shortcuts do nothing.
-- **Draw:** on macOS hold **Shift** and move the pointer; a Shift-click drops a
-  numbered pin and **⌘Z** takes the last stroke back. On Linux hold
-  **Ctrl+Alt+D** and move the pointer; a click while holding drops a pin, and
-  a right-click (or Ctrl+Z) takes the last stroke back. Let go and clicks
-  reach your apps again. Ink fades from the screen after about a second but
-  stays in the recording.
+- **One key:** **Option-Shift-S** on macOS, **F9** on Linux. Tap it to start
+  and tap again to stop. While it records, hold it and move the pointer to
+  draw, no click needed; let go and the mouse is the app's again. macOS asks
+  for Screen Recording the first time; Linux asks through the desktop's
+  screen-sharing dialog once, then remembers the screen. While it records,
+  the dictation shortcut does nothing.
+- **The bar:** the recording bar at the top shows the timer, a pen (click it
+  to draw until you click it again; Esc stops drawing), stop, and ✕ to
+  discard. On macOS, holding Shift draws too. Ink fades from the screen
+  after about a second but stays in the recording.
 - **Paste or send:** when it stops, the annotation is on your clipboard and
   the capsule offers **Paste** (the contact sheet, then the summary) and
   **Inspect**. With OpenCode running, **Send to…** lists its sessions (macOS

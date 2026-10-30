@@ -51,7 +51,6 @@ pub(super) const NO_KEY_SOURCE: &str = "polled key state (keyboard hook off)";
 /// `VK_S` on Dvorak too.
 pub const KEY_S: u16 = 0x53;
 pub const KEY_V: u16 = 0x56;
-const KEY_Z: u16 = 0x5A;
 /// An unassigned virtual key, sent around Alt or Win coming up after a shortcut so the app in
 /// front doesn't open its menu bar (or the Start menu) on the lone modifier release.
 const VK_MASK: u16 = 0xE8;
@@ -844,9 +843,7 @@ fn handle_hook_event(telemetry: &SharedCaptureTelemetry, event: HookEvent) {
             if !telemetry.active.load(Ordering::Acquire) || repeat {
                 return;
             }
-            if vk == KEY_Z && mods.ctrl && !mods.alt && !mods.shift && !mods.win {
-                let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
-            } else if (mods.ctrl || mods.win)
+            if (mods.ctrl || mods.win)
                 && let Some(key) = shortcut_key_name(vk)
             {
                 // Only modifier chords, never ordinary typing or secrets.
@@ -979,7 +976,6 @@ fn run_key_poller(telemetry: Arc<SharedCaptureTelemetry>) {
     let mut prev_shortcut = false;
     let mut prev_paste = false;
     let mut prev_shift_ink = false;
-    let mut prev_undo = false;
     let mut prev_escape = false;
     let mut await_shift_release = false;
     let mut prev_buttons = [false; 2];
@@ -1038,16 +1034,9 @@ fn run_key_poller(telemetry: Arc<SharedCaptureTelemetry>) {
         };
         if !telemetry.active.load(Ordering::Acquire) {
             prev_shift_ink = false;
-            prev_undo = false;
             prev_buttons = buttons;
             continue;
         }
-
-        let undo_now = ctrl && !win && !alt && !shift && key_down(KEY_Z);
-        if undo_now && !prev_undo && !KEYBOARD_HOOK_LIVE.load(Ordering::Acquire) {
-            let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
-        }
-        prev_undo = undo_now;
 
         let Some((x, y)) = win::cursor_position() else {
             continue;

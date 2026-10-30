@@ -2,14 +2,15 @@
 //! capture's target that draws what the pointer marks, as Scrawl's Metal
 //! overlay does. Shift-drawn ink holds 650 ms after it lifts, then fades;
 //! the laser trails a 0.42 s tapering tail with a soft glow and a hot core;
-//! a ⇧-click pin pulses once; a dot marks the pointer while Shift is held;
+//! a dot marks the pointer while Shift is held;
 //! and a full-screen capture's edges glow red for its first second.
 //!
-//! On Linux the overlay covers the screen and passes clicks through, except
-//! while the draw shortcut is held (`capture_host::drawing`): then it takes
-//! the pointer, moving it draws ink as Shift does on the Mac, a click drops
-//! a pin, and a right-click or Ctrl+Z undoes the last stroke
-//! (`capture_host::draw`).
+//! While Annotate draws (`capture_host::drawing`: its key held, or the
+//! capsule's pen on), the overlay takes the pointer so clicks never reach
+//! the app, and shows a pen cursor; the capsule stays clickable above it.
+//! On Linux the overlay covers the screen and leaves a hole where the
+//! capsule's pill is, and its pointer moves are the strokes
+//! (`capture_host::draw`); on the Mac the tap draws them.
 //!
 //! [`Scene::at`] decides what shows from the capture's strokes and clock;
 //! the view only draws it, and the overlay asks for frames only while a
@@ -20,9 +21,7 @@ use std::time::Duration;
 
 use rune::{Color, El, LineCap, OverlayHandle, Shape, Tx, canvas, el};
 use scrawl_capture::capture::InkSnapshot;
-use scrawl_capture::sketch::{
-    pin_pulse, slice_laser_window, smooth_ink_points, smooth_laser_points,
-};
+use scrawl_capture::sketch::{slice_laser_window, smooth_ink_points, smooth_laser_points};
 
 use crate::capture_host::InkSource;
 
@@ -62,8 +61,6 @@ pub(crate) struct Scene {
     ink: Vec<(Points, f32)>,
     /// Each laser tail's points with their weight, 0 at the tail.
     laser: Vec<Points>,
-    /// Pin pulses: centre, radius, opacity.
-    pins: Vec<([f32; 2], f32, f32)>,
     /// The pointer while Shift is held.
     tip: Option<[f32; 2]>,
     /// The start glow's strength, 0 to 1.
@@ -93,13 +90,7 @@ impl Scene {
             .chain(ink.laser.iter().map(|stroke| (stroke, true)))
             .chain(ink.live.iter().map(|stroke| (stroke, true)));
         for (stroke, live) in strokes {
-            if stroke.pin.is_some() {
-                if let Some(&[nx, ny]) = stroke.normalized_points().first()
-                    && let Some((radius, alpha)) = pin_pulse(now_ms.saturating_sub(stroke.t1))
-                {
-                    scene.pins.push((to_screen(nx, ny), radius, alpha));
-                }
-            } else if stroke.laser {
+            if stroke.laser {
                 if stroke.t1 + TAIL_MS < now_ms {
                     continue;
                 }
@@ -136,11 +127,7 @@ impl Scene {
 
     /// Nothing shows, and nothing will until new input.
     fn is_empty(&self) -> bool {
-        self.ink.is_empty()
-            && self.laser.is_empty()
-            && self.pins.is_empty()
-            && self.tip.is_none()
-            && self.glow <= 0.0
+        self.ink.is_empty() && self.laser.is_empty() && self.tip.is_none() && self.glow <= 0.0
     }
 }
 
@@ -172,8 +159,7 @@ pub(crate) struct InkState {
     placed: Option<[f32; 4]>,
     overlay: Option<OverlayHandle<InkState>>,
     shown: bool,
-    /// The overlay takes the pointer to draw (Linux).
-    #[cfg(target_os = "linux")]
+    /// The overlay takes the pointer to draw.
     drawing: bool,
 }
 
@@ -195,7 +181,6 @@ impl InkState {
             placed: None,
             overlay: None,
             shown: true,
-            #[cfg(target_os = "linux")]
             drawing: false,
         }
     }
@@ -238,21 +223,25 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     }
     let frame = ink.target;
     let rect = [frame.x as f32, frame.y as f32, scene.size[0], scene.size[1]];
-    #[cfg(target_os = "linux")]
     let drawing = crate::capture_host::drawing();
-    #[cfg(target_os = "linux")]
     if drawing != s.drawing {
         s.drawing = drawing;
         if let Some(overlay) = &s.overlay {
-            overlay.set_input(if drawing {
-                rune::OverlayInput::All
-            } else {
+            overlay.set_input(if !drawing {
                 rune::OverlayInput::None
+            } else if cfg!(target_os = "linux") {
+                // Everything but the capsule's pill (`draw_surface`).
+                rune::OverlayInput::Regions
+            } else {
+                rune::OverlayInput::All
             });
-            // For Ctrl+Z, where the desktop gives the overlay the keyboard.
+            // For Escape, where the desktop gives the overlay the keyboard.
             if drawing {
                 overlay.request_keys();
             }
+        }
+        if let Some(changed) = ON_DRAWING.get() {
+            changed(drawing);
         }
     }
     if let Some(overlay) = &s.overlay {
@@ -284,6 +273,23 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     changed
 }
 
+/// Told when drawing starts or stops (the capsule lights its pen).
+static ON_DRAWING: std::sync::OnceLock<Box<dyn Fn(bool) + Send + Sync>> =
+    std::sync::OnceLock::new();
+
+/// Calls `changed` whenever drawing starts or stops; set once.
+pub(crate) fn on_drawing(changed: impl Fn(bool) + Send + Sync + 'static) {
+    let _ = ON_DRAWING.set(Box::new(changed));
+}
+
+/// The pen the pointer becomes while Annotate draws, its tip the hot spot.
+fn pen_cursor() -> rune::Cursor {
+    rune::Cursor::Image(rune::CursorImage::png(
+        include_bytes!("../../../assets/icons/annotate-pen-cursor@2x.png"),
+        [3.5, 28.5],
+    ))
+}
+
 /// The ink overlay, as the app holds it.
 #[derive(Clone)]
 pub(crate) struct InkOverlay {
@@ -306,12 +312,8 @@ impl InkOverlay {
                 exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::None,
                 prewarm: true,
-                // Ctrl+Z while drawing (Linux), asked for only then.
-                keys: if cfg!(target_os = "linux") {
-                    rune::KeyPolicy::OnDemand
-                } else {
-                    rune::KeyPolicy::None
-                },
+                // Escape while drawing, asked for only then.
+                keys: rune::KeyPolicy::OnDemand,
                 ..Default::default()
             })
             .poll(poll)
@@ -352,7 +354,15 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
     #[cfg(not(target_os = "linux"))]
     let mut root = {
         let _ = cx;
-        el().size(w.max(1.0), h.max(1.0))
+        let root = el().size(w.max(1.0), h.max(1.0));
+        if s.drawing {
+            root.cursor(pen_cursor())
+                .hit()
+                .focusable(true)
+                .on_key(escape)
+        } else {
+            root
+        }
     };
     #[cfg(target_os = "linux")]
     let mut root = draw_surface(s.drawing, cx.env().scale);
@@ -409,24 +419,6 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
     if let Some(core) = layer(laser(|w| 0.9 * w.powf(0.82)), laser_hot(), 2.0) {
         root = root.child(core.opacity(0.95));
     }
-    for &(centre, radius, alpha) in &scene.pins {
-        let ring = (0..=40)
-            .map(|k| {
-                let a = k as f32 / 40.0 * std::f32::consts::TAU;
-                [
-                    radius + 2.0 + radius * a.cos(),
-                    radius + 2.0 + radius * a.sin(),
-                ]
-            })
-            .collect::<Vec<_>>();
-        let side = 2.0 * radius + 4.0;
-        root = root.child(
-            canvas(Shape::new().stroke_with(ring, true, 1.5, LineCap::Round, ink_red()))
-                .absolute(centre[0] - radius - 2.0, centre[1] - radius - 2.0)
-                .size(side, side)
-                .opacity(alpha),
-        );
-    }
     if let Some([x, y]) = scene.tip {
         root = root.child(
             el().absolute(x - 2.0, y - 2.0)
@@ -438,43 +430,53 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
     root
 }
 
-/// The whole screen; while the draw shortcut is held it takes the pointer:
-/// every move draws, a click pins, and a right-click or Ctrl+Z undoes.
+/// Escape on the overlay, where the desktop gives it the keyboard, stops
+/// drawing, never the recording.
+fn escape(_: &mut InkState, key: &rune::KeyEvent, _: &mut Tx) -> bool {
+    key.key == rune::Key::Escape && crate::capture_host::exit_drawing()
+}
+
+/// The whole screen. While Annotate draws, every pointer move draws and
+/// the screen takes the pointer, except a hole over the capsule's pill (top
+/// centre, where the capsule's panel sits), so the pen can be clicked off.
 /// `scale` is the screen's pixels per point.
 #[cfg(target_os = "linux")]
 fn draw_surface(drawing: bool, scale: f32) -> El {
-    use crate::capture_host::{Draw, draw};
+    use super::surface::PANEL_W;
+    use rune::{col, row};
     let root = el().w_full().h_full();
     if !drawing {
         return root;
     }
-    root.cursor(rune::Cursor::Crosshair)
-        .focusable(true)
+    let taken = || el().hit().cursor(pen_cursor());
+    let [px, py, pw, ph] = crate::capture_host::capsule_pill().unwrap_or([0.0; 4]);
+    // The pill's offset from the panel's centre, which is the screen's.
+    let off = px + pw * 0.5 - PANEL_W * 0.5;
+    let top = super::PANEL_MARGIN + py;
+    let regions = col()
+        .w_full()
+        .h_full()
+        .child(taken().w_full().h(top.max(0.0)))
+        .child(
+            row()
+                .w_full()
+                .h(ph)
+                .child(taken().grow(1.0).h_full())
+                .child(taken().w((2.0 * off).max(0.0)).h_full())
+                .child(el().w(pw).h_full())
+                .child(taken().w((-2.0 * off).max(0.0)).h_full())
+                .child(taken().grow(1.0).h_full()),
+        )
+        .child(taken().w_full().grow(1.0));
+    root.focusable(true)
+        .on_key(escape)
         .on_pointer_move_local(
             move |_: &mut InkState, p: rune::PointerEvent, tx: &mut Tx| {
-                draw(Draw::Move, p.x, p.y, scale);
+                crate::capture_host::draw(p.x, p.y, scale);
                 tx.wake_after(Duration::ZERO);
             },
         )
-        .on_drag(move |_: &mut InkState, d: &mut rune::Drag, tx: &mut Tx| {
-            let event = match d.phase {
-                rune::Phase::Down => Draw::Down,
-                rune::Phase::Move => Draw::Move,
-                rune::Phase::Up => Draw::Up,
-            };
-            draw(event, d.x, d.y, scale);
-            tx.wake_after(Duration::ZERO);
-        })
-        .on_secondary_press_local(move |_: &mut InkState, p: rune::PointerEvent, _| {
-            draw(Draw::Undo, p.x, p.y, scale);
-        })
-        .on_key(move |_: &mut InkState, key: &rune::KeyEvent, _| {
-            let undo = key.is_command('z');
-            if undo {
-                draw(Draw::Undo, 0.0, 0.0, scale);
-            }
-            undo
-        })
+        .child(regions)
 }
 
 /// One canvas holding `segments` (from, to, width), cropped to their bounds

@@ -376,13 +376,11 @@ pub(crate) enum HotkeyEvent {
     FinishPrinting(crate::control::PrintReply),
     Cancel,
     PasteLast,
-    /// The Annotate shortcut went down: the capture host decides whether
-    /// it starts or finishes a capture.
+    /// The Annotate key went down: nothing recording, a capture starts;
+    /// recording, the capture host waits to tell a tap from a hold.
     Capture,
-    /// The draw shortcut went down: Annotate draws while it's held.
-    DrawStart,
-    /// It came up: drawing stops and clicks reach the apps again.
-    DrawEnd,
+    /// It came up: a tap stops the recording, a hold stops drawing.
+    CaptureUp,
 }
 
 /// What a `hex` command asks of the running listener. Each one is
@@ -419,10 +417,17 @@ pub(crate) struct HotkeyOptions {
     pub(crate) double_tap_only: bool,
     pub(crate) toggle: bool,
     pub(crate) paste_last: Option<LinuxHotkey>,
-    /// Starts or finishes a capture, while Annotate is on.
+    /// Annotate's one key, while Annotate is on: tap to start and stop,
+    /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
-    /// Held to draw while Annotate records.
-    pub(crate) draw: Option<LinuxHotkey>,
+}
+
+/// Whether Annotate draws now, so Escape is Hex's (it stops drawing).
+fn annotate_drawing() -> bool {
+    #[cfg(hex_capture)]
+    return crate::capture_host::drawing();
+    #[cfg(not(hex_capture))]
+    false
 }
 
 pub(crate) const ESCAPE_CANCEL_WARNING: &str =
@@ -580,11 +585,10 @@ enum Shortcut {
     Dictation,
     PasteLast,
     Capture,
-    Draw,
 }
 
 impl Shortcut {
-    const ALL: [Self; 4] = [Self::Dictation, Self::PasteLast, Self::Capture, Self::Draw];
+    const ALL: [Self; 3] = [Self::Dictation, Self::PasteLast, Self::Capture];
 
     fn index(self) -> usize {
         self as usize
@@ -596,7 +600,6 @@ impl Shortcut {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::Capture => ("capture", "Annotate"),
-            Self::Draw => ("annotate-draw", "Annotate: hold to draw"),
         }
     }
 }
@@ -683,6 +686,9 @@ impl ShortcutState {
 
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
+            // Escape while Annotate draws stops drawing, never the recording.
+            #[cfg(hex_capture)]
+            Input::Escape if !self.wants_escape() && crate::capture_host::exit_drawing() => None,
             Input::Escape | Input::Lost => self.cancel(),
             Input::Pressed(Shortcut::Dictation) => {
                 let repeat = self
@@ -742,9 +748,7 @@ impl ShortcutState {
             }
             Input::Released(Shortcut::PasteLast) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
-            Input::Pressed(Shortcut::Draw) => Some(HotkeyEvent::DrawStart),
-            Input::Released(Shortcut::Draw) => Some(HotkeyEvent::DrawEnd),
-            Input::Released(Shortcut::Capture) => None,
+            Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
             Input::Command(command) => match command {
                 ShortcutCommand::DictationStart => self.start_dictation(),
                 ShortcutCommand::DictationStop => self.stop_dictation(),
@@ -978,7 +982,6 @@ impl Backend {
                 .as_ref()
                 .map(|key| (Shortcut::PasteLast, key)),
             options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
-            options.draw.as_ref().map(|key| (Shortcut::Draw, key)),
         ];
         let mut shortcuts = Vec::new();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -1096,8 +1099,9 @@ impl Backend {
                     "could not open the desktop's shortcut settings"
                 );
             }
-            // Escape belongs to Hex only while something records.
-            let wants_escape = dispatcher.state.wants_escape();
+            // Escape belongs to Hex only while something records, or
+            // Annotate draws.
+            let wants_escape = dispatcher.state.wants_escape() || annotate_drawing();
             if wants_escape && !escape_bound {
                 escape_bound = true;
                 let available = portal.bind_escape(held_escape(), &self.stop)?;
@@ -1137,7 +1141,6 @@ impl Backend {
             Some((Shortcut::Dictation, binding)),
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
             options.capture.map(|key| (Shortcut::Capture, key)),
-            options.draw.map(|key| (Shortcut::Draw, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);
@@ -1227,7 +1230,7 @@ impl Backend {
             }
             dispatcher.commands();
             // Keep Escape until its release so the release never reaches the app.
-            let wants_escape = dispatcher.state.wants_escape() || escape_down;
+            let wants_escape = dispatcher.state.wants_escape() || annotate_drawing() || escape_down;
             if wants_escape && grabs.escape_grabbed.is_empty() {
                 let available = grabs.grab_escape()?;
                 if self.status.update_escape_availability(available) {

@@ -1888,15 +1888,10 @@ unsafe extern "C" fn key_tap_callback(
         option: alt,
         shift,
     };
-    let z = keycode == layout_z_keycode() || keycode == KEY_Z;
     // Only modifier-chord shortcuts are logged, never ordinary typing or secrets.
     let name = (cmd || ctrl).then(|| shortcut_key_name(keycode)).flatten();
-    match crate::hosted_input::key_input(t_ms, name.as_deref(), z, modifiers) {
-        Some(InputEvent::UndoStroke) => {
-            let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
-        }
-        Some(chord) => telemetry.handle_input(chord),
-        None => {}
+    if let Some(chord) = crate::hosted_input::key_input(t_ms, name.as_deref(), modifiers) {
+        telemetry.handle_input(chord);
     }
     event
 }

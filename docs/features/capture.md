@@ -7,7 +7,7 @@ the name `capture`), steps 3 to 5 of
 display with ScreenCaptureKit, or on Linux the screen-cast portal and
 PipeWire (`capture.linux`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
-macOS, draw mode on Linux), transcribes the narration with word timestamps on
+macOS, or the Annotate key held or the pen), transcribes the narration with word timestamps on
 Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
 copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
 router (`crates/router`), run in Hex's process. Settings › Annotate (under
@@ -25,21 +25,29 @@ Turn it on                               // capture.gate
 │   the portal's dialog (Linux) at the first Screen capture
 └── Off -> no capture host, engine, sink, thread, or folder; `hex annotate` -> feature-off
 
-Draw                                     // capture.draw
-├── macOS -> hold Shift and move: ink; Shift-click: a numbered pin; ⌘Z: the
-│   last stroke back; the laser follows the pointer while it records
-├── Linux -> hold Ctrl+Alt+D while it records, as Shift on the Mac (the
-│   portal's Activated/Deactivated, or the X11 grab's press and release;
-│   linux_input DrawStart/DrawEnd -> capture_host::set_drawing): the ink
-│   overlay takes the pointer (crosshair); moving draws ink with no click, a
-│   click drops a pin, right-click (or Ctrl+Z, when the compositor gives the
-│   overlay the keyboard) takes the last stroke back; letting go gives clicks
-│   back to the apps. While held, the capsule takes no clicks.
-│   Held with nothing recording -> nothing. `hex annotate draw` toggles it
-│   instead, for desktops without the portal (it starts a recording drawing)
-│   Shift alone can't be a desktop shortcut; Ctrl+Alt+D sits beside
-│   Ctrl+Alt+S and no other default uses it. Check: none physical (needs a
-│   real hold on a portal desktop); the hold is logged as "Annotate drawing"
+Draw                                     // capture.draw (capture_host::drawing)
+├── One key: tap (under DRAW_HOLD, 250 ms) to start and again to stop; held
+│   while it records, the pointer draws with no click until it comes up
+│   (macOS: CaptureShortcut tells the tap from the hold at release; Linux:
+│   the portal's Activated/Deactivated or the X11 grab's press and release,
+│   linux_input Capture/CaptureUp -> CaptureHost::annotate_down/up)
+├── The capsule's pen -> drawing on until clicked again, or the key is
+│   tapped, or held and let go (Action::Pen -> capture_host::toggle_pen)
+├── Esc while drawing -> stops drawing, never the recording (recognition.rs
+│   on macOS; Escape bound through the portal or grab on Linux, and the
+│   overlay's own key handler where it gets the keyboard)
+├── macOS -> Shift held alone still draws, as in Scrawl
+├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
+│   clicks never reach the app; the capsule stays clickable above it (macOS:
+│   its level; Linux: the overlay leaves a hole over the capsule's pill).
+│   Every move draws ink; there are no pins and no undo
+├── `hex annotate draw` (Linux) -> the pen on or off, for desktops without
+│   the portal (it starts a recording drawing)
+├── Default key: ⌥⇧S on macOS; F9 on Linux, a single key one hand holds
+│   while the other moves the mouse (F10 is GTK's menu key, F11 full screen,
+│   F12 often a dropdown terminal). Saved bindings stay.
+│   Check: capture_host the_shortcut_records_once_its_keys_come_up; none
+│   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
@@ -73,9 +81,9 @@ On Linux                                 // capture.linux
 ├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
-├── Shortcuts -> Ctrl+Alt+S (start, stop) and Ctrl+Alt+D (hold to draw)
-│   through the GlobalShortcuts portal ("Annotate", "Annotate: hold to draw")
-│   or X11 grabs. There is no send-to list shortcut on any OS
+├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
+│   GlobalShortcuts portal ("Annotate") or X11 grabs. There is no separate
+│   draw shortcut and no send-to list shortcut on any OS
 ├── While it records, dictation and Voice Action start nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
@@ -92,11 +100,11 @@ Settings › Annotate                      // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
 │   input, retention, or folder, as with the experiment off
 │   └── On while the shortcut collides -> refused, the shortcut row says why
-├── Shortcut (capture.hotkey, default ⌥⇧S) -> same keycap and recorder as dictation;
+├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux) -> same keycap and recorder as dictation;
 │   a key is required; refused when it overlaps dictation or paste
-├── How it works (on) -> start, draw, pin, undo, stop, and send, each with
-│   its keys: ⇧, ⇧-click, ⌘Z on macOS; held Ctrl+Alt+D, a click while held,
-│   right-click or Ctrl+Z on Linux. Check: rune_ui::scrawl tests
+├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
+│   macOS), the capsule's pen with Esc, stop (tap again), and send, each
+│   with its keys. Check: rune_ui::scrawl tests
 ├── Screen Recording -> read (preflight, never a prompt) once a second and again
 │   when the pane opens or the window becomes key; granted -> Allowed, no button
 │   └── Allow -> rechecks, then the onboarding permission guide over System
@@ -155,10 +163,8 @@ While a capture records                  // capture.quiet
     capture_host a_capture_stays_quiet_until_it_stops_is_cancelled_or_hex_quits
 
 Switching target                         // capture.switch; the capsule's chips
-├── Started by the shortcut -> the snapshot's recording says `target: Pointer`,
-│   the only kind that shows the switch chips (Area · Window · Screen)
-├── First click, scroll, or ink stroke -> `worked`, so the chips fold
-├── Screen -> the capsule folds the chips; the capture goes on
+├── The recording capsule shows no target chips: a recording is the screen.
+│   Switching (below) remains for the CLI, the picker, and the playground
 ├── CaptureCommand::Switch(target) -> discard and start in one step: no snapshot
 │   shows nothing recording in between (Scrawl's switch_recording)
 │   ├── No room to start (two writing, Hex stopping) -> refused `busy` before
@@ -218,8 +224,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   `hex capture discard`) -> the capsule leaves; the picker a chip opened
 │   stays. A switch that can't start settles the recording it discarded as
 │   failed, which the capsule shows as "Couldn't start"
-├── A shortcut start (`target: Pointer`) -> Area · Window · Screen chips, plus
-│   iPhone while the snapshot names a cabled phone, for 3.5 s
+├── Recording -> `● 0:07 │ ✎ │ ■ ✕`: the timer, the toolbar (the pen, its
+│   only tool, lit with the accent fill while drawing), a divider, stop
+│   (Finish) and ✕ (asks "Discard?" first), all equal square icon buttons
+│   with tooltips "Draw", "Stop", "Discard". Goldens: recording,
+│   recording-drawing (rendered on apollo)
+├── Target chips (playground stories only; feed sends no Input::Chips) ->
+│   Area · Window · Screen, plus iPhone while a phone is cabled, for 3.5 s
 │   ├── `worked` -> they fold once seen for 0.9 s; never while the pointer is on
 │   │   the capsule, and 1.2 s after it leaves
 │   ├── A chip restarts rather than retargets (Scrawl's `switch_recording`)
@@ -431,8 +442,10 @@ While a capture records                  // capture.input
 ├── -> Capture::input() through a bounded queue; full -> events dropped and counted
 ├── Keys pressed in the app -> logged; keys Hex consumes (its shortcuts, Esc) and
 │   anything while a shortcut is being recorded -> not logged
-├── Scrawl's rules in the engine (hosted_input): Shift drag inks, a click pins,
-│   clicks on Hex's capture chrome ignored
+├── Scrawl's rules in the engine (hosted_input): Shift drag inks, a
+│   Shift-click is part of the drawing (no pins, no ⌘Z undo), clicks on
+│   Hex's capture chrome ignored; while drawing, capture_host::as_pen makes
+│   every pointer event Shift ink
 └── Shift still held from ⌥⇧S -> must come up once before it can ink; Shift up
     at the start -> the first Shift drag inks
 
@@ -653,7 +666,8 @@ Checks:
   the ink and click rules in hosted_input.rs, including
   `a_capture_started_by_its_shortcut_waits_for_shift_to_come_up`,
   `a_capture_started_without_shift_held_inks_from_the_first_stroke`, and
-  `a_click_with_the_chords_shift_still_held_is_no_pin`.
+  `a_click_with_the_chords_shift_still_held_is_no_pin`, and in
+  capture.rs `a_shift_click_is_part_of_the_drawing`.
 - iPhone: `an_iphone_capture_narrates_with_hex_audio_and_finishes_when_its_mirror_ends`
   and `a_mirror_ending_never_stops_a_screen_capture` in capture_host.rs;
   `since_moves_audio_and_gaps_onto_a_later_clock` in
@@ -694,7 +708,8 @@ Checks:
   (`chips_fold_once_seen_when_work_starts_but_never_under_the_pointer`,
   `the_shortcut_records_the_pickers_screen_and_a_chip_discards_the_recording`,
   …), feed tests
-  (`the_shortcuts_recording_shows_its_chips_until_work_starts`,
+  (`the_shortcuts_recording_shows_no_target_chips`,
+  `the_pen_lights_while_drawing`,
   `a_rule_shows_once_and_only_news_the_capsule_cant_know_moves_it`,
   `a_queued_send_says_so_and_says_sent_when_it_goes`,
   `a_cabled_phone_shows_its_chip`, …),

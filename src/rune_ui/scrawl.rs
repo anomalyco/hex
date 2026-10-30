@@ -107,42 +107,24 @@ fn folder_label(ui: &Ui) -> String {
         .unwrap_or_else(|| folder.display().to_string())
 }
 
-/// The steps, each with its keys: start, draw, pin, undo, stop, then paste
-/// or send. Linux draws while its draw keys are held, as the Mac does with
-/// Shift.
+/// The steps, each with its keys: one key taps to start and stop and is
+/// held to draw; the capsule's pen draws without it; Esc stops drawing.
 fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
     let shortcut = ui.settings.capture.hotkey.keycaps();
     let keys = |key: &str, parts: &[String]| super::controls::keycaps(p, key, parts);
-    let owned = |parts: &[&str]| {
-        parts
-            .iter()
-            .map(|part| part.to_string())
-            .collect::<Vec<_>>()
+    let draw_how = if cfg!(target_os = "macos") {
+        tr(
+            "While it records, hold the shortcut and move the pointer; no click needed. Shift draws too",
+        )
+    } else {
+        tr("While it records, hold the shortcut and move the pointer; no click needed")
     };
-    #[cfg(target_os = "linux")]
-    let (draw, pin, undo, draw_how, pin_how, undo_how) = (
-        crate::app_settings::HotkeyBinding::annotate_draw().keycaps(),
-        crate::app_settings::HotkeyBinding::annotate_draw().keycaps(),
-        owned(&["Ctrl", "Z"]),
-        tr("Hold the draw keys and move the pointer"),
-        tr("Click while holding the draw keys"),
-        tr("Right-click, or Ctrl+Z, while holding the draw keys"),
-    );
-    #[cfg(not(target_os = "linux"))]
-    let (draw, pin, undo, draw_how, pin_how, undo_how) = (
-        owned(&["⇧"]),
-        owned(&["⇧"]),
-        owned(&["⌘", "Z"]),
-        tr("Hold Shift and move the pointer"),
-        tr("Shift-click drops a numbered pin"),
-        tr("Takes the last stroke back"),
-    );
     vec![
         setting_row(
             p,
             "how-start",
             tr("Start"),
-            Some(tr("Press the shortcut to start recording; talk as you go")),
+            Some(tr("Tap the shortcut to start recording; talk as you go")),
             keys("how-start-keys", &shortcut),
         ),
         setting_row(
@@ -150,28 +132,23 @@ fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
             "how-draw",
             tr("Draw"),
             Some(draw_how),
-            keys("how-draw-keys", &draw),
+            keys("how-draw-keys", &shortcut),
         ),
         setting_row(
             p,
-            "how-pin",
-            tr("Pin"),
-            Some(pin_how),
-            keys("how-pin-keys", &pin),
-        ),
-        setting_row(
-            p,
-            "how-undo",
-            tr("Undo"),
-            Some(undo_how),
-            keys("how-undo-keys", &undo),
+            "how-pen",
+            tr("Pen"),
+            Some(tr(
+                "Or click the pen on the capsule to draw until you click it again; Esc stops drawing",
+            )),
+            keys("how-pen-keys", &["Esc".to_string()]),
         ),
         setting_row(
             p,
             "how-stop",
             tr("Stop"),
             Some(tr(
-                "Press it again: the annotation is copied, ready to paste",
+                "Tap the shortcut again: the annotation is copied, ready to paste",
             )),
             keys("how-stop-keys", &shortcut),
         ),
@@ -220,10 +197,8 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
 
 fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
     let enabled = ui.settings.capture.enabled;
-    let purpose = if enabled && cfg!(target_os = "linux") {
-        tr("Press to start and again to stop")
-    } else if enabled {
-        tr("Press to start and again to stop; Esc cancels")
+    let purpose = if enabled {
+        tr("Tap to start and stop; hold while recording to draw")
     } else {
         tr("Saved for when Annotate is on")
     };

@@ -396,9 +396,9 @@ pub enum CaptureCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Turn drawing on or off while a recording runs, or start one that
-    /// draws (Ctrl+Alt+D). Bind it in your desktop's keyboard shortcuts when
-    /// it has no shortcuts portal.
+    /// Turn the pen on or off while a recording runs (as the capsule's pen),
+    /// or start one that draws. Bind it in your desktop's keyboard shortcuts
+    /// when it has no shortcuts portal.
     #[cfg(target_os = "linux")]
     Draw {
         #[command(flatten)]

@@ -225,7 +225,6 @@ pub enum Event {
     /// ⌥⇧S (or the configured shortcut) went down; `shortcut::Shortcut` decides what it means.
     CaptureShortcut,
     PasteLatestShortcut,
-    UndoStroke,
     RequestSnapshot,
     /// The iPhone mirror ended on its own (unplugged, never found, or access denied).
     PhoneEnded,
@@ -1065,7 +1064,6 @@ pub enum InputEvent {
     Flag {
         t_ms: u64,
     },
-    UndoStroke,
 }
 
 /// Whether `shift` is held alone without other modifiers and is not left over from a multi-modifier
@@ -1145,8 +1143,8 @@ impl InputSink {
         self.button_down(t_ms, x, y, false, true);
     }
 
-    pub fn shift_up(&self, t_ms: u64, x: f64, y: f64) -> bool {
-        self.telemetry.shift_up(t_ms, x, y)
+    pub fn shift_up(&self) -> bool {
+        self.telemetry.shift_up()
     }
 
     pub fn scroll(&self, t_ms: u64, x: f64, y: f64, dx: f64, dy: f64) {
@@ -1175,10 +1173,6 @@ impl InputSink {
 
     pub fn flag(&self, t_ms: u64) {
         self.send(InputEvent::Flag { t_ms });
-    }
-
-    pub fn undo_stroke(&self) -> bool {
-        self.telemetry.undo_last_stroke()
     }
 
     pub fn snapshot(&self) -> InkSnapshot {
@@ -1609,7 +1603,7 @@ impl SharedCaptureTelemetry {
             .push(event);
     }
 
-    /// The left button went down with only ⇧ held: a pin if it comes up as a click (`shift_up`).
+    /// The left button went down with only ⇧ held: drawing, never a click (`shift_up`).
     pub fn shift_down(&self, t_ms: u64, screen_x: f64, screen_y: f64) {
         if !self.contains_screen_point(screen_x, screen_y) {
             return;
@@ -1625,65 +1619,15 @@ impl SharedCaptureTelemetry {
             Some((t_ms, screen_x, screen_y, frame));
     }
 
-    /// The button of a ⇧-press came up (with or without ⇧ still held). A ⇧-click drops the next
-    /// numbered pin where it went down, unless ink was already drawn in this ⇧ hold: a click in
-    /// the middle of a drawing belongs to the drawing, so it neither pins nor counts as a click.
-    /// A ⇧-drag is left to the ink the poller is drawing. Returns whether a ⇧-press was waiting,
-    /// so the release isn't also taken as a click's.
-    pub fn shift_up(&self, t_ms: u64, screen_x: f64, screen_y: f64) -> bool {
-        let Some((t0, x0, y0, start_frame)) = self
-            .shift_press
+    /// The button of a ⇧-press came up (with or without ⇧ still held). A ⇧-press is part of
+    /// the drawing, never a click: returns whether one was waiting, so the release isn't taken
+    /// as a click's.
+    pub fn shift_up(&self) -> bool {
+        self.shift_press
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
-        else {
-            return false;
-        };
-        let frame = *self
-            .target_frame
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !same_target_frame(start_frame, frame)
-            || !is_pin_click((t0, x0, y0), (t_ms, screen_x, screen_y))
-        {
-            return true;
-        }
-        {
-            let mut live = self
-                .live_ink
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if live.as_ref().is_some_and(|ink| drew_before(ink, t0)) {
-                return true;
-            }
-            // ⇧ draws as it's held, so the live ink is only the click's jitter; further ink
-            // starts a new stroke.
-            *live = None;
-        }
-        let (nx, ny, fw, fh) = self.normalize_point(x0, y0);
-        let mut strokes = self
-            .strokes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let number = strokes.iter().filter(|s| s.pin.is_some()).count() as u32 + 1;
-        strokes.push(Stroke {
-            t0,
-            t1: t_ms,
-            fw,
-            fh,
-            on: None,
-            pin: Some(number),
-            laser: false,
-            pts: vec![
-                (nx * SCALE as f32).round() as i32,
-                (ny * SCALE as f32).round() as i32,
-                0,
-            ],
-        });
-        drop(strokes);
-        self.window_log_request.store(true, Ordering::Release);
-        let _ = self.ui_sender.try_send(Event::RequestSnapshot);
-        true
+            .is_some()
     }
 
     /// The helper process whose window is the capture target (the iPhone mirror).
@@ -1838,7 +1782,7 @@ impl SharedCaptureTelemetry {
 
     pub fn handle_input_with(&self, event: InputEvent, on_own_window: impl Fn(f64, f64) -> bool) {
         match event {
-            // A ⇧-press is never a click: a ⇧-click drops a pin, a ⇧-drag is ink.
+            // A ⇧-press is never a click: ⇧ is drawing.
             InputEvent::ButtonDown {
                 t_ms,
                 x,
@@ -1861,7 +1805,7 @@ impl SharedCaptureTelemetry {
                 right,
                 shift_only,
             } => {
-                let shift_press = !right && self.shift_up(t_ms, x, y);
+                let shift_press = !right && self.shift_up();
                 if !shift_press && !shift_only {
                     self.pointer_up(t_ms, x, y, right);
                 }
@@ -1891,9 +1835,6 @@ impl SharedCaptureTelemetry {
             }
             InputEvent::Flag { t_ms } => {
                 self.flag_at(t_ms);
-            }
-            InputEvent::UndoStroke => {
-                let _ = self.undo_last_stroke();
             }
         }
     }
@@ -1976,22 +1917,6 @@ impl SharedCaptureTelemetry {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
-    }
-
-    pub fn undo_last_stroke(&self) -> bool {
-        let mut live = self
-            .live_ink
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if live.take().is_some() {
-            return true;
-        }
-        drop(live);
-        self.strokes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop()
-            .is_some()
     }
 
     pub fn ink_snapshot(&self) -> InkSnapshot {
@@ -2091,16 +2016,8 @@ pub fn on_own_window(
 
 /// A press that moves less than this (points) before it's let go is a click, not a drag.
 pub const CLICK_SLOP_PT: f32 = 12.0;
-/// A ⇧-press held still for longer than this drops no pin.
-pub const PIN_MAX_PRESS_MS: u64 = 1_000;
 /// Ink spanning less than this (points) is a stationary ⇧ tap, not a stroke.
 pub const MIN_INK_SPAN_PT: f32 = 6.0;
-
-/// Whether a ⇧-press (`t`, global `x`, `y`) let go at `up` is a ⇧-click, which drops a pin.
-pub fn is_pin_click(down: (u64, f64, f64), up: (u64, f64, f64)) -> bool {
-    up.0.saturating_sub(down.0) <= PIN_MAX_PRESS_MS
-        && ((up.1 - down.1).hypot(up.2 - down.2) as f32) < CLICK_SLOP_PT
-}
 
 /// Whether `stroke`'s points before `before_ms` reach at least `MIN_INK_SPAN_PT` from its start.
 pub fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
@@ -3598,21 +3515,11 @@ mod tests {
         telemetry
     }
 
+    /// The poller draws ink while ⇧ is held. A ⇧-click is part of the drawing, never a click:
+    /// the stroke carries on whole, and a ⇧-click with nothing drawn (only its own jitter)
+    /// leaves no stroke once ⇧ comes up.
     #[test]
-    fn a_long_still_shift_press_drops_no_pin() {
-        let down = (1_000, 10.0, 10.0);
-        let slop = f64::from(CLICK_SLOP_PT);
-        assert!(is_pin_click(down, (1_150, 14.0, 13.0)));
-        assert!(is_pin_click(down, (1_000 + PIN_MAX_PRESS_MS, 10.0, 10.0)));
-        assert!(!is_pin_click(down, (2_500, 10.0, 10.0)));
-        assert!(!is_pin_click(down, (1_100, 10.0, 10.0 + slop)));
-    }
-
-    /// The poller draws ink while ⇧ is held. A ⇧-click after ink was drawn in the same hold is
-    /// part of the drawing: no pin, and the stroke carries on whole. A ⇧-click with nothing drawn
-    /// first (only its own jitter) drops a pin and leaves no stroke.
-    #[test]
-    fn a_shift_click_mid_drawing_drops_no_pin() {
+    fn a_shift_click_is_part_of_the_drawing() {
         let telemetry = session(1000.0, 1000.0);
         let ink = |pts: &[(i32, i32, i32)]| Stroke {
             t0: 0,
@@ -3635,7 +3542,7 @@ mod tests {
         ]);
         *telemetry.live_ink.lock().unwrap() = Some(line.clone());
         telemetry.shift_down(press, 200.0, 500.0);
-        assert!(telemetry.shift_up(press + 80, 201.0, 500.0));
+        assert!(telemetry.shift_up());
         assert_eq!(telemetry.live_ink.lock().unwrap().as_ref(), Some(&line));
         // Letting go of ⇧ commits it as one stroke.
         let at = (200.0, 500.0);
@@ -3645,25 +3552,26 @@ mod tests {
         *telemetry.live_ink.lock().unwrap() = Some(ink(&[(s / 10, s / 10, 0), (s / 5, s / 10, 1)]));
         let t = telemetry.elapsed_ms() + 5_000;
         telemetry.shift_down(t, 200.0, 100.0);
-        assert!(telemetry.shift_up(t + 60, 200.0, 100.0));
+        assert!(telemetry.shift_up());
         *telemetry.live_ink.lock().unwrap() = None;
 
-        // A ⇧-click with only its own few points of jitter is a pin.
+        // A ⇧-click with only its own few points of jitter leaves nothing.
         let jitter = ink(&[(s / 2, s / 2, 0), (s / 2 + 2, s / 2, 30)]);
         *telemetry.live_ink.lock().unwrap() = Some(jitter);
         let t = telemetry.elapsed_ms();
         telemetry.shift_down(t, 500.0, 500.0);
-        assert!(telemetry.shift_up(t + 60, 500.0, 500.0));
-        assert!(telemetry.live_ink.lock().unwrap().is_none());
+        assert!(telemetry.shift_up());
+        assert!(!telemetry.shift_up(), "one press, one release");
+        track_shift_ink(&telemetry, (500.0, 500.0), false, true);
 
         let (events, strokes) = telemetry.finish_session();
         assert!(events.is_empty(), "{events:?}");
         let kinds: Vec<_> = strokes.iter().map(|s| (s.pin, s.pts.len() / 3)).collect();
-        assert_eq!(kinds, vec![(None, 3), (Some(1), 1)]);
+        assert_eq!(kinds, vec![(None, 3)]);
     }
 
     #[test]
-    fn shift_clicks_drop_pins_from_polled_buttons_too() {
+    fn shift_clicks_from_polled_buttons_are_neither_clicks_nor_pins() {
         let telemetry = session(1000.0, 1000.0);
         let mut prev = [false; 2];
         // ⇧-clicks at a point, the second on Scrawl's own window.
@@ -3674,13 +3582,11 @@ mod tests {
         }
         let (events, strokes) = telemetry.finish_session();
         assert!(events.is_empty(), "{events:?}");
-        assert_eq!(strokes.len(), 1);
-        assert_eq!(strokes[0].pin, Some(1));
-        assert_eq!(strokes[0].normalized_points(), vec![[0.25, 0.75]]);
+        assert!(strokes.is_empty(), "{strokes:?}");
     }
 
     #[test]
-    fn input_sink_routes_clicks_pins_ink_and_chord_release() {
+    fn input_sink_routes_clicks_ink_and_chord_release() {
         let telemetry = session(1000.0, 1000.0);
         let sink = InputSink::new(Arc::clone(&telemetry));
 
@@ -3699,16 +3605,11 @@ mod tests {
         sink.ink(160, 180.0, 200.0, false);
         assert_eq!(sink.snapshot().strokes.len(), 1);
 
-        // Shift-click pin via pointer_down/up while shift_held is active.
+        // A Shift-click (pointer_down/up while shift_held) is neither a click nor a pin.
         sink.ink(200, 500.0, 500.0, true);
         sink.pointer_down(210, 500.0, 500.0);
         sink.pointer_up(240, 500.0, 500.0, false);
         sink.ink(250, 500.0, 500.0, false);
-        assert_eq!(sink.snapshot().strokes.len(), 2);
-        assert_eq!(sink.snapshot().strokes[1].pin, Some(1));
-
-        // Undo removes the pin, leaving the ink stroke.
-        assert!(sink.undo_stroke());
         assert_eq!(sink.snapshot().strokes.len(), 1);
 
         // Key chord and flag.

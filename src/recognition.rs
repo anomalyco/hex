@@ -767,6 +767,10 @@ pub fn listen(
             }
             #[cfg(hex_capture)]
             if let Some(host) = capture_host.as_mut() {
+                // Escape while drawing stops drawing, never the recording.
+                if input_event.is_escape_down() && crate::capture_host::exit_drawing() {
+                    continue;
+                }
                 let activity = host.shortcut_activity(capture_at, &input);
                 let action = capture_shortcut.input(
                     input_event,
@@ -911,8 +915,9 @@ pub fn listen(
                 event => handle_dictation_event(event, &mut events, indicator.as_ref())?,
             }
         }
-        // A recording capture never takes Escape: only the capture
-        // shortcut's press before it starts, and the capsule's picker.
+        // A recording capture takes Escape only while it draws (Escape stops
+        // drawing); otherwise only the capture shortcut's press before it
+        // starts, and the capsule's picker.
         #[cfg(hex_capture)]
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]

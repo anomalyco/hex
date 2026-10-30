@@ -13,7 +13,7 @@ use super::ink::InkOverlay;
 use super::picker::PickerOverlay;
 use crate::capture_host::{
     CaptureCommand, CaptureRoute, CaptureSnapshot, CaptureTarget, RouteAnswer, RouteDelivery,
-    RouteDest, TargetKind,
+    RouteDest,
 };
 
 /// The capture the capsule shows, the stage it last showed, and whether its
@@ -93,10 +93,9 @@ impl Follow {
                 self.route = None;
                 self.worked = recording.worked;
                 self.began = recording.screen;
+                // No target chips: Annotate records the screen, and the
+                // capsule's toolbar (the pen) takes their place.
                 inputs.push(Input::Stage(Stage::Recording));
-                if recording.target == TargetKind::Pointer && !recording.worked {
-                    inputs.push(Input::Chips);
-                }
             } else if recording.worked && !self.worked {
                 self.worked = true;
                 inputs.push(Input::Worked);
@@ -295,6 +294,8 @@ impl CaptureOverlays {
         let capsule = CaptureCapsule::install(app, move |action| act(aim.resolve(action)));
         capsule.attach(picker.clone());
         let ink = InkOverlay::install(app);
+        let lit = capsule.clone();
+        super::ink::on_drawing(move |on| lit.input(Input::Drawing(on)));
         follow(capsule.clone(), ink.clone());
         Self {
             capsule,
@@ -419,6 +420,10 @@ pub(crate) fn act(action: Action) {
             always: always.is_some(),
         })],
         Action::Undo { .. } => vec![command(CaptureCommand::Undo)],
+        Action::Pen => {
+            crate::capture_host::toggle_pen();
+            return;
+        }
         Action::Paste => vec![command(CaptureCommand::Paste)],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
     };
@@ -484,7 +489,7 @@ mod tests {
                 bundle: bundle(name),
                 since: CaptureInstant::now(),
                 screen: true,
-                target: TargetKind::Display,
+                target: crate::capture_host::TargetKind::Display,
                 worked: false,
             }),
             finishing: Vec::new(),
@@ -637,19 +642,14 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcuts_recording_shows_its_chips_until_work_starts() {
+    fn the_shortcuts_recording_shows_no_target_chips() {
         let mut follow = Follow::default();
         let mut a = recording("a");
-        a.recording.as_mut().unwrap().target = TargetKind::Pointer;
-        assert_eq!(
-            follow.next(&a),
-            [Input::Stage(Stage::Recording), Input::Chips]
-        );
+        a.recording.as_mut().unwrap().target = crate::capture_host::TargetKind::Pointer;
+        assert_eq!(follow.next(&a), [Input::Stage(Stage::Recording)]);
         a.recording.as_mut().unwrap().worked = true;
         assert_eq!(follow.next(&a), [Input::Worked]);
-        assert_eq!(follow.next(&a), [], "work folds the chips once");
-        // A chip discarded it: nothing settles. The capsule is the picker
-        // by then, which a gone recording leaves alone (flow's test).
+        assert_eq!(follow.next(&a), []);
         assert_eq!(follow.next(&CaptureSnapshot::default()), [Input::Gone]);
         assert_eq!(follow.next(&CaptureSnapshot::default()), []);
     }

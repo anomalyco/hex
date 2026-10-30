@@ -697,7 +697,7 @@ pub(crate) struct CaptureCapsule {
 
 /// Panel points from the screen's top to the panel's: the capsule rests
 /// just under the menu bar.
-const PANEL_MARGIN: f32 = 14.0;
+pub(crate) const PANEL_MARGIN: f32 = 14.0;
 
 impl CaptureCapsule {
     /// Adds the capsule's overlay, prewarmed and hidden. `act` carries out
@@ -1042,8 +1042,55 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .hit()
                 .on_press_tx(press(id))
         }
-        Id::Record | Id::Finish => {
-            let name = if id == Id::Record { "Record" } else { "Finish" };
+        // The recording's toolbar: the pen, lit with the accent while
+        // drawing. Later tools join it, before the divider.
+        Id::Pen => {
+            let lit = shown.active;
+            let ink = if lit { c.bg_base } else { p.muted() };
+            let button = icon_button(
+                p,
+                canvas(icon(id, 16.0 * 1.75 / 24.0, ink)).size(16.0, 16.0),
+            );
+            let button = if lit { button.fill(p.accent()) } else { button };
+            base.child(
+                button
+                    .role("button")
+                    .label("Draw")
+                    .help("Draw")
+                    .hit()
+                    .on_press_tx(press(id)),
+            )
+        }
+        Id::Divider => base.child(el().size(surface::DIVIDER_W, 16.0).fill(c.border_base)),
+        // Stop: a filled square, Finish's icon.
+        Id::Finish => {
+            let side = 10.0;
+            let square = Shape::new()
+                .view_box(side, side)
+                .fill_path(&rounded(0.0, 0.0, side, side, 2.0), p.text());
+            base.child(
+                icon_button(p, canvas(square).size(side, side))
+                    .role("button")
+                    .label("Stop")
+                    .help("Stop")
+                    .hit()
+                    .on_press_tx(press(id)),
+            )
+        }
+        // Cancel: ✕, which asks before discarding.
+        Id::Cancel => base.child(
+            icon_button(
+                p,
+                canvas(icon(Id::Close, 12.0 * 2.4 / 24.0, p.muted())).size(12.0, 12.0),
+            )
+            .role("button")
+            .label("Discard")
+            .help("Discard")
+            .hit()
+            .on_press_tx(press(id)),
+        ),
+        Id::Record => {
+            let name = "Record";
             base.radius(surface::CHIP_RADIUS)
                 .fill(c.bg_contrast)
                 .hover(c.contrast_hover)
@@ -1054,12 +1101,8 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .hit()
                 .on_press_tx(press(id))
         }
-        Id::Cancel | Id::Keep => {
-            let name = if id == Id::Cancel {
-                "Cancel"
-            } else {
-                surface::KEEP_LABEL
-            };
+        Id::Keep => {
+            let name = surface::KEEP_LABEL;
             base.radius(surface::CHIP_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
@@ -1804,6 +1847,17 @@ fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
         .close()
 }
 
+/// A square icon button as tall as the capsule's chips, the icon centred.
+fn icon_button(p: Paint, icon: El) -> El {
+    row()
+        .center()
+        .size(CHIP_H, CHIP_H)
+        .radius(surface::CHIP_RADIUS)
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+        .child(icon)
+}
+
 /// Scrawl's line icons on their 24 × 24 grid; `Id::Why` is the warning.
 fn icon(id: Id, width: f32, color: Color) -> Shape {
     let mut paths: Vec<Path> = Vec::new();
@@ -1865,6 +1919,19 @@ fn icon(id: Id, width: f32, color: Color) -> Shape {
         }
         // An eye, two circular arcs meeting at its corners, and its pupil:
         // look at the capture.
+        Id::Pen => {
+            // A pencil, tip at the bottom left.
+            paths.push(
+                Path::new()
+                    .move_to([16.5, 3.5])
+                    .line_to([20.5, 7.5])
+                    .line_to([8.0, 20.0])
+                    .line_to([3.5, 20.5])
+                    .line_to([4.0, 16.0])
+                    .close(),
+            );
+            paths.push(line([13.5, 6.5], [17.5, 10.5]));
+        }
         Id::Inspect => {
             paths.push(
                 Path::new()

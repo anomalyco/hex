@@ -692,8 +692,12 @@ impl HotkeyBinding {
         binding
     }
 
-    /// Option-Shift-S, Scrawl's capture shortcut; Ctrl+Alt+S on Linux, beside
-    /// its other Ctrl+Alt defaults.
+    /// Option-Shift-S, Scrawl's capture shortcut; F9 on Linux. Annotate's
+    /// one key is held to draw while the other hand moves the mouse, so on
+    /// Linux it's a single key one hand holds easily: F9 is free in Hex's
+    /// defaults (Alt+Space, Ctrl+Alt+V) and in the common desktops', where
+    /// F10 opens GTK's menu bar, F11 is full screen and F12 is often a
+    /// dropdown terminal.
     #[cfg(hex_capture)]
     pub fn capture_default() -> Self {
         #[cfg(target_os = "macos")]
@@ -709,17 +713,8 @@ impl HotkeyBinding {
             }),
         };
         #[cfg(not(target_os = "macos"))]
-        let binding = Self::chord(HotkeyModifiers::control_option(), "s");
+        let binding = Self::chord(HotkeyModifiers::default(), "f9");
         binding
-    }
-
-    /// Ctrl+Alt+D, held to draw while Annotate records (Linux): Shift alone,
-    /// the Mac's draw key, can't be a desktop shortcut, and Ctrl+Alt+D sits
-    /// beside Annotate's Ctrl+Alt+S under the left hand, takes nothing from
-    /// apps while it isn't held for long, and no other default uses it.
-    #[cfg(all(hex_capture, target_os = "linux"))]
-    pub fn annotate_draw() -> Self {
-        Self::chord(HotkeyModifiers::control_option(), "d")
     }
 
     pub fn paste_meeting_default() -> Self {
@@ -1390,7 +1385,8 @@ impl Default for DictationPostProcessing {
 #[serde(default)]
 pub struct CaptureSettings {
     pub enabled: bool,
-    /// Press once to start a capture and again to finish it.
+    /// Annotate's one key: tap to start and stop, hold while recording to
+    /// draw.
     pub hotkey: HotkeyBinding,
     pub transcriber: CaptureTranscriber,
     /// Where new captures go; `None` is Scrawl's own captures folder.

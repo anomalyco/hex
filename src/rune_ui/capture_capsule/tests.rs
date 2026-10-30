@@ -213,6 +213,12 @@ fn stills() -> Vec<(&'static str, Pres)> {
             after(&beats)
         }),
         ("list-guess", after(&open(guess()))),
+        ("recording-drawing", {
+            let mut flow = Flow::new();
+            flow.input(Input::Stage(Stage::Recording), 0.0);
+            flow.input(Input::Drawing(true), 0.5);
+            flow.pres(1.0)
+        }),
         ("list-rule", after(&open(rule()))),
         ("list-no-answer", after(&open(no_answer()))),
         ("list-typed", {
@@ -504,6 +510,7 @@ const GOLDENS: &[&str] = &[
     "recording-discard",
     "recording-chips",
     "recording-chips-iphone",
+    "recording-drawing",
     "picker-iphone",
     "processing",
     "saved",
@@ -1166,7 +1173,7 @@ fn ink_on_screen(s: &super::ink::InkState, cx: &mut rune::Cx<super::ink::InkStat
 }
 
 /// A full-screen capture as it plays out: the start glow, ink drawn with
-/// Shift held and lifted, a laser sweep, then a ⇧-click pin.
+/// Shift held and lifted, then a laser sweep.
 fn ink_at(now: u64) -> super::ink::Scene {
     use scrawl_capture::capture::InkSnapshot;
 
@@ -1188,8 +1195,6 @@ fn ink_at(now: u64) -> super::ink::Scene {
     let ink = stroke(&wave([0.1, 0.32], [0.52, 0.3], 32, 0.06), 200, 12, false);
     let lifted = ink.t1;
     let laser = stroke(&wave([0.18, 0.72], [0.86, 0.52], 52, 0.07), 900, 13, true);
-    let mut pin = stroke(&[[0.72, 0.26]], 1_700, 1, false);
-    pin.pin = Some(1);
     let mut snapshot = InkSnapshot {
         target: frame(),
         strokes: Vec::new(),
@@ -1201,9 +1206,6 @@ fn ink_at(now: u64) -> super::ink::Scene {
         snapshot.live = until(ink);
     } else {
         snapshot.strokes.push(ink);
-    }
-    if now >= pin.t0 {
-        snapshot.strokes.push(pin);
     }
     let tip = (200..lifted).contains(&now).then(|| {
         let live = snapshot.live.as_ref().map(|s| s.normalized_points());

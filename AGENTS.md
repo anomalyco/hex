@@ -732,17 +732,22 @@ CoreAudio formats, AppleScript details, or event serialization.
   and shows no pane. Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
   dialog at its first Screen capture. Default shortcuts share no key with
-  the other defaults: ⌥⇧S on macOS, Ctrl+Alt+S and Ctrl+Alt+D (held to
-  draw) on Linux. There is no send-to list shortcut; Send to… is a capsule
-  click. Drawing on Linux lasts while Ctrl+Alt+D is held (portal
-  Activated/Deactivated), as Shift on the Mac: the ink overlay becomes a
-  full-screen surface that takes the pointer (`capture_host::draw`: moving
-  is Shift ink, a click a pin, a right-click undoes); `hex annotate draw`
-  toggles it for desktops without the portal. While a capture records, the
+  the other defaults: ⌥⇧S on macOS, F9 on Linux. One key does everything:
+  a tap (under `DRAW_HOLD`) starts and stops; held while recording, the
+  pointer draws with no click until it comes up (Linux: portal
+  Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
+  icons only, with no target chips; its pen turns drawing on until
+  clicked again, and Esc stops drawing, never the recording. Shift still
+  draws on the Mac. While drawing, the ink overlay takes the pointer with
+  a pen cursor (Linux leaves a hole over the capsule's pill), so clicks
+  reach neither the app nor anything but the capsule. Ink has no pins and
+  no undo. There is no separate draw shortcut and no send-to list
+  shortcut; Send to… is a capsule click. `hex annotate draw` toggles the
+  pen for desktops without the portal. While a capture records, the
   dictation and Voice Action shortcuts start nothing on either OS. Sends
   carry the contact sheet and keyframes as inline `data:` image parts, never
   a local path. The Linux capsule doesn't open suggestions by itself.
-  While drawing, clicks never reach the apps or the capsule. `validate-app.sh` requires
+  `validate-app.sh` requires
   `scrawl-helper` and the camera description in a macOS bundle. Linux
   never links PipeWire, VA-API, or FFmpeg: the first two load when a
   capture starts and `ffmpeg` runs as a child, so a missing one fails that
@@ -762,17 +767,19 @@ CoreAudio formats, AppleScript details, or event serialization.
   `capture.routing` never holds a Jev key. A cabled iPhone records through
   `scrawl-helper mirror --no-microphone`, narrated by the dictation timeline
   (macOS only: Linux lists no phone, so it never shows). Hex's capture
-  shortcut (default ⌥⇧S, Ctrl+Alt+S on Linux, a key required, never
-  overlapping another binding) is, on Linux, a press from the portal or an
-  X11 grab: idle it starts, recording it stops (debounced). On macOS it is
-  a fresh press: idle, it starts once one of its modifiers comes up (Esc
-  before then records nothing); recording, it stops; with the capsule's
-  picker open, the picker records. A switch chip discards the recording
-  (no outcome) rather than retargeting it; while Scrawl.app
+  shortcut (default ⌥⇧S, F9 on Linux, a key required, never overlapping
+  another binding) is, on Linux, the portal's or an X11 grab's press and
+  release: idle a press starts, recording a tap stops (debounced) and a
+  hold draws. On macOS it is a fresh press: idle, it starts once one of its
+  modifiers comes up (Esc before then records nothing); recording, a tap
+  stops and a hold draws; with the capsule's picker open, the picker
+  records. A switch (CLI) discards the recording (no outcome) rather than
+  retargeting it; while Scrawl.app
   (`dev.kitlangton.scrawl`) runs, Hex registers no capture shortcut and runs
   no retention, and only the pane's "Use Hex for captures" quits Scrawl.
-  Escape never ends a recording capture, and Hex's tap lets it through to
-  the app being recorded; discarding is the capsule's two-step ✕ (✕, then
+  Escape never ends a recording capture (while drawing it only stops
+  drawing), and otherwise Hex's tap lets it through to the app being
+  recorded; discarding is the capsule's two-step ✕ (✕, then
   Discard). Pointer
   events and Shift reach the engine from the one session tap, only while a
   capture records, through a bounded queue that drops rather than block; they

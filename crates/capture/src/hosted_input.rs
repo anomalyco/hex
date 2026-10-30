@@ -3,11 +3,11 @@
 //! Scrawl's app reads the mouse, keys and modifiers itself (a key tap, a global mouse monitor and
 //! an 8 ms poller). A host that runs the engine with `SharedResources::none()`, such as Hex,
 //! reports what its own tap sees instead, and these pure rules turn that into the
-//! [`InputEvent`]s Scrawl's taps and poller would have sent: `⇧` alone draws ink, `⇧`-clicks drop
-//! pins, `⌘Z` undoes a stroke, and only `⌘`/`⌃` chords are logged, never ordinary typing.
-//! Pin and ink thresholds and clicks on the host's own windows are then decided by
+//! [`InputEvent`]s Scrawl's taps and poller would have sent: `⇧` alone draws ink (a `⇧`-click is
+//! part of the drawing), and only `⌘`/`⌃` chords are logged, never ordinary typing.
+//! Ink thresholds and clicks on the host's own windows are then decided by
 //! [`SharedCaptureTelemetry::handle_input`](crate::capture::SharedCaptureTelemetry::handle_input)
-//! with [`is_pin_click`](crate::capture::is_pin_click), [`is_real_ink`](crate::capture::is_real_ink)
+//! with [`is_real_ink`](crate::capture::is_real_ink)
 //! and [`on_own_window`](crate::capture::on_own_window).
 
 use crate::capture::{InputEvent, pure_shift_state};
@@ -60,11 +60,9 @@ pub enum HostInput {
         y: f64,
         modifiers: Modifiers,
     },
-    /// A fresh key press, never an autorepeat: its name on the user's layout ([`key_name`]), and
-    /// whether it is the layout's Z.
+    /// A fresh key press, never an autorepeat: its name on the user's layout ([`key_name`]).
     Key {
         name: Option<String>,
-        z: bool,
         modifiers: Modifiers,
     },
 }
@@ -137,28 +135,20 @@ impl HostedInput {
             HostInput::Scroll { x, y, dx, dy } => {
                 (dx != 0.0 || dy != 0.0).then_some(InputEvent::Scroll { t_ms, x, y, dx, dy })
             }
-            HostInput::Key { name, z, modifiers } => key_input(t_ms, name.as_deref(), z, modifiers),
+            HostInput::Key { name, modifiers } => key_input(t_ms, name.as_deref(), modifiers),
         }
     }
 }
 
-/// `⌘Z` undoes the last stroke; other `⌘`/`⌃` chords are logged by name (`⌃⌥⇧⌘` order, as Scrawl
+/// `⌘`/`⌃` chords are logged by name (`⌃⌥⇧⌘` order, as Scrawl
 /// writes them). Keys without `⌘` or `⌃` are typing and never leave the host.
-pub fn key_input(
-    t_ms: u64,
-    name: Option<&str>,
-    z: bool,
-    modifiers: Modifiers,
-) -> Option<InputEvent> {
+pub fn key_input(t_ms: u64, name: Option<&str>, modifiers: Modifiers) -> Option<InputEvent> {
     let Modifiers {
         command,
         control,
         option,
         shift,
     } = modifiers;
-    if command && !control && !option && !shift && z {
-        return Some(InputEvent::UndoStroke);
-    }
     if !command && !control {
         return None;
     }
@@ -304,7 +294,7 @@ mod tests {
         };
         assert!(!click(&mut input, true, SHIFT));
         assert!(!click(&mut input, false, SHIFT));
-        // ⇧ comes up and goes down again: now it pins.
+        // ⇧ comes up and goes down again: now it draws.
         assert!(!click(&mut input, true, Modifiers::default()));
         assert!(click(&mut input, true, SHIFT));
     }
@@ -390,13 +380,16 @@ mod tests {
     }
 
     #[test]
-    fn command_z_undoes_and_only_modifier_chords_are_logged() {
+    fn only_modifier_chords_are_logged() {
         assert_eq!(
-            key_input(9, Some("Z"), true, COMMAND),
-            Some(InputEvent::UndoStroke)
+            key_input(9, Some("Z"), COMMAND),
+            Some(InputEvent::KeyChord {
+                t_ms: 9,
+                shortcut: "⌘Z".into()
+            })
         );
         assert_eq!(
-            key_input(9, Some("B"), false, COMMAND),
+            key_input(9, Some("B"), COMMAND),
             Some(InputEvent::KeyChord {
                 t_ms: 9,
                 shortcut: "⌘B".into()
@@ -409,16 +402,16 @@ mod tests {
             shift: true,
         };
         assert_eq!(
-            key_input(9, Some("Z"), true, all),
+            key_input(9, Some("Z"), all),
             Some(InputEvent::KeyChord {
                 t_ms: 9,
                 shortcut: "⌃⌥⇧⌘Z".into()
             })
         );
         // Typing, with or without ⇧ or ⌥, never leaves the host.
-        assert_eq!(key_input(9, Some("A"), false, Modifiers::default()), None);
-        assert_eq!(key_input(9, Some("A"), false, OPTION_SHIFT), None);
-        assert_eq!(key_input(9, None, false, COMMAND), None);
+        assert_eq!(key_input(9, Some("A"), Modifiers::default()), None);
+        assert_eq!(key_input(9, Some("A"), OPTION_SHIFT), None);
+        assert_eq!(key_input(9, None, COMMAND), None);
     }
 
     #[test]

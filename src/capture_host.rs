@@ -440,6 +440,13 @@ pub fn set_capsule_pill(pill: Option<[f32; 4]>) {
         .unwrap_or_else(|error| error.into_inner()) = pill;
 }
 
+/// The capsule's pill in its panel's points, while it shows.
+pub fn capsule_pill() -> Option<[f32; 4]> {
+    *CAPSULE_PILL
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 /// Whether a click lands on the capsule's pill, which takes it, rather than
 /// the app beneath. The panel's place comes from the window list, reread at
 /// most every 250 ms (scrolls come in bursts); it only moves between
@@ -1506,19 +1513,42 @@ impl CaptureHost {
     }
 
     /// `hex annotate draw` (Linux, for desktops without the shortcuts
-    /// portal): while a capture records it turns drawing on or off;
-    /// otherwise it starts one, and true says drawing should turn on once
+    /// portal): while a capture records it turns the pen on or off;
+    /// otherwise it starts one, and true says the pen should turn on once
     /// its engine takes input.
     #[cfg(target_os = "linux")]
     pub fn draw_shortcut(&mut self, audio: &impl AudioTimeline) -> bool {
         if self.recording_since(audio).is_some() {
-            set_drawing(!drawing());
+            toggle_pen();
             return false;
         }
         !matches!(
             self.shortcut(ShortcutAction::Record, audio),
             ControlReply::Error { .. }
         )
+    }
+
+    /// The Annotate key went down (Linux: the portal's Activated, or the
+    /// X11 grab's press). Nothing recording, it starts one; recording, it
+    /// waits to see whether this is a tap or a hold ([`Self::annotate_up`]).
+    #[cfg(target_os = "linux")]
+    pub fn annotate_down(&mut self, audio: &impl AudioTimeline) {
+        match self.shortcut_activity(CaptureInstant::now(), audio) {
+            ShortcutActivity::Recording { elapsed } if elapsed < SHORTCUT_DEBOUNCE => {}
+            ShortcutActivity::Recording { .. } => annotate_key_down(),
+            activity => {
+                self.shortcut(activity.on_press(), audio);
+            }
+        }
+    }
+
+    /// The Annotate key came up: a tap stops the recording, a hold only
+    /// stops drawing.
+    #[cfg(target_os = "linux")]
+    pub fn annotate_up(&mut self, audio: &impl AudioTimeline) {
+        if annotate_key_up() == KeyUp::Tap {
+            self.shortcut(ShortcutAction::Finish, audio);
+        }
     }
 
     /// The `capture-retention` thread: Scrawl's cleanup of the captures
@@ -2030,64 +2060,163 @@ pub fn report_input(at: CaptureInstant, input: Tapped) {
 }
 
 // ---------------------------------------------------------------------------
-// Drawing on Linux, as Shift on the Mac. Wayland reports no pointer to Hex
-// outside its own surfaces, so while the draw shortcut is held during a
-// recording, the ink overlay takes the pointer: moving it draws Scrawl's
-// Shift ink, a click drops a pin, and a right-click or Ctrl+Z undoes the
-// last stroke. Let go, and the stroke ends and clicks reach the apps again.
+// Drawing. One key does everything: a tap starts a recording and a tap
+// stops it; held while it records, the pointer draws (no click) until the
+// key comes up. The capsule's pen turns drawing on until it's clicked
+// again, the key is tapped or held and let go, or Escape. Shift still
+// draws on the Mac. While drawing, the ink overlay takes the pointer, so
+// clicks never reach the app; on Linux, where Wayland tells Hex nothing of
+// the pointer elsewhere, its moves are the strokes (`draw`).
 
-/// The ink overlay takes the pointer and draws.
-#[cfg(target_os = "linux")]
-static DRAWING: AtomicBool = AtomicBool::new(false);
+/// A press shorter than this is a tap; held longer while recording, it
+/// draws.
+pub const DRAW_HOLD: Duration = Duration::from_millis(250);
 
-/// Whether the ink overlay draws now: only while a capture records.
-#[cfg(target_os = "linux")]
-pub fn drawing() -> bool {
-    DRAWING.load(Ordering::Acquire) && wants_input()
+/// When the Annotate key went down while a capture recorded, until it comes
+/// up.
+static DRAW_HELD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// The capsule's pen is on.
+static PEN: AtomicBool = AtomicBool::new(false);
+
+fn draw_held() -> std::sync::MutexGuard<'static, Option<std::time::Instant>> {
+    DRAW_HELD.lock().unwrap_or_else(|error| error.into_inner())
 }
 
-/// Turns drawing on or off for the recording capture; nothing records,
-/// nothing changes. Turning it off ends a stroke under way.
-#[cfg(target_os = "linux")]
-pub fn set_drawing(on: bool) {
+/// Whether the pointer draws now: only while a capture records, with the
+/// pen on or the Annotate key held past [`DRAW_HOLD`].
+pub fn drawing() -> bool {
+    wants_input()
+        && (PEN.load(Ordering::Acquire)
+            || draw_held().is_some_and(|since| since.elapsed() >= DRAW_HOLD))
+}
+
+/// The Annotate key went down while a capture records.
+pub fn annotate_key_down() {
+    draw_held().get_or_insert_with(std::time::Instant::now);
+}
+
+/// What the Annotate key's release while recording was.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyUp {
+    /// Not pressed while recording: nothing.
+    Unpressed,
+    /// Let go before [`DRAW_HOLD`]: the tap that stops the recording.
+    Tap,
+    /// Held to draw: drawing ends (the pen too) and the recording goes on.
+    Drew,
+}
+
+/// The Annotate key came up.
+pub fn annotate_key_up() -> KeyUp {
+    let Some(since) = draw_held().take() else {
+        return KeyUp::Unpressed;
+    };
+    if since.elapsed() < DRAW_HOLD {
+        return KeyUp::Tap;
+    }
+    PEN.store(false, Ordering::Release);
+    end_stroke();
+    KeyUp::Drew
+}
+
+/// The capsule's pen: drawing on until it's clicked again.
+pub fn toggle_pen() {
+    set_pen(!PEN.load(Ordering::Acquire));
+}
+
+/// Turns the pen on or off while a capture records.
+pub fn set_pen(on: bool) {
     if !wants_input() {
-        DRAWING.store(false, Ordering::Release);
+        PEN.store(false, Ordering::Release);
         return;
     }
-    if DRAWING.swap(on, Ordering::AcqRel) == on {
-        return;
+    if PEN.swap(on, Ordering::AcqRel) != on {
+        tracing::info!(on, "Annotate pen");
+        if !on {
+            end_stroke();
+        }
     }
-    tracing::info!(on, "Annotate drawing");
-    if on {
-        return;
+}
+
+/// Escape: stops drawing, never the recording. True when something drew.
+pub fn exit_drawing() -> bool {
+    let drew = drawing();
+    *draw_held() = None;
+    PEN.store(false, Ordering::Release);
+    if drew {
+        end_stroke();
     }
+    drew
+}
+
+/// Forgets the key and the pen: a new capture starts without drawing.
+fn reset_drawing() {
+    *draw_held() = None;
+    PEN.store(false, Ordering::Release);
+}
+
+/// Ends a stroke under way where the pointer is, as letting go of Shift does.
+fn end_stroke() {
+    let [x, y] = ink_source()
+        .map(|source| {
+            *source
+                .telemetry
+                .pointer_screen
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+        })
+        .unwrap_or_default();
     report_input(
         CaptureInstant::now(),
         Tapped::Pointer(HostInput::Moved {
-            x: 0.0,
-            y: 0.0,
+            x: f64::from(x),
+            y: f64::from(y),
             modifiers: Modifiers::default(),
         }),
     );
 }
 
-/// What the pointer does on the drawing overlay: it draws as it moves,
-/// like Shift on the Mac; a press and release is a pin.
-#[cfg(target_os = "linux")]
-#[derive(Clone, Copy, Debug)]
-pub enum Draw {
-    Down,
-    Move,
-    Up,
-    /// A right-click: take the last stroke back.
-    Undo,
+/// While drawing, every pointer event draws as if Shift alone were held,
+/// whatever the keys (the Annotate key's own modifiers included).
+fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture::InputEvent {
+    use scrawl_capture::capture::InputEvent;
+    if !drawing() {
+        return event;
+    }
+    match event {
+        InputEvent::Move { t_ms, x, y, .. } => InputEvent::Move {
+            t_ms,
+            x,
+            y,
+            shift_only: true,
+        },
+        InputEvent::ButtonDown {
+            t_ms, x, y, right, ..
+        } => InputEvent::ButtonDown {
+            t_ms,
+            x,
+            y,
+            right,
+            shift_only: true,
+        },
+        InputEvent::ButtonUp {
+            t_ms, x, y, right, ..
+        } => InputEvent::ButtonUp {
+            t_ms,
+            x,
+            y,
+            right,
+            shift_only: true,
+        },
+        event => event,
+    }
 }
 
-/// One pointer event on the drawing overlay, at `x`, `y` in its points;
-/// `scale` is its pixels per point. The capture's target becomes the
-/// recorded screen in points, so strokes land where they were drawn.
+/// A pointer move on the drawing overlay, at `x`, `y` in its points;
+/// `scale` is its pixels per point (Linux). The capture's target becomes
+/// the recorded screen in points, so strokes land where they were drawn.
 #[cfg(target_os = "linux")]
-pub fn draw(event: Draw, x: f32, y: f32, scale: f32) {
+pub fn draw(x: f32, y: f32, scale: f32) {
     if !drawing() {
         return;
     }
@@ -2106,44 +2235,17 @@ pub fn draw(event: Draw, x: f32, y: f32, scale: f32) {
         frame.width = f64::from(area[0]);
         frame.height = f64::from(area[1]);
     }
-    let (x, y) = (f64::from(x), f64::from(y));
-    let pen = Modifiers {
-        shift: true,
-        ..Modifiers::default()
-    };
-    let inputs = match event {
-        Draw::Down => vec![HostInput::Button {
-            down: true,
-            right: false,
-            x,
-            y,
-            modifiers: pen,
-        }],
-        Draw::Move => vec![HostInput::Moved {
-            x,
-            y,
-            modifiers: pen,
-        }],
-        Draw::Up => vec![HostInput::Button {
-            down: false,
-            right: false,
-            x,
-            y,
-            modifiers: pen,
-        }],
-        Draw::Undo => vec![HostInput::Key {
-            name: Some("Z".into()),
-            z: true,
+    report_input(
+        CaptureInstant::now(),
+        Tapped::Pointer(HostInput::Moved {
+            x: f64::from(x),
+            y: f64::from(y),
             modifiers: Modifiers {
-                command: true,
+                shift: true,
                 ..Modifiers::default()
             },
-        }],
-    };
-    let at = CaptureInstant::now();
-    for input in inputs {
-        report_input(at, Tapped::Pointer(input));
-    }
+        }),
+    );
 }
 
 /// The modifiers in a CGEvent's flags.
@@ -2272,6 +2374,7 @@ impl LiveInput {
             rules: HostedInput::with_shift_held(shift_held),
             outcomes: Some(outcomes.clone()),
         });
+        reset_drawing();
         TAP_RECORDING.store(true, Ordering::Release);
     }
 
@@ -2284,15 +2387,14 @@ impl LiveInput {
         {
             state.target = None;
             TAP_RECORDING.store(false, Ordering::Release);
-            #[cfg(target_os = "linux")]
-            DRAWING.store(false, Ordering::Release);
+            reset_drawing();
         }
     }
 
     /// The `capture-input` thread: the engine's pure input rules turn each
     /// tap event into the event Scrawl's own taps would have sent, on the
-    /// capture's clock; the engine then applies its ink, pin, and
-    /// own-window rules (Hex's windows are this process's).
+    /// capture's clock; the engine then applies its ink and own-window
+    /// rules (Hex's windows are this process's).
     fn forward(&self, received: Receiver<(CaptureInstant, Tapped)>) {
         let mut pill = CapsulePill::default();
         for (at, tapped) in received {
@@ -2311,14 +2413,13 @@ impl LiveInput {
                         code,
                         crate::keyboard::command_character,
                     ),
-                    z: crate::keyboard::key_code_for('z').is_ok_and(|z| z == code) || code == KEY_Z,
                     modifiers: modifiers(flags),
                 },
                 // Wayland reports no keys to Hex outside its own windows.
                 #[cfg(not(target_os = "macos"))]
                 Tapped::Key { .. } => continue,
             };
-            let Some(event) = target.rules.translate(t_ms, input) else {
+            let Some(event) = target.rules.translate(t_ms, input).map(as_pen) else {
                 continue;
             };
             // A press or scroll on the capsule's pill is Hex's; anywhere
@@ -2412,15 +2513,15 @@ pub fn listen_for_controls() -> Receiver<CaptureControl> {
 }
 
 impl ShortcutActivity {
-    /// What a press of a shortcut the desktop reports only as pressed (the
-    /// Linux portal and keybindings) asks for: it records at once.
+    /// What a press asks for on Linux while nothing records: it records at
+    /// once. A press while recording is a tap or a hold, decided when the
+    /// key comes up ([`CaptureHost::annotate_up`]).
     #[cfg(target_os = "linux")]
     pub fn on_press(self) -> ShortcutAction {
         match self {
             Self::Free => ShortcutAction::Record,
             Self::Picking => ShortcutAction::Pick,
-            Self::Recording { elapsed } if elapsed < SHORTCUT_DEBOUNCE => ShortcutAction::None,
-            Self::Recording { .. } => ShortcutAction::Finish,
+            Self::Recording { .. } => ShortcutAction::None,
         }
     }
 }
@@ -2445,14 +2546,17 @@ pub enum ShortcutAction {
 /// press while nothing records arms it, and the capture starts once one of
 /// its modifiers comes up, however long it was held, so nothing records
 /// while ⌥⇧ is down (⇧ is ink). Escape before then records nothing, and
-/// never ends a recording. A press while
-/// recording finishes, except within [`SHORTCUT_DEBOUNCE`] of the start;
-/// autorepeats never count.
+/// never ends a recording. A press while recording (past
+/// [`SHORTCUT_DEBOUNCE`] from the start) is a tap or a hold, told apart when
+/// it comes up: a tap finishes, a hold drew ([`annotate_key_up`]).
+/// Autorepeats never count.
 #[cfg(target_os = "macos")]
 #[derive(Default)]
 pub struct CaptureShortcut {
     held: Option<u16>,
     armed: Option<crate::app_settings::RuntimeHotkey>,
+    /// Pressed while recording, waiting to come up.
+    pressed: Option<crate::app_settings::RuntimeHotkey>,
 }
 
 #[cfg(target_os = "macos")]
@@ -2490,14 +2594,18 @@ impl CaptureShortcut {
                     return ShortcutAction::None;
                 };
                 self.held = Some(code);
-                if self.armed.is_some() {
+                if self.armed.is_some() || self.pressed.is_some() {
                     return ShortcutAction::None;
                 }
                 match activity {
                     ShortcutActivity::Recording { elapsed } if elapsed < SHORTCUT_DEBOUNCE => {
                         ShortcutAction::None
                     }
-                    ShortcutActivity::Recording { .. } => ShortcutAction::Finish,
+                    ShortcutActivity::Recording { .. } => {
+                        self.pressed = Some(binding);
+                        annotate_key_down();
+                        ShortcutAction::None
+                    }
                     ShortcutActivity::Picking => ShortcutAction::Pick,
                     ShortcutActivity::Free => {
                         self.armed = Some(binding);
@@ -2514,6 +2622,13 @@ impl CaptureShortcut {
                 if key_up {
                     self.held = None;
                 }
+                if let Some(binding) = self.pressed
+                    && (key_up
+                        || (!binding.modifiers.is_empty()
+                            && !binding.required_modifiers_down(flags)))
+                {
+                    return self.release();
+                }
                 match self.armed {
                     // A shortcut without modifiers records on its key's release.
                     Some(binding) if binding.modifiers.is_empty() && key_up => self.record(),
@@ -2526,8 +2641,13 @@ impl CaptureShortcut {
                     _ => ShortcutAction::None,
                 }
             }
-            InputEvent::Flags(flags) => match self.armed {
-                Some(binding)
+            InputEvent::Flags(flags) => match (self.pressed, self.armed) {
+                (Some(binding), _)
+                    if !binding.modifiers.is_empty() && !binding.required_modifiers_down(flags) =>
+                {
+                    self.release()
+                }
+                (_, Some(binding))
                     if !binding.modifiers.is_empty() && !binding.required_modifiers_down(flags) =>
                 {
                     self.record()
@@ -2547,6 +2667,15 @@ impl CaptureShortcut {
         ShortcutAction::Record
     }
 
+    /// A press made while recording came up: a tap finishes, a hold drew.
+    fn release(&mut self) -> ShortcutAction {
+        self.pressed = None;
+        match annotate_key_up() {
+            KeyUp::Tap => ShortcutAction::Finish,
+            KeyUp::Drew | KeyUp::Unpressed => ShortcutAction::None,
+        }
+    }
+
     /// Pressed, waiting for its keys to come up: Escape is the shortcut's.
     pub fn armed(&self) -> bool {
         self.armed.is_some()
@@ -2557,7 +2686,7 @@ impl CaptureShortcut {
     /// list takes Escape at the session tap.) A recording capture never
     /// takes it, and a send's Undo is a click.
     pub fn takes_escape(&self) -> bool {
-        self.armed() || wants_escape()
+        self.armed() || wants_escape() || drawing()
     }
 
     /// Forgets a held key whose release the listener will not see, as while
@@ -2566,6 +2695,9 @@ impl CaptureShortcut {
     pub fn reset(&mut self) {
         self.held = None;
         self.armed = None;
+        if self.pressed.take().is_some() {
+            annotate_key_up();
+        }
     }
 }
 
@@ -2790,10 +2922,6 @@ fn shifted_digit(code: u16) -> Option<u8> {
         .position(|row| *row == code)
         .map(|i| i as u8 + 1)
 }
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// The ANSI Z key, when the layout has none.
-const KEY_Z: u16 = 6;
 
 /// Waits for `thread` until `deadline`, then leaves it running.
 fn join_by(thread: JoinHandle<()>, deadline: Instant, name: &str) {
@@ -4678,7 +4806,8 @@ mod tests {
         // And a recording one never hears it.
         assert_eq!(shortcut.input(escape, hotkeys, started), None);
 
-        // While recording a press finishes, except right after the start.
+        // While recording a tap finishes as it comes up, except right
+        // after the start.
         let recording = |ms| ShortcutActivity::Recording {
             elapsed: Duration::from_millis(ms),
         };
@@ -4692,13 +4821,39 @@ mod tests {
         );
         assert_eq!(
             shortcut.input(key(true, chord), hotkeys, recording(400)),
-            Finish
+            None
         );
         assert_eq!(
             shortcut.input(key(true, chord), hotkeys, recording(500)),
+            None,
+            "an autorepeat"
+        );
+        assert_eq!(
+            shortcut.input(key(false, chord), hotkeys, recording(520)),
+            Finish
+        );
+        assert_eq!(
+            shortcut.input(InputEvent::Flags(0), hotkeys, recording(530)),
             None
         );
-        assert_eq!(shortcut.input(key(false, chord), hotkeys, free), None);
+        // Held past DRAW_HOLD it drew: letting go finishes nothing.
+        assert_eq!(
+            shortcut.input(key(true, chord), hotkeys, recording(2_000)),
+            None
+        );
+        *draw_held() = Some(std::time::Instant::now() - 2 * DRAW_HOLD);
+        assert_eq!(
+            shortcut.input(
+                InputEvent::Flags(OPTION_KEY_MASK),
+                hotkeys,
+                recording(2_600)
+            ),
+            None
+        );
+        assert_eq!(
+            shortcut.input(key(false, 0), hotkeys, recording(2_610)),
+            None
+        );
         // While picking, the picker records.
         let picking = ShortcutActivity::Picking;
         assert_eq!(shortcut.input(key(true, chord), hotkeys, picking), Pick);
