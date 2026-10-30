@@ -21,6 +21,8 @@ Each set is a folder of start, stop, done, cancel, error and success WAVs:
 - wood: a soft-mallet marimba and hollow wood blocks in G major pentatonic.
 - analog: a warm analogue synth, two detuned saws through a closing low-pass
   filter, in F major.
+- thock: one mechanical keyboard key, cut from the team vote's winning start
+  sound, an ElevenLabs take kept in scripts/sounds/thock/; no done sound.
 
 Every synthesized sound is 48 kHz mono 16-bit, starts on its first sample (no
 leading silence), begins and ends at zero with raised-cosine edges, and is
@@ -36,6 +38,7 @@ touches 0.1% of the start's samples, the peaks of its clicks), and the
 classic cancel, about 15 dB louder than the rest, comes down to its target.
 """
 import subprocess
+from fractions import Fraction
 from math import gcd
 from pathlib import Path
 
@@ -383,7 +386,90 @@ def classic():
     return s
 
 
-SETS = {"signature": signature, "click": click, "soft": soft, "wood": wood, "analog": analog}
+# ---------------------------------------------------------------- thock
+
+THOCK = Path(__file__).resolve().parent / "thock"
+
+
+def decode_take(name):
+    """One of the vote's ElevenLabs takes in scripts/sounds/thock/, 48 kHz mono."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(THOCK / name), "-ac", "1",
+                          "-ar", str(SR), "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, dtype=np.float32).astype(np.float64)
+
+
+def first_hit_ms(x, from_ms, to_ms):
+    """Where a hit begins: the first sample within 15 dB of the window's peak."""
+    seg = x[int(from_ms / 1000 * SR):int(to_ms / 1000 * SR)]
+    return from_ms + int(np.argmax(np.abs(seg) > np.max(np.abs(seg)) * 10 ** (-15 / 20))) / SR * 1000
+
+
+def take_cut(x, at_ms, length_ms, fade_ms, lead_ms=0.3):
+    """`length_ms` of a take from just before `at_ms`, faded out over `fade_ms`, with no DC."""
+    a = max(0, int((at_ms - lead_ms) / 1000 * SR))
+    y = x[a:a + int(length_ms / 1000 * SR)].copy()
+    y *= attack(len(y), 0.3)
+    f = min(len(y), int(fade_ms / 1000 * SR))
+    y[-f:] *= 0.5 + 0.5 * np.cos(np.pi * np.arange(f) / f)
+    return y - np.mean(y) * np.hanning(len(y)) / np.mean(np.hanning(len(y)))
+
+
+def varispeed(x, semitones):
+    """Played faster or slower, like a smaller or bigger key: lower is longer."""
+    r = Fraction(2 ** (semitones / 12)).limit_denominator(200)
+    return resample_poly(x, r.denominator, r.numerator)
+
+
+def faded(x, ms, fade_ms):
+    y = x[:int(ms / 1000 * SR)].copy()
+    f = min(len(y), int(fade_ms / 1000 * SR))
+    y[-f:] *= 0.5 + 0.5 * np.cos(np.pi * np.arange(f) / f)
+    return y
+
+
+def keys(parts):
+    """(offset ms, gain, sound) on one timeline."""
+    out = np.zeros(max(int(o / 1000 * SR) + len(x) for o, _, x in parts))
+    for o, g, x in parts:
+        i = int(o / 1000 * SR)
+        out[i:i + len(x)] += g * x
+    return out
+
+
+def highpass(x, f, order=2):
+    return sosfilt(butter(order, f, btype="high", fs=SR, output="sos"), x)
+
+
+def thock():
+    """One keyboard, from the team vote's winning start sound (ElevenLabs v3,
+    "A single mechanical keyboard key press, deep creamy thock, tactile, dry,
+    very short."). Start is its press, stop the same key's upstroke, both cut
+    from the take; the rest is that press played as bigger and smaller keys:
+    cancel a lower, duller key, error two keys at once, twice, low, and
+    success a run of keys up to a full press. It has no done sound: the stop
+    already says it (Kit, 2026-10-30)."""
+    take = decode_take("mech-key-thock.mp3")
+    press = take_cut(take, first_hit_ms(take, 45, 60), 112, 40)
+    release = take_cut(take, first_hit_ms(take, 145, 165), 60, 30)
+    tap = lambda st, ms: faded(varispeed(press, st), ms, 25)  # noqa: E731
+    return {
+        "start": press,
+        "stop": release,
+        "cancel": highpass(lowpass(faded(varispeed(press, -5), 120, 45), 1800), 70),
+        "error": highpass(lowpass(keys([
+            (0, 1.0, faded(varispeed(press, -6), 70, 30)),
+            (14, 0.7, faded(varispeed(press, -9), 70, 30)),
+            (125, 0.9, faded(varispeed(press, -8), 95, 45)),
+            (139, 0.6, faded(varispeed(press, -11), 95, 45)),
+        ]), 1500), 70),
+        "success": keys([
+            (0, 0.55, tap(0, 45)), (80, 0.62, tap(2, 45)), (155, 0.7, tap(4, 45)),
+            (235, 0.8, tap(7, 50)), (330, 1.0, varispeed(press, 3)), (470, 0.8, varispeed(release, 3)),
+        ]),
+    }
+
+
+SETS = {"signature": signature, "click": click, "soft": soft, "wood": wood, "analog": analog, "thock": thock}
 
 # ---------------------------------------------------------------- onboarding
 
