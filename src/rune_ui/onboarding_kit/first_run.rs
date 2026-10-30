@@ -20,13 +20,13 @@ use super::flight::{Flight, caret_x, ember_tone, flicker, flying, typeset};
 use super::flows::continue_button;
 use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
-use super::hud_stage::{flow_box, live_hold_slot, voice_or_idle_slot};
+use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, clean_heading, keys, ready, staggered, title_font};
 use super::mic_line::mic_capsule;
 use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
 use super::stories::{Onboard, Step, is_live_window};
-use super::{permissions, versus};
+use super::{live, permissions, versus};
 
 const TOP_BAR: f32 = 48.0;
 const ACTION_H: f32 = 32.0;
@@ -59,6 +59,12 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             Some(d) if !s.had_model && !centred && s.step != Step::Ready => pill(p, d, s.closed),
             _ => slot(),
         });
+    // The real window has no title bar: the top of the page moves it.
+    let top = if s.live.is_some() {
+        super::super::title_bar(top)
+    } else {
+        top
+    };
     let page = match s.step {
         Step::Pick | Step::Started => download_page(p, s, false),
         Step::Waiting => download_page(p, s, true),
@@ -89,6 +95,35 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
         s.now,
         s.reduced.get(),
     );
+    if s.live.is_some() {
+        return col()
+            .key("ready-live-wrap")
+            .gap(20.0)
+            .items_center()
+            .child(core)
+            .child(
+                row()
+                    .key("ready-actions")
+                    .gap(10.0)
+                    .center_y()
+                    .transition(arrives())
+                    .child(
+                        Button::new("Try again")
+                            .variant(ButtonVariant::Neutral)
+                            .on_press(live::on_ui(Onboard::jump_to_try))
+                            .build_push(p.k)
+                            .key("try-again"),
+                    )
+                    .child(
+                        Button::new("Start using Hex")
+                            .variant(ButtonVariant::Contrast)
+                            .on_press(live::finish)
+                            .build_push(p.k)
+                            .key("start-using-hex")
+                            .default_button(),
+                    ),
+            );
+    }
     if !is_live_window() {
         return core;
     }
@@ -171,7 +206,11 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
             .gap(7.0)
             .center_y()
             .child(text("Downloading").key("pre").font(LEAD).color(p.muted()))
-            .child(language_capsule(p, d.language, Onboard::cycle_language))
+            .child(if s.live.is_some() {
+                language_capsule(p, d.language, live::cycle_language)
+            } else {
+                language_capsule(p, d.language, Onboard::cycle_language)
+            })
             .child(text("speech model").key("post").font(LEAD).color(p.muted()));
         heading(p, "download-head", "Setting up Hex", subtitle)
     };
@@ -208,6 +247,26 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         staggered(progress_capsule, 0.14, 6.0)
     };
 
+    let retry = s.live.as_ref().filter(|live| live.failed).map(|_| {
+        row()
+            .key("download-failed")
+            .gap(10.0)
+            .center_y()
+            .transition(arrives())
+            .child(
+                text("The download stopped.")
+                    .key("why")
+                    .font(LEAD)
+                    .color(p.muted()),
+            )
+            .child(
+                Button::new("Try again")
+                    .variant(ButtonVariant::Neutral)
+                    .on_press(live::retry_download)
+                    .build_push(p.k)
+                    .key("retry-download"),
+            )
+    });
     col()
         .key(if waiting { "waiting" } else { "download" })
         .gap(22.0)
@@ -215,6 +274,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .child(flow_box("download-hud", 1.24, s.now, reduced))
         .child(staggered(head, 0.06, 8.0))
         .child(progress_capsule)
+        .children(retry)
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {
@@ -225,7 +285,7 @@ fn demo_page(p: Paint, s: &Onboard) -> El {
         .child(versus::heading(p, s))
         .child(versus::stage(p, s))
         .child(action(if s.step == Step::Done {
-            continue_button(p)
+            continue_button(p, s)
         } else {
             none()
         }))
@@ -313,7 +373,7 @@ fn try_page(p: Paint, s: &Onboard) -> El {
                 .gap(14.0)
                 .items_center()
                 .child(action(if s.step == Step::TryHeard {
-                    continue_button(p)
+                    continue_button(p, s)
                 } else {
                     none()
                 }))
@@ -330,18 +390,20 @@ fn instrument_bar(p: Paint, s: &Onboard) -> El {
         .gap(8.0)
         .center_y()
         .child(mic_capsule(p, s.listening_peak()))
-        .child(shortcut_capsule(p, &s.caps, down))
+        .child(shortcut_capsule(p, &s.caps, down, s.live.is_none()))
 }
 
-fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
+/// The real first run shows the saved shortcut, which Settings changes.
+fn shortcut_capsule(p: Paint, caps: &[String], down: bool, cycles: bool) -> El {
     let k = p.k;
     let c = &k.c;
-    let mut pill = row()
+    let label = if cycles {
+        "Change shortcut"
+    } else {
+        "Your shortcut"
+    };
+    let pill = row()
         .key("change-shortcut")
-        .role("button")
-        .label("Change shortcut")
-        .focusable(true)
-        .focus_ring(1.5, 1.0, c.border_focus)
         .h(28.0)
         .pl(5.0)
         .pr(11.0)
@@ -350,9 +412,6 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
         .radius(14.0)
         .fill(c.surface_raised)
         .border(p.hair, c.border_weak)
-        .hover(c.hover)
-        .press(c.pressed)
-        .on_press(Onboard::cycle_shortcut)
         .child(
             row().key("mini-keys").gap(2.0).center_y().children(
                 caps.iter()
@@ -361,11 +420,22 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
             ),
         )
         .child(
-            text("Change shortcut")
+            text(label)
                 .key("label")
                 .font(DESCRIPTION)
                 .color(p.muted()),
         );
+    let mut pill = if cycles {
+        pill.role("button")
+            .label(label)
+            .focusable(true)
+            .focus_ring(1.5, 1.0, c.border_focus)
+            .hover(c.hover)
+            .press(c.pressed)
+            .on_press(Onboard::cycle_shortcut)
+    } else {
+        pill
+    };
     for shadow in k.shadow_layers(&k.elevation.button_neutral) {
         pill = pill.box_shadow(shadow);
     }
@@ -376,15 +446,8 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
 /// [`TextArea`] that receives real dictated pastes from the running Hex app (or
 /// direct typing).
 fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
-    let reduced = s.reduced.get();
-    let hud_el = if let Some(from) = s.live_hold_from {
-        Some(live_hold_slot(
-            "try-dot-hud",
-            TRY_HUD,
-            1.14,
-            s.now - from,
-            reduced,
-        ))
+    let hud_el = if let Some(frame) = s.hud.frame() {
+        Some(frame_slot("try-dot-hud", TRY_HUD, 1.14, frame))
     } else {
         voice_or_idle_slot("try-dot-hud", TRY_HUD, 1.14, true, &ANSWER_TRY, None, s).0
     };
@@ -393,11 +456,16 @@ fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
     let editor = TextArea::new(&s.practice)
         .placeholder(format!("Hold {shortcut} and say a sentence…"))
         .width(Some(TRY_FIELD_W))
-        .auto_grow(3, 5)
-        .on_edit(|s: &mut Onboard| &mut s.practice)
-        .on_change(Onboard::on_practice_change)
-        .build(p.k)
-        .key("try-live-editor");
+        .auto_grow(3, 5);
+    let editor = if s.live.is_some() {
+        editor.on_edit(live::practice).on_change(live::practice_changed)
+    } else {
+        editor
+            .on_edit(|s: &mut Onboard| &mut s.practice)
+            .on_change(Onboard::on_practice_change)
+    }
+    .build(p.k)
+    .key("try-live-editor");
 
     col()
         .key("try-stage")
@@ -406,6 +474,7 @@ fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
         .gap(16.0)
         .child(el().key("try-hud-box").size(TRY_W, 74.0).children(hud_el))
         .child(editor)
+        .children(s.live.as_ref().and_then(|live| live::hint(p, live)))
 }
 
 fn try_stage(p: Paint, s: &Onboard) -> El {

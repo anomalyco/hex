@@ -19,7 +19,9 @@ use super::flows::continue_button;
 use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, arrives, clean_heading, staggered, title_font};
+use super::live::Live;
 use super::stories::Onboard;
+use crate::onboarding::{ItemStatus, SetupItem};
 
 /// Total duration of the automated permissions step.
 pub(crate) const PERMISSIONS_SECS: f64 = 7.2;
@@ -83,13 +85,38 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
+    set_dot_hud(None);
+    if let Some(live) = &s.live {
+        return live_page(p, live);
+    }
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
-    set_dot_hud(None);
     let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
     let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
 
-    let head = clean_heading(
+    let head = heading(p);
+
+    col()
+        .key("permissions")
+        .gap(22.0)
+        .items_center()
+        .child(head)
+        .child(staggered(stage(p, e, mic, ax, reduced), 0.08, 10.0))
+        .child(
+            row()
+                .key("action")
+                .h(ACTION_H)
+                .center()
+                .child(if e >= CONTINUE_AT {
+                    continue_button(p, s)
+                } else {
+                    el().key("none")
+                }),
+        )
+}
+
+fn heading(p: Paint) -> El {
+    clean_heading(
         col()
             .key("permissions-head")
             .gap(8.0)
@@ -107,25 +134,105 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
                     .color(p.muted())
                     .align(rune::Align::Center),
             ),
-    );
+    )
+}
 
+/// The real first run's permissions: macOS's own prompt and System Settings
+/// with Hex's guide, and the rows follow what macOS reports.
+fn live_page(p: Paint, live: &Live) -> El {
+    let k = p.k;
+    let mic_ready = live.microphone == ItemStatus::Ready;
+    let ax_desc = match live.accessibility {
+        ItemStatus::Waiting => "Switch on Hex in System Settings",
+        _ => "Notices the shortcut and pastes your words in any app",
+    };
+    let mic_desc = match live.microphone {
+        ItemStatus::Denied => "Switch on Hex in System Settings",
+        _ => "Hears you only while you hold the shortcut",
+    };
+    let card = col()
+        .key("setup-card")
+        .w(COL_W)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(p.hair, k.c.border_weak)
+        .child(perm_row(
+            p,
+            "mic-row",
+            &glyphs::MIC,
+            "Microphone",
+            mic_desc,
+            live_pill(p, "mic-pill", live.microphone, true, SetupItem::Microphone),
+        ))
+        .child(separator(p, "sep0"))
+        .child(perm_row(
+            p,
+            "ax-row",
+            &glyphs::CURSOR_TEXT,
+            "Accessibility",
+            ax_desc,
+            live_pill(
+                p,
+                "ax-pill",
+                live.accessibility,
+                mic_ready,
+                SetupItem::Accessibility,
+            ),
+        ));
+    let action = if live.restart {
+        Button::new("Restart Hex")
+            .variant(ButtonVariant::Contrast)
+            .on_press(super::live::restart)
+            .build_push(k)
+            .key("restart")
+            .default_button()
+            .transition(arrives())
+    } else {
+        el().key("none")
+    };
     col()
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(head)
-        .child(staggered(stage(p, e, mic, ax, reduced), 0.08, 10.0))
-        .child(
-            row()
-                .key("action")
-                .h(ACTION_H)
-                .center()
-                .child(if e >= CONTINUE_AT {
-                    continue_button(p)
-                } else {
-                    el().key("none")
-                }),
-        )
+        .child(heading(p))
+        .child(staggered(k.elevate(card, &k.elevation.raised), 0.08, 10.0))
+        .child(row().key("action").h(ACTION_H).center().child(action))
+}
+
+fn live_pill(p: Paint, key: &str, status: ItemStatus, primary: bool, item: SetupItem) -> El {
+    let k = p.k;
+    let allow = |label: &str, primary: bool| {
+        Button::new(label)
+            .variant(if primary {
+                ButtonVariant::Contrast
+            } else {
+                ButtonVariant::Neutral
+            })
+            .on_press(super::live::allow(item))
+            .build_push(k)
+            .key(format!("{key}-allow"))
+            .transition(arrives())
+    };
+    match status {
+        ItemStatus::Ready => perm_pill(p, key, PermState::Allowed),
+        ItemStatus::Todo => allow("Allow", primary),
+        ItemStatus::Denied => allow("Open System Settings", primary),
+        // Pressing again reopens macOS's prompt or System Settings.
+        ItemStatus::Waiting => allow("Open", false),
+        ItemStatus::Restart => row()
+            .key(format!("{key}-restart"))
+            .h(28.0)
+            .px(6.0)
+            .center_y()
+            .transition(arrives())
+            .child(
+                text("Needs a restart")
+                    .key("lbl")
+                    .font(k.ty.small_medium)
+                    .color(p.muted()),
+            ),
+        ItemStatus::Downloading(_) | ItemStatus::Failed => el().key(format!("{key}-none")),
+    }
 }
 
 fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {

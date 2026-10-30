@@ -344,7 +344,7 @@ fn flip_experiment(ui: &mut Ui, experiment: Experiment) {
         Experiment::Playground => {
             ui.platform.playground = on;
         }
-        Experiment::LiveChapters | Experiment::LiveText => {}
+        Experiment::LiveChapters | Experiment::LiveText | Experiment::NewOnboarding => {}
     }
 }
 

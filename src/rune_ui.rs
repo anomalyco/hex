@@ -690,6 +690,8 @@ pub(crate) struct Ui {
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
+    /// The new first run over the tour (experiment `new-onboarding`).
+    first_run: Option<onboarding_kit::Onboard>,
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,
     host: platform::PlatformHost,
@@ -741,6 +743,7 @@ impl Ui {
         ui.platform.playground = playground::enabled();
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
+        onboarding_kit::live::start(&mut ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
@@ -781,6 +784,7 @@ impl Ui {
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
+            first_run: None,
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::None,
             meetings: meetings::MeetingsPane::default(),
@@ -1220,6 +1224,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= onboarding::poll(ui);
+    changed |= onboarding_kit::live::poll(ui, tx);
     changed |= general::poll_level(ui, clock, tx);
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
@@ -1297,7 +1302,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         layer.extend(modal);
     }
     let mut tour_layer = Vec::new();
-    if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
+    if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
+        layer.push(first_run);
+    } else if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
         layer.push(tour);
         layer.extend(tour_layer);
     }

@@ -68,14 +68,16 @@ pub(crate) fn is_dev_build_for(
 pub enum Experiment {
     LiveChapters,
     LiveText,
+    NewOnboarding,
     Playground,
     VoiceFilter,
 }
 
 impl Experiment {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::LiveChapters,
         Self::LiveText,
+        Self::NewOnboarding,
         Self::Playground,
         Self::VoiceFilter,
     ];
@@ -89,6 +91,7 @@ impl Experiment {
         match self {
             Self::LiveChapters => "live-chapters",
             Self::LiveText => "live-text",
+            Self::NewOnboarding => "new-onboarding",
             Self::Playground => "playground",
             Self::VoiceFilter => "voice-filter",
         }
@@ -99,6 +102,9 @@ impl Experiment {
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
             Self::LiveText => {
                 "Live text: a streaming model publishes what you have said so far while you dictate."
+            }
+            Self::NewOnboarding => {
+                "The new first-run onboarding: real download, permissions, and a live practice dictation (on in test builds)."
             }
             Self::Playground => {
                 "Rune's playground in the window (⇧⌘D, Ctrl+Shift+D off macOS): HUD Lab, prototypes, and fixture scenes."
@@ -117,9 +123,16 @@ impl Experiment {
     pub(crate) const fn index(self) -> usize {
         self as usize
     }
+
+    /// On without being named: `Hex Test.app` always runs the new
+    /// onboarding, so a fresh test install shows it.
+    fn on_by_default(self) -> bool {
+        self == Self::NewOnboarding && option_env!("HEX_TEST_BUILD") == Some("1")
+    }
 }
 
 static LIVE: [AtomicBool; Experiment::ALL.len()] = [
+    AtomicBool::new(false),
     AtomicBool::new(false),
     AtomicBool::new(false),
     AtomicBool::new(false),
@@ -190,7 +203,10 @@ fn snapshot() -> &'static Snapshot {
     SNAPSHOT.get_or_init(|| {
         let loaded = Snapshot::load();
         for experiment in Experiment::ALL {
-            LIVE[experiment.index()].store(loaded.enabled(experiment), Ordering::Release);
+            LIVE[experiment.index()].store(
+                loaded.enabled(experiment) || experiment.on_by_default(),
+                Ordering::Release,
+            );
         }
         loaded
     })

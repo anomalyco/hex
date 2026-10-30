@@ -60,8 +60,8 @@ fn download(s: &Onboard) -> Download {
 }
 
 /// Primary onward button (`Continue →`), matching the tour's forward CTA.
-pub(super) fn continue_button(p: Paint) -> El {
-    Button::new("Continue")
+pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
+    let button = Button::new("Continue")
         .variant(ButtonVariant::Contrast)
         .label_with(|font, ink| {
             row()
@@ -69,8 +69,13 @@ pub(super) fn continue_button(p: Paint) -> El {
                 .center_y()
                 .child(text("Continue").key("label").font(font).color(ink))
                 .child(icon(&glyphs::ARROW_RIGHT, 15.0).key("arrow").color(ink))
-        })
-        .on_press(Onboard::press_continue)
+        });
+    let button = if s.live.is_some() {
+        button.on_press(super::live::press_continue)
+    } else {
+        button.on_press(Onboard::press_continue)
+    };
+    button
         .build_push(p.k)
         .key("continue")
         .transition(arrives())
@@ -164,7 +169,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     let act = match s.step {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
-        Step::Done => continue_button(p),
+        Step::Done => continue_button(p, s),
         Step::Heard => text("Finishing the download…")
             .key("finishing")
             .font(p.k.ty.small)

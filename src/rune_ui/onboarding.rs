@@ -139,7 +139,10 @@ impl Tour {
         let completed = crate::onboarding::completion_recorded();
         let resume = crate::onboarding::take_resume();
         let saved = (!completed).then(crate::onboarding::saved_step).flatten();
-        (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
+        // The new first run shows until it finishes, even when setup is
+        // already ready, so the whole story plays once.
+        let story = super::onboarding_kit::live::wanted_for(platform);
+        (resume.is_some() || (!completed && (story || !status.ready() || saved.is_some()))).then(|| {
             Tour::new(
                 Flow::new(
                     resume.or(saved).unwrap_or(Step::Welcome),
