@@ -930,14 +930,14 @@ Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 │   ├── Lone Cancel -> The HUD just leaves: no cancel look on any OS
 │   ├── Lone Error (macOS) -> Failed look 0.6 s (Dot scope coral), then leaves
 │   ├── Chips -> Start / Stop / Done / Cancel / Error (macOS) play one sound
-│   │   └── Set has no such sound (Classic's done) -> Chip faint and inert
+│   │   └── Set has no such sound (Classic's or Thock's done) -> Chip faint and inert
 │   ├── Each set -> Name, what it sounds like, play button
 │   │   ├── Play -> Plays its dictation without choosing it; again stops it
 │   │   └── Press the set -> Save and apply live; play its dictation
 │   ├── Any playback -> Stops the one before it (20 ms fade)
 │   ├── Sound volume -> Plays at it; Off plays nothing, the HUD still shows
 │   └── Close / Escape / scrim / leaving the pane -> Stops playback
-├── hex settings set sound_theme <signature|classic|click|soft|wood|analog>
+├── hex settings set sound_theme <signature|classic|click|soft|wood|analog|thock>
 └── Every set -> Same loudness per sound at a given volume
 ```
 
@@ -964,7 +964,12 @@ then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif landing
 on a D sixth chord (1.1 s), played when the first-run tour reaches its last
 step. Click is mechanical key clicks, Soft tone warm sine blips in A major,
 Wood a soft-mallet marimba with hollow wood blocks for cancel and error, and
-Warm synth two detuned saws through a closing low-pass filter. Classic is the
+Warm synth two detuned saws through a closing low-pass filter, and Thock one
+mechanical keyboard key, from the team's vote on the start sound (its winner,
+an ElevenLabs take kept in `scripts/sounds/thock/`): start is the press, stop
+the same key's upstroke, cancel a lower, duller key, error two keys at once,
+twice, and success a run of keys up to a full press; it has no done sound
+because the stop already says it. Classic is the
 sounds Hex played before the signature set (start clicks, stop swish, cancel
 thud), restored from git; it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays signature's.
