@@ -1176,6 +1176,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> Setup.exe or install-windows.ps1 -> hex.exe + install.json receipt
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
+├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
+│   └── Theme read when the tray is created; a later switch applies at the next launch
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
 ├── Microphone -> System default or a saved device
@@ -1192,7 +1194,10 @@ Windows updates follow `maintain.updates` ([updater.rs](../../src/updater.rs),
 `updater/windows.rs`). CI test builds never check. The tray item and tooltip
 ([windows_rune.rs](../../src/windows_rune.rs)) follow the published update
 state. They pass the cross-compiled Clippy check, but no one has clicked them
-on a real Windows PC. Releases are Authenticode-signed once Azure Artifact
+on a real Windows PC. The white tray mark vanished on a light taskbar
+([#460](https://github.com/anomalyco/hex/issues/460)); a light taskbar now gets
+the same mark in black (`light_taskbar_gets_a_dark_mark_with_the_same_shape`
+checks the pixels, not a real taskbar). Releases are Authenticode-signed once Azure Artifact
 Signing is configured ([windows-signing.md](../windows-signing.md)).
 
 **Known defect, outside Hex:** Discord's game detection matches the running

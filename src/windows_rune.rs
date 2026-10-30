@@ -41,10 +41,10 @@ use crate::rune_ui::Ui;
 use crate::transcription_models::TranscriptionModelId;
 use crate::windows_app::WindowsDesktopHost;
 
-/// The tray icon: the app icon pre-rendered to raw 32×32 RGBA at build time
-/// from app/AppIcon.icon/Assets/Image.png (full color, so both taskbar
-/// themes use the same pixels).
+/// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
+/// a light taskbar ([`tray_icon_pixels`]).
 const TRAY_ICON_SIZE: u32 = 32;
+const TRAY_ICON_RGBA: &[u8] = include_bytes!("../resources/windows/tray-32.rgba");
 /// How often the runtime refreshes the listener while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
 
@@ -395,11 +395,34 @@ fn set_caption_color(hwnd: HWND, color: u32) {
     }
 }
 
+/// Whether the taskbar uses the light theme (Windows 11 light mode). Any
+/// failure to read it means dark, Windows' default taskbar.
+fn taskbar_is_light() -> bool {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .is_ok_and(|light| light != 0)
+}
+
+/// The tray mark for the taskbar's theme: the white mark on a dark taskbar,
+/// the same shape in black on a light one, where white would vanish.
+fn tray_icon_pixels(light_taskbar: bool) -> Vec<u8> {
+    let mut pixels = TRAY_ICON_RGBA.to_vec();
+    if light_taskbar {
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel[..3].fill(0);
+        }
+    }
+    pixels
+}
+
 fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
     let icon = rune::TrayIcon::rgba(
         TRAY_ICON_SIZE,
         TRAY_ICON_SIZE,
-        include_bytes!("../resources/windows/tray-32.rgba").to_vec(),
+        tray_icon_pixels(taskbar_is_light()),
     );
     let spec = rune::TraySpec::new("hex", "Hex", icon)
         .tooltip(tr("Hex Dictation"))
@@ -435,4 +458,21 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
         _ => {}
     })?;
     Ok(tray)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn light_taskbar_gets_a_dark_mark_with_the_same_shape() {
+        let dark = tray_icon_pixels(false);
+        let light = tray_icon_pixels(true);
+        assert_eq!(dark, TRAY_ICON_RGBA);
+        assert_eq!(light.len(), (TRAY_ICON_SIZE * TRAY_ICON_SIZE * 4) as usize);
+        for (shown, mark) in light.chunks_exact(4).zip(dark.chunks_exact(4)) {
+            assert_eq!(&shown[..3], &[0, 0, 0]);
+            assert_eq!(shown[3], mark[3]);
+        }
+    }
 }
