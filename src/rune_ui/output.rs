@@ -542,11 +542,8 @@ fn open_settings_file(ui: &mut Ui) {
     if !ui.live() {
         return;
     }
-    let opened = crate::app_settings::path().and_then(|path| {
-        crate::commands::execute(crate::commands::Action::OpenPath(
-            path.display().to_string(),
-        ))
-    });
+    let opened = crate::app_settings::path()
+        .and_then(|path| crate::opencode_catalog::open_url(&path.display().to_string()));
     if let Err(error) = opened {
         ui.error = Some(format!("{error:#}"));
     }

@@ -97,14 +97,6 @@ impl Script {
         &self.registration
     }
 
-    /// Runs command `id`'s handler and returns the actions it asked for as JSON.
-    pub fn invoke(&self, id: &str, context: &str, captures: &str) -> Result<String, String> {
-        self.call(
-            "invoke",
-            (id.to_owned(), context.to_owned(), captures.to_owned()),
-        )
-    }
-
     /// Runs the transformations `ids` (a JSON array) over `text` in order.
     pub fn transform(&self, ids: &str, text: &str, context: &str) -> Result<String, String> {
         self.call(
@@ -166,8 +158,8 @@ fn log(level: &str, message: &str) {
     }
 }
 
-/// A script failure as the Commands and Modes panes show it: the error and
-/// where it happened, or the time limit it ran past.
+/// A script failure as the Modes pane shows it: the error and where it
+/// happened, or the time limit it ran past.
 fn describe(error: CaughtError<'_>, deadline: &Cell<Option<Instant>>, limit: Duration) -> String {
     if deadline
         .get()

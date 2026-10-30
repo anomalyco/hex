@@ -43,10 +43,6 @@ strip = true
 transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
 transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
 
-[profile.moonshine-lab]
-inherits = "release"
-debug-assertions = true
-
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 color-eyre = "0.6.5"
@@ -57,7 +53,6 @@ fs2 = "0.4.3"
 getrandom = "0.4.3"
 hound = "3.5.1"
 libc = "0.2.189"
-libloading = "0.9.0"
 oxc_allocator = "0.156.0"
 oxc_ast = "0.156.0"
 oxc_ast_visit = "0.156.0"
@@ -90,7 +85,7 @@ objc2-core-foundation = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
-# Smart Turn: loads the ONNX Runtime dylib Moonshine already ships.
+# Smart Turn: loads libonnxruntime.1.23.2.dylib dynamically.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-23"] }
 procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "100b7d93a442b7758f426dd0f63e2dd9cd72aff4" }
 ratatui = "0.30.2"

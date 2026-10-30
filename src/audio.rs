@@ -479,6 +479,7 @@ impl AudioInput {
 
     /// The OS's default input, or a real one standing in when the default is
     /// Hex Microphone or missing.
+    #[cfg(target_os = "windows")]
     pub fn open_system_default() -> Result<Self> {
         match open_configured_input(&OpenRequest {
             device_override: None,
@@ -491,25 +492,7 @@ impl AudioInput {
         }
     }
 
-    pub fn open_named(name: &str) -> Result<Self> {
-        let host = cpal::default_host();
-        let (devices, names) = input_devices_of(&host)?;
-        let plan = resolve_input(
-            Some(name),
-            None,
-            &names,
-            None,
-            |_| Transport::Other,
-            Route::default(),
-        )
-        .map_err(|e| eyre!(e))?;
-        let InputTarget::Named(index) = plan.target else {
-            unreachable!("an override resolves by name");
-        };
-        Self::open_device(devices[index].clone(), names[index].clone(), false)
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     pub fn open_matching(query: &str) -> Result<Self> {
         let host = cpal::default_host();
         let (devices, names) = input_devices_of(&host)?;

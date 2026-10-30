@@ -417,10 +417,8 @@ impl WindowsDesktopHost {
                 || crate::personal_commands::workspace_configured();
         match (enabled, self.personal_commands.is_some()) {
             (true, false) => {
-                self.personal_commands = crate::personal_commands::PersonalCommands::start(
-                    crate::commands::CommandConfig::new(),
-                    self.transformations.clone(),
-                );
+                self.personal_commands =
+                    crate::personal_commands::PersonalCommands::start(self.transformations.clone());
             }
             (false, true) => self.personal_commands = None,
             _ => {}

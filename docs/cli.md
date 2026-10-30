@@ -32,19 +32,17 @@ hex
 ├── settings
 │   ├── list                       every setting: key, value, kind, choices, writable, about
 │   ├── get <key|prefix>           one setting, or every key under a prefix (`meetings`)
-│   └── set <key> <value> [--yes]
+│   └── set <key> <value>
 ├── model
 │   ├── list                       every model, its languages and size, installed or not
 │   ├── use <id> [--language L]    installed models only; never downloads or repairs
 │   ├── install <id> [--language L] download, then switch to it
 │   └── cancel                     stop a download or load in progress
 ├── commands
-│   ├── enable [--yes]             = settings set commands_enabled on
-│   ├── disable                    = settings set commands_enabled off
-│   ├── retry                      load the command model again after it failed
-│   └── init                       create ~/.config/hex (local, no running Hex needed)
+│   ├── init                       create ~/.config/hex (local, no running Hex needed)
+│   └── check                      validate ~/.config/hex/hex.config.ts transformations
 ├── window
-│   ├── show [settings|models|modes|history|commands|meetings]
+│   ├── show [settings|models|modes|history|meetings]
 │   ├── hide                       close the window; Hex stays in the menu bar
 │   └── story <story> [--variant V] [--play]  the `playground` experiment: open a story
 ├── history clear --yes            delete every retained dictation
@@ -89,7 +87,7 @@ no `hex dictation` command yet.
 
 `dictation cancel` with nothing recording cancels the newest unfinished
 dictation, like Escape. Escape cancels an active recording before any job, so
-while another capture records (a voice command or API dictation, say), an idle
+while another capture records (an API dictation, say), an idle
 `cancel` is refused with `busy` rather than reach past it; cancel that
 recording first. `meetings cancel` doesn't exist
 because Hex has no way to discard a meeting recording.
@@ -177,15 +175,15 @@ offer it.
   `504 control-timeout`. Bad or missing tokens get `401` like every other
   route.
 
-## Wire format (version 3)
+## Wire format (version 4)
 
 Requests are flat objects tagged by `command` (kebab-case):
 
 ```json
-{"version": 3, "command": "meeting-record", "title": "Design sync"}
-{"version": 3, "command": "settings-set", "key": "sound_effects", "value": "off", "confirm": false}
-{"version": 3, "command": "dictation", "action": "start"}
-{"version": 3, "command": "dictation", "action": "stop", "print": true}
+{"version": 4, "command": "meeting-record", "title": "Design sync"}
+{"version": 4, "command": "settings-set", "key": "sound_effects", "value": "off"}
+{"version": 4, "command": "dictation", "action": "start"}
+{"version": 4, "command": "dictation", "action": "stop", "print": true}
 ```
 
 ```ts
@@ -194,8 +192,7 @@ dictation {action, print?}                       action: start | stop | cancel |
                                                  print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last
-settings-get {key?} | settings-set {key, value, confirm}
-commands-retry
+settings-get {key?} | settings-set {key, value}
 model-list | model-use {model, language?} | model-install {model, language?} | model-cancel
 window-show {pane?} | window-hide | window-story {story, variant?, play}
 history-clear | check-for-updates | launch-at-login {enabled?}
@@ -212,28 +209,28 @@ no wire form. `history-clear` has no confirmation field: the CLI asks for
 Replies are tagged by `status`:
 
 ```json
-{"version": 3, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
-{"version": 3, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
-{"version": 3, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
+{"version": 4, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
+{"version": 4, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
+{"version": 4, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
   "kind": "bool", "writable": true, "about": "Play recording, cancellation, and error tones"}]}
-{"version": 3, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
+{"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
   "streams": true, "supports_recognition_hints": false}]}
-{"version": 3, "status": "vocabulary", "entries": [{"term": "OpenCode",
+{"version": 4, "status": "vocabulary", "entries": [{"term": "OpenCode",
   "sounds_like": ["open code"]}, {"term": "Rune"}]}
-{"version": 3, "status": "scrawl-capture", "changed": true, "state": "idle",
+{"version": 4, "status": "scrawl-capture", "changed": true, "state": "idle",
   "bundle": "…/captures/1792933491953.scrawl", "elapsed_ms": null,
   "finishing": ["…/captures/1792933491953.scrawl"], "last": null}
-{"version": 3, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
+{"version": 4, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
   "bundle": "…", "created_at_ms": 1792933491953, "duration_ms": 4000, "mode": "window",
   "app": "Brave", "words": 12, "sent_to": {"session": "ses_…", "title": "Hex"},
   "queued": false}]}
-{"version": 3, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
+{"version": 4, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
   "window_title": "…", "transcript": "…", "note": null, "missing_transcript": null,
   "marks": 2, "keyframes": 3, "video": "…/video.mp4", "audio": null,
   "contact_sheet": "…/contact-sheet.jpg"}
-{"version": 3, "status": "scrawl-capture-route", "explanation": "Capture   …"}
-{"version": 3, "status": "transcript", "text": "Ship it."}
+{"version": 4, "status": "scrawl-capture-route", "explanation": "Capture   …"}
+{"version": 4, "status": "transcript", "text": "Ship it."}
 ```
 
 `done.changed` is `false` when the command found things already so ("Already
@@ -245,15 +242,14 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
 
 ```json
 {
-  "version": 3, "status": "status",
+  "version": 4, "status": "status",
   "app_version": "2.3.1", "pid": 31708, "memory_footprint_bytes": 412000000,
   "listener": {"running": true, "status": "Listening"},
   "capture": {"state": "idle", "recording": null, "pending_jobs": 0},
   "meeting": {"state": "recording", "title": "Design sync", "elapsed_seconds": 723},
   "model": {"id": "parakeet_v3", "name": "…", "language": "en", "installed": true,
             "preparing": null, "downloaded_bytes": 0, "error": null},
-  "features": {"commands": false, "command_model": "disabled",
-               "meetings": true, "release_microphone_while_idle": false,
+  "features": {"meetings": true, "release_microphone_while_idle": false,
                "history_retention": "week"},
   "permissions": {"ready": true, "microphone": "ready", "accessibility": "ready",
                   "transcription_model": true},
@@ -266,11 +262,10 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
 ```ts
 listener.status     Enabled | Waiting for setup | No microphone | Stopped (running false)
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
-capture.recording   dictation | service | voice | null
+capture.recording   dictation | service | null
 meeting.state       idle | starting | recording | transcribing
-command_model       disabled | loading | ready | failed
 permissions.*       ready | needs-request | needs-settings | needs-restart
-window.pane         settings | modes | history | commands | meetings | …
+window.pane         settings | modes | history | meetings | …
 update              current | checking | available | unavailable
 ```
 
@@ -287,12 +282,12 @@ version-mismatch       this hex speaks another control version; use the running 
 unknown-setting        no such key (the message suggests a near match)
 read-only              the key can't be set here (the message says where)
 invalid-value          the value doesn't parse or is out of range
-confirmation-required  the change also turns another setting off, or clears history; pass --yes
+confirmation-required  clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
 not-found              no such capture, or it has no scrawl.json yet
 unknown-model          no such model id (`hex model list`)
 not-installed          `model use` on a model that isn't downloaded (`hex model install`)
-feature-off            the command needs an opt-in that is off (Meetings, commands)
+feature-off            the command needs an opt-in that is off (Meetings)
 not-ready              Hex is waiting for setup (permissions or the dictation model)
 meeting-active         quit/restart while a meeting records (pass --force)
 busy                   something is in progress (recording, transcribing, a full queue),
@@ -341,8 +336,6 @@ settings but do not observe input-source changes or show these controls.
   needs a key chord, as in Settings.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
-- `commands_enabled on` while `release_microphone_while_idle` is on, and the
-  reverse, need `--yes`, because each turns the other off.
 - `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
   channel it was published on), and checks for updates at once. Choosing
   another channel than the build's offers that channel's current release
@@ -367,7 +360,7 @@ settings but do not observe input-source changes or show these controls.
 `recording_duck_volume` sets the fraction of the original output volume (0–1,
 default 0.2), applied on the next intentional capture when ducking is selected.
 
-Writable keys: `commands_enabled`, `release_microphone_while_idle`,
+Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`,
@@ -388,9 +381,11 @@ fails when a new persisted setting has no key here.
 
 ## Compatibility
 
-`CONTROL_VERSION` is 3. A change that breaks a request or reply shape
+`CONTROL_VERSION` is 4. A change that breaks a request or reply shape
 increments it; adding a command, an optional request field, or a reply field
 does not. A `hex` from a different version gets `version-mismatch`; use the
 `hex` inside the running Hex.app, or restart Hex after updating. Version 2
 removed `permissions.input_monitoring` from the status reply; version 3 removed
-`voice-action` and `features.voice_action`.
+`voice-action` and `features.voice_action`; version 4 removed `commands-retry`,
+`settings-set.confirm`, `window-show` `commands`, `capture.recording` `voice`,
+`features.commands`, and `features.command_model`.

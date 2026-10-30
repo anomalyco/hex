@@ -106,16 +106,12 @@ xcrun actool "$root/app/AppIcon.icon" \
   --notices >&2
 cp "$icon_output/AppIcon.icns" "$icon_output/Assets.car" "$bundle/Contents/Resources/"
 
-set -- "$root"/.venv/lib/python*/site-packages/moonshine_voice
-moonshine_dir=$1
-if [ ! -d "$moonshine_dir" ]; then
-  echo "Moonshine is not installed. Run ./scripts/setup.sh." >&2
-  exit 1
+ort_dylib="$root/target/onnxruntime/libonnxruntime.1.23.2.dylib"
+if [ ! -f "$ort_dylib" ]; then
+  "$root/scripts/setup.sh" >&2
 fi
-cp "$moonshine_dir/libmoonshine.dylib" "$frameworks/"
-cp "$moonshine_dir/libonnxruntime.1.23.2.dylib" "$frameworks/"
+cp "$ort_dylib" "$frameworks/"
 sign "$frameworks/libonnxruntime.1.23.2.dylib"
-sign "$frameworks/libmoonshine.dylib"
 sign "$bundle/Contents/Library/HexMicrophone.driver"
 # Hex runs it only to decode the capture's movie, which needs no
 # entitlement; anything it touches is attributed to Hex, its responsible

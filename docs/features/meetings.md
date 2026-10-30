@@ -557,8 +557,6 @@ Final transcript            after flush            181 ms after Stop, 3.7% WER
 
 Dictation latency stays within run-to-run spread (earlier Parakeet-only runs
 measured p50 87-92 ms, p95 103-104 ms).
-Commands still run their own Moonshine when that opt-in is on; the meeting
-never loads it.
 
 ### Echo Suppression
 

@@ -1707,12 +1707,6 @@ impl DictationHotkey {
         }
     }
 
-    /// Drops the chord breaker the current press would be owed, for a press
-    /// Hex does not act on.
-    pub fn forgo_chord_break(&mut self) {
-        self.chord_break_at = None;
-    }
-
     /// Whether the held press is due its chord breaker at `now`; true at most
     /// once per press.
     pub fn take_chord_break(&mut self, now: CaptureInstant) -> bool {
@@ -4676,11 +4670,6 @@ mod tests {
         suspended.process(InputEvent::Flags(OPTION_KEY_MASK), now);
         suspended.suspend();
         assert!(!suspended.take_chord_break(later));
-        // Neither does a press voice-delimited dictation ignores.
-        let mut ignored = test_hotkey(false, now);
-        ignored.process(InputEvent::Flags(OPTION_KEY_MASK), now);
-        ignored.forgo_chord_break();
-        assert!(!ignored.take_chord_break(later));
     }
 
     #[test]

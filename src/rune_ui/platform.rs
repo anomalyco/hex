@@ -2,16 +2,14 @@
 //! and the requests they make of it.
 //!
 //! The panes never call macOS or Windows APIs. Permissions, the login item,
-//! the meetings store, the command catalog, and the Hex Microphone driver
-//! reach them as plain data in [`PlatformState`], and every action they take
-//! goes out as a [`PlatformRequest`] through [`PlatformHost`]. Linux scenes
-//! and tests feed preview data and record the requests, so macOS and Windows
-//! surfaces render and are tested on Linux; a native host fills the same
-//! data on its own OS.
+//! the meetings store, and the Hex Microphone driver reach them as plain data
+//! in [`PlatformState`], and every action they take goes out as a
+//! [`PlatformRequest`] through [`PlatformHost`]. Linux scenes and tests feed
+//! preview data and record the requests, so macOS and Windows surfaces render
+//! and are tested on Linux; a native host fills the same data on its own OS.
 
 use super::meetings::Meeting;
 use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
-use crate::commands::CommandScope;
 use crate::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
 };
@@ -30,8 +28,6 @@ pub(super) enum Os {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Capabilities {
     pub(super) os: Os,
-    /// The voice command catalog and its opt-in (macOS).
-    pub(super) commands: bool,
     /// Meeting recording and its pane, with the recordings and their
     /// settings (macOS beta).
     pub(super) meetings: bool,
@@ -70,7 +66,6 @@ pub(super) struct Capabilities {
 impl Capabilities {
     pub(super) const LINUX: Self = Self {
         os: Os::Linux,
-        commands: false,
         meetings: false,
         calendar: false,
         permissions: false,
@@ -91,7 +86,6 @@ impl Capabilities {
 
     pub(super) const MACOS: Self = Self {
         os: Os::Macos,
-        commands: true,
         meetings: true,
         calendar: true,
         permissions: true,
@@ -112,7 +106,6 @@ impl Capabilities {
 
     pub(super) const WINDOWS: Self = Self {
         os: Os::Windows,
-        commands: false,
         meetings: false,
         calendar: false,
         permissions: false,
@@ -212,18 +205,6 @@ pub(super) enum CalendarRequest {
     OpenPrivacySettings,
 }
 
-/// The voice command model's state while commands are on (macOS).
-// Only the macOS host reports the states fixtures do not show.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum CommandModel {
-    #[default]
-    Disabled,
-    Loading,
-    Ready,
-    Failed,
-}
-
 /// Whether Apple Intelligence can write meeting notes, as
 /// `apple_intelligence::Availability` reports it.
 // Only the macOS host reports the states fixtures do not show.
@@ -243,30 +224,6 @@ impl NotesAvailability {
     pub(super) fn is_available(self) -> bool {
         self == Self::Available
     }
-}
-
-/// One command of the catalog: compiled commands and the user's TypeScript
-/// commands, merged by the host.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct CatalogCommand {
-    pub(super) id: String,
-    pub(super) task: String,
-    pub(super) scope: CommandScope,
-    pub(super) phrase: String,
-    pub(super) aliases: Vec<String>,
-    pub(super) description: String,
-}
-
-/// The personal commands workspace behind `hex.config.ts`.
-// Only the macOS host reports the states fixtures do not show.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum Workspace {
-    #[default]
-    Missing,
-    Creating,
-    Ready,
-    Error,
 }
 
 /// What the Scrawl pane shows (the `capture` experiment).
@@ -332,13 +289,6 @@ pub(super) struct PlatformState {
     /// answer replaces it.
     pub(super) login_item_requested: Option<bool>,
     pub(super) hex_microphone: Option<HexMicrophoneStatus>,
-    pub(super) command_model: CommandModel,
-    pub(super) commands: Vec<CatalogCommand>,
-    pub(super) workspace: Workspace,
-    pub(super) workspace_path: String,
-    pub(super) workspace_error: Option<String>,
-    /// The frontmost application and browser host, for the command detail.
-    pub(super) context: Option<String>,
     pub(super) notes: NotesAvailability,
     /// A meeting folder that could not be revealed or chosen.
     pub(super) meeting_folder_error: Option<String>,
@@ -420,12 +370,6 @@ impl PlatformState {
             login_item_error: None,
             login_item_requested: None,
             hex_microphone: None,
-            command_model: CommandModel::Disabled,
-            commands: Vec::new(),
-            workspace: Workspace::Missing,
-            workspace_path: String::new(),
-            workspace_error: None,
-            context: None,
             notes: NotesAvailability::Available,
             meeting_folder_error: None,
             calendar: CalendarView::default(),
@@ -527,7 +471,7 @@ impl PlatformState {
     }
 
     /// Deterministic macOS state for scenes: every permission granted, the
-    /// login item off, the driver installed, a small command catalog.
+    /// login item off, and the driver installed.
     pub(super) fn preview(caps: Capabilities) -> Self {
         let mut state = Self::new(caps);
         let ready = PermissionState::Ready;
@@ -554,76 +498,8 @@ impl PlatformState {
         if caps.fun {
             state.demo = Some(super::fun::preview_demo(false, None));
         }
-        if caps.commands {
-            state.commands = preview_commands();
-            state.workspace = Workspace::Ready;
-            state.workspace_path = "~/Library/Application Support/hex/commands".into();
-            state.context = Some("Brave Browser / github.com".into());
-        }
         state
     }
-}
-
-fn preview_commands() -> Vec<CatalogCommand> {
-    let command =
-        |id: &str, task: &str, scope, phrase: &str, aliases: &[&str], description| CatalogCommand {
-            id: id.into(),
-            task: task.into(),
-            scope,
-            phrase: phrase.into(),
-            aliases: aliases.iter().map(|alias| alias.to_string()).collect(),
-            description: String::from(description),
-        };
-    vec![
-        command(
-            "mode.sleep",
-            "Voice control",
-            CommandScope::Global,
-            "go to sleep",
-            &["stop listening"],
-            "Stop listening for commands",
-        ),
-        command(
-            "mode.wake",
-            "Voice control",
-            CommandScope::Sleeping,
-            "wake up",
-            &[],
-            "Listen for commands again",
-        ),
-        command(
-            "dictation.paste-last",
-            "Dictation",
-            CommandScope::Global,
-            "paste that again",
-            &["paste last"],
-            "Paste the last dictation",
-        ),
-        command(
-            "open.slack",
-            "Open applications",
-            CommandScope::Global,
-            "open slack",
-            &["show slack"],
-            "Open application",
-        ),
-        command(
-            "browser.back",
-            "Browser navigation",
-            CommandScope::Application("Brave Browser".into()),
-            "go back",
-            &["back"],
-            "Navigate active tab",
-        ),
-        command(
-            "github.pulls",
-            "Application navigation",
-            CommandScope::Browser("github.com".into()),
-            "show pull requests",
-            &["pull requests", "open pulls"],
-            "Open application destination",
-        ),
-    ]
 }
 
 /// A meeting action the pane asks the meetings runtime for.
@@ -651,9 +527,6 @@ pub(super) enum PlatformRequest {
     UninstallHexMicrophone,
     Meeting(MeetingRequest),
     Calendar(CalendarRequest),
-    CreateCommandsConfig,
-    OpenCommandsConfig,
-    RetryCommandModel,
     /// Quit and reopen Hex so macOS applies new permissions.
     Relaunch,
     /// Apply this tuning to the live Hex Microphone filter

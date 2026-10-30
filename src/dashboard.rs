@@ -10,7 +10,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
-use crate::commands::{CommandConfig, CommandScope, Mode};
 use crate::context::ContextSnapshot;
 use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
@@ -20,7 +19,6 @@ use crate::meeting::{self, MeetingManifest, MeetingStatus};
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum View {
     Activity,
-    Commands,
     Meetings,
 }
 
@@ -29,19 +27,15 @@ enum RecentAction<'a> {
     Dictation(&'a DictationPhase, &'a str),
 }
 
-pub fn run(path: PathBuf, commands: CommandConfig) -> Result<()> {
+pub fn run(path: PathBuf) -> Result<()> {
     let mut terminal = ratatui::init();
-    let result = run_loop(&mut terminal, path, commands);
+    let result = run_loop(&mut terminal, path);
     ratatui::restore();
     result.map_err(Into::into)
 }
 
-fn run_loop(
-    terminal: &mut ratatui::DefaultTerminal,
-    path: PathBuf,
-    commands: CommandConfig,
-) -> io::Result<()> {
-    let mut view = View::Commands;
+fn run_loop(terminal: &mut ratatui::DefaultTerminal, path: PathBuf) -> io::Result<()> {
+    let mut view = View::Activity;
     let mut selected_meeting = 0;
     let mut events = EventReader::open(&path);
     loop {
@@ -52,7 +46,6 @@ fn run_loop(
             draw(
                 frame,
                 events.events(),
-                &commands,
                 view,
                 &path,
                 &meetings,
@@ -64,9 +57,8 @@ fn run_loop(
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('1') => view = View::Commands,
-                KeyCode::Char('2') => view = View::Activity,
-                KeyCode::Char('3') => view = View::Meetings,
+                KeyCode::Char('1') => view = View::Activity,
+                KeyCode::Char('2') => view = View::Meetings,
                 KeyCode::Down | KeyCode::Char('j') if view == View::Meetings => {
                     selected_meeting = (selected_meeting + 1).min(meetings.len().saturating_sub(1));
                 }
@@ -75,8 +67,7 @@ fn run_loop(
                 }
                 KeyCode::Tab => {
                     view = match view {
-                        View::Activity => View::Commands,
-                        View::Commands => View::Meetings,
+                        View::Activity => View::Meetings,
                         View::Meetings => View::Activity,
                     }
                 }
@@ -89,7 +80,6 @@ fn run_loop(
 fn draw(
     frame: &mut ratatui::Frame,
     events: &VecDeque<VoiceEvent>,
-    commands: &CommandConfig,
     view: View,
     path: &Path,
     meetings: &[MeetingManifest],
@@ -242,28 +232,15 @@ fn draw(
     match view {
         View::Activity => draw_activity(frame, events, areas[2]),
         View::Meetings => draw_meetings(frame, meetings, selected_meeting, areas[2]),
-        View::Commands => draw_commands(
-            frame,
-            commands,
-            if state == VoiceState::Sleeping {
-                Mode::Sleeping
-            } else {
-                Mode::Listening
-            },
-            &context,
-            areas[2],
-        ),
     }
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("q/esc", Style::default().fg(Color::Cyan)),
             Span::raw(" quit  "),
-            Span::styled("1", tab_style(matches!(view, View::Commands))),
-            Span::raw(" commands  "),
-            Span::styled("2", tab_style(matches!(view, View::Activity))),
+            Span::styled("1", tab_style(matches!(view, View::Activity))),
             Span::raw(" log  "),
-            Span::styled("3", tab_style(matches!(view, View::Meetings))),
+            Span::styled("2", tab_style(matches!(view, View::Meetings))),
             Span::raw(" meetings  "),
             Span::styled(
                 path.display().to_string(),
@@ -420,61 +397,6 @@ fn draw_activity(
         .collect();
     frame.render_widget(
         List::new(activity).block(Block::default().title(" Log ").borders(Borders::ALL)),
-        area,
-    );
-}
-
-fn draw_commands(
-    frame: &mut ratatui::Frame,
-    commands: &CommandConfig,
-    mode: Mode,
-    context: &ContextSnapshot,
-    area: ratatui::layout::Rect,
-) {
-    let phrase_width = if area.width >= 100 { 28 } else { 22 };
-    let mut available = commands.available_catalog(mode, context);
-    available.sort_by_key(|command| matches!(command.scope, CommandScope::Global));
-    let catalog: Vec<ListItem> = available
-        .into_iter()
-        .flat_map(|command| {
-            let scope = match &command.scope {
-                CommandScope::Sleeping | CommandScope::Global => "global",
-                CommandScope::Application(application) => application.as_str(),
-                CommandScope::Browser(host) => host.as_str(),
-            };
-            let mut rows = vec![ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!(" {:<9}", scope.to_lowercase()),
-                    Style::default().fg(if scope == "global" {
-                        Color::DarkGray
-                    } else {
-                        Color::Green
-                    }),
-                ),
-                Span::styled(
-                    format!("{:<phrase_width$}", command.phrase),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(command.description, Style::default().fg(Color::DarkGray)),
-            ]))];
-            if area.width >= 100 && !command.aliases.is_empty() {
-                rows.push(ListItem::new(Line::from(vec![
-                    Span::raw("           "),
-                    Span::styled("↳ ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        command.aliases.join("  ·  "),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ])));
-            }
-            rows
-        })
-        .collect();
-    let title = format!(" Commands · {} ", context.label());
-    frame.render_widget(
-        List::new(catalog).block(Block::default().title(title).borders(Borders::ALL)),
         area,
     );
 }

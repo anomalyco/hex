@@ -33,15 +33,13 @@ Agent or terminal                                  // control.cli; macOS release
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
 │   └── No meetings cancel: Hex cannot discard a recording
-├── hex settings list | get <key|prefix> | set <key> <value> [--yes]
+├── hex settings list | get <key|prefix> | set <key> <value>
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
-│   ├── Shortcut conflict -> refused, as the window's recorder would
-│   └── commands_enabled vs release_microphone_while_idle -> needs --yes
+│   └── Shortcut conflict -> refused, as the window's recorder would
 ├── hex model list | use <id> | install <id> | cancel
 │   └── use -> installed models only; never downloads or repairs; keeps the
 │       model's remembered language and hints (--language overrides)
-├── hex commands enable [--yes] | disable | retry
 ├── hex window show [pane] | hide
 │   ├── settings -> the General pane (status window.pane stays "settings")
 │   ├── meetings pane with Meetings off -> the pane's opt-in card
@@ -58,7 +56,7 @@ Hex through the owner-only discovery file and the bearer-authenticated
 `POST /control` route; none of them launch Hex. Commands dispatch in `main`
 before logging, and the instance lock, so they never compete
 with the running app for its files. Opt-ins stay explicit settings: no command
-turns Commands or Meetings on as a side effect.
+turns Meetings on as a side effect.
 
 Linux and Windows add only `hex settings`, which reports `unsupported`; the
 Linux service socket keeps its own `dictation`, `paste-last`,
@@ -76,8 +74,8 @@ Checks: `control::tests` round-trip every command and reply (including
 `a_printing_stop_answers_through_its_reply_channel`), refuse other
 protocol versions, and cover the quit rules (an unanswered listener refuses)
 and `model_selection` (remembered hints, wildcard-language validation); `control::settings::tests` include
-`every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts, the
-microphone/Commands confirmation, and zero volume; `control::cli::tests` pin
+`every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts,
+and zero volume; `control::cli::tests` pin
 exit codes, output, and `hex start`'s `open`
 arguments; `onboarding::tests::relaunch_forwards_only_the_hex_environment`
 pins restart's; `macos_rune::control::tests` check that `model use` prepares

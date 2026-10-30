@@ -12,7 +12,6 @@
 mod activity;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
-mod commands;
 mod controls;
 mod explainer;
 mod fun;
@@ -94,11 +93,6 @@ static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
     view: 24.0,
     body: include_str!("../assets/icons/history.svg"),
-};
-static COMMANDS_ICON: Icon = Icon {
-    name: "hex-commands",
-    view: 24.0,
-    body: include_str!("../assets/icons/commands.svg"),
 };
 static ACTIVITY_ICON: Icon = Icon {
     name: "hex-activity",
@@ -305,7 +299,6 @@ pub(crate) enum Destination {
     /// The Meetings pane, with a meeting selected when given.
     Meetings(Option<String>),
     Modes,
-    Commands,
     History,
 }
 
@@ -316,7 +309,6 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
         Destination::Settings | Destination::Models => Pane::General,
         Destination::Meetings(_) => Pane::Meetings,
         Destination::Modes => Pane::Output,
-        Destination::Commands => Pane::Commands,
         Destination::History => Pane::History,
     };
     picker::close(ui);
@@ -485,8 +477,6 @@ enum Pane {
     Output,
     /// The old per-app editor, kept for its scenes until it is removed.
     Modes,
-    /// The voice command catalog and its opt-in (macOS).
-    Commands,
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
@@ -509,7 +499,6 @@ impl Pane {
         Pane::General,
         Pane::Output,
         Pane::Modes,
-        Pane::Commands,
         Pane::Meetings,
         Pane::History,
         #[cfg(hex_capture)]
@@ -524,7 +513,6 @@ impl Pane {
         match self {
             Pane::Output => ui.platform.modes,
             Pane::Modes => false,
-            Pane::Commands => caps.commands,
             Pane::Meetings => caps.meetings,
             Pane::VoiceFilter => {
                 caps.fun
@@ -559,7 +547,6 @@ impl Pane {
             Pane::General => tr("General"),
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
-            Pane::Commands => tr("Commands"),
             Pane::History => tr("History"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
@@ -575,7 +562,6 @@ impl Pane {
             Pane::General => "nav-general",
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
-            Pane::Commands => "nav-commands",
             Pane::History => "nav-history",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
@@ -591,7 +577,6 @@ impl Pane {
             Pane::General => &SETTINGS_ICON,
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
-            Pane::Commands => &COMMANDS_ICON,
             Pane::History => &HISTORY_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
@@ -684,7 +669,6 @@ pub(crate) struct Ui {
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,
     host: platform::PlatformHost,
-    commands: commands::CommandsPane,
     meetings: meetings::MeetingsPane,
     fun: fun::FunPane,
     activity: activity::ActivityPane,
@@ -772,7 +756,6 @@ impl Ui {
             tour: None,
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::None,
-            commands: commands::CommandsPane::default(),
             meetings: meetings::MeetingsPane::default(),
             fun: fun::FunPane::default(),
             activity: activity::ActivityPane::default(),
@@ -1227,7 +1210,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p)),
         Pane::Modes => modes::pane(ui, p, &mut layer),
-        Pane::Commands => commands::pane(ui, p),
         Pane::History => history::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
@@ -2090,25 +2072,6 @@ const SCENES: &[Scene] = &[
         ui.host = platform::PlatformHost::Fixture(Vec::new());
         ui.settings.paste_with_shift = false;
     }),
-    ("mac-commands", |ui| {
-        *ui = mac_fixture();
-        ui.settings.commands_enabled = true;
-        ui.pane = Pane::Commands;
-    }),
-    ("mac-commands-unavailable", |ui| {
-        *ui = mac_fixture();
-        ui.settings.commands_enabled = true;
-        ui.platform.command_model = platform::CommandModel::Failed;
-        ui.pane = Pane::Commands;
-    }),
-    ("mac-commands-confirm", |ui| {
-        *ui = mac_fixture();
-        ui.settings.release_microphone_while_idle = true;
-        ui.commands.confirm_enable = true;
-        ui.platform.workspace = platform::Workspace::Missing;
-        ui.commands.search = TextEdit::new("zzz");
-        ui.pane = Pane::Commands;
-    }),
     ("meetings", |ui| {
         *ui = mac_fixture();
         ui.pane = Pane::Meetings;
@@ -2298,8 +2261,6 @@ fn hero_tour(ui: &mut Ui, still: bool) {
     }
 }
 
-/// The macOS window with every permission granted, meetings on, the Hex
-/// Microphone experiment on, and sample meetings and commands.
 /// The Annotate pane with captures `enabled`, a 3-day video retention, and
 /// `adjust` applied to what the host shows.
 #[cfg(hex_capture)]

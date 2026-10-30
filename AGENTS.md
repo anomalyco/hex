@@ -24,13 +24,12 @@ branch from and push to `dev`.
 
 Build Hex as a local, observable macOS voice appliance with explicit Linux
 X11, wlroots-compatible Wayland, and Windows (x64 and ARM64) beta contracts. Keep the engine native Rust
-and keep consequential behavior explicit. Protected commands and typed captures
-remain compiled Rust; ordinary literal commands live in the explicit TypeScript user config. User-facing
+and keep consequential behavior explicit. Deterministic personal transcript
+transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-The distributed release starts in hotkey-dictation-only mode. Voice commands and
-their catalog remain available as a persisted opt-in that defaults off.
-Meetings (beta) is a second
+The distributed release starts in hotkey-dictation-only mode.
+Meetings (beta) is a
 persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
 Meetings pane, menu-bar recording controls, and meeting paste in release builds.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
@@ -48,8 +47,7 @@ substitute for source inspection or a second roadmap.
 - Update the affected map in the same change when behavior, entry points,
   defaults, prerequisites, platform availability, recovery, or verification
   coverage changes. Do not churn unrelated maps for internal-only refactors.
-- Organize by user capability, not Rust module or UI pane. Dictation and Voice
-  Commands are distinct features; link shared flows and
+- Organize by user capability, not Rust module or UI pane; link shared flows and
   recovery rather than duplicating their descriptions. Keep the index current
   when adding or splitting a feature file.
 - Prefer small action/outcome diagrams in `ts` fences with Unicode tree
@@ -67,8 +65,6 @@ substitute for source inspection or a second roadmap.
   microphone, else the system default, never Hex Microphone), the CoreAudio
   default-input and device-list listeners, timestamped mono float PCM
   delivery, live selection, and bounded stream recovery.
-- `moonshine`, `moonshine_lab`: the only Moonshine C adapter, the streaming
-  recognizer, and the debug interactive/batch command-fixture evaluator.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
@@ -159,40 +155,31 @@ substitute for source inspection or a second roadmap.
   clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard.
-- `recognition`: the semantic coordinator for Moonshine, command mode, hotkey
-  and voice-delimited controls, workers, and observations. It does not own the
+- `recognition`: the macOS listener coordinator for hotkey and programmatic
+  dictation controls, Smart Turn, workers, and observations. It does not own the
   authoritative microphone timeline.
-- `command_grammar`, `spoken_text`: typed command patterns, captures,
-  spoken-number and ASCII-punctuation normalization, overlap detection, and
-  command catalog metadata.
-- `keys`: the platform-neutral key and modifier vocabulary of command actions.
-- `commands`: pure contextual resolution plus bounded asynchronous action
-  execution (`open` and CoreGraphics keystrokes on macOS; shell-opened URLs,
-  paths, and applications on Windows).
 - `personal_commands`: the user's `hex.config.ts` (or `.js`) in
   `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
   worker thread: TypeScript erased to same-position JavaScript by
   `personal_commands/typescript` (oxc's parser), the `@hex/commands` module
-  and managed `hex.d.ts` typings, the watch-reloaded registration compiled
-  into the command registry, handler calls whose returned actions run on
-  Hex's native executor, transformation calls, per-call time and runtime
-  memory limits, status snapshots, and `hex commands init|check`. macOS,
-  Windows, and Linux share it; Windows and Linux use transformations only.
+  and managed `hex.d.ts` typings, watch-reloaded deterministic transformation
+  calls, per-call time and runtime memory limits, status snapshots, and
+  `hex commands init|check`. macOS, Windows, and Linux share it.
 - `background_process`: the one constructor for child processes Hex starts for
   its own work (OpenCode CLI, curl, PowerShell); on Windows they
   never open a console window.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
-- `config`: compiled commands and dictation profiles.
-- `context`: the foreground context snapshot and selectors shared by commands
-  and modes, plus native macOS capture. Browser host is the domain concept;
+- `config`: dictation profiles.
+- `context`: the foreground context snapshot and selectors for modes,
+  plus native macOS capture. Browser host is the domain concept;
   Brave AppleScript is the first macOS adapter and `windows_context` reads any
   browser through UI Automation.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
   shortcuts, App Paths, and open windows, Linux `.desktop` entries.
 - `app_settings`: the one persisted `settings.json` on every OS and its live
-  runtime projection for commands, hotkeys, microphone and transcription
+  runtime projection for hotkeys, microphone and transcription
   selection, recording behavior, processing, sound volume, indicator position,
   interface language, and Dock policy. It records one-time changes in
   `migrations`.
@@ -298,7 +285,7 @@ substitute for source inspection or a second roadmap.
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
   `rune-kit` and the OpenCode theme: General and History, then the opt-in
-  Commands and Meetings once on (each feature owns its
+  Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
   the opt-in switches) Modes with mode-owned corrections and processing, the
   Voice Filter and developer-only HUD Lab (release too while `playground` is
@@ -425,31 +412,21 @@ substitute for source inspection or a second roadmap.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
   and `hex restart`, Ctrl-C, and AppKit's terminate) stops and joins Hex's
   workers, bounded by a 5 s deadline, then calls `_exit`, so C++ static
-  destructors (ggml's Metal device, Moonshine's transcriber map) never run
+  destructors (such as ggml's Metal device) never run
   under live threads. A restart
   schedules its relaunch first; the new copy waits for the old pid to exit.
-- `feedback`: bounded volume-controlled mode, capture, cancellation, and
+- `feedback`: bounded volume-controlled capture, cancellation, and
   failure tones.
 
-Keep modules deep. Callers should not coordinate Moonshine stream handles,
+Keep modules deep. Callers should not coordinate
 CoreAudio formats, AppleScript details, or event serialization.
 
 ## Invariants
 
-- Every build starts dictation-ready without loading Moonshine or a command
-  executor unless the persisted command opt-in is enabled. Enabling commands
-  loads Moonshine off the audio-consumption loop; disabling them unloads the
-  recognizer and executor.
 - On a new Mac, release dictation starts only after Microphone, Accessibility,
   and the selected dictation model are ready. Hex never asks for Input
   Monitoring: Accessibility also grants the listen-event access its shortcut
-  taps need (measured on macOS 26 and 27). Opt-in command
-  recognition additionally requires Moonshine, but its background preparation or
-  failure must never block hotkey dictation. Failed preparation exposes explicit
-  retry and disable actions without silently changing the command opt-in.
-- Among recognized voice commands, sleeping mode accepts only standalone wake
-  phrases. Dictation and explicit paste shortcuts remain available.
-- Unmatched completed speech is ignored and logged.
+  taps need (measured on macOS 26 and 27).
 - The dictation shortcut defaults to Option but supports modifier-only,
   modifier-plus-key, standalone Globe/Fn, and standalone function-key bindings.
   Capturing a new binding suspends global matching.
@@ -512,13 +489,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   modifier-change evidence that Fn is up; the full key scan and delayed-event
   fences remain required. Never strip Fn globally from shortcut matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
-  300 ms discard. A 450 ms hotkey pre-roll and one-second voice-trigger pre-roll
-  protect speech onset. Capture has no automatic duration limit; release,
+  300 ms discard. A 450 ms hotkey pre-roll
+  protects speech onset. Capture has no automatic duration limit; release,
   explicit stop, or Escape ends it.
 - When enabled, a second shortcut tap within 300 ms locks dictation. Press the
   shortcut again to finish or Escape to cancel.
-- When commands are enabled, every dictation or paste hotkey action resets
-  Moonshine so shortcut audio cannot leak into a later command.
 - Recording audio behavior and idle-sleep prevention begin only after the
   intentional-hold threshold. Ordinary shortcut chords must not mute output,
   pause media, or prevent sleep.
@@ -528,23 +503,21 @@ CoreAudio formats, AppleScript details, or event serialization.
   code 0x44 at HID while exactly its modifiers are still down, so other
   apps' modifier-tap hotkeys read a chord. Hex's annotated-session key tap
   drops it, so the focused app never receives it (and never beeps). Short
-  taps, chords, and presses during voice-delimited dictation never get one,
+  taps and chords never get one,
   and it never reaches Hex's state machines.
 - The start tone confirms the shortcut press itself, not the hold threshold: it
   is provisional, sounds after a 40 ms chord grace, and a chord, short tap, or
   cancel retracts it (silently inside the grace, else
   a 20 ms fade). With the microphone released while idle, the tone waits for
   the open microphone and the hold.
-- `Release microphone while idle` and Commands are mutually exclusive through
-  explicit confirmed transitions and a shared runtime policy. When release is
+- When `Release microphone while idle` is
   enabled, pressing the shortcut opens the selected device asynchronously with
   no pre-roll, preserves the physical press for the hold threshold, discards a
   release before readiness, and closes only after the authoritative capture is
   idle. Accepted jobs never keep the stream open. A stream failure before the
   hold threshold returns the press to pending and reopens; later failures fail
   the capture. Cold opens retry the selected device briefly before falling back.
-- Dictation remains available while command recognition sleeps.
-- Model inference, optional post-processing, paste, and application actions must
+- Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
 - CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
   share the macOS boot-time nanosecond clock. Do not apply the Mach timebase to
@@ -559,13 +532,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   never moved; the hold threshold uses it alone. The audio owner waits at most
   the tail plus 100 ms for that audio, and a stream stall, failure, or gap in
   the tail finishes with the audio already delivered instead of failing the
-  capture. Escape, short taps, voice controls, programmatic stops, and meetings
+  capture. Escape, short taps, programmatic stops, and meetings
   get no tail. A press during the tail is handled after the old clip finishes.
-- Active dictation capture is lossless with respect to Moonshine, event, UI,
-  context, and worker stalls. Command recognition is explicitly best-effort:
-  its backlog is bounded by duration, and pressure invalidates the generation,
-  discards stale audio and updates, and resets Moonshine without touching the
-  active recording.
+- Active dictation capture is lossless with respect to event, UI,
+  context, and worker stalls.
 - The dictation shortcut has a persisted `shortcut_mode`: `hold` (default)
   or `toggle`. Toggle reuses the lock state on every platform: each press acts
   as the second tap of a double-tap, so release locks and the next shortcut
@@ -643,7 +613,7 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Mode processing is best-effort and ordered: corrections, optional OpenCode
   rewriting, then selected transformations. A failed stage preserves its input;
   the transformation chain is one stage, so failure discards its partial results.
-  It applies to Paste and Send, not meetings.
+  It applies to Paste, not meetings.
 - OpenCode availability checks stay off the UI thread. When the app finds the
   `opencode2` executable, `opencode2 api` discovers or starts the managed service;
   the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
@@ -653,24 +623,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   OpenCode V2 while Settings is open refreshes the model catalog without
   restarting Hex. Catalog failures require an explicit retry rather than
   spawning clients in a tight loop.
-- Personal commands and transformations run in-process: no child process,
+- Personal transformations run in-process: no child process,
   no Node or Bun, and no filesystem, network, process, or timer API in the
   script engine; scripts import only `@hex/commands` and files inside the
-  config folder. One worker thread owns the QuickJS runtime; each handler or
+  config folder. One worker thread owns the QuickJS runtime; each
   transformation call is interrupted after 1 s and a load after 2 s, and the
   runtime is capped at 64 MiB. A config that fails to load or compile keeps
   the previous registry and reports its error with file, line, and column;
-  a removed config unregisters everything. Handlers only return or queue
-  actions, which Hex validates as a whole and runs in order on its native
-  executor after the handler returns. The built-in transformations stay
+  a removed config unregisters everything. The built-in transformations stay
   native Rust and never touch the script engine.
-- Ordinary resolver commands execute only from completed Moonshine lines.
-  Voice-delimited activation and stable control phrases are deliberate exceptions.
-- Contextual commands enter the candidate set only when their predicate matches.
-- Literal and typed command patterns compile into one registry. Reject overlaps
-  at configuration time and generate the catalog from that registry.
-- Successful commands rely on their action for feedback. Wake/sleep use quiet
-  tones; execution failures use an error tone.
 - Clipboard insertion is the fixed text-insertion path. Restore the previous
   clipboard only if no newer paste or external clipboard change superseded it.
   The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
@@ -748,7 +709,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   quitting begins, no meeting work starts a chunk or loads a model. The next
   launch with Meetings on runs the final pass on the dictation engine's model
   (or its own after 30 s without an engine).
-- Meetings run no Moonshine. Every in-call view and copy (the Meetings pane,
+- Every in-call meeting view and copy (the Meetings pane,
   Option-Control-V, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
   can replace; after Stop they read the final transcript.
@@ -871,9 +832,6 @@ CoreAudio formats, AppleScript details, or event serialization.
   system audio that could explain it has arrived (bounded when the system track
   stalls). Measure echo changes with `meeting_echo_replay` on a recorded
   speaker-mode call, counting genuine `You` lines lost as well as echo kept.
-- Moonshine sessions run single-threaded (`MOONSHINE_ORT_SINGLE_THREAD`, set
-  first thing in `main`); ONNX Runtime's default spinning pools cost several
-  times the CPU of the decoding itself.
 - The rolling transcript remains available if final transcription fails. Final
   publication is atomic; adjacent same-source entries within three seconds form
   one displayed turn labeled `You` or `Them`. Speaker echo never shows as `You`:
@@ -1115,7 +1073,7 @@ Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
 render). Scenes cover every pane and state the goldens check: the Linux and
 Windows panes (`modes`, `history`, `picker`, `onboarding`,
-`windows-settings`, …) and the macOS ones (`mac-settings`, `mac-commands`,
+`windows-settings`, …) and the macOS ones (`mac-settings`,
 `meetings*`, `mac-voice-filter*`, `mac-hud-lab`, `mac-activity`, `mac-onboarding*`).
 `live` renders the running Linux Hex's real state. On a host without a GPU,
 render on lavapipe with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
@@ -1301,15 +1259,15 @@ Windows Authenticode signature; `scripts/test-install-linux-release.sh`
 exercises the Linux one against a fixture service with a fixture key.
 
 Use `termctrl` to verify TUI changes at both wide and narrow dimensions. The
-`hex dev dashboard` keys are `1` for commands, `2` for the activity log, `3` for meetings,
+`hex dev dashboard` keys are `1` for the activity log, `2` for meetings,
 Tab to cycle, and `q`/Escape to quit.
 
 ## Diagnostics
 
 - `~/Library/Application Support/hex/logs/live.ndjson`: state,
-  transcript, command decision, outcome, processing, and context.
+  transcript, outcome, processing, and context.
 - `~/Library/Application Support/hex/logs/process.log`: Rust,
-  CoreAudio, Moonshine, and context-adapter diagnostics.
+  CoreAudio, and context-adapter diagnostics.
 - `~/Library/Application Support/hex/meetings/`: manifests, separate
   tracks, the rolling in-call transcript, and atomically published final
   transcripts.
@@ -1317,10 +1275,6 @@ Tab to cycle, and `q`/Escape to quit.
 Windows uses `%APPDATA%\hex` and Linux `~/.local/share/hex` (or under
 `XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
 folders or per-OS settings files.
-
-When diagnosing a missed command, inspect both logs and distinguish microphone
-capture, transcription, command mode/dictation, context matching, command resolution,
-and action execution before changing aliases or thresholds.
 
 ## Future Direction
 

@@ -16,10 +16,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
     #[cfg(target_os = "macos")]
-    Wake,
-    #[cfg(target_os = "macos")]
-    Sleep,
-    #[cfg(target_os = "macos")]
     Error,
     DictationStart,
     DictationStop,
@@ -267,8 +263,6 @@ pub fn play(tone: Tone) {
         return;
     }
     match tone {
-        #[cfg(target_os = "macos")]
-        Tone::Wake | Tone::Sleep => play_system_sound(tone),
         #[cfg(target_os = "macos")]
         Tone::Error if !sound_set().has_own_error() => play_system_sound(tone),
         _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
@@ -554,7 +548,7 @@ impl SetSounds {
 }
 
 /// The decoded sounds the playback worker plays, every set at once so a new
-/// choice plays at once. Wake and sleep stay the quieter macOS system sounds.
+/// choice plays at once.
 struct Sounds {
     /// In [`SoundSet::ALL`]'s order.
     sets: Vec<SetSounds>,
@@ -613,8 +607,6 @@ impl Sounds {
             }
             #[cfg(target_os = "macos")]
             Tone::Error => return sounds.error.as_ref(),
-            #[cfg(target_os = "macos")]
-            Tone::Wake | Tone::Sleep => return None,
             #[cfg(hex_capture)]
             Tone::CaptureStart => &self.capture[0],
             #[cfg(hex_capture)]
@@ -847,8 +839,6 @@ impl FeedbackOutput<MixerDeviceSink> {
 #[cfg(target_os = "macos")]
 fn play_system_sound(tone: Tone) {
     let sound = match tone {
-        Tone::Wake => "Pop",
-        Tone::Sleep => "Tink",
         Tone::Error => "Basso",
         _ => return,
     };

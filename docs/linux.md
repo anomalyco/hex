@@ -8,7 +8,7 @@ inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your 
 or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes,
-and History. Voice commands, website mode rules, and meetings are macOS-only.
+and History. Website mode rules and meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
 protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
 elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts portal when it has one, otherwise

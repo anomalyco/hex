@@ -6,11 +6,10 @@ vendored icon assets. Dependencies retain their respective upstream licenses.
 ## Lucide And Feather
 
 The settings sidebar icons in `assets/icons/` (`settings`, `modes`,
-`commands`, `meetings`, `history`, `voice-filter`, `scrawl`, `hud-lab`,
-`activity`) are Lucide 1.62.0's `sliders-horizontal`, `layers`,
-`square-terminal`, `users`, `history`, `audio-waveform`, `scan-line`,
-`flask-conical`, and `activity`, with stroke attributes moved onto each element
-and a 1.75 stroke.
+`meetings`, `history`, `voice-filter`, `scrawl`, `hud-lab`, `activity`) are
+Lucide 1.62.0's `sliders-horizontal`, `layers`, `users`, `history`,
+`audio-waveform`, `scan-line`, `flask-conical`, and `activity`, with stroke
+attributes moved onto each element and a 1.75 stroke.
 The `assets/icons/lucide/*.svg` assets in the Windows development branch are
 also from Lucide: https://github.com/lucide-icons/lucide
 

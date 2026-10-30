@@ -16,16 +16,15 @@ locators unless an executed result is explicitly recorded, as in the
 Hex                                      // macOS release
 ├── Get ready                            // install, permissions, local model
 ├── Dictate                              // hold OR double-tap lock
-├── Use the result                       // paste, Send, paste-last, History
+├── Use the result                       // paste, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
 ├── Process text                         // context-selected Modes (experiment `modes`, off by default)
-├── Opt in                               // Commands, Meetings: separately off
+├── Opt in                               // Meetings: off by default
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit
 ```
 
-[Dictation](dictation.md), [Voice Commands](commands.md),
-[Meetings](meetings.md), and [Recovery](recovery.md)
+[Dictation](dictation.md), [Meetings](meetings.md), and [Recovery](recovery.md)
 have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
@@ -69,8 +68,7 @@ Install on Linux                          // setup.linux-installer
     └── cannot start -> name the glibc floor or the missing Arch packages
 
 Prepare local models                      // separate network dependency
-├── Dictation -> huggingface.co and its download CDN
-└── Commands -> download.moonshine.ai
+└── Dictation -> huggingface.co and its download CDN
     └── Transfer fails -> host-specific guidance -> restore access -> Retry
 ```
 
@@ -104,7 +102,7 @@ Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/win
 [Linux installer](../../.github/release/install-linux.sh), and
 [updater](../../src/updater.rs).
 Model transfer failures in [transcription_models.rs](../../src/transcription_models.rs)
-and [moonshine.rs](../../src/moonshine.rs) explain the source host, retry, and
+explain the source host, retry, and
 separate prerequisites. These messages do not diagnose a particular firewall
 or establish a successful subsequent model download.
 Executed hosting checks and deployment details are recorded in
@@ -457,8 +455,7 @@ General > Advanced > Double-tap only     // optional for key bindings
 ```
 
 The [detailed map](dictation.md) covers timing, successive captures, output
-commitment, named checks, and native-proof gaps. Optional
-[spoken entry and controls](commands.md#spoken-dictation-controls) belong to Commands.
+commitment, named checks, and native-proof gaps.
 The macOS CLI entry is `hex listen`, with an optional authoritative `--device`.
 Do not start it beside an existing listener.
 
@@ -467,7 +464,6 @@ Do not start it beside an existing listener.
 ```ts
 Completed output                         // output
 ├── Paste -> Current focus, in submission order
-├── Spoken Send -> Paste, then Enter      // requires Commands and voice capture
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   └── Last completed dictation
 └── History
@@ -509,7 +505,7 @@ latency measurement.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, History, then each opt-in feature that is on (Commands, Meetings)
+├── General, History, then each opt-in feature that is on (Meetings)
 └── Labs ▸ -> Labs page: a switch per opt-in feature; one turned on joins the sidebar
     └── Experiments' panes (and Modes when shown) indent under Labs while it's open
         // Command-1…9 follow this order (labs::order)
@@ -551,8 +547,7 @@ General                                  // settings
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
-│   └── Release when idle -> Open on press; no pre-roll; startup delay
-│       └── Commands enabled? -> Confirm turning Commands off
+│   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
 ├── While dictating -> Mute / Pause media / Lower audio (macOS) / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
@@ -697,8 +692,7 @@ occludes the controls beneath it, and closes on any outside mouse-down. In the
 Rune window the menu is a rune-kit `Menu` in the overlay layer (scene `menus`);
 the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
-**Easy to misread:** an open microphone is not an active recording. Sleeping
-Commands still needs open input; it is not Release when idle.
+**Easy to misread:** an open microphone is not an active recording.
 
 ## Process Text With Modes
 
@@ -737,8 +731,8 @@ Stage fails -> Preserve its input        // failed chain discards partial result
 ```
 
 Built-in text transformations run natively. Custom transformations come from
-`~/.config/hex/hex.config.ts`, run in Hex's embedded script engine with a 1 s
-limit per call; they need neither Commands enabled nor anything installed. OpenCode rewriting sends documented
+`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine with a 1 s
+limit per call. OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
@@ -793,14 +787,6 @@ preference enabled never activates and every dictation falls back to Global.
 Update to repair saved selections automatically. For older builds, the workaround
 is to quit Hex, remove the `.app` suffix from
 `dictation_processing.modes[].applications` in `settings.json`, then relaunch.
-
-## Speak Commands
-
-[Voice Commands](commands.md) maps the command opt-in and separate Moonshine
-model, awake/sleep state, contextual catalog, personal config, and
-[spoken dictation controls](commands.md#spoken-dictation-controls).
-It owns the checks and [host/startup gaps](commands.md#gaps-and-constraints);
-actual capture and output remain in [Dictation](dictation.md).
 
 ## Record Meetings
 
@@ -1177,7 +1163,7 @@ state. They pass the cross-compiled Clippy check, but no one has clicked them
 on a real Windows PC. Releases are Authenticode-signed once Azure Artifact
 Signing is configured ([windows-signing.md](../windows-signing.md)).
 
-No Windows Commands, Meetings, or local transcription API. See the
+No Windows Meetings or local transcription API. See the
 [Windows guide](../windows.md) for the parity table, streaming notes, and
 release flow; [check-windows](../../.github/workflows/check-windows.yml) builds,
 lints, and tests x64 and builds and tests ARM64 on every pull request. Physical
@@ -1196,8 +1182,7 @@ The install kind comes from `updater/linux.rs`. The 2026-10-23 apollo
 observation (a staged update and the sidebar button) predates the release
 service and is not evidence for it.
 
-No Linux voice Commands or meetings. `hex listen` instead prints Moonshine
-transcripts. Wayland shortcuts need either the desktop's GlobalShortcuts portal
+No Linux meetings. Wayland shortcuts need either the desktop's GlobalShortcuts portal
 or the user's own keybindings for the `hex` commands; Hex reads no input
 devices. Click-through and a physical portal or keybinding press still need
 native evidence. Its [smoke](../../scripts/test-wayland-paste.sh) explicitly
@@ -1440,7 +1425,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Model and application searches: Up/Down highlight, Enter picks it
 ├── Not yet: right-click delete
 └── macOS/Windows surfaces as scenes too (Capabilities + preview data):
-    Commands, Meetings (Recordings | Settings, opt-in card), Voice Filter,
+    Meetings (Recordings | Settings, opt-in card), Voice Filter,
     HUD Lab, Activity, permission rows, Launch at login, Dock icon, shortcut
     sides, the full tour
 macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
@@ -1449,7 +1434,7 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── Runtime thread: model preparation (menu bar: installed only), starts the listener once setup is ready
 ├── Listener, meeting controller, local API: their own threads
 ├── macos_host: AppKit event monitor records chords (Option, Fn); NativeHost does permissions,
-│   login item, Hex Microphone, meeting start/stop/rename/trash/reveal, commands workspace, relaunch
+│   login item, Hex Microphone, meeting start/stop/rename/trash/reveal, relaunch
 ├── Meetings pane lists the store through meeting::query (1 s rescan, sent only when changed);
 │   a controller failure shows in the pane; rune::FileDialogs (file_dialog) chooses the
 │   meetings folder and Modes' "Choose a file…" .app
@@ -1490,8 +1475,8 @@ clear, copy; Modes add/delete, corrections, transformations (drag reorder saves 
 on release), application conflicts, a chosen file joining the mode, arrow
 keys in the model and application searches; the picker's ChooseModel/CancelModel; setup's download; draft
 saves; and, from macOS/Windows preview data, each OS's panes and rows, Launch
-at login, permission warnings, the command model notice in Commands, the
-Meetings opt-in card and Settings view, Commands search/opt-in card/prompt,
+at login, permission warnings, the
+Meetings opt-in card and Settings view,
 Meetings select,
 search, copy, rename, start/stop, two-step trash, and the overflow menu, and
 the macOS tour's permissions, practice, and relaunch; Voice Filter's

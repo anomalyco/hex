@@ -1,6 +1,6 @@
-//! Pieces the list-and-detail panes (Commands, Meetings) and the OS-only
-//! Settings rows share: list rows and group labels, the detail header and
-//! facts, tinted status tags, and the permission control.
+//! Pieces the list-and-detail panes (Meetings) and the OS-only Settings rows
+//! share: list rows and group labels, the detail header and facts, tinted
+//! status tags, and the permission control.
 
 use std::sync::LazyLock;
 

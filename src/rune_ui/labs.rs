@@ -27,30 +27,17 @@ struct Lab {
 
 fn labs(ui: &Ui) -> Vec<Lab> {
     let settings = &ui.settings;
-    let mut labs = vec![
-        Lab {
-            key: "lab-commands",
-            title: tr("Commands"),
-            about: tr("Open apps and press keys by voice"),
-            on: settings.commands_enabled,
-            flip: |ui| {
-                let on = !ui.settings.commands_enabled;
-                super::commands::set_enabled(ui, on);
-            },
-            pane: Pane::Commands,
+    let mut labs = vec![Lab {
+        key: "lab-meetings",
+        title: tr("Meetings"),
+        about: tr("Record calls and keep transcripts"),
+        on: settings.meetings.enabled,
+        flip: |ui| {
+            let on = !ui.settings.meetings.enabled;
+            ui.update(|settings| settings.meetings.enabled = on);
         },
-        Lab {
-            key: "lab-meetings",
-            title: tr("Meetings"),
-            about: tr("Record calls and keep transcripts"),
-            on: settings.meetings.enabled,
-            flip: |ui| {
-                let on = !ui.settings.meetings.enabled;
-                ui.update(|settings| settings.meetings.enabled = on);
-            },
-            pane: Pane::Meetings,
-        },
-    ];
+        pane: Pane::Meetings,
+    }];
     labs.retain(|lab| lab.pane.shown(ui));
     labs
 }
@@ -58,7 +45,6 @@ fn labs(ui: &Ui) -> Vec<Lab> {
 /// An opt-in feature's pane is in the main sidebar: it's on.
 fn turned_on(ui: &Ui, pane: Pane) -> bool {
     match pane {
-        Pane::Commands => ui.settings.commands_enabled,
         Pane::Meetings => super::meetings::available(ui),
         _ => false,
     }
@@ -69,7 +55,7 @@ fn turned_on(ui: &Ui, pane: Pane) -> bool {
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     let mut panes = vec![Pane::General, Pane::History];
     panes.extend(
-        [Pane::Commands, Pane::Meetings]
+        [Pane::Meetings]
             .into_iter()
             .filter(|pane| pane.shown(ui) && turned_on(ui, *pane)),
     );
@@ -175,14 +161,7 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
 /// The Labs page: the opt-in features with their switches, then the
 /// experiments turned on with `hex experiments`.
 pub(super) fn page(ui: &Ui, p: Paint) -> El {
-    let mut rows: Vec<CardRow> = Vec::new();
-    for lab in labs(ui) {
-        let pane = lab.pane;
-        rows.push(lab_row(p, &lab));
-        if pane == Pane::Commands {
-            rows.extend(super::commands::confirm_row(ui, p).map(CardRow::from));
-        }
-    }
+    let rows: Vec<CardRow> = labs(ui).iter().map(|lab| lab_row(p, lab)).collect();
     let mut content = controls::page("content").child(
         text(tr("Turn a feature on and it joins the sidebar."))
             .key("lede")

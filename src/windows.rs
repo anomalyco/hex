@@ -190,7 +190,6 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 crate::app_settings::transformations_used(&settings.dictation_processing)
                     .then(|| {
                         crate::personal_commands::PersonalCommands::start(
-                            crate::commands::CommandConfig::new(),
                             config.transformations.clone(),
                         )
                     })

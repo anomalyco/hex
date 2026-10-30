@@ -35,7 +35,6 @@ pub struct ContextMonitor {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContextSelector {
-    Always,
     BrowserHost(String),
     Application(String),
 }
@@ -51,7 +50,6 @@ impl ContextSelector {
 
     pub fn matches(&self, context: &ContextSnapshot) -> bool {
         match self {
-            Self::Always => true,
             Self::BrowserHost(host) => context.browser_host_is(host),
             Self::Application(application) => context.application_is(application),
         }
@@ -59,26 +57,6 @@ impl ContextSelector {
 
     pub fn is_browser(&self) -> bool {
         matches!(self, Self::BrowserHost(_))
-    }
-
-    pub(crate) fn specificity(&self) -> u8 {
-        match self {
-            Self::Always => 0,
-            Self::Application(_) => 1,
-            Self::BrowserHost(_) => 2,
-        }
-    }
-
-    pub(crate) fn can_coexist_with(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Always, _) | (_, Self::Always) => true,
-            (Self::BrowserHost(left), Self::BrowserHost(right)) => browser_hosts_equal(left, right),
-            (Self::Application(left), Self::Application(right)) => {
-                application_names_equal(left, right)
-            }
-            (Self::BrowserHost(_), Self::Application(_))
-            | (Self::Application(_), Self::BrowserHost(_)) => true,
-        }
     }
 }
 

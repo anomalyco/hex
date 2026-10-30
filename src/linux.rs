@@ -1,16 +1,12 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::AtomicBool;
 
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
 
-use crate::audio::{AudioInput, AudioInputEvent};
-use crate::events::{EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::linux_input::ShortcutCommand;
 use crate::linux_service::{Activation, Launch, Request};
-use crate::moonshine::Moonshine;
 
 #[derive(Parser)]
 #[command(version = crate::VERSION, about = "Local, observable voice recognition (Linux beta)")]
@@ -40,12 +36,6 @@ enum Command {
     Quit,
     /// Restart Hex's systemd unit in this graphical session.
     Restart,
-    /// Listen to the microphone and print local transcripts until interrupted.
-    Listen {
-        /// Select an input device by a case-insensitive name fragment.
-        #[arg(long)]
-        device: Option<String>,
-    },
     /// Start, stop, or cancel a dictation in the running Hex. Bind these
     /// in your desktop's keyboard shortcuts when it has no shortcuts portal.
     Dictation {
@@ -158,11 +148,6 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         }
         Command::Stop | Command::Quit => crate::linux_service::quit(),
         Command::Restart => crate::linux_service::restart(),
-        Command::Listen { device } => {
-            let _instance = crate::instance::acquire("listener")?;
-            crate::experiments::log_launch();
-            listen(&event_path, device.as_deref(), shutdown)
-        }
         Command::Dictation {
             action: DictationAction::Stop { print: true },
         } => crate::control::cli::finish(crate::control::cli::print(
@@ -304,61 +289,6 @@ fn launch(
             result => return result,
         }
     }
-}
-
-fn listen(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
-    shutdown.store(false, Ordering::Relaxed);
-    let mut recognizer = Moonshine::load(Path::new(env!("CARGO_MANIFEST_DIR")))?;
-    let input = match device {
-        Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open_system_default()?,
-    };
-    let events = EventLog::create(event_path)?;
-    events.emit(&VoiceEvent::SessionStarted {
-        timestamp_ms: now_ms(),
-    })?;
-    events.emit(&VoiceEvent::State {
-        timestamp_ms: now_ms(),
-        state: VoiceState::Listening,
-        device: input.device_name.clone(),
-    })?;
-    println!("Listening on {}. Press Ctrl-C to stop.", input.device_name);
-
-    while !shutdown.load(Ordering::Relaxed) {
-        let chunk = match input.recv_timeout(Duration::from_millis(100)) {
-            AudioInputEvent::Chunk { samples, .. } => samples,
-            AudioInputEvent::Timeout => continue,
-            AudioInputEvent::StreamFailed(error) => {
-                return Err(color_eyre::eyre::eyre!(
-                    "microphone stream stopped: {error}"
-                ));
-            }
-        };
-        recognizer.add_audio(&chunk, input.sample_rate)?;
-        for update in recognizer.update()? {
-            events.emit(&VoiceEvent::Transcript {
-                timestamp_ms: now_ms(),
-                phase: update.phase,
-                latency_ms: update.latency_ms,
-                text: update.text.clone(),
-            })?;
-            if update.phase == TranscriptPhase::Completed {
-                println!("{}", update.text);
-            } else if !update.text.is_empty() {
-                print!("\r{}", update.text);
-                use std::io::Write;
-                std::io::stdout().flush()?;
-            }
-        }
-    }
-
-    events.emit(&VoiceEvent::State {
-        timestamp_ms: now_ms(),
-        state: VoiceState::Stopping,
-        device: input.device_name.clone(),
-    })?;
-    println!("\nStopped.");
-    Ok(())
 }
 
 fn print_status(path: &Path, limit: usize) -> Result<()> {

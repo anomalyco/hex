@@ -17,7 +17,7 @@ use crate::vocabulary::{self, VocabularyEntry};
 
 /// The wire version of [`ControlRequest`] and [`ControlResponse`]. A change
 /// that breaks either shape increments it.
-pub const CONTROL_VERSION: u32 = 3;
+pub const CONTROL_VERSION: u32 = 4;
 
 /// What a capture command does. Commands are idempotent: starting while
 /// recording or stopping while idle changes nothing and succeeds.
@@ -58,7 +58,6 @@ pub enum Pane {
     #[value(alias = "replacements")]
     Modes,
     History,
-    Commands,
     Meetings,
 }
 
@@ -94,10 +93,7 @@ pub enum ControlCommand {
     SettingsSet {
         key: String,
         value: String,
-        #[serde(default)]
-        confirm: bool,
     },
-    CommandsRetry,
     ModelList,
     ModelUse {
         model: String,
@@ -530,8 +526,6 @@ pub enum CaptureKind {
     Dictation,
     /// A host-audio dictation through the local API (`POST /dictations`).
     Service,
-    /// A voice-delimited dictation started by a spoken command.
-    Voice,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -589,9 +583,6 @@ pub struct ModelReport {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct FeatureReport {
-    pub commands: bool,
-    /// disabled, loading, ready, or failed.
-    pub command_model: String,
     pub meetings: bool,
     pub release_microphone_while_idle: bool,
     pub history_retention: String,
@@ -821,7 +812,7 @@ mod tests {
         assert!(check_print(CaptureAction::Stop, true).is_ok());
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
-                r#"{"version":3,"command":"dictation","action":"stop"}"#
+                r#"{"version":4,"command":"dictation","action":"stop"}"#
             )
             .unwrap()
             .command,
@@ -863,11 +854,9 @@ mod tests {
             ControlCommand::MeetingCopyLast,
             ControlCommand::SettingsGet { key: None },
             ControlCommand::SettingsSet {
-                key: "commands_enabled".into(),
+                key: "release_microphone_while_idle".into(),
                 value: "on".into(),
-                confirm: true,
             },
-            ControlCommand::CommandsRetry,
             ControlCommand::ModelList,
             ControlCommand::ModelUse {
                 model: "parakeet_v3".into(),
@@ -904,7 +893,7 @@ mod tests {
             round_trip_request(command);
         }
         let request: ControlRequest =
-            serde_json::from_str(r#"{"version":3,"command":"vocabulary-add","term":"Rune"}"#)
+            serde_json::from_str(r#"{"version":4,"command":"vocabulary-add","term":"Rune"}"#)
                 .unwrap();
         assert_eq!(
             request.command,
@@ -959,15 +948,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 3, "command": "meeting-record", "title": "Standup"})
+            serde_json::json!({"version": 4, "command": "meeting-record", "title": "Standup"})
         );
         // Optional fields may be left out.
         let request: ControlRequest =
-            serde_json::from_str(r#"{"version":3,"command":"quit"}"#).unwrap();
+            serde_json::from_str(r#"{"version":4,"command":"quit"}"#).unwrap();
         assert_eq!(request.command, ControlCommand::Quit { force: false });
-        assert!(serde_json::from_str::<ControlRequest>(r#"{"version":3,"command":"x"}"#).is_err());
+        assert!(serde_json::from_str::<ControlRequest>(r#"{"version":4,"command":"x"}"#).is_err());
         let capture: ControlRequest =
-            serde_json::from_str(r#"{"version":3,"command":"scrawl-capture","action":"stop"}"#)
+            serde_json::from_str(r#"{"version":4,"command":"scrawl-capture","action":"stop"}"#)
                 .unwrap();
         assert_eq!(
             capture.command,
@@ -976,7 +965,7 @@ mod tests {
             }
         );
         let send: ControlRequest = serde_json::from_str(
-            r#"{"version":3,"command":"scrawl-capture-send","capture":"latest"}"#,
+            r#"{"version":4,"command":"scrawl-capture-send","capture":"latest"}"#,
         )
         .unwrap();
         assert_eq!(
@@ -1067,13 +1056,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 3, "status": "transcript", "text": "Ship it."})
+            serde_json::json!({"version": 4, "status": "transcript", "text": "Ship it."})
         );
         let json =
             serde_json::to_value(ControlResponse::from(ControlReply::error("busy", "x"))).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"version": 3, "status": "error", "code": "busy", "message": "x"})
+            serde_json::json!({"version": 4, "status": "error", "code": "busy", "message": "x"})
         );
     }
 

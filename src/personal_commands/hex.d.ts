@@ -184,15 +184,15 @@ declare module "@hex/commands" {
   export interface HexConfig {
     readonly dictation?: DictationProtocolConfig
     readonly transformations?: Readonly<Record<string, TransformationDefinition>>
-    readonly commands: Readonly<Record<string, CommandDefinition>>
+    readonly commands?: Readonly<Record<string, CommandDefinition>>
   }
 
   export function defineHexConfig<
-    const Captures extends Readonly<Record<string, unknown>>,
-    const Extra extends Omit<HexConfig, "commands">,
+    const Captures extends Readonly<Record<string, unknown>> = Record<string, never>,
+    const Extra extends Omit<HexConfig, "commands"> = Omit<HexConfig, "commands">,
   >(
     config: Extra & {
-      readonly commands: { readonly [Id in keyof Captures]: CommandFor<Captures[Id]> }
+      readonly commands?: { readonly [Id in keyof Captures]: CommandFor<Captures[Id]> }
     },
   ): typeof config
 }

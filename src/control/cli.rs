@@ -147,10 +147,6 @@ pub enum SettingsCommand {
     Set {
         key: String,
         value: String,
-        /// Accept a change that also turns another setting off (commands and
-        /// release_microphone_while_idle exclude each other).
-        #[arg(long)]
-        yes: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -248,14 +244,6 @@ pub enum VocabularyCommand {
 pub enum Toggle {
     On,
     Off,
-}
-
-/// `hex commands enable|disable|retry`.
-#[derive(Clone, Copy, Debug)]
-pub enum CommandsAction {
-    Enable { confirm: bool },
-    Disable,
-    Retry,
 }
 
 /// Exits with `code` once stdout is flushed.
@@ -506,39 +494,10 @@ pub fn settings(command: SettingsCommand) -> u8 {
         SettingsCommand::Get { key, output } => {
             send(ControlCommand::SettingsGet { key: Some(key) }, output)
         }
-        SettingsCommand::Set {
-            key,
-            value,
-            yes,
-            output,
-        } => send(
-            ControlCommand::SettingsSet {
-                key,
-                value,
-                confirm: yes,
-            },
-            output,
-        ),
+        SettingsCommand::Set { key, value, output } => {
+            send(ControlCommand::SettingsSet { key, value }, output)
+        }
     }
-}
-
-pub fn commands(action: CommandsAction, output: Output) -> u8 {
-    send(
-        match action {
-            CommandsAction::Enable { confirm } => ControlCommand::SettingsSet {
-                key: "commands_enabled".into(),
-                value: "on".into(),
-                confirm,
-            },
-            CommandsAction::Disable => ControlCommand::SettingsSet {
-                key: "commands_enabled".into(),
-                value: "off".into(),
-                confirm: false,
-            },
-            CommandsAction::Retry => ControlCommand::CommandsRetry,
-        },
-        output,
-    )
 }
 
 /// `hex history clear`; the confirmation is asked here, before Hex is.
@@ -1120,8 +1079,7 @@ fn human_status(report: &StatusReport) -> String {
          Capture      {capture}{pending}\n\
          Meeting      {meeting}\n\
          Model        {model_line}\n\
-         Features     commands {} (model {}), meetings {}, \
-         release mic while idle {}, history {}\n\
+         Features     meetings {}, release mic while idle {}, history {}\n\
          Permissions  {permission_line}\n\
          Window       {window}\n\
          Update       {}\n\
@@ -1133,8 +1091,6 @@ fn human_status(report: &StatusReport) -> String {
         } else {
             format!("waiting: {}", report.listener.status)
         },
-        on(features.commands),
-        features.command_model,
         on(features.meetings),
         on(features.release_microphone_while_idle),
         features.history_retention,

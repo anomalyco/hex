@@ -971,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_commands_model_does_not_block_dictation_setup() {
+    fn dictation_setup_requires_permissions_and_model() {
         let mut status = SetupStatus {
             microphone: PermissionState::Ready,
             accessibility: PermissionState::Ready,

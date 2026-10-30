@@ -357,45 +357,6 @@ fn process_cpu_seconds() -> f64 {
     seconds(usage.ru_utime) + seconds(usage.ru_stime)
 }
 
-/// How long the command recognizer's Moonshine updates take, the way
-/// recognition drives it: 100 ms of microphone audio, then an update every
-/// 200 ms, in real time for `HEX_MEETING_LIVE_SECONDS` (default 60).
-#[test]
-#[ignore = "requires HEX_MEETING_DIR; see the module documentation"]
-fn moonshine_command_update_latency() {
-    let directory = PathBuf::from(std::env::var("HEX_MEETING_DIR").unwrap());
-    let seconds: usize =
-        std::env::var("HEX_MEETING_LIVE_SECONDS").map_or(60, |value| value.parse().unwrap());
-    let (rate, samples) = read_float_wav(&directory.join("microphone.wav"));
-    let audio = replay_resample(rate, &samples[..rate as usize * seconds]);
-    let mut model =
-        crate::moonshine::Moonshine::load(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
-    let cpu = process_cpu_seconds();
-    let started = Instant::now();
-    let mut durations = Vec::new();
-    for (index, block) in audio.chunks(1_600).enumerate() {
-        let due = Duration::from_millis(index as u64 * 100);
-        if let Some(wait) = due.checked_sub(started.elapsed()) {
-            thread::sleep(wait);
-        }
-        model.add_audio_to(0, block, 16_000).unwrap();
-        if index % 2 == 1 {
-            let update = Instant::now();
-            model.update_stream(0).unwrap();
-            durations.push(update.elapsed().as_secs_f64() * 1_000.0);
-        }
-    }
-    durations.sort_by(f64::total_cmp);
-    let at = |fraction: f64| durations[((durations.len() - 1) as f64 * fraction) as usize];
-    println!(
-        "command updates: p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms; {:.0}% of one core",
-        at(0.5),
-        at(0.95),
-        at(1.0),
-        (process_cpu_seconds() - cpu) * 100.0 / seconds as f64
-    );
-}
-
 /// Dictation latency while something else runs: transcribes seconds 5-13
 /// of `HEX_MEETING_DIR/system.wav` with `HEX_MEETING_MODEL` twenty times,
 /// a second apart, and prints the spread.

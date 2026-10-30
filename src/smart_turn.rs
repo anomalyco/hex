@@ -837,8 +837,7 @@ fn load_onnx(project_root: &Path, closed: &AtomicBool) -> Result<Box<dyn Predict
     Ok(Box::new(OnnxPredictor { session }))
 }
 
-/// Loads the ONNX Runtime library once per process. Moonshine links the
-/// same file, so loading it again shares one copy.
+/// Loads the ONNX Runtime library once per process.
 fn init_runtime(library: &Path) -> Result<()> {
     static RUNTIME: OnceLock<Result<(), String>> = OnceLock::new();
     RUNTIME
@@ -862,17 +861,11 @@ fn find_runtime(project_root: &Path) -> Result<PathBuf> {
             return Ok(bundled);
         }
     }
-    let lib = project_root.join(".venv/lib");
-    if let Ok(entries) = fs::read_dir(&lib) {
-        for python in entries.flatten() {
-            let candidate = python
-                .path()
-                .join("site-packages/moonshine_voice")
-                .join(RUNTIME_LIBRARY);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
+    let candidate = project_root
+        .join("target/onnxruntime")
+        .join(RUNTIME_LIBRARY);
+    if candidate.exists() {
+        return Ok(candidate);
     }
     bail!("{RUNTIME_LIBRARY} not found; run ./scripts/setup.sh")
 }

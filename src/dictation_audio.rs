@@ -65,9 +65,6 @@ pub enum DictationAudioEvent {
         kept: Option<DictationClip>,
     },
     Reopened,
-    RecognitionDiscontinuity {
-        dropped_frames: u64,
-    },
     CaptureDiscontinuity {
         was_recording: bool,
         capture_generation: u64,
@@ -110,11 +107,6 @@ struct State {
 enum CaptureKind {
     Hotkey,
     Programmatic,
-    /// Voice-delimited capture; accepted only while this recognition
-    /// generation is still current and no shortcut edge is pending.
-    Voice {
-        recognition_generation: u64,
-    },
 }
 
 enum Command {
@@ -144,12 +136,9 @@ enum Command {
     },
     SetReleaseWhileIdle(bool),
     Shutdown,
+    #[cfg(test)]
     InvalidateRecognition {
         reply: SyncSender<u64>,
-    },
-    ConsumeRecognition {
-        expected_generation: u64,
-        reply: SyncSender<bool>,
     },
     #[cfg(hex_capture)]
     OpenCaptureSink {
@@ -174,7 +163,6 @@ struct Owner {
     recognition: SyncSender<RecognitionAudio>,
     events: Sender<DictationAudioEvent>,
     state: Arc<State>,
-    dropped_recognition_frames: u64,
     recognition_overflowed: bool,
     pending_input: PendingInputEvents,
     last_captured_through: Option<CaptureInstant>,
@@ -312,25 +300,11 @@ impl DictationAudio {
         self.state.recognition_generation.load(Ordering::Acquire)
     }
 
+    #[cfg(test)]
     pub fn invalidate_recognition(&self) -> Result<u64> {
         let generation = self.call(|reply| Command::InvalidateRecognition { reply })?;
-        self.discard_recognition_backlog();
-        Ok(generation)
-    }
-
-    pub fn consume_recognition(&self, expected_generation: u64) -> Result<bool> {
-        let consumed = self.call(|reply| Command::ConsumeRecognition {
-            expected_generation,
-            reply,
-        })?;
-        if consumed {
-            self.discard_recognition_backlog();
-        }
-        Ok(consumed)
-    }
-
-    pub fn discard_recognition_backlog(&self) {
         while self.recognition.try_recv().is_ok() {}
+        Ok(generation)
     }
 
     pub fn start(&self, at: CaptureInstant) -> Result<bool> {
@@ -343,15 +317,6 @@ impl DictationAudio {
         } else {
             Err(eyre!("microphone-unavailable"))
         }
-    }
-
-    pub fn start_voice(&self, at: CaptureInstant, recognition_generation: u64) -> Result<bool> {
-        self.start_capture(
-            at,
-            CaptureKind::Voice {
-                recognition_generation,
-            },
-        )
     }
 
     fn start_capture(&self, at: CaptureInstant, kind: CaptureKind) -> Result<bool> {
@@ -547,7 +512,6 @@ impl Owner {
             recognition: recognition_sender,
             events: event_sender,
             state: state.clone(),
-            dropped_recognition_frames: 0,
             recognition_overflowed: false,
             pending_input,
             last_captured_through: None,
@@ -610,18 +574,6 @@ impl Owner {
                 if self.input.is_recovering() {
                     let _ = reply.send(false);
                     return true;
-                }
-                if let CaptureKind::Voice {
-                    recognition_generation,
-                } = kind
-                {
-                    if recognition_generation != self.recognition_generation()
-                        || self.pending_input.oldest().is_some()
-                    {
-                        let _ = reply.send(false);
-                        return true;
-                    }
-                    self.next_recognition_generation();
                 }
                 self.state.capture_generation.fetch_add(1, Ordering::AcqRel);
                 if self.input.is_open() {
@@ -701,19 +653,9 @@ impl Owner {
             Command::SetReleaseWhileIdle(release) => {
                 self.release_while_idle = release;
             }
+            #[cfg(test)]
             Command::InvalidateRecognition { reply } => {
                 let _ = reply.send(self.next_recognition_generation());
-            }
-            Command::ConsumeRecognition {
-                expected_generation,
-                reply,
-            } => {
-                let current = expected_generation == self.recognition_generation()
-                    && self.pending_input.oldest().is_none();
-                if current {
-                    self.next_recognition_generation();
-                }
-                let _ = reply.send(current);
             }
             #[cfg(hex_capture)]
             Command::OpenCaptureSink { sink, since, reply } => {
@@ -969,7 +911,7 @@ impl Owner {
             .outstanding_recognition_frames
             .load(Ordering::Acquire);
         if outstanding.saturating_add(frames) > max_frames {
-            self.overflow_recognition(frames);
+            self.overflow_recognition();
             return;
         }
         let audio = RecognitionAudio {
@@ -987,23 +929,18 @@ impl Owner {
                 self.recognition_overflowed = false;
             }
             Err(TrySendError::Full(_)) => {
-                self.overflow_recognition(frames);
+                self.overflow_recognition();
             }
             Err(TrySendError::Disconnected(_)) => {}
         }
     }
 
-    fn overflow_recognition(&mut self, frames: u64) {
-        self.dropped_recognition_frames += frames;
+    fn overflow_recognition(&mut self) {
         if self.recognition_overflowed {
             return;
         }
         self.next_recognition_generation();
         self.recognition_overflowed = true;
-        let dropped_frames = std::mem::take(&mut self.dropped_recognition_frames);
-        let _ = self
-            .events
-            .send(DictationAudioEvent::RecognitionDiscontinuity { dropped_frames });
     }
 
     fn recognition_generation(&self) -> u64 {
@@ -1046,10 +983,8 @@ impl Owner {
         match kind {
             CaptureKind::Hotkey => self.capture.start_at(at),
             CaptureKind::Programmatic => self.capture.start_programmatic_at(at),
-            CaptureKind::Voice { .. } => self.capture.start_voice_at(at),
         }
-        // Only hotkey captures stream: voice-delimited clips are retranscribed
-        // without their control phrase, and programmatic ones need no speed-up.
+        // Only hotkey captures stream; programmatic ones need no speed-up.
         self.stream_capture = matches!(kind, CaptureKind::Hotkey);
         self.keep_on_loss = matches!(kind, CaptureKind::Programmatic);
     }
@@ -1683,36 +1618,24 @@ mod tests {
     }
 
     #[test]
-    fn start_revalidates_microphone_and_voice_generation_after_boundary_drain() {
-        for interrupted in [false, true] {
-            let (mut owner, input, samples) = owner_for_test(true);
-            let at = capture_time();
-            owner.handle_input(RecoveringAudioInputEvent::Chunk {
-                samples: vec![0.25; 480],
-                captured_through: at,
-            });
-            let boundary = at + Duration::from_millis(110);
-            if interrupted {
-                drop(samples);
-            } else {
-                samples.send((vec![0.25; 480], boundary)).unwrap();
-            }
-            let generation = input.capture_generation();
-            assert!(!control(&mut owner, |reply| Command::Start {
-                at: boundary,
-                kind: if interrupted {
-                    CaptureKind::Hotkey
-                } else {
-                    CaptureKind::Voice {
-                        recognition_generation: input.recognition_generation(),
-                    }
-                },
-                reply,
-            }));
-            assert_eq!(input.capture_generation(), generation);
-            assert!(!input.is_recording());
-            assert!(input.try_recv_event().is_some());
-        }
+    fn start_revalidates_microphone_after_boundary_drain() {
+        let (mut owner, input, samples) = owner_for_test(true);
+        let at = capture_time();
+        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+            samples: vec![0.25; 480],
+            captured_through: at,
+        });
+        let boundary = at + Duration::from_millis(110);
+        drop(samples);
+        let generation = input.capture_generation();
+        assert!(!control(&mut owner, |reply| Command::Start {
+            at: boundary,
+            kind: CaptureKind::Hotkey,
+            reply,
+        }));
+        assert_eq!(input.capture_generation(), generation);
+        assert!(!input.is_recording());
+        assert!(input.try_recv_event().is_some());
     }
 
     #[test]

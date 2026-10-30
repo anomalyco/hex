@@ -25,9 +25,6 @@ pastes the result into the app you are using.
   ordinary dictation does not require OpenCode or a cloud transcription service.
 - **Your words, your way.** Choose a shortcut, language, and model. Use Modes for
   corrections, application-specific behavior, and optional text processing.
-- **Optional voice tools.** Enable voice commands when you need
-  them. Commands start off; provider-backed rewriting is separate from local speech
-  recognition.
 
 The macOS app is available now. The [Windows beta](#windows-beta) covers x64 and
 ARM64 PCs, and the [Linux beta](#linux-beta) covers x86_64 X11 and compatible
@@ -104,9 +101,9 @@ DMG manually over the existing Rust app.
 On managed networks, ask IT to allow `anoma.ly`: Hex downloads and updates
 from the Anomaly release service at `https://anoma.ly/release` (releases up to
 2.3.1 use `https://anoma.ly/hex/files`). Local model setup separately needs `huggingface.co` and its model
-download CDN; optional Voice Commands needs `download.moonshine.ai`. A successful
+download CDN. A successful
 app download does not establish that those model hosts are reachable. After
-restoring access, retry model preparation in Settings (or Retry for Commands).
+restoring access, retry model preparation in Settings.
 
 Coming from the original Swift app? Install the new app manually and complete
 setup. Settings and history are not transferred. Quit the old app before
@@ -175,27 +172,17 @@ until you first use it.
 - `hex annotate list|show|send` (also `hex capture …`) reads and sends from the
   terminal.
 
-## Experimental Voice Commands
+## Custom Transformations
 
-Voice commands are available on macOS and disabled by default. Enabling them
-starts continuous local command recognition and requires a separate local
-command model; Hex prompts to install it when needed. Dictation remains
-available while command recognition is off or asleep.
+Advanced users can create `~/.config/hex/hex.config.ts` for deterministic
+dictation transformations, written in TypeScript or JavaScript. Hex runs the
+config itself in an embedded JavaScript engine and reloads it on save; nothing
+else needs installing. `hex commands init` creates the starter workspace, and
+`hex commands check` reports what the config registers or why it fails.
 
-The Commands pane lists built-in phrases and filters them by global, application,
-and Brave website context. Advanced users can create
-`~/.config/hex/hex.config.ts` for custom commands and dictation
-transformations, written in TypeScript or JavaScript. Hex runs the config
-itself in an embedded JavaScript engine and reloads it on save; nothing else
-needs installing. Hex provides an Edit Config action and a prompt you can paste
-into a local coding agent, and `hex commands check` reports what the config
-registers or why it fails.
+Config scripts get no filesystem, network, or process access.
 
-Config scripts get no filesystem, network, or process access: handlers return
-actions (open a URL, path, or app, press keys, type text) that Hex carries out,
-so review agent changes before enabling commands.
-
-To teach a coding agent how to configure personal commands and transformations,
+To teach a coding agent how to configure personal transformations,
 install the official Hex skill:
 
 ```sh
@@ -225,7 +212,7 @@ See [flags and the versioned JSON schema](docs/transcript-cli.md).
 
 ## Privacy And Local Data
 
-- Speech transcription and command recognition run locally.
+- Speech transcription runs locally.
 - Hex does not save dictation audio by default.
 - History retains successfully pasted dictation text
   for seven days by default, including the local transcript, final text, and
@@ -254,8 +241,7 @@ Review and redact diagnostics before sharing them.
 | Recording works but text does not paste | Verify Accessibility access. |
 | Transcription does not start | Confirm that the selected local model is installed. |
 | OpenCode features fail | Verify the separate OpenCode installation and model provider. |
-| Voice commands do not respond | Confirm Commands is enabled and voice control is awake. |
-| Website context does not match | Website-aware modes and commands currently require Brave Browser. |
+| Website context does not match | Website-aware modes currently require Brave Browser. |
 
 Permission changes may require quitting and reopening Hex.
 
@@ -276,7 +262,7 @@ dictation (Hold or Toggle, `Ctrl+Space` by default), Modes,
 History, a tray icon, and signed self-updates. On x64 with a Vulkan graphics
 driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
-CPU. Voice commands, meetings, and the local transcription API are not included.
+CPU. Meetings and the local transcription API are not included.
 Download the installer for
 [x64](https://anoma.ly/hex/download/windows-x64-setup) or
 [ARM64](https://anoma.ly/hex/download/windows-arm64-setup)
@@ -296,7 +282,7 @@ with the virtual keyboard protocol, or the desktop's RemoteDesktop portal (KDE,
 GNOME).
 Shortcuts come from the desktop's GlobalShortcuts portal, or you bind
 `hex dictation start` / `stop` / `toggle` in your compositor; see the
-[Linux guide](docs/linux.md#shortcuts). Voice commands and meetings are not
+[Linux guide](docs/linux.md#shortcuts). Meetings are not
 included.
 
 Install the signed release on x86_64 Arch Linux (glibc 2.44 or later) with:

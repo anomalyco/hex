@@ -113,14 +113,9 @@ const KEYS: &[Key] = &[
         "Input-source IDs mapped to a model and language; absent sources don't switch (macOS)",
     ),
     key(
-        "commands_enabled",
-        Kind::Bool,
-        "Voice commands (loads the command model; keeps the microphone ready)",
-    ),
-    key(
         "release_microphone_while_idle",
         Kind::Bool,
-        "Release the microphone between dictations (turns off voice commands)",
+        "Release the microphone between dictations",
     ),
     key(
         "sound_effects",
@@ -516,12 +511,10 @@ fn pointer(key: &str) -> String {
 
 /// Validates `raw` for `name` against `settings` and returns the settings
 /// to save, applying the rules the window applies for the same change.
-/// `confirm` accepts a change that turns another setting off.
 pub fn apply(
     settings: &AppSettings,
     name: &str,
     raw: &str,
-    confirm: bool,
     shortcuts: &ShortcutRules,
 ) -> Result<Change, ControlError> {
     let key = keys()
@@ -543,35 +536,8 @@ pub fn apply(
     let mut candidate: AppSettings =
         serde_json::from_value(json).map_err(|error| invalid(name, &format!("{error}")))?;
     let mut effects = Vec::new();
-    let mut message = format!("Set {name}");
+    let message = format!("Set {name}");
     match key.key {
-        "commands_enabled"
-            if candidate.commands_enabled && settings.release_microphone_while_idle =>
-        {
-            if !confirm {
-                return Err(ControlError::new(
-                    "confirmation-required",
-                    "Voice commands need the microphone ready, so this also turns off \
-                     release_microphone_while_idle; pass --yes to do both",
-                ));
-            }
-            candidate = settings.clone();
-            candidate.keep_microphone_ready_and_enable_commands();
-            message = "Turned on voice commands and kept the microphone ready".into();
-        }
-        "release_microphone_while_idle"
-            if candidate.release_microphone_while_idle && settings.commands_enabled =>
-        {
-            if !confirm {
-                return Err(ControlError::new(
-                    "confirmation-required",
-                    "Releasing the microphone turns off voice commands; pass --yes to do both",
-                ));
-            }
-            candidate = settings.clone();
-            candidate.disable_commands_and_release_microphone();
-            message = "Turned off voice commands and released the microphone while idle".into();
-        }
         "sound_effect_volume" => {
             let volume = candidate.sound_effect_volume;
             candidate.sound_effects = volume > 0.0;
@@ -951,7 +917,7 @@ mod tests {
         let settings = AppSettings::default();
         let value = r#"{"smartRouting": true, "sites": {"https://example.com": "ses_a"},
             "jevApiKey": "not-a-real-key"}"#;
-        let change = apply(&settings, "capture.routing", value, false, &rules()).unwrap();
+        let change = apply(&settings, "capture.routing", value, &rules()).unwrap();
         let config = change.settings.capture.routing.config();
         assert!(config.smart_routing);
         assert_eq!(config.sites.len(), 1);
@@ -959,7 +925,7 @@ mod tests {
         let shown = get(&change.settings, "capture.routing").unwrap();
         assert!(!shown[0].value.to_string().contains("not-a-real-key"));
         assert_eq!(
-            apply(&settings, "capture.routing", "[", false, &rules())
+            apply(&settings, "capture.routing", "[", &rules())
                 .unwrap_err()
                 .code,
             "invalid-value"
@@ -972,7 +938,6 @@ mod tests {
             &AppSettings::default(),
             "keyboard_model_switching.enabled",
             "on",
-            false,
             &rules(),
         )
         .unwrap()
@@ -982,7 +947,6 @@ mod tests {
             &settings,
             "keyboard_model_switching.mappings",
             r#"{"com.apple.keylayout.Spanish":{"model":"parakeet_v3","language":"es"}}"#,
-            false,
             &rules(),
         )
         .unwrap();
@@ -1008,7 +972,6 @@ mod tests {
                     &settings,
                     "keyboard_model_switching.mappings",
                     invalid,
-                    false,
                     &rules()
                 )
                 .is_err(),
@@ -1035,7 +998,7 @@ mod tests {
     #[test]
     fn values_are_parsed_and_checked() {
         let settings = AppSettings::default();
-        let change = apply(&settings, "sound_effects", "off", false, &rules()).unwrap();
+        let change = apply(&settings, "sound_effects", "off", &rules()).unwrap();
         assert!(!change.settings.sound_effects);
         assert!(change.changed(&settings));
         for (key, value) in [
@@ -1047,52 +1010,35 @@ mod tests {
             ("dictation_processing.modes", "[{"),
         ] {
             assert_eq!(
-                apply(&settings, key, value, false, &rules())
-                    .unwrap_err()
-                    .code,
+                apply(&settings, key, value, &rules()).unwrap_err().code,
                 "invalid-value",
                 "{key}={value}"
             );
         }
         assert_eq!(
-            apply(
-                &settings,
-                "transcription.model",
-                "parakeet_v2",
-                false,
-                &rules()
-            )
-            .unwrap_err()
-            .code,
+            apply(&settings, "transcription.model", "parakeet_v2", &rules())
+                .unwrap_err()
+                .code,
             "read-only"
         );
         assert_eq!(
-            apply(&settings, "bogus", "1", false, &rules())
-                .unwrap_err()
-                .code,
+            apply(&settings, "bogus", "1", &rules()).unwrap_err().code,
             "unknown-setting"
         );
-        let change = apply(&settings, "shortcut_mode", "Toggle", false, &rules()).unwrap();
+        let change = apply(&settings, "shortcut_mode", "Toggle", &rules()).unwrap();
         assert_eq!(
             change.settings.shortcut_mode,
             crate::dictation::ShortcutMode::Toggle
         );
-        let change = apply(
-            &settings,
-            "meetings.calendar.lead_minutes",
-            "5",
-            false,
-            &rules(),
-        )
-        .unwrap();
+        let change = apply(&settings, "meetings.calendar.lead_minutes", "5", &rules()).unwrap();
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
-        let change = apply(&settings, "ui_language", "none", false, &rules()).unwrap();
+        let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
         let mut saved = settings.clone();
         saved.microphone = Some("USB Mic".into());
-        let change = apply(&saved, "microphone", "system-default", false, &rules()).unwrap();
+        let change = apply(&saved, "microphone", "system-default", &rules()).unwrap();
         assert_eq!(change.settings.microphone, None);
-        let change = apply(&settings, "history_retention", "month", false, &rules()).unwrap();
+        let change = apply(&settings, "history_retention", "month", &rules()).unwrap();
         assert_eq!(
             change.effects,
             vec![Effect::HistoryRetention(
@@ -1102,50 +1048,15 @@ mod tests {
     }
 
     #[test]
-    fn the_microphone_and_commands_change_together_only_when_confirmed() {
-        let settings = AppSettings {
-            release_microphone_while_idle: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            apply(&settings, "commands_enabled", "on", false, &rules())
-                .unwrap_err()
-                .code,
-            "confirmation-required"
-        );
-        let change = apply(&settings, "commands_enabled", "on", true, &rules()).unwrap();
-        assert!(change.settings.commands_enabled);
-        assert!(!change.settings.release_microphone_while_idle);
-
-        let change = apply(
-            &change.settings,
-            "release_microphone_while_idle",
-            "on",
-            true,
-            &rules(),
-        )
-        .unwrap();
-        assert!(!change.settings.commands_enabled);
-        assert!(change.settings.release_microphone_while_idle);
-    }
-
-    #[test]
     fn zero_volume_turns_tones_off_and_keeps_the_level() {
         let settings = AppSettings::default();
-        let change = apply(&settings, "sound_effect_volume", "0", false, &rules()).unwrap();
+        let change = apply(&settings, "sound_effect_volume", "0", &rules()).unwrap();
         assert!(!change.settings.sound_effects);
         assert_eq!(
             change.settings.sound_effect_volume,
             settings.sound_effect_volume
         );
-        let change = apply(
-            &change.settings,
-            "sound_effect_volume",
-            "0.25",
-            false,
-            &rules(),
-        )
-        .unwrap();
+        let change = apply(&change.settings, "sound_effect_volume", "0.25", &rules()).unwrap();
         assert!(change.settings.sound_effects);
         assert_eq!(change.settings.sound_effect_volume, 0.25);
     }
@@ -1161,14 +1072,7 @@ mod tests {
             .map(|set| serde_json::to_value(set).unwrap().as_str().unwrap().into())
             .collect();
         assert_eq!(sets, choices);
-        let change = apply(
-            &AppSettings::default(),
-            "sound_theme",
-            "wood",
-            false,
-            &rules(),
-        )
-        .unwrap();
+        let change = apply(&AppSettings::default(), "sound_theme", "wood", &rules()).unwrap();
         assert_eq!(change.settings.sound_theme, crate::feedback::SoundSet::Wood);
     }
 
@@ -1224,27 +1128,21 @@ mod tests {
         let settings = AppSettings::default();
         let dictation = format_hotkey(&settings.dictation_hotkey);
         assert_eq!(
-            apply(&settings, "paste_last_hotkey", &dictation, false, &rules)
+            apply(&settings, "paste_last_hotkey", &dictation, &rules)
                 .unwrap_err()
                 .code,
             "shortcut-in-use"
         );
-        let change = apply(&settings, "paste_last_hotkey", "none", false, &rules).unwrap();
+        let change = apply(&settings, "paste_last_hotkey", "none", &rules).unwrap();
         assert_eq!(change.settings.paste_last_hotkey, None);
         let refuse = ShortcutRules {
             key_named: rules.key_named,
             rule: |_, _| Err("Modifier-only shortcuts aren't supported here".into()),
         };
         assert_eq!(
-            apply(
-                &settings,
-                "dictation_hotkey",
-                "control+shift",
-                false,
-                &refuse
-            )
-            .unwrap_err()
-            .code,
+            apply(&settings, "dictation_hotkey", "control+shift", &refuse)
+                .unwrap_err()
+                .code,
             "invalid-value"
         );
     }
@@ -1266,23 +1164,17 @@ mod tests {
             ..settings.clone()
         };
         assert_eq!(
-            apply(&without_key, "double_tap_only", "on", false, &rules())
+            apply(&without_key, "double_tap_only", "on", &rules())
                 .unwrap_err()
                 .code,
             "invalid-value"
         );
-        let with_key = apply(
-            &without_key,
-            "dictation_hotkey",
-            "option+space",
-            false,
-            &rules(),
-        )
-        .unwrap()
-        .settings;
-        let change = apply(&with_key, "double_tap_only", "on", false, &rules()).unwrap();
+        let with_key = apply(&without_key, "dictation_hotkey", "option+space", &rules())
+            .unwrap()
+            .settings;
+        let change = apply(&with_key, "double_tap_only", "on", &rules()).unwrap();
         assert!(change.settings.double_tap_only);
-        let change = apply(&change.settings, "double_tap_lock", "off", false, &rules()).unwrap();
+        let change = apply(&change.settings, "double_tap_lock", "off", &rules()).unwrap();
         assert!(!change.settings.double_tap_only);
     }
 }

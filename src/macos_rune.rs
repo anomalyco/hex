@@ -340,7 +340,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     // The microphone stays cold until setup is ready; the runtime starts it.
     let (recognition_start, start_receiver) = mpsc::sync_channel(1);
     let recognition_indicator = indicator.clone();
-    let recognition_meetings = meeting_requests.clone();
     let recognition_history = history.clone();
     let listener_failure = Arc::new(Mutex::new(None::<String>));
     let recognition_failure = listener_failure.clone();
@@ -364,10 +363,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     &listener.project_root,
                     event_log,
                     listener.device.as_deref(),
-                    crate::config::voice_control(),
                     shutdown,
                     Some(recognition_indicator.clone()),
-                    Some(recognition_meetings),
                     recognition_history,
                     Some(recognition_control_receiver),
                 )
@@ -494,8 +491,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         }
         drop(requests);
         local_api.shutdown();
-        // The listener owns Moonshine and the transcription engine; joining
-        // it frees both after their last use.
+        // The listener owns the transcription engine; joining it frees the
+        // model after its last use.
         for (name, worker) in [
             ("recognition", recognition),
             ("meeting controller", controller),
@@ -1182,7 +1179,6 @@ impl Pump {
             DeveloperCommand::Status => DeveloperReply::State {
                 window_open: window_visible(),
                 pane: None,
-                commands_enabled: crate::app_settings::commands_enabled(),
             },
             DeveloperCommand::Hud { state } => {
                 indicator.handle(DictationIndicatorEvent::Reset);
@@ -1210,7 +1206,6 @@ impl Pump {
                 let destination = match pane {
                     DeveloperPane::Settings => Destination::Settings,
                     DeveloperPane::Modes => Destination::Modes,
-                    DeveloperPane::Commands => Destination::Commands,
                     DeveloperPane::History => Destination::History,
                     DeveloperPane::Meetings => Destination::Meetings(None),
                     other => {
@@ -1222,24 +1217,6 @@ impl Pump {
                 };
                 show(&self.window, destination);
                 DeveloperReply::Ok
-            }
-            DeveloperCommand::SetCommandsEnabled { enabled } => {
-                let mut settings = match AppSettings::load() {
-                    Ok(settings) => settings,
-                    Err(error) => {
-                        return DeveloperReply::error("settings-load-failed", error.to_string());
-                    }
-                };
-                if let Err(error) = settings.set_commands_enabled(enabled) {
-                    return DeveloperReply::error("settings-conflict", error.to_string());
-                }
-                match settings.save() {
-                    Ok(()) => {
-                        let _ = self.runtime.send(Request::ReloadSettings);
-                        DeveloperReply::Ok
-                    }
-                    Err(error) => DeveloperReply::error("settings-save-failed", error.to_string()),
-                }
             }
         }
     }

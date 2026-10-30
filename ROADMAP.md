@@ -2,12 +2,11 @@
 
 Hex ships the macOS product loop: configurable hold-to-talk local dictation,
 optional context-aware OpenCode post-processing, a Metal HUD, bounded paste
-workers, settings, and a signed app bundle. Streaming commands are a
-disabled-by-default experimental opt-in, and Meetings (beta) is a separate
+workers, settings, and a signed app bundle. Meetings (beta) is a
 persisted opt-in (`meetings.enabled`, default off). Windows (x64 and ARM64) and
 x86_64 Linux (i3/X11 and compatible wlroots Wayland compositors) betas provide
 hotkey dictation, Modes, History, the shared Rune window, and signed user-local
-updates; they do not yet include voice commands or meetings. Nix packaging for
+updates; they do not yet include meetings. Nix packaging for
 Linux is implemented and awaiting supported-host validation before release.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
@@ -46,7 +45,7 @@ owns Microphone, Accessibility, and Automation permissions.
 Later, split features from settings into two windows (Kit, 2026-10-24; deferred
 in favour of the one-window feature-owned panes): the Hex window keeps what you
 use, History and Meetings recordings, and a separate Settings window (⌘, and
-the menu bar's Settings…) holds General, Modes, Commands,
+the menu bar's Settings…) holds General, Modes,
 Meetings settings, and Experiments.
 
 Microphone selection, idle-safe live switching, unavailable-device fallback,
@@ -87,25 +86,24 @@ packaged installation and optional Home Manager service. Validate the Wayland
 beta on a compatible compositor with physical portal shortcuts, the `hex`
 commands bound in a desktop without the portal, microphone, foreground paste,
 click-through HUD, and window close leaving the process running while `hex quit`
-drains and exits. See [`docs/plans/linux.md`](docs/plans/linux.md). Add commands,
+drains and exits. See [`docs/plans/linux.md`](docs/plans/linux.md). Add
 context, meetings, or broader Wayland support only as explicit later capability
 slices.
 
 macOS, Windows, and Linux now share one window and one `settings.json` (see
 [`docs/plans/shared-desktop-ui.md`](docs/plans/shared-desktop-ui.md)). Remaining
 desktop parity: website mode rules and the focused application on Wayland and
-for Linux browsers, and voice commands outside macOS.
+for Linux browsers.
 
 ## Harden The Real-Time Boundary
 
 Append-only observation serialization and flushing now run on a bounded writer
 instead of the semantic coordinator. Replaceable partial transcript and context
 observations may be dropped under pressure; completed transcripts, state
-transitions, command outcomes, and failures retain bounded backpressure.
+transitions, and failures retain bounded backpressure.
 
 The authoritative dictation timeline now drains timestamped CoreAudio on its own
-thread; Moonshine receives a duration-bounded, generation-safe projection that
-may reset without affecting active capture. Physically smoke-test delayed
+thread. Physically smoke-test delayed
 shortcut boundaries, custom modifier and key chords, lock behavior,
 cancellation, foreground insertion, and both reserved paste shortcuts.
 
@@ -165,8 +163,7 @@ Do not pre-publish an uncommitted transcript and attempt to repair it afterward.
 
 The microphone and dictation model remain warm by default. The shipped
 `Release when idle` microphone option opens the device on shortcut press, removes
-pre-roll, and adds first-capture latency. It is mutually exclusive with Commands
-through confirmed settings transitions. `Do nothing` is the default
+pre-roll, and adds first-capture latency. `Do nothing` is the default
 recording-audio behavior. Idle-sleep prevention is automatic and scoped to
 intentional dictation and active meeting capture rather than persisted as a
 user setting.
@@ -285,9 +282,8 @@ expiry/restart contract, then give the job its task and generation-scoped
 completion; verify that a stale job cannot reset a newer capture or delete its
 file. This is a source-identified risk, not a reproduced device failure.
 
-Keep protected lifecycle commands and typed captures in compiled Rust. Ordinary
-literal commands and dictation control phrases already use the explicit
-TypeScript user config. Do not generalize that config into a plugin framework.
+Do not generalize the `~/.config/hex` TypeScript transformation config into a
+plugin framework.
 
 Do not generalize the concrete macOS and Linux X11 adapters into a platform
 framework. Add seams only when a second implemented adapter requires one.

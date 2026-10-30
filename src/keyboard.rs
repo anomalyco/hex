@@ -4,8 +4,6 @@ use std::sync::{Mutex, OnceLock};
 
 use color_eyre::eyre::{Result, eyre};
 
-pub use crate::keys::{Key, Modifiers};
-
 type InputSourceRef = *const c_void;
 type EventRef = *mut c_void;
 
@@ -19,10 +17,6 @@ const COMMAND_KEY_CODE: u16 = 55;
 const COMMAND_FLAG: u64 = 1 << 20;
 const SHIFT_KEY_CODE: u16 = 56;
 const SHIFT_FLAG: u64 = 1 << 17;
-const OPTION_KEY_CODE: u16 = 58;
-const OPTION_FLAG: u64 = 1 << 19;
-const CONTROL_KEY_CODE: u16 = 59;
-const CONTROL_FLAG: u64 = 1 << 18;
 const RETURN_KEY_CODE: u16 = 36;
 /// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
 const MAX_UNICODE_UNITS: usize = 20;
@@ -232,11 +226,8 @@ fn collect_key_codes(entries: impl IntoIterator<Item = (char, u16)>) -> HashMap<
 }
 
 pub fn post_command(character: char) -> Result<()> {
-    post_shortcut(Key::Character(character), Modifiers::COMMAND)
-}
-
-pub fn post_enter() -> Result<()> {
-    post_shortcut(Key::Enter, Modifiers::NONE)
+    let key_code = resolve_key_code(character, true)?;
+    post_key_code(key_code, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1)
 }
 
 /// Types `text` as synthesized key events, never touching the clipboard. Line
@@ -324,39 +315,6 @@ fn chord_breaker_event_specs(flags: u64) -> impl Iterator<Item = (u16, bool, u64
     [true, false]
         .into_iter()
         .map(move |down| (CHORD_BREAKER_KEY_CODE, down, flags))
-}
-
-pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
-    post_repeated_shortcut(key, modifiers, 1)
-}
-
-pub fn post_repeated_shortcut(key: Key, modifiers: Modifiers, count: u8) -> Result<()> {
-    if count == 0 {
-        return Ok(());
-    }
-    let key_code = match key {
-        Key::Character(character) => {
-            resolve_key_code(character, modifiers.contains(Modifiers::COMMAND))?
-        }
-        Key::Home => 115,
-        Key::End => 119,
-        Key::Up => 126,
-        Key::Down => 125,
-        Key::Left => 123,
-        Key::Right => 124,
-        Key::Enter => RETURN_KEY_CODE,
-        Key::Escape => 53,
-    };
-    let modifiers = [
-        (Modifiers::COMMAND, COMMAND_FLAG, COMMAND_KEY_CODE),
-        (Modifiers::SHIFT, SHIFT_FLAG, SHIFT_KEY_CODE),
-        (Modifiers::OPTION, OPTION_FLAG, OPTION_KEY_CODE),
-        (Modifiers::CONTROL, CONTROL_FLAG, CONTROL_KEY_CODE),
-    ]
-    .into_iter()
-    .filter_map(|(modifier, flag, key)| modifiers.contains(modifier).then_some((flag, key)))
-    .collect::<Vec<_>>();
-    post_key_code(key_code, &modifiers, count)
 }
 
 fn post_key_code(key_code: u16, modifiers: &[(u64, u16)], count: u8) -> Result<()> {
@@ -492,6 +450,10 @@ fn translate(layout: *const u8, key_code: u16, modifier_state: u32) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OPTION_FLAG: u64 = 1 << 19;
+    const CONTROL_KEY_CODE: u16 = 59;
+    const CONTROL_FLAG: u64 = 1 << 18;
 
     /// Hex's taps let its own keystrokes through by this mark, so a posted
     /// shortcut (the capture hand-off's ⌘V included) never reads as the

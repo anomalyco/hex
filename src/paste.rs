@@ -28,7 +28,6 @@ pub struct Paster {
 #[derive(Clone, Copy)]
 pub enum PasteMode {
     Continue,
-    Send,
     Standalone,
 }
 
@@ -211,13 +210,7 @@ impl Paster {
         mode: PasteMode,
         commit: impl FnOnce() -> bool,
     ) -> Result<()> {
-        if matches!(mode, PasteMode::Send) {
-            send_after_paste(|| self.paste_text(text, mode, commit), keyboard::post_enter)?;
-            self.continuation = None;
-            Ok(())
-        } else {
-            self.paste_text(text, mode, commit)
-        }
+        self.paste_text(text, mode, commit)
     }
 
     fn paste_text(
@@ -411,14 +404,6 @@ fn complete_paste(
     // This is not an acknowledgment; longer OS or application stalls can still lose a paste.
     wait(PASTE_SETTLE_DELAY);
     Ok(())
-}
-
-fn send_after_paste(
-    paste: impl FnOnce() -> Result<()>,
-    post_enter: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    paste()?;
-    post_enter()
 }
 
 fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
@@ -757,35 +742,27 @@ mod tests {
     static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn rejected_commit_does_not_write_paste_restore_or_send() {
+    fn rejected_commit_does_not_write_paste_or_restore() {
         let steps = RefCell::new(Vec::new());
-        let result = send_after_paste(
+        let result = commit_prepared_paste(
             || {
-                commit_prepared_paste(
-                    || {
-                        steps.borrow_mut().push("prepare");
-                        Ok(())
-                    },
-                    || {
-                        steps.borrow_mut().push("commit");
-                        false
-                    },
-                    |()| {
-                        steps.borrow_mut().push("write");
-                        complete_paste(
-                            || {
-                                steps.borrow_mut().push("post");
-                                Ok(())
-                            },
-                            || steps.borrow_mut().push("restore"),
-                            |_| steps.borrow_mut().push("settle"),
-                        )
-                    },
-                )
+                steps.borrow_mut().push("prepare");
+                Ok(())
             },
             || {
-                steps.borrow_mut().push("enter");
-                Ok(())
+                steps.borrow_mut().push("commit");
+                false
+            },
+            |()| {
+                steps.borrow_mut().push("write");
+                complete_paste(
+                    || {
+                        steps.borrow_mut().push("post");
+                        Ok(())
+                    },
+                    || steps.borrow_mut().push("restore"),
+                    |_| steps.borrow_mut().push("settle"),
+                )
             },
         );
 
@@ -805,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn sequential_pastes_settle_before_overwrite_and_enter() {
+    fn sequential_pastes_settle_before_overwrite() {
         let clipboard = Cell::new("");
         let pending = Cell::new(false);
         let consumed = RefCell::new(Vec::new());
@@ -830,21 +807,12 @@ mod tests {
 
         paste("first").unwrap();
         assert_eq!(*consumed.borrow(), ["first"]);
-        send_after_paste(
-            || paste("second"),
-            || {
-                assert_eq!(*consumed.borrow(), ["first", "second"]);
-                steps.borrow_mut().push("enter");
-                Ok(())
-            },
-        )
-        .unwrap();
+        paste("second").unwrap();
+        assert_eq!(*consumed.borrow(), ["first", "second"]);
 
         assert_eq!(
             steps.into_inner(),
-            [
-                "post", "restore", "settle", "post", "restore", "settle", "enter"
-            ]
+            ["post", "restore", "settle", "post", "restore", "settle"]
         );
     }
 
@@ -869,23 +837,15 @@ mod tests {
     }
 
     #[test]
-    fn failed_paste_still_schedules_restore_without_settling_or_sending() {
+    fn failed_paste_still_schedules_restore_without_settling() {
         let steps = RefCell::new(Vec::new());
-        let result = send_after_paste(
+        let result = complete_paste(
             || {
-                complete_paste(
-                    || {
-                        steps.borrow_mut().push("post");
-                        Err(eyre!("post failed"))
-                    },
-                    || steps.borrow_mut().push("restore"),
-                    |_| steps.borrow_mut().push("settle"),
-                )
+                steps.borrow_mut().push("post");
+                Err(eyre!("post failed"))
             },
-            || {
-                steps.borrow_mut().push("enter");
-                Ok(())
-            },
+            || steps.borrow_mut().push("restore"),
+            |_| steps.borrow_mut().push("settle"),
         );
 
         assert_eq!(result.unwrap_err().to_string(), "post failed");

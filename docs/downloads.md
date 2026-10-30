@@ -56,7 +56,6 @@ App and model downloads have different hosts. Managed networks may need to allow
   2.3.1, which reach it through a redirect).
 - GitHub release downloads and their asset delivery host for the alternative DMG.
 - `huggingface.co` and its model download CDN for dictation-model setup.
-- `download.moonshine.ai` for optional Voice Commands.
 
 On September 11, 2026, a HEAD request for the pinned default Parakeet Unified
 English artifact followed `huggingface.co` to `us.aws.cdn.hf.co` and returned
@@ -64,8 +63,7 @@ HTTP 200. This is an observed delivery host, not a permanent exhaustive CDN list
 No model body was downloaded for that check.
 
 If the old update endpoint is blocked, install the new signed DMG manually.
-After restoring model-host access, retry preparation in Settings or choose
-Retry for Commands. Transfer failures preserve partial downloads. App download
+After restoring model-host access, retry preparation in Settings. Transfer failures preserve partial downloads. App download
 success does not establish model-host reachability, and our external checks do
 not establish access from a particular enterprise network.
 

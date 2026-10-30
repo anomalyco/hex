@@ -21,10 +21,6 @@ mod browser_media;
 mod calendar;
 #[cfg(hex_capture)]
 mod capture_host;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod command_grammar;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod commands;
 #[cfg(target_os = "macos")]
 mod config;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -70,8 +66,6 @@ mod keyboard;
 #[cfg(target_os = "macos")]
 mod keyboard_input_sources;
 mod keyboard_model_switching;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod keys;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
@@ -119,11 +113,6 @@ mod meeting_mcp;
 mod meeting_watcher;
 #[cfg(target_os = "macos")]
 mod microphone_activity;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod moonshine;
-#[cfg(all(target_os = "macos", debug_assertions))]
-mod moonshine_lab;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod onboarding;
 mod opencode_catalog;
@@ -148,8 +137,6 @@ mod rune_ui;
 #[cfg(target_os = "macos")]
 mod smart_turn;
 mod speech_detector;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod spoken_text;
 mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
@@ -278,8 +265,7 @@ enum Command {
         #[arg(long)]
         meetings_dir: Option<PathBuf>,
     },
-    /// Turn voice commands on or off, and manage the personal command
-    /// workspace.
+    /// Manage the ~/.config/hex personal transformations workspace.
     Commands {
         #[command(subcommand)]
         command: CommandsCommand,
@@ -337,19 +323,6 @@ enum Command {
         #[arg(long, default_value_t = 7)]
         runs: usize,
     },
-    #[cfg(debug_assertions)]
-    /// Record and evaluate command-recognition fixtures interactively.
-    MoonshineLab {
-        /// Corpus directory containing manifest.json and audio/*.wav.
-        #[arg(default_value = "perf/moonshine-corpus")]
-        directory: PathBuf,
-        /// Capture from this microphone instead of the saved one or the system default.
-        #[arg(long)]
-        device: Option<String>,
-        /// Evaluate every recorded fixture across every Moonshine profile.
-        #[arg(long)]
-        batch: bool,
-    },
 }
 
 #[cfg(target_os = "macos")]
@@ -367,24 +340,6 @@ enum CommandsCommand {
     /// Load ~/.config/hex's config as Hex would and report what it registers
     /// or why it fails.
     Check,
-    /// Turn voice commands on in the running Hex.
-    Enable {
-        /// Also turn off release_microphone_while_idle, which commands exclude.
-        #[arg(long)]
-        yes: bool,
-        #[command(flatten)]
-        output: control::cli::Output,
-    },
-    /// Turn voice commands off in the running Hex.
-    Disable {
-        #[command(flatten)]
-        output: control::cli::Output,
-    },
-    /// Load the command model again after it failed.
-    Retry {
-        #[command(flatten)]
-        output: control::cli::Output,
-    },
 }
 
 #[cfg(target_os = "macos")]
@@ -407,12 +362,6 @@ enum DevCommand {
     Show {
         #[arg(value_enum)]
         pane: developer_control::DeveloperPane,
-    },
-    #[cfg(debug_assertions)]
-    /// Enable or disable voice commands.
-    Commands {
-        #[arg(value_enum)]
-        state: DevToggle,
     },
     #[cfg(all(debug_assertions, hex_capture))]
     /// Run a capture headlessly, feeding WAV files in place of the
@@ -452,14 +401,6 @@ enum VoiceFilterCommand {
         #[arg(short = 'o', long = "output")]
         output: PathBuf,
     },
-}
-
-#[cfg(debug_assertions)]
-#[cfg(target_os = "macos")]
-#[derive(Clone, Copy, ValueEnum)]
-enum DevToggle {
-    On,
-    Off,
 }
 
 #[cfg(debug_assertions)]
@@ -508,7 +449,6 @@ enum MeetingCommand {
 
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
-    moonshine::run_sessions_single_threaded();
     color_eyre::install()?;
     let cli = Cli::parse_from(mcp_alias_arguments(std::env::args_os().collect()));
     let executable_name = std::env::current_exe()
@@ -543,25 +483,6 @@ fn main() -> Result<()> {
             ..
         })) => control::cli::finish(control::cli::clear_history(yes, output)),
         Some(Command::Capture { command }) => control::cli::finish(control::cli::capture(command)),
-        Some(Command::Commands { command }) => match command {
-            CommandsCommand::Enable { yes, output } => {
-                control::cli::finish(control::cli::commands(
-                    control::cli::CommandsAction::Enable { confirm: yes },
-                    output,
-                ))
-            }
-            CommandsCommand::Disable { output } => control::cli::finish(control::cli::commands(
-                control::cli::CommandsAction::Disable,
-                output,
-            )),
-            CommandsCommand::Retry { output } => control::cli::finish(control::cli::commands(
-                control::cli::CommandsAction::Retry,
-                output,
-            )),
-            CommandsCommand::Init | CommandsCommand::Check => Cli {
-                command: Some(Command::Commands { command }),
-            },
-        },
         command => Cli { command },
     };
     match &cli.command {
@@ -672,9 +593,7 @@ fn main() -> Result<()> {
                 &root,
                 events,
                 device.as_deref(),
-                config::voice_control(),
                 &SHUTDOWN,
-                None,
                 None,
                 history,
                 None,
@@ -742,13 +661,7 @@ fn main() -> Result<()> {
         | Command::History(_)
         | Command::Meetings { .. }
         | Command::Experiments { .. }
-        | Command::Control(_)
-        | Command::Commands {
-            command:
-                CommandsCommand::Enable { .. }
-                | CommandsCommand::Disable { .. }
-                | CommandsCommand::Retry { .. },
-        } => {
+        | Command::Control(_) => {
             unreachable!("handled before startup")
         }
         #[cfg(any(debug_assertions, hex_capture))]
@@ -765,10 +678,7 @@ fn main() -> Result<()> {
         Command::Commands {
             command: CommandsCommand::Check,
         } => {
-            println!(
-                "{}",
-                personal_commands::check_workspace(&config::voice_control())?
-            );
+            println!("{}", personal_commands::check_workspace()?);
             Ok(())
         }
         Command::Dev { command } => {
@@ -777,14 +687,11 @@ fn main() -> Result<()> {
                 use developer_control::{DeveloperCommand, DeveloperReply};
                 let command = match command {
                     DevCommand::Dashboard => {
-                        return dashboard::run(event_path, config::voice_control());
+                        return dashboard::run(event_path);
                     }
                     DevCommand::Status => DeveloperCommand::Status,
                     DevCommand::Hud { state } => DeveloperCommand::Hud { state },
                     DevCommand::Show { pane } => DeveloperCommand::ShowPane { pane },
-                    DevCommand::Commands { state } => DeveloperCommand::SetCommandsEnabled {
-                        enabled: matches!(state, DevToggle::On),
-                    },
                     #[cfg(all(debug_assertions, hex_capture))]
                     DevCommand::CaptureReplay { wavs } => {
                         experiments::log_launch();
@@ -934,15 +841,6 @@ fn main() -> Result<()> {
             };
             transcription_benchmark::run(&manifest, warmups, runs, backend)
         }
-        #[cfg(debug_assertions)]
-        Command::MoonshineLab {
-            directory,
-            device,
-            batch,
-        } => match batch {
-            true => moonshine_lab::run_batch(&root, &directory),
-            false => moonshine_lab::run(&root, &directory, device.as_deref()),
-        },
     }
 }
 
@@ -1113,7 +1011,13 @@ mod tests {
             Ok(Some(Command::Control(ControlCli::Dictation { .. })))
         ));
         assert!(matches!(
-            parse(&["hex", "settings", "set", "commands_enabled", "on", "--yes"]),
+            parse(&[
+                "hex",
+                "settings",
+                "set",
+                "release_microphone_while_idle",
+                "on"
+            ]),
             Ok(Some(Command::Control(ControlCli::Settings { .. })))
         ));
         assert!(matches!(
@@ -1142,9 +1046,9 @@ mod tests {
             }))
         ));
         assert!(matches!(
-            parse(&["hex", "commands", "enable", "--yes"]),
+            parse(&["hex", "commands", "check"]),
             Ok(Some(Command::Commands {
-                command: CommandsCommand::Enable { yes: true, .. }
+                command: CommandsCommand::Check
             }))
         ));
         assert!(parse(&["hex", "meetings", "cancel"]).is_err());

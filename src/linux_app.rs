@@ -504,7 +504,6 @@ impl LinuxDesktopHost {
         match (enabled, self.personal_commands.is_some()) {
             (true, false) => {
                 self.personal_commands = crate::personal_commands::PersonalCommands::start(
-                    crate::commands::CommandConfig::new(),
                     self.output.transformations.clone(),
                 );
             }

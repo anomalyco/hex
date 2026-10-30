@@ -5,11 +5,6 @@
 #[path = "../src/keyboard.rs"]
 mod keyboard;
 
-#[cfg(target_os = "macos")]
-#[allow(dead_code)]
-#[path = "../src/keys.rs"]
-mod keys;
-
 // The harness answers libtest's `--list` (which nextest uses to discover
 // tests): one `name: test` line per case, and nothing for `--ignored`.
 #[cfg(not(target_os = "macos"))]

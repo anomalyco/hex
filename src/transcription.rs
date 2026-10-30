@@ -2,7 +2,6 @@ use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::apple_speech::AppleSpeech;
-use crate::dictation::{DictationProtocol, VoiceTranscript};
 use crate::parakeet::Parakeet;
 use crate::transcription_models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
@@ -78,22 +77,6 @@ impl Transcriber {
                 model.transcribe(&samples)
             }
             Self::AppleSpeech(model) => model.transcribe(&samples).map(|result| result.text),
-        }
-    }
-
-    pub fn transcribe_voice(
-        &mut self,
-        mut samples: Vec<f32>,
-        protocol: &DictationProtocol,
-    ) -> Result<VoiceTranscript> {
-        match self {
-            Self::Gguf(model) => {
-                prepare_gguf_samples(&mut samples, model.model_id());
-                model.transcribe_voice(&samples, protocol)
-            }
-            Self::AppleSpeech(model) => model
-                .transcribe(&samples)
-                .map(|result| VoiceTranscript::heard(result.text, protocol)),
         }
     }
 

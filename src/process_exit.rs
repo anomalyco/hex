@@ -2,12 +2,10 @@
 //!
 //! `exit` (what `-[NSApplication terminate:]` and returning from `main` call)
 //! runs C++ static destructors and `atexit` handlers while threads Hex does
-//! not join are still running: CoreAudio's IO threads, ggml's residency-set
-//! keep-alive, a command-model loader mid-load. Those destructors tear down
-//! native globals under them. ggml's Metal device list aborts in
-//! `ggml_metal_rsets_free` unless every Metal buffer was already freed, and
-//! Moonshine's transcriber map is destroyed while a thread may still look a
-//! transcriber up in it. So Hex drains its own work first, then ends with
+//! not join are still running: CoreAudio's IO threads or ggml's residency-set
+//! keep-alive. Those destructors tear down native globals under them; ggml's
+//! Metal device list aborts in `ggml_metal_rsets_free` unless every Metal
+//! buffer was already freed. So Hex drains its own work first, then ends with
 //! `_exit`, which runs none of them. Nothing Hex keeps relies on them: the
 //! drain flushes the event log, and settings, history, and meetings are saved
 //! atomically when they change. A meeting recording at quit keeps its audio

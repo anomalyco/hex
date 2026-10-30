@@ -1081,17 +1081,14 @@ pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
         && settings.dictation_hotkey.key.is_some()
 }
 
-pub(super) fn release_confirmation(ui: &Ui, p: Paint) -> El {
-    let description = if ui.settings.commands_enabled {
-        tr("Opens the microphone on shortcut press without pre-roll and turns Commands off.")
-    } else {
-        tr("Opens the microphone on shortcut press without pre-roll. Commands remain off.")
-    };
+pub(super) fn release_confirmation(_ui: &Ui, p: Paint) -> El {
     setting_row(
         p,
         "confirm-release",
         tr("Release the microphone when idle?"),
-        Some(description),
+        Some(tr(
+            "Opens the microphone on shortcut press without pre-roll.",
+        )),
         row()
             .key("actions")
             .gap(8.0)
@@ -1111,7 +1108,7 @@ pub(super) fn release_confirmation(ui: &Ui, p: Paint) -> El {
                     tr("Release microphone"),
                     ButtonKind::Primary,
                     |ui: &mut Ui, _| {
-                        if ui.update(AppSettings::disable_commands_and_release_microphone) {
+                        if ui.update(|settings| settings.release_microphone_while_idle = true) {
                             ui.confirm_release = false;
                         }
                     },

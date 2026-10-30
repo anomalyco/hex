@@ -1,16 +1,13 @@
-//! Personal commands and custom transformations from the user's
-//! `hex.config.ts` (or `hex.config.js`), run in-process by embedded QuickJS
-//! ([`script`]) on one worker thread. The worker loads the config, compiles
-//! its registration into the command registry, reloads it when the config
-//! folder changes (keeping the last good registry when a reload fails),
-//! answers handler and transformation calls, and hands the actions handlers
-//! ask for to Hex's native action executor. The panes read its status from
-//! `personal-commands.json`.
+//! Custom transformations from the user's `hex.config.ts` (or `hex.config.js`),
+//! run in-process by embedded QuickJS ([`script`]) on one worker thread. The
+//! worker loads the config, reloads it when the config folder changes (keeping
+//! the last good registration when a reload fails), and answers transformation
+//! calls. The Modes pane reads its status from `personal-commands.json`.
 
 mod script;
 mod typescript;
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,13 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{
-    Action, ActionOutcome, CapturedValue, CapturedValues, CommandConfig, ConfiguredCommand,
-    ContextPredicate, PersonalCapture,
-};
 use crate::context::ContextSnapshot;
-use crate::dictation::DictationProtocol;
-use crate::keys::{Key, Modifiers};
 
 use script::Script;
 
@@ -48,28 +39,15 @@ const TEMPLATE_CONFIG: &str = include_str!("personal_commands/hex.config.ts");
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(350);
 const MAX_REGISTRATION_BYTES: usize = 256 * 1024;
-const MAX_COMMANDS: usize = 512;
 const MAX_TRANSFORMATIONS: usize = 128;
 const MAX_TRANSFORMATIONS_PER_INVOCATION: usize = 32;
-const MAX_PHRASES: usize = 16;
-const MAX_CAPTURE_ENTRIES: usize = 8;
-const MAX_CHOICE_VALUES: usize = 64;
-const MAX_CHOICE_ALIASES: usize = 16;
-const MAX_CHOICE_VALUE_BYTES: usize = 128;
-const MAX_CHOICE_WORD_BYTES: usize = 64;
-const MAX_UNION_MEMBERS: usize = 16;
-const MAX_UNION_DEPTH: usize = 4;
-const MAX_UNION_SERIALIZED_BYTES: usize = 16 * 1024;
-const MAX_REPEAT: u8 = 100;
-const MAX_ACTIONS_PER_INVOCATION: usize = 64;
-const ACTION_QUEUE: usize = 64;
 const MAX_WATCH_ENTRIES: usize = 4096;
 const MAX_WATCH_DEPTH: usize = 32;
 const MAX_STATUS_BYTES: usize = 256 * 1024;
 const MAX_STATUS_ERROR_BYTES: usize = 4096;
 const MAX_TRANSFORMATION_TEXT_BYTES: usize = 48 * 1024;
 /// How long a dictation waits for the worker, which may be loading a config
-/// or running a handler first; each script call has its own shorter limit.
+/// first; each script call has its own shorter limit.
 const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(5);
 const LOWERCASE_TRANSFORMATION_ID: &str = "lowercase";
 const SPONGEBOB_TRANSFORMATION_ID: &str = "spongebob-case";
@@ -119,9 +97,6 @@ pub fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {
     pub active_generation: Option<u64>,
-    pub catalog: Vec<StatusCommand>,
-    #[serde(default)]
-    pub dictation: Option<StatusDictationProtocol>,
     #[serde(default)]
     pub transformations: Vec<StatusTransformation>,
     pub host_state: HostState,
@@ -152,15 +127,6 @@ pub fn include_builtin_transformations(status: &mut StatusSnapshot) {
     );
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StatusDictationProtocol {
-    pub start: Vec<String>,
-    pub stop: Vec<String>,
-    pub send: Vec<String>,
-    pub cancel: Vec<String>,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HostState {
@@ -171,42 +137,10 @@ pub enum HostState {
     Stopped,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusCommand {
-    pub id: String,
-    pub phrases: Vec<String>,
-    pub group: String,
-    pub description: String,
-    pub context: StatusContext,
-    pub execution: StatusExecution,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum StatusContext {
-    Global,
-    Application { application: String },
-    BrowserHost { browser_host: String },
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum StatusExecution {
-    Native,
-    Handler,
-}
-
 impl Default for StatusSnapshot {
     fn default() -> Self {
         Self {
             active_generation: None,
-            catalog: Vec::new(),
-            dictation: None,
             transformations: Vec::new(),
             host_state: HostState::NotConfigured,
             last_reload_error: None,
@@ -256,46 +190,12 @@ fn persist_status_at(path: &Path, status: &StatusSnapshot) -> Result<()> {
 }
 
 fn validate_status(status: &StatusSnapshot) -> Result<()> {
-    if status.catalog.len() > MAX_COMMANDS {
-        return Err(eyre!(
-            "personal command status exceeds {MAX_COMMANDS} commands"
-        ));
-    }
     if status
         .last_reload_error
         .as_ref()
         .is_some_and(|error| error.len() > MAX_STATUS_ERROR_BYTES)
     {
         return Err(eyre!("personal command status error is too large"));
-    }
-    for command in &status.catalog {
-        validate_text(&command.id, "status command id", 128)?;
-        validate_text(&command.group, "status command group", 1024)?;
-        validate_text(&command.description, "status command description", 1024)?;
-        if command.phrases.is_empty() || command.phrases.len() > MAX_PHRASES {
-            return Err(eyre!("status command phrases are out of bounds"));
-        }
-        for phrase in &command.phrases {
-            validate_text(phrase, "status command phrase", 256)?;
-        }
-        match &command.context {
-            StatusContext::Global => {}
-            StatusContext::Application { application } => {
-                validate_text(application, "status application context", 256)?;
-            }
-            StatusContext::BrowserHost { browser_host } => {
-                validate_text(browser_host, "status browser context", 253)?;
-            }
-        }
-    }
-    if let Some(dictation) = &status.dictation {
-        DictationProtocol::try_new(
-            dictation.start.clone(),
-            dictation.stop.clone(),
-            dictation.send.clone(),
-            dictation.cancel.clone(),
-        )
-        .map_err(|error| eyre!(error))?;
     }
     if status.transformations.len() > MAX_TRANSFORMATIONS {
         return Err(eyre!("personal transformation catalog is too large"));
@@ -363,6 +263,43 @@ pub fn initialize_workspace() -> Result<PathBuf> {
     Ok(workspace)
 }
 
+/// Loads `~/.config/hex`'s config as Hex does and summarizes its transformations.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn check_workspace() -> Result<String> {
+    let workspace = crate::app_paths::personal_commands_workspace()?;
+    check_workspace_at(&workspace)
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn check_workspace_at(workspace: &Path) -> Result<String> {
+    let workspace = workspace.to_path_buf();
+    let handle = thread::Builder::new()
+        .name("personal-commands-check".into())
+        .stack_size(script::THREAD_STACK_SIZE)
+        .spawn(move || {
+            let Some(config) = find_config(&workspace)? else {
+                return Err(eyre!(
+                    "no hex.config.ts or hex.config.js in {}",
+                    workspace.display()
+                ));
+            };
+            let (_, candidate) = load_config(&workspace, config)?;
+            Ok(format!(
+                "{}: {} transformation{}",
+                workspace.join(config).display(),
+                candidate.transformations.len(),
+                if candidate.transformations.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ))
+        })?;
+    handle
+        .join()
+        .map_err(|_| eyre!("personal transformation check panicked"))?
+}
+
 fn initialize_workspace_at(workspace: &Path) -> Result<()> {
     fs::create_dir_all(workspace)?;
     refresh_managed_files(workspace)?;
@@ -399,9 +336,7 @@ fn refresh_managed_files(workspace: &Path) -> Result<()> {
 }
 
 pub struct PersonalCommands {
-    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
     requests: SyncSender<Request>,
-    outcomes: Receiver<ActionOutcome>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     worker_done: Receiver<()>,
@@ -409,16 +344,12 @@ pub struct PersonalCommands {
 }
 
 impl PersonalCommands {
-    pub fn start(base: CommandConfig, transformations: Arc<TransformationClient>) -> Option<Self> {
-        let active = Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(base.clone()))));
+    pub fn start(transformations: Arc<TransformationClient>) -> Option<Self> {
         let (request_sender, requests) = mpsc::sync_channel(32);
-        let (outcome_sender, outcomes) = mpsc::sync_channel(64);
         let stop = Arc::new(AtomicBool::new(false));
         let (done_sender, worker_done) = mpsc::sync_channel(1);
-        let actions = spawn_action_runner(outcome_sender.clone())?;
         let workspace = crate::app_paths::personal_commands_workspace().ok()?;
         let status_file = crate::app_paths::personal_commands_status_file().ok();
-        let worker_active = active.clone();
         let worker_transformations = transformations.clone();
         let worker_requests = request_sender.clone();
         let worker_stop = stop.clone();
@@ -428,12 +359,8 @@ impl PersonalCommands {
             .spawn(move || {
                 // Scripts never leave this thread.
                 Worker {
-                    base,
-                    active: worker_active,
                     transformations: worker_transformations,
                     requests: worker_requests,
-                    outcomes: outcome_sender,
-                    actions,
                     workspace,
                     status_file,
                     generation: 0,
@@ -448,47 +375,12 @@ impl PersonalCommands {
             })
             .ok()?;
         Some(Self {
-            active,
             requests: request_sender,
-            outcomes,
             stop,
             worker: Some(worker),
             worker_done,
             transformations,
         })
-    }
-
-    pub fn snapshot(&self) -> Arc<RuntimeSnapshot> {
-        self.active
-            .read()
-            .expect("command registry poisoned")
-            .clone()
-    }
-
-    pub fn invoke(
-        &self,
-        generation: u64,
-        command_id: impl Into<String>,
-        heard: &str,
-        context: ContextSnapshot,
-        captures: CapturedValues,
-    ) -> Result<(), &'static str> {
-        self.requests
-            .try_send(Request::Invoke(Box::new(Invocation {
-                generation,
-                command_id: command_id.into(),
-                heard: heard.into(),
-                context,
-                captures,
-            })))
-            .map_err(|error| match error {
-                TrySendError::Full(_) => "personal command queue is full",
-                TrySendError::Disconnected(_) => "personal commands are unavailable",
-            })
-    }
-
-    pub fn try_recv(&self) -> Option<ActionOutcome> {
-        self.outcomes.try_recv().ok()
     }
 }
 
@@ -509,67 +401,19 @@ impl Drop for PersonalCommands {
     }
 }
 
-struct Invocation {
-    generation: u64,
-    command_id: String,
-    heard: String,
-    context: ContextSnapshot,
-    captures: CapturedValues,
-}
-
 enum Request {
-    Invoke(Box<Invocation>),
     Transform(Box<TransformationRequest>),
     /// Reload the config now; also wakes the worker to stop.
     Reload,
 }
 
-/// The actions one handler asked for, run in order by the action runner.
-struct ActionJob {
-    outcome: ActionOutcome,
-    actions: Vec<Action>,
-}
-
-/// Runs handler actions one job at a time, in submission order, on Hex's
-/// native action executor, so a slow action never holds up the script worker.
-fn spawn_action_runner(outcomes: SyncSender<ActionOutcome>) -> Option<SyncSender<ActionJob>> {
-    let (sender, jobs) = mpsc::sync_channel::<ActionJob>(ACTION_QUEUE);
-    thread::Builder::new()
-        .name("personal-command-actions".into())
-        .spawn(move || {
-            while let Ok(job) = jobs.recv() {
-                let result = job
-                    .actions
-                    .into_iter()
-                    .try_for_each(crate::commands::execute)
-                    .map_err(|error| bounded_error(&error.to_string()));
-                if outcomes
-                    .send(ActionOutcome {
-                        result,
-                        ..job.outcome
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .ok()?;
-    Some(sender)
-}
-
-/// The script worker's state: the loaded config, the registry it compiled
-/// to, and the status the panes read.
+/// The script worker's state: the loaded config and the status the Modes pane reads.
 struct Worker {
-    base: CommandConfig,
-    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
     transformations: Arc<TransformationClient>,
     requests: SyncSender<Request>,
-    outcomes: SyncSender<ActionOutcome>,
-    actions: SyncSender<ActionJob>,
     workspace: PathBuf,
     status_file: Option<PathBuf>,
-    /// Counts every load, so a stale invocation never reaches a newer config.
+    /// Counts every load, so a stale transformation never reaches a newer config.
     generation: u64,
     /// The loaded config and the generation it registered as.
     script: Option<(u64, Script)>,
@@ -591,7 +435,6 @@ impl Worker {
         let mut next_poll = Instant::now() + POLL_INTERVAL;
         while !stop.load(Ordering::Acquire) {
             match requests.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
-                Ok(Request::Invoke(invocation)) => self.invoke(*invocation),
                 Ok(Request::Transform(request)) => self.transform(*request),
                 Ok(Request::Reload) => reload_now = true,
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -641,17 +484,16 @@ impl Worker {
         };
         self.generation += 1;
         let started = Instant::now();
-        match self.load(config) {
+        match load_config(&self.workspace, config) {
             Ok((script, candidate)) => {
-                self.transformations
-                    .activate(&candidate.runtime, self.requests.clone());
-                *self.active.write().expect("command registry poisoned") =
-                    Arc::new(candidate.runtime);
+                self.transformations.activate(
+                    self.generation,
+                    candidate.ids,
+                    self.requests.clone(),
+                );
                 self.script = Some((self.generation, script));
                 self.status = StatusSnapshot {
                     active_generation: Some(self.generation),
-                    catalog: candidate.catalog,
-                    dictation: candidate.dictation,
                     transformations: candidate.transformations,
                     host_state: HostState::Active,
                     last_reload_error: None,
@@ -660,15 +502,11 @@ impl Worker {
                 tracing::info!(
                     generation = self.generation,
                     duration_us = started.elapsed().as_micros(),
-                    "personal commands loaded"
+                    "personal transformations loaded"
                 );
             }
             Err(error) => self.reject(&format!("{error:#}")),
         }
-    }
-
-    fn load(&self, config: &str) -> Result<(Script, Candidate)> {
-        load_config(&self.workspace, config, &self.base, self.generation)
     }
 
     fn reject(&mut self, error: &str) {
@@ -689,8 +527,6 @@ impl Worker {
     fn deactivate(&mut self) {
         self.script = None;
         self.transformations.clear();
-        *self.active.write().expect("command registry poisoned") =
-            Arc::new(RuntimeSnapshot::native(self.base.clone()));
         self.status = StatusSnapshot {
             host_state: HostState::NotConfigured,
             ..StatusSnapshot::default()
@@ -711,69 +547,6 @@ impl Worker {
             .as_ref()
             .filter(|(loaded, _)| *loaded == generation)
             .map(|(_, script)| script)
-    }
-
-    fn invoke(&self, invocation: Invocation) {
-        let Some(script) = self.script(invocation.generation) else {
-            emit_failure(
-                invocation,
-                &self.outcomes,
-                "personal command generation is no longer available",
-            );
-            return;
-        };
-        let started = Instant::now();
-        let captures = invocation
-            .captures
-            .iter()
-            .map(|(name, value)| {
-                let value = match value {
-                    CapturedValue::Digit(value) => WireCaptureValue::Number(*value),
-                    CapturedValue::Letter(value) => WireCaptureValue::Text(value.to_string()),
-                    CapturedValue::Choice(value) | CapturedValue::Text(value) => {
-                        WireCaptureValue::Text(value.clone())
-                    }
-                };
-                (name.clone(), value)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let result = script
-            .invoke(
-                &invocation.command_id,
-                &json(&invocation_context(&invocation.context)),
-                &json(&captures),
-            )
-            .and_then(|actions| parse_actions(&actions));
-        tracing::info!(
-            generation = invocation.generation,
-            command_id = invocation.command_id,
-            status = if result.is_ok() {
-                "completed"
-            } else {
-                "failed"
-            },
-            duration_us = started.elapsed().as_micros(),
-            "personal command handler"
-        );
-        let actions = match result {
-            Ok(actions) => actions,
-            Err(error) => return emit_failure(invocation, &self.outcomes, &error),
-        };
-        let outcome = ActionOutcome {
-            id: invocation.command_id,
-            heard: invocation.heard,
-            context: invocation.context.label(),
-            result: Ok(()),
-        };
-        if actions.is_empty() {
-            let _ = self.outcomes.send(outcome);
-        } else if let Err(error) = self.actions.try_send(ActionJob { outcome, actions }) {
-            let (TrySendError::Full(job) | TrySendError::Disconnected(job)) = error;
-            let _ = self.outcomes.send(ActionOutcome {
-                result: Err("too many personal command actions are waiting".into()),
-                ..job.outcome
-            });
-        }
     }
 
     fn transform(&self, request: TransformationRequest) {
@@ -809,71 +582,33 @@ impl Worker {
     }
 }
 
-/// Loads `config` from `workspace` and compiles its registration over
-/// `base` as `generation`.
-fn load_config(
-    workspace: &Path,
-    config: &str,
-    base: &CommandConfig,
-    generation: u64,
-) -> Result<(Script, Candidate)> {
+/// Loads `config` from `workspace` and validates its transformations.
+fn load_config(workspace: &Path, config: &str) -> Result<(Script, Candidate)> {
     let script = Script::load(workspace, config).map_err(|error| eyre!(error))?;
     if script.registration().len() > MAX_REGISTRATION_BYTES {
         return Err(eyre!(
-            "the config registers more than {MAX_REGISTRATION_BYTES} bytes of commands"
+            "the config registers more than {MAX_REGISTRATION_BYTES} bytes of transformations"
         ));
     }
     let registration: Registration = serde_json::from_str(script.registration())
-        .wrap_err("the config's commands or transformations are invalid")?;
-    let catalog = status_catalog(&registration.commands);
-    let dictation = registration.dictation.clone();
-    let transformations = registration.transformations.clone();
-    let runtime = compile_registration(
-        base,
-        generation,
-        registration.dictation,
-        registration.transformations,
-        registration.commands,
-    )?;
+        .wrap_err("the config's transformations are invalid")?;
+    if registration.transformations.len() > MAX_TRANSFORMATIONS {
+        return Err(eyre!(
+            "personal registry exceeds {MAX_TRANSFORMATIONS} transformations"
+        ));
+    }
+    let ids = validate_transformations(&registration.transformations, "")?;
     Ok((
         script,
         Candidate {
-            runtime,
-            catalog,
-            dictation,
-            transformations,
+            ids,
+            transformations: registration.transformations,
         },
     ))
 }
 
-/// Loads the config as the running Hex would, over `base`, without
-/// registering anything: what it registers, or why it fails.
-#[cfg(target_os = "macos")]
-pub fn check_workspace(base: &CommandConfig) -> Result<String> {
-    check_workspace_at(&crate::app_paths::personal_commands_workspace()?, base)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn check_workspace_at(workspace: &Path, base: &CommandConfig) -> Result<String> {
-    let config = find_config(workspace)?.ok_or_else(|| {
-        eyre!(
-            "{} has no hex.config.ts; run `hex commands init`",
-            workspace.display()
-        )
-    })?;
-    let (_, candidate) = load_config(workspace, config, base, 0)?;
-    Ok(format!(
-        "{config}: {} commands, {} transformations",
-        candidate.catalog.len(),
-        candidate.transformations.len()
-    ))
-}
-
-/// What a successful load registers, before it replaces the active registry.
 struct Candidate {
-    runtime: RuntimeSnapshot,
-    catalog: Vec<StatusCommand>,
-    dictation: Option<StatusDictationProtocol>,
+    ids: HashSet<String>,
     transformations: Vec<StatusTransformation>,
 }
 
@@ -881,48 +616,11 @@ fn json(value: &impl Serialize) -> String {
     serde_json::to_string(value).expect("plain data serializes")
 }
 
-/// A handler's actions, validated before any of them runs.
-fn parse_actions(json: &str) -> std::result::Result<Vec<Action>, String> {
-    let actions: Vec<NativeAction> =
-        serde_json::from_str(json).map_err(|error| format!("invalid action: {error}"))?;
-    if actions.len() > MAX_ACTIONS_PER_INVOCATION {
-        return Err(format!(
-            "a command may run at most {MAX_ACTIONS_PER_INVOCATION} actions"
-        ));
-    }
-    actions
-        .into_iter()
-        .map(|action| action.into_action().map_err(|error| error.to_string()))
-        .collect()
-}
-
 /// The registration a config's `install` produces.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Registration {
-    dictation: Option<StatusDictationProtocol>,
     #[serde(default)]
     transformations: Vec<StatusTransformation>,
-    commands: Vec<RegistrationCommand>,
-}
-
-#[derive(Clone)]
-pub struct RuntimeSnapshot {
-    pub commands: CommandConfig,
-    pub dictation: Arc<DictationProtocol>,
-    generation: u64,
-    transformations: HashSet<String>,
-}
-
-impl RuntimeSnapshot {
-    pub fn native(commands: CommandConfig) -> Self {
-        Self {
-            commands,
-            dictation: Arc::new(DictationProtocol::default()),
-            generation: 0,
-            transformations: HashSet::new(),
-        }
-    }
 }
 
 #[derive(Default)]
@@ -1032,13 +730,13 @@ impl TransformationClient {
         }
     }
 
-    fn activate(&self, runtime: &RuntimeSnapshot, requests: SyncSender<Request>) {
+    fn activate(&self, generation: u64, ids: HashSet<String>, requests: SyncSender<Request>) {
         *self
             .active
             .write()
             .unwrap_or_else(|error| error.into_inner()) = Some(ActiveTransformations {
-            generation: runtime.generation,
-            ids: runtime.transformations.clone(),
+            generation,
+            ids,
             requests,
         });
     }
@@ -1084,100 +782,6 @@ fn remove_trailing_punctuation(text: &str) -> String {
     output
 }
 
-#[derive(Deserialize)]
-struct RegistrationCommand {
-    id: String,
-    phrases: Vec<String>,
-    group: Option<String>,
-    description: Option<String>,
-    when: Option<When>,
-    #[serde(default)]
-    captures: BTreeMap<String, CaptureDescriptor>,
-    execution: Execution,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
-enum CaptureDescriptor {
-    Digit {
-        min: u8,
-        max: u8,
-    },
-    Letter,
-    Choice {
-        choices: BTreeMap<String, Vec<String>>,
-    },
-    Union {
-        members: Vec<CaptureDescriptor>,
-    },
-    Text,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum When {
-    Application(ApplicationWhen),
-    BrowserHost(BrowserHostWhen),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ApplicationWhen {
-    application: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct BrowserHostWhen {
-    browser_host: String,
-}
-
-#[derive(Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum Execution {
-    Native { action: NativeAction },
-    Handler,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum NativeAction {
-    OpenUrl {
-        url: String,
-    },
-    OpenApplication {
-        application: String,
-    },
-    OpenPath {
-        path: String,
-    },
-    Press {
-        key: String,
-        #[serde(default)]
-        modifiers: Vec<String>,
-        #[serde(default = "one")]
-        repeat: u8,
-    },
-    TypeText {
-        text: String,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum WireCaptureValue {
-    Number(u8),
-    Text(String),
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InvocationContext {
@@ -1198,356 +802,6 @@ fn invocation_context(context: &ContextSnapshot) -> InvocationContext {
         browser_url: context.browser_url.as_ref().map(ToString::to_string),
         window_title: context.window_title.clone(),
     }
-}
-
-const fn one() -> u8 {
-    1
-}
-
-fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
-    commands
-        .iter()
-        .map(|command| StatusCommand {
-            id: command.id.clone(),
-            phrases: command.phrases.clone(),
-            group: command.group.clone().unwrap_or_else(|| "Other".into()),
-            description: command
-                .description
-                .clone()
-                .unwrap_or_else(|| "Custom command".into()),
-            context: match &command.when {
-                None => StatusContext::Global,
-                Some(When::Application(when)) => StatusContext::Application {
-                    application: when.application.clone(),
-                },
-                Some(When::BrowserHost(when)) => StatusContext::BrowserHost {
-                    browser_host: when.browser_host.clone(),
-                },
-            },
-            execution: match &command.execution {
-                Execution::Native { .. } => StatusExecution::Native,
-                Execution::Handler => StatusExecution::Handler,
-            },
-        })
-        .collect()
-}
-
-fn compile_capture_descriptor(
-    command_id: &str,
-    descriptor: &CaptureDescriptor,
-    depth: usize,
-) -> Result<PersonalCapture> {
-    match descriptor {
-        CaptureDescriptor::Digit { min, max } => {
-            if min > max || *max > 9 {
-                return Err(eyre!(
-                    "{command_id}: digit capture ranges must be within 0 through 9"
-                ));
-            }
-            Ok(PersonalCapture::Digit {
-                min: *min,
-                max: *max,
-            })
-        }
-        CaptureDescriptor::Letter => Ok(PersonalCapture::Letter),
-        CaptureDescriptor::Choice { choices } => {
-            if choices.is_empty() || choices.len() > MAX_CHOICE_VALUES {
-                return Err(eyre!(
-                    "{command_id}: choice captures must contain 1 through {MAX_CHOICE_VALUES} values"
-                ));
-            }
-            let mut spoken = BTreeMap::new();
-            for (value, aliases) in choices {
-                validate_text(value, "choice canonical value", MAX_CHOICE_VALUE_BYTES)?;
-                if aliases.is_empty() || aliases.len() > MAX_CHOICE_ALIASES {
-                    return Err(eyre!(
-                        "{command_id}: each choice value must contain 1 through {MAX_CHOICE_ALIASES} aliases"
-                    ));
-                }
-                for alias in aliases {
-                    validate_text(alias, "choice spoken alias", MAX_CHOICE_WORD_BYTES)?;
-                    let normalized = crate::spoken_text::normalize(alias);
-                    if normalized.split_whitespace().count() != 1 {
-                        return Err(eyre!(
-                            "{command_id}: choice aliases must normalize to exactly one spoken word"
-                        ));
-                    }
-                    if spoken.insert(normalized.clone(), value.clone()).is_some() {
-                        return Err(eyre!(
-                            "{command_id}: duplicate spoken choice alias {normalized}"
-                        ));
-                    }
-                }
-            }
-            Ok(PersonalCapture::Choice { choices: spoken })
-        }
-        CaptureDescriptor::Union { members } => {
-            if depth >= MAX_UNION_DEPTH {
-                return Err(eyre!(
-                    "{command_id}: union capture nesting may not exceed {MAX_UNION_DEPTH}"
-                ));
-            }
-            if members.len() < 2 {
-                return Err(eyre!(
-                    "{command_id}: union captures must contain at least two members"
-                ));
-            }
-            if serde_json::to_vec(descriptor)?.len() > MAX_UNION_SERIALIZED_BYTES {
-                return Err(eyre!(
-                    "{command_id}: union capture exceeds {MAX_UNION_SERIALIZED_BYTES} serialized bytes"
-                ));
-            }
-            let mut flattened = Vec::new();
-            for member in members {
-                match compile_capture_descriptor(command_id, member, depth + 1)? {
-                    PersonalCapture::Text => {
-                        return Err(eyre!("{command_id}: union captures do not accept text()"));
-                    }
-                    PersonalCapture::Union { members } => flattened.extend(members),
-                    member => flattened.push(member),
-                }
-            }
-            if flattened.len() > MAX_UNION_MEMBERS {
-                return Err(eyre!(
-                    "{command_id}: union captures may contain at most {MAX_UNION_MEMBERS} flattened members"
-                ));
-            }
-            for (index, left) in flattened.iter().enumerate() {
-                if flattened[index + 1..]
-                    .iter()
-                    .any(|right| left.overlaps(right))
-                {
-                    return Err(eyre!(
-                        "{command_id}: union capture members have overlapping spoken alternatives"
-                    ));
-                }
-            }
-            Ok(PersonalCapture::Union { members: flattened })
-        }
-        CaptureDescriptor::Text => Ok(PersonalCapture::Text),
-    }
-}
-
-fn compile_registration(
-    base: &CommandConfig,
-    generation: u64,
-    dictation: Option<StatusDictationProtocol>,
-    transformations: Vec<StatusTransformation>,
-    commands: Vec<RegistrationCommand>,
-) -> Result<RuntimeSnapshot> {
-    if commands.len() > MAX_COMMANDS {
-        return Err(eyre!("personal registry exceeds {MAX_COMMANDS} commands"));
-    }
-    if transformations.len() > MAX_TRANSFORMATIONS {
-        return Err(eyre!(
-            "personal registry exceeds {MAX_TRANSFORMATIONS} transformations"
-        ));
-    }
-    let transformation_ids = validate_transformations(&transformations, "")?;
-    let mut compiled = base.clone();
-    for command in commands {
-        validate_text(&command.id, "command id", 128)?;
-        if command.phrases.is_empty() || command.phrases.len() > MAX_PHRASES {
-            return Err(eyre!(
-                "{} must have 1 through {MAX_PHRASES} phrases",
-                command.id
-            ));
-        }
-        for phrase in &command.phrases {
-            validate_text(phrase, "command phrase", 256)?;
-        }
-        base.validate_personal_identity(&command.id, &command.phrases)?;
-        let context = match command.when {
-            None => ContextPredicate::Always,
-            Some(When::Application(when)) => {
-                validate_text(&when.application, "application context", 256)?;
-                ContextPredicate::application(when.application)
-            }
-            Some(When::BrowserHost(when)) => {
-                validate_text(&when.browser_host, "browser host context", 253)?;
-                validate_browser_host(&when.browser_host)?;
-                ContextPredicate::browser_host(when.browser_host)
-            }
-        };
-        let description = command
-            .description
-            .unwrap_or_else(|| "Custom command".into());
-        validate_text(&description, "command description", 1024)?;
-        if let Some(group) = &command.group {
-            validate_text(group, "command group", 1024)?;
-        }
-        let group = Some(command.group.unwrap_or_else(|| "Other".into()));
-        if command.captures.len() > MAX_CAPTURE_ENTRIES {
-            return Err(eyre!(
-                "{}: commands may contain at most {MAX_CAPTURE_ENTRIES} captures",
-                command.id
-            ));
-        }
-        let captures = command
-            .captures
-            .iter()
-            .map(|(name, descriptor)| {
-                validate_text(name, "capture name", 64)?;
-                let capture = compile_capture_descriptor(&command.id, descriptor, 0)?;
-                Ok((name.clone(), capture))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?;
-        let configured = match command.execution {
-            Execution::Native { action } => {
-                if !captures.is_empty() {
-                    return Err(eyre!(
-                        "{}: capture descriptors require a handler command (use run instead of action)",
-                        command.id
-                    ));
-                }
-                for phrase in &command.phrases {
-                    match crate::commands::phrase_placeholder(phrase) {
-                        Ok(None) => {}
-                        Ok(Some(_)) => {
-                            return Err(eyre!(
-                                "{}: {{capture}} placeholders require a handler command (use run instead of action)",
-                                command.id
-                            ));
-                        }
-                        Err(message) => return Err(eyre!("{}: {message}", command.id)),
-                    }
-                }
-                ConfiguredCommand::personal_literal(
-                    command.id,
-                    description,
-                    command.phrases,
-                    context,
-                    action.into_action()?,
-                    group,
-                )?
-            }
-            Execution::Handler => ConfiguredCommand::personal_command(
-                command.id,
-                description,
-                command.phrases,
-                context,
-                (!captures.is_empty()).then_some(captures),
-                move |captures| Action::InvokeHandler {
-                    generation,
-                    captures,
-                },
-                group,
-            )?,
-        };
-        compiled.try_command(configured)?;
-    }
-    let dictation = match dictation {
-        Some(dictation) => DictationProtocol::try_new(
-            dictation.start,
-            dictation.stop,
-            dictation.send,
-            dictation.cancel,
-        )
-        .map_err(|error| eyre!(error))?,
-        None => DictationProtocol::default(),
-    };
-    compiled.validate_protocol_identity("dictation.start", dictation.start_phrases(), true)?;
-    let controls = dictation.control_phrases().cloned().collect::<Vec<_>>();
-    compiled.validate_protocol_identity("dictation.control", &controls, false)?;
-    Ok(RuntimeSnapshot {
-        commands: compiled,
-        dictation: Arc::new(dictation),
-        generation,
-        transformations: transformation_ids,
-    })
-}
-
-impl NativeAction {
-    fn into_action(self) -> Result<Action> {
-        Ok(match self {
-            Self::OpenUrl { url } => {
-                validate_text(&url, "URL", 4096)?;
-                if url.bytes().any(|byte| byte.is_ascii_control()) {
-                    return Err(eyre!(
-                        "personal command URL must not contain control characters"
-                    ));
-                }
-                let parsed = url::Url::parse(&url).wrap_err("personal command URL is invalid")?;
-                if matches!(parsed.scheme(), "file" | "javascript" | "data" | "vbscript") {
-                    return Err(eyre!(
-                        "personal command URL scheme is not supported; use openPath for files"
-                    ));
-                }
-                Action::OpenUrl(url)
-            }
-            Self::OpenApplication { application } => {
-                validate_text(&application, "application", 4096)?;
-                Action::OpenApplication(application)
-            }
-            Self::OpenPath { path } => {
-                validate_text(&path, "path", 4096)?;
-                Action::OpenPath(path)
-            }
-            Self::TypeText { text } => {
-                validate_text(&text, "text", 4096)?;
-                Action::TypeText(text)
-            }
-            Self::Press {
-                key,
-                modifiers,
-                repeat,
-            } => {
-                if repeat == 0 || repeat > MAX_REPEAT {
-                    return Err(eyre!("press repeat must be from 1 through {MAX_REPEAT}"));
-                }
-                let key = parse_key(&key)?;
-                let modifiers = parse_modifiers(&modifiers)?;
-                if repeat == 1 {
-                    Action::Keystroke { key, modifiers }
-                } else {
-                    Action::RepeatedKeystroke {
-                        key,
-                        modifiers,
-                        count: repeat,
-                    }
-                }
-            }
-        })
-    }
-}
-
-fn parse_key(value: &str) -> Result<Key> {
-    match value.to_ascii_lowercase().as_str() {
-        "home" => Ok(Key::Home),
-        "end" => Ok(Key::End),
-        "up" => Ok(Key::Up),
-        "down" => Ok(Key::Down),
-        "left" => Ok(Key::Left),
-        "right" => Ok(Key::Right),
-        "enter" => Ok(Key::Enter),
-        "escape" => Ok(Key::Escape),
-        _ => {
-            let mut characters = value.chars();
-            let character = characters
-                .next()
-                .ok_or_else(|| eyre!("press key is empty"))?;
-            if characters.next().is_some() {
-                Err(eyre!(
-                    "press key must be a character or supported named key"
-                ))
-            } else {
-                Ok(Key::Character(character))
-            }
-        }
-    }
-}
-
-fn parse_modifiers(values: &[String]) -> Result<Modifiers> {
-    values.iter().try_fold(Modifiers::NONE, |modifiers, value| {
-        let next = match value.as_str() {
-            "command" => Modifiers::COMMAND,
-            "control" => Modifiers::CONTROL,
-            "option" => Modifiers::OPTION,
-            "shift" => Modifiers::SHIFT,
-            _ => return Err(eyre!("unsupported press modifier: {value}")),
-        };
-        Ok(modifiers.with(next))
-    })
 }
 
 fn workspace_fingerprint(root: &Path) -> u64 {
@@ -1615,15 +869,6 @@ fn validate_text(value: &str, label: &str, max_bytes: usize) -> Result<()> {
     }
 }
 
-fn validate_browser_host(host: &str) -> Result<()> {
-    let parsed = url::Host::parse(host).wrap_err("browser host context must be an exact host")?;
-    if crate::context::browser_hosts_equal(&parsed.to_string(), host) {
-        Ok(())
-    } else {
-        Err(eyre!("browser host context must be an exact host"))
-    }
-}
-
 fn bounded_error(message: &str) -> String {
     message.chars().take(4096).collect()
 }
@@ -1632,554 +877,10 @@ fn bounded_status_error(message: &str) -> String {
     message[..message.floor_char_boundary(MAX_STATUS_ERROR_BYTES)].to_owned()
 }
 
-fn emit_failure(invocation: Invocation, outcomes: &SyncSender<ActionOutcome>, error: &str) {
-    let _ = outcomes.send(ActionOutcome {
-        id: invocation.command_id,
-        heard: invocation.heard,
-        context: invocation.context.label(),
-        result: Err(bounded_error(error)),
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{Decision, Mode};
     use std::time::UNIX_EPOCH;
-
-    fn compile_commands(commands: Vec<RegistrationCommand>) -> Result<RuntimeSnapshot> {
-        compile_registration(&CommandConfig::new(), 1, None, vec![], commands)
-    }
-
-    fn compile_one(command: RegistrationCommand) -> Result<RuntimeSnapshot> {
-        compile_commands(vec![command])
-    }
-
-    fn compile_registration_json(json: &str) -> Result<RuntimeSnapshot> {
-        let registration: Registration = serde_json::from_str(json).unwrap();
-        compile_registration(
-            &CommandConfig::new(),
-            7,
-            None,
-            vec![],
-            registration.commands,
-        )
-    }
-
-    fn handler_command(
-        phrase: &str,
-        captures: impl IntoIterator<Item = (&'static str, CaptureDescriptor)>,
-    ) -> RegistrationCommand {
-        RegistrationCommand {
-            id: "bad".into(),
-            phrases: vec![phrase.into()],
-            group: None,
-            description: None,
-            when: None,
-            captures: captures
-                .into_iter()
-                .map(|(name, descriptor)| (name.into(), descriptor))
-                .collect(),
-            execution: Execution::Handler,
-        }
-    }
-
-    #[test]
-    fn native_url_actions_preserve_deep_links() {
-        for url in [
-            "https://example.com",
-            "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE",
-            "obsidian://open?vault=Work%20Notes&file=Plans%2FToday#section",
-            "mailto:hello@example.com?subject=Hello%20there",
-            "x-example+test://route?value=one%26two",
-            "SLACK://channel?team=T_EXAMPLE&id=C_EXAMPLE",
-        ] {
-            let action = NativeAction::OpenUrl { url: url.into() }
-                .into_action()
-                .unwrap();
-            assert!(matches!(action, Action::OpenUrl(value) if value == url));
-        }
-    }
-
-    #[test]
-    fn native_url_actions_reject_invalid_and_non_launchable_urls() {
-        for url in [
-            "relative/path",
-            "//example.com",
-            "",
-            "slack://channel\0",
-            "javascript:alert(1)",
-            "JaVaScRiPt:alert(1)",
-            "data:text/plain,hello",
-            "vbscript:msgbox(1)",
-            "file:///tmp/example",
-        ] {
-            assert!(
-                NativeAction::OpenUrl { url: url.into() }
-                    .into_action()
-                    .is_err(),
-                "{url:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn registration_compiles_native_and_handler_commands() {
-        let compiled = compile_registration_json(
-            r#"{"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            compiled.commands.resolve(Mode::Listening, "open example", &ContextSnapshot::default()),
-            Decision::Execute { action: Action::OpenUrl(url), .. } if url == "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"
-        ));
-        let slack = ContextSnapshot {
-            application: Some("Slack".into()),
-            ..ContextSnapshot::default()
-        };
-        assert!(matches!(
-            compiled
-                .commands
-                .resolve(Mode::Listening, "do work", &slack),
-            Decision::Execute {
-                id: "handled",
-                action: Action::InvokeHandler {
-                    generation: 7,
-                    captures,
-                },
-            } if captures.is_empty()
-        ));
-        assert_eq!(
-            compiled
-                .commands
-                .catalog()
-                .into_iter()
-                .find(|command| command.id == "handled")
-                .and_then(|command| command.group),
-            Some("Work".into())
-        );
-        assert_eq!(
-            compiled
-                .commands
-                .catalog()
-                .into_iter()
-                .find(|command| command.id == "native")
-                .and_then(|command| command.group),
-            Some("Other".into())
-        );
-    }
-
-    #[test]
-    fn capture_phrases_compile_for_handlers_and_carry_the_spoken_remainder() {
-        let compiled = compile_registration_json(
-            r#"{"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
-        )
-        .unwrap();
-
-        match compiled.commands.resolve(
-            Mode::Listening,
-            "search amazon for wool socks",
-            &ContextSnapshot::default(),
-        ) {
-            Decision::Execute {
-                id: "search",
-                action:
-                    Action::InvokeHandler {
-                        generation: 7,
-                        captures,
-                    },
-            } => {
-                assert_eq!(
-                    captures.get("query"),
-                    Some(&CapturedValue::Text("wool socks".into()))
-                );
-            }
-            _ => panic!("expected the capture command to execute"),
-        }
-        assert!(matches!(
-            compiled.commands.resolve(
-                Mode::Listening,
-                "search amazon for",
-                &ContextSnapshot::default()
-            ),
-            Decision::Ignore
-        ));
-    }
-
-    #[test]
-    fn typed_capture_phrases_resolve_multiple_digits_and_trailing_text() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"move","phrases":["move {from} to {to} named {label}"],"captures":{"from":{"type":"digit","min":1,"max":3},"to":{"type":"digit","min":4,"max":6},"label":{"type":"text"}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let compiled = compile_one(command).unwrap();
-
-        match compiled.commands.resolve(
-            Mode::Listening,
-            "move two to 5 named important item",
-            &ContextSnapshot::default(),
-        ) {
-            Decision::Execute {
-                action: Action::InvokeHandler { captures, .. },
-                ..
-            } => {
-                assert_eq!(captures.get("from"), Some(&CapturedValue::Digit(2)));
-                assert_eq!(captures.get("to"), Some(&CapturedValue::Digit(5)));
-                assert_eq!(
-                    captures.get("label"),
-                    Some(&CapturedValue::Text("important item".into()))
-                );
-            }
-            _ => panic!("expected typed capture command"),
-        }
-        assert!(matches!(
-            compiled.commands.resolve(
-                Mode::Listening,
-                "move four to 5 named important item",
-                &ContextSnapshot::default()
-            ),
-            Decision::Ignore
-        ));
-    }
-
-    #[test]
-    fn choice_captures_resolve_aliases_to_canonical_values() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"move","phrases":["move {direction} to {edge}"],"captures":{"direction":{"type":"choice","choices":{"left":["left","back"],"right":["right","forward"]}},"edge":{"type":"choice","choices":{"top":["top"],"bottom":["bottom"]}}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let compiled = compile_one(command).unwrap();
-
-        match compiled.commands.resolve(
-            Mode::Listening,
-            "move back to bottom",
-            &ContextSnapshot::default(),
-        ) {
-            Decision::Execute {
-                action: Action::InvokeHandler { captures, .. },
-                ..
-            } => {
-                assert_eq!(
-                    captures.get("direction"),
-                    Some(&CapturedValue::Choice("left".into()))
-                );
-                assert_eq!(
-                    captures.get("edge"),
-                    Some(&CapturedValue::Choice("bottom".into()))
-                );
-            }
-            _ => panic!("expected choice capture command"),
-        }
-    }
-
-    #[test]
-    fn letter_captures_resolve_spoken_and_nato_aliases_to_lowercase() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"control","phrases":["control {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let compiled = compile_one(command).unwrap();
-
-        for (heard, expected) in [
-            ("control A", 'a'),
-            ("control ay", 'a'),
-            ("control alpha", 'a'),
-            ("control bee", 'b'),
-            ("control echo", 'e'),
-            ("control aitch", 'h'),
-            ("control juliett", 'j'),
-            ("control cue", 'q'),
-            ("control whiskey", 'w'),
-            ("control xray", 'x'),
-            ("control why", 'y'),
-            ("control zed", 'z'),
-            ("control zulu", 'z'),
-        ] {
-            match compiled
-                .commands
-                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
-            {
-                Decision::Execute {
-                    action: Action::InvokeHandler { captures, .. },
-                    ..
-                } => assert_eq!(captures.get("key"), Some(&CapturedValue::Letter(expected))),
-                _ => panic!("expected {heard} to resolve"),
-            }
-        }
-    }
-
-    #[test]
-    fn union_captures_resolve_each_kind_and_multiple_capture_positions() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"keys","phrases":["key {first} then {second}"],"captures":{"first":{"type":"union","members":[{"type":"letter"},{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"],"escape":["escape","cancel"]}}]},"second":{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"enter":["enter"]}}]}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let compiled = compile_one(command).unwrap();
-
-        for (heard, first, second) in [
-            (
-                "key alpha then 2",
-                CapturedValue::Letter('a'),
-                CapturedValue::Digit(2),
-            ),
-            (
-                "key 7 then enter",
-                CapturedValue::Digit(7),
-                CapturedValue::Choice("enter".into()),
-            ),
-            (
-                "key cancel then 4",
-                CapturedValue::Choice("escape".into()),
-                CapturedValue::Digit(4),
-            ),
-        ] {
-            match compiled
-                .commands
-                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
-            {
-                Decision::Execute {
-                    action: Action::InvokeHandler { captures, .. },
-                    ..
-                } => {
-                    assert_eq!(captures.get("first"), Some(&first));
-                    assert_eq!(captures.get("second"), Some(&second));
-                }
-                _ => panic!("expected {heard} to resolve"),
-            }
-        }
-    }
-
-    #[test]
-    fn nested_unions_flatten_and_invalid_unions_are_rejected_transactionally() {
-        let valid: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"key","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"]}}]}]}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        assert!(compile_one(valid).is_ok());
-
-        for input in [
-            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"}]}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"text"}]}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"two":["2"]}}]}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"choice","choices":{"a":["alpha"]}}]}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"union","members":[{"type":"digit","min":0,"max":0},{"type":"union","members":[{"type":"choice","choices":{"home":["home"]}},{"type":"union","members":[{"type":"choice","choices":{"end":["end"]}},{"type":"union","members":[{"type":"choice","choices":{"up":["up"]}},{"type":"choice","choices":{"down":["down"]}}]}]}]}]}]}},"execution":{"type":"handler"}}"#,
-        ] {
-            let command = serde_json::from_str(input).unwrap();
-            assert!(
-                compile_one(command).is_err(),
-                "union should be rejected: {input}"
-            );
-        }
-
-        let members = (0..=MAX_UNION_MEMBERS)
-            .map(|index| CaptureDescriptor::Choice {
-                choices: BTreeMap::from([(format!("key{index}"), vec![format!("key{index}")])]),
-            })
-            .collect();
-        let command = handler_command("key {key}", [("key", CaptureDescriptor::Union { members })]);
-        assert!(compile_one(command).is_err());
-
-        let large_choice = |prefix: &str| CaptureDescriptor::Choice {
-            choices: (0..16)
-                .map(|value| {
-                    (
-                        format!("{prefix}{value}"),
-                        (0..16)
-                            .map(|alias| format!("{prefix}-{value}-{alias}-{}", "x".repeat(40)))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        };
-        let command = handler_command(
-            "key {key}",
-            [(
-                "key",
-                CaptureDescriptor::Union {
-                    members: vec![large_choice("left"), large_choice("right")],
-                },
-            )],
-        );
-        assert!(compile_one(command).is_err());
-    }
-
-    #[test]
-    fn union_overlap_checks_all_existing_token_kinds() {
-        let compile_pair = |right: &str| {
-            let union = serde_json::from_str(
-                r#"{"id":"union","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":0,"max":2},{"type":"choice","choices":{"home":["home"]}}]}},"execution":{"type":"handler"}}"#,
-            )
-            .unwrap();
-            compile_commands(vec![union, serde_json::from_str(right).unwrap()])
-        };
-
-        for right in [
-            r#"{"id":"literal","phrases":["press home"],"execution":{"type":"handler"}}"#,
-            r#"{"id":"digit","phrases":["press {key}"],"captures":{"key":{"type":"digit","min":2,"max":4}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"choice","phrases":["press {key}"],"captures":{"key":{"type":"choice","choices":{"house":["home"]}}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"text","phrases":["press {key}"],"captures":{"key":{"type":"text"}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"union2","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"choice","choices":{"house":["home"]}}]}},"execution":{"type":"handler"}}"#,
-        ] {
-            assert!(compile_pair(right).is_err(), "expected overlap: {right}");
-        }
-        assert!(compile_pair(
-            r#"{"id":"disjoint","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":3,"max":5},{"type":"choice","choices":{"end":["end"]}}]}},"execution":{"type":"handler"}}"#
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn letter_overlap_checks_literals_choices_letters_digits_and_text() {
-        let compile_pair = |right: &str| {
-            let letter = serde_json::from_str(
-                r#"{"id":"letter","phrases":["press {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#,
-            )
-            .unwrap();
-            let right = serde_json::from_str(right).unwrap();
-            compile_commands(vec![letter, right])
-        };
-
-        assert!(
-            compile_pair(
-                r#"{"id":"literal","phrases":["press alpha"],"execution":{"type":"handler"}}"#
-            )
-            .is_err()
-        );
-        assert!(compile_pair(r#"{"id":"choice","phrases":["press {key}"],"captures":{"key":{"type":"choice","choices":{"insect":["bee"]}}},"execution":{"type":"handler"}}"#).is_err());
-        assert!(compile_pair(r#"{"id":"letter-2","phrases":["press {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#).is_err());
-        assert!(compile_pair(r#"{"id":"text","phrases":["press {key}"],"captures":{"key":{"type":"text"}},"execution":{"type":"handler"}}"#).is_err());
-        assert!(compile_pair(r#"{"id":"digit","phrases":["press {key}"],"captures":{"key":{"type":"digit","min":0,"max":9}},"execution":{"type":"handler"}}"#).is_ok());
-    }
-
-    #[test]
-    fn invalid_choice_descriptors_are_rejected() {
-        for input in [
-            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{}}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":[]}}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["two words"]}}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["LEFT"],"other":["left!"]}}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["left"]},"extra":true}},"execution":{"type":"handler"}}"#,
-        ] {
-            let command = serde_json::from_str(input);
-            if let Ok(command) = command {
-                assert!(
-                    compile_one(command).is_err(),
-                    "descriptor should be rejected: {input}"
-                );
-            }
-        }
-
-        let command = |choices| {
-            handler_command(
-                "move {direction}",
-                [("direction", CaptureDescriptor::Choice { choices })],
-            )
-        };
-        let oversized_values = (0..=MAX_CHOICE_VALUES)
-            .map(|index| (format!("value{index}"), vec![format!("word{index}")]))
-            .collect();
-        for choices in [
-            BTreeMap::from([("x".repeat(MAX_CHOICE_VALUE_BYTES + 1), vec!["left".into()])]),
-            BTreeMap::from([("left".into(), vec!["x".repeat(MAX_CHOICE_WORD_BYTES + 1)])]),
-            BTreeMap::from([(
-                "left".into(),
-                (0..=MAX_CHOICE_ALIASES)
-                    .map(|index| format!("word{index}"))
-                    .collect(),
-            )]),
-            oversized_values,
-        ] {
-            assert!(compile_one(command(choices)).is_err());
-        }
-    }
-
-    #[test]
-    fn choice_overlap_checks_literals_digits_choices_and_text() {
-        let compile_pair = |left: &str, right: &str| {
-            let left = serde_json::from_str(left).unwrap();
-            let right = serde_json::from_str(right).unwrap();
-            compile_commands(vec![left, right])
-        };
-        let choice = r#"{"id":"choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"left":["left"],"second":["two"]}}},"execution":{"type":"handler"}}"#;
-
-        assert!(
-            compile_pair(
-                choice,
-                r#"{"id":"literal","phrases":["press left"],"execution":{"type":"handler"}}"#
-            )
-            .is_err()
-        );
-        assert!(compile_pair(
-            choice,
-            r#"{"id":"digit","phrases":["press {value}"],"captures":{"value":{"type":"digit","min":1,"max":2}},"execution":{"type":"handler"}}"#
-        )
-        .is_err());
-        assert!(compile_pair(
-            choice,
-            r#"{"id":"other-choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"backward":["left"]}}},"execution":{"type":"handler"}}"#
-        )
-        .is_err());
-        assert!(compile_pair(
-            choice,
-            r#"{"id":"text","phrases":["press {value}"],"captures":{"value":{"type":"text"}},"execution":{"type":"handler"}}"#
-        )
-        .is_err());
-        assert!(compile_pair(
-            choice,
-            r#"{"id":"disjoint-digit","phrases":["press {value}"],"captures":{"value":{"type":"digit","min":3,"max":5}},"execution":{"type":"handler"}}"#
-        )
-        .is_ok());
-        assert!(compile_pair(
-            choice,
-            r#"{"id":"disjoint-choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"right":["right"]}}},"execution":{"type":"handler"}}"#
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn typed_capture_aliases_and_ranges_are_validated() {
-        for input in [
-            r#"{"id":"bad","phrases":["move {from} to {to}","move {from}"],"captures":{"from":{"type":"digit","min":1,"max":3},"to":{"type":"digit","min":4,"max":6}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["say {words} now"],"captures":{"words":{"type":"text"}},"execution":{"type":"handler"}}"#,
-            r#"{"id":"bad","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":10}},"execution":{"type":"handler"}}"#,
-        ] {
-            let command = serde_json::from_str(input).unwrap();
-            assert!(compile_one(command).is_err());
-        }
-
-        let first = serde_json::from_str(
-            r#"{"id":"first","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":1,"max":3}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let disjoint = serde_json::from_str(
-            r#"{"id":"disjoint","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":4,"max":6}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        assert!(compile_commands(vec![first, disjoint]).is_ok());
-
-        let first = serde_json::from_str(
-            r#"{"id":"first","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":1,"max":3}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let overlapping = serde_json::from_str(
-            r#"{"id":"overlapping","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":5}},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        assert!(compile_commands(vec![first, overlapping]).is_err());
-    }
-
-    #[test]
-    fn capture_phrases_are_rejected_for_native_commands() {
-        let result = compile_registration_json(
-            r#"{"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
-        );
-
-        match result {
-            Ok(_) => panic!("native capture phrases are invalid"),
-            Err(error) => assert!(error.to_string().contains("handler")),
-        }
-    }
 
     #[test]
     fn transformation_client_dispatches_only_registered_ids() {
@@ -2364,137 +1065,6 @@ mod tests {
         assert_eq!(status.transformations[2].name, "No trailing punctuation");
     }
 
-    #[test]
-    fn invalid_candidate_does_not_mutate_base_registry() {
-        let base = CommandConfig::new().command(
-            ConfiguredCommand::literal(
-                "base",
-                "Base",
-                ["reserved phrase"],
-                ContextPredicate::Always,
-                Action::TypeText("base".into()),
-            )
-            .unwrap(),
-        );
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"personal","phrases":["reserved phrase"],"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-
-        assert!(compile_registration(&base, 1, None, vec![], vec![command]).is_err());
-        assert!(matches!(
-            base.resolve(
-                Mode::Listening,
-                "reserved phrase",
-                &ContextSnapshot::default()
-            ),
-            Decision::Execute { id: "base", .. }
-        ));
-    }
-
-    #[test]
-    fn configured_dictation_protocol_replaces_defaults_and_omission_falls_back() {
-        let configured = compile_registration(
-            &CommandConfig::new(),
-            1,
-            Some(StatusDictationProtocol {
-                start: vec!["begin note".into()],
-                stop: vec!["finish note".into()],
-                send: vec!["send note".into()],
-                cancel: vec!["discard note".into()],
-            }),
-            vec![],
-            vec![],
-        )
-        .unwrap();
-        assert!(
-            configured
-                .dictation
-                .start_prefix("Begin note, hello")
-                .is_some()
-        );
-        assert!(
-            configured
-                .dictation
-                .start_prefix("Dictate start, hello")
-                .is_none()
-        );
-
-        let fallback = compile_commands(vec![]).unwrap();
-        assert!(
-            fallback
-                .dictation
-                .start_prefix("Dictate start, hello")
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn dictation_protocol_collisions_reject_the_whole_registration() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"personal","phrases":["begin note now"],"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        let protocol = StatusDictationProtocol {
-            start: vec!["begin note".into()],
-            stop: vec!["finish note".into()],
-            send: vec!["send note".into()],
-            cancel: vec!["discard note".into()],
-        };
-
-        assert!(
-            compile_registration(
-                &CommandConfig::new(),
-                1,
-                Some(protocol),
-                vec![],
-                vec![command]
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn wake_sleep_ids_and_phrases_are_reserved() {
-        let base = CommandConfig::new()
-            .wake_with(["voice control"])
-            .sleep_with(["go to sleep"]);
-        for input in [
-            r#"{"id":"mode.wake","phrases":["something else"],"execution":{"type":"handler"}}"#,
-            r#"{"id":"personal","phrases":["voice control"],"execution":{"type":"handler"}}"#,
-            r#"{"id":"personal","phrases":["go to sleep"],"execution":{"type":"handler"}}"#,
-        ] {
-            let command = serde_json::from_str(input).unwrap();
-            assert!(compile_registration(&base, 1, None, vec![], vec![command]).is_err());
-        }
-    }
-
-    #[test]
-    fn browser_hosts_are_exact_and_canonical() {
-        let command: RegistrationCommand = serde_json::from_str(
-            r#"{"id":"bad","phrases":["bad"],"when":{"browserHost":"https://x.com/path"},"execution":{"type":"handler"}}"#,
-        )
-        .unwrap();
-        assert!(compile_one(command).is_err());
-
-        let context = ContextSnapshot {
-            application: Some("Brave Browser".into()),
-            browser_url: Some(url::Url::parse("https://X.COM./home").unwrap()),
-            ..ContextSnapshot::default()
-        };
-        assert!(context.browser_host_is("x.com"));
-        assert!(!context.browser_host_is("www.x.com"));
-    }
-
-    #[test]
-    fn context_predicates_reject_ambiguous_objects() {
-        let result = serde_json::from_str::<RegistrationCommand>(
-            r#"{"id":"bad","phrases":["bad"],"when":{"application":"Brave Browser","browserHost":"x.com"},"execution":{"type":"handler"}}"#,
-        );
-
-        assert!(result.is_err());
-    }
-
     #[cfg(unix)]
     #[test]
     fn workspace_fingerprint_does_not_follow_symlinks_or_excessive_depth() {
@@ -2533,22 +1103,6 @@ mod tests {
         let path = root.join("personal-commands.json");
         let status = StatusSnapshot {
             active_generation: Some(4),
-            catalog: vec![StatusCommand {
-                id: "open-example".into(),
-                phrases: vec!["open example".into(), "show example".into()],
-                group: "Web".into(),
-                description: "Open the example site".into(),
-                context: StatusContext::BrowserHost {
-                    browser_host: "example.com".into(),
-                },
-                execution: StatusExecution::Native,
-            }],
-            dictation: Some(StatusDictationProtocol {
-                start: vec!["begin note".into()],
-                stop: vec!["finish note".into()],
-                send: vec!["send note".into()],
-                cancel: vec!["discard note".into()],
-            }),
             transformations: vec![StatusTransformation {
                 id: "lowercase".into(),
                 name: "Lowercase".into(),
@@ -2565,33 +1119,17 @@ mod tests {
     }
 
     #[test]
-    fn status_snapshot_enforces_catalog_and_error_bounds() {
-        let command = StatusCommand {
-            id: "custom".into(),
-            phrases: vec!["custom phrase".into()],
-            group: "Other".into(),
-            description: "Custom command".into(),
-            context: StatusContext::Global,
-            execution: StatusExecution::Handler,
-        };
-        let mut status = StatusSnapshot {
-            catalog: vec![command; MAX_COMMANDS + 1],
+    fn status_snapshot_enforces_error_bounds() {
+        let status = StatusSnapshot {
+            last_reload_error: Some("x".repeat(MAX_STATUS_ERROR_BYTES + 1)),
             ..StatusSnapshot::default()
         };
         assert!(validate_status(&status).is_err());
-
-        status.catalog.clear();
-        status.last_reload_error = Some("x".repeat(MAX_STATUS_ERROR_BYTES + 1));
-        assert!(validate_status(&status).is_err());
     }
 
-    /// A worker over a fresh config folder, without threads: tests drive it
-    /// directly and read the actions it hands off.
     struct Harness {
         root: PathBuf,
         worker: Worker,
-        actions: Receiver<ActionJob>,
-        outcomes: Receiver<ActionOutcome>,
         _requests: Receiver<Request>,
     }
 
@@ -2606,17 +1144,9 @@ mod tests {
             fs::create_dir_all(&workspace).unwrap();
             fs::write(workspace.join("hex.config.ts"), config).unwrap();
             let (requests, request_receiver) = mpsc::sync_channel(4);
-            let (outcome_sender, outcomes) = mpsc::sync_channel(8);
-            let (action_sender, actions) = mpsc::sync_channel(8);
             let mut worker = Worker {
-                base: CommandConfig::new(),
-                active: Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(
-                    CommandConfig::new(),
-                )))),
                 transformations: Arc::new(TransformationClient::default()),
                 requests,
-                outcomes: outcome_sender,
-                actions: action_sender,
                 workspace,
                 status_file: Some(root.join("personal-commands.json")),
                 generation: 0,
@@ -2627,8 +1157,6 @@ mod tests {
             Self {
                 root,
                 worker,
-                actions,
-                outcomes,
                 _requests: request_receiver,
             }
         }
@@ -2638,8 +1166,8 @@ mod tests {
             self.worker.reload();
         }
 
-        fn snapshot(&self) -> Arc<RuntimeSnapshot> {
-            self.worker.active.read().unwrap().clone()
+        fn generation(&self) -> u64 {
+            self.worker.status.active_generation.unwrap_or(0)
         }
 
         fn error(&self) -> String {
@@ -2650,42 +1178,10 @@ mod tests {
                 .unwrap_or_default()
         }
 
-        /// Says `heard` and runs the handler it resolves to.
-        fn say(&self, heard: &str) -> std::result::Result<Vec<Action>, String> {
-            let snapshot = self.snapshot();
-            let Decision::Execute {
-                id,
-                action:
-                    Action::InvokeHandler {
-                        generation,
-                        captures,
-                    },
-            } = snapshot
-                .commands
-                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
-            else {
-                panic!("{heard:?} did not resolve to a handler");
-            };
-            self.worker.invoke(Invocation {
-                generation,
-                command_id: id.into(),
-                heard: heard.into(),
-                context: ContextSnapshot::default(),
-                captures,
-            });
-            match self.actions.try_recv() {
-                Ok(job) => Ok(job.actions),
-                Err(_) => match self.outcomes.try_recv().unwrap().result {
-                    Ok(()) => Ok(Vec::new()),
-                    Err(error) => Err(error),
-                },
-            }
-        }
-
         fn transform(&self, ids: &[&str], text: &str) -> std::result::Result<String, String> {
             let (response, result) = mpsc::sync_channel(1);
             self.worker.transform(TransformationRequest {
-                generation: self.snapshot().generation,
+                generation: self.generation(),
                 ids: ids.iter().map(ToString::to_string).collect(),
                 text: text.into(),
                 context: ContextSnapshot::default(),
@@ -2702,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn the_starter_config_registers_and_its_handlers_return_actions() {
+    fn the_starter_config_registers_transformations() {
         let harness = Harness::new(TEMPLATE_CONFIG);
         assert_eq!(
             harness.worker.status.host_state,
@@ -2711,77 +1207,40 @@ mod tests {
             harness.error()
         );
         assert_eq!(
-            harness
-                .worker
-                .status
-                .catalog
-                .iter()
-                .map(|command| (command.id.as_str(), command.execution))
-                .collect::<Vec<_>>(),
-            [
-                ("open-example", StatusExecution::Native),
-                ("search-amazon", StatusExecution::Handler),
-                ("control-key", StatusExecution::Handler),
-            ]
+            harness.transform(&["trim-whitespace"], "  hi  ").unwrap(),
+            "hi"
         );
-        assert!(matches!(
-            harness.say("search amazon for wool socks").unwrap().as_slice(),
-            [Action::OpenUrl(url)] if url == "https://www.amazon.com/s?k=wool%20socks"
-        ));
-        assert!(matches!(
-            harness.say("control five").unwrap().as_slice(),
-            [Action::Keystroke { key: Key::Character('5'), modifiers }]
-                if *modifiers == Modifiers::CONTROL
-        ));
-        assert!(matches!(
-            harness.say("control bravo").unwrap().as_slice(),
-            [Action::Keystroke {
-                key: Key::Character('b'),
-                ..
-            }]
-        ));
     }
 
     #[test]
-    fn handlers_queue_and_return_actions_in_order_and_fail_on_bad_ones() {
+    fn legacy_configs_with_commands_still_load_transformations() {
         let harness = Harness::new(
-            r#"import { defineHexConfig, openApplication, press, typeText } from "@hex/commands"
+            r#"import { choice, defineHexConfig, digit, letter, openUrl, union } from "@hex/commands"
 export default defineHexConfig({
+  transformations: {
+    exclaim: { name: "Exclaim", transform: (text) => `${text}!` },
+  },
   commands: {
-    both: {
-      phrases: ["do both"],
-      run: async ({ hex }) => {
-        await hex.openApplication("Slack")
-        return [press({ key: "k", modifiers: ["command"] }), typeText("hi")]
-      },
+    "open-example": {
+      phrases: ["open example"],
+      action: openUrl("https://example.com"),
     },
-    nothing: { phrases: ["do nothing"], run: () => {} },
-    broken: { phrases: ["do broken"], run: () => press({ key: "nope" }) },
-    throws: { phrases: ["do throws"], run: () => { throw new Error("no thanks") } },
-    odd: { phrases: ["do odd"], run: () => 42 },
+    "control-key": {
+      phrases: ["control {key}"],
+      captures: { key: union(letter(), digit(), choice(["home", "end"] as const)) },
+      run: ({ hex, captures }) => hex.press({ key: String(captures.key), modifiers: ["control"] }),
+    },
   },
 })
 "#,
         );
-        assert!(matches!(
-            harness.say("do both").unwrap().as_slice(),
-            [
-                Action::OpenApplication(application),
-                Action::Keystroke { key: Key::Character('k'), .. },
-                Action::TypeText(text),
-            ] if application == "Slack" && text == "hi"
-        ));
-        assert!(harness.say("do nothing").unwrap().is_empty());
-        assert!(harness.say("do broken").unwrap_err().contains("press key"));
-        let error = harness.say("do throws").unwrap_err();
-        assert!(error.starts_with("Error: no thanks"), "{error}");
-        assert!(error.contains("hex.config.ts:"), "{error}");
-        assert!(
-            harness
-                .say("do odd")
-                .unwrap_err()
-                .contains("must return an action")
+        assert_eq!(
+            harness.worker.status.host_state,
+            HostState::Active,
+            "{}",
+            harness.error()
         );
+        assert_eq!(harness.transform(&["exclaim"], "hi").unwrap(), "hi!");
     }
 
     #[test]
@@ -2795,7 +1254,6 @@ export default defineHexConfig({
     broken: { name: "Broken", transform: () => { throw new TypeError("bad input") } },
     number: { name: "Number", transform: () => 7 },
   },
-  commands: {},
 })
 "#,
         );
@@ -2833,7 +1291,6 @@ export default defineHexConfig({
     grow: { name: "Grow", transform: () => { const a = []; for (;;) a.push("x".repeat(1024)) } },
     echo: { name: "Echo", transform: (text) => text },
   },
-  commands: {},
 }
 "#,
         );
@@ -2863,11 +1320,11 @@ export default defineHexConfig({
     #[test]
     fn load_errors_name_the_file_line_and_column_and_keep_the_last_good_config() {
         let mut harness = Harness::new(
-            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } }, commands: {} }"#,
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } } }"#,
         );
-        let generation = harness.snapshot().generation;
+        let generation = harness.generation();
 
-        harness.write("const a = 1\nenum Color { Red }\nexport default { commands: {} }\n");
+        harness.write("const a = 1\nenum Color { Red }\nexport default {}\n");
         assert!(
             harness
                 .error()
@@ -2876,10 +1333,10 @@ export default defineHexConfig({
             harness.error()
         );
         assert_eq!(harness.worker.status.host_state, HostState::Active);
-        assert_eq!(harness.snapshot().generation, generation);
+        assert_eq!(harness.generation(), generation);
         assert_eq!(harness.transform(&["echo"], "kept").unwrap(), "kept");
 
-        harness.write("export default {\n  commands: {\n    a: { phrases: [\"x\"], run: () => {} },,\n  },\n}\n");
+        harness.write("export default {\n  transformations: {\n    a: { name: \"x\", transform: (t) => t },,\n  },\n}\n");
         assert!(
             harness.error().starts_with("SyntaxError"),
             "{}",
@@ -2894,7 +1351,7 @@ export default defineHexConfig({
         fs::remove_file(harness.worker.workspace.join("hex.config.ts")).unwrap();
         fs::write(
             harness.worker.workspace.join("hex.config.js"),
-            "export default {\n  commands: {\n    a: { phrases: [\"x\"] run: () => {} },\n  },\n}\n",
+            "export default {\n  transformations: {\n    a: { name: \"x\" transform: (t) => t },\n  },\n}\n",
         )
         .unwrap();
         harness.worker.reload();
@@ -2910,20 +1367,17 @@ export default defineHexConfig({
         );
         fs::remove_file(harness.worker.workspace.join("hex.config.js")).unwrap();
 
-        harness.write("throw new Error(\"top level\")\nexport default { commands: {} }\n");
+        harness.write("throw new Error(\"top level\")\nexport default {}\n");
         assert!(
             harness.error().starts_with("Error: top level"),
             "{}",
             harness.error()
         );
+        assert_eq!(harness.generation(), generation);
 
-        harness.write("export default { commands: { a: { phrases: [\"open notes\"], run: () => {} }, b: { phrases: [\"open notes\"], run: () => {} } } }\n");
-        assert_eq!(harness.error(), "command patterns overlap: a and b");
-        assert_eq!(harness.snapshot().generation, generation);
-
-        harness.write("export default { transformations: { echo: { name: \"Echo\", transform: (t) => t + \"?\" } }, commands: {} }\n");
+        harness.write("export default { transformations: { echo: { name: \"Echo\", transform: (t) => t + \"?\" } } }\n");
         assert!(harness.worker.status.last_reload_error.is_none());
-        assert!(harness.snapshot().generation > generation);
+        assert!(harness.generation() > generation);
         assert_eq!(harness.transform(&["echo"], "new").unwrap(), "new?");
 
         fs::remove_file(harness.worker.workspace.join("hex.config.ts")).unwrap();
@@ -2935,12 +1389,12 @@ export default defineHexConfig({
     #[test]
     fn stale_generations_never_reach_a_newer_config() {
         let mut harness = Harness::new(
-            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } }, commands: {} }"#,
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t } } }"#,
         );
         let (response, result) = mpsc::sync_channel(1);
-        let stale = harness.snapshot().generation;
+        let stale = harness.generation();
         harness.write(
-            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t + t } }, commands: {} }"#,
+            r#"export default { transformations: { echo: { name: "Echo", transform: (t) => t + t } } }"#,
         );
         harness.worker.transform(TransformationRequest {
             generation: stale,
@@ -2955,7 +1409,7 @@ export default defineHexConfig({
 
     #[test]
     fn scripts_import_only_hex_commands_and_files_in_the_folder() {
-        let mut harness = Harness::new("export default { commands: {} }");
+        let mut harness = Harness::new("export default {}");
         let workspace = harness.worker.workspace.clone();
         fs::create_dir_all(workspace.join("lib")).unwrap();
         fs::write(
@@ -2965,7 +1419,7 @@ export default defineHexConfig({
         .unwrap();
         fs::write(workspace.join("data.json"), "{\"mark\": \"!\"}").unwrap();
         harness.write(
-            "import { shout } from \"./lib/words\"\nexport default { transformations: { shout: { name: \"Shout\", transform: shout } }, commands: {} }\n",
+            "import { shout } from \"./lib/words\"\nexport default { transformations: { shout: { name: \"Shout\", transform: shout } } }\n",
         );
         assert_eq!(harness.transform(&["shout"], "hi").unwrap(), "HI!");
 
@@ -2977,12 +1431,12 @@ export default defineHexConfig({
             "hex:host",
         ] {
             harness.write(&format!(
-                "import {{ x }} from {import:?}\nexport default {{ commands: {{}} }}\n"
+                "import {{ x }} from {import:?}\nexport default {{}}\n"
             ));
             assert!(!harness.error().is_empty(), "{import} was importable");
         }
         harness.write(
-            "export default { transformations: { probe: { name: \"Probe\", transform: () => [typeof fetch, typeof setTimeout, typeof require, typeof process, typeof console.log].join(\" \") } }, commands: {} }\n",
+            "export default { transformations: { probe: { name: \"Probe\", transform: () => [typeof fetch, typeof setTimeout, typeof require, typeof process, typeof console.log].join(\" \") } } }\n",
         );
         assert_eq!(
             harness.transform(&["probe"], "").unwrap(),
@@ -2998,6 +1452,11 @@ export default defineHexConfig({
             .as_nanos();
         let workspace = std::env::temp_dir().join(format!("hex-init-{unique}"));
         initialize_workspace_at(&workspace).unwrap();
+        assert!(
+            check_workspace_at(&workspace)
+                .unwrap()
+                .contains("1 transformation")
+        );
         assert_eq!(
             fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
             TEMPLATE_CONFIG
@@ -3016,21 +1475,8 @@ export default defineHexConfig({
             fs::read_to_string(workspace.join("hex.d.ts")).unwrap(),
             MANAGED_FILES[0].1
         );
-        fs::write(
-            workspace.join("hex.config.js"),
-            "export default { commands: {} }\n",
-        )
-        .unwrap();
+        fs::write(workspace.join("hex.config.js"), "export default {}\n").unwrap();
         assert!(find_config(&workspace).is_err());
         fs::remove_dir_all(workspace).unwrap();
-    }
-
-    #[test]
-    fn check_reports_what_the_config_registers() {
-        let harness = Harness::new(TEMPLATE_CONFIG);
-        assert_eq!(
-            check_workspace_at(&harness.worker.workspace, &CommandConfig::new()).unwrap(),
-            "hex.config.ts: 3 commands, 0 transformations"
-        );
     }
 }

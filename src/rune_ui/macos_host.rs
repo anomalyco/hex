@@ -1,7 +1,7 @@
 //! The macOS window's host: the runtime thread `macos_rune` starts in this
 //! process, which owns model preparation and publishes the listener, model,
 //! update, and settings state, plus the OS-only work the panes ask for
-//! (permissions, the login item, Hex Microphone, meetings, commands).
+//! (permissions, the login item, Hex Microphone, meetings).
 //!
 //! Shortcut capture stays in the window: an AppKit local event
 //! monitor records the chord, because a modifier-only binding such as Option
@@ -24,9 +24,8 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
 use super::meetings::{Meeting, Status, Transcript, Turn};
 use super::platform::{
-    CalendarRequest, CalendarView, CatalogCommand, CommandModel, DemoRequest, HudDemo, HudLab,
-    MeetingRequest, NativeHost, NotesAvailability, PlatformRequest, PlatformState, UpcomingMeeting,
-    Workspace,
+    CalendarRequest, CalendarView, DemoRequest, HudDemo, HudLab, MeetingRequest, NativeHost,
+    NotesAvailability, PlatformRequest, PlatformState, UpcomingMeeting,
 };
 use super::settings::Chord;
 use super::{HostState, ServiceView};
@@ -34,7 +33,6 @@ use crate::app_settings::{
     CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, modifiers_from_flags,
 };
 use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
-use crate::commands::{CommandInfo, CommandScope};
 use crate::desktop_host::DesktopAction;
 use crate::desktop_i18n::tr;
 use crate::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
@@ -480,10 +478,6 @@ pub(super) fn native_host() -> Box<dyn NativeHost> {
 struct MacHost {
     login: Option<LoginItemWorker>,
     login_checking: bool,
-    commands: Vec<CatalogCommand>,
-    workspace_path: PathBuf,
-    workspace: Option<Receiver<Result<PathBuf, String>>>,
-    workspace_error: Option<String>,
     folder_error: Option<String>,
     refresh_at: Instant,
     notes: Option<NotesAvailability>,
@@ -504,10 +498,6 @@ impl MacHost {
         let mut host = Self {
             login,
             login_checking: false,
-            commands: build_commands(),
-            workspace_path: crate::app_paths::personal_commands_workspace().unwrap_or_default(),
-            workspace: None,
-            workspace_error: None,
             folder_error: None,
             refresh_at: Instant::now(),
             notes: None,
@@ -625,22 +615,6 @@ impl NativeHost for MacHost {
                 self.calendar.opening_privacy_settings();
                 crate::calendar::open_privacy_settings();
             }
-            PlatformRequest::CreateCommandsConfig => {
-                if self.workspace.is_none() {
-                    let (sender, receiver) = mpsc::sync_channel(1);
-                    std::thread::spawn(move || {
-                        let result = crate::personal_commands::initialize_workspace()
-                            .map_err(|error| format!("{error:#}"));
-                        let _ = sender.send(result);
-                    });
-                    self.workspace = Some(receiver);
-                    self.workspace_error = None;
-                }
-            }
-            PlatformRequest::OpenCommandsConfig => open_path(&self.workspace_path),
-            PlatformRequest::RetryCommandModel => self
-                .runtime()?
-                .recognition(crate::recognition::RecognitionControl::RetryCommands)?,
             PlatformRequest::Relaunch => {
                 if let Err(error) = crate::onboarding::record_relaunch(crate::onboarding::unix_ms())
                 {
@@ -708,20 +682,6 @@ impl NativeHost for MacHost {
                     changed = true;
                 }
             }
-        }
-        if let Some(receiver) = &self.workspace
-            && let Ok(result) = receiver.try_recv()
-        {
-            self.workspace = None;
-            match result {
-                Ok(path) => {
-                    self.workspace_path = path;
-                    self.workspace_error = None;
-                    self.commands = build_commands();
-                }
-                Err(error) => self.workspace_error = Some(error),
-            }
-            changed = true;
         }
         if let Some(choice) = self.folder_choice.as_ref().and_then(|p| p.poll()) {
             self.folder_choice = None;
@@ -803,34 +763,6 @@ impl NativeHost for MacHost {
             &mut state.hex_microphone,
             voice_filter.then(crate::hex_microphone::status),
         );
-        changed |= update(
-            &mut state.command_model,
-            match crate::recognition::command_model_status() {
-                crate::recognition::CommandModelStatus::Disabled => CommandModel::Disabled,
-                crate::recognition::CommandModelStatus::Loading => CommandModel::Loading,
-                crate::recognition::CommandModelStatus::Ready => CommandModel::Ready,
-                crate::recognition::CommandModelStatus::Failed => CommandModel::Failed,
-            },
-        );
-        if state.commands != self.commands {
-            state.commands.clone_from(&self.commands);
-            changed = true;
-        }
-        let workspace = if self.workspace.is_some() {
-            Workspace::Creating
-        } else if self.workspace_error.is_some() {
-            Workspace::Error
-        } else if crate::personal_commands::workspace_configured() {
-            Workspace::Ready
-        } else {
-            Workspace::Missing
-        };
-        changed |= update(&mut state.workspace, workspace);
-        changed |= update(
-            &mut state.workspace_path,
-            self.workspace_path.display().to_string(),
-        );
-        changed |= update(&mut state.workspace_error, self.workspace_error.clone());
         changed |= update(
             &mut state.notes,
             *self.notes.get_or_insert_with(notes_availability),
@@ -1456,26 +1388,6 @@ fn update<T: PartialEq>(slot: &mut T, value: T) -> bool {
     }
 }
 
-fn build_commands() -> Vec<CatalogCommand> {
-    let mut commands: Vec<CatalogCommand> = crate::config::voice_control()
-        .catalog()
-        .into_iter()
-        .map(|command| CatalogCommand {
-            task: command_task(&command),
-            scope: command.scope,
-            phrase: command.phrase,
-            aliases: command.aliases,
-            description: command.description,
-            id: command.id,
-        })
-        .collect();
-    match crate::personal_commands::load_status() {
-        Ok(status) => commands.extend(personal_catalog(&status)),
-        Err(error) => tracing::debug!(%error, "personal commands are unavailable"),
-    }
-    commands
-}
-
 fn notes_availability() -> NotesAvailability {
     use crate::apple_intelligence::Availability;
     match crate::apple_intelligence::availability() {
@@ -1495,59 +1407,6 @@ fn open_path(path: &std::path::Path) {
     {
         tracing::error!(%error, path = %path.display(), "could not open path");
     }
-}
-
-/// The catalog group a compiled command is listed under.
-fn command_task(command: &CommandInfo) -> String {
-    if let Some(group) = &command.group {
-        return group.clone();
-    }
-    if command.id.starts_with("mode.") {
-        tr("Voice control").into()
-    } else if command.id.starts_with("dictation.") {
-        tr("Dictation").into()
-    } else if command.id.starts_with("meeting.") {
-        tr("Meetings").into()
-    } else {
-        match command.description.as_str() {
-            "Open application" => tr("Open applications"),
-            "Open website" => tr("Open websites"),
-            "Navigate active tab" => tr("Browser navigation"),
-            "Use keyboard shortcut" => tr("Keyboard"),
-            "Use application shortcut" | "Open application destination" => {
-                tr("Application navigation")
-            }
-            _ => tr("Other"),
-        }
-        .into()
-    }
-}
-
-fn personal_catalog(status: &crate::personal_commands::StatusSnapshot) -> Vec<CatalogCommand> {
-    use crate::personal_commands::StatusContext;
-    status
-        .catalog
-        .iter()
-        .filter_map(|command| {
-            let (phrase, aliases) = command.phrases.split_first()?;
-            Some(CatalogCommand {
-                task: command.group.clone(),
-                scope: match &command.context {
-                    StatusContext::Global => CommandScope::Global,
-                    StatusContext::Application { application } => {
-                        CommandScope::Application(application.clone())
-                    }
-                    StatusContext::BrowserHost { browser_host } => {
-                        CommandScope::Browser(browser_host.clone())
-                    }
-                },
-                phrase: phrase.clone(),
-                aliases: aliases.to_vec(),
-                description: command.description.clone(),
-                id: command.id.clone(),
-            })
-        })
-        .collect()
 }
 
 #[cfg(test)]

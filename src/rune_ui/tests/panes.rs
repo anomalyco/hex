@@ -1,5 +1,5 @@
 //! The macOS and Windows surfaces, driven headlessly on Linux from preview
-//! data: Commands, Meetings, the OS-only General rows, and the full tour.
+//! data: Meetings, the OS-only General rows, and the full tour.
 
 use super::*;
 use crate::login_item::LoginItemStatus;
@@ -23,20 +23,12 @@ fn refresh(rt: &mut Runtime<Ui>) {
 fn each_os_lists_only_the_panes_it_can_run() {
     let mut linux = runtime("portal", true, PANE_SIZE);
     tap(&mut linux, "nav-labs");
-    for key in [
-        "lab-commands",
-        "lab-meetings",
-        "nav-commands",
-        "nav-meetings",
-    ] {
+    for key in ["lab-meetings", "nav-meetings"] {
         assert!(linux.find(key).is_none(), "Linux has no {key}");
     }
     let mut mac = runtime("mac-settings", true, PANE_SIZE);
     tap(&mut mac, "nav-labs");
-    tap(&mut mac, "lab-commands");
-    assert!(mac.state.settings.commands_enabled);
     for (key, pane) in [
-        ("nav-commands", Pane::Commands),
         ("nav-meetings", Pane::Meetings),
         ("nav-general", Pane::General),
     ] {
@@ -45,12 +37,7 @@ fn each_os_lists_only_the_panes_it_can_run() {
     }
     let mut windows = runtime("windows-settings", true, PANE_SIZE);
     tap(&mut windows, "nav-labs");
-    for key in [
-        "lab-commands",
-        "lab-meetings",
-        "nav-commands",
-        "nav-meetings",
-    ] {
+    for key in ["lab-meetings", "nav-meetings"] {
         assert!(windows.find(key).is_none(), "Windows has no {key}");
     }
 }
@@ -903,22 +890,6 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
 }
 
 #[test]
-fn a_failed_command_model_offers_retry_and_turning_commands_off() {
-    let mut rt = runtime("mac-commands-unavailable", true, PANE_SIZE);
-    assert!(
-        runtime("mac-settings-permissions", true, (980.0, 2400.0))
-            .find("command-model-notice")
-            .is_none(),
-        "the notice lives in Commands"
-    );
-    tap(&mut rt, "retry-commands");
-    assert_eq!(asked(&rt), [PlatformRequest::RetryCommandModel]);
-    tap(&mut rt, "disable-commands");
-    assert!(!rt.state.settings.commands_enabled);
-    assert!(rt.find("command-model-notice").is_none());
-}
-
-#[test]
 fn meetings_switch_between_recordings_and_settings() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
     assert!(rt.find("meeting-preview-design").is_some());
@@ -1080,70 +1051,6 @@ fn denied_calendar_access_links_to_privacy_settings() {
             CalendarRequest::OpenPrivacySettings
         )]
     );
-}
-
-#[test]
-fn commands_search_select_and_show_their_detail() {
-    let mut rt = runtime("mac-commands", true, PANE_SIZE);
-    assert!(texts(&rt).iter().any(|text| text == "Voice control"));
-    tap(&mut rt, "command-github.pulls");
-    assert_eq!(rt.state.commands.selected.as_deref(), Some("github.pulls"));
-    let shown = texts(&rt);
-    assert!(shown.iter().any(|text| text == "github.com"));
-    assert!(shown.iter().any(|text| text == "pull requests, open pulls"));
-    rt.state.commands.search = TextEdit::new("slack");
-    refresh(&mut rt);
-    assert!(rt.find("command-open.slack").is_some());
-    assert!(rt.find("command-mode.sleep").is_none());
-    rt.state.commands.search = TextEdit::new("nothing like this");
-    refresh(&mut rt);
-    assert!(
-        texts(&rt)
-            .iter()
-            .any(|text| text == "No matching commands.")
-    );
-}
-
-#[test]
-fn commands_turn_on_from_their_card() {
-    let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    assert!(
-        rt.find("nav-commands").is_none(),
-        "off, only Labs offers it"
-    );
-    tap(&mut rt, "nav-labs");
-    tap(&mut rt, "lab-commands");
-    assert!(rt.state.settings.commands_enabled);
-    tap(&mut rt, "nav-commands");
-    assert!(rt.find("commands-enabled").is_some());
-}
-
-#[test]
-fn enabling_commands_with_a_released_microphone_asks_first() {
-    let mut rt = runtime("mac-commands", true, PANE_SIZE);
-    tap(&mut rt, "commands-enabled");
-    assert!(!rt.state.settings.commands_enabled);
-    rt.state.settings.release_microphone_while_idle = true;
-    refresh(&mut rt);
-    tap(&mut rt, "commands-enabled");
-    assert!(rt.state.commands.confirm_enable);
-    assert!(!rt.state.settings.commands_enabled);
-    tap(&mut rt, "confirm-enable-commands");
-    assert!(rt.state.settings.commands_enabled);
-    assert!(!rt.state.settings.release_microphone_while_idle);
-}
-
-#[test]
-fn commands_copy_the_agent_prompt_and_open_the_config() {
-    let mut rt = runtime("mac-commands", true, PANE_SIZE);
-    tap(&mut rt, "commands-copy-prompt");
-    assert!(
-        rt.copy_request
-            .as_deref()
-            .is_some_and(|prompt| prompt.contains("hex.config.ts"))
-    );
-    tap(&mut rt, "commands-open-config");
-    assert_eq!(asked(&rt), [PlatformRequest::OpenCommandsConfig]);
 }
 
 #[test]
@@ -1388,7 +1295,6 @@ fn platform_goldens() {
         for scene in [
             "mac-settings",
             "mac-input-source-models",
-            "mac-commands",
             "meetings",
             "meetings-settings",
             "meetings-off",
@@ -1408,9 +1314,7 @@ fn platform_goldens() {
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-microphone-bluetooth", true, PANE_SIZE);
     check_golden("meetings-calendar-denied", true, PANE_SIZE);
-    check_golden("mac-commands-unavailable", true, PANE_SIZE);
     check_golden("windows-settings", false, GOLDEN_SIZE);
-    check_golden("mac-commands-confirm", false, PANE_SIZE);
     check_golden("meetings-actions", true, PANE_SIZE);
     check_golden("meetings-delete", false, PANE_SIZE);
     check_golden("meetings-rename", true, PANE_SIZE);

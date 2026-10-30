@@ -353,6 +353,32 @@ fn ran_within(last_run: Option<Instant>, now: Instant, window: Duration) -> bool
     last_run.is_some_and(|last_run| now.saturating_duration_since(last_run) < window)
 }
 
+fn normalize_spoken(text: &str) -> String {
+    text.split_whitespace()
+        .filter_map(|word| {
+            let word = word.trim_matches(|character: char| character.is_ascii_punctuation());
+            if word.is_empty() {
+                return None;
+            }
+            let word = word.to_ascii_lowercase();
+            Some(match word.as_str() {
+                "zero" => "0".to_string(),
+                "one" => "1".to_string(),
+                "two" => "2".to_string(),
+                "three" => "3".to_string(),
+                "four" => "4".to_string(),
+                "five" => "5".to_string(),
+                "six" => "6".to_string(),
+                "seven" => "7".to_string(),
+                "eight" => "8".to_string(),
+                "nine" => "9".to_string(),
+                _ => word,
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Drops Whisper segments that only repeat the recognition hints. Whisper
 /// reads the hints as its initial prompt and, on silence or noise, often
 /// returns them verbatim. Speech that merely contains a hint is kept, and so
@@ -366,7 +392,7 @@ fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
     if hints < 2 {
         return;
     }
-    let normalize = |text: &str| crate::spoken_text::normalize(&text.replace(is_separator, " "));
+    let normalize = |text: &str| normalize_spoken(&text.replace(is_separator, " "));
     let prompt = normalize(prompt);
     let echoes = |text: &str| normalize(text) == prompt;
     if transcript.segments.is_empty() {
@@ -413,6 +439,12 @@ fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizes_spoken_numbers_and_punctuation() {
+        assert_eq!(normalize_spoken("Move LEFT, three!"), "move left 3");
+        assert_eq!(normalize_spoken("Ä ä A a ONE one"), "Ä ä a a 1 1");
+    }
 
     #[test]
     fn only_a_completed_run_inside_the_window_counts_as_recent() {

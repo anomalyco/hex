@@ -20,7 +20,6 @@ pub enum DeveloperPane {
     Modes,
     History,
     HudLab,
-    Commands,
     Meetings,
     Fun,
     Activity,
@@ -32,7 +31,6 @@ pub enum DeveloperCommand {
     Status,
     Hud { state: DeveloperHudState },
     ShowPane { pane: DeveloperPane },
-    SetCommandsEnabled { enabled: bool },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -42,7 +40,6 @@ pub enum DeveloperReply {
     State {
         window_open: bool,
         pane: Option<DeveloperPane>,
-        commands_enabled: bool,
     },
     Error {
         code: String,

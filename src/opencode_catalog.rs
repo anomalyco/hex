@@ -120,10 +120,24 @@ pub(crate) fn start_model_catalog_load() -> Receiver<ModelCatalogState> {
     receiver
 }
 
+pub(crate) fn open_url(url: &str) -> color_eyre::eyre::Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status()?;
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(url).status()?;
+    #[cfg(target_os = "windows")]
+    let status = crate::background_process::command("rundll32")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(url)
+        .status()?;
+    if !status.success() {
+        return Err(color_eyre::eyre::eyre!("open failed for {url}: {status}"));
+    }
+    Ok(())
+}
+
 pub(crate) fn open_opencode_beta_docs() {
-    if let Err(error) = crate::commands::execute(crate::commands::Action::OpenUrl(
-        OPENCODE_BETA_DOCS_URL.into(),
-    )) {
+    if let Err(error) = open_url(OPENCODE_BETA_DOCS_URL) {
         tracing::error!(%error, "could not open the OpenCode beta documentation");
     }
 }

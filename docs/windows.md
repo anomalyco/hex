@@ -174,8 +174,7 @@ global or contextual mode and applies to the next output job. Each
 transformation call is limited to one second and the engine to 64 MiB; a
 failed step preserves the previous pipeline output. Saving the config reloads
 it; a config that fails to load keeps the previous one and shows its error in
-the card. Literal voice commands in the same config remain unavailable on
-Windows until a real streaming command recognizer lands.
+the card.
 
 ## The App
 
@@ -281,7 +280,6 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
 | Signed automatic self-update for managed installs | Implemented for x64 and ARM64; the same ed25519 key and `https://anoma.ly/hex/files` origin as Linux, one feed per architecture, activating into a user-local versions directory. Checks 10 s after launch and every 6 h (or Check for updates); a staged update shows Restart to update in the tray menu and the window's sidebar footer, and the tray tooltip says an update is available. Source builds keep the GitHub release link (Download update); CI test builds never check |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
-| Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
 | Managed installer with Start Menu integration and clean uninstall | Implemented as `.github/release/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
 | First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only once setup is recorded — the shared Rune tour |
 | Activity pane with the live session and recent transcripts | Implemented in developer builds; the shared read-only pane |
@@ -310,7 +308,7 @@ clipboard only when no newer clipboard change supersedes it.
 `check-windows` builds and tests the optimized MSVC release for x64 and ARM64
 on every pull request. The remaining code
 parity slice is the developer-only Meetings surface after the physical matrix
-is green; opt-in Commands wait on a Windows streaming command model. Shared
+is green. Shared
 first-run onboarding, complete OpenCode mode rewriting controls, and the bounded
 TypeScript transformation host already ship. Windows releases are built for
 x64 and ARM64 by

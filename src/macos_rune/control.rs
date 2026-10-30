@@ -17,7 +17,7 @@ use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
 use crate::meeting::MeetingRequest;
 use crate::meeting_watcher::{ControllerEvent, MeetingMenuState};
 use crate::onboarding::PermissionState;
-use crate::recognition::{CommandModelStatus, RecognitionControl};
+use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};
 use crate::rune_ui::{Destination, Ui};
 
@@ -223,12 +223,9 @@ impl Pump {
                     },
                 })
             }))),
-            ControlCommand::SettingsSet {
-                key,
-                value,
-                confirm,
-            } => Some(reply_with(self.set_setting(&key, &value, confirm))),
-            ControlCommand::CommandsRetry => Some(reply_with(retry_commands(&runtime))),
+            ControlCommand::SettingsSet { key, value } => {
+                Some(reply_with(self.set_setting(&key, &value)))
+            }
             ControlCommand::ModelList => {
                 Some(reply_with(load().map(|settings| ControlReply::Models {
                     models: control::model_infos(&settings.transcription),
@@ -438,12 +435,7 @@ impl Pump {
 
     /// Saves one setting as the window would, then lets the runtime, the
     /// listener, and an open window adopt it.
-    fn set_setting(
-        &mut self,
-        key: &str,
-        value: &str,
-        confirm: bool,
-    ) -> Result<ControlReply, ControlError> {
+    fn set_setting(&mut self, key: &str, value: &str) -> Result<ControlReply, ControlError> {
         let before = load()?;
         let rules = settings::ShortcutRules {
             key_named: |name| crate::rune_ui::hotkey_key_named(name).map_err(str::to_owned),
@@ -451,7 +443,7 @@ impl Pump {
                 crate::rune_ui::shortcut_rule(slot, binding).map_err(str::to_owned)
             },
         };
-        let change = settings::apply(&before, key, value, confirm, &rules)?;
+        let change = settings::apply(&before, key, value, &rules)?;
         if !change.changed(&before) {
             return Ok(ControlReply::unchanged(format!("{key} is already {value}")));
         }
@@ -493,7 +485,6 @@ impl Pump {
             Some(Pane::Models) => Destination::Models,
             Some(Pane::Modes) => Destination::Modes,
             Some(Pane::History) => Destination::History,
-            Some(Pane::Commands) => Destination::Commands,
             // While Meetings is off the pane shows its opt-in.
             Some(Pane::Meetings) => Destination::Meetings(None),
         };
@@ -599,22 +590,6 @@ fn capture_snapshot(runtime: &RuntimeHandle) -> Result<CaptureSnapshot, ControlE
         return Ok(CaptureSnapshot::default());
     }
     ask(runtime, |reply| RecognitionControl::CaptureStatus { reply })
-}
-
-fn retry_commands(runtime: &RuntimeHandle) -> Result<ControlReply, ControlError> {
-    if !crate::app_settings::commands_enabled() {
-        return Err(ControlError::new(
-            "feature-off",
-            "voice commands are off; turn them on with `hex commands enable`",
-        ));
-    }
-    if crate::recognition::command_model_status() != CommandModelStatus::Failed {
-        return Ok(ControlReply::unchanged("The command model hasn't failed"));
-    }
-    runtime
-        .recognition(RecognitionControl::RetryCommands)
-        .map_err(|error| ControlError::new("busy", error))?;
-    Ok(ControlReply::done("Loading the command model again"))
 }
 
 fn clear_history(runtime: &RuntimeHandle) -> Result<ControlReply, ControlError> {
@@ -847,14 +822,6 @@ fn status(
             error: published.preparation.error.clone(),
         },
         features: FeatureReport {
-            commands: settings.commands_enabled,
-            command_model: match crate::recognition::command_model_status() {
-                CommandModelStatus::Disabled => "disabled",
-                CommandModelStatus::Loading => "loading",
-                CommandModelStatus::Ready => "ready",
-                CommandModelStatus::Failed => "failed",
-            }
-            .into(),
             meetings: crate::app_settings::meetings_enabled(),
             release_microphone_while_idle: settings.release_microphone_while_idle,
             history_retention: serde_json::to_value(settings.history_retention)

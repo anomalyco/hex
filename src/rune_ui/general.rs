@@ -550,9 +550,9 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             "microphone-mode",
             &ZAP,
             tr("Microphone mode"),
-            settings.release_microphone_while_idle.then(|| {
-                tr("Opens only while holding the shortcut. Disables pre-roll and commands.")
-            }),
+            settings
+                .release_microphone_while_idle
+                .then(|| tr("Opens only while holding the shortcut. Disables pre-roll.")),
             pick_select(
                 ui,
                 p,
@@ -567,13 +567,7 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
                     }
                     ui.confirm_release = false;
                     if ui.settings.release_microphone_while_idle != release {
-                        let mut candidate = ui.drafted();
-                        match candidate.set_release_microphone_while_idle(release) {
-                            Ok(()) => {
-                                ui.commit(candidate);
-                            }
-                            Err(error) => ui.error = Some(format!("{error:#}")),
-                        }
+                        ui.update(|settings| settings.release_microphone_while_idle = release);
                     }
                 },
                 layer,

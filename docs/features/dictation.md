@@ -431,7 +431,7 @@ the model is always asked first). A
 patient preset is `1500`, `0.8`, `3000`. Every check writes one `smart_turn`
 event to `live.ndjson` with the probability, silence, decision (`stop`,
 `continue`, `fallback`, `stale`, `failed`), and inference time, never text.
-The model runs on the ONNX Runtime library Moonshine already ships, loaded
+The model runs on ONNX Runtime, loaded
 with `ort`'s `load-dynamic`; its Whisper log-mel features are computed in Rust.
 
 Checks in [smart_turn.rs](../../src/smart_turn.rs): `log_mel_matches_whisper_feature_extractor`
@@ -450,12 +450,10 @@ synthetic signal), `checks_once_per_pause_after_speech`,
 `listening_starts_after_the_start_phrase`,
 `a_non_finite_probability_fails_the_check`,
 `non_finite_samples_read_as_silence`, and `off_reads_and_loads_nothing`,
-all with a scripted predictor; `a_spoken_control_decides_a_smart_turn_voice_target`
-in [parakeet.rs](../../src/parakeet.rs). The ignored
+all with a scripted predictor. The ignored
 `real_model_matches_python_on_the_reference_signal` downloads the model and
 matched Python onnxruntime 1.23.2 (P 0.8643) on 2026-10-24. Not covered: the
-recognition-loop wiring (queued input, the release tail, spoken controls end
-to end), a physical microphone, or whether the defaults suit real speech.
+recognition-loop wiring (queued input, the release tail), a physical microphone, or whether the defaults suit real speech.
 
 ### Warm And Cold Capture
 
@@ -706,12 +704,6 @@ fake stream). Not re-measured on a real model here; ElliottH's Metal replays
 went from 18/36 to 0/36 lost words for 6–14 s gaps of silence or steady noise.
 Limit: noise that rises mid-dictation counts as speech for up to about 10 s,
 so that pause is not cut.
-### Optional Voice Controls
-
-Optional spoken entry requires Commands enabled, its model ready, and recognition
-awake. [Voice Commands](commands.md#spoken-dictation-controls) owns
-`dictate.hexs`, its start/stop/Send/cancel phrases, config, and checks;
-this page owns the resulting capture and output.
 
 ### Ongoing Jobs And Output
 
@@ -748,8 +740,8 @@ sections in each repetition. This is Metal inference evidence on an M2 Max, not
 physical capture/paste or Linux runtime proof. Chunk boundaries can still affect
 individual words; this is not a claim of perfect recognition or silence handling.
 
-The macOS `Transcriber` owns backend input padding for ordinary and
-voice-protocol transcription. `short_unified_input_is_minimum_padded_before_trailing_context`
+The macOS `Transcriber` owns backend input padding for ordinary
+transcription. `short_unified_input_is_minimum_padded_before_trailing_context`
 in [transcription.rs](../../src/transcription.rs) checks minimum-duration padding
 followed by Unified English's additional trailing silence. This is a pure sample
 policy check, not native inference-quality proof. Padding is now included in
@@ -775,15 +767,10 @@ sized Parakeet Unified English model, `transcribe-cpp` 0.1.3 grew from a 792 MB 
 footprint to 1,195 MB after a 45-second input and retained 1,195 MB after another
 short run. The same 0.1.3 runtime with Hex's session rotation measured 792 MB loaded,
 801 MB after the long input, and 802 MB after the following short run. The probe used
-generated silence and no live microphone, UI, Commands model, or paste. This
+generated silence and no live microphone, UI, or paste. This
 establishes the backend scratch cause and reclamation on that model and machine, not
 Parakeet v3's exact whole-app footprint on the reporter's Mac. Activity Monitor can
-include additional app and optional Commands-model memory.
-
-The ignored `dictation_protocol_audio` native fixture was also run with the selected
-Unified English model. Before and after session rotation it reached the same existing
-second-pass mismatch (`say stop` decoded as `say stay`) on the question fixture, so
-that run is not claimed as a passing transcription regression check.
+include additional app memory.
 
 ```ts
 Accepted job on a GPU device             // dictate.inference-threads

@@ -125,12 +125,9 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("modes-opencode-v1", "Window/Modes/OpenCode V1"),
     ("modes-off", "Window/Modes/Off"),
-    ("mac-commands", "Window/Commands/Commands"),
-    ("mac-commands-unavailable", "Window/Commands/Unavailable"),
-    ("mac-commands-confirm", "Window/Commands/Confirm turning on"),
     (
         "mac-input-source-models",
-        "Window/Commands/Input source models",
+        "Window/General/Input source models",
     ),
     ("meetings", "Window/Meetings/Meetings"),
     ("meetings-recording", "Window/Meetings/Recording"),
