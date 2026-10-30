@@ -26,6 +26,21 @@ working audio session and a Vulkan driver for Settings, even when inference
 falls back to the CPU. On non-NixOS hosts, Nix GUI
 applications may require the host's usual Nix graphics integration.
 
+On NixOS, Hex built from its own pinned nixpkgs can use an older glibc than
+your system's graphics drivers need. Hex then finds no suitable Vulkan
+adapter and its window does not open. Make Hex's nixpkgs follow your
+system's, so both use the same glibc:
+
+```nix
+{
+  inputs.hex = {
+    url = "github:anomalyco/hex";
+    # Use the name of your own nixpkgs input here.
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+}
+```
+
 Models are downloaded into your user data directory, not the Nix store.
 Run `hex model install` once, then launch Hex as your normal desktop user.
 Do not run Hex as root.
