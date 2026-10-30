@@ -68,7 +68,10 @@ input method (`XCURSOR_THEME`, `XCURSOR_SIZE`, `XMODIFIERS`, `GTK_IM_MODULE`,
 `QT_IM_MODULE`), and, when set, `XDG_DATA_DIRS` and the locale (`LANG`,
 `LANGUAGE`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`). Missing display variables
 explicitly clear stale Wayland/X11 values inherited by the user manager; missing
-locale and data-directory variables are left to the user manager. No
+locale and data-directory variables are left to the user manager. A saved
+`XAUTHORITY` whose file is gone (Xwayland writes a new cookie at each login, so
+a reboot strands the old path) is replaced at startup by the user manager's
+current value, or dropped so Xlib uses `~/.Xauthority`. No
 permissions are granted. The unit is `PartOf=graphical-session.target`;
 desktops managing a custom session target must bind its lifetime to their
 login/logout lifecycle. Systemd restarts a crashed Hex (`Restart=on-failure`)
@@ -368,7 +371,10 @@ background worker; unavailable audio output does not prevent dictation.
 Closing the window leaves Hex running on both X11 and Wayland. The
 recording/processing pill never takes focus or intercepts clicks, with or
 without the window open: a Rune overlay that is a layer-shell surface on
-Wayland and an override-redirect window on X11. It needs the window's event
+Wayland and an override-redirect window on X11. On a Wayland compositor without
+layer-shell (GNOME), only the pill opens on XWayland, as that X11 window with an
+empty input shape on the primary monitor; the rest of Hex, including the window
+and portal shortcuts, stays on Wayland. It needs the window's event
 loop, so it is unavailable when the window cannot start (no display or GPU)
 and in `hex dictate`. **Recording indicator** places it at the top or bottom of the
 screen, or turns it off.
@@ -414,8 +420,10 @@ On Wayland, restoring needs the compositor's `wlr-data-control` protocol
   There is no silent XWayland, direct-typing, uinput, or privileged
   input-injection fallback. Transcript text travels on stdin, not command-line
   arguments.
-- The overlay requires layer-shell. Settings reports when the HUD is unavailable
-  rather than presenting a normal focus-taking window as an overlay.
+- The overlay uses layer-shell. Without it (GNOME), only the HUD opens on
+  XWayland as an override-redirect, click-through window that never takes
+  focus. With neither, Settings reports that the HUD is unavailable rather than
+  presenting a normal focus-taking window as an overlay.
 - Shortcuts come from the GlobalShortcuts portal or from your own keybindings
   for the `hex` commands ([Shortcuts](#shortcuts)). Hex reads no input devices
   and needs no `input` group membership or other device permission. If the
