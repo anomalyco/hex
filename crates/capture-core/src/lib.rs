@@ -43,8 +43,8 @@ pub use input::{
     filter_key, host_channel, secure_input_enabled,
 };
 pub use manifest::{
-    AudioGap, Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Permission, SourceEntry,
-    TrackKind,
+    AudioGap, Clock, CursorBundle, FileEntry, FileKind, InputBundle, MANIFEST_VERSION, Manifest,
+    Marker, Permission, SIDECAR_VERSION, SourceEntry, TrackKind,
 };
 pub use native::Recorder;
 pub use plan::{
