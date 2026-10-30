@@ -115,6 +115,7 @@ enum ModelCommand {
 
 pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     let activation = crate::linux_service::Activation::take_from_environment();
+    crate::linux_service::refresh_x_authority();
     color_eyre::install()?;
     let command = Cli::parse().command.unwrap_or(Command::App {
         hidden: false,

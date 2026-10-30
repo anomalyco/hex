@@ -1130,10 +1130,17 @@ Linux beta                               // not macOS feature parity
 │   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
 │       ├── Wayland -> layer-shell overlay layer, no keyboard, empty input region
 │       ├── X11 -> override-redirect window, empty input shape
-│       ├── No layer-shell (Rune refused it, or the compositor lacks
-│       │   zwlr_layer_shell_v1, e.g. GNOME) -> process.log warns once;
-│       │   `hex status` reports `hud_limitation` and the listener warning (#465)
-│       │   // no XWayland fallback for the HUD yet
+│       ├── Wayland without layer-shell (zwlr_layer_shell_v1; GNOME) and XWayland
+│       │   (`DISPLAY`) -> only the HUD opens on XWayland: override-redirect ARGB
+│       │   window, notification type, empty input shape, primary monitor's edge,
+│       │   scale from Xft.dpi; the rest of Hex (window, portal shortcuts) stays
+│       │   on Wayland (#465)
+│       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
+│       │   // centre, animating, focus unchanged, the pointer over it hits the
+│       │   // window below; not yet on a real GNOME Shell session
+│       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
+│       │   -> process.log warns once; `hex status` reports `hud_limitation`
+│       │   and the listener warning
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
@@ -1302,6 +1309,8 @@ Linux process                            // maintain.linux-service
 ├── Crash -> systemd Restart=on-failure -> Hex without a window
 ├── Update -> Restart the unit -> Hex reopens the window
 ├── hex restart without a display (SSH) -> Keep the saved session.env
+├── Saved XAUTHORITY file gone (a reboot: Xwayland's cookie is new each login)
+│   -> Take the user manager's current XAUTHORITY, else drop it (#465)
 ├── Window fails (no display, no GPU) -> Logged; Hex keeps running
 └── Startup -> transcribe.cpp's Vulkan instance first, on the main thread
     └── then the model load and the window's wgpu instance never create one at once

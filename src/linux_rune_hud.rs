@@ -2,7 +2,9 @@
 //! Dot scope drawn on the GPU, as an overlay in the Hex process.
 //! Rune makes it a layer-shell surface on Wayland (overlay layer, no
 //! keyboard, empty input region) and an override-redirect window with an
-//! empty input shape on X11, so it never takes focus or a click.
+//! empty input shape on X11, so it never takes focus or a click. On a
+//! Wayland compositor without layer-shell (GNOME), Rune opens only the HUD
+//! as that X11 window on XWayland; the rest of Hex stays on Wayland.
 //!
 //! It only observes: the listener reports its capture, meter, and pending
 //! output through `LinuxIndicator`, which never waits on the HUD and turns
@@ -124,34 +126,47 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
 }
 
 /// Why the HUD can't show: Rune tried and could not, or the Wayland
-/// compositor offers no layer-shell (GNOME's Mutter), which Rune needs for
-/// the overlay. Logged once, the first time it is known.
+/// compositor offers no layer-shell (GNOME's Mutter) and there is no
+/// XWayland for Rune to show it on instead. Logged once, the first time it
+/// is known.
 pub(crate) fn limitation() -> Option<String> {
-    static NO_LAYER_SHELL: OnceLock<bool> = OnceLock::new();
+    static NO_OVERLAY: OnceLock<bool> = OnceLock::new();
     static LOGGED: std::sync::Once = std::sync::Once::new();
     let rune_refused = HUD
         .get()
         .is_some_and(|hud| hud.availability() == Availability::Unavailable);
     let unavailable = rune_refused
-        || *NO_LAYER_SHELL.get_or_init(|| {
-            crate::linux_session::LinuxSession::detect().is_wayland()
+        || *NO_OVERLAY.get_or_init(|| {
+            let no_layer_shell = crate::linux_session::LinuxSession::detect().is_wayland()
                 && wayland_reachable()
-                && !crate::linux_paste::wayland_offers(LAYER_SHELL)
+                && !crate::linux_paste::wayland_offers(LAYER_SHELL);
+            if no_layer_shell && xwayland() {
+                tracing::info!("HUD shows on XWayland: compositor has no layer-shell");
+            }
+            no_layer_shell && !xwayland()
         });
     if !unavailable {
         return None;
     }
     LOGGED.call_once(|| {
-        tracing::warn!("HUD unavailable: compositor has no layer-shell; dictation still works")
+        tracing::warn!(
+            "HUD unavailable: compositor has no layer-shell and XWayland is not running; dictation still works"
+        )
     });
     Some(LIMITATION.into())
 }
 
 const LAYER_SHELL: &str = "zwlr_layer_shell_v1";
-const LIMITATION: &str = "Recording HUD unavailable: this compositor does not support Wayland layer-shell. Dictation still works.";
+const LIMITATION: &str = "Recording HUD unavailable: this compositor does not support Wayland layer-shell and XWayland is not running. Dictation still works.";
 
 /// Whether a Wayland connection opens at all, so a missing display is never
 /// read as a compositor without layer-shell.
 fn wayland_reachable() -> bool {
     wayland_client::Connection::connect_to_env().is_ok()
+}
+
+/// Whether the session runs XWayland, which Rune shows the HUD on when the
+/// compositor has no layer-shell.
+fn xwayland() -> bool {
+    std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty())
 }
