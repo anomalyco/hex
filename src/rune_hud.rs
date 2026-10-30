@@ -243,7 +243,7 @@ fn view(_: &Hud, _: &mut Cx<Hud>) -> El {
 /// `DotUniforms` in `rune_hud.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct DotUniforms {
+pub(crate) struct DotUniforms {
     resolution: [f32; 2],
     backing_scale: f32,
     width: f32,
@@ -270,7 +270,11 @@ struct DotUniforms {
 }
 
 const _: () = assert!(std::mem::size_of::<DotUniforms>() == 192);
+const DOT_UNIFORM_BYTES: u32 = std::mem::size_of::<DotUniforms>() as u32;
 const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
+/// How `rune_hud.wgsl` declares `u` as a uniform buffer; with immediates it
+/// is declared `var<immediate>` instead.
+const DOT_UNIFORM_BINDING: &str = "@group(0) @binding(0) var<uniform> u: DotUniforms;";
 
 impl DotUniforms {
     fn new(frame: &DotFrame, layout: Layout, target: Target) -> Self {
@@ -398,6 +402,10 @@ struct HudCompositor {
 }
 
 impl Compositor<Hud> for HudCompositor {
+    fn features(&self) -> wgpu::Features {
+        Painter::FEATURES
+    }
+
     fn animating(&self) -> bool {
         self.animating.load(Ordering::Acquire)
     }
@@ -427,10 +435,10 @@ impl Compositor<Hud> for HudCompositor {
             self.gpu = Some(Painter::new(f.device, f.format));
         }
         let gpu = self.gpu.as_ref().expect("created above");
-        gpu.write(&drawn, layout, target, |buffer, data| {
+        let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });
-        gpu.draw(f.encoder, f.target);
+        gpu.draw(f.encoder, f.target, &uniforms);
         f.rt.state.drawn = Some(drawn);
     }
 }
@@ -438,17 +446,31 @@ impl Compositor<Hud> for HudCompositor {
 /// The HUD's shaders, ready to draw into targets of one format.
 pub(crate) struct Painter {
     pub(crate) format: wgpu::TextureFormat,
-    dot_uniforms: wgpu::Buffer,
+    /// `None` when `DotUniforms` travel as immediates, set in the pass with
+    /// no buffer write.
+    dot_uniforms: Option<wgpu::Buffer>,
     dots: wgpu::Buffer,
     bind: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
 }
 
 impl Painter {
+    /// What a compositor drawing with a `Painter` asks its device for.
+    pub(crate) const FEATURES: wgpu::Features = wgpu::Features::IMMEDIATES;
+
     pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Painter {
+        let immediates = device.features().contains(wgpu::Features::IMMEDIATES)
+            && device.limits().max_immediate_size >= DOT_UNIFORM_BYTES;
+        let source = include_str!("rune_hud.wgsl");
+        assert!(source.contains(DOT_UNIFORM_BINDING));
+        let source = if immediates {
+            source.replace(DOT_UNIFORM_BINDING, "var<immediate> u: DotUniforms;")
+        } else {
+            source.to_owned()
+        };
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hex hud"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("rune_hud.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let buffer = |label, size: u64| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -458,10 +480,8 @@ impl Painter {
                 mapped_at_creation: false,
             })
         };
-        let dot_uniforms = buffer(
-            "hex hud dot uniforms",
-            std::mem::size_of::<DotUniforms>() as u64,
-        );
+        let dot_uniforms =
+            (!immediates).then(|| buffer("hex hud dot uniforms", u64::from(DOT_UNIFORM_BYTES)));
         let dots = buffer("hex hud dots", DOT_BYTES);
         let entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -473,28 +493,31 @@ impl Painter {
             },
             count: None,
         };
+        let mut entries = vec![entry(1)];
+        let mut bindings = vec![wgpu::BindGroupEntry {
+            binding: 1,
+            resource: dots.as_entire_binding(),
+        }];
+        if let Some(buffer) = &dot_uniforms {
+            entries.push(entry(0));
+            bindings.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            });
+        }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hex hud"),
-            entries: &[entry(0), entry(1)],
+            entries: &entries,
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hex hud"),
             layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: dot_uniforms.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: dots.as_entire_binding(),
-                },
-            ],
+            entries: &bindings,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hex hud"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
+            immediate_size: if immediates { DOT_UNIFORM_BYTES } else { 0 },
         });
         // Display values; a linear target decodes them.
         let constants = [("linear_target", f64::from(u8::from(format.is_srgb())))];
@@ -535,26 +558,39 @@ impl Painter {
         }
     }
 
-    /// Writes `frame`'s buffers through `write`.
+    /// Writes `frame`'s buffers through `write` and returns its uniforms,
+    /// for the draw.
     pub(crate) fn write(
         &self,
         frame: &DotFrame,
         layout: Layout,
         target: Target,
         mut write: impl FnMut(&wgpu::Buffer, &[u8]),
-    ) {
-        write(
-            &self.dot_uniforms,
-            bytes(&DotUniforms::new(frame, layout, target)),
-        );
+    ) -> DotUniforms {
+        let uniforms = DotUniforms::new(frame, layout, target);
+        if let Some(buffer) = &self.dot_uniforms {
+            write(buffer, bytes(&uniforms));
+        }
         write(&self.dots, &packed_dots(frame));
+        uniforms
     }
 
     /// Clears `view` and draws Dot scope into it.
-    fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let mut pass = clear_pass(encoder, view);
+    fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        uniforms: &DotUniforms,
+    ) {
+        self.draw_in(&mut clear_pass(encoder, view), uniforms);
+    }
+
+    fn draw_in(&self, pass: &mut wgpu::RenderPass<'_>, uniforms: &DotUniforms) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
+        if self.dot_uniforms.is_none() {
+            pass.set_immediates(0, bytes(uniforms));
+        }
         pass.draw(0..3, 0..1);
     }
 
@@ -565,6 +601,7 @@ impl Painter {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         target: Target,
+        uniforms: &DotUniforms,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("hex hud preview"),
@@ -586,9 +623,7 @@ impl Painter {
         pass.set_viewport(x, y, width, height, 0.0, 1.0);
         let [cx, cy, cw, ch] = target.clip;
         pass.set_scissor_rect(cx, cy, cw, ch);
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind, &[]);
-        pass.draw(0..3, 0..1);
+        self.draw_in(&mut pass, uniforms);
     }
 }
 

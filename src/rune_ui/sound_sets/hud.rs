@@ -238,10 +238,10 @@ impl Preview {
             scale: px[2] / WINDOW.0,
             dark: f.rt.env.system_dark,
         };
-        painter.write(&frame, Layout::default(), target, |buffer, data| {
+        let uniforms = painter.write(&frame, Layout::default(), target, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });
-        painter.draw_over(f.encoder, f.target, target);
+        painter.draw_over(f.encoder, f.target, target, &uniforms);
     }
 }
 

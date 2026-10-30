@@ -188,7 +188,26 @@ fn rune_hud_frames() {
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = block_on(instance.request_adapter(&Default::default())).expect("a GPU adapter");
-    let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
+    // `HEX_HUD_BUFFERS=1` draws through the uniform buffer, as a device
+    // without immediates does.
+    let features = if std::env::var("HEX_HUD_BUFFERS").as_deref() == Ok("1") {
+        wgpu::Features::empty()
+    } else {
+        adapter.features() & Painter::FEATURES
+    };
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: features,
+        required_limits: wgpu::Limits {
+            max_immediate_size: if features.is_empty() {
+                0
+            } else {
+                adapter.limits().max_immediate_size
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    }))
+    .unwrap();
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let gpu = Painter::new(&device, format);
     let scale = 2.0;
@@ -227,10 +246,10 @@ fn rune_hud_frames() {
         packed.resize(DOT_BYTES as usize, 0);
         dump.extend(packed);
         let mut encoder = device.create_command_encoder(&Default::default());
-        gpu.write(frame, layout, target, |buffer, data| {
+        let uniforms = gpu.write(frame, layout, target, |buffer, data| {
             queue.write_buffer(buffer, 0, data)
         });
-        gpu.draw(&mut encoder, &view);
+        gpu.draw(&mut encoder, &view, &uniforms);
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {

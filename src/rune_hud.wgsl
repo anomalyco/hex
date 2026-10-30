@@ -118,6 +118,8 @@ fn island_distance(point: vec2f, island: vec4f) -> f32 {
     return min(body, max(square, hollow));
 }
 
+// `var<immediate> u: DotUniforms;` on a device with immediates
+// (`Painter::new`).
 @group(0) @binding(0) var<uniform> u: DotUniforms;
 // `MAX_DOTS` (1024) dots, two u16 halves to a u32, four u32 to a vec4.
 @group(0) @binding(1) var<uniform> dots: array<vec4u, 256>;

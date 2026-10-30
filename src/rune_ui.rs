@@ -216,7 +216,8 @@ pub(crate) struct WindowCompositor {
 
 impl rune::compose::Compositor<Ui> for WindowCompositor {
     fn features(&self) -> wgpu::Features {
-        self.hero.features()
+        // The Sounds sheet's HUD, and one device shared with the HUD overlay.
+        self.hero.features() | crate::rune_hud::Painter::FEATURES
     }
 
     fn animating(&self) -> bool {
