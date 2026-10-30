@@ -1360,7 +1360,7 @@ mod tests {
             let json = serde_json::to_string(&set).unwrap();
             assert_eq!(serde_json::from_str::<SoundSet>(&json).unwrap(), set);
         }
-        assert_eq!(SoundSet::decode(u8::MAX), SoundSet::Signature);
+        assert_eq!(SoundSet::decode(u8::MAX), SoundSet::Classic);
         assert_eq!(
             serde_json::to_string(&SoundSet::Analog).unwrap(),
             "\"analog\""
