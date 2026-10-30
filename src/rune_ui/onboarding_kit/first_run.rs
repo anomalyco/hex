@@ -1,47 +1,41 @@
-//! The first-run onboarding flow (`t405`), redesigned as one coherent piece:
+//! The first-run onboarding flow (`t405`), featuring:
 //!
-//! 1. **Download (`"Setting up Hex"`):** thin single-hexagon loader with an
-//!    interior calibrating scope wave (no radial glow), an inline interactive
-//!    language capsule button (`"Downloading [ English ▾ ] speech model"`),
-//!    and a clean tabular percentage.
-//! 2. **Without Hex / With Hex demo:** centred stage, 3D-tilted keyboard,
-//!    awkward slow typing with five typos vs spoken words three times faster.
-//! 3. **Permissions:** calm zero-bounce grants and the escaping Accessibility
-//!    helper panel ([`super::permissions`]).
-//! 4. **Almost ready:** shown only if a slow connection is still downloading.
-//! 5. **Try (`"Your turn"` -> `"That's Hex"`):** thin single-hexagon voice
-//!    scope, focused practice field, and a matched instrument bar pairing the
-//!    microphone capsule with a tactile `[ ⌥  Change shortcut ]` button.
-//! 6. **Ready (`"Hex is ready"`):** top pill's hexagon lands at centre stage
-//!    over staggered copy and a quiet macOS menu-bar preview.
+//! - Flat, crisp Rune 2D UI (no embossed cards or shader starbursts).
+//! - Hex's real `Dot scope` phosphor dot-matrix HUD (`rune_hud.wgsl`) on
+//!   `"Setting up Hex"`, `"With Hex"`, and `"Your turn"`.
+//! - Live interactive `"Your turn"` in desktop windows: pauses with a focused
+//!   [`rune_kit::TextArea`] so holding `⌥` and speaking into the running Hex
+//!   listener pastes real dictated words right into the card.
+//! - Calm permission grants and the escaping Accessibility panel (`permissions`).
+//! - Auditionable typing key-sound candidates and `#292` `feedback` tones (`sfx`).
 
 use rune::{Anim, El, TextStyle, Transition, col, el, row, text};
+use rune_kit::{Button, ButtonVariant, TextArea};
 
-use super::super::controls::{DESCRIPTION, KeySize, Paint, keycap};
+use super::super::controls::{DESCRIPTION, KeySize, Paint, PushSize, keycap};
 use super::super::lists::allowed;
 use super::field_text::Field;
 use super::fixture::{ANSWER_TRY, Download};
 use super::flight::{Flight, caret_x, ember_tone, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::hex_meter::hex_loader;
-use super::landing::{LEAD, clean_heading, keys, ready, staggered, title_font};
-use super::mic::mouth;
+use super::gpu_stage::set_dot_hud;
+use super::hex_meter::hex_meter;
+use super::hud_stage::{flow_box, live_hold_slot, voice_or_idle_slot};
+use super::landing::{LEAD, arrives, clean_heading, keys, ready, staggered, title_font};
 use super::mic_line::mic_capsule;
 use super::pill::{FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
-use super::stories::{Onboard, Step};
+use super::stories::{Onboard, Step, is_live_window};
 use super::{permissions, versus};
 
 const TOP_BAR: f32 = 48.0;
 const ACTION_H: f32 = 32.0;
-const BIG_METER: f32 = 124.0;
 
-const TRY_W: f32 = 520.0;
-const TRY_MOUTH: [f32; 2] = [TRY_W * 0.5, 34.0];
-const TRY_MOUTH_D: f32 = 52.0;
-const TRY_FIELD_X: f32 = 20.0;
+const TRY_W: f32 = 468.0;
+const TRY_HUD: [f32; 2] = [TRY_W * 0.5, 36.0];
+const TRY_FIELD_X: f32 = 14.0;
 const TRY_FIELD_Y: f32 = 96.0;
-const TRY_FIELD_W: f32 = TRY_W - 2.0 * TRY_FIELD_X; // 480.0
+const TRY_FIELD_W: f32 = TRY_W - 2.0 * TRY_FIELD_X;
 const TRY_PAD: f32 = 18.0;
 const TRY_TEXT: Field = Field {
     font: TextStyle::new(18.0, 460.0),
@@ -71,7 +65,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => demo_page(p, s),
         Step::Permissions => permissions::page(p, s),
         Step::Try | Step::TryHearing | Step::TryHeard => try_page(p, s),
-        Step::Ready => ready(p, &s.caps, (!s.had_model).then_some(PILL)),
+        Step::Ready => ready_page(p, s),
     };
     vec![
         top,
@@ -84,6 +78,33 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .pb(TOP_BAR)
             .child(page),
     ]
+}
+
+fn ready_page(p: Paint, s: &Onboard) -> El {
+    set_dot_hud(None);
+    let core = ready(
+        p,
+        &s.caps,
+        (!s.had_model).then_some(PILL),
+        s.now,
+        s.reduced.get(),
+    );
+    if !is_live_window() {
+        return core;
+    }
+    col()
+        .key("ready-live-wrap")
+        .gap(20.0)
+        .items_center()
+        .child(core)
+        .child(
+            Button::new("Try dictating again")
+                .variant(ButtonVariant::Neutral)
+                .on_press(Onboard::jump_to_try)
+                .build_push(p.k)
+                .key("try-again")
+                .transition(arrives()),
+        )
 }
 
 fn action(content: El) -> El {
@@ -133,11 +154,10 @@ fn hold(p: Paint, s: &Onboard, rest: &str, down: bool) -> El {
         .child(text(rest).key("rest").font(LEAD).color(p.muted()))
 }
 
-/// `"Setting up Hex"` and `"Almost ready"`: thin single-hexagon loader, inline
-/// language capsule button (`"Downloading [ English ▾ ] speech model"`), and
-/// clean tabular percentage.
 fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     let d = download(s);
+    let reduced = s.reduced.get();
+
     let head = if waiting {
         heading(
             p,
@@ -157,50 +177,46 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     };
 
     let pct = (d.fraction() * 100.0).round() as u32;
-    let status = if d.done() {
+    let status_inner = if d.done() {
         allowed(p, "status", "Ready").transition(Transition::opacity())
     } else {
         text(format!("{pct}%"))
             .key("status")
-            .font(TextStyle::new(13.0, 500.0).lh(18.0).features("'tnum' 1"))
-            .color(p.muted())
+            .font(TextStyle::new(13.0, 520.0).lh(18.0).features("'tnum' 1"))
+            .color(p.text())
     };
+    let progress_capsule = row()
+        .key("download-progress-pill")
+        .h(32.0)
+        .pl(10.0)
+        .pr(13.0)
+        .gap(8.0)
+        .center_y()
+        .radius(16.0)
+        .fill(p.k.c.surface_raised)
+        .border(p.hair, p.k.c.border_weak)
+        .child(
+            el().key(PILL)
+                .size(18.0, 18.0)
+                .matched(PILL)
+                .motion(FLY)
+                .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed)),
+        )
+        .child(status_inner);
 
     col()
         .key(if waiting { "waiting" } else { "download" })
-        .gap(26.0)
+        .gap(22.0)
         .items_center()
-        .child(staggered(
-            el().key("meter-stage").size(BIG_METER, BIG_METER).child(
-                el().key(PILL)
-                    .absolute(0.0, 0.0)
-                    .matched(PILL)
-                    .motion(FLY)
-                    .child(hex_loader(
-                        p,
-                        "meter",
-                        BIG_METER,
-                        d.fraction(),
-                        s.closed,
-                        s.now,
-                        s.reduced.get(),
-                    )),
-            ),
-            0.0,
-            6.0,
-        ))
-        .child(staggered(head, 0.08, 8.0))
-        .child(staggered(
-            row().key("status-row").h(20.0).center().child(status),
-            0.16,
-            6.0,
-        ))
+        .child(flow_box("download-hud", 1.24, s.now, reduced))
+        .child(staggered(head, 0.06, 8.0))
+        .child(staggered(progress_capsule, 0.14, 6.0))
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {
     col()
         .key("demo")
-        .gap(18.0)
+        .gap(16.0)
         .items_center()
         .child(versus::heading(p, s))
         .child(versus::stage(p, s))
@@ -253,7 +269,7 @@ fn try_flights(s: &Onboard) -> Vec<(Flight, super::field_text::Slot<'static>)> {
         .map(|(i, (slot, at))| {
             let to = [origin[0] + slot.centre[0], origin[1] + slot.centre[1]];
             (
-                Flight::new(TRY_MOUTH, to, from + at, HOT, TRY_TEXT.font.size, i),
+                Flight::new(TRY_HUD, to, from + at, HOT, TRY_TEXT.font.size, i),
                 slot,
             )
         })
@@ -261,6 +277,7 @@ fn try_flights(s: &Onboard) -> Vec<(Flight, super::field_text::Slot<'static>)> {
 }
 
 fn try_page(p: Paint, s: &Onboard) -> El {
+    let holding = s.step == Step::TryHearing || s.live_hold_from.is_some();
     let head = match s.step {
         Step::TryHeard => heading(
             p,
@@ -272,15 +289,20 @@ fn try_page(p: Paint, s: &Onboard) -> El {
             p,
             "try",
             "Your turn",
-            hold(p, s, "and say anything.", s.step == Step::TryHearing),
+            hold(p, s, "and say anything.", holding),
         ),
+    };
+    let stage = if s.interactive_try() {
+        interactive_try_stage(p, s)
+    } else {
+        try_stage(p, s)
     };
     col()
         .key("try-page")
         .gap(22.0)
         .items_center()
         .child(head)
-        .child(staggered(try_stage(p, s), 0.08, 10.0))
+        .child(stage)
         .child(staggered(
             col()
                 .key("try-foot")
@@ -297,15 +319,14 @@ fn try_page(p: Paint, s: &Onboard) -> El {
         ))
 }
 
-/// Matched `28 pt` secondary instrument row pairing the live microphone
-/// selector capsule with a tactile `[ ⌥  Change shortcut ]` button.
 fn instrument_bar(p: Paint, s: &Onboard) -> El {
+    let down = s.step == Step::TryHearing || s.live_hold_from.is_some();
     row()
         .key("instrument-bar")
         .gap(8.0)
         .center_y()
         .child(mic_capsule(p, s.listening_peak()))
-        .child(shortcut_capsule(p, &s.caps, s.step == Step::TryHearing))
+        .child(shortcut_capsule(p, &s.caps, down))
 }
 
 fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
@@ -347,8 +368,45 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool) -> El {
     pill
 }
 
+/// Live interactive `"Your turn"` stage: real `Dot scope` HUD above a focused
+/// [`TextArea`] that receives real dictated pastes from the running Hex app (or
+/// direct typing).
+fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
+    let reduced = s.reduced.get();
+    let hud_el = if let Some(from) = s.live_hold_from {
+        Some(live_hold_slot(
+            "try-dot-hud",
+            TRY_HUD,
+            1.14,
+            s.now - from,
+            reduced,
+        ))
+    } else {
+        voice_or_idle_slot("try-dot-hud", TRY_HUD, 1.14, true, &ANSWER_TRY, None, s).0
+    };
+
+    let shortcut = s.caps.join("");
+    let editor = TextArea::new(&s.practice)
+        .placeholder(format!("Hold {shortcut} and say a sentence…"))
+        .width(Some(TRY_FIELD_W))
+        .auto_grow(3, 5)
+        .on_edit(|s: &mut Onboard| &mut s.practice)
+        .on_change(Onboard::on_practice_change)
+        .build(p.k)
+        .key("try-live-editor");
+
+    col()
+        .key("try-stage")
+        .w(TRY_W)
+        .items_center()
+        .gap(16.0)
+        .child(el().key("try-hud-box").size(TRY_W, 74.0).children(hud_el))
+        .child(editor)
+}
+
 fn try_stage(p: Paint, s: &Onboard) -> El {
     let reduced = s.reduced.get();
+    let hearing = s.step == Step::TryHearing;
     let flights = try_flights(s);
     let (knock, flash) = if reduced {
         ([0.0, 0.0], 0.0)
@@ -364,8 +422,19 @@ fn try_stage(p: Paint, s: &Onboard) -> El {
         (knock.map(|v| v.clamp(-KNOCK, KNOCK)), flash)
     };
     let h = TRY_FIELD_Y + try_field_h() + 14.0;
+
+    let hud_el = voice_or_idle_slot(
+        "try-dot-hud",
+        TRY_HUD,
+        1.14,
+        s.step == Step::Try,
+        &ANSWER_TRY,
+        s.take_from.filter(|_| s.step >= Step::TryHearing),
+        s,
+    )
+    .0;
+
     let k = p.k;
-    let hearing = s.step == Step::TryHearing;
     let border = if hearing {
         k.c.border_focus
     } else {
@@ -397,7 +466,7 @@ fn try_stage(p: Paint, s: &Onboard) -> El {
     let only: Vec<Flight> = flights.iter().map(|(f, _)| *f).collect();
     el().key("try-stage")
         .size(TRY_W, h)
-        .child(mouth(p, "mouth", TRY_MOUTH, TRY_MOUTH_D, s, hearing))
+        .children(hud_el)
         .child(field)
         .child(try_words(p, s, &flights, knock, h))
         .child(impacts(p, "impacts", [TRY_W, h], &only, s.now, reduced).absolute(0.0, 0.0))
@@ -472,6 +541,6 @@ mod tests {
         assert!(try_lines() <= 2, "{}", try_lines());
         const { assert!(HOT > 0.42) };
         let [x, y] = try_text_origin();
-        assert!(x > TRY_FIELD_X && y > TRY_MOUTH[1] + TRY_MOUTH_D / 2.0);
+        assert!(x > TRY_FIELD_X && y > TRY_HUD[1] + 24.0);
     }
 }

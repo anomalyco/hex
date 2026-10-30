@@ -70,7 +70,7 @@ pub(super) fn continue_button(p: Paint) -> El {
                 .child(text("Continue").key("label").font(font).color(ink))
                 .child(icon(&glyphs::ARROW_RIGHT, 15.0).key("arrow").color(ink))
         })
-        .on_press(|_: &mut Onboard| {})
+        .on_press(Onboard::press_continue)
         .build_push(p.k)
         .key("continue")
         .transition(arrives())
@@ -116,7 +116,9 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle().pb(TOP_BAR).child(ready(p, &s.caps, None)),
+            middle()
+                .pb(TOP_BAR)
+                .child(ready(p, &s.caps, None, s.now, s.reduced.get())),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -206,7 +208,9 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Ready {
         return vec![
             top_bar(),
-            middle().pb(TOP_BAR).child(ready(p, &s.caps, Some(PILL))),
+            middle()
+                .pb(TOP_BAR)
+                .child(ready(p, &s.caps, Some(PILL), s.now, s.reduced.get())),
         ];
     }
     let d = download(s);
@@ -316,7 +320,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(p, &s.caps, None),
+        Step::Ready => ready(p, &s.caps, None, s.now, s.reduced.get()),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

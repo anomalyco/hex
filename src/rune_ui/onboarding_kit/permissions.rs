@@ -16,6 +16,7 @@ use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
 use super::flows::continue_button;
+use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, arrives, clean_heading, staggered, title_font};
 use super::stories::Onboard;
@@ -30,13 +31,13 @@ const ACTION_H: f32 = 32.0;
 // Timeline beats (seconds since `permissions_from`).
 const MIC_ASK: f64 = 0.85;
 const MIC_PRESS: f64 = 1.75;
-const MIC_GRANT: f64 = 2.10;
+pub(crate) const MIC_GRANT: f64 = 2.10;
 const AX_TRAY_OPEN: f64 = 2.25;
-const AX_ESCAPE: f64 = 2.85;
+pub(crate) const AX_ESCAPE: f64 = 2.85;
 const AX_DOCKED: f64 = 3.55;
 const DRAG: (f64, f64) = (3.85, 4.75);
 const SWITCH_ON: f64 = 4.90;
-const AX_GRANT: f64 = 5.15;
+pub(crate) const AX_GRANT: f64 = 5.15;
 const SETTINGS_CLOSE: f64 = 5.80;
 const CONTINUE_AT: f64 = 6.00;
 
@@ -84,6 +85,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
+    set_dot_hud(None);
     let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
     let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
 

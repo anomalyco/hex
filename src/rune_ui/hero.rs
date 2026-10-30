@@ -24,6 +24,7 @@ use rune::compose::{Compositor, Frame};
 use rune::{Color, El, el};
 
 use super::Ui;
+use super::onboarding_kit::gpu_stage::{OnboardingGpu, is_onboard_mark};
 
 /// The stage's key, found by the compositor each frame.
 const KEY: &str = "hero-stage";
@@ -97,6 +98,7 @@ pub(super) fn stage() -> El {
 #[derive(Default)]
 pub(crate) struct HeroCompositor {
     gpu: Option<Gpu>,
+    onboarding: Option<OnboardingGpu>,
     /// Rune's clock when the stage appeared: the entrance starts there.
     since: Option<f64>,
     shown: bool,
@@ -125,7 +127,18 @@ impl Compositor<Ui> for HeroCompositor {
     }
 
     fn render(&mut self, f: &mut Frame<'_, Ui>) {
-        f.draw_ui();
+        if f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
+            if self
+                .onboarding
+                .as_ref()
+                .is_none_or(|g| !g.matches(f.format))
+            {
+                self.onboarding = Some(OnboardingGpu::new(f.device, f.format));
+            }
+            self.onboarding.as_mut().expect("created above").render(f);
+        } else {
+            f.draw_ui();
+        }
         let _ = f.device.poll(wgpu::PollType::Poll);
         let started = Instant::now();
         let fixture_still = f.rt.state.tour.as_ref().map(|tour| tour.hero_still);

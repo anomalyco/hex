@@ -385,6 +385,57 @@ def classic():
 
 SETS = {"signature": signature, "click": click, "soft": soft, "wood": wood, "analog": analog}
 
+# ---------------------------------------------------------------- onboarding
+
+ONBOARDING_TARGETS = {
+    "hexagon": -30.5,
+    "panel_escape": -30.0,
+    "permission_tick": -29.5,
+    "almost_ready": -30.5,
+}
+
+
+def onboarding():
+    """Quiet harmonic motion cues in Hex's D-major sixth world. Tactile keycap
+    and shortcut foley WAVs (`key_*`, `shortcut_*`) live alongside these in
+    `resources/audio/sounds/onboarding/` and are kept intact."""
+    D5, Fs5, A5, B5, D6 = map(hz, ["D5", "F#5", "A5", "B5", "D6"])
+    s = {}
+
+    # Hexagon mark landing: feather-light crystalline D5 + A5 glass harmonic bloom.
+    s["hexagon"] = mix([
+        (0.0, 0.72 * warm(D5, 0.17, 0.048, h2=0.08, bell=0.07, atk_ms=6.5)),
+        (0.018, 0.58 * warm(A5, 0.16, 0.044, h2=0.05, bell=0.09, atk_ms=7.0)),
+    ], 0.185)
+
+    # Panel escaping & docking beside System Settings: soft velvet air sweep -> quiet dock click.
+    t_air = t_axis(0.145)
+    raw_air = rng.standard_normal(len(t_air))
+    cutoff = 850.0 + 1350.0 * np.sin(np.pi * np.clip(t_air / 0.145, 0, 1))
+    air = svf_lowpass(band(raw_air, 500, 4200), cutoff, 1.35)
+    air /= np.max(np.abs(air)) + 1e-12
+    air *= np.sin(np.pi * np.clip(t_air / 0.145, 0, 1)) ** 1.4
+    dock = mix([
+        (0.0, 0.65 * tick(body=1420, body_tau=0.0038, thock=235, thock_amt=0.55,
+                          thock_tau=0.012, noise_amt=0.28, dull=4400, dur=0.048)),
+        (0.0, 0.45 * warm(B5, 0.085, 0.024, h2=0.06, bell=0.05, atk_ms=1.8)),
+    ], 0.09)
+    s["panel_escape"] = mix([(0.0, 0.42 * air), (0.125, dock)], 0.22)
+
+    # Permission row ticking to Allowed: reassuring two-grace-note warm pip (A5 -> D6).
+    s["permission_tick"] = mix([
+        (0.0, 0.68 * warm(A5, 0.065, 0.020, h2=0.08, bell=0.05, atk_ms=1.8)),
+        (0.030, 0.92 * warm(D6, 0.105, 0.030, h2=0.06, bell=0.08, atk_ms=1.8)),
+    ], 0.14)
+
+    # "Almost ready" waiting cue: calm suspended breath (F#5 -> A5).
+    s["almost_ready"] = mix([
+        (0.0, 0.72 * warm(Fs5, 0.12, 0.036, h2=0.06, atk_ms=5.0)),
+        (0.052, 0.85 * warm(A5, 0.15, 0.044, h2=0.06, bell=0.04, atk_ms=5.0)),
+    ], 0.21)
+
+    return s
+
 # ---------------------------------------------------------------- loudness
 
 _K1 = ([1.53512485958697, -2.69169618940638, 1.19839281085285], [1.0, -1.69065929318241, 0.73248077421585])
@@ -465,6 +516,12 @@ def main():
     folder.mkdir(parents=True, exist_ok=True)
     for key, x in classic().items():
         write(folder / f"{key}.wav", 44100, finish(x, TARGETS[key], 44100))
+    print("onboarding")
+    rng = np.random.default_rng(6)
+    folder = OUT / "onboarding"
+    folder.mkdir(parents=True, exist_ok=True)
+    for key, x in onboarding().items():
+        write(folder / f"{key}.wav", SR, finish(x.astype(np.float64), ONBOARDING_TARGETS[key]))
 
 
 if __name__ == "__main__":

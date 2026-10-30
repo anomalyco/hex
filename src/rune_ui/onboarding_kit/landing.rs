@@ -5,7 +5,7 @@ use rune_kit::{Button, ButtonVariant};
 
 use super::super::controls::{KeySize, Paint, PushSize, key_tray, keycap};
 use super::fixture::Language;
-use super::hex_meter::hex_meter;
+use super::hex_meter::{hex_meter, hex_meter_glowing};
 use super::pill::{FLY, PILL};
 
 /// One display heading style across every onboarding step (`26 pt`, softened
@@ -131,10 +131,16 @@ pub(crate) fn keys(p: Paint, key: &str, caps: &[String], down: bool) -> El {
 }
 
 /// Final `"Hex is ready"` landing: the thin single-hexagon mark arrives from
-/// the top pill, followed by staggered copy and a quiet macOS menu-bar preview
-/// showing where Hex lives.
-pub(crate) fn ready(p: Paint, caps: &[String], matched: Option<&str>) -> El {
-    let mark = hex_meter(p, "meter", 64.0, 1.0, 1.0);
+/// the top pill with a soft outline glow, followed by staggered copy and a
+/// quiet macOS menu-bar preview showing where Hex lives.
+pub(crate) fn ready(
+    p: Paint,
+    caps: &[String],
+    matched: Option<&str>,
+    now: f64,
+    reduced: bool,
+) -> El {
+    let mark = hex_meter_glowing(p, "meter", 64.0, now, reduced);
     let mark = match matched {
         Some(id) => el().key(id).matched(id).motion(FLY).child(mark),
         None => staggered(mark.key("mark"), 0.0, 8.0),

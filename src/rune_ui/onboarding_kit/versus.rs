@@ -1,15 +1,15 @@
-//! Without Hex, then with it — aligned on one central vertical spine:
+//! Without Hex, then with it:
 //!
-//! 1. Staggered entrance (never sitting on stage during `"Setting up Hex"`):
-//!    the heading settles in, Jay's centred notification card glides into
-//!    place, and the 3D-tilted keyboard rises beneath it just before typing.
-//! 2. Someone types Jay's reply slowly (~8.5 s), stumbling over five typos
-//!    and arrowing back to fix `"snyc"`, while a centred stopwatch capsule
-//!    counts up above the card.
-//! 3. For `"With Hex"`, the reply field clears cleanly, the 3D keyboard dims
-//!    back leaving `⌥` backlit on its front row, the thin single-hexagon
-//!    voice scope rises on the centre spine, and spoken words arc upward into
-//!    the card in 3.0 s (`"Three times faster"`).
+//! 1. The 14.5u Apple Magic Keyboard glides into place over `1.35 s` before the
+//!    first keystroke lands, with crisp 2D scissor keycaps and nested Inter
+//!    legends.
+//! 2. Jay (CEO) pings: `"The investors are in the room. Are we ready to ship?"`
+//!    Typing by hand fumbles `"Yse, we're dead"` and accidentally hits Return,
+//!    freezes in horror, then fires off `"oh god *reayd"` — another typo!
+//! 3. Switching to `"With Hex"` gently recedes the keyboard while opening Hex's
+//!    real `Dot scope` phosphor HUD (`rune_hud.wgsl`), lighting `⌥`, and
+//!    delivering `"Every test is green and prod is warm. Ship it right now."`
+//!    in **1.5 seconds**.
 
 use rune::{Anim, Beat, El, Sequence, Transition, col, el, row, text};
 
@@ -19,7 +19,9 @@ use super::field_text::{self, slots};
 use super::fixture::ANSWER_JAY;
 use super::flight::{Flight, caret_x, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::keyboard::{self, keyboard};
+use super::gpu_stage::set_dot_hud;
+use super::hud_stage::voice_or_idle_slot;
+use super::keyboard::{self, keyboard_lit};
 use super::landing::{
     LEAD, UI_SPRING, arrives, clean_heading, keys, language_pick, ready, title_font,
 };
@@ -28,18 +30,14 @@ use super::pill::{pill, slot};
 use super::stories::{Flow, Onboard, Step};
 use super::typing;
 
-const STAGE_W: f32 = 640.0;
-const STAGE_H: f32 = 388.0;
-/// Single central spine shared by stopwatch, card, voice scope, and keyboard.
+const STAGE_W: f32 = 500.0;
+const STAGE_H: f32 = 408.0;
 const CENTRE_X: f32 = STAGE_W * 0.5;
 const CARD_X: f32 = CENTRE_X - CARD_W * 0.5;
-const CARD_TOP: f32 = 32.0;
-/// Voice scope sits in the open corridor (`y = 178..224`) between Jay's card
-/// (`bottom = 174`) and the 3D keyboard (`top = 226`), never overlapping keys.
-const MOUTH: [f32; 2] = [CENTRE_X, 201.0];
-const MOUTH_D: f32 = 42.0;
-const CALM: f32 = 0.14;
-const BURST: f64 = 0.05;
+const CARD_TOP: f32 = 30.0;
+const HUD_CENTRE: [f32; 2] = [CENTRE_X, 205.0];
+const CALM: f32 = 0.20;
+const BURST: f64 = 0.04;
 const ACTION_H: f32 = 32.0;
 const TOP_BAR: f32 = 48.0;
 
@@ -48,7 +46,7 @@ fn reply_lines() -> usize {
 }
 
 fn card_bottom() -> f32 {
-    CARD_TOP + lines_card_height(reply_lines())
+    CARD_TOP + lines_card_height(&JAY, reply_lines())
 }
 
 fn field_origin() -> [f32; 2] {
@@ -92,7 +90,7 @@ fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
         .map(|(i, (slot, at))| {
             let to = [origin[0] + slot.centre[0], origin[1] + slot.centre[1]];
             (
-                Flight::new(MOUTH, to, from + at, CALM, FIELD_FONT.size, i),
+                Flight::new(HUD_CENTRE, to, from + at, CALM, FIELD_FONT.size, i),
                 slot,
             )
         })
@@ -101,11 +99,14 @@ fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Ready {
+        set_dot_hud(None);
         return vec![
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle().pb(TOP_BAR).child(ready(p, &s.caps, None)),
+            middle()
+                .pb(TOP_BAR)
+                .child(ready(p, &s.caps, None, s.now, s.reduced.get())),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -129,14 +130,13 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         top,
         middle()
             .pb(TOP_BAR)
-            .gap(20.0)
+            .gap(16.0)
             .child(heading(p, s))
-            // Never sit the keyboard on stage before the demo actually starts.
             .children(parked.then(|| stage(p, s)))
             .child(
                 col()
                     .key("try")
-                    .gap(12.0)
+                    .gap(10.0)
                     .items_center()
                     .child(row().key("action").h(ACTION_H).center().child(act))
                     .child(mic_line(
@@ -168,6 +168,15 @@ fn typed_secs() -> f64 {
     typing::duration()
 }
 
+fn faster_headline() -> &'static str {
+    match (typed_secs() / ANSWER_JAY.release).round() as u32 {
+        0..=2 => "Twice as fast",
+        3 => "Three times faster",
+        4 => "Four times faster",
+        _ => "Five times faster",
+    }
+}
+
 pub(super) fn heading(p: Paint, s: &Onboard) -> El {
     let line = |key: &str, copy: String| -> El {
         text(copy)
@@ -188,14 +197,17 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         Step::Parked if !typed_done(s) => (
             "without",
             "Without Hex",
-            line("lead-usual", "Answering Jay the usual way.".into()),
+            line(
+                "lead-usual",
+                "Answering under pressure, the usual way.".into(),
+            ),
         ),
         Step::Parked if s.demo_hears() => (
             "without",
             "Without Hex",
             line(
                 "lead-sent",
-                format!("Five typos and {} later.", seconds(typed_secs())),
+                format!("Two panic typos and {} later.", seconds(typed_secs())),
             ),
         ),
         Step::Parked => (
@@ -220,11 +232,11 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         ),
         _ if s.flow == Flow::FirstRun => (
             "heard",
-            "Three times faster",
+            faster_headline(),
             line(
                 "lead-done",
                 format!(
-                    "Typed in {}. Spoken in {}.",
+                    "Typed in {} (with two typos). Spoken cleanly in {}.",
                     seconds(typed_secs()),
                     seconds(ANSWER_JAY.release)
                 ),
@@ -253,82 +265,108 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
     )
 }
 
+fn smoothstep(u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     const CARD_IN: &[Beat] = &[
         Beat::new(0.0).opacity(0.0).scale(0.975),
-        Beat::new(0.34)
-            .opacity(1.0)
-            .scale(1.0)
-            .easing(rune::Easing::EASE_OUT),
-    ];
-    const KB_IN: &[Beat] = &[
-        Beat::new(0.0).opacity(0.0).scale(0.985),
         Beat::new(0.42)
             .opacity(1.0)
             .scale(1.0)
             .easing(rune::Easing::EASE_OUT),
     ];
+    const KB_ARRIVE_SECS: f64 = 1.38;
 
     let (kw, kh) = keyboard::size();
     let nudge = landing_nudge(s);
     let voice_phase = s.step >= Step::YourTurn;
+    let reduced = s.reduced.get();
 
-    // Smooth vertical rise for the 3D keyboard arriving 0.24 s into the demo.
-    let kb_rise = if s.reduced.get() || voice_phase {
-        0.0
+    // Slow, calm `1.38 s` quartic ease-out arrival before typing begins.
+    let enter_u = if reduced {
+        1.0
     } else {
-        match typing_elapsed(s) {
-            Some(te) => {
-                // `typing_from` starts ~0.6 s after `Step::Parked` begins.
-                let since_parked = (te + 0.6).max(0.0);
-                let u = ((since_parked - 0.22) / 0.42).clamp(0.0, 1.0) as f32;
-                let eased = 1.0 - (1.0 - u).powi(3);
-                20.0 * (1.0 - eased)
+        match s.parked_from {
+            Some(from) => {
+                let raw = ((s.now - from - 0.08) / KB_ARRIVE_SECS).clamp(0.0, 1.0) as f32;
+                1.0 - (1.0 - raw).powi(4)
             }
-            None => 0.0,
+            None => 1.0,
         }
+    };
+
+    let done_u = if reduced {
+        if typed_done(s) { 1.0 } else { 0.0 }
+    } else {
+        typing_elapsed(s).map_or(0.0, |te| {
+            smoothstep(((te - typing::duration()) / 0.72) as f32)
+        })
+    };
+    let voice_u = if reduced {
+        if voice_phase { 1.0 } else { 0.0 }
+    } else {
+        s.voice_from
+            .filter(|_| voice_phase)
+            .map_or(0.0, |from| smoothstep(((s.now - from) / 0.85) as f32))
+    };
+
+    let after_type_dim = 1.0 - 0.24 * done_u;
+    let dim = after_type_dim + (0.46 - after_type_dim) * voice_u;
+
+    let kb_el = keyboard_lit(
+        p,
+        "keyboard",
+        enter_u,
+        dim,
+        |id| key_depth(s, id),
+        |id| key_glow(s, id, voice_u),
+    );
+
+    // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`.
+    let hud_el = if voice_phase {
+        voice_or_idle_slot(
+            "onboard-dot-hud",
+            HUD_CENTRE,
+            1.05,
+            s.step == Step::YourTurn,
+            &ANSWER_JAY,
+            s.take_from,
+            s,
+        )
+        .0
+    } else {
+        set_dot_hud(None);
+        None
     };
 
     let card = el()
         .key("card-wrap")
         .absolute(CARD_X, CARD_TOP)
         .w(CARD_W)
-        .sequence(Sequence::new(CARD_IN).delay(0.08))
-        .transition(Transition::offset(0.0, 12.0))
+        .sequence(Sequence::new(CARD_IN).delay(0.06))
+        .transition(Transition::offset(0.0, 10.0))
         .child(
             notice(p, &JAY, jay_reply(s), false)
                 .offset(nudge[0], nudge[1])
                 .offset_motion(Anim::INSTANT),
         );
 
-    let kb_dim = if voice_phase {
-        0.28
-    } else if typed_done(s) {
-        0.55
-    } else {
-        1.0
-    };
-    let kb_shift = if voice_phase { 6.0 } else { 0.0 };
+    let kb_shift = (1.0 - enter_u) * 14.0 + voice_u * 8.0;
     let keys_el = el()
         .key("keys")
-        .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh + kb_shift + kb_rise)
+        .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh + kb_shift)
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
-        .sequence(Sequence::new(KB_IN).delay(0.22))
-        .child(keyboard(
-            p,
-            "keyboard",
-            kb_dim,
-            |id| key_depth(s, id),
-            |id| key_glow(s, id),
-        ));
+        .child(kb_el);
 
-    let show_scope = matches!(s.step, Step::YourTurn | Step::Hearing);
     el().key("stage")
         .size(STAGE_W, STAGE_H)
         .child(stopwatch_pill(p, s))
         .child(keys_el)
-        .children(show_scope.then(|| mouth(p, s).transition(arrives())))
+        .children(hud_el)
         .child(card)
         .child(words(p, s, nudge))
 }
@@ -347,13 +385,19 @@ fn key_depth(s: &Onboard, id: &str) -> f32 {
     }
 }
 
-fn key_glow(s: &Onboard, id: &str) -> f32 {
+fn key_glow(s: &Onboard, id: &str, voice_u: f32) -> f32 {
     if !shortcut_keys(s).any(|k| k == id) {
         return 0.0;
     }
     match s.step {
-        Step::YourTurn => 0.65,
+        Step::YourTurn => 0.74 * voice_u,
         Step::Hearing => 1.0,
+        Step::Heard => {
+            let fade = s.take_from.map_or(0.0, |from| {
+                1.0 - smoothstep(((s.now - from - ANSWER_JAY.release) / 0.45) as f32)
+            });
+            0.70 * fade
+        }
         _ => 0.0,
     }
 }
@@ -361,6 +405,7 @@ fn key_glow(s: &Onboard, id: &str) -> f32 {
 fn jay_reply(s: &Onboard) -> Reply<'static> {
     let lines = reply_lines();
     let empty = Reply::Lines {
+        sent_bubbles: &[],
         text: "",
         caret: None,
         lines,
@@ -374,24 +419,28 @@ fn jay_reply(s: &Onboard) -> Reply<'static> {
             let active = typing_elapsed(s).filter(|&e| e >= 0.0);
             let stroke = active.and_then(typing::at);
             let typed = stroke.map_or("", |st| st.text.as_str());
+            let bubbles = stroke.map_or(&[][..], |st| st.sent.as_slice());
             Reply::Lines {
+                sent_bubbles: bubbles,
                 text: typed,
                 caret: active.map(|_| stroke.map_or(0, |st| st.caret)),
-                lines,
-                placeholder: typed.is_empty(),
+                lines: if bubbles.is_empty() { lines } else { 1 },
+                placeholder: typed.is_empty() && bubbles.is_empty(),
                 focus: active.is_some(),
                 sent: false,
             }
         }
         Step::Parked => Reply::Lines {
-            text: ANSWER_JAY.text(),
+            sent_bubbles: typing::final_sent(),
+            text: "",
             caret: None,
-            lines,
+            lines: 1,
             placeholder: false,
             focus: false,
-            sent: true,
+            sent: false,
         },
         Step::YourTurn | Step::Hearing => Reply::Lines {
+            sent_bubbles: &[],
             text: "",
             caret: None,
             lines,
@@ -400,6 +449,7 @@ fn jay_reply(s: &Onboard) -> Reply<'static> {
             sent: false,
         },
         _ => Reply::Lines {
+            sent_bubbles: &[],
             text: "",
             caret: None,
             lines,
@@ -410,8 +460,6 @@ fn jay_reply(s: &Onboard) -> Reply<'static> {
     }
 }
 
-/// Centred tabular stopwatch capsule above Jay's card: wakes once typing
-/// starts, then places the spoken time right beside it for direct comparison.
 fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
     let k = p.k;
     let typed_raw = typing_elapsed(s).filter(|&e| e >= 0.0);
@@ -492,10 +540,6 @@ fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
         .child(k.elevate(pill, &k.elevation.raised))
 }
 
-fn mouth(p: Paint, s: &Onboard) -> El {
-    super::mic::mouth(p, "mouth", MOUTH, MOUTH_D, s, s.step == Step::Hearing)
-}
-
 fn landing_nudge(s: &Onboard) -> [f32; 2] {
     if s.reduced.get() {
         return [0.0, 0.0];
@@ -566,23 +610,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn streamed_words_leave_as_they_are_heard() {
+    fn streamed_words_leave_within_one_and_a_half_seconds() {
         let at = heard_at(true);
-        assert_eq!(at.len(), 10);
-        assert_eq!(at[0], 0.45);
+        assert_eq!(at.len(), 12);
+        assert_eq!(at[0], 0.14);
         assert!(at.windows(2).all(|w| w[0] <= w[1]));
+        assert!(*at.last().unwrap() <= ANSWER_JAY.release);
         let burst = heard_at(false);
         assert_eq!(burst[0], ANSWER_JAY.release);
     }
 
     #[test]
-    fn card_and_voice_scope_share_the_central_spine() {
+    fn card_and_voice_hud_share_the_central_spine() {
         assert!(((CARD_X + CARD_W * 0.5) - STAGE_W * 0.5).abs() < 0.01);
-        assert!((MOUTH[0] - STAGE_W * 0.5).abs() < 0.01);
+        assert!((HUD_CENTRE[0] - STAGE_W * 0.5).abs() < 0.01);
         let [x, y] = field_origin();
         assert!(x > CARD_X && x < STAGE_W);
         assert!(y > CARD_TOP && y < card_bottom());
-        assert!(card_bottom() < MOUTH[1] - MOUTH_D * 0.5);
-        assert!(MOUTH[1] + MOUTH_D * 0.5 < STAGE_H - keyboard::size().1);
+        assert!(card_bottom() < HUD_CENTRE[1] - 10.0);
     }
 }

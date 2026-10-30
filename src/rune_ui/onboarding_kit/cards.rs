@@ -1,6 +1,6 @@
 //! Example macOS notifications to answer by voice, drawn strictly with
-//! OpenCode theme tokens. Only the reply field changes between states, so the
-//! card never jumps.
+//! OpenCode theme tokens. Supports stacked sent bubbles above the input field
+//! during the `"Without Hex"` double-send typo comedy!
 
 use rune::{Color, El, Path, Shape, Spring, TextStyle, Transition, canvas, col, el, row, text};
 
@@ -10,8 +10,7 @@ use super::field_text;
 use super::mic::mic_level;
 use super::words::live_words;
 
-/// Width of a centred macOS notification card on the onboarding stage.
-pub(crate) const CARD_W: f32 = 388.0;
+pub(crate) const CARD_W: f32 = 404.0;
 const CARD_PAD: f32 = 14.0;
 const RADIUS: f32 = 16.0;
 const ICON: f32 = 32.0;
@@ -20,9 +19,7 @@ const FIELD_PX: f32 = 12.0;
 const FIELD_PY: f32 = 7.0;
 pub(crate) const FIELD_FONT: TextStyle = TextStyle::new(13.0, 440.0);
 pub(crate) const FIELD_LINE: f32 = 18.0;
-/// Room beside the reply's last line for `✓ Sent`.
 const SENT_W: f32 = 58.0;
-/// Maximum line width inside a [`Reply::Lines`] field.
 pub(crate) const REPLY_W: f32 = CARD_W - 2.0 * CARD_PAD - 2.0 * FIELD_PX - SENT_W;
 const DRIFT: f32 = 2.5;
 const DRIFT_SECS: f64 = 5.0;
@@ -63,9 +60,9 @@ pub(crate) const FRANK: Notice = Notice {
 pub(crate) const JAY: Notice = Notice {
     key: "jay",
     app: App::Messages,
-    from: "Jay",
+    from: "Jay · CEO",
     place: None,
-    body: "can we move our sync?",
+    body: "The investors are in the room. Are we ready to ship?",
     field: "iMessage",
 };
 pub(crate) const DAX: Notice = Notice {
@@ -99,6 +96,7 @@ pub(crate) enum Reply<'a> {
     Typing(&'a str),
     Sent(&'a str),
     Lines {
+        sent_bubbles: &'a [String],
         text: &'a str,
         caret: Option<usize>,
         lines: usize,
@@ -108,10 +106,16 @@ pub(crate) enum Reply<'a> {
     },
 }
 
-/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with `lines`.
-pub(crate) fn lines_card_height(lines: usize) -> f32 {
-    // Top row: 12 (head) + 1 + 20 (title) + 1 + 20 (body) = 54, gap 10, field, 2 * CARD_PAD.
-    2.0 * CARD_PAD + 54.0 + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
+/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with empty
+/// `sent_bubbles` and `lines` wrapped lines.
+pub(crate) fn lines_card_height(n: &Notice, lines: usize) -> f32 {
+    // Measure how many lines `n.body` takes inside the top message column
+    // (`CARD_W - 2*CARD_PAD - ICON - 10.0`).
+    let k = rune_theme_opencode::kit(true);
+    let body_w = CARD_W - 2.0 * CARD_PAD - ICON - 10.0;
+    let (_, bh) = rune::text::measure(n.body, &[], k.ty.ui, Some(body_w));
+    let top_h = (12.0 + 1.0 + 20.0 + 1.0 + bh).max(ICON);
+    2.0 * CARD_PAD + top_h + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
 }
 
 pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> El {
@@ -159,8 +163,14 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .wrap()
                 .max_lines(2),
         );
+
+    let bubbles: &[String] = match reply {
+        Reply::Lines { sent_bubbles, .. } => sent_bubbles,
+        _ => &[],
+    };
+
     let (fill, rim) = material(p);
-    let card = col()
+    let mut card = col()
         .key(n.key)
         .w(CARD_W)
         .padding(CARD_PAD)
@@ -170,6 +180,7 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
         .fill(fill)
         .backdrop_blur(24.0)
         .border(p.hair, rim)
+        .motion(Spring::new(0.24, 0.0))
         .child(
             row()
                 .key("top")
@@ -177,9 +188,61 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .items_start()
                 .child(app_icon(p, n.app))
                 .child(message),
-        )
-        .child(field(p, n, reply));
+        );
+
+    if !bubbles.is_empty() {
+        card = card.child(sent_thread(p, bubbles));
+    }
+
+    // Hide the empty input box once both panic bubbles have been fired off.
+    let hide_field = bubbles.len() >= 2
+        && matches!(
+            reply,
+            Reply::Lines {
+                text: "",
+                focus: false,
+                ..
+            }
+        );
+    if !hide_field {
+        card = card.child(field(p, n, reply));
+    }
+
     k.elevate(card, &k.elevation.floating)
+}
+
+/// Right-aligned sent bubbles for the accidental double-send typos!
+fn sent_thread(p: Paint, bubbles: &[String]) -> El {
+    let k = p.k;
+    let bubble_bg = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 4 } else { 3 });
+    let bubble_rim = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 });
+    let mut list = col().key("sent-thread").w_full().gap(5.0).items_end();
+    for (i, msg) in bubbles.iter().enumerate() {
+        list = list.child(
+            row()
+                .key(format!("sent-bubble-{i}"))
+                .px(10.0)
+                .py(4.0)
+                .gap(6.0)
+                .center_y()
+                .radius(12.0)
+                .fill(bubble_bg)
+                .border(p.hair, bubble_rim)
+                .transition(
+                    Transition::scale(0.94)
+                        .combined(Transition::offset(0.0, 6.0))
+                        .combined(Transition::opacity()),
+                )
+                .child(
+                    text(msg.clone())
+                        .key("msg")
+                        .font(FIELD_FONT.lh(16.0))
+                        .color(p.text()),
+                )
+                .child(text("Sent").key("tag").font(k.ty.small).color(p.muted())),
+        );
+    }
+    list
 }
 
 fn material(p: Paint) -> (Color, Color) {
@@ -191,7 +254,6 @@ fn material(p: Paint) -> (Color, Color) {
     }
 }
 
-/// Top-left origin of [`Reply::Lines`] text given the card's bottom-left point.
 pub(crate) fn field_text_origin(card_bottom_left: [f32; 2], lines: usize) -> [f32; 2] {
     let [x, bottom] = card_bottom_left;
     [
@@ -321,8 +383,6 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {
     };
     let trailing = match reply {
         Reply::Hearing { meter, .. } => Some(mic_level(p, "mic", 16.0, meter.0, meter.1, true)),
-        // Instant clearance when resetting between Without Hex and With Hex,
-        // so `✓ Sent` never lingers over the fresh `iMessage` placeholder.
         Reply::Sent(_) => Some(allowed(p, "sent", "Sent").transition(Transition::opacity())),
         Reply::Lines { sent: true, .. } => Some(allowed(p, "sent", "Sent")),
         _ => None,
