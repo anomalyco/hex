@@ -127,6 +127,7 @@ fn build_version() {
 /// A test or local build carries its commit (`HEX_COMMIT`), which the sidebar shows
 /// beside the version.
 fn test_build_commit() {
+    println!("cargo:rerun-if-env-changed=HEX_BUILD_CHANNEL");
     println!("cargo:rerun-if-env-changed=HEX_TEST_BUILD");
     println!("cargo:rerun-if-env-changed=HEX_LOCAL_BUILD");
     if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1")

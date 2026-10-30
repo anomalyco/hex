@@ -41,7 +41,6 @@ executable_name=hex
 
 bundle="$root/target/app/$bundle_name"
 executable="$bundle/Contents/MacOS/$executable_name"
-frameworks="$bundle/Contents/Frameworks"
 
 sign() {
   if [ "$identity" = - ]; then
@@ -71,7 +70,7 @@ done
 SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
   cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
-mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library" "$frameworks"
+mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library"
 cp "$root/target/release/hex" "$executable"
 cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
@@ -106,12 +105,6 @@ xcrun actool "$root/app/AppIcon.icon" \
   --notices >&2
 cp "$icon_output/AppIcon.icns" "$icon_output/Assets.car" "$bundle/Contents/Resources/"
 
-ort_dylib="$root/target/onnxruntime/libonnxruntime.1.23.2.dylib"
-if [ ! -f "$ort_dylib" ]; then
-  "$root/scripts/setup.sh" >&2
-fi
-cp "$ort_dylib" "$frameworks/"
-sign "$frameworks/libonnxruntime.1.23.2.dylib"
 sign "$bundle/Contents/Library/HexMicrophone.driver"
 # Hex runs it only to decode the capture's movie, which needs no
 # entitlement; anything it touches is attributed to Hex, its responsible

@@ -1203,7 +1203,7 @@ impl Default for MeetingSettings {
 
 impl MeetingSettings {
     pub fn available(&self) -> bool {
-        crate::DEVELOPER_FEATURES_ENABLED || self.enabled
+        crate::experiments::is_dev_build() && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
@@ -1247,7 +1247,8 @@ impl ExperimentalSettings {
 /// `voice-filter` experiment, or an installed driver each turn it on, so a
 /// driver apps already use keeps receiving audio.
 pub fn voice_filter_enabled(setting: bool, experiment: bool, driver_installed: bool) -> bool {
-    setting || env_hex_experimental_mic() || experiment || driver_installed
+    crate::experiments::is_dev_build()
+        && (setting || env_hex_experimental_mic() || experiment || driver_installed)
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -2003,6 +2004,10 @@ impl AppSettings {
         Ok(())
     }
 
+    pub(crate) fn refresh_runtime(&self) {
+        self.apply_runtime();
+    }
+
     fn validate_recording_duck_volume(&self) -> Result<()> {
         if !self.recording_duck_volume.is_finite()
             || !(0.0..=1.0).contains(&self.recording_duck_volume)
@@ -2280,10 +2285,10 @@ impl AppSettings {
         }
     }
 
-    /// Annotate is on: the person hasn't turned it off.
+    /// Annotate is on: dev build and the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
-        self.capture.enabled
+        crate::experiments::is_dev_build() && self.capture.enabled
     }
 
     /// A shortcut saved as a bare left click swallowed every click, so its
@@ -2420,12 +2425,11 @@ pub fn microphone_policy() -> MicrophonePolicy {
 
 /// Whether the global mode or any mode runs a transformation.
 pub fn transformations_used(processing: &DictationProcessingSettings) -> bool {
-    crate::experiments::enabled(crate::experiments::Experiment::Modes)
-        && (!processing.default_mode.transformations.is_empty()
-            || processing
-                .modes
-                .iter()
-                .any(|mode| !mode.transformations.is_empty()))
+    !processing.default_mode.transformations.is_empty()
+        || processing
+            .modes
+            .iter()
+            .any(|mode| !mode.transformations.is_empty())
 }
 
 /// Where the recording HUD appears, as last saved.

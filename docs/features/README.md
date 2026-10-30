@@ -18,7 +18,7 @@ Hex                                      // macOS release
 ├── Dictate                              // hold OR double-tap lock
 ├── Use the result                       // paste, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
-├── Process text                         // context-selected Modes (experiment `modes`, off by default)
+├── Process text                         // Output tab + context-selected Modes
 ├── Opt in                               // Meetings: off by default
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit
@@ -537,6 +537,11 @@ General                                  // settings
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
+│   ├── Level bars -> peak of the audio Hex receives, ~30 fps while General shows // input_level
+│   │   ├── Read from one atomic the audio owner stores per chunk; never opens or blocks the mic
+│   │   ├── No audio for 250 ms (released while idle, failed, not allowed) -> flat, dimmed
+│   │   └── Scenes: mac-settings-mic-level (a recorded WAV, `--video`), mac-settings-mic-released
+│   │       // check: the_microphone_level_follows_the_voice (Linux)
 │   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
 │   ├── System default -> The OS default input, followed live
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
@@ -1120,8 +1125,9 @@ Linux beta                               // not macOS feature parity
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
 ├── Escape -> Cancel active capture, not newest accepted job
-│   ├── Bound only while recording (portal: own session, also with held modifiers)
-│   └── X11 grab conflict / portal refusal -> Warn without stopping dictation
+│   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
+│   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
+│       the user assigns one, idle presses do nothing (#482)
 ├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
 │   └── Selected text from the primary selection -> OpenCode -> Paste the reply
 ├── Recording HUD -> Dot scope, as on macOS, on the
@@ -1268,7 +1274,7 @@ through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-s
 checks that commands fail without a listening Hex.
 On 2026-10-22 the portal path was observed on niri with xdg-desktop-portal-gnome
 using synthetic uinput keys against an isolated service: granted triggers,
-hold and Escape while held, double-tap lock, Paste Last, and commands. A
+hold and Escape while held (since replaced by Cancel dictation), double-tap lock, Paste Last, and commands. A
 physical keyboard press has not been recorded.
 
 `linux.hud`: [linux_rune_hud.rs](../../src/linux_rune_hud.rs) keeps the

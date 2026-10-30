@@ -9,7 +9,6 @@ use url::Url;
 
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::dictation_processor::{PostProcessingSettings, Processed, Profile, Profiles};
-use crate::experiments::Experiment;
 use crate::text_replacements::ReplacementSet;
 
 /// Live mode-processing snapshot. The output worker clones it before any
@@ -25,24 +24,9 @@ pub struct ModeRuntime {
 
 impl ModeRuntime {
     pub fn from_settings(settings: &AppSettings) -> Self {
-        Self::with_modes(settings, crate::experiments::enabled(Experiment::Modes))
-    }
-
-    /// With the `modes` experiment off only the global replacements run:
-    /// no per-app modes, rewriting, or transformations.
-    pub fn with_modes(settings: &AppSettings, modes_on: bool) -> Self {
         let processing = &settings.dictation_processing;
-        let replacements = ReplacementSet::new(&processing.default_mode.replacements);
-        if !modes_on {
-            return Self {
-                replacements,
-                default: PostProcessingSettings::default(),
-                default_transformations: Vec::new(),
-                modes: Vec::new(),
-            };
-        }
         Self {
-            replacements,
+            replacements: ReplacementSet::new(&processing.default_mode.replacements),
             default: processing.default_mode.post_processing.clone(),
             default_transformations: processing.default_mode.transformations.clone(),
             modes: processing.modes.clone(),
@@ -196,7 +180,7 @@ mod tests {
     fn runtime(settings: impl FnOnce(&mut AppSettings)) -> ModeRuntime {
         let mut value = AppSettings::default();
         settings(&mut value);
-        ModeRuntime::with_modes(&value, true)
+        ModeRuntime::from_settings(&value)
     }
 
     #[test]
@@ -278,45 +262,6 @@ mod tests {
         let observation = processed.observation.as_ref().expect("transformation ran");
         assert_eq!(observation.profile, "Custom transformations");
         assert_eq!(observation.fallback, None);
-    }
-
-    #[test]
-    fn without_the_experiment_only_global_replacements_run() {
-        let mut settings = AppSettings::default();
-        let processing = &mut settings.dictation_processing;
-        processing.default_mode.replacements = vec![crate::text_replacements::TextReplacement {
-            matched_phrase: "hex".into(),
-            output: "Hex".into(),
-        }];
-        processing.modes = vec![DictationMode {
-            replacements: vec![crate::text_replacements::TextReplacement {
-                matched_phrase: "open code".into(),
-                output: "OpenCode".into(),
-            }],
-            transformations: vec!["lowercase".into()],
-            ..mode("Code", &["code"], &[])
-        }];
-        let context = crate::context::ContextSnapshot {
-            application: Some("Visual Studio Code".into()),
-            ..crate::context::ContextSnapshot::default()
-        };
-        let transformations = crate::personal_commands::TransformationClient::default();
-
-        let off = ModeRuntime::with_modes(&settings, false).process(
-            "Use open code in hex.",
-            &context,
-            &transformations,
-        );
-        assert_eq!(off.text, "Use open code in Hex.");
-        assert!(off.observation.is_none());
-        assert!(off.transformations.is_empty());
-
-        let on = ModeRuntime::with_modes(&settings, true).process(
-            "Use open code in hex.",
-            &context,
-            &transformations,
-        );
-        assert_eq!(on.text, "use opencode in hex.");
     }
 
     #[test]

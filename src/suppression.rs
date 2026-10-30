@@ -1382,6 +1382,7 @@ impl DictationHotkey {
 
     /// Recording hands-free: locked by a double tap, a Toggle release, or
     /// `hex dictation start`.
+    #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         matches!(self.state, State::Locked)
     }
@@ -1460,18 +1461,6 @@ impl DictationHotkey {
             }
             self.stale_keys_neutral_since = None;
         }
-    }
-
-    pub fn wait_for_release(&mut self) {
-        // A settings transition is not a new press; preserve held-key suppression.
-        let now = CaptureInstant::now();
-        // SAFETY: These are read-only queries of the documented HID system state.
-        let flags = unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) };
-        let key_down = self
-            .binding
-            .key_code
-            .is_some_and(|code| input_is_down(HID_SYSTEM_STATE, code));
-        self.wait_for_release_with_state(now, flags, key_down);
     }
 
     #[cfg(test)]
@@ -1559,6 +1548,7 @@ impl DictationHotkey {
         self.recovery_updated_keys.clear();
     }
 
+    #[cfg(test)]
     fn wait_for_release_with_state(&mut self, now: CaptureInstant, flags: u64, key_down: bool) {
         self.suspend();
         self.ignore_before = Some(now);

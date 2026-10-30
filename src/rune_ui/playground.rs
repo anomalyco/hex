@@ -26,6 +26,11 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-settings", "Window/General/Settings"),
     ("mac-settings-sides", "Window/General/Left Option shortcut"),
     ("mac-settings-advanced", "Window/General/Advanced"),
+    ("mac-settings-mic-level", "Window/General/Microphone level"),
+    (
+        "mac-settings-mic-released",
+        "Window/General/Microphone released while idle",
+    ),
     (
         "mac-settings-ducking",
         "Window/General/Duck while dictating",
@@ -128,7 +133,6 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Modes/Transformation menu",
     ),
     ("modes-opencode-v1", "Window/Modes/OpenCode V1"),
-    ("modes-off", "Window/Modes/Off"),
     (
         "mac-input-source-models",
         "Window/General/Input source models",
@@ -169,7 +173,8 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Voice Filter/Driver missing",
     ),
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
-    ("mac-hud-lab-playground", "Window/HUD Lab/Release build"),
+    ("mac-labs", "Window/General/Labs & experiments"),
+    ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding tour/Welcome"),
     ("onboarding-hero", "Window/Onboarding tour/Welcome · hero"),
@@ -482,6 +487,20 @@ mod tests {
             }
         }
         open_link(&mut rt, "hex://story/hud/processing?variant=menu-bar");
+        for control in [
+            "dot-scope-reset",
+            "dot-scope-copy",
+            "dot-scope-save",
+            "dot-processing",
+            "dot-placement",
+            "dot-auto-level",
+            "dot-spacing",
+        ] {
+            assert!(
+                rt.find(control).is_some(),
+                "HUD story side panel lacked {control}"
+            );
+        }
     }
 
     /// Every capture-capsule story, on every flow after a capture, opens

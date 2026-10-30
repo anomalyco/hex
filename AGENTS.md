@@ -28,13 +28,16 @@ and keep consequential behavior explicit. Deterministic personal transcript
 transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-The distributed release starts in hotkey-dictation-only mode.
-Meetings (beta) is a
-persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
-Meetings pane, menu-bar recording controls, and meeting paste in release builds.
-`DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
-keeps the meeting CLI, Activity, and HUD Lab debug-only. One exception: while
-the `playground` experiment is on, release builds show HUD Lab too.
+The distributed production release (`!experiments::is_dev_build()`) shows
+General, Output, and History, hides Labs and all experimental panes, ignores
+`HEX_EXPERIMENTS` and `~/.config/hex/experiments`, and keeps Meetings, Annotate,
+and Voice Filter dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
+expose the Labs sidebar item with switches for Meetings, Annotate, and every
+experiment (`Voice Filter`, `Live text`, `Live chapters`, `Playground`),
+writing `~/.config/hex/experiments` and applying live where supported. HUD Lab's
+live Dot scope tuning lives inside Playground (`⇧⌘D`, `Prototypes/HUD/*`).
+`DEVELOPER_FEATURES_ENABLED` keeps Meetings available by default in debug builds
+and keeps the meeting CLI debug-only.
 
 ## Feature Map
 
@@ -78,6 +81,9 @@ substitute for source inspection or a second roadmap.
   disposable bounded command audio projection, and the bounded capture sink
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
   a Scrawl capture.
+- `input_level`: the latest microphone peak as one atomic, stored per chunk by
+  each OS's audio owner and read by the window's level bars (General and the
+  practice dictation); a stale peak reads as no audio.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior, each held
   from the first dictation or capture session that wants it to the last.
@@ -211,9 +217,8 @@ substitute for source inspection or a second roadmap.
   or, without the portal, the `hex` commands alone.
 - `linux_portal`: the portal bus (a private zbus connection, `Register("hex")`
   after writing a managed `hex.desktop` for a loose binary, requests and
-  sessions) and the GlobalShortcuts client on it: one session for Hex's
-  shortcuts, a second session binding Escape only while recording,
-  granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
+  sessions) and the GlobalShortcuts client on it: one session binding all of
+  Hex's shortcuts once, Cancel dictation included, granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
   session-closed reporting.
 - `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
@@ -285,12 +290,11 @@ substitute for source inspection or a second roadmap.
   snapshot-and-action types shared by the Linux and Windows hosts, the window,
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
-  `rune-kit` and the OpenCode theme: General and History, then the opt-in
-  Meetings once on (each feature owns its
+  `rune-kit` and the OpenCode theme: General, Output, and History, then in dev
+  builds the opt-in Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
-  the opt-in switches) Modes with mode-owned corrections and processing, the
-  Voice Filter and developer-only HUD Lab (release too while `playground` is
-  on) and Activity, the transcription
+  the opt-in and experiment switches) Annotate and the Voice Filter, plus in
+  Playground (`⇧⌘D`) HUD Lab's live Dot scope sliders (`hud_stories`), the transcription
   picker, the Sounds sheet (its stage replays `rune_hud`'s HUD, drawn by the
   window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
   meeting capsules, the `--snap`
@@ -956,8 +960,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   A loose binary writes its own managed `hex.desktop` so the portal can
-  identify it. Escape is bound only while
-  something records. Modifier-only shortcuts stay unsupported on Linux.
+  identify it. Every portal shortcut, Cancel dictation included, is bound
+  in one session with one BindShortcuts call, and that set never changes
+  while Hex runs: desktops keep one set per app, and KDE replaces it with
+  each call (a second session once wiped Hex's shortcuts,
+  [#482](https://github.com/anomalyco/hex/issues/482)). A portal shortcut
+  is held for as long as it is bound and consumed before the focused app
+  sees it, so the portal never binds Escape: Cancel dictation has no
+  suggested trigger, the user assigns one in the desktop, and it acts only
+  while something records or Annotate draws. Modifier-only shortcuts stay
+  unsupported on Linux.
 - Every Linux shortcut source (X11 grabs, portal presses, `hex` commands) feeds
   the same `linux_input` state machine and emits the same events. Commands are
   idempotent: starting while recording or stopping while idle does nothing.

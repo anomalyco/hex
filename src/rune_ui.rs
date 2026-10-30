@@ -141,9 +141,9 @@ pub(crate) fn run_app(
         .float_on_open();
     crate::linux_rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
-    // The capture capsule, picker, and ink, with the `capture` experiment on.
-    let _capture_overlays =
-        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
+    // The capture capsule, picker, and ink, in dev builds only.
+    let _capture_overlays = crate::experiments::is_dev_build()
+        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let handle = app.handle();
     host.set_window_visible({
         let handle = handle.clone();
@@ -492,7 +492,7 @@ enum Pane {
     #[default]
     General,
     /// What Hex does to every dictation and in some apps, read-only: the
-    /// person's agent edits it (the `modes` experiment).
+    /// person's agent edits it.
     Output,
     /// The old per-app editor, kept for its scenes until it is removed.
     Modes,
@@ -507,9 +507,9 @@ enum Pane {
     /// The Hex Microphone's driver, tuning, and try-it demo (macOS, under
     /// Experiments).
     VoiceFilter,
-    /// The dictation indicator's tuning (macOS debug builds).
+    /// The dictation indicator's tuning scene (Playground only).
     HudLab,
-    /// The event log (debug builds).
+    /// Legacy event-log inspector scene (Playground only).
     Activity,
 }
 
@@ -528,14 +528,17 @@ impl Pane {
     ];
 
     fn shown(self, ui: &Ui) -> bool {
+        if !ui.platform.dev_build {
+            return matches!(self, Pane::General | Pane::Output | Pane::History);
+        }
         let caps = ui.platform.caps;
         match self {
-            Pane::Output => ui.platform.modes,
-            Pane::Modes => false,
+            Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings,
             Pane::VoiceFilter => {
                 caps.fun
-                    && ui.settings.experimental.voice_filter_enabled(
+                    && crate::app_settings::voice_filter_enabled(
+                        ui.settings.experimental.hex_microphone,
                         ui.platform.voice_filter,
                         ui.platform
                             .hex_microphone
@@ -543,22 +546,19 @@ impl Pane {
                             .is_some_and(|status| status.driver_bundle_installed),
                     )
             }
-            // Release builds too while the `playground` experiment is on.
-            Pane::HudLab => caps.hud_lab && (ui.platform.developer || ui.platform.playground),
-            Pane::Activity => ui.platform.developer,
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
             _ => true,
         }
     }
 
-    /// Listed under the sidebar's Experiments heading.
+    /// Listed under the sidebar's Labs group.
     fn experimental(self) -> bool {
         #[cfg(hex_capture)]
         if self == Pane::Annotate {
             return true;
         }
-        matches!(self, Pane::VoiceFilter | Pane::HudLab | Pane::Activity)
+        matches!(self, Pane::VoiceFilter)
     }
 
     fn title(self) -> &'static str {
@@ -663,6 +663,7 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
+    mic_level: general::MicLevel,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -724,11 +725,13 @@ impl Ui {
         ui.error = error;
         ui.history = history::HistoryPane::shared(store);
         ui.models = models::Models::load();
-        if crate::experiments::enabled(crate::experiments::Experiment::Modes) {
-            ui.modes.load_personal_commands();
+        ui.modes.load_personal_commands();
+        let dev_build = crate::experiments::is_dev_build();
+        ui.platform.dev_build = dev_build;
+        for experiment in crate::experiments::Experiment::ALL {
+            ui.platform.experiments[experiment.index()] = crate::experiments::enabled(experiment);
         }
-        ui.platform.developer = crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.modes = crate::experiments::enabled(crate::experiments::Experiment::Modes);
+        ui.platform.developer = dev_build && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
         ui.platform.playground = playground::enabled();
@@ -756,6 +759,7 @@ impl Ui {
             microphones_listed_at: 0.0,
             microphones_listing: None,
             confirm_release: false,
+            mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
             build_preview: None,
@@ -1212,6 +1216,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= onboarding::poll(ui);
+    changed |= general::poll_level(ui, clock, tx);
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
     changed |= sound_sets::poll(ui, clock, visible, tx);
@@ -1344,7 +1349,9 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             NAV_ROW_GAP / 2.0,
         ));
     }
-    nav = nav.child(labs::nav(ui, p));
+    if ui.platform.dev_build {
+        nav = nav.child(labs::nav(ui, p));
+    }
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => Some((
             tr("Restart to update").to_owned(),
@@ -1807,11 +1814,6 @@ const SCENES: &[Scene] = &[
             .enabled = false;
         ui.pane = Pane::Modes;
     }),
-    ("modes-off", |ui| {
-        *ui = portal_fixture();
-        ui.platform.modes = false;
-        ui.pane = Pane::General;
-    }),
     ("modes-global", |ui| {
         *ui = portal_fixture();
         modes::fixture(ui);
@@ -1926,6 +1928,20 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    // The microphone row following a recorded voice (`--video`), and with
+    // the microphone released while idle, when no audio arrives.
+    ("mac-settings-mic-level", |ui| {
+        *ui = mac_fixture();
+        ui.mic_level = general::MicLevel::playing(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/vocabulary/audio/term-opencode-2.wav"
+        )));
+    }),
+    ("mac-settings-mic-released", |ui| {
+        *ui = mac_fixture();
+        ui.settings.release_microphone_while_idle = true;
+        ui.mic_level = general::MicLevel::closed();
+    }),
     ("mac-settings-ducking", |ui| {
         *ui = mac_fixture();
         ui.settings.recording_audio_behavior = crate::app_settings::RecordingAudioBehavior::Duck;
@@ -2218,11 +2234,17 @@ const SCENES: &[Scene] = &[
         ui.platform.developer = true;
         ui.pane = Pane::HudLab;
     }),
-    // A release build with the `playground` experiment on.
-    ("mac-hud-lab-playground", |ui| {
+    ("mac-labs", |ui| {
         *ui = mac_fixture();
-        ui.platform.playground = true;
-        ui.pane = Pane::HudLab;
+        #[cfg(hex_capture)]
+        {
+            ui.platform.scrawl = Some(platform::ScrawlView::preview());
+        }
+        ui.labs_open = true;
+    }),
+    ("mac-production", |ui| {
+        *ui = mac_fixture();
+        ui.platform.dev_build = false;
     }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();
