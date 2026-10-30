@@ -48,11 +48,16 @@ check_layout() { # <file> <magic numbers in hex>...
 check_layout "$background" 4d4d002a 49492a00
 check_layout "$finder" 0000000142756431
 
-# Every Mach-O in the bundle must be one this script signs.
-expected=$(printf '%s\n' Contents/MacOS/hex Contents/MacOS/scrawl-helper \
-  Contents/Library/HexMicrophone.driver/Contents/MacOS/HexMicrophoneDriver \
-  Contents/Frameworks/libmoonshine.dylib Contents/Frameworks/libonnxruntime.1.23.2.dylib | LC_ALL=C sort)
+# Every Mach-O in the bundle must be one this script signs: these always,
+# and libonnxruntime only while a build still bundles it.
+required=$(printf '%s\n' Contents/MacOS/hex Contents/MacOS/scrawl-helper \
+  Contents/Library/HexMicrophone.driver/Contents/MacOS/HexMicrophoneDriver | LC_ALL=C sort)
+optional=Contents/Frameworks/libonnxruntime.1.23.2.dylib
 found=$(cd "$app" && find . -type f -exec sh -c 'file -b "$1" | grep -q Mach-O && printf "%s\n" "${1#./}"' _ {} \; | LC_ALL=C sort)
+expected=$required
+if printf '%s\n' "$found" | grep -qxF "$optional"; then
+  expected=$(printf '%s\n%s\n' "$required" "$optional" | LC_ALL=C sort)
+fi
 [ "$found" = "$expected" ] || die "Unexpected code in Hex.app: $(diff <(echo "$expected") <(echo "$found") | grep '^[<>]' | tr '\n' ' ')"
 
 sign() {
@@ -62,8 +67,7 @@ notarize() {
   xcrun notarytool submit "$1" --key "$HEX_NOTARY_KEY" --key-id "$HEX_NOTARY_KEY_ID" --issuer "$HEX_NOTARY_ISSUER" --wait --timeout 45m
 }
 
-sign "$app/Contents/Frameworks/libonnxruntime.1.23.2.dylib"
-sign "$app/Contents/Frameworks/libmoonshine.dylib"
+if [ -f "$app/$optional" ]; then sign "$app/$optional"; fi
 sign "$app/Contents/Library/HexMicrophone.driver"
 # The capture experiment's movie decoder; Hex runs it, so it needs no entitlement.
 sign --identifier anomaly.hex.scrawl-helper "$app/Contents/MacOS/scrawl-helper"
