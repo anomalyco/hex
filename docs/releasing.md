@@ -193,7 +193,8 @@ refuses force pushes and deletion.
    when it deploys.
 5. First release on the service only: set the informational item's version in
    `packaging/macos/legacy-appcast.xml` (a 2.4.0 / build 20400 placeholder) to
-   the release, push it, and publish it for 2.3.1 Macs (below).
+   the release, push it, deploy the old hosts' redirect, and publish the
+   item for 2.3.1 Macs (both below, "Transition from Kit's hosting").
 
 The first Anomaly-signed macOS release also changes the bundle ID to
 `anomaly.hex` (docs/plans/macos-signing.md). Its notes must tell Mac users
@@ -328,19 +329,31 @@ the release service compile `https://anoma.ly/release`.
 - `hex-production-files` was seeded with byte copies of every object the old
   bucket served (the 2.3.1 feeds and artifacts, installers, the appcast, DMGs, Sparkle
   ZIPs, and Setup.exe installers).
-- Kit adds a redirect on his zone: `downloads.hex.kitlangton.dev/*` and
-  `downloads.hex.kitlangton.com/*` → `https://anoma.ly/hex/files/$1`
-  (302, path and query preserved). Sparkle and the Linux/Windows updaters
-  (curl `--location`, HTTPS-only redirects, since the first updater) follow it,
-  so those installs read the frozen 2.3.1 feeds and, once published, the
-  informational appcast item. The redirect must stay up while old installs
-  remain.
+- Both hosts are custom domains of `hex-releases` in Kit's personal
+  Cloudflare account and serve the bucket directly until the redirect is
+  deployed. The redirect is the Worker in `packaging/legacy-downloads/`
+  (`hex-legacy-downloads`, routes `downloads.hex.kitlangton.dev/*` and
+  `downloads.hex.kitlangton.com/*` → `https://anoma.ly/hex/files/<path>`,
+  302, path and query preserved). Deploy it with Kit's personal Wrangler
+  login, before the Legacy appcast workflow runs, which checks both hosts:
+
+  ```sh
+  bunx wrangler@latest deploy --config packaging/legacy-downloads/wrangler.jsonc
+  ```
+
+  It changes no bytes old installs get (`hex-production-files` holds copies
+  of everything the bucket served), so it may go up before the notice.
+  Sparkle and the Linux/Windows updaters (curl `--location`, HTTPS-only
+  redirects, since the first updater) follow it, so those installs read the
+  frozen 2.3.1 feeds and, once published, the informational appcast item. The
+  redirect must stay up while old installs remain; `wrangler delete` with the
+  same config takes it down.
 - Kit's bucket stays as it is, frozen at 2.3.1, with its
   `pub-089d681d41754031a4aefa7017d8c2fb.r2.dev` endpoint: builds 2.0.9–2.1.16
   read that URL directly (no redirect is possible there), update to 2.3.1,
   and reach the new origin from there.
-- Without the redirect, Kit would publish the informational appcast item to
-  his own bucket too.
+- Without the redirect, 2.3.1 Macs read the bucket's own `appcast.xml` and
+  never see the informational item.
 
 ## Secrets (`release` environment, limited to `dev` and `production`)
 
