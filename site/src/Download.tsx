@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import type { Platform } from "./platform"
 import { RELEASE } from "./release"
 
@@ -169,30 +169,74 @@ function StackRow({ row }: { row: Row }) {
   )
 }
 
+// Places the selected-tab pill (`.install__os::before`) under the chosen tab.
+// Until the first measurement the selected tab paints its own background, so
+// the prerendered page and a page without scripts still show the selection.
+// The pill slides only after a click (`data-animate`), so the OS picked from
+// the user agent on load doesn't animate in from macOS.
+function useTabIndicator(list: RefObject<HTMLDivElement | null>, selected: Os) {
+  useLayoutEffect(() => {
+    const element = list.current
+    if (!element) return
+    const place = () => {
+      const tab = element.querySelector<HTMLElement>('[aria-selected="true"]')
+      if (!tab) return
+      element.style.setProperty("--tab-x", `${tab.offsetLeft}px`)
+      element.style.setProperty("--tab-width", `${tab.offsetWidth}px`)
+      element.dataset.measured = ""
+    }
+    place()
+    // Tab widths change when Inter finishes loading or the viewport resizes.
+    const observer = new ResizeObserver(place)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [list, selected])
+}
+
 export default function Download({ platform }: { platform: Platform }) {
   const [chosenOs, setOs] = useState<Os>()
   const os = chosenOs ?? osOf(platform)
   const arch = archOf(platform)
+  const tabs = useRef<HTMLDivElement>(null)
+  useTabIndicator(tabs, os)
 
   return (
     <div className="hero__action install" data-avoid>
-      <div className="install__os" role="tablist" aria-label="Operating system">
+      <div className="install__os" role="tablist" aria-label="Operating system" ref={tabs}>
         {OSES.map((entry) => (
           <button
             key={entry.id}
+            id={`install-tab-${entry.id}`}
             type="button"
             role="tab"
             aria-selected={entry.id === os}
-            onClick={() => setOs(entry.id)}
+            aria-controls={`install-panel-${entry.id}`}
+            onClick={() => {
+              if (tabs.current) tabs.current.dataset.animate = ""
+              setOs(entry.id)
+            }}
           >
             {entry.mark}
             <span>{entry.label}</span>
           </button>
         ))}
       </div>
-      <div className="stack" role="tabpanel">
-        {rows(os, arch).map((row) => (
-          <StackRow key={`${row.label}-${row.note ?? ""}`} row={row} />
+      {/* Every OS's stack shares one grid cell, so the tallest reserves the
+          height and switching tabs never moves the page. */}
+      <div className="install__panels">
+        {OSES.map((entry) => (
+          <div
+            key={entry.id}
+            id={`install-panel-${entry.id}`}
+            className="stack"
+            role="tabpanel"
+            aria-labelledby={`install-tab-${entry.id}`}
+            data-active={entry.id === os ? "" : undefined}
+          >
+            {rows(entry.id, arch).map((row) => (
+              <StackRow key={`${row.label}-${row.note ?? ""}`} row={row} />
+            ))}
+          </div>
         ))}
       </div>
     </div>
