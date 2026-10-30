@@ -41,7 +41,7 @@ fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static
     Ok(())
 }
 
-fn toggle(ui: &mut Ui) {
+pub(super) fn toggle(ui: &mut Ui) {
     cancel_capture(ui);
     let enabled = !ui.settings.capture.enabled;
     let mut candidate = ui.drafted();

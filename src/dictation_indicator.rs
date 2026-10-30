@@ -34,6 +34,9 @@ pub enum DictationIndicatorEvent {
     Started,
     Meter {
         average: f32,
+        // Dot scope follows `average`; the window's meters read
+        // `input_level` instead.
+        #[allow(dead_code)]
         peak: f32,
     },
     Submitted {
@@ -83,13 +86,10 @@ impl DictationIndicatorEvent {
 pub use macos::*;
 
 /// macOS reports through a channel the main thread's pump drains into the
-/// HUD (`rune_hud::macos`); the window's practice dictation reads the meter.
+/// HUD (`rune_hud::macos`).
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc::{self, Receiver, Sender};
-    use std::time::Instant;
 
     use super::DictationIndicatorEvent;
 
@@ -103,44 +103,9 @@ mod macos {
 
         pub fn meter(&self, samples: &[f32]) {
             if let Some(event) = DictationIndicatorEvent::meter(samples) {
-                if let DictationIndicatorEvent::Meter { peak, .. } = event {
-                    record_peak(peak);
-                }
                 self.send(event);
             }
         }
-    }
-
-    /// The latest metered peak (high 32 bits) and when, in milliseconds since
-    /// `meter_epoch` plus one (low 32 bits, zero before any meter), for the
-    /// window's practice dictation.
-    static LATEST_METER: AtomicU64 = AtomicU64::new(0);
-    /// How long a metered peak stays current.
-    const METER_FRESH_MS: u32 = 250;
-
-    fn meter_epoch() -> Instant {
-        static EPOCH: OnceLock<Instant> = OnceLock::new();
-        *EPOCH.get_or_init(Instant::now)
-    }
-
-    fn meter_clock() -> u32 {
-        (meter_epoch().elapsed().as_millis() as u32).wrapping_add(1)
-    }
-
-    fn record_peak(peak: f32) {
-        let packed = (u64::from(peak.to_bits()) << 32) | u64::from(meter_clock());
-        LATEST_METER.store(packed, Ordering::Relaxed);
-    }
-
-    /// The peak of the dictation audio metered in the last quarter second, 0 to
-    /// 1, or silence when none arrived.
-    pub fn recent_peak() -> f32 {
-        let packed = LATEST_METER.load(Ordering::Relaxed);
-        let at = packed as u32;
-        if at == 0 || meter_clock().wrapping_sub(at) > METER_FRESH_MS {
-            return 0.0;
-        }
-        f32::from_bits((packed >> 32) as u32).clamp(0.0, 1.0)
     }
 
     pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {

@@ -13,15 +13,15 @@ use super::controls::{
     ButtonKind, CardRow, DESCRIPTION, METRICS, Paint, PushSize, button, card, folding, note, page,
     raised,
 };
-use super::gem::gem;
 use super::lists::{Tone, tone_tag};
 use super::modes::{application_icon, monogram};
+use super::spark::spark;
 use crate::app_settings::DictationMode;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::text_replacements::ReplacementSet;
 
-/// The agent card's gem, this many points square.
-const GEM: f32 = 30.0;
+/// The agent card's spark, this many points square.
+const SPARK: f32 = 30.0;
 /// Each app rule's folding steps, by its place in the list.
 const RULE_STEPS: [&str; 8] = [
     "rule0-steps",
@@ -158,7 +158,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 /// The pane's one action: the agent writes the steps, so this card is how
 /// to change them.
 fn agent_card(ui: &Ui, p: Paint) -> El {
-    let mark = gem(p, "gem", GEM);
+    let mark = spark(p, "spark", SPARK);
     let detail = if ui.output.prompt_copied {
         tr("Copied. Paste it into your agent and say what you want")
     } else {

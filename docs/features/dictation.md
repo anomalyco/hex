@@ -217,6 +217,19 @@ listen-only session and HID taps on Kit's Studio: Spaceman's Option-1/2/3
 reached HID but never the session. The installed fix has no physical-keyboard
 run yet.
 
+**Fixed October 30, 2026 (issue 485):** on GNOME Wayland, releasing Ctrl
+before Space (or both at once) can leave the GlobalShortcuts portal without a
+`Deactivated`, so a Hold capture kept recording until the shortcut was pressed
+and released again. Linux now treats a press that arrives while the shortcut
+is still held as a key repeat only within 1 s of the previous press; a later
+press is new and finishes the Hold capture whose release was lost, and that
+press's own repeats and release start nothing. Hex never infers a release from
+silence or a timeout. Checks:
+`a_hold_whose_release_never_arrives_finishes_on_the_next_new_press` and
+`a_balanced_release_finishes_a_repeating_hold` in
+[linux_input.rs](../../src/linux_input.rs) (constructed inputs; not run on
+GNOME).
+
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
 pressing the digit, which 2.3.0 and the Swift app both ignored after the
 threshold. Any non-modifier key pressed while a modifier-only shortcut is still
@@ -396,73 +409,6 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `double_tap_only_waits_for_two_complete_key_chord_taps`,
 `locked_dictation_finishes_after_a_missing_key_release`.
 These cover gesture decisions, not hardware keyboard-layout or remapping equivalence.
-
-### Smart Turn Auto-Stop (Experiment `smart-turn`)
-
-macOS only, off unless the `smart-turn` [experiment](experiments.md) is on.
-It finishes a hands-free capture when the speaker seems done, so a locked
-capture needs no finishing press.
-
-```ts
-Shortcut or spoken-start dictation records         // dictate.smart-turn
-  // only double-tap LOCKED, Toggle after its release, `hex dictation start`
-  // (it locks), or the spoken start phrase may stop; never Hold, Voice
-  // Action, edit, API capture, or meetings
-  -> First such capture -> Find the ONNX Runtime library, then download and
-       verify the pinned model           // models/smart-turn-v3.2-cpu.onnx, size + SHA-256
-  ├── Model not ready yet -> Nothing is followed; no check, no fallback
-  └── Model ready -> 16 kHz, 20 ms frames, the meeting pause detector's speech rule
-        // shortcut: from the press, so speech while the key is down counts
-        // spoken start: only audio after the start phrase ends
-        ├── Under 200 ms of speech so far -> Pauses don't count
-        ├── Not hands-free yet (key still down) -> Speech counts, pauses don't
-        │     // the silence clock starts again at the lock
-        ├── Silence reaches the check point (300 ms)
-        │     -> Worker scores the last 8 s     // off the audio loop; newest pause wins
-        │     ├── P >= threshold (0.7) -> Finish as a locked finishing press
-        │     │     // hotkey: same release tail, transcription, paste, tones;
-        │     │     // shortcut presses during the tail are ignored
-        │     │     // spoken start: as the stop phrase; a control phrase at
-        │     │     // the end of the transcript still applies, so
-        │     │     // "dictate cancel" cancels and "dictate send" sends
-        │     ├── P < threshold -> Keep listening
-        │     └── P not a finite number -> `failed`; keep listening
-        ├── Silence reaches the fallback (2 s) -> Finish the same way
-        ├── Speech resumes, or the capture ends or changes -> Late answer ignored
-        ├── Escape or shortcut press queued -> Handled first; the stop waits
-        └── Download, runtime, or model fails -> Logged; dictation as if it were off
-```
-
-`HEX_SMART_TURN_CHECK_MS`, `HEX_SMART_TURN_THRESHOLD`, and
-`HEX_SMART_TURN_FALLBACK_MS` override the defaults at launch (invalid values
-are logged and ignored; the fallback is at least 500 ms after the check, so
-the model is always asked first). A
-patient preset is `1500`, `0.8`, `3000`. Every check writes one `smart_turn`
-event to `live.ndjson` with the probability, silence, decision (`stop`,
-`continue`, `fallback`, `stale`, `failed`), and inference time, never text.
-The model runs on ONNX Runtime, loaded
-with `ort`'s `load-dynamic`; its Whisper log-mel features are computed in Rust.
-
-Checks in [smart_turn.rs](../../src/smart_turn.rs): `log_mel_matches_whisper_feature_extractor`
-(against `transformers`' `WhisperFeatureExtractor(chunk_length=8)` on a
-synthetic signal), `checks_once_per_pause_after_speech`,
-`silence_alone_never_checks_or_stops`,
-`a_confident_answer_stops_and_a_doubtful_one_waits_for_the_fallback`,
-`answers_about_an_earlier_pause_are_stale`,
-`the_model_is_always_asked_before_the_fallback`,
-`stops_a_hands_free_capture_when_the_model_hears_the_end`,
-`an_answer_for_an_ended_or_newer_capture_does_nothing`,
-`an_ended_capture_drops_its_waiting_check`,
-`nothing_is_followed_or_stopped_before_the_model_is_ready`,
-`a_failed_load_leaves_dictation_alone`,
-`speech_while_held_counts_but_only_a_hands_free_capture_stops`,
-`listening_starts_after_the_start_phrase`,
-`a_non_finite_probability_fails_the_check`,
-`non_finite_samples_read_as_silence`, and `off_reads_and_loads_nothing`,
-all with a scripted predictor. The ignored
-`real_model_matches_python_on_the_reference_signal` downloads the model and
-matched Python onnxruntime 1.23.2 (P 0.8643) on 2026-10-24. Not covered: the
-recognition-loop wiring (queued input, the release tail), a physical microphone, or whether the defaults suit real speech.
 
 ### Warm And Cold Capture
 

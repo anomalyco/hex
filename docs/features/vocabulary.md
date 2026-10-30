@@ -16,6 +16,8 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── Empty list -> Opens with one blank row focused
 ├── Add term -> New empty row, focused; saved once the term has text
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
+├── × -> Removes that row at any click speed or focus; rows keep an identity,
+│   so a late edit, focus change, or second × for a removed row touches nothing
 ├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
@@ -116,8 +118,12 @@ first 64 terms and their spellings reaching transcription, boost names);
 trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 [control/cli.rs](../../src/control/cli.rs);
 `rows_project_to_cleaned_merged_entries`,
-`rows_past_the_limits_keep_their_term_and_what_fits`, and
-`the_sheet_starts_empty_lists_with_a_row_and_saves_on_close` in
+`rows_past_the_limits_keep_their_term_and_what_fits`,
+`the_sheet_starts_empty_lists_with_a_row_and_saves_on_close`,
+`removing_a_focused_row_leaves_the_others_and_late_edits_touch_nothing`,
+`removing_the_last_row_then_editing_it_is_harmless`,
+`rapid_removals_from_one_frame_remove_only_their_own_rows`, and
+`a_reload_retires_the_old_rows` in
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
 `the_vocabulary_row_opens_its_sheet` and
 `the_vocabulary_row_says_when_the_model_ignores_the_list` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs);

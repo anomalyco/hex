@@ -264,12 +264,7 @@ impl LinuxHotkey {
                 "Wayland's shortcuts portal cannot request mouse buttons; bind the hex commands in the desktop settings"
             ));
         }
-        self.portal_trigger_for(&keysym_name(&self.key)?)
-    }
-
-    /// This shortcut's modifiers with another key: Escape pressed while
-    /// the shortcut is still held arrives with its modifiers.
-    fn portal_trigger_for(&self, key: &str) -> Result<String> {
+        let key = keysym_name(&self.key)?;
         let mut parts = Vec::new();
         for (held, name) in [
             (self.control, "CTRL"),
@@ -281,7 +276,7 @@ impl LinuxHotkey {
                 parts.push(name);
             }
         }
-        parts.push(key);
+        parts.push(&key);
         Ok(parts.join("+"))
     }
 
@@ -635,6 +630,8 @@ struct ShortcutState {
     capture: Capture,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
+    /// The dictation shortcut was pressed and its release hasn't arrived.
+    down: bool,
 }
 
 impl ShortcutState {
@@ -646,6 +643,7 @@ impl ShortcutState {
             capture: Capture::Idle,
             last_release: None,
             last_press: None,
+            down: false,
         }
     }
 
@@ -689,12 +687,23 @@ impl ShortcutState {
             // Escape while Annotate draws stops drawing, never the recording.
             #[cfg(hex_capture)]
             Input::Escape if !self.wants_escape() && crate::capture_host::exit_drawing() => None,
-            Input::Escape | Input::Lost => self.cancel(),
+            Input::Escape => self.cancel(),
+            Input::Lost => {
+                self.down = false;
+                self.cancel()
+            }
             Input::Pressed(Shortcut::Dictation) => {
-                let repeat = self
-                    .last_press
-                    .is_some_and(|pressed| now.saturating_duration_since(pressed) < KEY_REPEAT_GAP);
+                // A press with no release since the last one, sooner than a
+                // new press could come, is the desktop repeating a held key.
+                let repeat = self.down
+                    && self.last_press.is_some_and(|pressed| {
+                        now.saturating_duration_since(pressed) < KEY_REPEAT_GAP
+                    });
                 self.last_press = Some(now);
+                self.down = true;
+                if repeat {
+                    return None;
+                }
                 match self.capture {
                     Capture::Locked => {
                         self.capture = Capture::Idle;
@@ -714,35 +723,39 @@ impl ShortcutState {
                         self.capture = Capture::Held { second_tap };
                         Some(HotkeyEvent::Start)
                     }
-                    // The desktop never sent the release that would have locked
-                    // this capture (Hyprland's Lua binds drop it when the
-                    // modifier comes up first), so this press finishes it.
-                    Capture::Held { second_tap: true } if !repeat => {
+                    // The desktop never sent the release that would have
+                    // finished or locked this capture (Hyprland's Lua binds and
+                    // GNOME's portal drop it when the modifier comes up first),
+                    // so this new press finishes it.
+                    Capture::Held { .. } => {
                         self.capture = Capture::Idle;
                         self.last_release = None;
                         Some(HotkeyEvent::Finish)
                     }
-                    Capture::Armed | Capture::Held { .. } => None,
+                    Capture::Armed => None,
                 }
             }
-            Input::Released(Shortcut::Dictation) => match self.capture {
-                Capture::Armed => {
-                    self.capture = Capture::Idle;
-                    self.last_release = Some(now);
-                    None
+            Input::Released(Shortcut::Dictation) => {
+                self.down = false;
+                match self.capture {
+                    Capture::Armed => {
+                        self.capture = Capture::Idle;
+                        self.last_release = Some(now);
+                        None
+                    }
+                    Capture::Held { second_tap: true } => {
+                        self.capture = Capture::Locked;
+                        self.last_release = None;
+                        None
+                    }
+                    Capture::Held { second_tap: false } => {
+                        self.capture = Capture::Idle;
+                        self.last_release = self.double_tap.then_some(now);
+                        Some(HotkeyEvent::Finish)
+                    }
+                    Capture::Idle | Capture::Locked => None,
                 }
-                Capture::Held { second_tap: true } => {
-                    self.capture = Capture::Locked;
-                    self.last_release = None;
-                    None
-                }
-                Capture::Held { second_tap: false } => {
-                    self.capture = Capture::Idle;
-                    self.last_release = self.double_tap.then_some(now);
-                    Some(HotkeyEvent::Finish)
-                }
-                Capture::Idle | Capture::Locked => None,
-            },
+            }
             Input::Pressed(Shortcut::PasteLast) | Input::Command(ShortcutCommand::PasteLast) => {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
@@ -994,14 +1007,13 @@ impl Backend {
             shortcuts.push(crate::linux_portal::Shortcut {
                 id,
                 description,
-                trigger: key.portal_trigger()?,
+                trigger: Some(key.portal_trigger()?),
             });
         }
-        let granted = if shortcuts.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            portal.bind(&shortcuts, &self.stop)?
-        };
+        // Every shortcut, cancel included, goes in this one bind: a second
+        // bind would replace the set on KDE.
+        shortcuts.push(crate::linux_portal::Shortcut::cancel());
+        let granted = portal.bind(&shortcuts, &self.stop)?;
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             requested
                 .iter()
@@ -1038,22 +1050,16 @@ impl Backend {
             .store(portal.configurable(), Ordering::Release);
         self.status.configure.store(false, Ordering::Release);
         self.mark_ready(DesktopShortcuts::Portal(granted));
-        // Escape while the recording shortcut is still held carries its modifiers.
-        let held_escape = || -> Option<String> {
-            let trigger = binding.portal_trigger_for("Escape").ok()?;
-            (trigger != "Escape").then_some(trigger)
-        };
         let shortcut_for = |id: &str| {
             Shortcut::ALL
                 .into_iter()
                 .find(|shortcut| shortcut.portal_id().0 == id)
         };
-        let mut escape_bound = false;
         while !self.stopping() {
             for event in portal.events() {
                 let input = match event {
                     crate::linux_portal::Event::Pressed(id)
-                        if crate::linux_portal::is_escape(&id) =>
+                        if id == crate::linux_portal::CANCEL_ID =>
                     {
                         Input::Escape
                     }
@@ -1098,19 +1104,6 @@ impl Backend {
                     error = format!("{error:#}"),
                     "could not open the desktop's shortcut settings"
                 );
-            }
-            // Escape belongs to Hex only while something records, or
-            // Annotate draws.
-            let wants_escape = dispatcher.state.wants_escape() || annotate_drawing();
-            if wants_escape && !escape_bound {
-                escape_bound = true;
-                let available = portal.bind_escape(held_escape(), &self.stop)?;
-                if self.status.update_escape_availability(available) {
-                    tracing::warn!("{ESCAPE_CANCEL_WARNING}; continuing without Escape-cancel");
-                }
-            } else if !wants_escape && escape_bound {
-                escape_bound = false;
-                portal.release_escape();
             }
             if !dispatcher.flush()? {
                 return Ok(());
@@ -1943,6 +1936,54 @@ mod tests {
             test.press(Shortcut::Dictation);
             assert_eq!(test.events, [Finish, Start]);
         }
+    }
+
+    #[test]
+    fn a_hold_whose_release_never_arrives_finishes_on_the_next_new_press() {
+        // GNOME's portal repeats a held shortcut's activation and sends no
+        // deactivation when Ctrl comes up before Space.
+        for double_tap in [false, true] {
+            let mut test = Test::new(double_tap);
+            test.press(Shortcut::Dictation);
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            assert_eq!(test.events, [Start], "repeats never finish the hold");
+            assert_eq!(test.state.capture, Capture::Held { second_tap: false });
+            // Ctrl up first: the repeats stop and no release comes.
+            test.now += Duration::from_secs(3);
+            test.press(Shortcut::Dictation);
+            assert_eq!(test.events, [Start, Finish]);
+            // The finishing press's own repeats and release start nothing.
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [Start, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            test.now += Duration::from_secs(1);
+            test.tap();
+            assert_eq!(test.events, [Start, Finish, Start, Finish]);
+        }
+    }
+
+    #[test]
+    fn a_balanced_release_finishes_a_repeating_hold() {
+        // Space first, or both together: the desktop sends the release.
+        let mut test = Test::new(false);
+        test.press(Shortcut::Dictation);
+        for _ in 0..20 {
+            test.now += Duration::from_millis(33);
+            test.press(Shortcut::Dictation);
+        }
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [Start, Finish]);
+        // A quick new press after a release is a press, not a repeat.
+        test.now += Duration::from_millis(100);
+        test.press(Shortcut::Dictation);
+        assert_eq!(test.events, [Start, Finish, Start]);
     }
 
     #[test]

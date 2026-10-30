@@ -4,7 +4,10 @@
 //! other panes' rows share: the fold, the quiet select, and the shortcut's
 //! keys.
 
-use rune::{El, col, row, text};
+use std::path::Path;
+use std::time::Duration;
+
+use rune::{El, Tx, col, row, text};
 use rune_kit::{Placement, Select, SelectAppearance};
 
 use super::controls::{
@@ -95,7 +98,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         )
         .into(),
     );
-    rows.push(language_row(ui, p, layer).into());
+    rows.extend(language_row(ui, p, layer).map(CardRow::from));
     let vocabulary_note = super::vocabulary::unused_note(ui);
     rows.push(
         icon_row(
@@ -240,18 +243,21 @@ fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
     rows
 }
 
-/// The model's languages as a quiet select, or its one language as text.
-fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+/// The model's languages as a quiet select, or the fallback note when
+/// switching to a single-language model changed the saved language.
+fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let selection = &ui.settings.transcription;
     let model = transcription_models::definition(selection.model);
     let current = transcription_models::language_name(&selection.language);
     let codes = model.language_choices();
+    let fallback = super::picker::fallback_note(ui);
+    if codes.len() <= 1 && fallback.is_none() {
+        return None;
+    }
     let control = if codes.len() <= 1 {
-        // The text lines up with the values above and below it.
         row()
             .key("transcription-language-control")
             .h(24.0)
-            .pr(24.0)
             .center_y()
             .child(
                 text(current.to_string())
@@ -283,14 +289,14 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             layer,
         )
     };
-    icon_row(
+    Some(icon_row(
         p,
         "transcription-language",
         &LANGUAGES,
         tr("Language"),
-        super::picker::fallback_note(ui).as_deref(),
+        fallback.as_deref(),
         control,
-    )
+    ))
 }
 
 /// The microphone with the input it resolves to, why another input stands
@@ -395,7 +401,7 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
         .hover(c.hover)
         .press(c.pressed)
         .on_press(|ui: &mut Ui| s::toggle_menu(ui, Menu::Microphone))
-        .child(super::onboarding::mic_bars(p, 0.0, p.faint()))
+        .child(ui.mic_level.bars(p))
         .child(
             text(detail.unwrap_or(microphone).to_string())
                 .key("value")
@@ -422,7 +428,124 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
         }
         menu = menu.item(item.on_select(move |ui: &mut Ui| (choice.choose)(ui)));
     }
-    menu.build(p.k, layer)
+    menu.build(p.k, layer).mr(-9.0)
+}
+
+/// How often the microphone row follows the level while audio arrives.
+const LEVEL_FRAME: Duration = Duration::from_millis(33);
+
+/// What the microphone row's level shows: the audio Hex receives from the
+/// microphone in use, or nothing while none arrives (released while idle,
+/// failed, or not allowed), as flat, dimmed bars.
+pub(super) struct MicLevel {
+    /// 0 to 1.
+    level: f32,
+    pub(super) receiving: bool,
+    /// The poll clock when the next level frame is due.
+    frame_at: f64,
+    /// Scenes: a recording played from virtual time zero instead of the
+    /// microphone.
+    recording: Option<(Vec<f32>, u32)>,
+}
+
+impl Default for MicLevel {
+    /// A quiet room, as fixtures show it.
+    fn default() -> Self {
+        Self {
+            level: 0.0,
+            receiving: true,
+            frame_at: 0.0,
+            recording: None,
+        }
+    }
+}
+
+impl MicLevel {
+    /// No audio arriving.
+    pub(super) fn closed() -> Self {
+        Self {
+            receiving: false,
+            ..Self::default()
+        }
+    }
+
+    /// Plays the mono WAV at `path` from virtual time zero.
+    pub(super) fn playing(path: &Path) -> Self {
+        Self {
+            recording: crate::voice_filter::read_wav_mono_f32(path).ok(),
+            ..Self::default()
+        }
+    }
+
+    /// Takes the latest peak, `None` when no audio arrived lately; true
+    /// when what shows changed.
+    pub(super) fn hear(&mut self, peak: Option<f32>) -> bool {
+        let before = self.shown();
+        match peak {
+            Some(peak) => {
+                self.receiving = true;
+                self.level = super::onboarding::follow_level(self.level, peak);
+            }
+            None => {
+                self.receiving = false;
+                self.level = 0.0;
+            }
+        }
+        before != self.shown()
+    }
+
+    fn shown(&self) -> (bool, u8) {
+        (self.receiving, super::onboarding::level_step(self.level))
+    }
+
+    /// The recording's peak over the frame before `clock`, or `None` once
+    /// it has played.
+    fn recording_peak(&self, clock: f64) -> Option<Option<f32>> {
+        let (samples, rate) = self.recording.as_ref()?;
+        let end = (clock * f64::from(*rate)) as usize;
+        let start = end.saturating_sub((LEVEL_FRAME.as_secs_f64() * f64::from(*rate)) as usize);
+        Some((start < samples.len()).then(|| {
+            samples[start..end.min(samples.len())]
+                .iter()
+                .fold(0.0_f32, |peak, s| peak.max(s.abs()))
+        }))
+    }
+
+    pub(super) fn bars(&self, p: Paint) -> El {
+        let tint = if self.receiving {
+            p.faint()
+        } else {
+            p.k.c.border_strong
+        };
+        super::onboarding::mic_bars(p, super::onboarding::shown_level(self.level), tint)
+    }
+}
+
+/// Follows the microphone's level while General shows in a visible window
+/// (a scene's recording also plays headless), waking at a UI rate only while
+/// audio arrives or the bars fall; the window's own tick notices audio
+/// starting again. It only reads the level the audio owner stores, so it
+/// never opens a microphone, including one released while idle. True when
+/// the row changed.
+pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
+    if ui.pane != Pane::General || ui.labs_open || ui.tour.is_some() {
+        return false;
+    }
+    let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
+    let (peak, playing) = match ui.mic_level.recording_peak(clock) {
+        Some(peak) => (peak.or(Some(0.0)), peak.is_some()),
+        None if ui.live() && visible => (crate::input_level::recent(), true),
+        // Other fixtures keep the level they set.
+        _ => return false,
+    };
+    let level = &mut ui.mic_level;
+    let changed = level.hear(peak);
+    // A level still falling finishes even once the recording has played.
+    if ((playing && level.receiving) || level.level > 0.0) && clock >= level.frame_at {
+        level.frame_at = clock + LEVEL_FRAME.as_secs_f64();
+        tx.wake_after(LEVEL_FRAME);
+    }
+    changed
 }
 
 /// Launch at login, driven by the OS's login item: macOS's `SMAppService`
@@ -1098,6 +1221,7 @@ pub(super) fn quiet_select(
             }
         })
         .build(p.k, layer)
+        .mr(-8.0)
 }
 
 fn value_font(p: Paint) -> rune::TextStyle {
@@ -1122,6 +1246,7 @@ pub(super) fn value_button(
         .h(24.0)
         .pl(8.0)
         .pr(4.0)
+        .mr(-9.0)
         .gap(4.0)
         .center_y()
         .radius(p.k.radius.sm)
@@ -1187,6 +1312,7 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         .label(s::face_label(face))
         .center_y()
         .padding(2.0)
+        .mr(-3.0)
         .radius(p.k.radius.md)
         // While listening, keys reach the recorder rather than pressing it again.
         .focusable(!listening)

@@ -1,5 +1,5 @@
-//! HUD Lab (macOS debug builds, and release builds while the `playground`
-//! experiment is on): tunes Dot scope, the dictation HUD, live. Pick the
+//! HUD Lab (macOS dev builds, when `DEVELOPER_FEATURES_ENABLED` or the
+//! `hud-lab` experiment is on): tunes Dot scope, the dictation HUD, live. Pick the
 //! state it shows and drag its sliders; every change goes to the HUD as
 //! `PlatformRequest::ConfigureHud` or `TuneHud`. Save writes
 //! `dot-scope.json`, which the HUD loads at launch; Copy values copies the
@@ -40,8 +40,9 @@ fn configure(ui: &mut Ui, change: impl FnOnce(&mut HudLab)) {
     });
 }
 
-/// Dot scope's sliders, grouped as HUD Lab shows them, by `KNOBS` key.
-const DOT_SCOPE_GROUPS: [(&str, &[&str]); 5] = [
+/// Dot scope's sliders, grouped by `KNOBS` key (shared with the HUD
+/// stories in Playground).
+pub(super) const DOT_SCOPE_GROUPS: [(&str, &[&str]); 5] = [
     (
         "Field",
         &[

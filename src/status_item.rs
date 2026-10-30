@@ -232,6 +232,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             mtm,
         );
         item.setState(isize::from(crate::capture_host::own_windows_recorded()));
+        item.setHidden(!crate::experiments::is_dev_build());
         item
     };
     let models = NSMenu::initWithTitle(

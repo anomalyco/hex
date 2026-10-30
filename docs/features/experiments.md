@@ -1,28 +1,30 @@
 # Experiments
 
-Experiments are unfinished features whose code sits on `dev` but stays
-dormant until someone turns one on for their own Hex. They are **unsupported**:
-an experiment may misbehave, change, or disappear without notice, and the
-window offers no switch for them. There is a flag, not a setting. Panes an
-experiment adds list under **Labs** at the bottom of the sidebar, indented
-while Labs or one of them is open.
+Experiments are unfinished features whose code sits on `dev` and can be turned
+on in dev, local, and test builds (`experiments::is_dev_build()`). Production
+builds (`!experiments::is_dev_build()`) ignore `HEX_EXPERIMENTS` and
+`~/.config/hex/experiments` completely, hide **Labs** and every experimental
+pane from the sidebar, and keep Meetings, Annotate, and Voice Filter dormant.
+
+In dev builds, **Labs** at the bottom of the sidebar offers live toggle
+switches for every experiment supported on the current OS, writing
+`~/.config/hex/experiments` atomically and applying changes live where
+supported (such as showing or hiding `Voice Filter` immediately). Panes an
+active experiment adds list indented under **Labs**.
 
 ```ts
-Turn an experiment on                    // experiments.sources
-├── HEX_EXPERIMENTS=live-chapters,smart-turn  // commas or spaces; this process and its children
-├── ~/.config/hex/experiments            // one name per line, # comments; every launch
-│   ├── Hex Test.app -> ~/.config/hex-test/experiments
-│   └── Windows / Linux -> %USERPROFILE%\.config\hex, ~/.config/hex
-├── On = named in either source (union)
-├── Unknown name -> Warning in process.log, ignored    // never fatal
-└── Missing file -> Nothing on
+Production vs dev builds                 // experiments.dev-build
+├── Production (!is_dev_build()) -> Ignore env & file; hide Labs & experimental panes
+└── Dev / local / test (is_dev_build())
+    ├── Labs › Experiments switches -> Write ~/.config/hex/experiments + apply live
+    ├── HEX_EXPERIMENTS=live-chapters,live-text   // commas or spaces; this process
+    ├── ~/.config/hex/experiments        // one name per line, # comments
+    │   ├── Hex Test.app -> ~/.config/hex-test/experiments
+    │   └── Windows / Linux -> %USERPROFILE%\.config\hex, ~/.config/hex
+    ├── Unknown name -> Warning in process.log, ignored    // never fatal
+    └── Missing file -> Nothing on
 
-Launch                                   // experiments.snapshot
-├── Read both sources once -> Fixed for the life of the process
-├── process.log -> "experiments enabled" or "no experiments enabled"
-└── Edit a source -> Applies at the next launch
-
-hex experiments                          // experiments.cli; macOS, Windows, Linux
+hex experiments                          // experiments.cli; dev builds only
 ├── list [--json] -> Each experiment, on/off, source (env, file, env+file)
 ├── enable <name> -> Add it to the file atomically; print the restart hint
 ├── disable <name> -> Remove every line naming it; keep comments and others
@@ -32,8 +34,13 @@ hex experiments                          // experiments.cli; macOS, Windows, Lin
 The known experiments are compiled into
 [experiments.rs](../../src/experiments.rs):
 
-- `capture` is retired: [Annotate](capture.md) is on by default on macOS
-  and Linux since 2026-10-29. A file or variable naming it is ignored.
+- `capture` is retired: [Annotate](capture.md) is gated by `is_dev_build()` and
+  its `capture.enabled` switch in Labs. A file or variable naming it is ignored.
+- `modes` is retired: the Output tab (`Pane::Output`) and per-app Modes
+  processing are always on in the main sidebar (`General`, `Output`, `History`)
+  in both production and dev builds. A file or variable naming it is ignored.
+- `smart-turn` is retired and its ONNX Runtime predictor was removed on
+  2026-10-29. A file or variable naming it is ignored silently.
 - `vocabulary` is retired: [Vocabulary](vocabulary.md) became a General
   card and the `hex vocabulary` commands on 2026-10-29. A file or variable
   naming it is ignored silently.
@@ -74,20 +81,6 @@ The known experiments are compiled into
   [hud_placement.rs](../../src/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
-- `modes`: Modes ([Process Text With Modes](README.md#process-text-with-modes)),
-  every OS. Off by default (Kit, 2026-10-27): no Output pane (the read-only
-  view that replaced the Modes editor, t694) or onboarding tip,
-  and processing runs only the global replacements, so no per-app mode,
-  OpenCode rewrite, mode correction, or transformation ever touches a
-  transcript, and custom transformations load only for the user's own
-  `hex.config.ts`. The gate is where the work starts:
-  `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
-  (macOS), and `app_settings::transformations_used`. Saved modes stay in
-  `settings.json` and keep their `hex settings` keys; turning the experiment
-  on and restarting brings them back unchanged. Checks:
-  `without_the_experiment_only_global_replacements_run`,
-  `without_the_modes_experiment_the_profile_is_global_replacements_only`,
-  `the_sidebar_has_no_output_without_the_experiment`; scene `modes-off`.
 - `playground`: Rune's playground in the window (every OS). ⇧⌘D (View ›
   Playground on macOS) or Ctrl+Shift+D swaps the window for a list of
   folded groups, nested by path:
@@ -98,11 +91,11 @@ The known experiments are compiled into
   ├── Meetings      Live notes: a canned call's chapters and notes under a
   │                 draggable capsule, hidable, copied whole, new, or by
   │                 chapter (nothing real runs; live_notes.rs)
-  ├── HUD           (macOS) each placement × look × ending, Processing, Your voice
+  ├── HUD           (macOS) each placement × look × ending, Processing, Your voice + live HUD Lab Dot scope sliders & Save
   └── Capture capsule   (macOS) whole flow and each state × flow, notch, family
   Window            every macOS-window fixture scene by pane, under a readable name
   ├── General       Settings, Microphone missing, Shortcut/…, Updates/…
-  ├── Modes … Activity, Transcription model, Shortcut explainer, Onboarding tour
+  ├── Output, Modes … HUD Lab, Activity, Transcription model, Shortcut explainer, Onboarding tour
   Linux & Windows   the portal and Windows fixtures
   ```
 
@@ -142,13 +135,6 @@ The known experiments are compiled into
   `every_capsule_story_and_flow_opens_from_its_link` in
   playground.rs open every HUD and capsule link headlessly. The URL
   handler and the replay have no automated end-to-end check.
-- `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
-  hears the end of a turn (macOS; see
-  [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The
-  gate is where the work starts: the recognition loop builds no tracker and
-  reads no settings, so nothing downloads, loads, or runs while it is off.
-  Until the model is ready, and if it fails, dictation behaves as if it were
-  off.
 - `voice-filter`: the Voice Filter pane (macOS), the only home of the Hex
   Microphone driver, its filter modes, and Try it
   ([Hex Microphone](README.md#experimental-hex-microphone-and-voice-filter)).

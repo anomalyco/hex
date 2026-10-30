@@ -85,11 +85,8 @@ objc2-core-foundation = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
-# Smart Turn: loads libonnxruntime.1.23.2.dylib dynamically.
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-23"] }
 procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54" }
 ratatui = "0.30.2"
-realfft = "3.5.0"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }

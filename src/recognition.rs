@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -217,9 +216,7 @@ impl Hotkeys {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn listen(
-    project_root: &Path,
     events: EventLog,
     device_override: Option<&str>,
     shutdown: &AtomicBool,
@@ -276,7 +273,6 @@ pub fn listen(
     #[cfg(hex_capture)]
     let mut capture_shortcut = crate::capture_host::CaptureShortcut::default();
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
-    let mut smart_turn = crate::smart_turn::SmartTurn::start(project_root);
     let mut personal_host_enabled = crate::app_settings::custom_transformations_enabled();
     let mut personal_commands = personal_host_enabled
         .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
@@ -1019,54 +1015,6 @@ pub fn listen(
         }
 
         let audio = input.recv_timeout(Duration::from_millis(20))?;
-        if let Some(smart_turn) = &mut smart_turn {
-            // Follow a shortcut dictation from its start, so speech while the
-            // shortcut is still down counts; only a locked or Toggle capture
-            // after its release may stop.
-            let followed = input.is_recording()
-                && programmatic.is_none()
-                && !hotkey_capture_suspended
-                && hotkeys.dictation.is_recording();
-            smart_turn.track(followed.then(|| crate::smart_turn::Capture {
-                generation: input.capture_generation(),
-                listen_from: None,
-                armed: hotkeys.dictation.is_locked(),
-            }));
-            // Smart Turn orders audio by capture time and skips anything it
-            // already heard.
-            if let Some(audio) = &audio {
-                smart_turn.push(&audio.samples, input.sample_rate(), audio.captured_from());
-            }
-            for report in smart_turn.poll() {
-                events.emit(&report.event(now_ms()))?;
-            }
-            // A queued Escape or shortcut press is handled first; the stop
-            // waits for a later turn of the loop.
-            if followed
-                && input_monitor.pending_events().oldest().is_none()
-                && smart_turn.take_stop()
-            {
-                smart_turn.track(None);
-                let boundary = capture_boundary(&input, microphone_policy.release_while_idle);
-                // As `hex dictation stop` does: a locked finish press.
-                finish_hotkey_dictation(
-                    boundary,
-                    &input,
-                    &dictation_worker,
-                    &context,
-                    &input.device_name(),
-                    &mut events,
-                    indicator.as_ref(),
-                    microphone_policy.release_while_idle,
-                    None,
-                )?;
-                // Unlock only now: a shortcut press during the stop's tail
-                // meant to finish this capture, so it is ignored instead of
-                // starting another.
-                hotkeys.dictation.wait_for_release();
-                continue;
-            }
-        }
         if let (Some(active), Some(audio)) = (&mut programmatic, &audio) {
             if active.last_level.elapsed() >= Duration::from_millis(30) {
                 let _ = active.levels.try_send(level_for(&audio.samples));

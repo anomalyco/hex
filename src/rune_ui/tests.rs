@@ -574,7 +574,7 @@ fn flush(rt: &mut Runtime<Ui>) {
 /// A shown window keeps drawing while its runtime animates, has input queued
 /// or has live values pending (Rune's `Host::redraw`). Five seconds after
 /// mounting, with nothing changing, the only motion left in any scene is the
-/// pulsing dot of something live, Output's turning gem, or the
+/// pulsing dot of something live, Output's turning spark, or the
 /// shortcut explainer's looping demo, and under Reduce Motion, which stills
 /// them all, no scene asks for another frame.
 #[test]
@@ -593,7 +593,7 @@ fn every_scene_stops_asking_for_frames() {
             moving.extend(
                 rt.elements()
                     .into_iter()
-                    .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot")) && !gem(e))
+                    .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot")) && !spark(e))
                     .map(|e| format!("{scene}: {}", e.path)),
             );
         }
@@ -614,23 +614,21 @@ fn every_scene_stops_asking_for_frames() {
 }
 
 #[test]
-fn the_sidebar_has_no_output_without_the_experiment() {
-    let mut rt = runtime("modes-off", true, PANE_SIZE);
-    tap(&mut rt, "nav-labs");
-    assert!(rt.find("nav-output").is_none());
-    assert!(!Pane::Output.shown(&rt.state));
-    let rt = runtime("output", true, PANE_SIZE);
-    assert!(rt.find("nav-modes").is_none(), "Output replaces Modes");
-    assert!(
-        rt.find("nav-output").is_some(),
-        "Labs unfolds around its pane"
-    );
+fn the_sidebar_always_shows_output() {
+    for scene in ["portal", "mac-settings", "mac-production"] {
+        let rt = runtime(scene, true, PANE_SIZE);
+        assert!(
+            rt.find("nav-output").is_some(),
+            "{scene} shows Output in the main sidebar"
+        );
+        assert!(Pane::Output.shown(&rt.state));
+        assert!(rt.find("nav-modes").is_none(), "Output replaces Modes");
+    }
 }
 
 #[test]
 fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);
-    tap(&mut rt, "nav-labs");
     for (key, pane) in [
         ("nav-output", Pane::Output),
         ("nav-history", Pane::History),
@@ -646,7 +644,6 @@ fn the_sidebar_switches_panes_and_keeps_settings() {
 #[test]
 fn the_sidebar_switches_on_press_not_release() {
     let mut rt = runtime("portal", true, PANE_SIZE);
-    tap(&mut rt, "nav-labs");
     settle(&mut rt);
     let (x, y) = rt.find("nav-output").expect("the Output item");
     rt.pointer_down(x, y);
@@ -676,8 +673,8 @@ fn switching_panes_is_instant() {
         !panel.iter().any(|e| e.key.as_deref() == Some("lede")),
         "Labs left at once"
     );
-    // Output's gem turns on its own; it is not a pane transition.
-    for element in panel.iter().filter(|e| !gem(e)) {
+    // Output's spark turns on its own; it is not a pane transition.
+    for element in panel.iter().filter(|e| !spark(e)) {
         assert!(
             element.opacity >= 0.999 && !element.moving,
             "{} is still animating",
@@ -686,9 +683,9 @@ fn switching_panes_is_instant() {
     }
 }
 
-/// A frame of Output's turning gem, which moves on its own.
-fn gem(e: &rune::ElementInfo) -> bool {
-    e.key.as_deref().is_some_and(|key| key.starts_with("gem"))
+/// A frame of Output's turning spark, which moves on its own.
+fn spark(e: &rune::ElementInfo) -> bool {
+    e.key.as_deref().is_some_and(|key| key.starts_with("spark"))
 }
 
 fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
@@ -1327,6 +1324,16 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
 }
 
 #[test]
+fn single_language_models_hide_the_language_row_without_a_fallback() {
+    let single = runtime("mac-settings", true, PANE_SIZE);
+    assert!(single.find("transcription-language").is_none());
+    let multi = runtime("language-menu", true, PANE_SIZE);
+    assert!(multi.find("transcription-language").is_some());
+    let fallback = runtime("language-fallback", true, PANE_SIZE);
+    assert!(fallback.find("transcription-language").is_some());
+}
+
+#[test]
 fn browsing_the_picker_never_changes_the_language() {
     let mut rt = runtime("picker", true, PANE_SIZE);
     let before = rt.state.settings.transcription.clone();
@@ -1504,7 +1511,7 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         "Tab enters at the current pane"
     );
     key(&mut rt, Key::Down, Mods::default());
-    assert_eq!(rt.state.pane, Pane::History, "selection follows the arrows");
+    assert_eq!(rt.state.pane, Pane::Output, "selection follows the arrows");
     let command = Mods {
         cmd: true,
         ..Mods::default()
