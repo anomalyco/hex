@@ -1,5 +1,5 @@
-//! One note as it floats under the recording capsule: a card with a mark in
-//! its kind's colour, the note, and who owns it. Pressing it opens the
+//! One note in its chapter under the recording capsule: a mark in its
+//! kind's colour, the note, and who owns it. Pressing it opens the
 //! transcript lines it came from. Platform-neutral: a host converts its
 //! store into [`Note`].
 
@@ -64,14 +64,13 @@ pub(super) fn kind_color(p: Paint, kind: NoteKind) -> rune::Color {
 const MARK_H: f32 = 20.0;
 const MARK_W: f32 = 14.0;
 
-/// `ink` is the note's colour: the newest reads first.
-pub(super) fn card(p: Paint, note: &Note, open: bool, ink: rune::Color) -> El {
+pub(super) fn row_for(p: Paint, note: &Note, open: bool) -> El {
     let c = &p.k.c;
     let mut words = col().key("words").grow(1.0).min_w(0.0).gap(1.0).child(
         text(note.text.clone())
             .key("text")
             .font(p.k.ty.ui)
-            .color(ink)
+            .color(p.text())
             .wrap(),
     );
     if let Some(owner) = &note.owner {
@@ -88,12 +87,10 @@ pub(super) fn card(p: Paint, note: &Note, open: bool, ink: rune::Color) -> El {
         .label(note.text.clone())
         .w_full()
         .gap(8.0)
-        .pl(10.0)
-        .pr(14.0)
-        .py(8.0)
-        .radius(p.k.radius.lg)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
+        .pl(8.0)
+        .pr(10.0)
+        .py(5.0)
+        .radius(p.k.radius.md)
         .hover(c.hover)
         .press(c.pressed)
         .child(
@@ -111,9 +108,6 @@ pub(super) fn card(p: Paint, note: &Note, open: bool, ink: rune::Color) -> El {
                 )
                 .child(words),
         );
-    for shadow in &p.k.elevation.overlay {
-        card = card.box_shadow(*shadow);
-    }
     if open {
         card = card.child(excerpt(p, &note.excerpt));
     }
