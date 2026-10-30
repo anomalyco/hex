@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use crate::onboarding::{PermissionKind, PermissionState};
 
 /// A permission a capture needs.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaptureNeed {
     ScreenRecording,
@@ -26,6 +27,7 @@ impl CaptureNeed {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn kind(self) -> PermissionKind {
         match self {
             Self::ScreenRecording => PermissionKind::ScreenRecording,
