@@ -16,10 +16,11 @@ use std::time::Duration;
 use rune::{Cx, El, KeyEvent, Spring, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Switch};
 
-use super::flow::{Action, Cue, Delivered, Dest, Failure, Input, Route, Undone};
+use super::flow::{Action, Cue, Delivered, Dest, Failure, Grant, Input, Route, Undone};
 use super::surface::{Id, PANEL_H, PANEL_W};
 use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, flow_label};
 use super::{CapsuleState, Mode, capsule, tone};
+use crate::capture_host::CaptureNeed;
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
@@ -164,7 +165,14 @@ const SCENES: &[Scene] = &[
     ("discard", |s| {
         scene(s, &[record(), Step::Click(Id::Cancel)])
     }),
+    // Allow walks it to granted, as System Settings would.
+    ("permission", |s| scene(s, &[needs_screen()])),
 ];
+
+/// A capture refused for Screen Recording: the permission helper.
+fn needs_screen() -> Step {
+    Step::Input(Input::NeedsPermission(CaptureNeed::ScreenRecording))
+}
 
 /// A saved rule's answer, which the router sends at once.
 fn rule_sent() -> Vec<Step> {
@@ -287,6 +295,20 @@ impl Playground {
                 }
             }
             Action::Undo { .. } => self.at(0.25, Step::Input(Input::Undone(Undone::TakenBack))),
+            // System Settings granting it: first with a restart due, then
+            // as a fresh Hex sees it.
+            Action::Allow(need) => {
+                self.at(1.5, Step::Input(Input::Permission(need, Grant::Restart)));
+            }
+            Action::Restart => {
+                self.at(
+                    0.6,
+                    Step::Input(Input::Permission(
+                        CaptureNeed::ScreenRecording,
+                        Grant::Ready,
+                    )),
+                );
+            }
             Action::Cancel
             | Action::Discard
             | Action::Send { .. }
@@ -627,6 +649,16 @@ fn states(p: Paint) -> El {
                         Step::Input(Input::Failed(
                             Failure::Send("SEER".into()),
                             Some("OpenCode isn't running".into()),
+                        )),
+                    ]
+                }))
+                .child(state_button(p, "No permission", || vec![needs_screen()]))
+                .child(state_button(p, "Restart Hex", || {
+                    vec![
+                        needs_screen(),
+                        Step::Input(Input::Permission(
+                            CaptureNeed::ScreenRecording,
+                            Grant::Restart,
                         )),
                     ]
                 }))

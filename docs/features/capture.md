@@ -23,6 +23,10 @@ Turn it on                               // capture.gate
 ├── Windows -> not compiled; no pane, no `hex annotate`
 ├── Nothing is asked at launch: Screen Recording (macOS) at the first capture,
 │   the portal's dialog (Linux) at the first Screen capture
+├── A start without a permission it needs (macOS: Screen Recording unless
+│   iPhone, then Microphone, then Accessibility; capture_host::permissions)
+│   -> refused with code `permission`, no error tone, and the capsule's
+│   permission helper opens (capture.permission)
 └── Off -> no capture host, engine, sink, thread, or folder; `hex annotate` -> feature-off
 
 Draw                                     // capture.draw (capture_host::drawing)
@@ -226,11 +230,26 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   silent): start, stop, a rule's send going, an Undo, a failure
 ├── Failed -> "Couldn't start" until the engine reports it
 │   recording (`screen`), then "Couldn't save"; a failed send ->
-│   "Couldn't send to X". Each keeps its `error`, or "Screen Recording is off"
-│   when it isn't granted, or "Restart Hex to record your screen" when it was
-│   granted after Hex started (a fresh read, as the pane's); a start that fails before any snapshot showed it
+│   "Couldn't send to X". Each keeps its `error`; a start or save that fails
+│   while Screen Recording is off (a fresh read) opens the permission helper
+│   instead; a start that fails before any snapshot showed it
 │   recording still shows, but never over a newer recording, and a capture
 │   already under way that fails in the background never takes it over
+├── Permission helper (capture.permission) -> "Hex needs Screen Recording ·
+│   to see your screen · Allow ✕" (Microphone, Accessibility alike)
+│   ├── Allow -> macOS's microphone prompt, else System Settings with the
+│   │   floating guide beside it (permission_guide), never at launch
+│   ├── Followed once a second (feed::watch_grant, screen_access) ->
+│   │   "… is on · Restart Hex" when macOS needs one, then "… is on ·
+│   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
+│   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
+│   │   back as it stood
+│   ├── A capture written with no frames (Screen Recording turned off mid-way)
+│   │   -> sent with only the voice and marks, its summary noting "No screen:
+│   │   Screen Recording is off for Hex", no contact sheet; the helper opens
+│   │   once its capsule folds
+│   └── Story: hex://story/prototypes/capture-capsule/permission; goldens
+│       capture-capsule-permission{,-restart,-ready}
 ├── A shown recording that leaves with no outcome (a discard, from a chip or
 │   `hex capture discard`) -> the capsule leaves; the picker a chip opened
 │   stays. A switch that can't start settles the recording it discarded as

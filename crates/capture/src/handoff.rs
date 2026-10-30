@@ -227,6 +227,7 @@ fn copy_loaded_bundle_to_clipboard(
     let summary = crate::sketch::summary_markdown(bundle, directory);
     #[cfg(target_os = "windows")]
     if experiment("clipboardImage")
+        && !bundle.keyframes.is_empty()
         && let Ok(image) = fs::read(directory.join(&bundle.contact_sheet))
         && crate::win::clipboard::set_png_and_text(&image, Some(&summary)).is_ok()
     {
@@ -285,8 +286,15 @@ fn paste_loaded_bundle_image_and_text(
     paste: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     let sheet_path = directory.join(&bundle.contact_sheet);
-    let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
     let summary = crate::sketch::summary_markdown(bundle, directory);
+    if bundle.keyframes.is_empty() {
+        // No screen: the words alone, never a blank sheet.
+        crate::capture::wait_for_modifiers_released(350);
+        copy_string_to_clipboard(&summary)?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        return paste();
+    }
+    let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
 
     crate::capture::wait_for_modifiers_released(350);
 

@@ -894,6 +894,7 @@ mod tests {
             cursor: Vec::new(),
             autocrop: None,
             destination: None,
+            no_screen: None,
         }
     }
 

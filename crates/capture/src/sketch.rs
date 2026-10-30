@@ -787,7 +787,11 @@ pub fn summary_markdown_with(
         }
         out.push('\n');
     }
-    if !bundle.keyframes.is_empty() {
+    if let Some(reason) = &bundle.no_screen {
+        out.push_str(&format!(
+            "No screen: {reason}. Only the voice and marks were captured.\n"
+        ));
+    } else if !bundle.keyframes.is_empty() {
         out.push_str(LOOK_AT_IMAGES);
         out.push('\n');
     }
@@ -2104,6 +2108,7 @@ mod tests {
             cursor: Vec::new(),
             autocrop: None,
             destination: None,
+            no_screen: None,
         };
         let tl = timeline(&bundle).join("\n");
         assert!(tl.find("0:03 “").unwrap() < tl.find("0:04 · pressed").unwrap());
@@ -2126,6 +2131,14 @@ mod tests {
         let summary = summary_markdown(&silent, std::path::Path::new("/recordings/test"));
         assert!(summary.contains("No transcript: "));
         assert!(summary.contains("(en_US) was still downloading. The audio is saved"));
+
+        // No screen recorded: the summary says why and asks for no images.
+        let mut blind = bundle.clone();
+        blind.keyframes.clear();
+        blind.no_screen = Some("Screen Recording is off for Hex".into());
+        let summary = summary_markdown(&blind, std::path::Path::new("/recordings/test"));
+        assert!(summary.contains("No screen: Screen Recording is off for Hex."));
+        assert!(!summary.contains(LOOK_AT_IMAGES));
 
         // A phone bundle: device header, a flagged keyframe, and app events under the keyframe
         // that was on screen when they happened.

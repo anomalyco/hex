@@ -1256,7 +1256,8 @@ fn blit_scaled(dst: &mut RgbaFrame, src: &RgbaFrame, rect: [f32; 4], radius: f32
     }
 }
 
-/// Render at a stable design size, then scale to the requested capture geometry.
+/// Render at a stable design size, then scale to the requested capture geometry. Only for
+/// `generate_demo_bundle` and tests: a real capture with no frames goes without pictures.
 pub fn render_synthetic_demo_frame(width: u32, height: u32, t_ms: u64, phase: u32) -> RgbaFrame {
     let mut frame = solid(1280, 800, [22, 23, 26, 255]);
     rounded(&mut frame, [0.0, 0.0, 244.0, 800.0], 0.0, [28, 29, 33, 255]);

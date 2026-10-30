@@ -985,7 +985,10 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     }
     // The agent host has the bundle at the same path (synced above), and an
     // SSH command line can't carry inline images.
-    let files = if agent_host().is_some() {
+    // A capture with no screen (`no_screen`) sends its words alone: its sheet is blank.
+    let files = if bundle.keyframes.is_empty() {
+        Vec::new()
+    } else if agent_host().is_some() {
         vec![serde_json::json!({
             "uri": file_uri(&directory.join(&bundle.contact_sheet)),
             "name": "contact-sheet.png",
@@ -995,14 +998,20 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
         inline_images(&directory, &bundle)
     };
     let frames = files.len().saturating_sub(1);
+    let attached = match (files.len(), frames) {
+        (0, _) => "No images".to_owned(),
+        (_, 0) => "Attached: the contact sheet (every keyframe in order)".to_owned(),
+        (_, 1) => {
+            "Attached: the contact sheet (every keyframe in order) and 1 keyframe at full size"
+                .to_owned()
+        }
+        (_, n) => format!(
+            "Attached: the contact sheet (every keyframe in order) and {n} keyframes at full size"
+        ),
+    };
     let text = format!(
-        "{}\n\nAttached: the contact sheet (every keyframe in order){}. Everything the capture holds is in this message (recorded at {}).\nThis capture is {} ms long.",
+        "{}\n\n{attached}. Everything the capture holds is in this message (recorded at {}).\nThis capture is {} ms long.",
         summary.trim_end(),
-        match frames {
-            0 => String::new(),
-            1 => " and 1 keyframe at full size".to_owned(),
-            n => format!(" and {n} keyframes at full size"),
-        },
         directory.display(),
         bundle.duration_ms,
     );

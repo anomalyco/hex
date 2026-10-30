@@ -528,6 +528,7 @@ mod tests {
             "taken-back",
             "recording",
             "discard",
+            "permission",
         ] {
             for flow in ["tuned", "list", "toast", "menu-bar", "cursor", "notch"] {
                 open_link(

@@ -8,12 +8,12 @@ use std::time::Duration;
 use scrawl_capture::capture::Stage;
 
 use super::CaptureCapsule;
-use super::flow::{Action, Delivered, Dest, Failure, Input, Mode, Route, Undone};
+use super::flow::{Action, Delivered, Dest, Failure, Grant, Input, Mode, Route, Undone};
 use super::ink::InkOverlay;
 use super::picker::PickerOverlay;
 use crate::capture_host::{
-    CaptureCommand, CaptureRoute, CaptureSnapshot, CaptureTarget, RouteAnswer, RouteDelivery,
-    RouteDest,
+    CaptureCommand, CaptureNeed, CaptureRoute, CaptureSnapshot, CaptureTarget, NeedState,
+    RouteAnswer, RouteDelivery, RouteDest,
 };
 
 /// The capture the capsule shows, the stage it last showed, and whether its
@@ -297,6 +297,8 @@ impl CaptureOverlays {
         let lit = capsule.clone();
         super::ink::on_drawing(move |on| lit.input(Input::Drawing(on)));
         follow(capsule.clone(), ink.clone());
+        let helper = capsule.clone();
+        crate::capture_host::on_missing(move |need| show_helper(&helper, need));
         Self {
             capsule,
             picker,
@@ -339,36 +341,74 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                 let inputs = follow.next(&snapshot);
                 // The first frame goes ahead of "Copied", so the capsule
                 // lands with it rather than swapping its check a moment on.
+                let mut screenless = false;
                 if inputs.contains(&Input::Stage(Stage::Done))
                     && let Some((bundle, _)) = &follow.shown
-                    && let Some(image) = first_frame(&images, bundle)
                 {
-                    capsule.thumbnail(image);
+                    screenless = !bundle.join("frames/frame-01.png").exists();
+                    if let Some(image) = first_frame(&images, bundle) {
+                        capsule.thumbnail(image);
+                    }
                 }
                 for input in inputs {
-                    capsule.input(match input {
-                        // The common first-capture failure: the engine's
-                        // own reason for it is a ScreenCaptureKit error.
-                        #[cfg(target_os = "macos")]
-                        Input::Failed(what @ (Failure::Start | Failure::Save), error) => {
-                            use crate::capture_host::ScreenAccess;
-                            match crate::capture_host::screen_access_now() {
-                                ScreenAccess::Off => {
-                                    Input::Failed(what, Some(SCREEN_RECORDING_OFF.into()))
-                                }
-                                ScreenAccess::NeedsRestart => {
-                                    Input::Failed(what, Some(SCREEN_RECORDING_RESTART.into()))
-                                }
-                                ScreenAccess::Allowed => Input::Failed(what, error),
-                            }
-                        }
-                        input => input,
-                    });
+                    // The common first-capture failure, whose own reason is
+                    // a ScreenCaptureKit error: the helper says what to do.
+                    if let Input::Failed(Failure::Start | Failure::Save, _) = &input
+                        && screen_off()
+                    {
+                        show_helper(&capsule, CaptureNeed::ScreenRecording);
+                        continue;
+                    }
+                    capsule.input(input);
+                }
+                // Sent with only the voice and marks: the helper follows
+                // once its capsule folds.
+                if screenless && screen_off() {
+                    show_helper(&capsule, CaptureNeed::ScreenRecording);
                 }
             }
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the capture capsule's thread");
+    }
+}
+
+/// Follows `need` while the permission helper shows it, once a second on
+/// its own thread, until it's granted or the helper would have folded. One
+/// watch at a time: a later refusal hands the running one its need.
+fn watch_grant(capsule: CaptureCapsule, need: CaptureNeed) {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    static NEED: Mutex<Option<CaptureNeed>> = Mutex::new(None);
+    *NEED.lock().unwrap_or_else(|e| e.into_inner()) = Some(need);
+    if WATCHING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("capture-permission".into())
+        .spawn(move || {
+            let started = std::time::Instant::now();
+            while started.elapsed().as_secs_f64() < super::flow::PERMISSION_HOLD_S {
+                let Some(need) = *NEED.lock().unwrap_or_else(|e| e.into_inner()) else {
+                    break;
+                };
+                let grant = match crate::capture_host::permission_state(need, false) {
+                    None => Grant::Ready,
+                    Some(NeedState::Restart) => Grant::Restart,
+                    Some(NeedState::Off) => Grant::Off,
+                };
+                capsule.input(Input::Permission(need, grant));
+                if grant == Grant::Ready {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            WATCHING.store(false, Ordering::Release);
+        });
+    if let Err(error) = spawned {
+        WATCHING.store(false, Ordering::Release);
+        tracing::warn!(%error, "could not watch a capture permission");
     }
 }
 
@@ -433,6 +473,14 @@ pub(crate) fn act(action: Action) {
         }
         Action::Paste => vec![command(CaptureCommand::Paste)],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
+        Action::Allow(need) => {
+            crate::capture_host::allow_permission(need);
+            return;
+        }
+        Action::Restart => {
+            crate::capture_host::restart_for_permission();
+            return;
+        }
     };
     for control in controls {
         if let Err(error) = crate::capture_host::send_to_listener(control) {
@@ -441,13 +489,16 @@ pub(crate) fn act(action: Action) {
     }
 }
 
-/// Why a capture failed when Screen Recording isn't granted.
-#[cfg(target_os = "macos")]
-const SCREEN_RECORDING_OFF: &str = "Screen Recording is off";
+/// Whether this Hex can't record the screen now, read afresh.
+fn screen_off() -> bool {
+    crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_some()
+}
 
-/// Why it failed when Screen Recording is on but this Hex predates it.
-#[cfg(target_os = "macos")]
-const SCREEN_RECORDING_RESTART: &str = "Restart Hex to record your screen";
+/// Opens the permission helper for `need` and follows its grant.
+fn show_helper(capsule: &CaptureCapsule, need: CaptureNeed) {
+    capsule.input(Input::NeedsPermission(need));
+    watch_grant(capsule.clone(), need);
+}
 
 /// The pointer, in global top-left points. Wayland tells Hex nothing of it:
 /// the portal picks the screen.

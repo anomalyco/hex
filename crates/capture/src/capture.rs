@@ -118,6 +118,30 @@ pub struct ScreenRecording {
     /// The movie, which may still be finishing: only what reads it waits ([`Movie::wait`]).
     pub video: Option<Movie>,
     pub duration_ms: u64,
+    /// Why there is no picture of the screen, when no frame was recorded: the summary says so
+    /// instead of showing anything.
+    pub no_screen: Option<String>,
+}
+
+/// Why a screen capture recorded no frame: Screen Recording off for this app (by the name
+/// macOS lists it under), or the shots failed.
+pub fn no_screen_reason() -> String {
+    if screen_capture_usable(false) {
+        "the screen recorded no frames".into()
+    } else {
+        format!("Screen Recording is off for {}", host_app_name())
+    }
+}
+
+/// The app this process runs as: its `.app` bundle's name, else its executable's.
+fn host_app_name() -> String {
+    let exe = std::env::current_exe().unwrap_or_default();
+    exe.ancestors()
+        .find(|dir| dir.extension().is_some_and(|ext| ext == "app"))
+        .unwrap_or(&exe)
+        .file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "this app".into())
 }
 
 impl ScreenRecording {
@@ -955,14 +979,14 @@ impl ScreenCaptureSession {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
             CandidateBuffer::new(0),
         );
-        let mut collected = buffer.into_frames();
-        if collected.is_empty() {
-            collected.push(crate::render::render_synthetic_demo_frame(1280, 800, 0, 0));
-        }
+        let frames = buffer.into_frames();
+        // Never a made-up frame: the capture goes with its voice and marks alone, and says why.
+        let no_screen = frames.is_empty().then(no_screen_reason);
         ScreenRecording {
-            frames: collected,
+            frames,
             video,
             duration_ms: duration_ms.max(100),
+            no_screen,
         }
     }
 }
