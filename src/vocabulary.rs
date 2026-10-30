@@ -23,26 +23,6 @@ const MAX_BIASED_TERMS: usize = 64;
 /// Read limit for settings.json when reading it without loading `AppSettings`.
 const SETTINGS_READ_LIMIT: u64 = 4 * 1024 * 1024;
 
-/// Names "Add suggested" offers. Nothing is added until it is clicked.
-pub const SUGGESTED: [&str; 16] = [
-    "abattoir",
-    "OpenCode",
-    "HiveMind",
-    "Scrawl",
-    "motion-lint",
-    "Rune",
-    "Parakeet",
-    "Moonshine",
-    "Effect",
-    "Anomaly",
-    "Dax",
-    "Aiden",
-    "Claude",
-    "Argon",
-    "Astra",
-    "Sparkle",
-];
-
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct VocabularyEntry {
     pub term: String,
@@ -301,19 +281,6 @@ pub fn remove(list: &mut Vec<VocabularyEntry>, term: &str) -> bool {
     list.len() != before
 }
 
-/// Adds every suggested term not already in the list; returns how many.
-pub fn add_suggested(list: &mut Vec<VocabularyEntry>) -> usize {
-    SUGGESTED
-        .iter()
-        .filter(|term| add(list, term, &[]).unwrap_or(false))
-        .count()
-}
-
-/// Whether every suggested term is already in the list.
-pub fn has_every_suggestion(list: &[VocabularyEntry]) -> bool {
-    SUGGESTED.iter().all(|term| contains(list, term))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,16 +331,6 @@ mod tests {
         assert!(remove(&mut list, "opencode"));
         assert!(!remove(&mut list, "opencode"));
         assert_eq!(list, [entry("Rune", &[])]);
-    }
-
-    #[test]
-    fn suggestions_add_only_whats_missing() {
-        let mut list = vec![entry("rune", &["rooney"])];
-        assert!(!has_every_suggestion(&list));
-        assert_eq!(add_suggested(&mut list), SUGGESTED.len() - 1);
-        assert_eq!(list[0], entry("rune", &["rooney"]));
-        assert!(has_every_suggestion(&list));
-        assert_eq!(add_suggested(&mut list), 0);
     }
 
     #[test]

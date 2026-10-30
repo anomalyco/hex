@@ -277,6 +277,7 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     picker::close(ui);
     explainer::close(ui);
     sound_sets::close(ui);
+    vocabulary::close(ui);
     // HUD Lab's demo would otherwise stay on screen; reopening starts at
     // General, and coming back to HUD Lab starts the demo again.
     if ui.pane == Pane::HudLab {
@@ -315,6 +316,7 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     picker::close(ui);
     explainer::close(ui);
     sound_sets::close(ui);
+    vocabulary::close(ui);
     if pane.shown(ui) {
         ui.select_pane(pane, tx);
     }
@@ -988,7 +990,7 @@ impl Ui {
                 self.modes.reload(&service);
             }
             if !drafts.vocabulary && service.vocabulary != self.settings.vocabulary {
-                self.vocabulary = vocabulary::VocabularyEditor::new(&service.vocabulary);
+                self.vocabulary.reload(&service.vocabulary);
             }
             self.settings = service.clone();
             self.settings_changed();
@@ -1023,6 +1025,7 @@ impl Ui {
         picker::close(self);
         explainer::close(self);
         sound_sets::close(self);
+        vocabulary::close(self);
         self.output.prompt_copied = false;
         if self.pane == Pane::HudLab {
             self.ask(platform::PlatformRequest::EndHudDemo);
@@ -1052,6 +1055,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         && !ui.picker.open
         && !ui.explainer.open
         && !ui.sound_sets.open
+        && !ui.vocabulary.open
         && ui.tour.is_none()
     {
         let index = digit as usize - '1' as usize;
@@ -1069,6 +1073,9 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         true
     } else if ui.sound_sets.open {
         sound_sets::close(ui);
+        true
+    } else if ui.vocabulary.open {
+        vocabulary::close(ui);
         true
     } else if ui.picker.open {
         picker::close(ui);
@@ -1259,6 +1266,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         layer.extend(modal);
     }
     if let Some(modal) = sound_sets::modal(ui, p) {
+        layer.extend(modal);
+    }
+    if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
     }
     let mut tour_layer = Vec::new();

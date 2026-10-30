@@ -1374,6 +1374,19 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     );
 }
 
+/// General's Vocabulary row opens the sheet, and Escape closes it.
+#[test]
+fn the_vocabulary_row_opens_its_sheet() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "vocabulary-control");
+    settle(&mut rt);
+    assert!(rt.state.vocabulary.open);
+    assert!(rt.find("vocabulary-boost").is_some());
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(!rt.state.vocabulary.open);
+}
+
 /// The Sounds row opens the sheet. A set's play button plays its dictation
 /// without choosing it, and pressing it again stops it; a chip plays one
 /// sound; picking a set saves it and plays it; Escape closes the sheet.

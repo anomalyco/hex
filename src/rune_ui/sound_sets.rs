@@ -95,6 +95,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::settings::cancel_capture(ui);
     super::picker::close(ui);
     super::explainer::close(ui);
+    super::vocabulary::close(ui);
     ui.open = None;
     ui.sound_sets.open = true;
     ui.sound_sets.playing = None;

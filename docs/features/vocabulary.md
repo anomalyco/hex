@@ -6,13 +6,13 @@ list (the default) changes nothing. The `hex vocabulary` commands are macOS
 only for now.
 
 ```ts
-General › Vocabulary › Names and terms   // vocabulary.settings; after Dictation
-├── Each row -> Term | Sounds like (comma-separated) | ×
-├── + -> New empty row; saved once the term has text
-├── Add suggested -> Adds vocabulary::SUGGESTED terms not already listed
-│   └── Every suggestion present -> Button hidden     // never added without a click
-├── Empty -> "No terms yet."
+General › Vocabulary   // vocabulary.settings; after Language
+├── Row value -> "None", "1 term", "N terms" -> opens the Vocabulary sheet
+├── Sheet rows -> Term | Sounds like (comma-separated) | ×; scroll past ~8
+├── Empty list -> Opens with one blank row focused
+├── Add term -> New empty row, focused; saved once the term has text
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
+├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
 └── Boost -> Off | Light | Normal (default) | Strong -> settings.json
@@ -98,7 +98,7 @@ Sources: [vocabulary.rs](../../src/vocabulary.rs),
 (`edit_vocabulary`).
 
 Checks: `vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
-suggestions, comma splitting, reading the saved list without settings, the
+comma splitting, reading the saved list without settings, the
 first 64 terms and their spellings reaching transcription, boost names);
 `vocabulary_round_trips_and_stays_out_of_files_without_one` in
 [app_settings.rs](../../src/app_settings.rs);
@@ -111,9 +111,11 @@ first 64 terms and their spellings reaching transcription, boost names);
 `vocabulary_edits_report_whether_they_changed_the_list` and the request round
 trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 [control/cli.rs](../../src/control/cli.rs);
-`rows_project_to_cleaned_merged_entries` and
-`rows_past_the_limits_keep_their_term_and_what_fits` in
-[rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs). Scenes:
+`rows_project_to_cleaned_merged_entries`,
+`rows_past_the_limits_keep_their_term_and_what_fits`, and
+`the_sheet_starts_empty_lists_with_a_row_and_saves_on_close` in
+[rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
+`the_vocabulary_row_opens_its_sheet` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs). Scenes:
 `mac-settings-vocabulary`, `mac-settings-vocabulary-empty`. Passed on macOS on
-2026-10-23. Not yet observed: the card edited in a running Hex, a CLI edit
+2026-10-23. Not yet observed: the sheet edited in a running Hex, a CLI edit
 against a running Hex, or a rewrite with a live provider.

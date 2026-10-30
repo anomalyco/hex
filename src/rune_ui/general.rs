@@ -40,7 +40,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     }
     content = content
         .child(basics(ui, p, layer))
-        .child(super::vocabulary::section_view(ui, p))
         .child(advanced_toggle(ui, p, Pane::General));
     if advanced_open(ui, Pane::General) {
         content = content
@@ -97,6 +96,23 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .into(),
     );
     rows.push(language_row(ui, p, layer).into());
+    rows.push(
+        icon_row(
+            p,
+            "vocabulary",
+            &BOOK,
+            tr("Vocabulary"),
+            None,
+            value_button(
+                p,
+                "vocabulary-control",
+                &super::vocabulary::summary(ui),
+                &rune_theme_opencode::icons::CHEVRON_RIGHT,
+                super::vocabulary::open,
+            ),
+        )
+        .into(),
+    );
     rows.extend(microphone_rows(ui, p, layer));
     rows.extend(launch_at_login_rows(ui, p));
     card(p, "basics", rows)
