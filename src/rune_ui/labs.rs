@@ -212,7 +212,39 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
             exp_rows,
         ));
     }
+    if super::onboarding_kit::live::restart_unavailable(ui).is_none() {
+        content = content.child(controls::section(
+            p,
+            "onboarding",
+            "Onboarding",
+            vec![restart_onboarding_row(p)],
+        ));
+    }
     super::scroll_body("scroll", content)
+}
+
+/// Replays the first run on this install, for trying it again (dev, test,
+/// and local builds).
+fn restart_onboarding_row(p: Paint) -> CardRow {
+    let restart = rune_kit::Button::new("Restart")
+        .variant(rune_kit::ButtonVariant::Ghost)
+        .control_size(rune_kit::ControlSize::Small)
+        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
+            if let Err(error) = super::onboarding_kit::live::restart(ui, tx) {
+                ui.error = Some(error);
+            }
+        })
+        .build(p.k)
+        .key("restart-onboarding");
+    icon_row(
+        p,
+        "lab-restart-onboarding",
+        &SPARKLES,
+        "Restart onboarding",
+        Some("Play the first run again. Settings, models, and permissions stay"),
+        restart,
+    )
+    .into()
 }
 
 fn open_pane_button(p: Paint, pane: Pane) -> El {
@@ -344,7 +376,7 @@ fn flip_experiment(ui: &mut Ui, experiment: Experiment) {
         Experiment::Playground => {
             ui.platform.playground = on;
         }
-        Experiment::LiveChapters | Experiment::LiveText => {}
+        Experiment::LiveChapters | Experiment::LiveText | Experiment::NewOnboarding => {}
     }
 }
 

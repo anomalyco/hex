@@ -68,14 +68,16 @@ pub(crate) fn is_dev_build_for(
 pub enum Experiment {
     LiveChapters,
     LiveText,
+    NewOnboarding,
     Playground,
     VoiceFilter,
 }
 
 impl Experiment {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::LiveChapters,
         Self::LiveText,
+        Self::NewOnboarding,
         Self::Playground,
         Self::VoiceFilter,
     ];
@@ -89,6 +91,7 @@ impl Experiment {
         match self {
             Self::LiveChapters => "live-chapters",
             Self::LiveText => "live-text",
+            Self::NewOnboarding => "new-onboarding",
             Self::Playground => "playground",
             Self::VoiceFilter => "voice-filter",
         }
@@ -99,6 +102,9 @@ impl Experiment {
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
             Self::LiveText => {
                 "Live text: a streaming model publishes what you have said so far while you dictate."
+            }
+            Self::NewOnboarding => {
+                "The new first-run onboarding: real download, permissions, and a live practice dictation (on in test builds)."
             }
             Self::Playground => {
                 "Rune's playground in the window (⇧⌘D, Ctrl+Shift+D off macOS): HUD Lab, prototypes, and fixture scenes."
@@ -117,9 +123,16 @@ impl Experiment {
     pub(crate) const fn index(self) -> usize {
         self as usize
     }
+
+    /// On without being named: `Hex Test.app` always runs the new
+    /// onboarding, so a fresh test install shows it.
+    fn on_by_default(self) -> bool {
+        self == Self::NewOnboarding && option_env!("HEX_TEST_BUILD") == Some("1")
+    }
 }
 
 static LIVE: [AtomicBool; Experiment::ALL.len()] = [
+    AtomicBool::new(false),
     AtomicBool::new(false),
     AtomicBool::new(false),
     AtomicBool::new(false),
@@ -200,18 +213,24 @@ fn snapshot() -> &'static Snapshot {
 struct Sources {
     env: bool,
     file: bool,
+    /// On by default in this build (`new-onboarding` in test builds).
+    build: bool,
 }
 
 impl Sources {
     fn any(self) -> bool {
-        self.env || self.file
+        self.env || self.file || self.build
     }
 
     fn labels(self) -> Vec<&'static str> {
-        [(self.env, "env"), (self.file, "file")]
-            .into_iter()
-            .filter_map(|(on, label)| on.then_some(label))
-            .collect()
+        [
+            (self.env, "env"),
+            (self.file, "file"),
+            (self.build, "build"),
+        ]
+        .into_iter()
+        .filter_map(|(on, label)| on.then_some(label))
+        .collect()
     }
 }
 
@@ -255,10 +274,14 @@ impl Snapshot {
                 Ok(file) => (file, None),
                 Err(error) => (None, Some(format!("{error:#}"))),
             };
-        Self {
+        let mut snapshot = Self {
             file_error,
             ..Self::parse(env.as_deref(), file.as_deref())
+        };
+        for experiment in Experiment::ALL {
+            snapshot.sources[experiment.index()].build = experiment.on_by_default();
         }
+        snapshot
     }
 
     fn parse(env: Option<&str>, file: Option<&str>) -> Self {
@@ -451,6 +474,9 @@ pub fn run(command: &ExperimentsCommand) -> Result<()> {
             if !on && from_env {
                 println!("{ENV} in this shell still turns it on for Hex started from here.");
             }
+            if !on && experiment.on_by_default() {
+                println!("This build turns it on regardless.");
+            }
             Ok(())
         }
     }
@@ -579,7 +605,8 @@ mod tests {
             snapshot.sources[Experiment::LiveChapters.index()],
             Sources {
                 env: true,
-                file: true
+                file: true,
+                build: false,
             }
         );
         assert_eq!(
@@ -730,6 +757,12 @@ mod tests {
                         "sources": ["env", "file"],
                     },
                     {
+                        "name": "new-onboarding",
+                        "description": Experiment::NewOnboarding.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
                         "name": "playground",
                         "description": Experiment::Playground.description(),
                         "enabled": false,
@@ -749,9 +782,19 @@ mod tests {
         let mut text = Vec::new();
         print_list(&mut text, &snapshot, path).unwrap();
         let text = String::from_utf8(text).unwrap();
-        assert!(text.contains("live-chapters  off  -"));
-        assert!(text.contains("live-text      on   env+file"));
+        assert!(text.contains("live-chapters   off  -"));
+        assert!(text.contains("live-text       on   env+file"));
         assert!(text.contains("unknown experiment \"mystery\" in file"));
+    }
+
+    #[test]
+    fn list_reports_a_build_default() {
+        let mut snapshot = Snapshot::parse(None, None);
+        snapshot.sources[Experiment::NewOnboarding.index()].build = true;
+        let mut text = Vec::new();
+        print_list(&mut text, &snapshot, Path::new("/tmp/experiments")).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("new-onboarding  on   build"), "{text}");
     }
 
     #[test]

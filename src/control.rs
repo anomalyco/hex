@@ -111,6 +111,9 @@ pub enum ControlCommand {
         pane: Option<Pane>,
     },
     WindowHide,
+    /// Replay the first-run onboarding in the window (dev, test, and local
+    /// builds); settings, history, models, and permissions stay.
+    OnboardingReset,
     /// Open the window on a playground story (the `playground` experiment).
     WindowStory {
         story: String,
@@ -871,6 +874,7 @@ mod tests {
                 pane: Some(Pane::History),
             },
             ControlCommand::WindowHide,
+            ControlCommand::OnboardingReset,
             ControlCommand::WindowStory {
                 story: "HUD/Processing".into(),
                 variant: Some("2".into()),

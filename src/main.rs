@@ -1005,6 +1005,12 @@ mod tests {
             parse(&["hex", "window", "show", "history"]),
             Ok(Some(Command::Control(ControlCli::Window { .. })))
         ));
+        for verb in ["reset", "restart"] {
+            assert!(matches!(
+                parse(&["hex", "onboarding", verb]),
+                Ok(Some(Command::Control(ControlCli::Onboarding { .. })))
+            ));
+        }
         assert!(matches!(
             parse(&["hex", "history", "clear", "--yes"]),
             Ok(Some(Command::History(transcript_cli::HistoryArgs {
