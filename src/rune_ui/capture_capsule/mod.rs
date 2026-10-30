@@ -58,12 +58,7 @@ const HIDE_AFTER_S: f64 = 0.5;
 const LIST_RADIUS: f32 = surface::SHELL_RADIUS;
 const ROW_RADIUS: f32 = 8.0;
 const ROW_PX: f32 = 10.0;
-const NUMBER_W: f32 = 10.0;
-/// The rows' numbers: the names' weight in tabular digits, so 1 and 4
-/// fill the same column.
-const NUMBER: rune::TextStyle = MEDIUM.features("'tnum' 1");
-/// Above a section after the first, and under its header's words.
-const SECTION_GAP: f32 = 4.0;
+/// Under the list header's words.
 const HEADER_PB: f32 = 4.0;
 /// Between one hint and the next.
 const HINTS_GAP: f32 = 16.0;
@@ -681,7 +676,6 @@ fn key_input(key: crate::capture_host::CapsuleKey) -> Input {
         CapsuleKey::Down => Input::Move(1),
         CapsuleKey::Return { shift } => Input::Send { always: shift },
         CapsuleKey::Tab { shift } => Input::Cycle(if shift { -1 } else { 1 }),
-        CapsuleKey::Digit(digit) => Input::SendRow(usize::from(digit.saturating_sub(1))),
         CapsuleKey::Press => Input::ClickAway,
         CapsuleKey::Shift(down) => Input::Shift(down),
     }
@@ -1189,24 +1183,49 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             })
         }
         Id::Next => keyed(p, base, &["⇥"], "Next", MEDIUM).on_press_tx(press(id)),
-        // A chip beside the frame in the menu-bar flow, its number after.
-        Id::Pick(row) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            let key = (row + 1).to_string();
-            keyed(p, base, &[&key], shown.text(), MEDIUM).on_press_tx(press(id))
+        // A chip beside the frame in the menu-bar flow.
+        Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
+            keyed(p, base, &[], shown.text(), MEDIUM).on_press_tx(press(id))
         }
         Id::Pick(row) => pick_row(p, base, shown, row),
         Id::CardHints => base
             .justify_start()
             .px(ROW_PX)
-            .child(hint(p, "Send", shown.text()))
+            .child(hint(p, "Search", shown.text()))
             .role("text")
-            .label(format!("Send {}", shown.text())),
+            .label(format!("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
         // The quiet way out of a send that just went.
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => keyed(p, base, &[], UNDO_LABEL, MEDIUM).on_press_tx(press(id)),
+        // Search, with the capture shortcut that opens it as Settings draws it.
+        Id::Ask
+            if matches!(
+                &surface.pres,
+                Pres::Done(Done { ask: Some(ask), ask_keys: true, .. }) if *ask == shown.ident
+            ) =>
+        {
+            base.justify_start()
+                .pl(CHIP_PX)
+                .pr(surface::keycaps_inset())
+                .gap(surface::KEYCAPS_GAP)
+                .radius(surface::CHIP_RADIUS)
+                .hover(c.hover)
+                .press(c.pressed)
+                .child(label(&shown.ident, MEDIUM, p.muted()))
+                .child(el().grow(1.0))
+                .child(super::controls::keycaps(
+                    p,
+                    "ask-keys",
+                    &surface::shortcut_keycaps(),
+                ))
+                .role("button")
+                .label(shown.ident.clone())
+                .hit()
+                .on_press_tx(press(id))
+        }
         Id::Ask => keyed(p, base, &[], &shown.ident, MEDIUM).on_press_tx(press(id)),
         Id::Paste | Id::Inspect => {
             let (name, help) = if id == Id::Paste {
@@ -1245,10 +1264,10 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
 }
 
 /// A guess in the cursor's or the notch's card, as the list's rows read:
-/// its number, its name, and its reason, the best one's in the accent.
+/// its name and its reason, the best one's in the accent.
 fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
     let c = &p.k.c;
-    let room = shown.rect[2] - 5.0 * ROW_PX - NUMBER_W - measure(shown.text(), MEDIUM);
+    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), MEDIUM);
     let note = ellipsize(shown.note(), SMALL, room.max(24.0));
     base.justify_start()
         .px(ROW_PX)
@@ -1256,7 +1275,6 @@ fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
         .radius(ROW_RADIUS + 2.0)
         .hover(c.hover)
         .press(c.pressed)
-        .child(label(&(row + 1).to_string(), NUMBER, p.faint()).w(NUMBER_W))
         .child(label(shown.text(), MEDIUM, p.text()))
         .child(el().grow(1.0))
         .child(
@@ -1494,131 +1512,107 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
         .combined(Transition::scale(scale))
         .springs(springs);
     let mut body = col().absolute(0.0, 0.0).w(w).px(LIST_PAD).pt(LIST_PAD);
-    let mut n = 0;
     let suggesting = list.suggesting();
     let saving = list.always.as_ref().is_some_and(|(_, shift)| *shift);
-    let first = if suggesting { "Send to" } else { "Suggested" };
-    let sections = [(first, &list.suggested), ("Recent", &list.recent)];
-    for (title, rows) in sections {
-        if rows.is_empty() {
-            continue;
-        }
-        // A header sits nearer the rows it heads than the ones above it.
+    // Over the suggestions, the header's right says what ⇧ does (the
+    // search's footer says it there).
+    let remembers = (suggesting && list.always.is_some()).then(|| {
+        label(
+            "⇧ remembers",
+            k.ty.small_medium,
+            if saving { p.accent() } else { p.faint() },
+        )
+        .key("remembers")
+    });
+    if headed(list) {
         body = body.child(
             row()
-                .key(format!("section-{title}"))
+                .key(format!("section-{}", list.title))
                 .items_end()
                 .h(HEADER_H)
-                .mt(if n == 0 { 0.0 } else { SECTION_GAP })
                 .px(ROW_PX)
                 .pb(HEADER_PB)
-                .child(label(title, k.ty.small_medium, p.faint()))
+                .child(label(list.title, k.ty.small_medium, p.faint()))
+                .child(el().grow(1.0))
+                .children(remembers)
                 .transition(in_place),
         );
-        for dest in rows {
-            // The name keeps its width; a long reason is cut first, to no
-            // less than two fifths of the row.
-            let content = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - NUMBER_W - 3.0 * ROW_PX;
-            let why_room = (content - measure(&dest.name, MEDIUM)).max(content * 0.4);
-            let why = ellipsize(&dest.why, SMALL, why_room);
-            let max = content - measure(&why, SMALL);
-            let mut entry = row()
-                .key(format!("row-{}", dest.name))
-                .trace_name("row")
-                .center_y()
-                .h(ROW_H)
-                .px(ROW_PX)
-                .gap(ROW_PX)
-                .radius(ROW_RADIUS)
-                .hover(k.c.hover)
-                .press(k.c.pressed)
-                .child(
-                    label(&(n + 1).to_string(), NUMBER, p.faint())
-                        .key(format!("number-{n}"))
-                        .w(NUMBER_W)
-                        .transition(Transition::opacity().springs(springs)),
-                )
-                .child(label(&ellipsize(&dest.name, MEDIUM, max), MEDIUM, p.text()))
-                .child(el().grow(1.0))
-                // The best suggestion is marked by its reason, on the
-                // name's baseline; Shift down, so is where a rule would send.
-                .child(
-                    label(
-                        &why,
-                        SMALL,
-                        if (suggesting && n == 0) || saving && n == list.selected {
-                            p.accent()
-                        } else {
-                            p.muted()
-                        },
-                    )
-                    .offset(0.0, (MEDIUM.size - SMALL.size) * BASELINE_DROP),
-                )
-                .role("button")
-                .label(dest.name.clone())
-                .hit()
-                .on_press_tx(press(Id::Row(n)))
-                .transition(in_place);
-            if n == list.selected {
-                entry = entry.fill(k.c.layer_02);
-            }
-            body = body.child(entry);
-            n += 1;
-        }
     }
-    let footer = match &list.always {
-        Some((site, true)) => saving_hint(p, list, site, w),
-        _ if suggesting => suggest_hints(p, list, w),
-        _ => send_hints(p, list, w),
+    for (n, dest) in list.rows.iter().enumerate() {
+        // The name keeps its width; a long reason is cut first, to no
+        // less than two fifths of the row.
+        let content = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - 2.0 * ROW_PX;
+        let why_room = (content - measure(&dest.name, MEDIUM)).max(content * 0.4);
+        let why = ellipsize(&dest.why, SMALL, why_room);
+        let max = content - measure(&why, SMALL);
+        let mut entry = row()
+            .key(format!("row-{}", dest.name))
+            .trace_name("row")
+            .center_y()
+            .h(ROW_H)
+            .px(ROW_PX)
+            .gap(ROW_PX)
+            .radius(ROW_RADIUS)
+            .hover(k.c.hover)
+            .press(k.c.pressed)
+            .child(label(&ellipsize(&dest.name, MEDIUM, max), MEDIUM, p.text()))
+            .child(el().grow(1.0))
+            // The best suggestion is marked by its reason, on the
+            // name's baseline; Shift down, so is where a rule would send.
+            .child(
+                label(
+                    &why,
+                    SMALL,
+                    if (suggesting && n == 0) || saving && n == list.selected {
+                        p.accent()
+                    } else {
+                        p.muted()
+                    },
+                )
+                .offset(0.0, (MEDIUM.size - SMALL.size) * BASELINE_DROP),
+            )
+            .role("button")
+            .label(dest.name.clone())
+            .hit()
+            .on_press_tx(press(Id::Row(n)))
+            .transition(in_place);
+        // The suggestions mark only the best, by its reason: a click
+        // picks, so no row is "selected" until the search opens.
+        if n == list.selected && !suggesting {
+            entry = entry.fill(k.c.layer_02);
+        }
+        body = body.child(entry);
+    }
+    let footer = match (&list.always, list.footer) {
+        (_, Footer::Suggesting) => None,
+        (Some((site, true)), _) => Some(saving_hint(p, list, site, w)),
+        (_, Footer::Search { remember }) => Some(search_hints(p, remember, w)),
     };
     list_panel(p, body, footer, x, w, h, blur)
 }
 
-/// The list's own hints, as one quiet line: what each key does, then the
-/// key ("Send ⏎"); the highlighted row already says where.
-fn send_hints(p: Paint, list: &List, w: f32) -> El {
+/// The search's hints, as one quiet line: what each key does, then the
+/// key ("Send ⏎"); the highlighted row already says where. The capture
+/// shortcut, which records anew from here, sits on the right.
+fn search_hints(p: Paint, remember: bool, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let send = "Send".to_owned();
-    let (keys, second): (&[&str], String) = match &list.footer {
-        Footer::KeepCopied => (&["esc"], "Keep".to_owned()),
-        Footer::Keep(to) => (&["esc"], format!("Keep {to}")),
-        Footer::Always(_) => (&["⇧", "⏎"], "Always".to_owned()),
-        Footer::Suggesting => (&["esc"], "Keep".to_owned()),
-    };
-    let keys = chord(keys);
-    let used = hint_width(&send, "⏎") + HINTS_GAP;
-    let second = ellipsize(
-        &second,
-        SMALL,
-        room - used - hint_width("", &keys) - HINT_GAP,
-    );
+    let shortcut = chord(&surface::shortcut_keycaps());
+    let used = hint_width("Send", "⏎") + HINTS_GAP;
+    let remember = remember && used + hint_width("Remember", "⇧⏎") <= room;
+    let used = used
+        + if remember {
+            hint_width("Remember", "⇧⏎")
+        } else {
+            0.0
+        };
+    let capture = used + HINTS_GAP + hint_width("New capture", &shortcut) <= room;
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .child(hint(p, &send, "⏎").key("send"))
-        .child(hint(p, &second, &keys).key("second"))
-}
-
-/// The suggestions' hints: the digits that send, then Shift for a rule
-/// when one can be made.
-fn suggest_hints(p: Paint, list: &List, w: f32) -> El {
-    let rows = list.rows().count();
-    let digits = if rows > 1 {
-        format!("1–{rows}")
-    } else {
-        "1".to_owned()
-    };
-    let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let always = list.always.is_some()
-        && hint_width("Send", &digits) + HINTS_GAP + hint_width("Always", "⇧") <= room;
-    let say_send = hint_width("Send", &digits) <= room;
-    let send = hint(p, if say_send { "Send" } else { "" }, &digits).key("send");
-    row()
-        .center_y()
-        .gap(HINTS_GAP)
-        .child(send)
-        .children(always.then(|| hint(p, "Always", "⇧").key("second")))
+        .child(hint(p, "Send", "⏎").key("send"))
+        .children(remember.then(|| hint(p, "Remember", "⇧⏎").key("remember")))
         .child(el().grow(1.0))
+        .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
 }
 
 /// Shift down: the footer says where the rule will send `site`, each in
@@ -1788,7 +1782,7 @@ fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
     }
 }
 
-fn list_panel(p: Paint, body: El, hints: El, x: f32, w: f32, h: f32, blur: f32) -> El {
+fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blur: f32) -> El {
     let k = p.k;
     let mut panel = el()
         .key("list")
@@ -1808,7 +1802,7 @@ fn list_panel(p: Paint, body: El, hints: El, x: f32, w: f32, h: f32, blur: f32) 
             .radius(LIST_RADIUS)
             .clip_rounded(LIST_RADIUS)
             .child(body)
-            .child(footer_box(p, hints, w, h)),
+            .children(hints.map(|hints| footer_box(p, hints, w, h))),
     );
     if k.dark {
         panel = panel.child(rim(k, w, h, LIST_RADIUS));
@@ -1829,18 +1823,23 @@ fn list_panel(p: Paint, body: El, hints: El, x: f32, w: f32, h: f32, blur: f32) 
         )
 }
 
-/// The list's height: its sections, rows, and footer.
+/// Whether the list shows its header: over rows, or the room a search
+/// keeps for them.
+fn headed(list: &List) -> bool {
+    !list.rows.is_empty() || list.min_rows > 0
+}
+
+/// The list's height: its header, rows (at least the room it keeps), and
+/// the search's footer.
 pub(crate) fn list_height(list: &List) -> f32 {
-    let sections = [&list.suggested, &list.recent]
-        .iter()
-        .filter(|rows| !rows.is_empty())
-        .count() as f32;
-    let rows = (list.suggested.len() + list.recent.len()) as f32;
-    LIST_PAD
-        + sections * HEADER_H
-        + (sections - 1.0).max(0.0) * SECTION_GAP
-        + rows * ROW_H
-        + footer_height()
+    let header = if headed(list) { HEADER_H } else { 0.0 };
+    let rows = list.rows.len().max(list.min_rows) as f32;
+    let footer = if list.suggesting() {
+        LIST_PAD
+    } else {
+        footer_height()
+    };
+    LIST_PAD + header + rows * ROW_H + footer
 }
 
 /// A rounded rectangle on the icon grid.

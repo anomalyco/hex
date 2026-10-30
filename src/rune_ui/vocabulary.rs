@@ -1,27 +1,33 @@
 //! Vocabulary: a sheet from General's Vocabulary row with one row per term
 //! and its "sounds like" spellings, edited in place and saved when typing
-//! pauses, like a mode's corrections, and the boost.
+//! pauses, like a mode's corrections. The boost has no control here; it
+//! stays a setting (`hex settings set vocabulary_boost`).
 
-use rune::{El, TextEdit, col, edit_access, el, row, text};
+use rune::tok::motion::{SETTLE, SETTLE_EXIT};
+use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
-    segmented, setting_row,
 };
 use super::lists::remove_button;
 use crate::desktop_i18n::{tr, tr_fill};
-use crate::vocabulary::{self, VocabularyBoost, VocabularyEntry};
+use crate::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
 const PADDING: f32 = 18.0;
-/// The term rows scroll past this.
-const ROWS_HEIGHT: f32 = 300.0;
 /// One term row: a regular text field and its padding.
 const ROW_HEIGHT: f32 = 36.0;
-/// The term list's fades; the bottom one is the gap before Boost at rest.
+/// The term list's fades; the bottom one is the gap before the footer at
+/// rest.
 const FADES: (f32, f32) = (0.0, 6.0);
+/// The term rows scroll past eight whole rows, so a list scrolled to its
+/// end shows no sliver of a row above.
+const ROWS_HEIGHT: f32 = 8.0 * ROW_HEIGHT + FADES.0 + FADES.1;
+/// Room beside the rows inside the list's clip, so the fields' borders
+/// aren't cut at its sides.
+const SIDE_ROOM: f32 = 2.0;
 const TERM_WIDTH: f32 = 200.0;
 
 /// One term row: its term and "sounds like" fields, and an identity that
@@ -40,6 +46,9 @@ pub(super) struct VocabularyEditor {
     next_id: u64,
     /// What an edit for a row that is gone lands in; never saved.
     detached: TextEdit,
+    /// The row Add term made last while the sheet is open: only it arrives
+    /// with motion, so opening the sheet never animates its rows.
+    added: Option<u64>,
     pub(super) open: bool,
 }
 
@@ -53,6 +62,7 @@ impl VocabularyEditor {
     /// Replaces the rows with `entries`, keeping the sheet open or shut.
     pub(super) fn reload(&mut self, entries: &[VocabularyEntry]) {
         self.rows.clear();
+        self.added = None;
         for entry in entries {
             self.push(
                 TextEdit::new(entry.term.clone()),
@@ -85,6 +95,11 @@ impl VocabularyEditor {
                 &mut self.detached
             }
         }
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn last_row(&self) -> Option<u64> {
+        self.rows.last().map(|row| row.id)
     }
 
     /// The rows as saved entries: blank terms are left out and repeated
@@ -153,20 +168,42 @@ pub(super) fn close(ui: &mut Ui) {
         return;
     }
     ui.vocabulary.open = false;
+    ui.vocabulary.added = None;
     ui.flush_drafts();
     ui.vocabulary
         .rows
         .retain(|row| !row.term.text.trim().is_empty() || !row.sounds_like.text.trim().is_empty());
 }
 
-fn add_row(ui: &mut Ui) {
+fn add_row(ui: &mut Ui) -> u64 {
     for row in &mut ui.vocabulary.rows {
         row.term.focused = false;
         row.sounds_like.focused = false;
     }
     let mut term = TextEdit::default();
     term.focused = true;
-    ui.vocabulary.push(term, TextEdit::default());
+    ui.vocabulary.push(term, TextEdit::default())
+}
+
+/// Add term: a new focused row at the end, which the list glides down to
+/// as the row arrives.
+fn add_term(ui: &mut Ui, tx: &mut Tx) {
+    ui.vocabulary.added = Some(add_row(ui));
+    tx.scroll_to_bottom("term-scroll");
+}
+
+fn row_key(id: u64) -> String {
+    format!("term{id}")
+}
+
+/// A new row rises a few points into place as it fades in; under Reduce
+/// Motion only the fade remains. Its removal is the usual fade.
+fn arrival() -> Transition {
+    Transition::asymmetric(
+        Transition::offset(0.0, 8.0).combined(Transition::opacity()),
+        Transition::opacity(),
+    )
+    .springs(SpringPair::new(SETTLE, SETTLE_EXIT))
 }
 
 /// Removes row `id`; a second press for a row already gone does nothing.
@@ -177,10 +214,10 @@ fn remove_row(ui: &mut Ui, id: u64) {
     }
 }
 
-fn term_row(p: Paint, entry: &TermRow) -> El {
+fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
     let id = entry.id;
-    row()
-        .key(format!("term{id}"))
+    let term_row = row()
+        .key(row_key(id))
         .h(ROW_HEIGHT)
         .gap(8.0)
         .center_y()
@@ -210,7 +247,12 @@ fn term_row(p: Paint, entry: &TermRow) -> El {
             p,
             ControlSize::Regular,
             move |ui: &mut Ui| remove_row(ui, id),
-        ))
+        ));
+    if added {
+        term_row.transition(arrival())
+    } else {
+        term_row
+    }
 }
 
 pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
@@ -218,42 +260,25 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         return None;
     }
     let c = &p.k.c;
-    let rows = col()
-        .key("terms")
-        .children(ui.vocabulary.rows.iter().map(|entry| term_row(p, entry)));
+    let rows = col().key("terms").px(SIDE_ROOM).children(
+        ui.vocabulary
+            .rows
+            .iter()
+            .map(|entry| term_row(p, entry, ui.vocabulary.added == Some(entry.id))),
+    );
     let height = ui.vocabulary.rows.len() as f32 * ROW_HEIGHT + FADES.0 + FADES.1;
     let terms = col()
         .key("term-column")
         .h(height.min(ROWS_HEIGHT))
+        .mx(-SIDE_ROOM)
         .child(super::faded_body("term-scroll", rows, FADES));
     let add = button(
         p,
         "add-term",
         tr("Add term"),
         ButtonKind::Secondary,
-        |ui: &mut Ui, _| add_row(ui),
+        add_term,
     );
-    let boost = setting_row(
-        p,
-        "boost",
-        tr("Boost"),
-        Some(tr("How readily transcription swaps in a term")),
-        segmented(
-            p,
-            "vocabulary-boost",
-            &[tr("Off"), tr("Light"), tr("Normal"), tr("Strong")],
-            VocabularyBoost::ALL
-                .iter()
-                .position(|&boost| boost == ui.settings.vocabulary_boost)
-                .unwrap_or(2),
-            |ui: &mut Ui, index| {
-                if let Some(&boost) = VocabularyBoost::ALL.get(index) {
-                    ui.update(|settings| settings.vocabulary_boost = boost);
-                }
-            },
-        ),
-    )
-    .mx(-super::controls::METRICS.row_px);
     let footer = row()
         .key("footer")
         .gap(12.0)
@@ -287,6 +312,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .font(DESCRIPTION)
             .color(p.muted())
             .wrap(),
+        )
+        .child(
+            text(tr("Terms with spaces match only when said in full"))
+                .key("phrases")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
         );
     if let Some(unused) = unused_note(ui) {
         heading = heading.child(
@@ -323,7 +355,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .mx(-super::controls::METRICS.row_px),
         );
     }
-    panel = panel.child(boost).child(footer);
+    panel = panel.child(footer);
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }

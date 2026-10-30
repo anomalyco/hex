@@ -2596,6 +2596,18 @@ pub fn capture_settings() -> CaptureSettings {
         .clone()
 }
 
+/// The capture shortcut's keycaps (`capture.hotkey`), without cloning the
+/// capture settings.
+#[cfg(hex_capture)]
+pub fn capture_hotkey_keycaps() -> Vec<String> {
+    CAPTURE_SETTINGS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .hotkey
+        .keycaps()
+}
+
 /// The saved [`CapsuleFlow`], without cloning the capture settings.
 #[cfg(hex_capture)]
 pub fn capsule_flow() -> CapsuleFlow {
