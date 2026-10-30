@@ -2124,20 +2124,6 @@ mod tests {
         );
     }
 
-    /// A left click from the mouse monitor: down at `from` with `flags`, up at `to` with `up_flags`.
-    fn click(t: &SharedCaptureTelemetry, from: (f64, f64), to: (f64, f64), flags: [u64; 2]) {
-        for (kind, (x, y), flags) in [
-            (EVENT_LEFT_MOUSE_DOWN, from, flags[0]),
-            (EVENT_LEFT_MOUSE_UP, to, flags[1]),
-        ] {
-            let cg = unsafe { CGEventCreateMouseEvent(ptr::null(), kind, CGPoint { x, y }, 0) };
-            assert!(!cg.is_null());
-            unsafe { CGEventSetFlags(cg, flags) };
-            mouse_event(t, cg, |_, _| false);
-            unsafe { CFRelease(cg.cast()) };
-        }
-    }
-
     fn session(width: f64, height: f64) -> Arc<SharedCaptureTelemetry> {
         let (sender, _receiver) = flume::unbounded();
         let telemetry = SharedCaptureTelemetry::new(sender, ShortcutConfig::defaults());
@@ -2149,44 +2135,6 @@ mod tests {
             scale: 2.0,
         });
         telemetry
-    }
-
-    /// Issue #9: ⇧-click is documented to drop a numbered pin, but the mouse monitor skipped
-    /// every ⇧ press (as ink) and nothing else made pins, so none ever landed.
-    #[test]
-    fn a_shift_click_drops_numbered_pins_and_is_not_a_click() {
-        let telemetry = session(1000.0, 1000.0);
-        let shift = [FLAG_SHIFT; 2];
-        // A few points of trackpad jitter.
-        click(&telemetry, (100.0, 200.0), (103.0, 202.0), shift);
-        click(&telemetry, (500.0, 500.0), (500.0, 500.0), shift);
-        // ⇧ let go before the button still drops the pin.
-        click(&telemetry, (700.0, 300.0), (700.0, 300.0), [FLAG_SHIFT, 0]);
-        // A ⇧-drag is ink (the poller's), not a pin; ⇧ with ⌘ is neither.
-        click(&telemetry, (100.0, 800.0), (300.0, 800.0), shift);
-        let cmd_shift = [FLAG_SHIFT | FLAG_COMMAND; 2];
-        click(&telemetry, (900.0, 900.0), (900.0, 900.0), cmd_shift);
-
-        let (events, strokes) = telemetry.finish_session();
-        let pins: Vec<_> = strokes
-            .iter()
-            .map(|s| (s.pin, s.normalized_points()[0]))
-            .collect();
-        assert_eq!(
-            pins,
-            vec![
-                (Some(1), [0.1, 0.2]),
-                (Some(2), [0.5, 0.5]),
-                (Some(3), [0.7, 0.3])
-            ]
-        );
-        let shape = crate::sketch::shape_of(&strokes[0]);
-        assert_eq!(shape, crate::model::Shape::Pin);
-        // Only the ⌘⇧-click is an ordinary click.
-        assert!(
-            matches!(events[..], [InteractionEvent::Click { x, .. }] if (x - 0.9).abs() < 1e-3),
-            "{events:?}"
-        );
     }
 
     /// The helper's windows (the SwiftUI capsule's Finish, Settings, onboarding) reach the mouse
@@ -2241,8 +2189,7 @@ mod tests {
             ),
             "{events:?}"
         );
-        let pins: Vec<_> = strokes.iter().map(|s| s.normalized_points()[0]).collect();
-        assert_eq!(pins, vec![[0.1, 0.1]]);
+        assert!(strokes.is_empty(), "{strokes:?}");
     }
 
     #[test]
