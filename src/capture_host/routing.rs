@@ -29,8 +29,6 @@ use super::{SharedOutcomes, lock};
 const RETRY_EVERY: Duration = Duration::from_secs(15);
 /// How long taking back a send may wait on OpenCode.
 const UNDO_DEADLINE: Duration = Duration::from_secs(10);
-/// Recent sessions listed beside the router's suggestions.
-const RECENT: usize = 8;
 const QUEUE: usize = 16;
 
 // ---------------------------------------------------------------------------
@@ -78,6 +76,7 @@ pub struct RouteDest {
     pub why: String,
 }
 
+/// `recent` is every other session the look read, newest first.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RouteAnswer {
     /// Written; the router is still working.
@@ -1125,7 +1124,8 @@ fn lead_why(to: &smart::Scored) -> String {
         .unwrap_or_default()
 }
 
-/// The newest sessions not already shown, with how long ago each moved.
+/// Every session read and not already shown, newest first, with how long
+/// ago each moved: the capsule lists the newest and searches them all.
 fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<RouteDest> {
     let mut recent: Vec<_> = candidates
         .iter()
@@ -1134,7 +1134,6 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
     recent.sort_by_key(|candidate| std::cmp::Reverse(candidate.updated_ms));
     recent
         .into_iter()
-        .take(RECENT)
         .map(|candidate| RouteDest {
             session: candidate.id.clone(),
             name: candidate.label().to_owned(),

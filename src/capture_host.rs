@@ -1483,8 +1483,8 @@ impl CaptureHost {
         at: CaptureInstant,
         audio: &impl AudioTimeline,
     ) -> ShortcutActivity {
-        if picking() {
-            return ShortcutActivity::Picking;
+        if picking() || suggesting() {
+            return ShortcutActivity::Capsule;
         }
         match self.recording_since(audio) {
             Some(t0) => ShortcutActivity::Recording {
@@ -2492,8 +2492,9 @@ impl LiveInput {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShortcutActivity {
     Free,
-    /// The capsule's picker is open ([`CapsuleKeys::Picker`]).
-    Picking,
+    /// The capsule takes the press ([`CapsuleKey::Shortcut`]): its picker
+    /// records what it's on, and its suggestions open the search.
+    Capsule,
     Recording {
         elapsed: Duration,
     },
@@ -2557,7 +2558,7 @@ impl ShortcutActivity {
     pub fn on_press(self) -> ShortcutAction {
         match self {
             Self::Free => ShortcutAction::Record,
-            Self::Picking => ShortcutAction::Pick,
+            Self::Capsule => ShortcutAction::Pick,
             Self::Recording { .. } => ShortcutAction::None,
         }
     }
@@ -2575,7 +2576,8 @@ pub enum ShortcutAction {
     /// records.
     Cancel,
     Finish,
-    /// The picker is open: record what it is on ([`CapsuleKey::Shortcut`]).
+    /// The capsule takes the press ([`CapsuleKey::Shortcut`]): the picker
+    /// records what it is on, the suggestions open the search.
     Pick,
 }
 
@@ -2643,7 +2645,7 @@ impl CaptureShortcut {
                         annotate_key_down();
                         ShortcutAction::None
                     }
-                    ShortcutActivity::Picking => ShortcutAction::Pick,
+                    ShortcutActivity::Capsule => ShortcutAction::Pick,
                     ShortcutActivity::Free => {
                         self.armed = Some(binding);
                         ShortcutAction::None
@@ -2747,17 +2749,19 @@ pub enum CapsuleKeys {
     /// The open list: every key press without ⌘ or ⌃ that isn't one of
     /// Hex's shortcuts.
     List,
-    /// A capture's suggestions: 1 to `rows` with no modifier ([`CapsuleKey::Digit`]), and
-    /// a mouse press ([`CapsuleKey::Press`]) that may fold them. `cycle`:
-    /// Return and Tab too, for the toast that offers one guess at a time.
-    Suggest { rows: u8, cycle: bool },
+    /// A capture's suggestions: the capture shortcut, which opens the
+    /// search ([`CapsuleKey::Shortcut`]), Shift, and a mouse press
+    /// ([`CapsuleKey::Press`]) that may fold them. `cycle`: Return and Tab
+    /// too, for the toast that offers one guess at a time.
+    Suggest { cycle: bool },
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// A key the capsule gets from Hex's tap.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapsuleKey {
-    /// The capture shortcut, while picking: record what the picker is on.
+    /// The capture shortcut: the picker records what it is on, and the
+    /// suggestions open the search.
     Shortcut,
     Escape,
     /// What a key types in the list, in the active layout.
@@ -2773,9 +2777,6 @@ pub enum CapsuleKey {
     Tab {
         shift: bool,
     },
-    /// 1 to 9 typed in the list (otherwise text), with Shift too: a
-    /// Shift pick also saves a rule.
-    Digit(u8),
     /// Shift went down (true) or up while the list or suggestions show.
     Shift(bool),
     /// A mouse button went down anywhere, while the list is open. The click
@@ -2871,13 +2872,9 @@ pub fn list_open() -> bool {
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// Whether the capsule's suggestions take their digit keys at the tap.
+/// Whether the capsule's suggestions show, taking the capture shortcut.
 pub fn suggesting() -> bool {
-    GRAB_KEYS.load(Ordering::Acquire)
-        == keys_code(Some(CapsuleKeys::Suggest {
-            rows: 0,
-            cycle: false,
-        }))
+    GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::Suggest { cycle: false }))
 }
 
 /// Hands `key` to the capsule if its keys include it; false otherwise.
@@ -2892,8 +2889,10 @@ pub fn capsule_key(key: CapsuleKey) -> bool {
 fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
     match (keys, key) {
         (CapsuleKeys::Picker, CapsuleKey::Shortcut | CapsuleKey::Escape) => true,
-        (CapsuleKeys::Suggest { rows, .. }, CapsuleKey::Digit(digit)) => (1..=rows).contains(digit),
-        (CapsuleKeys::Suggest { .. }, CapsuleKey::Press | CapsuleKey::Shift(_)) => true,
+        (
+            CapsuleKeys::Suggest { .. },
+            CapsuleKey::Shortcut | CapsuleKey::Press | CapsuleKey::Shift(_),
+        ) => true,
         (
             CapsuleKeys::Suggest { cycle: true, .. },
             CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
@@ -2921,7 +2920,6 @@ pub fn list_key(code: u16, flags: u64, typed: &str) -> ListTap {
     const COMMAND: u64 = 1 << 20;
     const CONTROL: u64 = 1 << 18;
     const SHIFT: u64 = 1 << 17;
-    const OPTION: u64 = 1 << 19;
     if flags & (COMMAND | CONTROL) != 0 {
         return ListTap::Pass;
     }
@@ -2936,28 +2934,12 @@ pub fn list_key(code: u16, flags: u64, typed: &str) -> ListTap {
         126 => CapsuleKey::Up,
         125 => CapsuleKey::Down,
         51 => CapsuleKey::Backspace,
-        // Shift's digits type symbols, so the digit row reads by position.
-        _ if flags & (SHIFT | OPTION) == SHIFT && shifted_digit(code).is_some() => {
-            CapsuleKey::Digit(shifted_digit(code).unwrap_or(1))
-        }
         _ => match typed.chars().next() {
-            Some(digit @ '1'..='9') if typed.len() == 1 && flags & OPTION == 0 => {
-                CapsuleKey::Digit(digit as u8 - b'0')
-            }
             Some(_) if !typed.chars().any(char::is_control) => CapsuleKey::Text(typed.into()),
             _ => return ListTap::Swallow,
         },
     };
     ListTap::Key(key)
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// 1 to 9 for the ANSI digit row's key codes.
-fn shifted_digit(code: u16) -> Option<u8> {
-    [18, 19, 20, 21, 23, 22, 26, 28, 25]
-        .iter()
-        .position(|row| *row == code)
-        .map(|i| i as u8 + 1)
 }
 
 /// Waits for `thread` until `deadline`, then leaves it running.
@@ -4892,7 +4874,7 @@ mod tests {
             None
         );
         // While picking, the picker records.
-        let picking = ShortcutActivity::Picking;
+        let picking = ShortcutActivity::Capsule;
         assert_eq!(shortcut.input(key(true, chord), hotkeys, picking), Pick);
         assert_eq!(shortcut.input(key(false, chord), hotkeys, picking), None);
 
@@ -4928,25 +4910,19 @@ mod tests {
         drop(first);
         assert!(capsule_key(CapsuleKey::Escape));
 
-        // Suggestions: only their own digits, never Escape.
-        second.set(CapsuleKeys::Suggest {
-            rows: 2,
-            cycle: false,
-        });
+        // Suggestions: the capture shortcut opens the search; never Escape,
+        // and no typing.
+        second.set(CapsuleKeys::Suggest { cycle: false });
         assert!(suggesting() && !wants_escape() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
         assert!(capsule_key(CapsuleKey::Press), "a press may fold them");
         assert!(capsule_key(CapsuleKey::Shift(true)), "Shift shows the rule");
-        assert!(capsule_key(CapsuleKey::Digit(2)));
-        assert!(!capsule_key(CapsuleKey::Digit(3)), "no third row");
-        assert!(!capsule_key(CapsuleKey::Text("h".into())));
+        assert!(capsule_key(CapsuleKey::Shortcut), "the shortcut searches");
+        assert!(!capsule_key(CapsuleKey::Text("1".into())));
         assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: false }));
         // The toast's one guess at a time: Return sends it, Tab moves on.
-        second.set(CapsuleKeys::Suggest {
-            rows: 2,
-            cycle: true,
-        });
+        second.set(CapsuleKeys::Suggest { cycle: true });
         assert!(suggesting());
         assert!(capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(capsule_key(CapsuleKey::Return { shift: false }));
@@ -4956,6 +4932,8 @@ mod tests {
         assert!(list_open() && !wants_escape());
         assert!(capsule_key(CapsuleKey::Text("ho".into())));
         assert!(capsule_key(CapsuleKey::Press));
+        // The search lets the capture shortcut through: it records anew.
+        assert!(!capsule_key(CapsuleKey::Shortcut));
         drop(second);
         assert!(!picking() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
@@ -4966,7 +4944,7 @@ mod tests {
                 (2, CapsuleKey::Escape),
                 (2, CapsuleKey::Press),
                 (2, CapsuleKey::Shift(true)),
-                (2, CapsuleKey::Digit(2)),
+                (2, CapsuleKey::Shortcut),
                 (2, CapsuleKey::Tab { shift: false }),
                 (2, CapsuleKey::Return { shift: false }),
                 (2, CapsuleKey::Text("ho".into())),
@@ -4992,10 +4970,9 @@ mod tests {
         assert_eq!(list_key(126, 0, ""), key(CapsuleKey::Up));
         assert_eq!(list_key(125, 0, ""), key(CapsuleKey::Down));
         assert_eq!(list_key(51, 0, "\u{7f}"), key(CapsuleKey::Backspace));
-        assert_eq!(list_key(18, 0, "1"), key(CapsuleKey::Digit(1)));
-        // Shift's digits type symbols; the row reads by position.
-        assert_eq!(list_key(19, shift, "@"), key(CapsuleKey::Digit(2)));
-        assert_eq!(list_key(25, shift, "("), key(CapsuleKey::Digit(9)));
+        // Digits are typed, never picks: session names have numbers.
+        assert_eq!(list_key(18, 0, "1"), key(CapsuleKey::Text("1".into())));
+        assert_eq!(list_key(19, shift, "@"), key(CapsuleKey::Text("@".into())));
         assert_eq!(list_key(29, 0, "0"), key(CapsuleKey::Text("0".into())));
         assert_eq!(list_key(18, option, "¡"), key(CapsuleKey::Text("¡".into())));
         assert_eq!(list_key(4, shift, "H"), key(CapsuleKey::Text("H".into())));

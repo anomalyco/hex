@@ -213,7 +213,7 @@ pub(crate) enum Id {
     /// A guess in the capsule itself: a chip in the menu-bar flow, a row
     /// in the cursor's and the notch's card.
     Pick(usize),
-    /// The card's key hint under its guesses ("Send 1–5").
+    /// The card's key hint under its guesses ("Search ⌥⇧S").
     CardHints,
     /// The toast's next guess (⇥).
     Next,
@@ -338,6 +338,31 @@ fn chip_width(label: f32) -> f32 {
     label + 2.0 * CHIP_PX
 }
 
+/// The capture shortcut's keycaps, as Settings draws them.
+pub(crate) fn shortcut_keycaps() -> Vec<String> {
+    crate::app_settings::capture_hotkey_keycaps()
+}
+
+/// Between a chip's label and its keycaps.
+pub(crate) const KEYCAPS_GAP: f32 = 8.0;
+
+/// The keycaps' tray sits this far inside the chip's right edge: as far
+/// as from its top, and ✕'s hug on top, since ✕ tucks into the chip.
+pub(crate) fn keycaps_inset() -> f32 {
+    (CHIP_H - super::super::controls::KeySize::Small.height()) / 2.0
+        - super::super::controls::TRAY_PADDING
+        + CLOSE_HUG
+}
+
+/// A chip's label, then the capture shortcut's keycaps.
+pub(crate) fn keycaps_chip_width(label: &str, style: TextStyle) -> f32 {
+    CHIP_PX
+        + measure(label, style)
+        + KEYCAPS_GAP
+        + super::super::controls::keycaps_width(&shortcut_keycaps(), measure)
+        + keycaps_inset()
+}
+
 /// A chip's label, then its shortcut in quiet text, or a plain chip
 /// without one.
 pub(crate) fn keyed_width(keys: &[&str], label: &str, style: TextStyle) -> f32 {
@@ -430,11 +455,10 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
     }
     if tuning::get().flow == CapsuleFlow::MenuBar {
         for (row, (name, _)) in done.picks.iter().enumerate() {
-            let key = (row + 1).to_string();
             raw.push((
                 Id::Pick(row),
                 name.clone(),
-                keyed_width(&[&key], name, MEDIUM),
+                keyed_width(&[], name, MEDIUM),
                 false,
             ));
         }
@@ -452,8 +476,15 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
-        if let (Some(ask), false) = (&done.ask, listed) {
-            raw.push((Id::Ask, ask.clone(), keyed_width(&[], ask, MEDIUM), false));
+        // Over the suggestions it's Search, with the capture shortcut that
+        // opens it.
+        if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
+            let width = if done.ask_keys {
+                keycaps_chip_width(ask, MEDIUM)
+            } else {
+                keyed_width(&[], ask, MEDIUM)
+            };
+            raw.push((Id::Ask, ask.clone(), width, false));
         }
     }
     raw.push((Id::Close, String::new(), CHIP_H, false));
@@ -510,13 +541,9 @@ pub(crate) fn layout_at(pres: &Pres, clock: &str, anchor: Anchor) -> ([f32; 4], 
     }
     if !picks.is_empty() {
         let hints_y = rows_y + picks.len() as f32 * PICK_H;
-        let digits = match picks.len() {
-            1 => "1".to_owned(),
-            n => format!("1–{n}"),
-        };
         items.push(Item {
             id: Id::CardHints,
-            ident: digits,
+            ident: chord(&shortcut_keycaps()),
             rect: [
                 shell[0] + ISLAND_INSET,
                 hints_y,
@@ -647,6 +674,12 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
         let w = span(&widths, 0) + spread + 2.0 * ISLAND_INSET;
         (CX - w * 0.5, CX + w * 0.5)
     };
+    // The room a wide list leaves goes between the label and the actions,
+    // so they and ✕ stay one cluster at the right.
+    let cluster = raw
+        .iter()
+        .position(|r| r.0.group() != 0)
+        .unwrap_or(raw.len().saturating_sub(1));
     let mut x = l + ISLAND_INSET;
     let mut items = Vec::with_capacity(raw.len());
     for (i, (id, ident, _, active)) in raw.iter().enumerate() {
@@ -660,7 +693,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
         if i + 1 < raw.len() {
             x += w + gap_after(i);
         }
-        if i + 2 == raw.len() {
+        if i + 1 == cluster {
             x += spread;
         }
     }
@@ -1022,10 +1055,14 @@ mod tests {
             open: Some((
                 String::new(),
                 List {
-                    suggested: vec![Dest::new("SEER", "same page")],
-                    recent: vec![Dest::new("HOME", "yesterday")],
+                    rows: vec![
+                        Dest::new("SEER", "same page"),
+                        Dest::new("HOME", "yesterday"),
+                    ],
+                    title: "Send to",
+                    min_rows: 0,
                     selected: 0,
-                    footer: Footer::KeepCopied,
+                    footer: Footer::Search { remember: false },
                     always: None,
                 },
             )),

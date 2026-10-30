@@ -272,35 +272,45 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── The Undo chip counts nothing down: the capsule reads the same for the
 │   │   whole window and wakes once, when it ends
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: the lead alone with the suggestions open under it
-│   │   and Paste beside it; nothing sends until Kit picks. Linux: closed,
+│   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
+│   │   keycaps (as Settings draws them) and ✕, the suggestions open under
+│   │   it; nothing sends until Kit picks. Linux: closed,
 │   │   with Paste, Inspect, and Send to…, which opens them on a click
-│   │   ├── Up to five rows, suggested then recent, numbered 1-5; the first
+│   │   ├── "Send to" over up to five rows, suggested then the newest
+│   │   │   sessions, with no numbers and no footer; "⇧ remembers" on the
+│   │   │   header's right when a pick can save a rule. The first
 │   │   │   carries its reason in the accent. A reason is a real one in plain
 │   │   │   words ("you were just in it", "same page", "mentioned", "recent")
 │   │   │   or nothing; never "guess"
-│   │   ├── Shift down (a guess or rule with a site or app) -> the footer reads
-│   │   │   "Always send [site] to [row]", the site and the highlighted row's
+│   │   ├── Shift down (a guess or rule with a site or app) -> "⇧ remembers"
+│   │   │   lights, and the highlighted row reads "always"; in the search the
+│   │   │   footer reads "Always send [site] to [row]", the site and the row's
 │   │   │   name each in a rounded-rect badge with its kind's icon (a globe for
-│   │   │   a site, a window for an app, a bubble for the session), and that
-│   │   │   row reads "always"; up, the
-│   │   │   footer is "Send 1–5  Always ⇧" again. Shift+1-5 or Shift+click
+│   │   │   a site, a window for an app, a bubble for the session). Shift+click
+│   │   │   (or ⇧⏎ in the search)
 │   │   │   sends and saves the rule: "Sent to X · saved rule", and its Undo
 │   │   │   takes back the send and the rule (what the key held before, or
 │   │   │   nothing, comes back). The rule names that session (`ses_…`),
 │   │   │   never its folder: a folder rule goes to the folder's newest
 │   │   │   session, so with SEER and RUNE DESKTOP in one checkout, a rule
 │   │   │   saved for RUNE DESKTOP went to SEER
-│   │   ├── 1-5 or a click -> sends at once: "Sent to X", the Sent tone, and a
+│   │   ├── A click -> sends at once: "Sent to X", the Sent tone, and a
 │   │   │   quiet Undo for the same 5 s, with no ring or drain; ✕ closes;
 │   │   │   the capsule then leaves by itself with its exit
-│   │   ├── Send to… -> the full list with its search field
+│   │   ├── Search or the capture shortcut (⌥⇧S) -> the search: "All
+│   │   │   sessions" over every session the router's look read (its two
+│   │   │   newest pages, every folder's, and any it named), filtered by
+│   │   │   what's typed, five rows at most and never shorter than the
+│   │   │   suggestions it opened from; the footer reads "Send ⏎",
+│   │   │   "Remember ⇧⏎", and "New capture ⌥⇧S". Esc or a click away goes
+│   │   │   back to the suggestions; ⌥⇧S in the search records a new capture
+│   │   ├── Once the capsule has gone, ⌥⇧S records as usual
 │   │   ├── Esc -> not Hex's here: it goes to the app in front
 │   │   └── Unpicked -> they leave with the capsule after the done hold
 │   ├── Taken back (a rule's send or a pick) -> never
 │   │   ends the capture: the list opens again with the same sessions, the one
-│   │   it went to (by session id) once, last of all ("taken back"), with 1-9,
-│   │   typing, and ⇧⏎ as before. Open, it stays, sent nowhere; a click away
+│   │   it went to (by session id) once, last of all ("taken back"), with
+│   │   clicks, Search, and ⇧-click as before. Open, it stays, sent nowhere; a click away
 │   │   folds it to "Taken back" with "Send to…", and it leaves after the done
 │   │   hold; nothing here takes Esc. ✕ (or Esc in the typed list) dismisses:
 │   │   "Kept", the bundle untouched. Either way it then
@@ -317,19 +327,21 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   collide; the capsule shows titles
 │   ├── Keys (capture_host::take_keys), never taking focus:
 │   │   ├── Picker -> ⌥⇧S and Esc through the listener
+│   │   ├── Suggestions -> ⌥⇧S through the listener
+│   │   │   (`ShortcutActivity::Capsule`), which opens the search
 │   │   ├── Routed or closed -> no keys: Send to… is click-only, and never
 │   │   │   Esc, so a send is taken back only by clicking Undo
 │   │   ├── A send from the list still undoable -> no keys; Esc goes to the
 │   │   │   app, and the Undo button is the only way back
-│   │   ├── Suggestions -> at the session tap only 1 to the number of rows, with no
-│   │   │   modifier or Shift (`capture_host::suggesting`; Shift's digits read
-│   │   │   by key position), and a mouse press, which folds them (the click
-│   │   │   still reaches the app); every other key, Esc included, goes on to
-│   │   │   the app. Shift's presses and releases (flagsChanged) reach the
+│   │   ├── Suggestions -> at the session tap no key at all (the toast's
+│   │   │   ⏎ and ⇥ aside), only a mouse press, which folds them (the click
+│   │   │   still reaches the app); every key, digits and Esc included, goes on
+│   │   │   to the app. Shift's presses and releases (flagsChanged) reach the
 │   │   │   capsule too (`CapsuleKey::Shift`) and still go on to the app
 │   │   └── List open -> the session tap takes every key press without ⌘ or ⌃
 │   │       that isn't a Hex shortcut: text in the active layout, ⌫, ↑↓, ⏎,
-│   │       ⇧⏎ (always), 1-9, Esc; their releases too. A send, Esc, or a
+│   │       ⇧⏎ (always), Esc; their releases too. Digits are typed (session
+│   │       names have them), and ⌥⇧S goes on to the listener, which records. A send, Esc, or a
 │   │       press off the capsule (the tap reports mouse-downs while the list
 │   │       is open, and still delivers them) closes the list and gives the
 │   │       keys back; hiding drops the grab
@@ -338,7 +350,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   while a send can be taken back, else Paste and Inspect as two quiet
 │   │   icons (tooltips "Paste the capture", "Open the capture") for a written
 │   │   capture, with the click-only Send to… chip beside them while there is
-│   │   somewhere to send it. Paste and Inspect have no key on either OS.
+│   │   somewhere to send it; over the suggestions, Search alone (the
+│   │   capture is already copied), right beside ✕. Paste and Inspect have no key on either OS.
 │   │   The list hangs
 │   │   under the capsule, which is never narrower than LIST_W; the capsule
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
@@ -359,10 +372,10 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── Undo is a click only, with no shortcut: Escape meant for another app
 │   │   was taking sends back
 │   ├── Shortcuts read as quiet text after what they do, never a keycap per
-│   │   key (those are Settings'): a hint's keys sit in one small rounded rect,
-│   │   on a quiet fill. The list's
-│   │   footer reads "Send 1–5  Always ⇧", "Send ⏎", "Keep esc", "Always ⇧⏎"; the
-│   │   cursor's and the notch's cards end in "Send 1–5" under their guesses.
+│   │   key, except Search's capture shortcut, drawn as Settings' keycaps: a
+│   │   hint's keys sit in one small rounded rect, on a quiet fill. The
+│   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; the
+│   │   cursor's and the notch's cards end in "Search ⌥⇧S" under their guesses.
 │   │   The footer sits apart from the rows in one of
 │   │   two looks while Kit picks (tuning `list_footer`): ListFooter::Band
 │   │   (default), a full-width band on its own fill under a rule, or
@@ -562,7 +575,7 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   reason as the row's word ("dev server", "same page", "mentioned"; none
 │   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
-│   │   `site` names what a Shift pick (Shift+digit or click, ⇧⏎ in the list,
+│   │   `site` names what a Shift pick (Shift+click, ⇧⏎ in the list,
 │   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead
 │   ├── Each Rule or Guess -> routing.json's `shown`: `as` rule or guess, and

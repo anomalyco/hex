@@ -872,6 +872,21 @@ pub(super) fn keycaps(p: Paint, key: &str, parts: &[String]) -> El {
     )
 }
 
+/// The width [`keycaps`] draws `parts` at, with `measure` giving a
+/// legend's width.
+#[cfg(hex_capture)]
+pub(super) fn keycaps_width(parts: &[String], measure: impl Fn(&str, TextStyle) -> f32) -> f32 {
+    let size = KeySize::Small;
+    let caps: f32 = parts
+        .iter()
+        .map(|part| {
+            (measure(part, size.legend()) + 2.0 * (size.face_padding() + KEY_RIM))
+                .max(size.min_width())
+        })
+        .sum();
+    caps + KEY_GAP * parts.len().saturating_sub(1) as f32 + 2.0 * TRAY_PADDING
+}
+
 /// In from the well's bottom, out through its top, inside its clip.
 pub(super) fn tray_roll() -> Transition {
     Transition::push(Edge::Bottom)

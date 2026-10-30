@@ -25,11 +25,8 @@ pub(crate) const CHIPS_LINGER_S: f64 = 1.2;
 /// longer once it leaves.
 pub(crate) const DISCARD_ASK_S: f64 = 4.0;
 pub(crate) const DISCARD_LINGER_S: f64 = 1.5;
-/// The most rows each list section shows.
-pub(crate) const MAX_SUGGESTED: usize = 5;
-pub(crate) const MAX_RECENT: usize = 5;
-/// The suggestions a finished capture shows under it, picked with 1–5,
-/// when the router has that many.
+/// The rows a finished capture's suggestions show under it, when the
+/// router has that many, and the most a search shows.
 pub(crate) const SUGGEST_ROWS: usize = 5;
 /// The menu-bar flow's hint of the guesses stays this long, then the
 /// capsule folds into Hex's menu-bar item, where the capture waits.
@@ -185,6 +182,7 @@ pub(crate) enum Input {
     /// fold, once they have been seen.
     Worked,
     /// The capture shortcut while the picker is open: record what it's on.
+    /// Over a capture's suggestions it opens the search.
     Record,
     /// Send to…: the list opens (or, when open,
     /// nothing), and a closed capsule whose capture waits for a pick comes
@@ -200,7 +198,7 @@ pub(crate) enum Input {
     Send {
         always: bool,
     },
-    /// 1–9 in the open list (1–5 in the suggestions): send to that row.
+    /// A row clicked: send to it.
     SendRow(usize),
     /// Tab in the toast (⇧ back): its next guess, round again after the
     /// last.
@@ -284,25 +282,28 @@ pub(crate) enum Cue {
     Failed,
 }
 
-/// The second footer hint in the open list.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The open list's footer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Footer {
-    /// Escape keeps it copied (the list is open, so it is Hex's).
-    KeepCopied,
-    /// Escape keeps it where the rule sent it.
-    Keep(String),
-    /// ⇧⏎ always sends this site to the selected session.
-    Always(String),
-    /// The suggestions: 1–5 send.
+    /// The search: ⏎ sends, the capture shortcut records anew, and
+    /// `remember`: ⇧⏎ also saves a rule for the site or app.
+    Search { remember: bool },
+    /// The suggestions have none: a click sends, and the header says ⇧
+    /// remembers.
     Suggesting,
 }
 
 /// The list under the open capsule.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct List {
-    pub(crate) suggested: Vec<Dest>,
-    pub(crate) recent: Vec<Dest>,
-    /// Across both sections, suggested first.
+    /// The suggestions, then the newest sessions; searching, every
+    /// session that matches.
+    pub(crate) rows: Vec<Dest>,
+    /// The header over the rows.
+    pub(crate) title: &'static str,
+    /// The rows the list keeps room for, so a search that matches fewer
+    /// than the suggestions it opened from never shrinks it.
+    pub(crate) min_rows: usize,
     pub(crate) selected: usize,
     pub(crate) footer: Footer,
     /// The site or app a Shift pick saves a rule for, and whether Shift is
@@ -320,7 +321,7 @@ impl List {
 
 impl List {
     pub(crate) fn rows(&self) -> impl Iterator<Item = &Dest> {
-        self.suggested.iter().chain(&self.recent)
+        self.rows.iter()
     }
 
     pub(crate) fn selected_dest(&self) -> Option<&Dest> {
@@ -339,11 +340,14 @@ pub(crate) struct Done {
     pub(crate) undo: bool,
     /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
+    /// The capture shortcut opens the search from here: its keycaps sit
+    /// on the chip ("Search ⌥⇧S").
+    pub(crate) ask_keys: bool,
     /// Open: what's typed into the field, and the list under it.
     pub(crate) open: Option<(String, List)>,
     /// A written capture: Paste and Inspect, as Scrawl's capsule offers.
     pub(crate) hand_off: bool,
-    /// The guesses in the capsule itself, picked with 1–5 or a click: chips
+    /// The guesses in the capsule itself, picked with a click: chips
     /// in the menu-bar flow, rows in the cursor's card and the notch.
     /// Each is a name and its quiet reason.
     pub(crate) picks: Vec<(String, String)>,
@@ -361,6 +365,7 @@ impl Done {
             why: None,
             undo: false,
             ask: None,
+            ask_keys: false,
             open: None,
             hand_off: false,
             picks: Vec::new(),
@@ -483,6 +488,9 @@ struct Open {
     /// Searching every session (Send to…): the field
     /// takes typing. Otherwise it's the suggestions a capture opens with.
     typing: bool,
+    /// The search opened over the suggestions: Escape and a click away go
+    /// back to them.
+    back: bool,
     /// Shift is down: a pick also saves a rule.
     shift: bool,
 }
@@ -493,6 +501,7 @@ impl Open {
             query: String::new(),
             selected: 0,
             typing: false,
+            back: false,
             shift: false,
         }
     }
@@ -915,10 +924,20 @@ impl Flow {
             {
                 Phase::Routed(routed)
             }
+            // The capture shortcut over the suggestions searches every
+            // session; in the search it records anew, which the listener
+            // does itself.
+            (Phase::Routed(routed), Input::Record)
+                if routed.open.as_ref().is_some_and(|open| !open.typing) =>
+            {
+                self.phase = Phase::Routed(routed);
+                return self.step(Input::OpenList, now);
+            }
             (Phase::Routed(mut routed), Input::OpenList) => {
                 match &mut routed.open {
                     Some(open) if !open.typing => {
                         open.typing = true;
+                        open.back = true;
                         open.selected = 0;
                     }
                     Some(_) => {}
@@ -980,6 +999,23 @@ impl Flow {
                 }
                 Phase::Routed(routed)
             }
+            // A click away from a search opened over the suggestions goes
+            // back to them, as Escape does.
+            (Phase::Routed(mut routed), input @ (Input::ClickAway | Input::Escape))
+                if routed
+                    .open
+                    .as_ref()
+                    .is_some_and(|open| open.typing && open.back)
+                    && (input == Input::Escape || !self.hovered) =>
+            {
+                if let Some(open) = &mut routed.open {
+                    *open = Open {
+                        shift: open.shift,
+                        ..Open::suggesting()
+                    };
+                }
+                Phase::Routed(routed)
+            }
             // Taken back, folding it starts its hold: it leaves like any
             // finished capsule, and Send to… brings it back.
             (Phase::Routed(mut routed), Input::ClickAway) if !self.hovered => {
@@ -1002,7 +1038,9 @@ impl Flow {
                     ..
                 }),
                 input @ (Input::Escape | Input::Dismiss),
-            ) if input == Input::Dismiss || open.as_ref().is_some_and(|open| open.typing) => {
+            ) if input == Input::Dismiss
+                || open.as_ref().is_some_and(|open| open.typing && !open.back) =>
+            {
                 match already_with {
                     None => Phase::Kept { at: now },
                     Some(_) => Phase::Hidden,
@@ -1239,15 +1277,11 @@ impl Flow {
             // leaves by itself.
             Phase::TakenBack { .. } => None,
             Phase::Routed(Routed {
-                open: Some(open),
-                route,
-                ..
+                open: Some(open), ..
             }) => Some(if open.typing {
                 CapsuleKeys::List
             } else {
-                let rows = list(route, open).rows().count();
                 CapsuleKeys::Suggest {
-                    rows: u8::try_from(rows).unwrap_or(u8::MAX),
                     cycle: tuning::get().flow == CapsuleFlow::Toast,
                 }
             }),
@@ -1501,61 +1535,50 @@ fn sections(route: &Route) -> (&[Dest], &[Dest]) {
     }
 }
 
-/// The list for `route`, filtered by `query`.
+/// The list for `route`: its suggestions, then the newest sessions, and
+/// searching, every session whose name has the query.
 fn list(route: &Route, open: &Open) -> List {
     let query = open.query.to_lowercase();
-    let keep = |rows: &[Dest], max: usize| -> Vec<Dest> {
-        rows.iter()
-            .filter(|dest| dest.name.to_lowercase().contains(&query))
-            .take(max)
-            .cloned()
-            .collect()
-    };
     let (suggested, recent) = sections(route);
     let site = match route {
         Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
         _ => None,
     };
     let always = site.map(|site| (site, open.shift));
-    let mut list = if open.typing {
-        let footer = match (route, &always) {
-            (Route::Rule { to, .. }, _) => Footer::Keep(to.name.clone()),
-            (Route::Guess { .. }, Some((site, _))) => Footer::Always(site.clone()),
-            _ => Footer::KeepCopied,
-        };
-        List {
-            suggested: keep(suggested, MAX_SUGGESTED),
-            recent: keep(recent, MAX_RECENT),
-            selected: open.selected,
-            footer,
-            always,
-        }
-    } else {
-        List {
-            suggested: suggested
-                .iter()
-                .chain(recent)
-                .take(SUGGEST_ROWS)
-                .cloned()
-                .collect(),
-            recent: Vec::new(),
-            selected: open.selected,
-            footer: Footer::Suggesting,
-            always,
-        }
+    let every = || suggested.iter().chain(recent);
+    let mut list = List {
+        rows: every()
+            .filter(|dest| dest.name.to_lowercase().contains(&query))
+            .take(SUGGEST_ROWS)
+            .cloned()
+            .collect(),
+        title: if open.typing {
+            "All sessions"
+        } else {
+            "Send to"
+        },
+        // Searching keeps the suggestions' height, so the footer is all
+        // that comes in.
+        min_rows: if open.typing {
+            every().take(SUGGEST_ROWS).count()
+        } else {
+            0
+        },
+        selected: open.selected,
+        footer: if open.typing {
+            Footer::Search {
+                remember: always.is_some(),
+            }
+        } else {
+            Footer::Suggesting
+        },
+        always,
     };
     // Shift down, the highlighted row is where the rule would send it.
-    if list.always.as_ref().is_some_and(|(_, shift)| *shift) {
-        let selected = list.selected;
-        let split = list.suggested.len();
-        let row = if selected < split {
-            list.suggested.get_mut(selected)
-        } else {
-            list.recent.get_mut(selected - split)
-        };
-        if let Some(row) = row {
-            row.why = "always".into();
-        }
+    if list.always.as_ref().is_some_and(|(_, shift)| *shift)
+        && let Some(row) = list.rows.get_mut(list.selected)
+    {
+        row.why = "always".into();
     }
     list
 }
@@ -1767,10 +1790,18 @@ fn offered(base: Done, list: List) -> Done {
             .collect()
     };
     match tuning::get().flow {
+        // Just Search and its shortcut beside "Copied": a click on a row
+        // sends, and the capture is already on the clipboard to paste.
         CapsuleFlow::List => Done {
-            ask: None,
+            text: if base.text.is_empty() {
+                "Copied".into()
+            } else {
+                base.text.clone()
+            },
+            ask: Some("Search".into()),
+            ask_keys: true,
             open: Some((String::new(), list)),
-            hand_off: true,
+            hand_off: false,
             ..base
         },
         // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.
@@ -1884,13 +1915,7 @@ mod tests {
             assert_eq!(shown.text, "Send to SEER");
             assert_eq!(shown.why.as_deref(), Some("⏎"));
             assert!(shown.cycle && shown.sends && shown.open.is_none());
-            assert_eq!(
-                flow.keys(),
-                Some(CapsuleKeys::Suggest {
-                    rows: 3,
-                    cycle: true
-                })
-            );
+            assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: true }));
             flow.input(Input::Cycle(1), 0.5);
             assert_eq!(done(&flow, 0.5).text, "Send to HEX");
             flow.input(Input::Cycle(-1), 0.6);
@@ -2301,10 +2326,7 @@ mod tests {
             // 1-3 pick; Escape stays the app's.
             assert_eq!(
                 flow.keys(),
-                Some(CapsuleKeys::Suggest {
-                    rows: 3,
-                    cycle: false
-                }),
+                Some(CapsuleKeys::Suggest { cycle: false }),
                 "{how}"
             );
             // The router's answer changes nothing, and nothing times out.
@@ -2359,14 +2381,11 @@ mod tests {
         // The same sessions, the wrongly picked one last; nothing sent.
         assert_eq!(rows(&flow, 1.2), ["HEX", "HOME", "SEER"]);
         let (_, list) = done(&flow, 1.2).open.unwrap();
-        assert_eq!(list.suggested[2].why, "taken back");
+        assert_eq!(list.rows[2].why, "taken back");
         assert_eq!(list.selected, 0);
         assert_eq!(
             flow.keys(),
-            Some(crate::capture_host::CapsuleKeys::Suggest {
-                rows: 3,
-                cycle: false
-            })
+            Some(crate::capture_host::CapsuleKeys::Suggest { cycle: false })
         );
         // It never leaves by itself.
         assert!(flow.next_due(1.2).is_none());
@@ -2440,7 +2459,7 @@ mod tests {
         assert_eq!(shown.why.as_deref(), Some("too late"));
         assert_eq!(rows(&flow, 1.2), ["HEX", "HOME", "SEER"]);
         let (_, list) = shown.open.unwrap();
-        assert_eq!(list.suggested[2].why, "has it");
+        assert_eq!(list.rows[2].why, "has it");
         assert!(!flow.tick(1_000.0), "it waits for a pick");
         // Pick 2: a copy goes to #2.
         assert_eq!(
@@ -2802,6 +2821,12 @@ mod tests {
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         flow.hover(false, 0.65);
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest { cycle: false }),
+            "back to the suggestions it opened over"
+        );
+        assert!(flow.input(Input::ClickAway, 0.75).is_empty());
         assert_eq!(flow.keys(), None);
         assert!(matches!(flow.pres(0.8), Pres::Done(_)));
         flow.input(Input::ClickAway, 0.9);
@@ -2934,11 +2959,9 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         let asked = done(&flow, 0.0);
-        assert!(asked.ask.is_none());
-        assert!(
-            asked.hand_off,
-            "Paste and Inspect stay beside the suggestions"
-        );
+        assert_eq!(asked.ask.as_deref(), Some("Search"));
+        assert!(asked.ask_keys, "with the shortcut that opens it");
+        assert!(!asked.hand_off, "trimmed to Search and ✕");
         let (_, suggestions) = asked.open.expect("a guess opens on its suggestions");
         assert!(suggestions.suggesting());
         flow.input(Input::OpenList, 1.0);
@@ -2946,10 +2969,8 @@ mod tests {
         let (query, list) = open.open.expect("open");
         assert_eq!(query, "");
         assert_eq!(list.selected_dest().unwrap().name, "SEER");
-        assert_eq!(
-            list.footer,
-            Footer::Always("problems.kitlangton.com".into())
-        );
+        assert_eq!(list.footer, Footer::Search { remember: true });
+        assert_eq!(list.title, "All sessions");
         assert!(open.ask.is_none(), "the field takes the chips' place");
         flow.input(Input::Type("ho".into()), 1.5);
         let (_, list) = done(&flow, 1.5).open.unwrap();
@@ -2969,7 +2990,7 @@ mod tests {
     }
 
     #[test]
-    fn a_guess_suggests_three_and_a_digit_sends_nothing_before_it() {
+    fn a_guess_suggests_three_and_a_click_sends_nothing_before_it() {
         use crate::capture_host::CapsuleKeys;
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
@@ -2979,13 +3000,7 @@ mod tests {
         assert_eq!(list.selected, 0, "the best is marked");
         assert_eq!(list.footer, Footer::Suggesting);
         assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
-        assert_eq!(
-            flow.keys(),
-            Some(CapsuleKeys::Suggest {
-                rows: 3,
-                cycle: false
-            })
-        );
+        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
         assert!(flow.take_cues().is_empty(), "nothing sent, nothing heard");
         flow.tick(4.0);
         assert!(matches!(flow.pres(4.0), Pres::Done(_)), "no countdown runs");
@@ -2999,6 +3014,39 @@ mod tests {
         );
         assert_eq!(flow.take_cues(), [Cue::Sent], "a pick sounds as it goes");
         assert_eq!(done(&flow, 5.0).why, None);
+    }
+
+    #[test]
+    fn the_capture_shortcut_searches_every_session_and_escape_comes_back() {
+        use crate::capture_host::CapsuleKeys;
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        let (_, list) = done(&flow, 0.0).open.unwrap();
+        assert_eq!(list.title, "Send to");
+        let height = list.rows().count();
+        assert!(
+            flow.input(Input::Record, 1.0).is_empty(),
+            "it records nothing"
+        );
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::List),
+            "the search takes typing"
+        );
+        flow.input(Input::Type("hom".into()), 1.5);
+        let (query, list) = done(&flow, 1.5).open.unwrap();
+        assert_eq!(query, "hom");
+        assert_eq!(list.title, "All sessions");
+        assert_eq!(
+            list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            ["HOME"]
+        );
+        assert_eq!(list.min_rows, height, "fewer matches keep the height");
+        assert!(flow.input(Input::Escape, 2.0).is_empty());
+        let (query, list) = done(&flow, 2.0).open.unwrap();
+        assert_eq!(query, "", "Escape goes back to the suggestions");
+        assert!(list.suggesting());
+        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
     }
 
     #[test]
@@ -3117,13 +3165,7 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Done), 0.0);
         flow.input(Input::Routed(guess()), 0.0);
-        assert_eq!(
-            flow.keys(),
-            Some(CapsuleKeys::Suggest {
-                rows: 3,
-                cycle: false
-            })
-        );
+        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
         // Its hold runs out: hidden, and no key is the capsule's.
         assert!(flow.tick(hold + 1.0));
         assert_eq!(flow.pres(hold + 1.0), Pres::Hidden);
@@ -3291,7 +3333,7 @@ mod tests {
             "HOME",
             "a rule opens on the next"
         );
-        assert_eq!(list.footer, Footer::Keep("SEER".into()));
+        assert!(matches!(list.footer, Footer::Search { .. }));
         assert!(flow.next_due(6.0).is_none(), "an open list stays");
         assert!(flow.input(Input::Escape, 7.0).is_empty());
         assert!(done(&flow, 7.0).open.is_none());
