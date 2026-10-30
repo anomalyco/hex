@@ -98,7 +98,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         )
         .into(),
     );
-    rows.push(language_row(ui, p, layer).into());
+    rows.extend(language_row(ui, p, layer).map(CardRow::from));
     let vocabulary_note = super::vocabulary::unused_note(ui);
     rows.push(
         icon_row(
@@ -243,18 +243,21 @@ fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
     rows
 }
 
-/// The model's languages as a quiet select, or its one language as text.
-fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+/// The model's languages as a quiet select, or the fallback note when
+/// switching to a single-language model changed the saved language.
+fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let selection = &ui.settings.transcription;
     let model = transcription_models::definition(selection.model);
     let current = transcription_models::language_name(&selection.language);
     let codes = model.language_choices();
+    let fallback = super::picker::fallback_note(ui);
+    if codes.len() <= 1 && fallback.is_none() {
+        return None;
+    }
     let control = if codes.len() <= 1 {
-        // The text lines up with the values above and below it.
         row()
             .key("transcription-language-control")
             .h(24.0)
-            .pr(24.0)
             .center_y()
             .child(
                 text(current.to_string())
@@ -286,14 +289,14 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             layer,
         )
     };
-    icon_row(
+    Some(icon_row(
         p,
         "transcription-language",
         &LANGUAGES,
         tr("Language"),
-        super::picker::fallback_note(ui).as_deref(),
+        fallback.as_deref(),
         control,
-    )
+    ))
 }
 
 /// The microphone with the input it resolves to, why another input stands
@@ -425,7 +428,7 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
         }
         menu = menu.item(item.on_select(move |ui: &mut Ui| (choice.choose)(ui)));
     }
-    menu.build(p.k, layer)
+    menu.build(p.k, layer).mr(-9.0)
 }
 
 /// How often the microphone row follows the level while audio arrives.
@@ -1218,6 +1221,7 @@ pub(super) fn quiet_select(
             }
         })
         .build(p.k, layer)
+        .mr(-8.0)
 }
 
 fn value_font(p: Paint) -> rune::TextStyle {
@@ -1242,6 +1246,7 @@ pub(super) fn value_button(
         .h(24.0)
         .pl(8.0)
         .pr(4.0)
+        .mr(-9.0)
         .gap(4.0)
         .center_y()
         .radius(p.k.radius.sm)
@@ -1307,6 +1312,7 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         .label(s::face_label(face))
         .center_y()
         .padding(2.0)
+        .mr(-3.0)
         .radius(p.k.radius.md)
         // While listening, keys reach the recorder rather than pressing it again.
         .focusable(!listening)

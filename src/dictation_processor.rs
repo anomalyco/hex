@@ -95,12 +95,6 @@ impl Profile {
         self
     }
 
-    /// The global profile without the `modes` experiment: the default
-    /// mode's replacements only, no rewriting or transformations.
-    pub(crate) fn global_replacements(mode: &crate::app_settings::DictationMode) -> Self {
-        Self::new("Global", "").replacements(ReplacementSet::new(&mode.replacements))
-    }
-
     pub(crate) fn from_mode(mode: &crate::app_settings::DictationMode) -> Self {
         let name = if mode.name.trim().is_empty() {
             "Untitled mode"

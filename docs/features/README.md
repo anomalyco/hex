@@ -18,7 +18,7 @@ Hex                                      // macOS release
 ├── Dictate                              // hold OR double-tap lock
 ├── Use the result                       // paste, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
-├── Process text                         // context-selected Modes (experiment `modes`, off by default)
+├── Process text                         // Output tab + context-selected Modes
 ├── Opt in                               // Meetings: off by default
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit

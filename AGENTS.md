@@ -28,13 +28,16 @@ and keep consequential behavior explicit. Deterministic personal transcript
 transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-The distributed release starts in hotkey-dictation-only mode.
-Meetings (beta) is a
-persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
-Meetings pane, menu-bar recording controls, and meeting paste in release builds.
-`DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
-keeps the meeting CLI, Activity, and HUD Lab debug-only. One exception: while
-the `playground` experiment is on, release builds show HUD Lab too.
+The distributed production release (`!experiments::is_dev_build()`) shows
+General, Output, and History, hides Labs and all experimental panes, ignores
+`HEX_EXPERIMENTS` and `~/.config/hex/experiments`, and keeps Meetings, Annotate,
+and Voice Filter dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
+expose the Labs sidebar item with switches for Meetings, Annotate, and every
+experiment (`Voice Filter`, `Live text`, `Live chapters`, `Playground`),
+writing `~/.config/hex/experiments` and applying live where supported. HUD Lab's
+live Dot scope tuning lives inside Playground (`⇧⌘D`, `Prototypes/HUD/*`).
+`DEVELOPER_FEATURES_ENABLED` keeps Meetings available by default in debug builds
+and keeps the meeting CLI debug-only.
 
 ## Feature Map
 
@@ -288,12 +291,11 @@ substitute for source inspection or a second roadmap.
   snapshot-and-action types shared by the Linux and Windows hosts, the window,
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
-  `rune-kit` and the OpenCode theme: General and History, then the opt-in
-  Meetings once on (each feature owns its
+  `rune-kit` and the OpenCode theme: General, Output, and History, then in dev
+  builds the opt-in Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
-  the opt-in switches) Modes with mode-owned corrections and processing, the
-  Voice Filter and developer-only HUD Lab (release too while `playground` is
-  on) and Activity, the transcription
+  the opt-in and experiment switches) Annotate and the Voice Filter, plus in
+  Playground (`⇧⌘D`) HUD Lab's live Dot scope sliders (`hud_stories`), the transcription
   picker, the Sounds sheet (its stage replays `rune_hud`'s HUD, drawn by the
   window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
   meeting capsules, the `--snap`
