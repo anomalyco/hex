@@ -3,7 +3,7 @@ use std::io::Cursor;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -78,7 +78,8 @@ pub enum Tone {
     Error,
     DictationStart,
     DictationStop,
-    /// A dictation was pasted.
+    /// A dictation pasted at least [`DONE_MIN_AFTER_STOP`] after its stop
+    /// sound, such as after a slow rewrite.
     DictationDone,
     Cancel,
     /// The first-run tour reached its last step.
@@ -338,9 +339,33 @@ pub fn preload() -> Result<()> {
     Ok(())
 }
 
+/// The least time between the stop sound and a paste for the done sound to
+/// play. A dictation that pastes at once is already over when stop sounds.
+pub const DONE_MIN_AFTER_STOP: Duration = Duration::from_secs(2);
+
+static LAST_STOP: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Whether a done sound asked for now follows a stop sound by
+/// [`DONE_MIN_AFTER_STOP`]; without a stop sound there is nothing to follow.
+fn done_is_late(stopped: Option<Instant>, now: Instant) -> bool {
+    stopped.is_none_or(|at| now.saturating_duration_since(at) >= DONE_MIN_AFTER_STOP)
+}
+
 pub fn play(tone: Tone) {
     if !sounds_enabled() {
         return;
+    }
+    match tone {
+        Tone::DictationStop => {
+            *LAST_STOP.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        }
+        Tone::DictationDone => {
+            let stopped = *LAST_STOP.lock().unwrap_or_else(|e| e.into_inner());
+            if !done_is_late(stopped, Instant::now()) {
+                return;
+            }
+        }
+        _ => {}
     }
     match tone {
         #[cfg(target_os = "macos")]
@@ -547,7 +572,7 @@ impl Auditioning {
 
 /// One set's bundled files, in `resources/audio/sounds/<set>/`. A missing
 /// done tone stays silent, a missing error plays macOS Basso, and a missing
-/// success plays the signature set's.
+/// success plays the set's own stop sound.
 struct BundledSet {
     start: &'static [u8],
     stop: &'static [u8],
@@ -769,10 +794,7 @@ impl Sounds {
             Tone::DictationDone => return sounds.done.as_ref(),
             Tone::Cancel => &sounds.cancel,
             Tone::OnboardingSuccess => {
-                return sounds
-                    .success
-                    .as_ref()
-                    .or(self.set(SoundSet::Signature).success.as_ref());
+                return sounds.success.as_ref().or(Some(&sounds.stop));
             }
             Tone::Onboarding(cue) => return self.onboarding.get(cue),
             #[cfg(target_os = "macos")]
@@ -1704,7 +1726,7 @@ mod tests {
                 );
                 assert!(sound.any(|sample| sample.abs() > 0.0), "{set:?} {name}");
             }
-            // Every set plays onboarding success, the classic one signature's.
+            // Every set plays onboarding success; Classic's is its stop sound.
             assert!(
                 sounds.get(set, Tone::OnboardingSuccess).is_some(),
                 "{set:?}"
@@ -1716,6 +1738,24 @@ mod tests {
                 .is_some()
         );
         assert!(sounds.get(SoundSet::Classic, Tone::DictationDone).is_none());
+        assert!(std::ptr::eq(
+            sounds
+                .get(SoundSet::Classic, Tone::OnboardingSuccess)
+                .unwrap(),
+            sounds.get(SoundSet::Classic, Tone::DictationStop).unwrap()
+        ));
+    }
+
+    #[test]
+    fn done_plays_only_after_a_slow_paste() {
+        let stop = Instant::now();
+        assert!(!done_is_late(Some(stop), stop + Duration::from_millis(300)));
+        assert!(!done_is_late(
+            Some(stop),
+            stop + DONE_MIN_AFTER_STOP - Duration::from_millis(1)
+        ));
+        assert!(done_is_late(Some(stop), stop + DONE_MIN_AFTER_STOP));
+        assert!(done_is_late(None, stop));
     }
 
     /// A dictation audition plays start, stop and done at their moments,
