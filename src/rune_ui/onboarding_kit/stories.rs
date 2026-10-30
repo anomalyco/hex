@@ -39,7 +39,9 @@ const CLOSE_SECS: f64 = 0.65;
 const WORD_SECS: f64 = 0.22;
 const EXAMPLE_START: f64 = 0.6;
 const EXAMPLE_GAP: f64 = 0.5;
-pub(super) const FRAME: Duration = Duration::from_millis(16);
+// Ask for the next display frame, including 120 Hz displays. Rune paces a
+// hidden or unpaced window itself rather than spinning on a zero deadline.
+pub(super) const FRAME: Duration = Duration::ZERO;
 const SIDE_W: f32 = 240.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +80,7 @@ pub(crate) struct Onboard {
     pub(crate) language: Option<Language>,
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
+    pub(crate) motion: super::landing::Motion,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
     pub(crate) parked_from: Option<f64>,
@@ -138,6 +141,7 @@ impl Onboard {
             language: None,
             now: 0.0,
             reduced: Cell::new(false),
+            motion: super::landing::Motion::default(),
             download_from: None,
             download: None,
             parked_from: None,
@@ -477,6 +481,16 @@ fn first_run() -> Story<Onboard> {
     .variant("Model already downloaded", |s| s.had_model = true)
     .variant("Permissions already granted", |s| s.granted = true)
     .variant("Auto-play video", |s| s.scripted_try = true)
+    .variant("Quick motion", |s| {
+        s.motion.enter = 0.28;
+        s.motion.exit = 0.20;
+        s.motion.keyboard = 0.5;
+    })
+    .variant("Gentle motion", |s| {
+        s.motion.enter = 0.4;
+        s.motion.exit = 0.3;
+        s.motion.keyboard = 0.8;
+    })
     .side(side)
 }
 
@@ -755,6 +769,8 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
 /// Moves the story to `now`; true while anything on it still moves.
 pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
+    tx.trace_channel("onboarding.step", "state", s.step as u32 as f32);
+    tx.trace_channel("onboarding.mic", "level", s.listening_peak().unwrap_or(0.0));
     // A sent `"Without Hex"` reply lifts out of the field into its bubble.
     let sent = versus::sent_count(s);
     for i in s.sent_seen..sent {
@@ -983,6 +999,7 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
             ),
         ];
         out = out.child(side_section(p, "steps-sec", "Jump to step", step_items));
+        out = out.child(motion_controls(p, s));
     }
 
     if matches!(s.flow, Flow::FirstRun | Flow::Versus) {
@@ -1020,6 +1037,59 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
             .wrap()
             .w(SIDE_W),
     )
+}
+
+fn motion_controls(p: Paint, s: &Onboard) -> El {
+    use super::super::lists::slider_in;
+    let m = s.motion;
+    col()
+        .key("motion-controls")
+        .gap(10.0)
+        .child(slider_in(
+            p,
+            "motion-enter",
+            "Rise",
+            (m.enter - 0.2) / 0.4,
+            format!("{:.2} s", m.enter),
+            SIDE_W,
+            |s: &mut Onboard, v, _| s.motion.enter = 0.2 + v * 0.4,
+        ))
+        .child(slider_in(
+            p,
+            "motion-exit",
+            "Leave",
+            (m.exit - 0.15) / 0.25,
+            format!("{:.2} s", m.exit),
+            SIDE_W,
+            |s: &mut Onboard, v, _| s.motion.exit = 0.15 + v * 0.25,
+        ))
+        .child(slider_in(
+            p,
+            "motion-travel",
+            "Travel",
+            m.travel / 20.0,
+            format!("{:.0} pt", m.travel),
+            SIDE_W,
+            |s: &mut Onboard, v, _| s.motion.travel = v * 20.0,
+        ))
+        .child(slider_in(
+            p,
+            "motion-stagger",
+            "Stagger",
+            m.stagger / 0.08,
+            format!("{:.0} ms", m.stagger * 1000.0),
+            SIDE_W,
+            |s: &mut Onboard, v, _| s.motion.stagger = v * 0.08,
+        ))
+        .child(slider_in(
+            p,
+            "motion-keyboard",
+            "Keyboard",
+            (m.keyboard - 0.35) / 0.65,
+            format!("{:.2} s", m.keyboard),
+            SIDE_W,
+            |s: &mut Onboard, v, _| s.motion.keyboard = 0.35 + v * 0.65,
+        ))
 }
 
 #[cfg(test)]

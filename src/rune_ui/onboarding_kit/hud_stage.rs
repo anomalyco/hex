@@ -17,6 +17,20 @@ use crate::dot_scope::{Tuning, demo_level};
 use crate::rune_hud::WINDOW;
 
 const STEP: f32 = 1.0 / 60.0;
+/// Integrate all the way to the presentation clock, including between 60 Hz
+/// samples. Equal substeps avoid a tiny remainder that the HUD's minimum dt
+/// would round up; the simulation stays bounded without quantising the pose.
+fn steps(duration: f32) -> (u32, f32) {
+    let count = (duration / STEP).ceil() as u32;
+    (
+        count,
+        if count == 0 {
+            0.0
+        } else {
+            duration / count as f32
+        },
+    )
+}
 const JOB: u64 = 1;
 /// Seconds after shortcut release (`Submitted` + `Transcribing`) when the final
 /// streamed word lands and `JobCompleted` triggers Dot scope's Done wipe.
@@ -34,12 +48,12 @@ pub(crate) fn flow_frame_at(now_secs: f64, reduce: bool) -> DotFrame {
     // Bounded cyclic window (`0.65 s` warm-in + smooth continuous phase) so step
     // count stays tiny even at `t = 30 s`.
     let target = (0.45 + (now_secs.max(0.0) % 12.0)) as f32;
-    let mut time = 0.0_f32;
+    let (count, dt) = steps(target);
     let mut drawn = model.step(clock, 0.0, reduce);
-    while time + STEP <= target + 1e-4 {
-        time += STEP;
+    for i in 1..=count {
+        let time = i as f32 * dt;
         let at = clock + Duration::from_secs_f32(time);
-        drawn = model.step(at, STEP, reduce);
+        drawn = model.step(at, dt, reduce);
     }
     drawn
 }
@@ -86,26 +100,26 @@ pub(crate) fn voice_frame_at(
     let mut drawn = model.step(clock, 0.0, reduce);
 
     let idle = idle_time(idle);
-    let mut time = 0.0_f32;
-    while time + STEP <= idle + 1e-4 {
-        time += STEP;
+    let (count, dt) = steps(idle);
+    for i in 1..=count {
+        let time = i as f32 * dt;
         let at = clock + Duration::from_secs_f32(time);
         model.handle(IDLE_METER, at, reduce);
-        drawn = model.step(at, STEP, reduce);
+        drawn = model.step(at, dt, reduce);
     }
     let Some((take, elapsed)) = take else {
         return Some(drawn);
     };
 
-    let pressed = time;
+    let pressed = idle;
     let target = elapsed as f32;
     let stop_at = take.release as f32;
     let done_at = (take.release + DONE_DELAY) as f32;
     let mut submitted = false;
     let mut completed = false;
-    let mut since = 0.0_f32;
-    while since + STEP <= target + 1e-4 {
-        since += STEP;
+    let (count, dt) = steps(target);
+    for i in 1..=count {
+        let since = i as f32 * dt;
         let now = clock + Duration::from_secs_f32(pressed + since);
         if !submitted && since >= stop_at {
             submitted = true;
@@ -131,7 +145,7 @@ pub(crate) fn voice_frame_at(
         if !model.active() {
             return None;
         }
-        drawn = model.step(now, STEP, reduce);
+        drawn = model.step(now, dt, reduce);
     }
     model.active().then_some(drawn)
 }
@@ -314,6 +328,17 @@ pub(crate) fn voice_or_idle_slot(
 mod tests {
     use super::super::fixture::ANSWER_JAY;
     use super::*;
+
+    #[test]
+    fn the_hud_advances_between_sixty_hertz_frames() {
+        let a = voice_frame_at(0.25, None, false).unwrap();
+        let b = voice_frame_at(0.25 + 1.0 / 120.0, None, false).unwrap();
+        assert_ne!(a, b, "a 120 Hz frame must not repeat the previous pose");
+        assert_ne!(
+            flow_frame_at(0.25, false),
+            flow_frame_at(0.25 + 1.0 / 120.0, false)
+        );
+    }
 
     #[test]
     fn dot_hud_appears_listens_wipes_done_and_leaves() {

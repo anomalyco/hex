@@ -125,6 +125,16 @@ The known experiments are compiled into
   `the_playgrounds_keys_work_with_a_story_open`, and
   `a_scene_opened_from_the_list_hears_command_digits` in
   [playground.rs](../../src/rune_ui/playground.rs).
+  First run's side controls tune rise, leave, travel, stagger and keyboard
+  arrival; Quick motion and Gentle motion are presets. The real first run
+  uses the default values from
+  [landing.rs](../../src/rune_ui/onboarding_kit/landing.rs): zero-bounce
+  vertical entrances/exits, with each stagger delaying the whole entrance.
+  Polling follows the display clock; the scripted HUD samples between 60 Hz
+  frames and the microphone bars follow the level continuously. The
+  `the_hud_advances_between_sixty_hertz_frames` regression checks different
+  half-frame poses; a headless story recording does not prove native display
+  pacing or a real permission grant.
   On macOS a story opens from a link or the CLI:
 
   ```ts

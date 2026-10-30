@@ -1,6 +1,6 @@
 //! Shared typography, motion transitions, and the `"Hex is ready"` finale.
 
-use rune::{Beat, El, Sequence, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
+use rune::{El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 use rune_kit::{Button, ButtonVariant};
 
 use super::super::controls::{KeySize, Paint, PushSize, key_tray, keycap};
@@ -23,55 +23,67 @@ pub(crate) const LEAD: TextStyle = TextStyle::new(15.0, 410.0).lh(22.0);
 
 /// Product UI spring: `0.30 s`, zero bounce.
 pub(crate) const UI_SPRING: Spring = Spring::new(0.30, 0.0);
-const EXIT_SPRING: Spring = Spring::new(0.11, 0.0);
-const STEP_IN_BEATS: &[Beat] = &[
-    Beat::new(0.0).opacity(0.0).scale(0.985),
-    Beat::new(0.07).opacity(0.0).scale(0.985),
-    Beat::new(0.32)
-        .opacity(1.0)
-        .scale(1.0)
-        .easing(rune::Easing::EASE_OUT),
-];
+const EXIT_SPRING: Spring = Spring::new(0.25, 0.0);
 
-/// Calm entrance/exit (`scale 0.97`, zero bounce, faster exit so outgoing
-/// elements clear before incoming ones settle).
+/// The story's live motion controls. The real first run uses the same defaults.
+#[derive(Clone, Copy)]
+pub(crate) struct Motion {
+    pub enter: f32,
+    pub exit: f32,
+    pub travel: f32,
+    pub stagger: f32,
+    pub keyboard: f32,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Self {
+            enter: 0.34,
+            exit: 0.26,
+            travel: 8.0,
+            stagger: 0.05,
+            keyboard: 0.65,
+        }
+    }
+}
+
+impl Motion {
+    pub fn roll(self, distance: f32) -> Transition {
+        let fade = |y| Transition::offset(0.0, y).combined(Transition::opacity());
+        Transition::asymmetric(fade(distance), fade(-distance)).springs(SpringPair::new(
+            Spring::new(self.enter, 0.0),
+            Spring::new(self.exit, 0.0),
+        ))
+    }
+
+    pub fn heading(self, child: El) -> El {
+        child.transition(self.roll(self.travel))
+    }
+
+    pub fn staggered(self, child: El, rank: f32, distance: f32) -> El {
+        child
+            .transition(self.roll(distance))
+            .enter_delay(rank * self.stagger)
+    }
+
+    /// One critically damped progress value for a clock-driven pose.
+    pub fn keyboard_progress(self, elapsed: f64) -> f32 {
+        Spring::new(self.keyboard, 0.0)
+            .sample(0.0, 0.0, 1.0, elapsed.max(0.0) as f32)
+            .0
+    }
+}
+
+/// Whole-state replacement in place, with a slightly shorter exit.
 pub(crate) fn arrives() -> Transition {
     Transition::scale(0.97)
         .combined(Transition::opacity())
         .springs(SpringPair::new(UI_SPRING, EXIT_SPRING))
 }
 
-/// Directional vertical replacement for step headings: outgoing lifts `-6 pt`
-/// and clears in `0.11 s` before incoming rises `+8 pt`, preventing ghosted
-/// double-exposure titles.
+/// Incoming words rise as outgoing words lift away, on one presence spring.
 pub(crate) fn step_replace() -> Transition {
-    let enter = Transition::offset(0.0, 8.0).combined(Transition::opacity());
-    let exit = Transition::offset(0.0, -6.0).combined(Transition::opacity());
-    Transition::asymmetric(enter, exit).springs(SpringPair::new(UI_SPRING, EXIT_SPRING))
-}
-
-/// Applies [`step_replace`] plus a brief `70 ms` hold so the outgoing heading
-/// clears before the incoming text reaches contrast.
-pub(crate) fn clean_heading(el: El) -> El {
-    el.transition(step_replace())
-        .sequence(Sequence::new(STEP_IN_BEATS))
-}
-
-const STAGGER_BEATS: &[Beat] = &[
-    Beat::new(0.0).opacity(0.0).scale(0.975),
-    Beat::new(0.32)
-        .opacity(1.0)
-        .scale(1.0)
-        .easing(rune::Easing::EASE_OUT),
-];
-
-/// Staggers a child's entrance by `delay_secs` (`0.32 s` settle, no bounce).
-pub(crate) fn staggered(child: El, delay_secs: f64, y_offset: f32) -> El {
-    child
-        .sequence(Sequence::new(STAGGER_BEATS).delay(delay_secs))
-        .transition(
-            Transition::offset(0.0, y_offset).springs(SpringPair::new(UI_SPRING, EXIT_SPRING)),
-        )
+    Motion::default().roll(Motion::default().travel)
 }
 
 /// A heading and the line under it, centred on the column spine.
@@ -139,33 +151,36 @@ pub(crate) fn ready(
     matched: Option<&str>,
     now: f64,
     reduced: bool,
+    motion: Motion,
 ) -> El {
     let mark = hex_meter_glowing(p, "meter", 64.0, now, reduced);
     let mark = match matched {
         Some(id) => el().key(id).matched(id).motion(FLY).child(mark),
-        None => staggered(mark.key("mark"), 0.0, 8.0),
+        None => motion.staggered(mark.key("mark"), 0.0, 8.0),
     };
     col()
         .key("ready")
         .gap(24.0)
         .items_center()
         .child(mark)
-        .child(staggered(
-            col()
-                .key("ready-copy")
-                .gap(10.0)
-                .items_center()
-                .child(
-                    text("Hex is ready")
-                        .key("title")
-                        .font(title_font(p))
-                        .color(p.text()),
-                )
-                .child(hold_anywhere(p, caps)),
-            0.08,
-            8.0,
-        ))
-        .child(staggered(menubar_hint(p), 0.18, 10.0))
+        .child(
+            motion.staggered(
+                col()
+                    .key("ready-copy")
+                    .gap(10.0)
+                    .items_center()
+                    .child(
+                        text("Hex is ready")
+                            .key("title")
+                            .font(title_font(p))
+                            .color(p.text()),
+                    )
+                    .child(hold_anywhere(p, caps)),
+                1.0,
+                8.0,
+            ),
+        )
+        .child(motion.staggered(menubar_hint(p), 2.0, 8.0))
 }
 
 /// `"Hold [⌥] anywhere, then talk."`
