@@ -12,17 +12,23 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   -> muted note on the row and under the sheet's description: "Whisper
 │   large-v3-turbo doesn't use these terms; rewriting and search still do";
 │   Parakeet-based models (Parakeet, Underdog Bark) show none
-├── Sheet rows -> Term | Sounds like (comma-separated) | ×; scroll past ~8
-├── Empty list -> Opens with one blank row focused
-├── Add term -> New empty row, focused; saved once the term has text
+├── Sheet description -> what the list does, then "Terms with spaces match
+│   only when said in full" (a term is matched whole; "Dax Rad" doesn't help
+│   "Dax" said alone, so a name also said alone gets its own row)
+├── Sheet rows -> Term | Sounds like (comma-separated) | ×; scroll past 8
+├── Empty list -> Opens with one blank row focused; opening never animates rows
+├── Add term -> New empty row, focused; the list glides to its end and the row
+│   rises 8 pt as it fades in (SETTLE, bounce 0; Reduce Motion: fade only);
+│   saved once the term has text
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing
 ├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
-└── Boost -> Off | Light | Normal (default) | Strong -> settings.json
-    `vocabulary_boost`, `hex settings set vocabulary_boost`  // vocabulary.boost
+└── Boost -> no control in the window: Normal (default) unless changed with
+    `hex settings set vocabulary_boost off|light|normal|strong`
+    (settings.json `vocabulary_boost`)  // vocabulary.boost
 
 Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; gguf_session::with_vocabulary
 ├── Every run and live stream reads the list and the boost at its start:
@@ -125,7 +131,8 @@ trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 `rapid_removals_from_one_frame_remove_only_their_own_rows`, and
 `a_reload_retires_the_old_rows` in
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
-`the_vocabulary_row_opens_its_sheet` and
+`the_vocabulary_row_opens_its_sheet`,
+`add_term_scrolls_the_new_row_into_view`, and
 `the_vocabulary_row_says_when_the_model_ignores_the_list` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs);
 `only_parakeet_based_models_use_the_vocabulary` in
 [transcription_models.rs](../../src/transcription_models.rs). Scenes:
