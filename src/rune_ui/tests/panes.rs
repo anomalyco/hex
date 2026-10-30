@@ -77,7 +77,7 @@ fn settings_rows_follow_each_os() {
     assert!(present(&windows, "launch-at-login"));
     assert!(present(&windows, "toggle-listening"));
     assert!(!present(&windows, "dock-icon"));
-    assert!(!present(&windows, "terminal-paste"));
+    assert!(present(&windows, "terminal-paste"));
     assert!(!present(&windows, "meetings-enabled"));
 }
 
