@@ -52,6 +52,10 @@ const PATHS: &[(&str, &str)] = &[
         "mac-settings-vocabulary-empty",
         "Window/General/Vocabulary · empty",
     ),
+    (
+        "vocabulary-unused",
+        "Window/General/Vocabulary · not used by the model",
+    ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
     (
