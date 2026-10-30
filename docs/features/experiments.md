@@ -130,6 +130,8 @@ The known experiments are compiled into
   uses the default values from
   [landing.rs](../../src/rune_ui/onboarding_kit/landing.rs): zero-bounce
   vertical entrances/exits, with each stagger delaying the whole entrance.
+  The demonstration's second send removes its input field in the same layout
+  change, so the card contracts once while the old field fades inside it.
   Polling follows the display clock; the scripted HUD samples between 60 Hz
   frames, the download HUD advances one retained simulation, and the microphone
   bars follow the level continuously. A real press keeps the waiting HUD open;
