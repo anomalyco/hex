@@ -319,7 +319,7 @@ const KEYS: &[Key] = &[
     key(
         "paste_with_shift",
         Kind::Bool,
-        "Paste with Ctrl-Shift-V for terminals (Linux)",
+        "Paste with Ctrl-Shift-V for terminals (Linux and Windows)",
     ),
     key(
         "share_dictation_shortcut",

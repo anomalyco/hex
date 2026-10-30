@@ -560,13 +560,15 @@ General                                  // settings
 │   │   Double-tap only, Microphone mode, keyboard-language model switching (macOS),
 │   │   Use the Mac's microphone instead of Bluetooth (macOS),
 │   │   Share dictation shortcut with other apps (Windows), Recognition hints
-│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
+│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux, Windows)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
 ├── Use the Mac's microphone instead of Bluetooth (Advanced, macOS, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Share dictation shortcut with other apps (Advanced, Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
+├── Terminal paste (Advanced, Linux and Windows, off)
+│   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
