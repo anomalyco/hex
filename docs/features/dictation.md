@@ -919,7 +919,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
 
 ```ts
 Settings > Sounds (next to Sound volume)                    // dictate.sound-set
-├── Default / older settings -> Hex signature
+├── Default / older settings -> Classic
 ├── Row shows the saved set -> Opens the Sounds sheet
 │   ├── Stage -> Hex's own HUD, where this OS puts it, does what it does
 │   │   │          at each sound of a short dictation

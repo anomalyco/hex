@@ -130,7 +130,7 @@ const KEYS: &[Key] = &[
     key(
         "sound_theme",
         Kind::Choice(&["signature", "classic", "click", "soft", "wood", "analog"]),
-        "Which sounds play; classic is Hex's original tones",
+        "Which sounds play; classic, Hex's original tones, is the default",
     ),
     optional(
         "microphone",

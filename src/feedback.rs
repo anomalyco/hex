@@ -357,10 +357,10 @@ pub fn play(tone: Tone) {
 #[repr(u8)]
 pub enum SoundSet {
     /// One kalimba-like voice playing one motif across a dictation.
-    #[default]
     Signature = 0,
     /// The sounds Hex played before the signature set. It has no done tone,
     /// and errors play macOS Basso as they did.
+    #[default]
     Classic = 1,
     Click = 2,
     Soft = 3,
@@ -493,7 +493,7 @@ impl Audition {
     }
 }
 
-static SOUND_SET: AtomicU8 = AtomicU8::new(SoundSet::Signature as u8);
+static SOUND_SET: AtomicU8 = AtomicU8::new(SoundSet::Classic as u8);
 
 pub fn set_sound_set(set: SoundSet) {
     SOUND_SET.store(set as u8, Ordering::Relaxed);
