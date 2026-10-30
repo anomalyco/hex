@@ -276,7 +276,10 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   footer is "Send 1–5  Always ⇧" again. Shift+1-5 or Shift+click
 │   │   │   sends and saves the rule: "Sent to X · saved rule", and its Undo
 │   │   │   takes back the send and the rule (what the key held before, or
-│   │   │   nothing, comes back)
+│   │   │   nothing, comes back). The rule names that session (`ses_…`),
+│   │   │   never its folder: a folder rule goes to the folder's newest
+│   │   │   session, so with SEER and RUNE DESKTOP in one checkout, a rule
+│   │   │   saved for RUNE DESKTOP went to SEER
 │   │   ├── 1-5 or a click -> sends at once: "Sent to X", the Sent tone, and a
 │   │   │   quiet Undo for the same 5 s, with no ring or drain; ✕ closes;
 │   │   │   the capsule then leaves by itself with its exit
@@ -682,7 +685,8 @@ Checks:
   `a_saved_site_or_app_rule_sends_whatever_the_routing_flags`,
   `the_port_ladder_is_a_guess`, `the_captured_apps_checkout_is_a_guess`,
   `a_look_past_its_deadline_is_routed_without`,
-  `an_always_rule_names_the_folder_of_the_session_it_sends_to`, and
+  `an_always_rule_names_the_session_it_sends_to`,
+  `an_always_rule_keeps_sending_to_the_session_picked`, and
   `a_capture_routed_after_a_newer_one_settled_is_still_sendable_by_name`;
   `an_always_rule_makes_its_sites_next_capture_a_saved_rule`,
   `a_failing_page_keeps_what_was_read_and_still_reads_what_rules_name`,

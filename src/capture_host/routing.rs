@@ -760,28 +760,17 @@ impl Worker {
     }
 
     /// The always-rule sending the current capture's site or app to
-    /// `session`: the rule offered after its send when that send went to
-    /// `session`, else `session`'s project (or the session itself).
+    /// `session` itself: its site or app, else the key of the rule offered
+    /// after its send. Never `session`'s folder: a folder rule sends to the
+    /// newest session in that repository, which is another session
+    /// whenever two work in it (a worktree's beside its main checkout's).
     fn rule_for(&self, session: &str) -> Option<(RuleKind, String, String)> {
         let current = self.current.as_ref()?;
-        let sent_here = current
-            .sent
-            .as_ref()
-            .is_some_and(|sent| sent.session == session);
-        if let Some(offer) = current.offered.as_ref().filter(|_| sent_here) {
-            return Some((offer.kind, offer.key.clone(), offer.folder.clone()));
-        }
         let (kind, key) = current.rule.clone().or_else(|| {
             let offer = current.offered.as_ref()?;
             Some((offer.kind, offer.key.clone()))
         })?;
-        let target = current
-            .candidates
-            .iter()
-            .find(|candidate| candidate.id == session)
-            .and_then(policy::rule_folder)
-            .map_or_else(|| session.to_owned(), |folder| folder.display().to_string());
-        Some((kind, key, target))
+        Some((kind, key, session.to_owned()))
     }
 
     /// Logs the person correcting or confirming the router (with Jev routing
@@ -1836,8 +1825,82 @@ mod tests {
             }
         }
 
+        /// SEER and RUNE DESKTOP working in one checkout, SEER the newer.
+        fn one_checkout(path: &str, _: Duration) -> anyhow::Result<Vec<u8>> {
+            let session = |id: &str, title: &str, updated: u64| {
+                serde_json::json!({
+                    "id": id, "title": title, "parentID": null,
+                    "time": {"updated": updated}, "location": {"directory": "/p/seer"},
+                })
+            };
+            let all = [
+                session("ses_seer", "SEER", 30),
+                session("ses_rune", "RUNE DESKTOP", 20),
+            ];
+            let body = match path.strip_prefix("/api/session/") {
+                Some(id) => all
+                    .iter()
+                    .find(|s| s["id"] == id)
+                    .map(|s| serde_json::json!({ "data": s }))
+                    .ok_or_else(|| anyhow::anyhow!("404 Not Found"))?,
+                None => serde_json::json!({ "data": all }),
+            };
+            Ok(serde_json::to_vec(&body)?)
+        }
+
         #[test]
-        fn an_always_rule_names_the_folder_of_the_session_it_sends_to() {
+        fn an_always_rule_keeps_sending_to_the_session_picked() {
+            let senses = || look::Senses {
+                hooks: Hooks {
+                    sdk: no_sdk,
+                    listener_dir: dev_server,
+                    api: one_checkout,
+                },
+                ..senses(no_tab)
+            };
+            let context = || RouteContext {
+                front_bundle_id: Some("com.example.rune".into()),
+                captured_bundle_id: Some("com.example.rune".into()),
+                app_pid: None,
+            };
+            let look = look_with(context(), router_with(|_| {}), senses()).unwrap();
+            let mut worker = worker(SharedOutcomes::default());
+            worker.written(written("com.example.rune"), look);
+            // Shift-picking RUNE DESKTOP saves the app's rule to that session.
+            let (kind, key, target) = worker.rule_for("ses_rune").expect("an app rule");
+            assert_eq!(
+                (kind, key.as_str(), target.as_str()),
+                (RuleKind::App, "com.example.rune", "ses_rune")
+            );
+            let saved = RouterConfig {
+                send_captures: true,
+                ..RouterConfig::default()
+            }
+            .with_rule(kind, &key, &target)
+            .unwrap();
+            let (answer, sent) = route(
+                router_with(|c| *c = saved.clone()),
+                "com.example.rune",
+                senses(),
+            );
+            assert!(
+                matches!(answer, RouteAnswer::Rule { ref to, .. } if to.session == "ses_rune"),
+                "{answer:?}"
+            );
+            assert_eq!(sent.as_deref(), Some("ses_rune"));
+            // What it saved before: the checkout, whose newest session is SEER.
+            let (_, sent) = route(
+                router_with(|c| {
+                    c.apps.insert("com.example.rune".into(), "/p/seer".into());
+                }),
+                "com.example.rune",
+                senses(),
+            );
+            assert_eq!(sent.as_deref(), Some("ses_seer"));
+        }
+
+        #[test]
+        fn an_always_rule_names_the_session_it_sends_to() {
             let router = router_with(|c| {
                 c.sites
                     .insert("https://board.example.com".into(), "/p/board".into());
@@ -1860,18 +1923,18 @@ mod tests {
                 key: "https://board.example.com".into(),
                 folder: "/p/board".into(),
             });
-            let site = |folder: &str| {
+            let site = |session: &str| {
                 Some((
                     RuleKind::Site,
                     "https://board.example.com".to_owned(),
-                    folder.to_owned(),
+                    session.to_owned(),
                 ))
             };
-            assert_eq!(worker.rule_for("ses_board"), site("/p/board"));
+            assert_eq!(worker.rule_for("ses_board"), site("ses_board"));
             assert_eq!(
                 worker.rule_for("ses_home"),
-                site("/p/home"),
-                "--to HOME --always names HOME's folder, not the offer's"
+                site("ses_home"),
+                "--to HOME --always names HOME, not the offer's folder"
             );
         }
 
