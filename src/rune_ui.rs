@@ -15,6 +15,7 @@ pub(crate) mod capture_capsule;
 mod controls;
 mod explainer;
 mod fun;
+mod gem;
 mod general;
 mod hero;
 mod history;
