@@ -1965,6 +1965,7 @@ impl AppSettings {
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
                 settings.migrate_disabled_transcription_model();
+                settings.clear_unsupported_recognition_hints();
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
                 // A model that is gone, or a language it lost, maps to nothing.
@@ -2208,6 +2209,23 @@ impl AppSettings {
             "switched English dictation to the streaming English model"
         );
         self.remember_transcription(selection);
+    }
+
+    /// Recognition hints saved for a model that can't use them (edited by
+    /// hand, or left from another model) are dropped with a warning rather
+    /// than failing the whole settings load.
+    fn clear_unsupported_recognition_hints(&mut self) {
+        let model = crate::transcription_models::definition(self.transcription.model);
+        if model.supports_recognition_hints
+            || self.transcription.recognition_hints.trim().is_empty()
+        {
+            return;
+        }
+        tracing::warn!(
+            model = self.transcription.model.as_str(),
+            "cleared recognition hints the selected model doesn't support"
+        );
+        self.transcription.recognition_hints.clear();
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
@@ -2703,6 +2721,38 @@ mod tests {
             loaded.keyboard_model_switching.mappings,
             [("Russian".to_owned(), russian)].into()
         );
+    }
+
+    #[test]
+    fn loading_clears_recognition_hints_the_model_does_not_support() {
+        let dir = TestSettingsDir::new("unsupported-hints");
+        let mut settings = AppSettings {
+            transcription: TranscriptionSelection {
+                model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                language: "en".into(),
+                recognition_hints: "Hex, Rune".into(),
+            },
+            sound_effect_volume: 0.25,
+            ..AppSettings::default()
+        };
+        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            loaded.transcription.model,
+            TranscriptionModelId::ParakeetUnifiedEnglish
+        );
+        assert!(loaded.transcription.recognition_hints.is_empty());
+        assert_eq!(loaded.sound_effect_volume, 0.25);
+
+        let whisper = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "en".into(),
+            recognition_hints: "Hex, Rune".into(),
+        };
+        settings.transcription = whisper.clone();
+        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(loaded.transcription, whisper);
     }
 
     #[test]

@@ -225,6 +225,14 @@ kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
 `hints_without_spaces_after_commas_are_matched` in
 [gguf_session.rs](../../src/gguf_session.rs).
 
+Only Whisper takes recognition hints. Saved hints for a model that can't use
+them (for example Parakeet Unified English, set by hand in `settings.json`) are
+cleared with a logged warning when settings load, rather than failing the whole
+load and leaving the listener off
+([#448](https://github.com/anomalyco/hex/issues/448)). Check:
+`loading_clears_recognition_hints_the_model_does_not_support` in
+[app_settings.rs](../../src/app_settings.rs).
+
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
 ├── Title row -> Name, recommendation tag, "Streams" tag    // at most two tags
