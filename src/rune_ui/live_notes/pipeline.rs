@@ -14,7 +14,8 @@
 use super::script::Script;
 
 /// Live chapters' interval.
-pub(super) const CHAPTERS_INTERVAL_MS: u64 = 180_000;
+#[cfg(test)]
+const CHAPTERS_INTERVAL_MS: u64 = 180_000;
 /// #201's live notes interval.
 pub(super) const NOTES_INTERVAL_MS: u64 = 75_000;
 const MIN_NEW_WORDS: usize = 40;
@@ -138,11 +139,6 @@ impl Pipeline {
             "Boundary pass: {moved} {} moved to where the topic begins",
             if moved == 1 { "chapter" } else { "chapters" }
         ));
-    }
-
-    /// The chapter a moment falls in, if any has opened.
-    pub(super) fn chapter_at(&self, ms: u64) -> Option<usize> {
-        self.chapters.iter().rposition(|c| c.start_ms <= ms)
     }
 
     /// The topic most of the new lines are about, and the window's span.
