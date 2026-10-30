@@ -1085,11 +1085,12 @@ when it replaced the glossy capsule, which Omarchy users on X called a
 "static red thingy"; the capsule's shader and HUD Lab styles are deleted. It is the t422 prototype's look A with its values.
 Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no
 menu-bar or notch placement). On Windows the window is a topmost,
-click-through tool window that Rune shows and hides with `ShowWindow` itself;
-before Rune 159e3aeb its hide went through winit, which had never seen the
-show, so the cleared window stayed on screen as a black rectangle after the
-first dictation (#499; fixed by reading the code, not yet observed on
-Windows). Every OS takes dark or light and Reduce Motion
+click-through tool window with no redirection bitmap, drawn through
+DirectComposition. Rune shows and hides it with Win32 calls alone and
+re-asserts its styles on each show; winit never sees its visibility. A
+black rectangle that stayed after the first dictation (#499) and then no HUD
+at all (#510) followed from mixing winit and Win32 (fixed by reading the
+code, not yet observed on Windows). Every OS takes dark or light and Reduce Motion
 from Rune, and loads `dot-scope.json` at launch.
 
 ```ts
