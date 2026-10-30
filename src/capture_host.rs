@@ -70,6 +70,8 @@ use crate::transcription_models::{ModelRuntime, TranscriptionModelId};
 
 mod library;
 mod routing;
+#[cfg(target_os = "macos")]
+mod screen_access;
 mod sink;
 
 pub use library::{
@@ -77,6 +79,8 @@ pub use library::{
 };
 pub use routing::CaptureRoute;
 pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
+#[cfg(target_os = "macos")]
+pub use screen_access::{ScreenAccess, screen_access, screen_access_now};
 #[cfg(target_os = "macos")]
 pub use sink::CaptureSink;
 #[cfg(target_os = "linux")]

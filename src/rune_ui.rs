@@ -2205,6 +2205,13 @@ const SCENES: &[Scene] = &[
     ("mac-scrawl-permission", |ui| {
         scrawl_fixture(ui, true, |view| view.screen_recording = false)
     }),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-restart", |ui| {
+        scrawl_fixture(ui, true, |view| {
+            view.screen_recording = false;
+            view.screen_needs_restart = true;
+        })
+    }),
     ("mac-voice-filter", |ui| {
         *ui = mac_fixture();
         ui.pane = Pane::VoiceFilter;

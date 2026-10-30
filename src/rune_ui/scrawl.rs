@@ -7,8 +7,8 @@ use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, card, described_row, folding, note, page, section, segmented,
-    select, setting_row, toggle_row,
+    ButtonKind, Choice, Paint, button, card, described_row, folding, note, page, section,
+    segmented, select, setting_row, toggle_row,
 };
 use super::general::keys_button;
 use super::lists::{PermissionControl, permission_control};
@@ -211,7 +211,23 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
     )];
     // Linux asks through the desktop's screen-cast portal when a capture
     // starts, and Wayland can't keep an overlay out of a recording.
-    if enabled && cfg!(target_os = "macos") {
+    if enabled && cfg!(target_os = "macos") && view.screen_needs_restart {
+        // macOS lets a running app use the grant only after it relaunches.
+        rows.push(setting_row(
+            p,
+            "screen-recording",
+            tr("Screen Recording"),
+            Some(tr("Turns on when Hex restarts")),
+            button(
+                p,
+                "screen-recording-restart",
+                tr("Restart Hex"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| ui.ask(PlatformRequest::Permission(PermissionAction::Restart)),
+            ),
+        ));
+        rows.push(recordings_row(ui, p));
+    } else if enabled && cfg!(target_os = "macos") {
         rows.push(setting_row(
             p,
             "screen-recording",
@@ -520,6 +536,21 @@ mod tests {
         assert!(
             rt.find(&format!("{ALLOW}-control/mark/ink/check"))
                 .is_some()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_grant_this_hex_cant_use_yet_offers_a_restart() {
+        let mut rt = pane("mac-scrawl-restart");
+        assert!(
+            rt.find(ALLOW).is_none(),
+            "no Allow over a switch already on"
+        );
+        tap(&mut rt, "screen-recording-restart");
+        assert_eq!(
+            asked(&rt),
+            [PlatformRequest::Permission(PermissionAction::Restart)]
         );
     }
 
