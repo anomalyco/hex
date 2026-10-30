@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,8 @@ use crate::final_frame_hold::hold_final_video_frame;
 use crate::frames::FrameSampler;
 use crate::input::{HostInputDrain, InputLog, RecordedInput};
 use crate::manifest::{
-    Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Permission, SourceEntry, TrackKind,
-    write_json,
+    Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Marker, Permission, SIDECAR_VERSION,
+    SourceEntry, TrackKind, format_utc_rfc3339_millis, write_json,
 };
 use crate::plan::{Exclusions, Names, Source};
 use crate::system_audio::SystemAudioWriter;
@@ -182,6 +182,7 @@ impl Default for Timeouts {
 /// One source while it records.
 pub(crate) struct SourceRun {
     pub source: Source,
+    pub label: Option<String>,
     pub name: String,
     pub path: PathBuf,
     pub stream: Box<dyn SourceStream>,
@@ -191,6 +192,7 @@ pub(crate) struct SourceRun {
     pub attached: HostTime,
     pub width: u32,
     pub height: u32,
+    pub scale: Option<f64>,
     pub rect: Rect,
     pub audio_tracks: Vec<TrackKind>,
 }
@@ -301,11 +303,13 @@ impl SourceRun {
         SourceOutcome {
             entry: SourceEntry {
                 source: self.source,
+                label: self.label,
                 file: self.name,
                 start_ns,
                 duration_ms,
                 width: self.width,
                 height: self.height,
+                scale: self.scale,
                 frame: self.rect,
                 audio_tracks: self.audio_tracks,
                 error: error.map(|error| error.to_string()),
@@ -397,7 +401,9 @@ pub(crate) struct Active {
     pub dir: PathBuf,
     pub names: Names,
     pub anchor: HostTime,
+    pub started_at: Option<String>,
     pub sources: Vec<SourceRun>,
+    pub markers: Vec<Marker>,
     pub pointer: Option<PointerSampler>,
     pub clicks: Option<ClickMonitor>,
     pub host_input: Option<HostInputDrain>,
@@ -416,7 +422,9 @@ impl Active {
             dir,
             names,
             anchor,
+            started_at: format_utc_rfc3339_millis(SystemTime::now()),
             sources: Vec::new(),
+            markers: Vec::new(),
             pointer: None,
             clicks: None,
             host_input: None,
@@ -464,9 +472,11 @@ impl Active {
             .map(|run| {
                 (
                     run.source,
+                    run.label.clone(),
                     run.name.clone(),
                     run.width,
                     run.height,
+                    run.scale,
                     run.rect,
                 )
             })
@@ -482,7 +492,8 @@ impl Active {
         );
         let mut sources = Vec::with_capacity(outcomes.len());
         let mut cursor = Vec::with_capacity(outcomes.len());
-        for (outcome, (source, file, width, height, rect)) in outcomes.into_iter().zip(placeholders)
+        for (outcome, (source, label, file, width, height, scale, rect)) in
+            outcomes.into_iter().zip(placeholders)
         {
             match outcome {
                 Some(outcome) => {
@@ -491,11 +502,13 @@ impl Active {
                 }
                 None => sources.push(SourceEntry {
                     source,
+                    label,
                     file,
                     start_ns: anchor.as_nanos(),
                     duration_ms: 0,
                     width,
                     height,
+                    scale,
                     frame: rect,
                     audio_tracks: Vec::new(),
                     error: Some("the finishing thread panicked".into()),
@@ -556,7 +569,7 @@ impl Active {
             .unwrap_or_default();
         if let Some(name) = &self.names.cursor {
             let file = CursorFile {
-                version: 1,
+                version: SIDECAR_VERSION,
                 sources: &cursor,
             };
             match write_json(&self.dir, name, &file) {
@@ -570,7 +583,7 @@ impl Active {
         }
         if let Some(name) = &self.names.input {
             let file = InputFile {
-                version: 1,
+                version: SIDECAR_VERSION,
                 clock: Clock::MachHostNs,
                 anchor_ns: anchor.as_nanos(),
                 dropped: input_dropped,
@@ -589,8 +602,10 @@ impl Active {
             version: MANIFEST_VERSION,
             clock: Clock::MachHostNs,
             anchor_ns: anchor.as_nanos(),
+            started_at: self.started_at.clone(),
             sources,
             files,
+            markers: std::mem::take(&mut self.markers),
             audio_gaps,
             missing_permissions: std::mem::take(&mut self.missing_permissions),
         };
@@ -695,6 +710,21 @@ impl Recording {
     /// The sink for [`Mic::External`](crate::Mic::External) audio. Returns it once.
     pub fn external_audio(&mut self) -> Option<ExternalAudioSink> {
         self.external_sink.take()
+    }
+
+    /// Records a named moment on the bundle's clock (`HostTime::now()`).
+    pub fn mark(&mut self, label: impl Into<String>) {
+        self.mark_at(HostTime::now(), label);
+    }
+
+    /// Records a named moment at a caller-captured `HostTime`.
+    pub fn mark_at(&mut self, at: HostTime, label: impl Into<String>) {
+        if let Some(active) = &mut self.active {
+            active.markers.push(Marker {
+                host_ns: at.as_nanos(),
+                label: label.into(),
+            });
+        }
     }
 
     /// Whether the core's own click tap is running ([`Input::Tap`](crate::Input::Tap)).

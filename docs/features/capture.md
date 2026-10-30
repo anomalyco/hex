@@ -335,7 +335,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   app, and the Undo button is the only way back
 │   │   ├── Suggestions -> at the session tap no key at all (the toast's
 │   │   │   ⏎ and ⇥ aside), only a mouse press, which folds them (the click
-│   │   │   still reaches the app); every key, digits and Esc included, goes on
+│   │   │   still reaches the app) unless the pointer is on the pill or the
+│   │   │   list under it: the tap reports the press before the overlay gets
+│   │   │   it, so a click on a row would otherwise fold the row away first
+│   │   │   (`clicks_on_the_capsule_do_what_they_say`, headless pointer
+│   │   │   events, not native); every key, digits and Esc included, goes on
 │   │   │   to the app. Shift's presses and releases (flagsChanged) reach the
 │   │   │   capsule too (`CapsuleKey::Shift`) and still go on to the app
 │   │   └── List open -> the session tap takes every key press without ⌘ or ⌃
@@ -443,7 +447,11 @@ Hex's own windows                        // capture.own-windows
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
 │   ├── Other recorders -> the capsule, picker, and ink are left out
-│   │   (sharingType none); the dictation HUD and meeting capsules show
+│   │   (sharingType none) while shown; the dictation HUD and meeting
+│   │   capsules show
+│   │   └── Hidden (prewarmed, alpha zero on every Space) -> sharingType
+│   │       readOnly, set the turn after the hide, so Mission Control's
+│   │       Space thumbnails stay drawn (`capture_capsule::set_shown`)
 │   ├── Show in screen recordings on -> every recorder, Hex's captures
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's

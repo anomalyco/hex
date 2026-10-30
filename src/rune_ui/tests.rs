@@ -1474,10 +1474,36 @@ fn the_vocabulary_row_opens_its_sheet() {
     tap(&mut rt, "vocabulary-control");
     settle(&mut rt);
     assert!(rt.state.vocabulary.open);
-    assert!(rt.find("vocabulary-boost").is_some());
+    assert!(rt.find("add-term").is_some());
+    assert!(rt.find("vocabulary-boost").is_none());
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
     assert!(!rt.state.vocabulary.open);
+}
+
+/// Add term on a list longer than the sheet scrolls the new row into view.
+#[test]
+fn add_term_scrolls_the_new_row_into_view() {
+    let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
+    rt.state.settings.vocabulary = (0..14)
+        .map(|index| crate::vocabulary::VocabularyEntry {
+            term: format!("term {index}"),
+            sounds_like: Vec::new(),
+        })
+        .collect();
+    rt.state.vocabulary = super::vocabulary::VocabularyEditor::new(&rt.state.settings.vocabulary);
+    rt.state.vocabulary.open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "add-term");
+    settle(&mut rt);
+    let id = rt.state.vocabulary.last_row().unwrap();
+    let new_row = element(&rt, &format!("term{id}")).rect;
+    let list = element(&rt, "term-scroll").rect;
+    assert!(
+        new_row[1] >= list[1] && new_row[1] + new_row[3] <= list[1] + list[3] + 0.5,
+        "row {new_row:?} outside list {list:?}"
+    );
 }
 
 /// A model transcription doesn't bias says so on the Vocabulary row and in

@@ -306,6 +306,14 @@ impl Animated {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+/// The pieces the pointer can be on: the pill, and the list hanging under
+/// it, which sits outside the pill's clip.
+#[derive(Clone, Copy)]
+enum Part {
+    Pill,
+    List,
+}
+
 /// The host's side of a press or key: what to do with the capture.
 pub(crate) type Act = Arc<dyn Fn(Action) + Send + Sync>;
 
@@ -339,6 +347,8 @@ pub(crate) struct CapsuleState {
         crate::capture_host::CapsuleKeys,
         crate::capture_host::CapsuleKeyGrab,
     )>,
+    /// Whether the pointer is on each [`Part`].
+    hovering: [bool; 2],
     /// The on-screen picker, and the mode it was last told to pick.
     picker: Option<picker::PickerOverlay>,
     picker_mode: Option<Mode>,
@@ -374,6 +384,7 @@ impl CapsuleState {
             replace: false,
             placed: surface::Anchor::Top,
             keys: None,
+            hovering: [false; 2],
             picker: None,
             picker_mode: None,
             still: false,
@@ -451,8 +462,15 @@ impl CapsuleState {
         tx.wake_after(Duration::ZERO);
     }
 
-    /// The pointer came onto the capsule or left it: chips never fold under it.
-    fn hover(&mut self, on: bool, tx: &mut Tx) {
+    /// The pointer came onto `part` of the capsule or left it: chips never
+    /// fold under it, and a press there is never a click away.
+    fn hover(&mut self, part: Part, on: bool, tx: &mut Tx) {
+        let was = self.hovering != [false; 2];
+        self.hovering[part as usize] = on;
+        let on = self.hovering != [false; 2];
+        if on == was {
+            return;
+        }
         let now = self.now;
         self.flow.hover(on, now);
         self.present(now);
@@ -553,11 +571,7 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
-            if shown {
-                overlay.show();
-            } else {
-                overlay.hide();
-            }
+            set_shown(overlay, shown, |s: &CapsuleState| !s.shown);
         }
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
@@ -608,6 +622,44 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
 /// Moves the overlay to where the capsule rests: under the menu bar, at
 /// the screen's top edge (the notch), or at the pointer (the cursor's
 /// card, whose rect is global, so on the primary display's origin).
+/// Shows or hides a capture overlay, left out of screen recordings only
+/// while shown. A hidden prewarmed overlay stays on screen at alpha zero on
+/// every Space, and Mission Control draws each Space holding a
+/// non-shareable window as a blank thumbnail. Hiding makes the window
+/// shareable one turn after the hide, so no recorder sees it visible;
+/// `hidden` reads whether it is still hidden by then.
+fn set_shown<T: 'static>(overlay: &OverlayHandle<T>, shown: bool, hidden: fn(&T) -> bool) {
+    if shown {
+        overlay.set_exclude_from_capture(!crate::capture_host::own_windows_recorded());
+        overlay.show();
+        return;
+    }
+    overlay.hide();
+    let handle = overlay.clone();
+    overlay.update_if(move |s, _| {
+        if hidden(s) {
+            handle.set_exclude_from_capture(false);
+        }
+        false
+    });
+}
+
+/// `capture.show_overlays_in_recordings` on a capture overlay: applied now
+/// if it is shown, else at its next show.
+fn follow_recordings<T: 'static>(
+    overlay: &OverlayHandle<T>,
+    recorded: bool,
+    shown: fn(&T) -> bool,
+) {
+    let handle = overlay.clone();
+    overlay.update_if(move |s, _| {
+        if shown(s) {
+            handle.set_exclude_from_capture(!recorded);
+        }
+        false
+    });
+}
+
 fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
     use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
@@ -715,7 +767,8 @@ impl CaptureCapsule {
                 }),
                 display: DisplayTarget::UnderPointer,
                 level: OverlayLevel::AboveOverlays,
-                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                // Hidden until shown; `set_shown` excludes it then.
+                exclude_from_capture: false,
                 input: OverlayInput::Regions,
                 prewarm: true,
                 ..Default::default()
@@ -752,7 +805,7 @@ impl CaptureCapsule {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the capsule, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        self.overlay.set_exclude_from_capture(!shown);
+        follow_recordings(&self.overlay, shown, |s: &CapsuleState| s.shown);
     }
 
     /// Shows `image`, decoded, as the finished capsule's lead until the
@@ -931,7 +984,7 @@ fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleStat
         .size(w, h)
         .motion(surface.shell_motion)
         .clip_rounded(corner(h))
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(on, tx));
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
         open: Some((_, list)),
@@ -1812,6 +1865,9 @@ fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blu
         .role("list")
         .label("Send to")
         .hit()
+        // Hex's tap reports a press on the list before the list hears it:
+        // the pointer being here keeps it from reading as a click away.
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::List, on, tx))
         .transition(
             Transition::offset(0.0, -LIST_DROP)
                 .combined(Transition::opacity())

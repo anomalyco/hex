@@ -391,17 +391,20 @@ pub enum SoundSet {
     Soft = 3,
     Wood = 4,
     Analog = 5,
+    /// The team vote's winner (2026-10): one mechanical key's thock.
+    Thock = 6,
 }
 
 impl SoundSet {
     /// In the order Settings lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Signature,
         Self::Classic,
         Self::Click,
         Self::Soft,
         Self::Wood,
         Self::Analog,
+        Self::Thock,
     ];
 
     /// The English name Settings shows, translated where it is shown.
@@ -413,6 +416,7 @@ impl SoundSet {
             Self::Soft => "Soft tone",
             Self::Wood => "Wood",
             Self::Analog => "Warm synth",
+            Self::Thock => "Thock",
         }
     }
 
@@ -425,10 +429,11 @@ impl SoundSet {
             Self::Soft => "Warm, rounded blips",
             Self::Wood => "Soft marimba and hollow wood blocks",
             Self::Analog => "A mellow analogue synth",
+            Self::Thock => "A deep, creamy keyboard key",
         }
     }
 
-    /// Whether the set plays a sound for `cue`. Classic has no done sound;
+    /// Whether the set plays a sound for `cue`. Classic and Thock have no done sound;
     /// its errors play macOS Basso, and errors sound only on macOS.
     pub fn has(self, cue: Cue) -> bool {
         cue != Cue::Done || BUNDLED_SETS[self as usize].done.is_some()
@@ -611,7 +616,7 @@ macro_rules! synthesized_set {
 }
 
 /// In [`SoundSet::ALL`]'s order.
-const BUNDLED_SETS: [BundledSet; 6] = [
+const BUNDLED_SETS: [BundledSet; 7] = [
     synthesized_set!("signature"),
     BundledSet {
         start: bundled_sound!("classic", "start"),
@@ -625,6 +630,15 @@ const BUNDLED_SETS: [BundledSet; 6] = [
     synthesized_set!("soft"),
     synthesized_set!("wood"),
     synthesized_set!("analog"),
+    // No done sound: the stop already says it (Kit, 2026-10-30).
+    BundledSet {
+        start: bundled_sound!("thock", "start"),
+        stop: bundled_sound!("thock", "stop"),
+        done: None,
+        cancel: bundled_sound!("thock", "cancel"),
+        error: Some(bundled_sound!("thock", "error")),
+        success: Some(bundled_sound!("thock", "success")),
+    },
 ];
 
 /// One set, decoded.
@@ -1260,9 +1274,10 @@ mod tests {
     fn every_set_but_classic_has_every_sound() {
         for set in SoundSet::ALL {
             let bundled = &BUNDLED_SETS[set as usize];
-            let whole =
-                bundled.done.is_some() && bundled.error.is_some() && bundled.success.is_some();
-            assert_eq!(whole, set != SoundSet::Classic, "{set:?}");
+            let own = bundled.error.is_some() && bundled.success.is_some();
+            assert_eq!(own, set != SoundSet::Classic, "{set:?}");
+            let done = ![SoundSet::Classic, SoundSet::Thock].contains(&set);
+            assert_eq!(bundled.done.is_some(), done, "{set:?}");
         }
     }
 
