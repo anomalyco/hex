@@ -528,10 +528,14 @@ impl Pane {
     ];
 
     fn shown(self, ui: &Ui) -> bool {
-        if !ui.platform.dev_build {
-            return matches!(self, Pane::General | Pane::Output | Pane::History);
-        }
         let caps = ui.platform.caps;
+        if !ui.platform.dev_build {
+            return match self {
+                Pane::General | Pane::Output | Pane::History => true,
+                Pane::Meetings => caps.meetings,
+                _ => false,
+            };
+        }
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings,
@@ -1349,7 +1353,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             NAV_ROW_GAP / 2.0,
         ));
     }
-    if ui.platform.dev_build {
+    if labs::shown(ui) {
         nav = nav.child(labs::nav(ui, p));
     }
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
@@ -2245,6 +2249,13 @@ const SCENES: &[Scene] = &[
     ("mac-production", |ui| {
         *ui = mac_fixture();
         ui.platform.dev_build = false;
+        ui.settings.meetings.enabled = false;
+    }),
+    ("mac-production-labs", |ui| {
+        *ui = mac_fixture();
+        ui.platform.dev_build = false;
+        ui.settings.meetings.enabled = false;
+        ui.labs_open = true;
     }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();

@@ -3,18 +3,20 @@
 Experiments are unfinished features whose code sits on `dev` and can be turned
 on in dev, local, and test builds (`experiments::is_dev_build()`). Production
 builds (`!experiments::is_dev_build()`) ignore `HEX_EXPERIMENTS` and
-`~/.config/hex/experiments` completely, hide **Labs** and every experimental
-pane from the sidebar, and keep Meetings, Annotate, and Voice Filter dormant.
+`~/.config/hex/experiments` completely, hide Annotate, Voice Filter, and every
+experiment, and on macOS show **Labs** with only the opt-in `Meetings (beta)`
+switch (`meetings.enabled`, default off; hidden on Linux and Windows where
+there is no release Lab).
 
-In dev builds, **Labs** at the bottom of the sidebar offers live toggle
-switches for every experiment supported on the current OS, writing
+In dev builds, **Labs** at the bottom of the sidebar adds Annotate and live
+toggle switches for every experiment supported on the current OS, writing
 `~/.config/hex/experiments` atomically and applying changes live where
 supported (such as showing or hiding `Voice Filter` immediately). Panes an
 active experiment adds list indented under **Labs**.
 
 ```ts
 Production vs dev builds                 // experiments.dev-build
-├── Production (!is_dev_build()) -> Ignore env & file; hide Labs & experimental panes
+├── Production (!is_dev_build()) -> Ignore env & file; macOS Labs has only Meetings (beta); Linux/Windows hide Labs
 └── Dev / local / test (is_dev_build())
     ├── Labs › Experiments switches -> Write ~/.config/hex/experiments + apply live
     ├── HEX_EXPERIMENTS=live-chapters,live-text   // commas or spaces; this process

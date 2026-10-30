@@ -1518,14 +1518,14 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 }
 
 #[test]
-fn production_builds_hide_labs_and_experimental_panes() {
-    let rt = runtime("mac-production", true, PANE_SIZE);
+fn production_builds_offer_meetings_in_labs_and_hide_experiments() {
+    let mut rt = runtime("mac-production", true, PANE_SIZE);
     assert!(!rt.state.platform.dev_build);
     assert!(rt.find("nav-general").is_some());
     assert!(rt.find("nav-output").is_some());
     assert!(rt.find("nav-history").is_some());
+    assert!(rt.find("nav-labs").is_some());
     for hidden in [
-        "nav-labs",
         "nav-meetings",
         "nav-annotate",
         "nav-voice-filter",
@@ -1533,6 +1533,37 @@ fn production_builds_hide_labs_and_experimental_panes() {
         "nav-activity",
     ] {
         assert!(rt.find(hidden).is_none(), "production showed {hidden}");
+    }
+
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("lab-meetings").is_some());
+    for hidden in [
+        "lab-annotate",
+        "exp-voice-filter",
+        "exp-live-text",
+        "exp-live-chapters",
+        "exp-playground",
+    ] {
+        assert!(rt.find(hidden).is_none(), "production Labs listed {hidden}");
+    }
+
+    tap(&mut rt, "lab-meetings");
+    assert!(rt.state.settings.meetings.enabled);
+    assert!(
+        rt.find("nav-meetings").is_some(),
+        "enabling Meetings (beta) in Labs adds Meetings to the sidebar"
+    );
+
+    // Linux and Windows have no release Labs opt-in, so Labs stays hidden in
+    // production builds there.
+    for scene in ["portal", "windows-settings"] {
+        let mut os_rt = runtime(scene, true, PANE_SIZE);
+        os_rt.state.platform.dev_build = false;
+        refresh(&mut os_rt);
+        assert!(
+            os_rt.find("nav-labs").is_none(),
+            "{scene} showed Labs in production"
+        );
     }
 }
 

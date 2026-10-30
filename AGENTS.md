@@ -29,15 +29,17 @@ transformations live in the explicit TypeScript user config (`~/.config/hex/hex.
 runtime settings persist in Application Support.
 
 The distributed production release (`!experiments::is_dev_build()`) shows
-General, Output, and History, hides Labs and all experimental panes, ignores
-`HEX_EXPERIMENTS` and `~/.config/hex/experiments`, and keeps Meetings, Annotate,
-and Voice Filter dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
-expose the Labs sidebar item with switches for Meetings, Annotate, and every
-experiment (`Voice Filter`, `Live text`, `Live chapters`, `Playground`),
-writing `~/.config/hex/experiments` and applying live where supported. HUD Lab's
-live Dot scope tuning lives inside Playground (`⇧⌘D`, `Prototypes/HUD/*`).
-`DEVELOPER_FEATURES_ENABLED` keeps Meetings available by default in debug builds
-and keeps the meeting CLI debug-only.
+General, Output, and History, plus Labs on macOS with only the opt-in
+`Meetings (beta)` switch (`meetings.enabled`, default off: no call detection or
+EventKit reads while off); it ignores `HEX_EXPERIMENTS` and
+`~/.config/hex/experiments` and keeps Annotate, Voice Filter, and every
+experiment dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
+add Annotate and every experiment (`Voice Filter`, `Live text`,
+`Live chapters`, `Playground`) to Labs, writing `~/.config/hex/experiments` and
+applying live where supported. HUD Lab's live Dot scope tuning lives inside
+Playground (`⇧⌘D`, `Prototypes/HUD/*`). `DEVELOPER_FEATURES_ENABLED` keeps
+Meetings available by default in debug builds and keeps the meeting CLI
+debug-only.
 
 ## Feature Map
 

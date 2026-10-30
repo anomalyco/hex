@@ -1203,7 +1203,7 @@ impl Default for MeetingSettings {
 
 impl MeetingSettings {
     pub fn available(&self) -> bool {
-        crate::experiments::is_dev_build() && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
+        crate::DEVELOPER_FEATURES_ENABLED || self.enabled
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
