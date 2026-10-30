@@ -86,6 +86,18 @@ pub(super) fn summary(ui: &Ui) -> String {
     }
 }
 
+/// Why the list doesn't reach transcription, when the selected model is
+/// one transcription doesn't bias (only Parakeet-based models take it).
+pub(super) fn unused_note(ui: &Ui) -> Option<String> {
+    let model = crate::transcription_models::definition(ui.settings.transcription.model);
+    (!model.uses_vocabulary()).then(|| {
+        tr_fill(
+            "{} doesn't use these terms; rewriting and search still do",
+            model.name,
+        )
+    })
+}
+
 /// Opens the sheet alone, with an empty row to type into when the list is
 /// empty.
 pub(super) fn open(ui: &mut Ui) {
@@ -222,6 +234,33 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             )
             .default_button(),
         );
+    let mut heading = col()
+        .key("heading")
+        .gap(4.0)
+        .child(
+            text(tr("Vocabulary"))
+                .key("title")
+                .font(p.k.ty.body_medium)
+                .color(p.text()),
+        )
+        .child(
+            text(tr(
+                "Transcription and rewriting spell them right, and search finds them when misheard",
+            ))
+            .key("description")
+            .font(DESCRIPTION)
+            .color(p.muted())
+            .wrap(),
+        );
+    if let Some(unused) = unused_note(ui) {
+        heading = heading.child(
+            text(unused)
+                .key("unused")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
     let mut panel = col()
         .key("vocabulary")
         .role("dialog")
@@ -236,26 +275,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .border(p.hair, c.border_weak)
         // Presses inside the panel stay inside.
         .on_press(|_: &mut Ui| {})
-        .child(
-            col()
-                .key("heading")
-                .gap(4.0)
-                .child(
-                    text(tr("Vocabulary"))
-                        .key("title")
-                        .font(p.k.ty.body_medium)
-                        .color(p.text()),
-                )
-                .child(
-                    text(tr(
-                        "Transcription and rewriting spell them right, and search finds them when misheard",
-                    ))
-                    .key("description")
-                    .font(DESCRIPTION)
-                    .color(p.muted())
-                    .wrap(),
-                ),
-        )
+        .child(heading)
         .child(terms);
     if ui.vocabulary.clamped() {
         panel = panel.child(

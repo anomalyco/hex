@@ -327,6 +327,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Language of the Hex interface", ["Język interfejsu Hex", "Hex 界面语言", "Hex の表示言語", "Sprache der Hex-Oberfläche", "Idioma de la interfaz de Hex", "Мова інтерфейсу Hex"]),
     ("System", ["Systemowy", "跟随系统", "システム", "System", "Sistema", "Системна"]),
     ("Recognition hints", ["Podpowiedzi rozpoznawania", "识别提示", "認識ヒント", "Erkennungshinweise", "Sugerencias de reconocimiento", "Підказки для розпізнавання"]),
+    ("{} doesn't use these terms; rewriting and search still do", ["{} nie korzysta z tych terminów; przepisywanie i wyszukiwanie nadal tak", "{} 不使用这些词语；改写和搜索仍会使用", "{} はこれらの用語を使いません。書き換えと検索では引き続き使われます", "{} nutzt diese Begriffe nicht; Umschreiben und Suche schon", "{} no usa estos términos; la reescritura y la búsqueda sí", "{} не використовує ці терміни; переписування й пошук їх використовують"]),
     ("Fastest", ["Najszybszy", "最快", "最速", "Am schnellsten", "Más rápido", "Найшвидша"]),
     ("Most accurate", ["Najdokładniejszy", "最准确", "最高精度", "Am genauesten", "Más preciso", "Найточніша"]),
     ("Use", ["Użyj", "使用", "使用", "Verwenden", "Usar", "Вибрати"]),

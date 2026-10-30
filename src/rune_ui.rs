@@ -2010,6 +2010,13 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::fixture(ui, false);
     }),
+    // Whisper ignores the list: the row and the sheet say so.
+    ("vocabulary-unused", |ui| {
+        *ui = portal_fixture();
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        vocabulary::fixture(ui, true);
+    }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
         let held = crate::app_settings::HotkeyModifiers {

@@ -96,13 +96,14 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .into(),
     );
     rows.push(language_row(ui, p, layer).into());
+    let vocabulary_note = super::vocabulary::unused_note(ui);
     rows.push(
         icon_row(
             p,
             "vocabulary",
             &BOOK,
             tr("Vocabulary"),
-            None,
+            vocabulary_note.as_deref(),
             value_button(
                 p,
                 "vocabulary-control",

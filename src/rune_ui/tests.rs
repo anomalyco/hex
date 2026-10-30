@@ -1386,6 +1386,42 @@ fn the_vocabulary_row_opens_its_sheet() {
     assert!(!rt.state.vocabulary.open);
 }
 
+/// A model transcription doesn't bias says so on the Vocabulary row and in
+/// its sheet; a Parakeet-based model shows no note.
+#[test]
+fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
+    let note = "Whisper large-v3-turbo doesn't use these terms; rewriting and search still do";
+    let shows_note = |rt: &Runtime<Ui>| texts(rt).iter().any(|text| text == note);
+    let sheet_note = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .any(|e| !e.exiting && e.key.as_deref() == Some("unused"))
+    };
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    assert!(!shows_note(&rt));
+    rt.state.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(shows_note(&rt), "{:?}", texts(&rt));
+    tap(&mut rt, "vocabulary-control");
+    assert!(rt.state.vocabulary.open);
+    assert!(sheet_note(&rt));
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    rt.state.settings.transcription.model = TranscriptionModelId::UnderdogBark3Pro;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.contains("doesn't use these terms"))
+    );
+
+    let rt = runtime("vocabulary-unused", true, PANE_SIZE);
+    assert!(rt.state.vocabulary.open);
+    assert!(sheet_note(&rt));
+}
+
 /// The Sounds row opens the sheet. A set's play button plays its dictation
 /// without choosing it, and pressing it again stops it; a chip plays one
 /// sound; picking a set saves it and plays it; Escape closes the sheet.

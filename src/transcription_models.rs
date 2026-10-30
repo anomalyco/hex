@@ -268,6 +268,14 @@ impl ModelDefinition {
         }
     }
 
+    /// Whether transcription biases this model toward the vocabulary: only
+    /// Parakeet's transducer heads take it (`gguf_session` checks the same
+    /// architecture before it adds the list to a run). Rewriting and search
+    /// use the vocabulary with every model.
+    pub fn uses_vocabulary(&self) -> bool {
+        matches!(self.runtime, ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet")
+    }
+
     pub const fn download_bytes(&self) -> Option<u64> {
         match self.runtime {
             ModelRuntime::Gguf(artifact) => Some(artifact.bytes),
@@ -1318,6 +1326,26 @@ mod tests {
             runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
             ..*definition(TranscriptionModelId::ParakeetV2)
         }
+    }
+
+    #[test]
+    fn only_parakeet_based_models_use_the_vocabulary() {
+        use TranscriptionModelId::*;
+        let using: Vec<_> = MODELS
+            .iter()
+            .filter(|model| model.uses_vocabulary())
+            .map(|model| model.id)
+            .collect();
+        assert_eq!(
+            using,
+            [
+                ParakeetUnifiedEnglish,
+                ParakeetV2,
+                ParakeetV3,
+                UnderdogBark3Pro,
+                UnderdogBark3Clean,
+            ]
+        );
     }
 
     #[test]

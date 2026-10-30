@@ -2,12 +2,16 @@
 
 One shared list of names Hex should know (people, projects, products), each
 with optional "sounds like" spellings a transcript may show instead. An empty
-list (the default) changes nothing. The `hex vocabulary` commands are macOS
-only for now.
+list (the default) changes nothing. The window edits the list on macOS,
+Linux, and Windows; the `hex vocabulary` commands are macOS only for now.
 
 ```ts
 General › Vocabulary   // vocabulary.settings; after Language
 ├── Row value -> "None", "1 term", "N terms" -> opens the Vocabulary sheet
+├── Selected model transcription doesn't bias (ModelDefinition::uses_vocabulary)
+│   -> muted note on the row and under the sheet's description: "Whisper
+│   large-v3-turbo doesn't use these terms; rewriting and search still do";
+│   Parakeet-based models (Parakeet, Underdog Bark) show none
 ├── Sheet rows -> Term | Sounds like (comma-separated) | ×; scroll past ~8
 ├── Empty list -> Opens with one blank row focused
 ├── Add term -> New empty row, focused; saved once the term has text
@@ -18,7 +22,7 @@ General › Vocabulary   // vocabulary.settings; after Language
 └── Boost -> Off | Light | Normal (default) | Strong -> settings.json
     `vocabulary_boost`, `hex settings set vocabulary_boost`  // vocabulary.boost
 
-Transcription (Parakeet: RNN-T and TDT)  // vocabulary.transcription; gguf_session::with_vocabulary
+Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; gguf_session::with_vocabulary
 ├── Every run and live stream reads the list and the boost at its start:
 │   dictation, meetings, captures, the local API
 ├── First 64 terms (the engine's cap) and their spellings; empty or Off -> unchanged
@@ -115,7 +119,11 @@ trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 `rows_past_the_limits_keep_their_term_and_what_fits`, and
 `the_sheet_starts_empty_lists_with_a_row_and_saves_on_close` in
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
-`the_vocabulary_row_opens_its_sheet` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs). Scenes:
-`mac-settings-vocabulary`, `mac-settings-vocabulary-empty`. Passed on macOS on
-2026-10-23. Not yet observed: the sheet edited in a running Hex, a CLI edit
+`the_vocabulary_row_opens_its_sheet` and
+`the_vocabulary_row_says_when_the_model_ignores_the_list` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs);
+`only_parakeet_based_models_use_the_vocabulary` in
+[transcription_models.rs](../../src/transcription_models.rs). Scenes:
+`mac-settings-vocabulary`, `mac-settings-vocabulary-empty`,
+`vocabulary-unused` (Whisper, no golden). Passed on macOS on
+2026-10-23; the unused-model note's checks have not been observed running. Not yet observed: the sheet edited in a running Hex, a CLI edit
 against a running Hex, or a rewrite with a live provider.
