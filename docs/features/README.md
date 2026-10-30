@@ -1128,6 +1128,8 @@ Linux beta                               // not macOS feature parity
 │       │   (2 s cap without a release); after a hex command -> 250 ms
 │       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
 │       ├── Compositor offers zwp_virtual_keyboard_manager_v1 and wtype is installed -> wtype
+│       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
+│       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
 │       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms; session lives with Hex
 │       └── Neither works -> Failed: "Copied to the clipboard; press Ctrl+V…" naming
@@ -1153,7 +1155,13 @@ paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
 yet observed on a real desktop. The modifier wait (`ShortcutKeys` in
 [linux_input.rs](../../src/linux_input.rs)) has unit tests for its timing only;
 it is not yet observed on Hyprland, and a modifier held past the wait still
-changes the paste.
+changes the paste. wtype numbers its keymap from evdev code 1 in order of first
+use, and Hyprland matches binds through its configured layout, so a bare
+`-k v` read as Escape and a Ctrl+Shift+Escape bind swallowed Terminal paste
+([#444](https://github.com/anomalyco/hex/issues/444)). Hex now releases 46
+never-pressed placeholder keysyms first so V lands on `KEY_V`;
+`wtype_sends_v_on_the_v_key` checks the numbering against wtype's rule, not a
+real Hyprland session.
 
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)

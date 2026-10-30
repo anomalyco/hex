@@ -406,27 +406,31 @@ impl X11Paster {
     }
 }
 
-fn paste_keys(with_shift: bool) -> &'static [&'static str] {
-    // GTK 3's reverse keymap lookup skips the final keycode. Keep V before a
-    // neutral VoidSymbol release so its shortcut remains discoverable (#28).
-    if with_shift {
+/// The evdev code of the V key (`KEY_V`).
+const EVDEV_KEY_V: usize = 47;
+
+fn paste_keys(with_shift: bool) -> Vec<String> {
+    // wtype numbers its keymap in order of first use from evdev code 1, so a
+    // bare `-k v` sends evdev 1 (Escape in the standard keymap). Hyprland
+    // reads virtual-keyboard keys through its configured layout to match
+    // binds, so it saw Ctrl+Shift+Escape and a user bind swallowed the paste
+    // (#444). Releasing distinct, never-pressed placeholder keysyms first puts
+    // V on evdev KEY_V, which any compositor's layout also reads as V.
+    let mut keys: Vec<String> = (0..EVDEV_KEY_V - 1)
+        .flat_map(|index| ["-p".to_owned(), format!("U{:04X}", 0x2460 + index)])
+        .collect();
+    let chord: &[&str] = if with_shift {
         &[
-            "-M",
-            "ctrl",
-            "-M",
-            "shift",
-            "-k",
-            "v",
-            "-m",
-            "shift",
-            "-m",
-            "ctrl",
-            "-p",
-            "VoidSymbol",
+            "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl",
         ]
     } else {
-        &["-M", "ctrl", "-k", "v", "-m", "ctrl", "-p", "VoidSymbol"]
-    }
+        &["-M", "ctrl", "-k", "v", "-m", "ctrl"]
+    };
+    keys.extend(chord.iter().map(|key| (*key).to_owned()));
+    // GTK 3's reverse keymap lookup skips the final keycode. Keep V before a
+    // neutral VoidSymbol release so its shortcut remains discoverable (#28).
+    keys.extend(["-p".to_owned(), "VoidSymbol".to_owned()]);
+    keys
 }
 
 fn wait_for_modifiers(stop: &AtomicBool, mut held: impl FnMut() -> Result<bool>) -> Result<()> {
@@ -538,12 +542,13 @@ mod tests {
 
     #[test]
     fn standard_and_terminal_paste_balance_their_modifiers() {
+        let padding = (EVDEV_KEY_V - 1) * 2;
         assert_eq!(
-            paste_keys(false),
+            paste_keys(false)[padding..],
             ["-M", "ctrl", "-k", "v", "-m", "ctrl", "-p", "VoidSymbol"]
         );
         assert_eq!(
-            paste_keys(true),
+            paste_keys(true)[padding..],
             [
                 "-M",
                 "ctrl",
@@ -559,6 +564,26 @@ mod tests {
                 "VoidSymbol"
             ]
         );
+    }
+
+    /// wtype gives each new keysym the next evdev code from 1, in argument
+    /// order; V must land on `KEY_V` so Hyprland's binds read V (#444).
+    #[test]
+    fn wtype_sends_v_on_the_v_key() {
+        for with_shift in [false, true] {
+            let args = paste_keys(with_shift);
+            let mut keymap: Vec<&str> = Vec::new();
+            for pair in args.windows(2) {
+                if matches!(pair[0].as_str(), "-k" | "-p" | "-P")
+                    && !keymap.contains(&pair[1].as_str())
+                {
+                    keymap.push(&pair[1]);
+                }
+            }
+            let v = keymap.iter().position(|key| *key == "v").unwrap() + 1;
+            assert_eq!(v, EVDEV_KEY_V);
+            assert_eq!(keymap.last(), Some(&"VoidSymbol"));
+        }
     }
 
     #[test]
