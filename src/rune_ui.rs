@@ -15,7 +15,6 @@ pub(crate) mod capture_capsule;
 mod controls;
 mod explainer;
 mod fun;
-mod gem;
 mod general;
 mod hero;
 mod history;
@@ -48,6 +47,7 @@ pub(crate) mod playground;
 mod scrawl;
 mod settings;
 mod sound_sets;
+mod spark;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;

@@ -574,7 +574,7 @@ fn flush(rt: &mut Runtime<Ui>) {
 /// A shown window keeps drawing while its runtime animates, has input queued
 /// or has live values pending (Rune's `Host::redraw`). Five seconds after
 /// mounting, with nothing changing, the only motion left in any scene is the
-/// pulsing dot of something live, Output's turning gem, or the
+/// pulsing dot of something live, Output's turning spark, or the
 /// shortcut explainer's looping demo, and under Reduce Motion, which stills
 /// them all, no scene asks for another frame.
 #[test]
@@ -593,7 +593,7 @@ fn every_scene_stops_asking_for_frames() {
             moving.extend(
                 rt.elements()
                     .into_iter()
-                    .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot")) && !gem(e))
+                    .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot")) && !spark(e))
                     .map(|e| format!("{scene}: {}", e.path)),
             );
         }
@@ -676,8 +676,8 @@ fn switching_panes_is_instant() {
         !panel.iter().any(|e| e.key.as_deref() == Some("lede")),
         "Labs left at once"
     );
-    // Output's gem turns on its own; it is not a pane transition.
-    for element in panel.iter().filter(|e| !gem(e)) {
+    // Output's spark turns on its own; it is not a pane transition.
+    for element in panel.iter().filter(|e| !spark(e)) {
         assert!(
             element.opacity >= 0.999 && !element.moving,
             "{} is still animating",
@@ -686,9 +686,9 @@ fn switching_panes_is_instant() {
     }
 }
 
-/// A frame of Output's turning gem, which moves on its own.
-fn gem(e: &rune::ElementInfo) -> bool {
-    e.key.as_deref().is_some_and(|key| key.starts_with("gem"))
+/// A frame of Output's turning spark, which moves on its own.
+fn spark(e: &rune::ElementInfo) -> bool {
+    e.key.as_deref().is_some_and(|key| key.starts_with("spark"))
 }
 
 fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
