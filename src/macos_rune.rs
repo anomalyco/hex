@@ -281,7 +281,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
-    let settings = AppSettings::load()?;
+    let mut settings = AppSettings::load()?;
     // Preload bundled feedback sounds on a worker so onboarding and the Sounds
     // sheet play immediately even before permissions let `recognition` start.
     // Opens no audio output device until a tone actually plays.
@@ -294,6 +294,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         .then(|| crate::keyboard_input_sources::current(mtm))
         .flatten();
     let setup_ready = crate::onboarding::status(&settings.transcription).ready();
+    crate::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
     let onboarding_completed = crate::onboarding::completion_recorded();
     let history = match crate::history::History::open_default(settings.history_retention) {
         Ok(history) => Some(history),
