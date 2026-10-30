@@ -553,11 +553,7 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
-            if shown {
-                overlay.show();
-            } else {
-                overlay.hide();
-            }
+            set_shown(overlay, shown, |s: &CapsuleState| !s.shown);
         }
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
@@ -608,6 +604,44 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
 /// Moves the overlay to where the capsule rests: under the menu bar, at
 /// the screen's top edge (the notch), or at the pointer (the cursor's
 /// card, whose rect is global, so on the primary display's origin).
+/// Shows or hides a capture overlay, left out of screen recordings only
+/// while shown. A hidden prewarmed overlay stays on screen at alpha zero on
+/// every Space, and Mission Control draws each Space holding a
+/// non-shareable window as a blank thumbnail. Hiding makes the window
+/// shareable one turn after the hide, so no recorder sees it visible;
+/// `hidden` reads whether it is still hidden by then.
+fn set_shown<T: 'static>(overlay: &OverlayHandle<T>, shown: bool, hidden: fn(&T) -> bool) {
+    if shown {
+        overlay.set_exclude_from_capture(!crate::capture_host::own_windows_recorded());
+        overlay.show();
+        return;
+    }
+    overlay.hide();
+    let handle = overlay.clone();
+    overlay.update_if(move |s, _| {
+        if hidden(s) {
+            handle.set_exclude_from_capture(false);
+        }
+        false
+    });
+}
+
+/// `capture.show_overlays_in_recordings` on a capture overlay: applied now
+/// if it is shown, else at its next show.
+fn follow_recordings<T: 'static>(
+    overlay: &OverlayHandle<T>,
+    recorded: bool,
+    shown: fn(&T) -> bool,
+) {
+    let handle = overlay.clone();
+    overlay.update_if(move |s, _| {
+        if shown(s) {
+            handle.set_exclude_from_capture(!recorded);
+        }
+        false
+    });
+}
+
 fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
     use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
@@ -715,7 +749,8 @@ impl CaptureCapsule {
                 }),
                 display: DisplayTarget::UnderPointer,
                 level: OverlayLevel::AboveOverlays,
-                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                // Hidden until shown; `set_shown` excludes it then.
+                exclude_from_capture: false,
                 input: OverlayInput::Regions,
                 prewarm: true,
                 ..Default::default()
@@ -752,7 +787,7 @@ impl CaptureCapsule {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the capsule, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        self.overlay.set_exclude_from_capture(!shown);
+        follow_recordings(&self.overlay, shown, |s: &CapsuleState| s.shown);
     }
 
     /// Shows `image`, decoded, as the finished capsule's lead until the

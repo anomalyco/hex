@@ -443,7 +443,11 @@ Hex's own windows                        // capture.own-windows
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
 │   ├── Other recorders -> the capsule, picker, and ink are left out
-│   │   (sharingType none); the dictation HUD and meeting capsules show
+│   │   (sharingType none) while shown; the dictation HUD and meeting
+│   │   capsules show
+│   │   └── Hidden (prewarmed, alpha zero on every Space) -> sharingType
+│   │       readOnly, set the turn after the hide, so Mission Control's
+│   │       Space thumbnails stay drawn (`capture_capsule::set_shown`)
 │   ├── Show in screen recordings on -> every recorder, Hex's captures
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's
