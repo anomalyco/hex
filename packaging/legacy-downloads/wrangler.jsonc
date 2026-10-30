@@ -1,0 +1,15 @@
+// Kit's personal Cloudflare account, where both zones and the hex-releases
+// bucket live. Deploying this adds the routes, which take these hosts from the
+// bucket's custom domains; `wrangler delete` with this config removes them.
+{
+  "name": "hex-legacy-downloads",
+  "account_id": "19d80aa432b86d110c8e1480cf895f5c",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "downloads.hex.kitlangton.dev/*", "zone_name": "kitlangton.dev" },
+    { "pattern": "downloads.hex.kitlangton.com/*", "zone_name": "kitlangton.com" },
+  ],
+}
