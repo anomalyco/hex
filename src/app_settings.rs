@@ -1660,10 +1660,20 @@ const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
 /// Annotate became a default feature: on for everyone once.
 #[cfg(hex_capture)]
 const ANNOTATE_DEFAULT_MIGRATION: &str = "annotate-on-by-default";
+/// Settings saved by an `anomaly.hex` build. Up to 2.3.1 Hex was
+/// `com.kitlangton.hex2` and used the same folder, so a file without this
+/// ID may carry onboarding finished under grants macOS no longer gives the
+/// new identity; the macOS launch checks setup once
+/// (`onboarding::recheck_after_identity_change`).
+const ANOMALY_IDENTITY_MIGRATION: &str = "anomaly-hex-identity";
 #[cfg(hex_capture)]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, ANNOTATE_DEFAULT_MIGRATION];
+const MIGRATIONS: &[&str] = &[
+    STREAMING_ENGLISH_MIGRATION,
+    ANNOTATE_DEFAULT_MIGRATION,
+    ANOMALY_IDENTITY_MIGRATION,
+];
 #[cfg(not(hex_capture))]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
+const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, ANOMALY_IDENTITY_MIGRATION];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
 #[cfg(hex_capture)]
@@ -2170,6 +2180,22 @@ impl AppSettings {
 
     fn has_migration(&self, id: &str) -> bool {
         self.migrations.iter().any(|applied| applied == id)
+    }
+
+    /// Whether these settings come from before the `anomaly.hex` identity.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn predates_anomaly_identity(&self) -> bool {
+        !self.has_migration(ANOMALY_IDENTITY_MIGRATION)
+    }
+
+    /// Records the identity check in the file at `path`, changing nothing else.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn record_anomaly_identity(&mut self, path: &std::path::Path) -> Result<()> {
+        if self.predates_anomaly_identity() {
+            self.migrations.push(ANOMALY_IDENTITY_MIGRATION.into());
+            self.write_to(path)?;
+        }
+        Ok(())
     }
 
     /// English dictation moves to Parakeet Unified English, which streams

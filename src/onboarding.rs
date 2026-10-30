@@ -731,6 +731,53 @@ pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
     true
 }
 
+/// Once per settings file from before `anomaly.hex` (2.3.1 shared the `hex`
+/// folder): macOS gave the new identity none of the old grants, so setup
+/// that is not ready at launch reopens the tour instead of counting the old
+/// completion. Setup that is ready changes nothing.
+#[cfg(target_os = "macos")]
+pub fn recheck_after_identity_change(
+    settings: &mut crate::app_settings::AppSettings,
+    setup_ready: bool,
+) {
+    let result = crate::app_paths::support_dir()
+        .and_then(|directory| recheck_after_identity_change_at(&directory, settings, setup_ready));
+    match result {
+        Ok(true) => {
+            tracing::info!("setup is not ready under the new identity; reopening onboarding")
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "could not recheck onboarding for the new identity"),
+    }
+}
+
+/// True when it reopened the tour.
+#[cfg(target_os = "macos")]
+pub(crate) fn recheck_after_identity_change_at(
+    directory: &Path,
+    settings: &mut crate::app_settings::AppSettings,
+    setup_ready: bool,
+) -> color_eyre::Result<bool> {
+    if !settings.predates_anomaly_identity() {
+        return Ok(false);
+    }
+    let reopen = !setup_ready;
+    if reopen {
+        record_pending_at(directory)?;
+        for marker in ["onboarding-complete", "onboarding-step"] {
+            match fs::remove_file(directory.join(marker)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+        crate::transcription_models::sync_directory(directory)?;
+    }
+    settings.record_anomaly_identity(&directory.join("settings.json"))?;
+    Ok(reopen)
+}
+
 pub(crate) fn record_pending_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
     write_owner_only_marker(&directory.join("onboarding-pending"), false)?;
@@ -1069,6 +1116,89 @@ mod tests {
 
         assert!(!completion_recorded_at(&directory));
         assert!(!directory.join("onboarding-complete").exists());
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn identity_directory(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-onboarding-identity-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    /// Settings as 2.3.1 left them: a choice of the user's, an older
+    /// migration, finished onboarding.
+    #[cfg(target_os = "macos")]
+    fn upgrader(directory: &Path) -> crate::app_settings::AppSettings {
+        fs::write(
+            directory.join("settings.json"),
+            br#"{"sound_effects":false,"migrations":["streaming-english-model"]}"#,
+        )
+        .unwrap();
+        record_completion_at(directory).unwrap();
+        crate::app_settings::AppSettings::load_from(&directory.join("settings.json")).unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_fresh_install_onboards_without_the_identity_check() {
+        let directory = identity_directory("fresh");
+        let mut settings =
+            crate::app_settings::AppSettings::load_from(&directory.join("settings.json")).unwrap();
+
+        assert!(!recheck_after_identity_change_at(&directory, &mut settings, false).unwrap());
+        assert!(!completion_recorded_at(&directory));
+        assert!(!directory.join("settings.json").exists());
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_upgrader_without_permissions_gets_the_tour_once() {
+        let directory = identity_directory("not-ready");
+        fs::write(directory.join("onboarding-step"), "done").unwrap();
+        let mut settings = upgrader(&directory);
+        assert!(completion_recorded_at(&directory));
+
+        assert!(recheck_after_identity_change_at(&directory, &mut settings, false).unwrap());
+        assert!(!completion_recorded_at(&directory));
+        assert_eq!(saved_step_at(&directory), None);
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(directory.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(saved["sound_effects"], false);
+        let migrations = saved["migrations"].as_array().unwrap();
+        assert_eq!(migrations[0], "streaming-english-model");
+        assert_eq!(migrations.last().unwrap(), "anomaly-hex-identity");
+
+        // Finishing the tour sticks: the check does not run again.
+        record_completion_at(&directory).unwrap();
+        let mut reloaded =
+            crate::app_settings::AppSettings::load_from(&directory.join("settings.json")).unwrap();
+        assert!(!recheck_after_identity_change_at(&directory, &mut reloaded, false).unwrap());
+        assert!(completion_recorded_at(&directory));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_upgrader_whose_setup_is_ready_skips_the_tour() {
+        let directory = identity_directory("ready");
+        let mut settings = upgrader(&directory);
+
+        assert!(!recheck_after_identity_change_at(&directory, &mut settings, true).unwrap());
+        assert!(completion_recorded_at(&directory));
+        assert!(!settings.predates_anomaly_identity());
+        let reloaded =
+            crate::app_settings::AppSettings::load_from(&directory.join("settings.json")).unwrap();
+        assert!(!reloaded.predates_anomaly_identity());
+        assert!(!reloaded.sound_effects);
 
         fs::remove_dir_all(directory).unwrap();
     }

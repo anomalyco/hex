@@ -111,6 +111,13 @@ with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 
 ```ts
 Launch Hex, setup incomplete              // setup.tour; full-window, own column
+├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
+│   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
+│   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch
+│   │   ├── Permissions or the selected model not ready -> the old completion
+│   │   │   no longer counts -> the tour opens at Welcome
+│   │   └── Everything ready -> no tour; nothing but the ID changes
+│   └── Saved settings are kept; the ID is recorded either way
 ├── Tour opens -> speech model download starts at once      // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
@@ -312,7 +319,11 @@ grants waiting for a restart
 `setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
 advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
 and the saved step
-(`the_tour_step_is_saved_for_the_next_launch`). Rune tests drive the tour
+(`the_tour_step_is_saved_for_the_next_launch`), and the upgrade check
+(`a_fresh_install_onboards_without_the_identity_check`,
+`an_upgrader_without_permissions_gets_the_tour_once`,
+`an_upgrader_whose_setup_is_ready_skips_the_tour`; a real 2.3.1 to
+`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the tour
 (`the_mac_tour_asks_each_permission_then_practices`,
 `a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen`,
 `a_refused_microphone_points_to_system_settings`,
