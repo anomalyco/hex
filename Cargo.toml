@@ -85,7 +85,7 @@ objc2-core-foundation = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "159e3aeb532fd7f9fefa61cb8da4f942292d18eb" }
 ratatui = "0.30.2"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
@@ -110,15 +110,15 @@ zbus = { version = "6.1.0", default-features = false, features = ["tokio", "prox
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "159e3aeb532fd7f9fefa61cb8da4f942292d18eb" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 pollster = "1.0.1"
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54", features = ["native-file-dialog"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "9983acadcf43dc95807a06bb014c9a20e6f04c54" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "159e3aeb532fd7f9fefa61cb8da4f942292d18eb", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "159e3aeb532fd7f9fefa61cb8da4f942292d18eb" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "159e3aeb532fd7f9fefa61cb8da4f942292d18eb" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
