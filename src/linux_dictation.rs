@@ -724,9 +724,11 @@ pub(crate) fn run(
                 timeline.restart();
                 audio_ready = false;
                 device_label = input.device_name().to_string();
+                // A press waiting on the released microphone is already
+                // Dictating; its first chunk starts the capture.
                 emit_state(
                     &mut events,
-                    active_state(capture.is_recording(), pending),
+                    active_state(capture.is_recording() || start_pending, pending),
                     &device_label,
                 )?;
             }
