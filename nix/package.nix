@@ -89,7 +89,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
       "rune-0.0.1" = "sha256-FQj7Cn2ZTvHji1vJPZG//qH4oO9SNovwVVYxD5a8Hy4=";
-      "procwatch-0.1.0" = "sha256-zbQGHgTnnqS05xMrcG4kEosT3sYVfcLMo+RF7iMtY5w=";
+      "procwatch-0.1.0" = "sha256-FQj7Cn2ZTvHji1vJPZG//qH4oO9SNovwVVYxD5a8Hy4=";
       "transcribe-cpp-sys-0.4.1" = "sha256-AP8+t4baAzjOVJo76vodPoWv8lrFLR2tsXvsrbMFeSk=";
     };
   };
