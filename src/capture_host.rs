@@ -441,6 +441,7 @@ pub fn set_capsule_pill(pill: Option<[f32; 4]>) {
 }
 
 /// The capsule's pill in its panel's points, while it shows.
+#[cfg(target_os = "linux")]
 pub fn capsule_pill() -> Option<[f32; 4]> {
     *CAPSULE_PILL
         .lock()
