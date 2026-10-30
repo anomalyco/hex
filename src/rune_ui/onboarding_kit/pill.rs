@@ -20,10 +20,17 @@ pub(crate) const CAPSULE: &str = "download-capsule";
 pub(crate) const FLY: Spring = Spring::new(0.42, 0.0);
 const HEIGHT: f32 = 30.0;
 
+/// What the real first run calls [`Language::Other`]: the Mac's language.
+static OTHER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub(crate) fn set_other_label(label: &str) {
+    let _ = OTHER.set(label.to_owned());
+}
+
 pub(crate) fn language_label(language: Language) -> &'static str {
     match language {
         Language::English => "English",
-        Language::Other => "French",
+        Language::Other => OTHER.get().map_or("French", String::as_str),
     }
 }
 

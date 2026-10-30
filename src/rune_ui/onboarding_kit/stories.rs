@@ -13,6 +13,8 @@ use super::super::controls::Paint;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
+use super::hud_stage::LiveHud;
+use super::live::Live;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
 use crate::feedback::KeySoundStyle;
@@ -31,12 +33,13 @@ const DOWNLOAD_SECS: f64 = 9.0;
 const FIRST_RUN_SECS: f64 = 23.0;
 const SLOW_SECS: f64 = 31.0;
 const DOWNLOAD_HOLD: f64 = 2.8;
+const PERMISSIONS_WAIT: f64 = 0.6;
 const TYPING_LEAD: f64 = 1.15;
 const CLOSE_SECS: f64 = 0.65;
 const WORD_SECS: f64 = 0.22;
 const EXAMPLE_START: f64 = 0.6;
 const EXAMPLE_GAP: f64 = 0.5;
-const FRAME: Duration = Duration::from_millis(16);
+pub(super) const FRAME: Duration = Duration::from_millis(16);
 const SIDE_W: f32 = 240.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +106,14 @@ pub(crate) struct Onboard {
     auto_due_at: Option<f64>,
     pub(crate) practice: TextEdit,
     pub(crate) live_hold_from: Option<f64>,
+    /// The `"Your turn"` plate, on the microphone's real level.
+    pub(crate) hud: LiveHud,
+    /// A dictation's text landed since the plate last stepped.
+    pub(crate) hud_landed: bool,
     pub(crate) sfx: SfxTrack,
+    /// Set when this is Hex's real first run (experiment `new-onboarding`):
+    /// what the window's tour reports, in place of the fixtures.
+    pub(crate) live: Option<Live>,
 }
 
 impl Drop for Onboard {
@@ -115,7 +125,7 @@ impl Drop for Onboard {
 const PRESET_SHORTCUTS: &[&[&str]] = &[&["⌥"], &["fn"], &["⌃", "Space"], &["R⌘"]];
 
 impl Onboard {
-    fn new(flow: Flow) -> Self {
+    pub(super) fn new(flow: Flow) -> Self {
         Self {
             flow,
             speech: Speech::Apple,
@@ -156,14 +166,19 @@ impl Onboard {
             auto_due_at: None,
             practice: TextEdit::default(),
             live_hold_from: None,
+            hud: LiveHud::default(),
+            hud_landed: false,
             sfx: SfxTrack::default(),
+            live: None,
         }
     }
 
     /// True when `"Your turn"` should wait for real voice dictation / typing
     /// rather than auto-playing the scripted reply.
     pub(crate) fn interactive_try(&self) -> bool {
-        self.flow == Flow::FirstRun && is_live_window() && !self.scripted_try
+        self.flow == Flow::FirstRun
+            && (self.live.is_some() || is_live_window())
+            && !self.scripted_try
     }
 
     pub(crate) fn pick(&mut self, language: Language) {
@@ -235,6 +250,7 @@ impl Onboard {
     /// real dictation paste from Hex lands or the user types).
     pub(crate) fn on_practice_change(&mut self, _: &mut Tx) {
         let has_words = !self.practice.text.trim().is_empty();
+        self.hud_landed |= has_words;
         if has_words && self.step == Step::Try {
             self.step = Step::TryHeard;
             self.sfx.on_live_dictation_landed(self.now);
@@ -249,6 +265,11 @@ impl Onboard {
         self.auto_due_at = None;
         self.sfx.on_capsule_tap();
         match self.step {
+            // The real first run moves on as the story does, so the model
+            // and permissions it still waits for decide the next page.
+            Step::Done | Step::Permissions if self.live.is_some() => {
+                self.auto_due_at = Some(self.now);
+            }
             Step::Done if self.flow == Flow::FirstRun => {
                 if !self.granted {
                     self.jump_to_permissions();
@@ -315,8 +336,12 @@ impl Onboard {
         self.ensure_download(false);
         self.step = Step::Permissions;
         self.permissions_from = Some(self.now);
-        self.sfx.on_permissions(self.now);
-        self.auto_due_at = Some(self.now + permissions::PERMISSIONS_SECS);
+        if self.live.is_some() {
+            self.auto_due_at = Some(self.now + PERMISSIONS_WAIT);
+        } else {
+            self.sfx.on_permissions(self.now);
+            self.auto_due_at = Some(self.now + permissions::PERMISSIONS_SECS);
+        }
     }
 
     pub(crate) fn jump_to_try(&mut self) {
@@ -336,6 +361,22 @@ impl Onboard {
         }
     }
 
+    /// The real first run sets these as the story would at its start.
+    pub(super) fn begin_live(&mut self, now: f64) {
+        self.manual_override = true;
+        self.auto_due_at = Some(now + begin_first_run(self, now));
+    }
+
+    /// The real first run's `"Almost ready"`, for a run resumed past the
+    /// permissions while the model still downloads.
+    pub(super) fn jump_to_waiting(&mut self) {
+        self.manual_override = true;
+        self.sfx.clear();
+        self.ensure_download(false);
+        self.step = Step::Waiting;
+        self.auto_due_at = Some(self.now);
+    }
+
     pub(crate) fn jump_to_ready(&mut self) {
         self.manual_override = true;
         self.auto_due_at = None;
@@ -352,10 +393,8 @@ impl Onboard {
     }
 
     pub(crate) fn listening_peak(&self) -> Option<f32> {
-        if let Some(from) = self.live_hold_from {
-            let e = (self.now - from).max(0.0);
-            let wave = ((e * 11.0).sin() * (e * 5.7).cos()).abs() as f32;
-            return Some((0.28 + 0.55 * wave).clamp(0.15, 0.92));
+        if self.live_hold_from.is_some() {
+            return Some(crate::input_level::recent().unwrap_or(0.0));
         }
         matches!(self.step, Step::Hearing | Step::TryHearing).then_some(self.meter.1)
     }
@@ -487,7 +526,16 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
 }
 
 fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
-    let now = play.now();
+    let delay = begin_first_run(s, play.now());
+    play.after(delay, advance);
+    play.wake_after(Duration::ZERO);
+}
+
+/// Starts the first run at `now`; the story's next beat is due after the
+/// returned seconds.
+pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> f64 {
+    s.now = now;
+    s.examples_from = Some(now);
     s.pick(s.wants);
     if s.had_model {
         if let Some(download) = s.download.as_mut() {
@@ -501,12 +549,11 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         let tf = now + TYPING_LEAD;
         s.typing_from = Some(tf);
         s.sfx.on_without_hex(now, tf, true);
-        play.after(TYPING_LEAD + typing::duration() + 1.15, advance);
+        TYPING_LEAD + typing::duration() + 1.15
     } else {
         s.sfx.on_download_start(now);
-        play.after(DOWNLOAD_HOLD, advance);
+        DOWNLOAD_HOLD
     }
-    play.wake_after(Duration::ZERO);
 }
 
 fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
@@ -576,9 +623,13 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     play.wake_after(Duration::ZERO);
 }
 
-fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
+pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
     const WAIT: f64 = 0.25;
     match s.step {
+        // The real permissions wait for macOS, then hold their checks a beat.
+        Step::Permissions if s.live.as_ref().is_some_and(|live| !live.granted_for(now)) => {
+            Some(WAIT)
+        }
         Step::Pick | Step::Started => {
             s.step = Step::Parked;
             s.parked_from = Some(now);
@@ -695,6 +746,14 @@ fn physical_shortcut_held(_: &[String]) -> bool {
 }
 
 fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
+    if advance_to(s, now, tx) {
+        tx.wake_after(FRAME);
+    }
+    true
+}
+
+/// Moves the story to `now`; true while anything on it still moves.
+pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
     // A sent `"Without Hex"` reply lifts out of the field into its bubble.
     let sent = versus::sent_count(s);
@@ -710,20 +769,35 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     }
 
     if s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard) {
-        let held = physical_shortcut_held(&s.caps);
+        // The real first run follows Hex's own dictation, which sounds its
+        // own tones.
+        let real = s.live.as_ref().map(|live| live.listening);
+        let held = real.unwrap_or_else(|| physical_shortcut_held(&s.caps));
         match (s.live_hold_from, held) {
             (None, true) => {
                 s.live_hold_from = Some(now);
-                s.sfx.on_live_shortcut_down(now);
+                if real.is_none() {
+                    s.sfx.on_live_shortcut_down(now);
+                }
             }
             (Some(_), false) => {
                 s.live_hold_from = None;
-                s.sfx.on_live_shortcut_up(now);
+                if real.is_none() {
+                    s.sfx.on_live_shortcut_up(now);
+                }
             }
             _ => {}
         }
+        let landed = std::mem::take(&mut s.hud_landed);
+        s.hud.step(
+            s.live_hold_from.is_some(),
+            crate::input_level::recent(),
+            landed,
+            s.reduced.get(),
+        );
     } else {
         s.live_hold_from = None;
+        s.hud.clear();
     }
 
     s.sfx.advance_to(now);
@@ -736,7 +810,15 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         || (s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard))
         || (s.examples_from.is_some() && (s.step < Step::Ready || !s.reduced.get()));
 
-    if let (Some(from), Some(download)) = (s.download_from, s.download.as_mut()) {
+    // The real first run's download comes from Hex (`live::poll`).
+    let from = s.download_from.filter(|_| s.live.is_none());
+    if let Some(download) = s.download.as_mut().filter(|_| s.live.is_some()) {
+        if download.done() {
+            s.closed_from.get_or_insert(now);
+        } else {
+            moving = true;
+        }
+    } else if let (Some(from), Some(download)) = (from, s.download.as_mut()) {
         download.downloaded = downloaded(download.total, now - from, s.download_secs);
         if download.done() {
             s.closed_from.get_or_insert(now);
@@ -769,10 +851,7 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             s.meter = (0.03 + 0.04 * hum, 0.05 + 0.06 * hum);
         }
     }
-    if moving {
-        tx.wake_after(FRAME);
-    }
-    true
+    moving
 }
 
 fn smooth(u: f32) -> f32 {

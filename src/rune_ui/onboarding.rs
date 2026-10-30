@@ -132,6 +132,20 @@ impl Tour {
         }
     }
 
+    /// The tour from Welcome, as on a new Mac: Restart onboarding.
+    pub(super) fn replay(settings: &AppSettings, platform: &PlatformState) -> Tour {
+        let installed = super::picker::Picker::default().selected_installed(settings);
+        Tour::new(
+            Flow::new(
+                Step::Welcome,
+                platform.setup_status(installed),
+                platform.caps.permissions,
+                platform.caps.practice_dictation,
+            ),
+            false,
+        )
+    }
+
     /// The tour when this run still needs it.
     pub(super) fn start(settings: &AppSettings, platform: &PlatformState) -> Option<Tour> {
         let installed = super::picker::Picker::default().selected_installed(settings);
@@ -139,17 +153,22 @@ impl Tour {
         let completed = crate::onboarding::completion_recorded();
         let resume = crate::onboarding::take_resume();
         let saved = (!completed).then(crate::onboarding::saved_step).flatten();
-        (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
-            Tour::new(
-                Flow::new(
-                    resume.or(saved).unwrap_or(Step::Welcome),
-                    status,
-                    platform.caps.permissions,
-                    platform.caps.practice_dictation,
-                ),
-                completed,
-            )
-        })
+        // The new first run shows until it finishes, even when setup is
+        // already ready, so the whole story plays once.
+        let story = super::onboarding_kit::live::wanted_for(platform);
+        (resume.is_some() || (!completed && (story || !status.ready() || saved.is_some()))).then(
+            || {
+                Tour::new(
+                    Flow::new(
+                        resume.or(saved).unwrap_or(Step::Welcome),
+                        status,
+                        platform.caps.permissions,
+                        platform.caps.practice_dictation,
+                    ),
+                    completed,
+                )
+            },
+        )
     }
 }
 

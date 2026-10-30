@@ -191,6 +191,61 @@ static CGRect currentSettingsFrame(void) {
     return best;
 }
 
+static NSString *const settingsBundleID = @"com.apple.systempreferences";
+/// Bumped by every pane request, so an older request's retries stand down.
+static NSUInteger settingsRequest;
+
+static BOOL settingsHasWindow(void) {
+    NSArray<NSRunningApplication *> *apps =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:settingsBundleID];
+    if (apps.count == 0) {
+        return NO;
+    }
+    pid_t pid = apps.firstObject.processIdentifier;
+    NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
+    for (NSDictionary *window in windows) {
+        if ([window[(id)kCGWindowOwnerPID] intValue] == pid &&
+            [window[(id)kCGWindowLayer] integerValue] == 0) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+/// Opens System Settings at `url`. A System Settings that isn't running yet
+/// drops the pane in the URL while it restores the pane it showed last, so
+/// after a cold launch the URL goes again once its window is up and settled.
+static void openSettingsPane(NSURL *url) {
+    BOOL cold =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:settingsBundleID].count == 0;
+    NSUInteger request = ++settingsRequest;
+    [[NSWorkspace sharedWorkspace] openURL:url];
+    if (!cold) {
+        return;
+    }
+    __block NSUInteger polls = 0;
+    [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+        polls += 1;
+        if (request != settingsRequest || polls > 100) {
+            [timer invalidate];
+            return;
+        }
+        if (!settingsHasWindow()) {
+            return;
+        }
+        [timer invalidate];
+        for (NSNumber *delay in @[ @0.35, @1.2 ]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (request == settingsRequest) {
+                    [[NSWorkspace sharedWorkspace] openURL:url];
+                }
+            });
+        }
+    }];
+}
+
 static NSRect appKitFrame(CGRect frame) {
     NSScreen *primary = NSScreen.screens.firstObject;
     if (primary == nil) {
@@ -455,7 +510,7 @@ void hex_show_permission_guide(int permission) {
     BOOL draggable = activePermission != HexPermissionMicrophone;
     NSURL *settingsURL = [NSURL URLWithString:[NSString stringWithFormat:
         @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?%@", pane]];
-    [[NSWorkspace sharedWorkspace] openURL:settingsURL];
+    openSettingsPane(settingsURL);
     // A development binary has no bundle to list, so it gets the pane alone.
     if (![bundleURL.pathExtension.lowercaseString isEqualToString:@"app"]) {
         return;

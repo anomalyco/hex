@@ -95,6 +95,11 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: WindowCommand,
     },
+    /// Replay the first-run onboarding (dev, test, and local builds).
+    Onboarding {
+        #[command(subcommand)]
+        command: OnboardingCommand,
+    },
     /// Check for a Hex update now; Hex shows what it finds.
     CheckForUpdates {
         #[command(flatten)]
@@ -180,6 +185,20 @@ pub enum ModelCommand {
     },
     /// Stop a download or load in progress.
     Cancel {
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum OnboardingCommand {
+    /// Open the first-run onboarding in the window now, as on a new Mac.
+    ///
+    /// Turns the new onboarding on for this install and forgets that
+    /// onboarding finished. Settings, history, models, and permissions stay,
+    /// so their steps pass at once.
+    #[command(visible_alias = "restart")]
+    Reset {
         #[command(flatten)]
         output: Output,
     },
@@ -310,6 +329,9 @@ pub fn run(command: ControlCli) -> u8 {
                 output,
             ),
         },
+        ControlCli::Onboarding {
+            command: OnboardingCommand::Reset { output },
+        } => send(ControlCommand::OnboardingReset, output),
         ControlCli::CheckForUpdates { output } => send(ControlCommand::CheckForUpdates, output),
         ControlCli::LaunchAtLogin { state, output } => send(
             ControlCommand::LaunchAtLogin {

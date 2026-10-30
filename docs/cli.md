@@ -45,6 +45,7 @@ hex
 │   ├── show [settings|models|modes|history|meetings]
 │   ├── hide                       close the window; Hex stays in the menu bar
 │   └── story <story> [--variant V] [--play]  the `playground` experiment: open a story
+├── onboarding reset (alias restart)  replay the first run now; dev, test, and local builds (below)
 ├── history clear --yes            delete every retained dictation
 ├── vocabulary                     the shared vocabulary (features/vocabulary.md)
 │   ├── list [--json]              every term and its "sounds like" spellings
@@ -91,6 +92,16 @@ while another capture records (an API dictation, say), an idle
 `cancel` is refused with `busy` rather than reach past it; cancel that
 recording first. `meetings cancel` doesn't exist
 because Hex has no way to discard a meeting recording.
+
+`onboarding reset` (or `onboarding restart`) opens the window on the
+first-run onboarding at once, as on a new Mac, for trying it again. It turns
+the `new-onboarding` experiment on for this install and removes only the
+onboarding markers (`onboarding-complete`, `onboarding-step`,
+`onboarding-relaunch`) from the data folder. Settings, history, models, and
+permissions are untouched, so the run finds them ready: the download passes at
+once and the permission step is skipped. Builds that aren't dev, test, or
+local, and OSes without the new onboarding (Linux and Windows for now), refuse
+with `unsupported`. Labs' Restart onboarding row does the same.
 
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
@@ -195,6 +206,7 @@ meeting-record {title?} | meeting-stop | meeting-copy-last
 settings-get {key?} | settings-set {key, value}
 model-list | model-use {model, language?} | model-install {model, language?} | model-cancel
 window-show {pane?} | window-hide | window-story {story, variant?, play}
+onboarding-reset
 history-clear | check-for-updates | launch-at-login {enabled?}
 vocabulary-list | vocabulary-add {term, sounds_like} | vocabulary-remove {term}
 scrawl-capture {action}                          action: start | stop | cancel | status; `capture` experiment

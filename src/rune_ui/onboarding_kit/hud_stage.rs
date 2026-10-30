@@ -153,36 +153,106 @@ fn slot_el(key: &str, centre: [f32; 2], scale: f32) -> El {
         .size(w, h)
 }
 
-/// Live `Dot scope` wave while the user physically holds the shortcut key on
-/// interactive `"Your turn"`.
-pub(crate) fn live_hold_slot(
-    key: &str,
-    centre: [f32; 2],
-    scale: f32,
-    held_secs: f64,
-    reduce: bool,
-) -> El {
-    let clock = Instant::now();
-    let mut model = IndicatorModel::new(Tuning::default(), clock);
-    model.handle(Event::Started, clock, reduce);
-    let target = (0.18 + (held_secs.max(0.0) % 10.0)) as f32;
-    let mut time = 0.0_f32;
-    let mut drawn = model.step(clock, 0.0, reduce);
-    while time + STEP <= target + 1e-4 {
-        time += STEP;
-        let at = clock + Duration::from_secs_f32(time);
-        let lvl = demo_level(time);
-        model.handle(
-            Event::Meter {
-                average: (0.09 * lvl).min(0.32),
-                peak: (0.34 * lvl).min(0.82),
-            },
-            at,
-            reduce,
-        );
-        drawn = model.step(at, STEP, reduce);
+/// The `"Your turn"` plate while a real dictation records and transcribes:
+/// one model stepped each frame with the microphone's own level, as the
+/// desktop HUD is, so silence rests and louder speech moves it more.
+pub(crate) struct LiveHud {
+    model: Option<IndicatorModel>,
+    at: Instant,
+    held: bool,
+    released: Option<Instant>,
+    frame: Option<DotFrame>,
+}
+
+/// How long the plate waits for a released dictation's text before it
+/// finishes anyway.
+const LAND_TIMEOUT: Duration = Duration::from_secs(6);
+
+impl Default for LiveHud {
+    fn default() -> Self {
+        Self {
+            model: None,
+            at: Instant::now(),
+            held: false,
+            released: None,
+            frame: None,
+        }
     }
-    set_dot_hud(Some(drawn));
+}
+
+impl LiveHud {
+    /// Steps to now: `held` while the dictation records, `peak` the
+    /// microphone's latest peak (`None`: no audio), `landed` once its text
+    /// arrived. True while the plate still shows.
+    pub(crate) fn step(
+        &mut self,
+        held: bool,
+        peak: Option<f32>,
+        landed: bool,
+        reduce: bool,
+    ) -> bool {
+        let now = Instant::now();
+        if held && !self.held {
+            let mut model = IndicatorModel::new(Tuning::default(), now);
+            model.handle(Event::Started, now, reduce);
+            self.model = Some(model);
+            self.at = now;
+        }
+        let Some(model) = self.model.as_mut() else {
+            self.held = held;
+            self.frame = None;
+            return false;
+        };
+        if !held && self.held {
+            model.handle(Event::Submitted { job_id: JOB }, now, reduce);
+            model.handle(Event::Transcribing { job_id: JOB }, now, reduce);
+            self.released = Some(now);
+        }
+        let timed_out = self
+            .released
+            .is_some_and(|at| now.duration_since(at) >= LAND_TIMEOUT);
+        if !held && self.released.is_some() && (landed || timed_out) {
+            self.released = None;
+            model.handle(Event::JobCompleted { job_id: JOB }, now, reduce);
+        }
+        self.held = held;
+        if held {
+            // The desktop HUD reads the chunk's RMS; speech runs at about a
+            // third of its peak.
+            let peak = peak.unwrap_or(0.0).clamp(0.0, 1.0);
+            model.handle(
+                Event::Meter {
+                    average: peak * 0.3,
+                    peak,
+                },
+                now,
+                reduce,
+            );
+        }
+        let dt = now.duration_since(self.at).as_secs_f32();
+        self.at = now;
+        let frame = model.step(now, dt, reduce);
+        if model.active() {
+            self.frame = Some(frame);
+        } else {
+            self.model = None;
+            self.frame = None;
+        }
+        self.frame.is_some()
+    }
+
+    pub(crate) fn frame(&self) -> Option<&DotFrame> {
+        self.frame.as_ref()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Mounts `frame` as the plate.
+pub(crate) fn frame_slot(key: &str, centre: [f32; 2], scale: f32, frame: &DotFrame) -> El {
+    set_dot_hud(Some(frame.clone()));
     slot_el(key, centre, scale)
 }
 

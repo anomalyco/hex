@@ -1602,6 +1602,16 @@ fn dev_experiments_switches_toggle_panes_live() {
 }
 
 #[test]
+fn labs_restart_onboarding_opens_the_first_run() {
+    let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
+    assert!(rt.state.first_run.is_none());
+    tap(&mut rt, "restart-onboarding");
+    assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
+    assert!(rt.state.first_run.is_some(), "the first run opens at once");
+    assert!(rt.state.platform.experiments[crate::experiments::Experiment::NewOnboarding.index()]);
+}
+
+#[test]
 fn activity_lists_events_and_shows_the_raw_one() {
     let mut rt = runtime("mac-activity", true, PANE_SIZE);
     assert!(texts(&rt).iter().any(|t| t == "Context changed to Slack"));

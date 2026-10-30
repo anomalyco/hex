@@ -34,6 +34,7 @@ mod hex_meter;
 mod hud_stage;
 mod keyboard;
 mod landing;
+pub(super) mod live;
 mod mic;
 mod mic_line;
 mod permissions;
@@ -46,4 +47,5 @@ mod versus;
 mod words;
 
 pub(crate) use game::add as game;
+pub(super) use stories::Onboard;
 pub(crate) use stories::{add as stories, set_live_window};

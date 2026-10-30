@@ -123,7 +123,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .font(p.k.ty.small)
             .color(p.faint())
             .transition(Transition::opacity()),
-        Step::Done => continue_button(p),
+        Step::Done => continue_button(p, s),
         _ => el().key("none"),
     };
     vec![
