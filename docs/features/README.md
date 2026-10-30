@@ -1179,6 +1179,13 @@ state. They pass the cross-compiled Clippy check, but no one has clicked them
 on a real Windows PC. Releases are Authenticode-signed once Azure Artifact
 Signing is configured ([windows-signing.md](../windows-signing.md)).
 
+**Known defect, outside Hex:** Discord's game detection matches the running
+`hex.exe` to *HEX: Shards of Fate*
+([#445](https://github.com/anomalyco/hex/issues/445)). The executable name stays
+as it is because the managed install layout, updater, shortcut, and login entry
+use it. The workaround is to hide the entry in Discord's Registered Games
+([Windows guide](../windows.md#known-issues)). No check covers it.
+
 No Windows Meetings or local transcription API. See the
 [Windows guide](../windows.md) for the parity table, streaming notes, and
 release flow; [check-windows](../../.github/workflows/check-windows.yml) builds,

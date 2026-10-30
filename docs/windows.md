@@ -63,6 +63,20 @@ powershell -ExecutionPolicy Bypass -Command "iwr https://anoma.ly/hex/files/inst
 
 Uninstall a script install with `install-windows.ps1 -Uninstall`.
 
+## Known Issues
+
+**Discord shows "Playing HEX: Shards of Fate"**
+([#445](https://github.com/anomalyco/hex/issues/445)). With game activity
+detection on, Discord Desktop matches the running `hex.exe` to the verified game
+*HEX: Shards of Fate*. It then shows that game on your profile for as long as
+Hex runs. The reporter's local test suggests Discord matches on the executable
+name. Hex keeps the name `hex.exe` because the installer, updater, Start Menu
+shortcut, and Launch at login all use the managed
+`%APPDATA%\hex\versions\<version>\hex.exe` path. The problem has been reported
+to Discord. Until Discord fixes its game list, open Discord's
+**Settings › Registered Games** (or **Activity Privacy**) and hide the detected
+entry, or turn off activity sharing there. Hex works the same either way.
+
 ## Streaming Dictation
 
 With Parakeet Unified English on a GPU, Hex streams audio into the model while
