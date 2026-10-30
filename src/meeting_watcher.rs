@@ -108,7 +108,6 @@ pub enum MeetingMenuState {
 }
 
 pub struct ListenerConfig {
-    pub project_root: PathBuf,
     pub event_path: PathBuf,
     pub device: Option<String>,
 }

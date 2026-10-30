@@ -23,8 +23,6 @@ const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
 
 pub struct RecognitionAudio {
     pub samples: Vec<f32>,
-    captured_through: CaptureInstant,
-    sample_rate: u32,
     generation: u64,
     outstanding_frames: Arc<AtomicU64>,
 }
@@ -32,11 +30,6 @@ pub struct RecognitionAudio {
 impl RecognitionAudio {
     pub fn is_current(&self, generation: u64) -> bool {
         self.generation == generation
-    }
-
-    pub fn captured_from(&self) -> CaptureInstant {
-        self.captured_through
-            .sub_frames(self.samples.len(), self.sample_rate)
     }
 }
 
@@ -809,7 +802,7 @@ impl Owner {
                         self.capture_sink = None;
                     }
                 }
-                self.forward_recognition(samples, captured_through);
+                self.forward_recognition(samples);
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
@@ -902,7 +895,7 @@ impl Owner {
         }
     }
 
-    fn forward_recognition(&mut self, samples: Vec<f32>, captured_through: CaptureInstant) {
+    fn forward_recognition(&mut self, samples: Vec<f32>) {
         let frames = samples.len() as u64;
         let max_frames =
             u64::from(self.sample_rate()) * MAX_RECOGNITION_BACKLOG.as_millis() as u64 / 1_000;
@@ -916,8 +909,6 @@ impl Owner {
         }
         let audio = RecognitionAudio {
             samples,
-            captured_through,
-            sample_rate: self.sample_rate(),
             generation: self.recognition_generation(),
             outstanding_frames: self.state.outstanding_recognition_frames.clone(),
         };

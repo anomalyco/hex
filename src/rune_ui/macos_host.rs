@@ -708,7 +708,7 @@ impl NativeHost for MacHost {
             changed = true;
         }
         #[cfg(hex_capture)]
-        {
+        if state.dev_build {
             changed |= self.scrawl.poll(state, Instant::now() >= self.refresh_at);
         }
         if Instant::now() < self.refresh_at {

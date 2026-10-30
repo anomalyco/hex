@@ -913,15 +913,13 @@ fn done(ui: &Ui, p: Paint) -> El {
             keycaps(p, "keys", &binding.keycaps()),
         ));
     }
-    if ui.platform.modes {
-        tips.push(setting_row(
-            p,
-            "tip-modes",
-            tr("Modes"),
-            Some(tr("Fix names, tone, and formatting per app.")),
-            el().key("none"),
-        ));
-    }
+    tips.push(setting_row(
+        p,
+        "tip-modes",
+        tr("Modes"),
+        Some(tr("Fix names, tone, and formatting per app.")),
+        el().key("none"),
+    ));
     let send_off = match ui.platform.caps.os {
         Os::Macos => tr_fill(
             "Hex waits in the menu bar. Use {} in any app to dictate.",

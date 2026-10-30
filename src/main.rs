@@ -134,8 +134,6 @@ mod recognition;
 mod recording_environment;
 mod rune_hud;
 mod rune_ui;
-#[cfg(target_os = "macos")]
-mod smart_turn;
 mod speech_detector;
 mod spring;
 #[cfg(target_os = "macos")]
@@ -557,7 +555,6 @@ fn main() -> Result<()> {
             output,
         );
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
 
     let event_path = log_dir.join("live.ndjson");
@@ -575,7 +572,7 @@ fn main() -> Result<()> {
         }
     });
     match command {
-        Command::App { device, rune_args } => open_app(root, event_path, device, rune_args),
+        Command::App { device, rune_args } => open_app(event_path, device, rune_args),
         Command::Listen { device } => {
             let _instance = instance::acquire("listener")?;
             experiments::log_launch();
@@ -589,15 +586,7 @@ fn main() -> Result<()> {
                     None
                 }
             };
-            recognition::listen(
-                &root,
-                events,
-                device.as_deref(),
-                &SHUTDOWN,
-                None,
-                history,
-                None,
-            )
+            recognition::listen(events, device.as_deref(), &SHUTDOWN, None, history, None)
         }
         Command::Service { embedded } => {
             if !embedded {
@@ -847,12 +836,7 @@ fn main() -> Result<()> {
 /// Rune reads its own flags (`--snap`, `--scene`, …) from `rune_args`; a
 /// headless run draws fixtures without starting the runtime.
 #[cfg(target_os = "macos")]
-fn open_app(
-    root: PathBuf,
-    event_path: PathBuf,
-    device: Option<String>,
-    rune_args: Vec<String>,
-) -> Result<()> {
+fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>) -> Result<()> {
     if !rune_args.is_empty() {
         crate::rune_ui::render_app(rune_args).run();
         return Ok(());
@@ -862,11 +846,7 @@ fn open_app(
     hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
-        meeting_watcher::ListenerConfig {
-            project_root: root,
-            event_path,
-            device,
-        },
+        meeting_watcher::ListenerConfig { event_path, device },
     )
 }
 
@@ -1088,11 +1068,11 @@ mod tests {
             }))
         ));
         assert!(matches!(
-            Cli::try_parse_from(["hex", "experiments", "enable", "smart-turn"])
+            Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
                 .map(|cli| cli.command),
             Ok(Some(Command::Experiments {
                 command: ExperimentsCommand::Enable { name }
-            })) if name == "smart-turn"
+            })) if name == "live-text"
         ));
         assert!(Cli::try_parse_from(["hex", "experiments", "disable"]).is_err());
     }
