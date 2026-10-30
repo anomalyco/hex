@@ -90,6 +90,15 @@ that does not ask for Fn; Fn stays significant everywhere else. Check:
 `function_keys_match_despite_the_fn_flag_macos_adds` in `suppression.rs`
 (constructed events; no physical-keyboard run).
 
+**Fixed October 30, 2026 (issue 462):** the Globe key can also send its own key
+event (key code 179) beside the Fn modifier change, seen with
+Karabiner-Elements running. A Fn shortcut read that event as another key pressed
+with it and discarded most presses as a chord 60–130 ms after they started.
+For a shortcut that holds Fn, key code 179 is now neither a chord key nor HID
+chord evidence; any other key still is. Check:
+`globe_key_events_are_not_a_chord_with_the_function_shortcut` in
+`suppression.rs` (constructed events; no physical-keyboard run).
+
 ### Chord Shortcuts
 
 **Added October 29, 2026 (issue 394):** every shortcut (dictation, Voice

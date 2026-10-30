@@ -17,6 +17,8 @@ use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
+/// The key code the Globe (Fn) key reports in its own key events.
+const GLOBE_KEY_CODE: u16 = 179;
 
 const EVENT_LEFT_MOUSE_DOWN: u32 = 1;
 const EVENT_LEFT_MOUSE_UP: u32 = 2;
@@ -630,11 +632,19 @@ unsafe extern "C" fn physical_event_callback(
 /// Escape and Hex's own shortcuts already act through their session events.
 fn is_chord_evidence(code: u16, flags: u64, hotkeys: RuntimeHotkeys) -> bool {
     code != ESCAPE_KEY_CODE
+        && !is_own_globe_key(code, hotkeys.dictation)
         && !hotkeys
             .all()
             .iter()
             .flatten()
             .any(|hotkey| hotkey.matches_key_press(code, flags))
+}
+
+/// The Globe key's own key event, which some keyboards and remappers
+/// (Karabiner-Elements) send beside the Fn modifier change. For a binding
+/// that holds Fn, it is the shortcut itself, never a chord.
+fn is_own_globe_key(code: u16, binding: RuntimeHotkey) -> bool {
+    code == GLOBE_KEY_CODE && binding.modifiers.function && binding.key_code != Some(code)
 }
 
 /// HID-tap timestamps arrive as Mach ticks on Apple Silicon and as
@@ -1562,6 +1572,11 @@ impl DictationHotkey {
 
     // Suspended shortcut matching must still observe releases of previously held keys.
     pub fn track_key_state(&mut self, event: InputEvent, at: CaptureInstant) -> Option<bool> {
+        if let InputEvent::Key { code, .. } | InputEvent::PhysicalKeyDown { code, .. } = event
+            && is_own_globe_key(code, self.binding)
+        {
+            return None;
+        }
         self.stale_keys_neutral_since = None;
         let fenced = self.ignore_before.is_some_and(|changed_at| at < changed_at)
             || self
@@ -2865,6 +2880,63 @@ mod tests {
             hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
+    }
+
+    #[test]
+    fn globe_key_events_are_not_a_chord_with_the_function_shortcut() {
+        let now = capture_time();
+        let globe = |down| InputEvent::Key {
+            code: GLOBE_KEY_CODE,
+            down,
+            flags: FUNCTION_KEY_MASK,
+        };
+        let hid_globe = |at| InputEvent::PhysicalKeyDown {
+            code: GLOBE_KEY_CODE,
+            timing: HidTiming {
+                raw: 0,
+                clock: HidClock::Arrival,
+                received_at: at,
+            },
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, function_binding());
+        hotkey.set_toggle(true);
+        let ms = |millis| now + Duration::from_millis(millis);
+        for (at, event, expected) in [
+            (ms(0), globe(true), None),
+            (
+                ms(0),
+                InputEvent::Flags(FUNCTION_KEY_MASK),
+                Some(HotkeyAction::Start),
+            ),
+            (ms(60), hid_globe(ms(60)), None),
+            (ms(80), globe(false), None),
+            (ms(90), InputEvent::Flags(NO_FLAGS), None),
+            (ms(1_000), globe(true), None),
+            (
+                ms(1_000),
+                InputEvent::Flags(FUNCTION_KEY_MASK),
+                Some(HotkeyAction::Finish),
+            ),
+        ] {
+            assert_eq!(hotkey.process(event, at), expected);
+        }
+        let hotkeys = RuntimeHotkeys {
+            dictation: function_binding(),
+            ..RuntimeHotkeys::default()
+        };
+        assert!(!is_chord_evidence(
+            GLOBE_KEY_CODE,
+            FUNCTION_KEY_MASK,
+            hotkeys
+        ));
+        // Another key held with Fn is still a chord, and Globe is evidence for
+        // a shortcut without Fn.
+        assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, hotkeys));
+        let option = RuntimeHotkeys {
+            dictation: option_binding(),
+            ..RuntimeHotkeys::default()
+        };
+        assert!(is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, option));
     }
 
     #[test]
