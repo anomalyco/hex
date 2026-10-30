@@ -1,6 +1,7 @@
-//! Labs: the opt-in features and the experiments in dev, local, and test
-//! builds, folded under one sidebar row. Production builds (`!dev_build`) hide
-//! Labs and every experimental pane completely.
+//! Labs: the opt-in features (Meetings beta on macOS, plus Annotate in dev
+//! builds) and the experiments in dev, local, and test builds, folded under one
+//! sidebar row. Production builds (`!dev_build`) expose only Meetings (beta)
+//! on macOS and hide Annotate and every experiment.
 
 use rune::{El, Icon, Tx, col, row, text};
 
@@ -29,13 +30,10 @@ struct Lab {
 }
 
 fn labs(ui: &Ui) -> Vec<Lab> {
-    if !ui.platform.dev_build {
-        return Vec::new();
-    }
     let settings = &ui.settings;
     let mut labs = vec![Lab {
         key: "lab-meetings",
-        title: tr("Meetings"),
+        title: tr("Meetings (beta)"),
         about: tr("Record calls and keep transcripts"),
         on: settings.meetings.enabled,
         open_when_off: false,
@@ -46,7 +44,7 @@ fn labs(ui: &Ui) -> Vec<Lab> {
         pane: Pane::Meetings,
     }];
     #[cfg(hex_capture)]
-    if ui.platform.scrawl.is_some() {
+    if ui.platform.dev_build && ui.platform.scrawl.is_some() {
         labs.push(Lab {
             key: "lab-annotate",
             title: tr("Annotate"),
@@ -59,6 +57,13 @@ fn labs(ui: &Ui) -> Vec<Lab> {
     }
     labs.retain(|lab| lab.pane.shown(ui));
     labs
+}
+
+/// Whether the sidebar shows Labs: dev builds always have experiments;
+/// production builds show Labs only on OSes with a release opt-in (Meetings on
+/// macOS).
+pub(super) fn shown(ui: &Ui) -> bool {
+    ui.platform.dev_build || !labs(ui).is_empty()
 }
 
 /// An opt-in feature's pane is in the main sidebar: it's on.

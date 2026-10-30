@@ -441,8 +441,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     } else {
         app.windowless()
     };
-    let dev_build = crate::experiments::is_dev_build();
-    let capsules = dev_build.then(|| {
+    let capsules = {
         let window = window.clone();
         crate::rune_ui::meeting_capsules::MeetingCapsules::install(
             &mut app,
@@ -459,12 +458,12 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 window.update(move |ui, _| crate::rune_ui::meeting_corner_moved(ui, corner));
             },
         )
-    });
+    };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, in dev builds only.
     #[cfg(hex_capture)]
-    let capture_overlays = dev_build
+    let capture_overlays = crate::experiments::is_dev_build()
         .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let pump = Pump {
         window: window.clone(),
@@ -794,7 +793,7 @@ impl Runtime {
 
 struct Pump {
     window: rune::AppHandle<Ui>,
-    capsules: Option<crate::rune_ui::meeting_capsules::MeetingCapsules>,
+    capsules: crate::rune_ui::meeting_capsules::MeetingCapsules,
     #[cfg(hex_capture)]
     capture_overlays: Option<crate::rune_ui::capture_capsule::feed::CaptureOverlays>,
     runtime: RuntimeHandle,
@@ -1124,9 +1123,7 @@ impl Pump {
     }
 
     fn controller_event(&mut self, event: ControllerEvent) {
-        if let Some(capsules) = &mut self.capsules {
-            capsules.event(&event);
-        }
+        self.capsules.event(&event);
         match event {
             ControllerEvent::Offer(_)
             | ControllerEvent::Reminder { .. }
