@@ -99,6 +99,48 @@ impl Activation {
     }
 }
 
+/// A saved `XAUTHORITY` outlives its file: Xwayland's cookie (GNOME's
+/// `/run/user/…/.mutter-Xwaylandauth.*`) is new each login, so the path in an
+/// older `session.env` breaks every X11 connection after a reboot. A missing
+/// file takes the user manager's current value, else is dropped so Xlib falls
+/// back to `~/.Xauthority`.
+pub(crate) fn refresh_x_authority() {
+    let Some(saved) = std::env::var_os("XAUTHORITY").filter(|path| !path.is_empty()) else {
+        return;
+    };
+    if Path::new(&saved).exists() {
+        return;
+    }
+    let live = manager_environment("XAUTHORITY").filter(|path| Path::new(path).exists());
+    // Called on the main thread before Hex starts any other thread.
+    unsafe {
+        match live {
+            Some(path) => std::env::set_var("XAUTHORITY", path),
+            None => std::env::remove_var("XAUTHORITY"),
+        }
+    }
+}
+
+/// A variable in the systemd user manager's environment, which the desktop
+/// session imports at each login.
+fn manager_environment(key: &str) -> Option<String> {
+    let output = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(())?;
+    environment_value(&String::from_utf8_lossy(&output.stdout), key)
+}
+
+fn environment_value(environment: &str, key: &str) -> Option<String> {
+    environment.lines().find_map(|line| {
+        let value = line.strip_prefix(key)?.strip_prefix('=')?;
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
 /// What `hex status` prints and every reply carries.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Status {
@@ -1034,5 +1076,16 @@ mod tests {
         assert!(!body.contains("XDG_DATA_DIRS"));
         assert!(!body.contains("LC_ALL"));
         assert!(environment_line("DISPLAY", ":0\nEVIL=yes").is_err());
+    }
+
+    #[test]
+    fn manager_environment_reads_one_exact_key() {
+        let environment =
+            "XAUTHORITY_OLD=/a\nXAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.X1\nDISPLAY=:0\n";
+        assert_eq!(
+            environment_value(environment, "XAUTHORITY").as_deref(),
+            Some("/run/user/1000/.mutter-Xwaylandauth.X1")
+        );
+        assert_eq!(environment_value("XAUTHORITY=\n", "XAUTHORITY"), None);
     }
 }

@@ -111,6 +111,13 @@ with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 
 ```ts
 Launch Hex, setup incomplete              // setup.tour; full-window, own column
+├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
+│   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
+│   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch
+│   │   ├── Permissions or the selected model not ready -> the old completion
+│   │   │   no longer counts -> the tour opens at Welcome
+│   │   └── Everything ready -> no tour; nothing but the ID changes
+│   └── Saved settings are kept; the ID is recorded either way
 ├── Tour opens -> speech model download starts at once      // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
@@ -312,7 +319,11 @@ grants waiting for a restart
 `setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
 advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
 and the saved step
-(`the_tour_step_is_saved_for_the_next_launch`). Rune tests drive the tour
+(`the_tour_step_is_saved_for_the_next_launch`), and the upgrade check
+(`a_fresh_install_onboards_without_the_identity_check`,
+`an_upgrader_without_permissions_gets_the_tour_once`,
+`an_upgrader_whose_setup_is_ready_skips_the_tour`; a real 2.3.1 to
+`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the tour
 (`the_mac_tour_asks_each_permission_then_practices`,
 `a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen`,
 `a_refused_microphone_points_to_system_settings`,
@@ -554,13 +565,15 @@ General                                  // settings
 │   │   Double-tap only, Microphone mode, keyboard-language model switching (macOS),
 │   │   Use the Mac's microphone instead of Bluetooth (macOS),
 │   │   Share dictation shortcut with other apps (Windows), Recognition hints
-│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
+│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux, Windows)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
 ├── Use the Mac's microphone instead of Bluetooth (Advanced, macOS, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Share dictation shortcut with other apps (Advanced, Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
+├── Terminal paste (Advanced, Linux and Windows, off)
+│   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
@@ -1122,10 +1135,17 @@ Linux beta                               // not macOS feature parity
 │   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
 │       ├── Wayland -> layer-shell overlay layer, no keyboard, empty input region
 │       ├── X11 -> override-redirect window, empty input shape
-│       ├── No layer-shell (Rune refused it, or the compositor lacks
-│       │   zwlr_layer_shell_v1, e.g. GNOME) -> process.log warns once;
-│       │   `hex status` reports `hud_limitation` and the listener warning (#465)
-│       │   // no XWayland fallback for the HUD yet
+│       ├── Wayland without layer-shell (zwlr_layer_shell_v1; GNOME) and XWayland
+│       │   (`DISPLAY`) -> only the HUD opens on XWayland: override-redirect ARGB
+│       │   window, notification type, empty input shape, primary monitor's edge,
+│       │   scale from Xft.dpi; the rest of Hex (window, portal shortcuts) stays
+│       │   on Wayland (#465)
+│       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
+│       │   // centre, animating, focus unchanged, the pointer over it hits the
+│       │   // window below; not yet on a real GNOME Shell session
+│       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
+│       │   -> process.log warns once; `hex status` reports `hud_limitation`
+│       │   and the listener warning
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
@@ -1294,6 +1314,8 @@ Linux process                            // maintain.linux-service
 ├── Crash -> systemd Restart=on-failure -> Hex without a window
 ├── Update -> Restart the unit -> Hex reopens the window
 ├── hex restart without a display (SSH) -> Keep the saved session.env
+├── Saved XAUTHORITY file gone (a reboot: Xwayland's cookie is new each login)
+│   -> Take the user manager's current XAUTHORITY, else drop it (#465)
 ├── Window fails (no display, no GPU) -> Logged; Hex keeps running
 └── Startup -> transcribe.cpp's Vulkan instance first, on the main thread
     └── then the model load and the window's wgpu instance never create one at once

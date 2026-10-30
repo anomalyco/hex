@@ -411,7 +411,7 @@ fn taskbar_is_light() -> bool {
 fn tray_icon_pixels(light_taskbar: bool) -> Vec<u8> {
     let mut pixels = TRAY_ICON_RGBA.to_vec();
     if light_taskbar {
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel[..3].fill(0);
         }
     }
@@ -470,7 +470,7 @@ mod tests {
         let light = tray_icon_pixels(true);
         assert_eq!(dark, TRAY_ICON_RGBA);
         assert_eq!(light.len(), (TRAY_ICON_SIZE * TRAY_ICON_SIZE * 4) as usize);
-        for (shown, mark) in light.chunks_exact(4).zip(dark.chunks_exact(4)) {
+        for (shown, mark) in light.as_chunks::<4>().0.iter().zip(dark.as_chunks::<4>().0) {
             assert_eq!(&shown[..3], &[0, 0, 0]);
             assert_eq!(shown[3], mark[3]);
         }

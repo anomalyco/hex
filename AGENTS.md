@@ -233,7 +233,8 @@ substitute for source inspection or a second roadmap.
 - `linux_rune_hud`: the Linux side of `rune_hud`: `LinuxIndicator` turns the
   listener's capture, meter, and pending-output reports into HUD events and
   never waits on the HUD; it shows once the window's app runs, whether or not
-  the window is open (layer-shell on Wayland, override-redirect on X11).
+  the window is open (layer-shell on Wayland, override-redirect on X11, and
+  override-redirect on XWayland when Wayland has no layer-shell).
 - `rune_hud`: the dictation HUD on every OS: a click-through Rune overlay
   whose compositor steps `dictation_indicator`'s model on Rune's frame clock
   (the display's refresh) and draws Dot scope on the GPU with
@@ -938,7 +939,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   staging; macOS unpacks beside the bundle and swaps it in with
   `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes
   the old bundle at launch.
-- The Wayland beta requires compatible clipboard and layer-shell protocols.
+- The Wayland beta requires compatible clipboard protocols, and layer-shell or
+  XWayland for the HUD.
   Paste sends its shortcut through `wtype` when the compositor advertises
   `zwp_virtual_keyboard_manager_v1`, and otherwise through the
   RemoteDesktop portal, the general injection path: one keyboard-only session
@@ -949,7 +951,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   `hex paste-last` commands in the desktop's own
   keybindings. One general path: no compositor-specific code, no raw input
   devices, no input-group requirement, and no silent fallback to XWayland or
-  privileged input injection (uinput). The desktop may grant a different
+  privileged input injection (uinput). One allowed exception: on a compositor
+  without layer-shell (GNOME), Rune opens only the HUD, an input-free overlay,
+  as an override-redirect X11 window on XWayland when `DISPLAY` is set (empty
+  input shape, never focused); everything else stays on Wayland, and without
+  XWayland Settings reports the HUD unavailable. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   A loose binary writes its own managed `hex.desktop` so the portal can

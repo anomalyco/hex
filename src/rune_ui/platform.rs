@@ -40,7 +40,7 @@ pub(super) struct Capabilities {
     pub(super) dock_icon: bool,
     /// The listener can be off: the status card and Enable on launch.
     pub(super) listener_control: bool,
-    /// Paste with Ctrl-Shift-V for terminals.
+    /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
     pub(super) terminal_paste: bool,
     /// The dictation shortcut can pass through to other apps (Windows).
     pub(super) share_shortcut: bool,
@@ -112,7 +112,7 @@ impl Capabilities {
         launch_at_login: true,
         dock_icon: false,
         listener_control: true,
-        terminal_paste: false,
+        terminal_paste: true,
         share_shortcut: true,
         hex_microphone: false,
         practice_dictation: false,
@@ -483,7 +483,8 @@ impl PlatformState {
         state.system_audio = true;
         state.login_item = caps.launch_at_login.then_some(LoginItemStatus::Disabled);
         if caps.hex_microphone {
-            let version = env!("CARGO_PKG_VERSION").to_string();
+            // Fixed, so the scenes' goldens don't change with the crate version.
+            let version = "0.0.0".to_string();
             state.hex_microphone = Some(HexMicrophoneStatus {
                 driver_bundle_installed: true,
                 driver_loaded: true,

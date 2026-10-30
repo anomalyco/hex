@@ -23,7 +23,6 @@ pub(super) struct Line {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Topic {
     pub(super) name: &'static str,
-    pub(super) summary: &'static str,
     /// Its first line, where the boundary pass after Stop moves a chapter.
     pub(super) first_line: usize,
 }
@@ -51,7 +50,6 @@ pub(super) struct Script {
     pub(super) notes: &'static [NoteSpec],
     /// The title before chapters extend it: the call's.
     pub(super) base_title: &'static str,
-    pub(super) app: &'static str,
     pub(super) summary: &'static str,
 }
 
@@ -84,22 +82,18 @@ impl Script {
 const TOPICS: &[Topic] = &[
     Topic {
         name: "Lantern onboarding",
-        summary: "Cutting the tutorial down so players learn the lantern first.",
         first_line: 0,
     },
     Topic {
         name: "Lobby host migration",
-        summary: "Why lobbies drop players when the host leaves, and the fix.",
         first_line: 19,
     },
     Topic {
         name: "Cave lighting performance",
-        summary: "Getting the caves back to 40 fps on Steam Deck.",
         first_line: 39,
     },
     Topic {
         name: "Launch date and trailer",
-        summary: "A conditional March 26 launch, the trailer, and the demo.",
         first_line: 59,
     },
 ];
@@ -215,7 +209,6 @@ pub(super) fn lantern() -> &'static Script {
             topics: TOPICS,
             notes: NOTES,
             base_title: "Zoom call",
-            app: "Zoom",
             summary: "The team cut Lantern's tutorial to a lantern-only first room and will \
                 test shared and separate co-op lanterns in Friday's playtest. Lobbies will \
                 send only quantized inputs when the host migrates, the caves get a \

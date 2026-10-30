@@ -1559,7 +1559,9 @@ mod tests {
         let mut speech = SpeechFrames::default();
         assert!(
             !clip
-                .chunks_exact(FRAME_SAMPLES)
+                .as_chunks::<FRAME_SAMPLES>()
+                .0
+                .iter()
                 .any(|frame| speech.is_speech(frame)),
             "the speech margin misses this speech"
         );

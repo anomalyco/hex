@@ -1,5 +1,6 @@
 use std::mem::size_of;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -63,6 +64,9 @@ impl ClipboardSnapshot {
 pub struct WindowsPaster {
     clipboard: arboard::Clipboard,
     clipboard_restore: Arc<Mutex<ClipboardRestore>>,
+    /// Terminal paste: send Ctrl+Shift+V instead of Ctrl+V. Shared so a
+    /// settings change applies to the next paste without a new paster.
+    paste_with_shift: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -89,11 +93,12 @@ impl ClipboardRestore {
 }
 
 impl WindowsPaster {
-    pub fn new() -> Result<Self> {
+    pub fn new(paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
         Ok(Self {
             clipboard: arboard::Clipboard::new()
                 .wrap_err("could not open the Windows clipboard")?,
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
+            paste_with_shift,
         })
     }
 
@@ -120,7 +125,7 @@ impl WindowsPaster {
         let generation = restore.register(snapshot, original_sequence, transcript_sequence);
         drop(restore);
 
-        if let Err(error) = send_paste_shortcut() {
+        if let Err(error) = send_paste_shortcut(self.paste_with_shift.load(Ordering::Relaxed)) {
             restore_clipboard_generation(&self.clipboard_restore, generation);
             return Err(error);
         }
@@ -163,7 +168,8 @@ fn restore_clipboard_generation(clipboard_restore: &Arc<Mutex<ClipboardRestore>>
 }
 
 /// Waits, without a deadline, until Shift, Alt, and Win are up: held, they
-/// would turn the synthesized Ctrl+V into a different shortcut. A held Ctrl
+/// would turn the synthesized Ctrl+V (or Ctrl+Shift+V, whose Shift Hex
+/// presses and releases itself) into a different shortcut. A held Ctrl
 /// is harmless, so the user may keep it down after finishing with a chord.
 fn wait_for_conflicting_modifiers() {
     while [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN]
@@ -174,17 +180,24 @@ fn wait_for_conflicting_modifiers() {
     }
 }
 
-/// Ctrl plus `key`, leaving a physically held Ctrl untouched: synthesizing
-/// its release would leave Windows thinking it is up while the user holds it.
-fn control_chord(key: u16) -> Vec<INPUT> {
-    let held = key_down(VK_CONTROL);
-    let mut inputs = Vec::with_capacity(4);
-    if !held {
+/// Ctrl plus `key` (Ctrl+Shift plus `key` with `shift`), leaving a Ctrl the
+/// user physically holds (`control_held`) untouched: synthesizing its
+/// release would leave Windows thinking it is up while the user holds it.
+/// Shift goes down after Ctrl and comes up before it.
+fn control_chord(key: u16, shift: bool, control_held: bool) -> Vec<INPUT> {
+    let mut inputs = Vec::with_capacity(6);
+    if !control_held {
         inputs.push(keyboard_input(VK_CONTROL, 0));
+    }
+    if shift {
+        inputs.push(keyboard_input(VK_SHIFT, 0));
     }
     inputs.push(keyboard_input(key, 0));
     inputs.push(keyboard_input(key, KEYEVENTF_KEYUP));
-    if !held {
+    if shift {
+        inputs.push(keyboard_input(VK_SHIFT, KEYEVENTF_KEYUP));
+    }
+    if !control_held {
         inputs.push(keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP));
     }
     inputs
@@ -194,8 +207,8 @@ fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
 }
 
-fn send_paste_shortcut() -> Result<()> {
-    let inputs = control_chord(VK_V);
+fn send_paste_shortcut(shift: bool) -> Result<()> {
+    let inputs = control_chord(VK_V, shift, key_down(VK_CONTROL));
     let sent = send_inputs(&inputs);
     if sent != inputs.len() as u32 {
         // Release only what this chord pressed; never a key the user holds.
@@ -255,5 +268,52 @@ mod tests {
             restore.original.as_ref(),
             Some(ClipboardSnapshot::Text(text)) if text == "original"
         ));
+    }
+
+    fn keys(inputs: &[INPUT]) -> Vec<(u16, bool)> {
+        inputs
+            .iter()
+            .map(|input| {
+                let ki = unsafe { input.Anonymous.ki };
+                (ki.wVk, ki.dwFlags & KEYEVENTF_KEYUP != 0)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn paste_chords_press_shift_inside_control_and_leave_a_held_control_alone() {
+        assert_eq!(
+            keys(&control_chord(VK_V, false, false)),
+            [
+                (VK_CONTROL, false),
+                (VK_V, false),
+                (VK_V, true),
+                (VK_CONTROL, true)
+            ]
+        );
+        assert_eq!(
+            keys(&control_chord(VK_V, false, true)),
+            [(VK_V, false), (VK_V, true)]
+        );
+        assert_eq!(
+            keys(&control_chord(VK_V, true, false)),
+            [
+                (VK_CONTROL, false),
+                (VK_SHIFT, false),
+                (VK_V, false),
+                (VK_V, true),
+                (VK_SHIFT, true),
+                (VK_CONTROL, true)
+            ]
+        );
+        assert_eq!(
+            keys(&control_chord(VK_V, true, true)),
+            [
+                (VK_SHIFT, false),
+                (VK_V, false),
+                (VK_V, true),
+                (VK_SHIFT, true)
+            ]
+        );
     }
 }

@@ -911,6 +911,18 @@ possibly Vivaldi) is classified by that number. Installed web-app shims carry
 no framework and keep paste. An active input method may treat typed events
 differently from a paste. Remove the typing path once Chrome 157 is the floor.
 
+**Windows paste (issue 477):** Windows puts the transcript on the clipboard,
+waits for Shift, Alt, and Win to come up, sends Ctrl+V, and restores the
+previous clipboard 500 ms later unless a newer paste or another app changed it.
+General › Advanced › Output › Terminal paste (`paste_with_shift`, off by
+default; shared with Linux) sends Ctrl+Shift+V instead, for apps that ignore
+a synthetic Ctrl+V (the herdr desktop app). Shift goes down after Ctrl and up
+before it; a Ctrl the user still holds is never pressed or released by Hex. A
+saved change applies to the next paste without restarting the listener.
+Source: `control_chord` in [windows_paste.rs](../../src/windows_paste.rs).
+Check: `paste_chords_press_shift_inside_control_and_leave_a_held_control_alone`
+(the synthesized key sequence only; no paste into a real Windows app).
+
 ### Cancellation Before Commit
 
 ```ts

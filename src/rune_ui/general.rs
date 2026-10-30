@@ -808,7 +808,7 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
 }
 
 /// Paste last, what happens to other audio while dictating, the HUD, and
-/// terminal paste (Linux).
+/// terminal paste (Linux and Windows).
 fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = Vec::new();
