@@ -346,6 +346,12 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
+/// `hex onboarding reset`: replays the first run in the window now.
+#[cfg(target_os = "macos")]
+pub(crate) fn restart_onboarding(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
+    onboarding_kit::live::restart(ui, tx)
+}
+
 /// The pane the window shows, by its `hex window show` name: General is
 /// still `settings` there.
 #[cfg(target_os = "macos")]

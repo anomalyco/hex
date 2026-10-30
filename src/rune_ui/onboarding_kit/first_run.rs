@@ -419,12 +419,7 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool, cycles: bool) -> El {
                     .map(|(i, cap)| keycap(p, i, cap, KeySize::Small, down).scale(0.9)),
             ),
         )
-        .child(
-            text(label)
-                .key("label")
-                .font(DESCRIPTION)
-                .color(p.muted()),
-        );
+        .child(text(label).key("label").font(DESCRIPTION).color(p.muted()));
     let mut pill = if cycles {
         pill.role("button")
             .label(label)
@@ -458,7 +453,9 @@ fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
         .width(Some(TRY_FIELD_W))
         .auto_grow(3, 5);
     let editor = if s.live.is_some() {
-        editor.on_edit(live::practice).on_change(live::practice_changed)
+        editor
+            .on_edit(live::practice)
+            .on_change(live::practice_changed)
     } else {
         editor
             .on_edit(|s: &mut Onboard| &mut s.practice)

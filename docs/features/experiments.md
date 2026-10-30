@@ -27,7 +27,7 @@ Production vs dev builds                 // experiments.dev-build
     └── Missing file -> Nothing on
 
 hex experiments                          // experiments.cli; dev builds only
-├── list [--json] -> Each experiment, on/off, source (env, file, env+file)
+├── list [--json] -> Each experiment, on/off, source (env, file, build, or a mix)
 ├── enable <name> -> Add it to the file atomically; print the restart hint
 ├── disable <name> -> Remove every line naming it; keep comments and others
 └── Unknown name -> Error listing the known experiments
@@ -56,6 +56,15 @@ The known experiments are compiled into
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
   gate is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
+- `new-onboarding`: the onboarding story as the real first run on macOS
+  (`rune_ui/onboarding_kit/live.rs`): the real model download, Microphone and
+  Accessibility rows that follow macOS, and a practice dictation with the
+  real shortcut and the HUD on the live microphone level. The window's tour
+  stays the state machine underneath. `Hex Test.app` builds turn it on
+  (source `build`). Labs' Restart onboarding and `hex onboarding reset` turn
+  it on for the install and replay the first run without touching settings,
+  history, models, or permissions; ready steps pass at once. Not yet: words
+  flying into the field.
 - `live-text`: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
   OS; see [Streaming Finish](dictation.md#streaming-finish)). The gate is

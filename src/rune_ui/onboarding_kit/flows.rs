@@ -75,10 +75,7 @@ pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
     } else {
         button.on_press(Onboard::press_continue)
     };
-    button
-        .build_push(p.k)
-        .key("continue")
-        .transition(arrives())
+    button.build_push(p.k).key("continue").transition(arrives())
 }
 
 fn hold(p: Paint, s: &Onboard, rest: &str) -> El {

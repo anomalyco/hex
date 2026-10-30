@@ -307,6 +307,12 @@ impl Pump {
                 variant,
                 play,
             } => Some(self.show_story(StoryLink::new(&story, variant, play))),
+            ControlCommand::OnboardingReset => {
+                show(&self.window, Destination::Settings);
+                let window = self.window.clone();
+                background(reply, move || restart_onboarding(&window));
+                None
+            }
             ControlCommand::HistoryClear => Some(reply_with(clear_history(&runtime))),
             ControlCommand::LaunchAtLogin { enabled } => {
                 background(reply, move || launch_at_login(enabled));
@@ -755,6 +761,21 @@ fn current_pane(window: &rune::AppHandle<Ui>) -> Option<String> {
         let _ = sender.send(crate::rune_ui::current_pane(ui));
     });
     receiver.recv_timeout(WINDOW_TIMEOUT).ok().map(String::from)
+}
+
+fn restart_onboarding(window: &rune::AppHandle<Ui>) -> Result<ControlReply, ControlError> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    window.update(move |ui, tx| {
+        let _ = sender.send(crate::rune_ui::restart_onboarding(ui, tx));
+    });
+    match receiver.recv_timeout(CONFIRM_WAIT) {
+        Ok(Ok(())) => Ok(ControlReply::done("Opened onboarding")),
+        Ok(Err(why)) => Err(ControlError::new("unsupported", why)),
+        Err(_) => Err(ControlError::new(
+            "unavailable",
+            "the window didn't answer; try again",
+        )),
+    }
 }
 
 fn permission(state: PermissionState) -> String {

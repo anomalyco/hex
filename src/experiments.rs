@@ -203,10 +203,7 @@ fn snapshot() -> &'static Snapshot {
     SNAPSHOT.get_or_init(|| {
         let loaded = Snapshot::load();
         for experiment in Experiment::ALL {
-            LIVE[experiment.index()].store(
-                loaded.enabled(experiment) || experiment.on_by_default(),
-                Ordering::Release,
-            );
+            LIVE[experiment.index()].store(loaded.enabled(experiment), Ordering::Release);
         }
         loaded
     })
@@ -216,18 +213,24 @@ fn snapshot() -> &'static Snapshot {
 struct Sources {
     env: bool,
     file: bool,
+    /// On by default in this build (`new-onboarding` in test builds).
+    build: bool,
 }
 
 impl Sources {
     fn any(self) -> bool {
-        self.env || self.file
+        self.env || self.file || self.build
     }
 
     fn labels(self) -> Vec<&'static str> {
-        [(self.env, "env"), (self.file, "file")]
-            .into_iter()
-            .filter_map(|(on, label)| on.then_some(label))
-            .collect()
+        [
+            (self.env, "env"),
+            (self.file, "file"),
+            (self.build, "build"),
+        ]
+        .into_iter()
+        .filter_map(|(on, label)| on.then_some(label))
+        .collect()
     }
 }
 
@@ -271,10 +274,14 @@ impl Snapshot {
                 Ok(file) => (file, None),
                 Err(error) => (None, Some(format!("{error:#}"))),
             };
-        Self {
+        let mut snapshot = Self {
             file_error,
             ..Self::parse(env.as_deref(), file.as_deref())
+        };
+        for experiment in Experiment::ALL {
+            snapshot.sources[experiment.index()].build = experiment.on_by_default();
         }
+        snapshot
     }
 
     fn parse(env: Option<&str>, file: Option<&str>) -> Self {
@@ -467,6 +474,9 @@ pub fn run(command: &ExperimentsCommand) -> Result<()> {
             if !on && from_env {
                 println!("{ENV} in this shell still turns it on for Hex started from here.");
             }
+            if !on && experiment.on_by_default() {
+                println!("This build turns it on regardless.");
+            }
             Ok(())
         }
     }
@@ -595,7 +605,8 @@ mod tests {
             snapshot.sources[Experiment::LiveChapters.index()],
             Sources {
                 env: true,
-                file: true
+                file: true,
+                build: false,
             }
         );
         assert_eq!(
@@ -746,6 +757,12 @@ mod tests {
                         "sources": ["env", "file"],
                     },
                     {
+                        "name": "new-onboarding",
+                        "description": Experiment::NewOnboarding.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
                         "name": "playground",
                         "description": Experiment::Playground.description(),
                         "enabled": false,
@@ -765,9 +782,19 @@ mod tests {
         let mut text = Vec::new();
         print_list(&mut text, &snapshot, path).unwrap();
         let text = String::from_utf8(text).unwrap();
-        assert!(text.contains("live-chapters  off  -"));
-        assert!(text.contains("live-text      on   env+file"));
+        assert!(text.contains("live-chapters   off  -"));
+        assert!(text.contains("live-text       on   env+file"));
         assert!(text.contains("unknown experiment \"mystery\" in file"));
+    }
+
+    #[test]
+    fn list_reports_a_build_default() {
+        let mut snapshot = Snapshot::parse(None, None);
+        snapshot.sources[Experiment::NewOnboarding.index()].build = true;
+        let mut text = Vec::new();
+        print_list(&mut text, &snapshot, Path::new("/tmp/experiments")).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("new-onboarding  on   build"), "{text}");
     }
 
     #[test]

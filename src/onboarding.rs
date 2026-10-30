@@ -778,6 +778,30 @@ pub(crate) fn recheck_after_identity_change_at(
     Ok(reopen)
 }
 
+/// Forgets that onboarding finished, so the window shows it again. Only the
+/// onboarding markers change: settings, history, models, and permissions stay.
+pub fn reset() -> color_eyre::Result<()> {
+    reset_at(&crate::app_paths::support_dir()?)
+}
+
+pub(crate) fn reset_at(directory: &Path) -> color_eyre::Result<()> {
+    record_pending_at(directory)?;
+    for marker in [
+        "onboarding-complete",
+        "onboarding-step",
+        "onboarding-relaunch",
+    ] {
+        match fs::remove_file(directory.join(marker)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.into());
+            }
+            _ => {}
+        }
+    }
+    crate::transcription_models::sync_directory(directory)?;
+    Ok(())
+}
+
 pub(crate) fn record_pending_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
     write_owner_only_marker(&directory.join("onboarding-pending"), false)?;
@@ -1102,6 +1126,38 @@ mod tests {
         assert_eq!(
             fs::metadata(marker).unwrap().permissions().mode() & 0o777,
             0o600
+        );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn reset_replays_onboarding_and_keeps_data() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-onboarding-reset-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(directory.join("models")).unwrap();
+        fs::write(
+            directory.join("settings.json"),
+            b"{\"sound_effects\":false}",
+        )
+        .unwrap();
+        fs::write(directory.join("models/model.gguf"), b"weights").unwrap();
+        record_completion_at(&directory).unwrap();
+        record_step_at(&directory, Step::Done).unwrap();
+        assert!(completion_recorded_at(&directory));
+
+        reset_at(&directory).unwrap();
+
+        assert!(!completion_recorded_at(&directory));
+        assert_eq!(saved_step_at(&directory), None);
+        assert_eq!(
+            fs::read(directory.join("settings.json")).unwrap(),
+            b"{\"sound_effects\":false}"
+        );
+        assert_eq!(
+            fs::read(directory.join("models/model.gguf")).unwrap(),
+            b"weights"
         );
 
         fs::remove_dir_all(directory).unwrap();

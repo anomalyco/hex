@@ -182,7 +182,7 @@ fn live_page(p: Paint, live: &Live) -> El {
     let action = if live.restart {
         Button::new("Restart Hex")
             .variant(ButtonVariant::Contrast)
-            .on_press(super::live::restart)
+            .on_press(super::live::restart_hex)
             .build_push(k)
             .key("restart")
             .default_button()

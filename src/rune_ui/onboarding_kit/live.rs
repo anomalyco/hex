@@ -15,11 +15,13 @@ use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, advance_to};
-use crate::onboarding::{Input, ItemStatus, Practice, SetupItem, Step as TourStep};
+use crate::onboarding::{Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep};
 use crate::transcription_models::{self, TranscriptionModelId, TranscriptionSelection};
 
 /// How long both permission checks show before the page moves on.
 const GRANTED_BEAT: f64 = 0.7;
+/// How often the first run looks at the model on disk and the permissions.
+const CHECK_EVERY: f64 = 0.25;
 
 /// What the real first run reports to the story's pages.
 pub(crate) struct Live {
@@ -35,6 +37,15 @@ pub(crate) struct Live {
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
     granted_at: Option<f64>,
+    checked: Option<Checked>,
+}
+
+/// The last look at the disk and macOS.
+#[derive(Clone, Copy)]
+struct Checked {
+    at: f64,
+    installed: bool,
+    status: SetupStatus,
 }
 
 impl Live {
@@ -55,7 +66,7 @@ pub(in crate::rune_ui) fn wanted(ui: &Ui) -> bool {
 }
 
 pub(in crate::rune_ui) fn wanted_for(platform: &super::super::platform::PlatformState) -> bool {
-    crate::experiments::enabled(crate::experiments::Experiment::NewOnboarding)
+    platform.experiments[crate::experiments::Experiment::NewOnboarding.index()]
         && platform.caps.permissions
         && platform.caps.practice_dictation
 }
@@ -133,6 +144,7 @@ pub(in crate::rune_ui) fn start(ui: &mut Ui) {
         practice: Practice::Waiting,
         choice,
         granted_at: None,
+        checked: None,
     });
     let now = clock();
     s.now = now;
@@ -151,6 +163,45 @@ pub(in crate::rune_ui) fn start(ui: &mut Ui) {
     }
 }
 
+/// Why Hex can't replay its first run here, if it can't.
+pub(crate) fn restart_unavailable(ui: &Ui) -> Option<&'static str> {
+    if !ui.platform.dev_build {
+        Some("Restarting onboarding is only in dev, test, and local builds")
+    } else if !(ui.platform.caps.permissions && ui.platform.caps.practice_dictation) {
+        Some("The new onboarding is not on this OS yet")
+    } else {
+        None
+    }
+}
+
+/// "Restart onboarding" and `hex onboarding reset`: turns the new first run
+/// on for this install, forgets that onboarding finished, and opens it now.
+/// Settings, history, models, and permissions stay as they are, so the run
+/// finds them ready and passes their steps.
+pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
+    use crate::experiments::{self, Experiment};
+    if let Some(why) = restart_unavailable(ui) {
+        return Err(why.into());
+    }
+    if ui.live() {
+        if !experiments::enabled(Experiment::NewOnboarding) {
+            experiments::set_enabled(Experiment::NewOnboarding, true)
+                .map_err(|error| format!("{error:#}"))?;
+        }
+        crate::onboarding::reset().map_err(|error| format!("{error:#}"))?;
+    }
+    ui.platform.experiments[Experiment::NewOnboarding.index()] = true;
+    ui.select_pane(super::super::Pane::General, tx);
+    ui.first_run = None;
+    ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
+    start(ui);
+    tx.settle();
+    if ui.first_run.is_none() {
+        return Err("Hex could not open onboarding".into());
+    }
+    Ok(())
+}
+
 /// Feeds the first run fresh state and moves it on; true while it shows.
 pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     if ui.first_run.is_none() {
@@ -159,22 +210,60 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let now = clock();
     let view = ui.tour.as_ref().map(|tour| tour.flow.view());
     let caps = ui.settings.dictation_hotkey.keycaps();
-    let transcription = ui.view.as_ref().map(|view| view.transcription.clone());
-    let (choice, choice_installed) = {
-        let live = ui
-            .first_run
-            .as_ref()
-            .and_then(|s| s.live.as_ref())
-            .expect("the first run is live");
-        (live.choice.clone(), installed(ui, &live.choice))
+    let Some(choice) = ui
+        .first_run
+        .as_ref()
+        .and_then(|s| s.live.as_ref())
+        .map(|live| live.choice.clone())
+    else {
+        return false;
     };
-    let status = ui.platform.setup_status(choice_installed);
+    let model = transcription_models::validate(&choice).ok();
+    let (preparing, downloaded_bytes, errored) =
+        ui.view.as_ref().map_or((false, 0, false), |view| {
+            let t = &view.transcription;
+            (
+                model.is_some_and(|m| t.preparing == Some(m.id)),
+                t.downloaded_bytes,
+                t.error.is_some(),
+            )
+        });
+    // The disk and macOS checks run a few times a second, not every frame.
+    let checked = ui
+        .first_run
+        .as_ref()
+        .and_then(|s| s.live.as_ref())
+        .and_then(|live| live.checked)
+        .filter(|checked| now - checked.at < CHECK_EVERY);
+    let checked = match checked {
+        Some(checked) => checked,
+        None => {
+            let installed = installed(ui, &choice);
+            Checked {
+                at: now,
+                installed,
+                status: ui.platform.setup_status(installed),
+            }
+        }
+    };
+    let (choice_installed, status) = (checked.installed, checked.status);
+    // Setup that is already ready never moves the tour past it by itself,
+    // and the tour watches the practice dictation only once it has.
+    if status.ready()
+        && ui
+            .tour
+            .as_ref()
+            .is_some_and(|tour| tour.flow.step() == TourStep::Setup)
+    {
+        onboarding::input(ui, Input::Continue);
+    }
     let Some(s) = ui.first_run.as_mut() else {
         return false;
     };
     let Some(live) = s.live.as_mut() else {
         return false;
     };
+    live.checked = Some(checked);
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {
@@ -198,13 +287,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     live.listening = live.practice == Practice::Listening;
 
     // The model download.
-    let model = transcription_models::validate(&choice).ok();
-    let preparing = transcription
-        .as_ref()
-        .is_some_and(|t| model.is_some_and(|m| t.preparing == Some(m.id)));
-    live.failed = !choice_installed
-        && !preparing
-        && transcription.as_ref().is_some_and(|t| t.error.is_some());
+    live.failed = !choice_installed && !preparing && errored;
     s.granted = granted;
     s.caps = caps;
     if let Some(download) = s.download.as_mut() {
@@ -214,8 +297,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         if choice_installed {
             download.downloaded = download.total;
         } else if preparing {
-            let bytes = transcription.as_ref().map_or(0, |t| t.downloaded_bytes);
-            download.downloaded = bytes.min(download.total.saturating_sub(1));
+            download.downloaded = downloaded_bytes.min(download.total.saturating_sub(1));
         }
     }
 
@@ -286,6 +368,7 @@ pub(super) fn cycle_language(ui: &mut Ui) {
     };
     live.choice = other_selection(&live.choice);
     live.failed = false;
+    live.checked = None;
     let choice = live.choice.clone();
     choose(ui, &choice);
 }
@@ -305,7 +388,7 @@ pub(super) fn allow(item: SetupItem) -> impl Fn(&mut Ui) + 'static {
 }
 
 /// "Restart Hex" once macOS applies a grant only after a restart.
-pub(super) fn restart(ui: &mut Ui) {
+pub(super) fn restart_hex(ui: &mut Ui) {
     onboarding::input(ui, Input::Restart);
 }
 

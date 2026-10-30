@@ -184,7 +184,13 @@ impl LiveHud {
     /// Steps to now: `held` while the dictation records, `peak` the
     /// microphone's latest peak (`None`: no audio), `landed` once its text
     /// arrived. True while the plate still shows.
-    pub(crate) fn step(&mut self, held: bool, peak: Option<f32>, landed: bool, reduce: bool) -> bool {
+    pub(crate) fn step(
+        &mut self,
+        held: bool,
+        peak: Option<f32>,
+        landed: bool,
+        reduce: bool,
+    ) -> bool {
         let now = Instant::now();
         if held && !self.held {
             let mut model = IndicatorModel::new(Tuning::default(), now);
