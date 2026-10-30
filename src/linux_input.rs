@@ -635,6 +635,8 @@ struct ShortcutState {
     capture: Capture,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
+    /// The dictation shortcut was pressed and its release hasn't arrived.
+    down: bool,
 }
 
 impl ShortcutState {
@@ -646,6 +648,7 @@ impl ShortcutState {
             capture: Capture::Idle,
             last_release: None,
             last_press: None,
+            down: false,
         }
     }
 
@@ -689,12 +692,23 @@ impl ShortcutState {
             // Escape while Annotate draws stops drawing, never the recording.
             #[cfg(hex_capture)]
             Input::Escape if !self.wants_escape() && crate::capture_host::exit_drawing() => None,
-            Input::Escape | Input::Lost => self.cancel(),
+            Input::Escape => self.cancel(),
+            Input::Lost => {
+                self.down = false;
+                self.cancel()
+            }
             Input::Pressed(Shortcut::Dictation) => {
-                let repeat = self
-                    .last_press
-                    .is_some_and(|pressed| now.saturating_duration_since(pressed) < KEY_REPEAT_GAP);
+                // A press with no release since the last one, sooner than a
+                // new press could come, is the desktop repeating a held key.
+                let repeat = self.down
+                    && self.last_press.is_some_and(|pressed| {
+                        now.saturating_duration_since(pressed) < KEY_REPEAT_GAP
+                    });
                 self.last_press = Some(now);
+                self.down = true;
+                if repeat {
+                    return None;
+                }
                 match self.capture {
                     Capture::Locked => {
                         self.capture = Capture::Idle;
@@ -714,35 +728,39 @@ impl ShortcutState {
                         self.capture = Capture::Held { second_tap };
                         Some(HotkeyEvent::Start)
                     }
-                    // The desktop never sent the release that would have locked
-                    // this capture (Hyprland's Lua binds drop it when the
-                    // modifier comes up first), so this press finishes it.
-                    Capture::Held { second_tap: true } if !repeat => {
+                    // The desktop never sent the release that would have
+                    // finished or locked this capture (Hyprland's Lua binds and
+                    // GNOME's portal drop it when the modifier comes up first),
+                    // so this new press finishes it.
+                    Capture::Held { .. } => {
                         self.capture = Capture::Idle;
                         self.last_release = None;
                         Some(HotkeyEvent::Finish)
                     }
-                    Capture::Armed | Capture::Held { .. } => None,
+                    Capture::Armed => None,
                 }
             }
-            Input::Released(Shortcut::Dictation) => match self.capture {
-                Capture::Armed => {
-                    self.capture = Capture::Idle;
-                    self.last_release = Some(now);
-                    None
+            Input::Released(Shortcut::Dictation) => {
+                self.down = false;
+                match self.capture {
+                    Capture::Armed => {
+                        self.capture = Capture::Idle;
+                        self.last_release = Some(now);
+                        None
+                    }
+                    Capture::Held { second_tap: true } => {
+                        self.capture = Capture::Locked;
+                        self.last_release = None;
+                        None
+                    }
+                    Capture::Held { second_tap: false } => {
+                        self.capture = Capture::Idle;
+                        self.last_release = self.double_tap.then_some(now);
+                        Some(HotkeyEvent::Finish)
+                    }
+                    Capture::Idle | Capture::Locked => None,
                 }
-                Capture::Held { second_tap: true } => {
-                    self.capture = Capture::Locked;
-                    self.last_release = None;
-                    None
-                }
-                Capture::Held { second_tap: false } => {
-                    self.capture = Capture::Idle;
-                    self.last_release = self.double_tap.then_some(now);
-                    Some(HotkeyEvent::Finish)
-                }
-                Capture::Idle | Capture::Locked => None,
-            },
+            }
             Input::Pressed(Shortcut::PasteLast) | Input::Command(ShortcutCommand::PasteLast) => {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
@@ -1943,6 +1961,54 @@ mod tests {
             test.press(Shortcut::Dictation);
             assert_eq!(test.events, [Finish, Start]);
         }
+    }
+
+    #[test]
+    fn a_hold_whose_release_never_arrives_finishes_on_the_next_new_press() {
+        // GNOME's portal repeats a held shortcut's activation and sends no
+        // deactivation when Ctrl comes up before Space.
+        for double_tap in [false, true] {
+            let mut test = Test::new(double_tap);
+            test.press(Shortcut::Dictation);
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            assert_eq!(test.events, [Start], "repeats never finish the hold");
+            assert_eq!(test.state.capture, Capture::Held { second_tap: false });
+            // Ctrl up first: the repeats stop and no release comes.
+            test.now += Duration::from_secs(3);
+            test.press(Shortcut::Dictation);
+            assert_eq!(test.events, [Start, Finish]);
+            // The finishing press's own repeats and release start nothing.
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [Start, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            test.now += Duration::from_secs(1);
+            test.tap();
+            assert_eq!(test.events, [Start, Finish, Start, Finish]);
+        }
+    }
+
+    #[test]
+    fn a_balanced_release_finishes_a_repeating_hold() {
+        // Space first, or both together: the desktop sends the release.
+        let mut test = Test::new(false);
+        test.press(Shortcut::Dictation);
+        for _ in 0..20 {
+            test.now += Duration::from_millis(33);
+            test.press(Shortcut::Dictation);
+        }
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [Start, Finish]);
+        // A quick new press after a release is a press, not a repeat.
+        test.now += Duration::from_millis(100);
+        test.press(Shortcut::Dictation);
+        assert_eq!(test.events, [Start, Finish, Start]);
     }
 
     #[test]

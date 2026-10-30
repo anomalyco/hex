@@ -217,6 +217,19 @@ listen-only session and HID taps on Kit's Studio: Spaceman's Option-1/2/3
 reached HID but never the session. The installed fix has no physical-keyboard
 run yet.
 
+**Fixed October 30, 2026 (issue 485):** on GNOME Wayland, releasing Ctrl
+before Space (or both at once) can leave the GlobalShortcuts portal without a
+`Deactivated`, so a Hold capture kept recording until the shortcut was pressed
+and released again. Linux now treats a press that arrives while the shortcut
+is still held as a key repeat only within 1 s of the previous press; a later
+press is new and finishes the Hold capture whose release was lost, and that
+press's own repeats and release start nothing. Hex never infers a release from
+silence or a timeout. Checks:
+`a_hold_whose_release_never_arrives_finishes_on_the_next_new_press` and
+`a_balanced_release_finishes_a_repeating_hold` in
+[linux_input.rs](../../src/linux_input.rs) (constructed inputs; not run on
+GNOME).
+
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
 pressing the digit, which 2.3.0 and the Swift app both ignored after the
 threshold. Any non-modifier key pressed while a modifier-only shortcut is still
