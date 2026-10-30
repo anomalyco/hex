@@ -3,10 +3,11 @@
 //! requests; `Portal` is the GlobalShortcuts client and
 //! `linux_remote_desktop` the RemoteDesktop one.
 //!
-//! `Portal` binds Hex's shortcuts in one session and plain Escape in a
-//! second session only while something records, and reports their presses
-//! and releases. Dropping a bus closes its sessions, and the desktop
-//! releases the keys. Each bus runs on its own one-thread tokio runtime, so
+//! `Portal` binds all of Hex's shortcuts in one session, once, and reports
+//! their presses and releases. Desktops keep one shortcut set per app (KDE
+//! replaces it with each BindShortcuts call), so Hex never binds a second
+//! set or changes this one while running. Dropping a bus closes its
+//! sessions, and the desktop releases the keys. Each bus runs on its own one-thread tokio runtime, so
 //! the portal's signals queue while the caller sleeps.
 
 use std::collections::{HashMap, VecDeque};
@@ -35,20 +36,30 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How often a pending request checks for cancellation.
 const STOP_POLL: Duration = Duration::from_millis(50);
-const ESCAPE_ID: &str = "cancel";
-const HELD_ESCAPE_ID: &str = "cancel-held";
-
-/// Whether a pressed id is one of the Escape session's.
-pub(crate) fn is_escape(id: &str) -> bool {
-    id == ESCAPE_ID || id == HELD_ESCAPE_ID
-}
+/// Cancel dictation, which the user assigns in the desktop. Not `cancel`:
+/// KDE still holds Escape under that id from builds that bound it.
+pub(crate) const CANCEL_ID: &str = "cancel-dictation";
 
 /// One shortcut Hex asks the desktop for.
 pub(crate) struct Shortcut {
     pub(crate) id: &'static str,
     pub(crate) description: &'static str,
-    /// XDG shortcuts format, such as `CTRL+ALT+space`.
-    pub(crate) trigger: String,
+    /// XDG shortcuts format, such as `CTRL+ALT+space`; `None` leaves the
+    /// shortcut for the user to assign.
+    pub(crate) trigger: Option<String>,
+}
+
+impl Shortcut {
+    /// Cancel dictation, with no suggested key: a portal shortcut is held
+    /// for as long as Hex runs, so suggesting Escape would take it from
+    /// every other application.
+    pub(crate) fn cancel() -> Self {
+        Self {
+            id: CANCEL_ID,
+            description: "Cancel dictation",
+            trigger: None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -442,17 +453,12 @@ fn exec_argument(argument: &str) -> String {
 pub(crate) struct Portal {
     bus: PortalBus,
     session: Option<OwnedObjectPath>,
-    escape: Option<OwnedObjectPath>,
 }
 
 impl Portal {
     /// `None` when the session has no shortcuts portal.
     pub(crate) fn connect(stop: &AtomicBool) -> Result<Option<Self>> {
-        Ok(PortalBus::open(SHORTCUTS, stop)?.map(|bus| Self {
-            bus,
-            session: None,
-            escape: None,
-        }))
+        Ok(PortalBus::open(SHORTCUTS, stop)?.map(|bus| Self { bus, session: None }))
     }
 
     /// Whether the desktop can show its dialog for Hex's shortcuts
@@ -486,46 +492,13 @@ impl Portal {
         self.bind_session(session, shortcuts, stop)
     }
 
-    /// Binds Escape in its own session, and `held`, Escape with the
-    /// recording shortcut's modifiers, for a press while that shortcut is
-    /// still down. False when the desktop refused plain Escape.
-    pub(crate) fn bind_escape(&mut self, held: Option<String>, stop: &AtomicBool) -> Result<bool> {
-        let session = self.bus.create_session(stop)?;
-        self.escape = Some(session.clone());
-        let mut shortcuts = vec![Shortcut {
-            id: ESCAPE_ID,
-            description: "Cancel dictation",
-            trigger: "Escape".into(),
-        }];
-        shortcuts.extend(held.map(|trigger| Shortcut {
-            id: HELD_ESCAPE_ID,
-            description: "Cancel dictation while holding its shortcut",
-            trigger,
-        }));
-        let granted = self.bind_session(session, &shortcuts, stop)?;
-        Ok(granted.get(ESCAPE_ID).is_some_and(Option::is_some))
-    }
-
-    pub(crate) fn release_escape(&mut self) {
-        if let Some(session) = self.escape.take() {
-            self.bus.close_session(&session);
-        }
-    }
-
     /// The presses, releases, and changes that arrived since the last call.
     pub(crate) fn events(&mut self) -> Vec<Event> {
-        let escape = self.escape.as_ref().map(|session| session.as_str());
         let shortcuts = self.session.as_ref().map(|session| session.as_str());
         self.bus
             .events()
             .into_iter()
-            .filter_map(|(session, event)| {
-                if escape == Some(session.as_str()) {
-                    return matches!(event, Event::Pressed(_) | Event::Released(_))
-                        .then_some(event);
-                }
-                (shortcuts == Some(session.as_str())).then_some(event)
-            })
+            .filter_map(|(session, event)| (shortcuts == Some(session.as_str())).then_some(event))
             .collect()
     }
 
@@ -538,16 +511,12 @@ impl Portal {
         let requested = shortcuts
             .iter()
             .map(|shortcut| {
-                (
-                    shortcut.id,
-                    HashMap::from([
-                        ("description", Variant::from(shortcut.description)),
-                        (
-                            "preferred_trigger",
-                            Variant::from(shortcut.trigger.as_str()),
-                        ),
-                    ]),
-                )
+                let mut options =
+                    HashMap::from([("description", Variant::from(shortcut.description))]);
+                if let Some(trigger) = &shortcut.trigger {
+                    options.insert("preferred_trigger", Variant::from(trigger.as_str()));
+                }
+                (shortcut.id, options)
             })
             .collect::<Vec<_>>();
         let handle = session.into_inner();
