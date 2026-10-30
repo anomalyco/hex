@@ -203,6 +203,7 @@ pub(crate) struct LiveHud {
     clock: Instant,
     at: Instant,
     held: bool,
+    waiting: bool,
     finished: bool,
     released: Option<Instant>,
     frame: Option<DotFrame>,
@@ -219,6 +220,7 @@ impl Default for LiveHud {
             clock: Instant::now(),
             at: Instant::now(),
             held: false,
+            waiting: true,
             finished: false,
             released: None,
             frame: None,
@@ -245,6 +247,7 @@ impl LiveHud {
             self.model = Some(model);
             self.at = now;
             self.finished = false;
+            self.waiting = true;
         }
         let Some(model) = self.model.as_mut() else {
             self.held = held;
@@ -252,7 +255,12 @@ impl LiveHud {
             return false;
         };
         if held && !self.held {
-            model.handle(Event::Started, now, reduce);
+            // The waiting plate is already recording a quiet meter. Started
+            // resets Dot scope's scanner, so only restart after a previous take.
+            if !self.waiting {
+                model.handle(Event::Started, now, reduce);
+            }
+            self.waiting = false;
             self.released = None;
         }
         if !held && self.held {
@@ -279,7 +287,7 @@ impl LiveHud {
                 now,
                 reduce,
             );
-        } else if self.released.is_none() && !landed && !timed_out {
+        } else if self.waiting {
             model.handle(IDLE_METER, now, reduce);
         }
         self.held = held;
@@ -378,10 +386,13 @@ mod tests {
         for i in 0..120 {
             hud.step(i as f64 / 120.0, false, None, false, false);
         }
-        let before = hud.frame().unwrap().pose.opacity;
+        let before = hud.frame().unwrap().pose;
         hud.step(1.0, true, Some(0.3), false, false);
+        let pressed = hud.frame().unwrap().pose;
         assert!(
-            hud.frame().unwrap().pose.opacity >= before - 0.01,
+            pressed.opacity >= before.opacity - 0.01
+                && pressed.scale >= before.scale - 0.01
+                && pressed.width >= before.width - 0.1,
             "pressing must keep the waiting plate, not unfold a new one"
         );
         hud.step(1.1, false, None, false, false);
