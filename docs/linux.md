@@ -244,7 +244,7 @@ unmanaged development Hex instead; without one it forwards to the installed Hex.
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press the same chord again to finish, or press Escape to cancel the
-active recording. **Double-tap only** waits for two complete taps before
+active recording (on Wayland, the Cancel dictation shortcut you assign; see below). **Double-tap only** waits for two complete taps before
 recording, and **Toggle** mode starts and stops with single presses.
 **Ctrl-Alt-V** pastes the last dictation again. Settings shows listener state,
 Start/Stop, and operational errors. Changing a shortcut or a setting the
@@ -300,8 +300,8 @@ hl.bind("F9", hl.dsp.global("hex:paste-last"))
 ```
 
   Older Hyprland configs write `bind = , End, global, hex:dictation`.
-  Escape-cancel can't be bound this way; bind `hex dictation cancel` to a key
-  instead. Hyprland 0.56's Lua binds send no release when the modifier comes
+  Cancel the same way with `hex:cancel-dictation`, on a key you don't need
+  elsewhere (an Escape bind takes Escape from every application). Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues
   until the next press and release, so lift the key first or use Toggle.
@@ -341,10 +341,14 @@ stopping while idle, and cancelling while idle do nothing, so key repeat is
 harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
 stop finishes. A shortcut press also finishes a recording a command started.
 
-Escape cancels only while something records. On Wayland with the portal, Hex
-binds Escape, and Escape with the recording shortcut's modifiers, only for the
-length of the recording; the desktop then keeps that Escape from the focused
-application. Without the portal, bind `hex dictation cancel` instead.
+Escape cancels only while something records, on X11. On Wayland, Escape stays
+with your applications: a portal shortcut is held for as long as Hex runs, and
+the desktop would keep Escape from every application. With the portal, Hex asks
+for a **Cancel dictation** shortcut with no key; assign one in your desktop's
+shortcut settings (Settings > Desktop shortcuts > Open), and it cancels the
+recording. Hex ignores it while nothing records, so pick a key you don't need
+elsewhere. Without the portal, bind `hex dictation cancel` instead. Either way,
+finishing with the dictation shortcut and deleting the text works too.
 
 Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
 alone, are not supported on Linux.

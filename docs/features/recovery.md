@@ -393,19 +393,34 @@ Release the hold shortcut, or press the locked shortcut, to finish when Escape
 is unavailable. With the bare-Escape fallback, release other modifiers before
 pressing Escape. A failed fallback releases any partial grabs.
 
-On Wayland with the GlobalShortcuts portal, Escape follows the same rule
-through a second portal session that exists only while something records:
+On Wayland, Escape stays with applications. A GlobalShortcuts binding is held
+for as long as it is bound and consumed before the focused app sees it (KDE's
+kglobalaccel, GNOME Shell's accelerator grabs, Hyprland's `global` binds), and
+desktops keep one shortcut set per app, so it can't be bound only while
+recording:
 
 ```ts
-capture starts -> bind Escape, and Escape with the recording shortcut's modifiers
-  ├── granted -> Escape cancels, held shortcut or not
-  └── refused (the desktop or another binding owns Escape)
-        -> keep dictating without Escape-cancel; same listener warning
-capture ends -> close the Escape session -> Escape returns to applications
-desktop closes the main shortcuts session -> cancel active capture
+listener starts -> one session, one BindShortcuts: Hex's shortcuts + Cancel dictation
+  └── Cancel dictation has no suggested trigger -> the user assigns a key
+user's cancel key
+  ├── recording or Annotate drawing -> cancel, like Escape   // recover.linux-portal-cancel
+  └── idle -> nothing
+no key assigned / no portal -> `hex dictation cancel`, or finish with the shortcut
+desktop closes the shortcuts session -> cancel active capture
   -> listener stops with an error -> Retry / hex start binds again
-no portal -> bind `hex dictation cancel` in the desktop
 ```
+
+**Fixed after dev-249** ([#482](https://github.com/anomalyco/hex/issues/482),
+reported by ohlmann on KDE Plasma): Hex bound Escape in a second portal session
+when recording started. KDE keys shortcuts by app, so that session's
+BindShortcuts asked again for "Cancel dictation (Escape)" and, once approved,
+removed Hex's other shortcuts, so recording never started. Hex now binds every
+shortcut once in one session and never binds Escape there. The cancel id is new
+(`cancel-dictation`), so KDE drops the old `cancel` Escape binding instead of
+restoring it. Verified against xdg-desktop-portal-kde's `BindShortcuts` and
+`setActions` and xdg-desktop-portal-gnome's grab/ungrab source, not on a live
+Plasma session.
+
 
 Checks in [linux_input.rs](../../src/linux_input.rs):
 `escape_is_wanted_only_while_something_records`,
