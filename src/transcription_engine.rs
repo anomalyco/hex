@@ -1146,7 +1146,7 @@ struct PauseCap<'a, S> {
     speech: crate::pause_segmenter::SpeechFrames,
     /// Samples not yet a whole 20 ms frame.
     frame: Vec<f32>,
-    /// Non-speech samples since the last speech frame.
+    /// Quiet samples since the last frame above the noise floor.
     pause: usize,
     /// The newest pause samples past the head, released if speech resumes.
     tail: VecDeque<f32>,
@@ -1166,7 +1166,10 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
     }
 
     fn frame(&mut self, out: &mut Vec<f32>) {
-        if self.speech.is_speech(&self.frame) {
+        // Only audio at the noise floor counts as pause. Speech a few dB over
+        // steady noise misses the meeting detector's speech margin, and
+        // cutting it truncated the transcript (#458).
+        if !self.speech.is_quiet(&self.frame) {
             out.extend(self.tail.drain(..));
             self.pause = 0;
             out.append(&mut self.frame);
@@ -1537,6 +1540,37 @@ mod tests {
         assert_eq!(fake.fed[..56_000], clip[..56_000]);
         let resumed = 56_000 + PAUSE_HEAD_SAMPLES + PAUSE_TAIL_SAMPLES;
         assert_eq!(fake.fed[resumed..resumed + 16_000], clip[216_000..232_000]);
+    }
+
+    #[test]
+    fn quiet_speech_over_steady_noise_is_never_cut_as_a_pause() {
+        use crate::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
+        // #458: 17 s of -28 dBFS syllables over -35 dBFS noise, too close
+        // to the floor for the meeting detector's 12 dB speech margin.
+        let mut seed = 11;
+        let mut clip = noise(17_000, -35.0, &mut seed);
+        let mut voice_seed = 5;
+        for start in (0..clip.len()).step_by(4_800) {
+            let burst = noise(240, -28.0, &mut voice_seed);
+            for (sample, voice) in clip[start..].iter_mut().zip(burst) {
+                *sample += voice;
+            }
+        }
+        let mut speech = SpeechFrames::default();
+        assert!(
+            !clip
+                .chunks_exact(FRAME_SAMPLES)
+                .any(|frame| speech.is_speech(frame)),
+            "the speech margin misses this speech"
+        );
+        let mut fake = FakeStream::default();
+        let mut capped = PauseCap::new(&mut fake);
+        for chunk in clip.chunks(1_234) {
+            capped.feed(chunk).unwrap();
+        }
+        capped.finalize().unwrap();
+        assert_eq!(capped.dropped, 0);
+        assert_eq!(fake.fed, clip);
     }
 
     fn heard(samples: usize) -> Partial {

@@ -12,6 +12,8 @@ use std::time::Duration;
 const SAMPLE_RATE: usize = 16_000;
 pub(crate) const FRAME_SAMPLES: usize = SAMPLE_RATE / 50;
 const SPEECH_MARGIN_DB: f32 = 12.0;
+/// How far above the floor a frame may sit and still count as quiet.
+const QUIET_MARGIN_DB: f32 = 4.0;
 const MINIMUM_SPEECH_DB: f32 = -55.0;
 const LOWEST_FLOOR_DB: f32 = -90.0;
 /// About 3 dB per second at 50 frames per second.
@@ -31,6 +33,21 @@ pub(crate) struct SpeechFrames {
 impl SpeechFrames {
     /// Whether `frame`, the next `FRAME_SAMPLES` samples, is speech.
     pub(crate) fn is_speech(&mut self, frame: &[f32]) -> bool {
+        let (level_db, floor_db) = self.measure(frame);
+        level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB)
+    }
+
+    /// Whether `frame` sits at the noise floor (within `QUIET_MARGIN_DB`) or
+    /// below the speech minimum. Stricter than "not speech": speech only a
+    /// few dB above steady room noise is not quiet, so audio that is dropped
+    /// as quiet is never quiet speech the speech margin missed.
+    pub(crate) fn is_quiet(&mut self, frame: &[f32]) -> bool {
+        let (level_db, floor_db) = self.measure(frame);
+        level_db <= (floor_db + QUIET_MARGIN_DB).max(MINIMUM_SPEECH_DB)
+    }
+
+    /// The frame's level and the noise floor after it, both in dBFS.
+    fn measure(&mut self, frame: &[f32]) -> (f32, f32) {
         let energy = frame.iter().map(|sample| sample * sample).sum::<f32>() / frame.len() as f32;
         let level_db = if energy.is_finite() {
             10.0 * energy.max(1e-18).log10()
@@ -42,7 +59,7 @@ impl SpeechFrames {
             _ => level_db.max(LOWEST_FLOOR_DB),
         };
         self.floor_db = Some(floor_db);
-        level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB)
+        (level_db, floor_db)
     }
 }
 

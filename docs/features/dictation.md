@@ -705,6 +705,16 @@ went from 18/36 to 0/36 lost words for 6–14 s gaps of silence or steady noise.
 Limit: noise that rises mid-dictation counts as speech for up to about 10 s,
 so that pause is not cut.
 
+**Fixed October 30, 2026 (issue 458):** over steady background noise, speech
+only about 8 dB louder than the room missed the meeting detector's 12 dB
+speech margin, so the whole dictation counted as one pause and the stream
+heard only its first 2.5 s ("This in a test on the" for a 17 s clip over
+−35 dBFS noise). `PauseCap` now cuts only frames within 4 dB of the noise
+floor (or under −55 dBFS) (`SpeechFrames::is_quiet`); anything louder is
+kept. Noisier rooms keep more pause audio rather than lose speech. Check:
+`quiet_speech_over_steady_noise_is_never_cut_as_a_pause` (synthetic noise
+bursts, a fake stream; no real-model or microphone run).
+
 ### Ongoing Jobs And Output
 
 ```ts
