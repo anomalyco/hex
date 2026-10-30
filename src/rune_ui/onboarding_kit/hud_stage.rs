@@ -44,64 +44,81 @@ pub(crate) fn flow_frame_at(now_secs: f64, reduce: bool) -> DotFrame {
     drawn
 }
 
-/// Calm resting `Dot scope` phosphor plate while waiting for the user to hold `⌥`
-/// (`Step::YourTurn` and `Step::Try`).
-pub(crate) fn idle_frame_at(now_secs: f64, reduce: bool) -> DotFrame {
-    let clock = Instant::now();
-    let mut model = IndicatorModel::new(Tuning::default(), clock);
-    model.handle(Event::Started, clock, reduce);
-    let target = (0.55 + (now_secs.max(0.0) % 6.0)) as f32;
-    let mut time = 0.0_f32;
-    let mut drawn = model.step(clock, 0.0, reduce);
-    while time + STEP <= target + 1e-4 {
-        time += STEP;
-        let at = clock + Duration::from_secs_f32(time);
-        model.handle(
-            Event::Meter {
-                average: 0.024,
-                peak: 0.075,
-            },
-            at,
-            reduce,
-        );
-        drawn = model.step(at, STEP, reduce);
-    }
-    drawn
+/// The resting meter the plate hums at while waiting for the user to hold `⌥`.
+const IDLE_METER: Event = Event::Meter {
+    average: 0.024,
+    peak: 0.075,
+};
+/// After its first unfold, the resting plate replays this window so the idle
+/// simulation stays bounded however long it waits.
+const IDLE_LOOP: f64 = 6.0;
+const IDLE_SETTLED: f64 = 0.55;
+
+/// Where `idle` seconds of waiting land in the bounded idle simulation: the
+/// whole first pass, so the plate unfolds when it mounts, then a loop that
+/// starts once it has settled.
+fn idle_time(idle: f64) -> f32 {
+    let idle = idle.max(0.0);
+    let t = if idle < IDLE_SETTLED + IDLE_LOOP {
+        idle
+    } else {
+        IDLE_SETTLED + (idle - IDLE_SETTLED) % IDLE_LOOP
+    };
+    t as f32
 }
 
-/// Computes Hex's real [`DotFrame`] at `elapsed` seconds after shortcut press
-/// for `take`, returning `None` before press or once the Done collapse finishes.
-pub(crate) fn frame_at(take: &Take, elapsed: f64, reduce: bool) -> Option<DotFrame> {
-    if elapsed < 0.0 || elapsed > take.release + 1.2 {
+/// Hex's real [`DotFrame`] for a resting plate that showed `idle` seconds
+/// before the shortcut went down (or before now, while it still waits), then
+/// `take` recording `elapsed` seconds after the press, on one model: the plate
+/// unfolds when it mounts and keeps running through the press instead of
+/// starting over. `None` before the press or once the Done collapse finishes.
+pub(crate) fn voice_frame_at(
+    idle: f64,
+    take: Option<(&Take, f64)>,
+    reduce: bool,
+) -> Option<DotFrame> {
+    if take.is_some_and(|(take, elapsed)| elapsed < 0.0 || elapsed > take.release + 1.2) {
         return None;
     }
-    let target = elapsed as f32;
     let clock = Instant::now();
     let mut model = IndicatorModel::new(Tuning::default(), clock);
     model.handle(Event::Started, clock, reduce);
+    let mut drawn = model.step(clock, 0.0, reduce);
 
+    let idle = idle_time(idle);
+    let mut time = 0.0_f32;
+    while time + STEP <= idle + 1e-4 {
+        time += STEP;
+        let at = clock + Duration::from_secs_f32(time);
+        model.handle(IDLE_METER, at, reduce);
+        drawn = model.step(at, STEP, reduce);
+    }
+    let Some((take, elapsed)) = take else {
+        return Some(drawn);
+    };
+
+    let pressed = time;
+    let target = elapsed as f32;
     let stop_at = take.release as f32;
     let done_at = (take.release + DONE_DELAY) as f32;
     let mut submitted = false;
     let mut completed = false;
-    let mut time = 0.0_f32;
-    let mut drawn = Some(model.step(clock, 0.0, reduce));
-
-    while time + STEP <= target + 1e-4 {
-        time += STEP;
-        let now = clock + Duration::from_secs_f32(time);
-        if !submitted && time >= stop_at {
+    let mut since = 0.0_f32;
+    while since + STEP <= target + 1e-4 {
+        since += STEP;
+        let now = clock + Duration::from_secs_f32(pressed + since);
+        if !submitted && since >= stop_at {
             submitted = true;
             model.handle(Event::Submitted { job_id: JOB }, now, reduce);
             model.handle(Event::Transcribing { job_id: JOB }, now, reduce);
         }
-        if !completed && time >= done_at {
+        if !completed && since >= done_at {
             completed = true;
             model.handle(Event::JobCompleted { job_id: JOB }, now, reduce);
         }
         if !submitted {
-            let (avg, pk) = take.meter(f64::from(time));
-            let demo = demo_level(time);
+            let (avg, pk) = take.meter(f64::from(since));
+            let demo = demo_level(since);
             model.handle(
                 Event::Meter {
                     average: (0.06 * demo + 0.11 * avg).min(0.35),
@@ -111,15 +128,19 @@ pub(crate) fn frame_at(take: &Take, elapsed: f64, reduce: bool) -> Option<DotFra
                 reduce,
             );
         }
-        if model.active() {
-            let next = model.step(now, STEP, reduce);
-            drawn = model.active().then_some(next);
-        } else {
-            drawn = None;
-            break;
+        if !model.active() {
+            return None;
         }
+        drawn = model.step(now, STEP, reduce);
     }
-    drawn
+    model.active().then_some(drawn)
+}
+
+/// Computes Hex's real [`DotFrame`] at `elapsed` seconds after shortcut press
+/// for `take`, returning `None` before press or once the Done collapse finishes.
+#[cfg(test)]
+pub(crate) fn frame_at(take: &Take, elapsed: f64, reduce: bool) -> Option<DotFrame> {
+    voice_frame_at(0.0, Some((take, elapsed)), reduce)
 }
 
 fn slot_el(key: &str, centre: [f32; 2], scale: f32) -> El {
@@ -177,7 +198,9 @@ pub(crate) fn flow_box(key: &str, scale: f32, now: f64, reduce: bool) -> El {
 }
 
 /// Mounts the real `Dot scope` phosphor HUD for `"With Hex"` or `"Your turn"`,
-/// returning `(hud_element, hud_heat, voice_energy)`.
+/// returning `(hud_element, hud_heat, voice_energy)`. The plate rests while
+/// `waiting`, then records `take` from `take_from`, on one model that started
+/// when the plate first showed (`Onboard::hud_from`).
 pub(crate) fn voice_or_idle_slot(
     key: &str,
     centre: [f32; 2],
@@ -191,7 +214,8 @@ pub(crate) fn voice_or_idle_slot(
     let reduce = s.reduced.get();
     if let Some(from) = take_from {
         let elapsed = now - from;
-        if let Some(frame) = frame_at(take, elapsed, reduce) {
+        let idle = s.hud_from.map_or(0.0, |shown| from - shown);
+        if let Some(frame) = voice_frame_at(idle, Some((take, elapsed)), reduce) {
             let heat = (frame.pose.opacity * if elapsed < take.release { 1.0 } else { 0.45 })
                 .clamp(0.0, 1.0);
             let (avg, _) = take.meter(elapsed);
@@ -201,8 +225,13 @@ pub(crate) fn voice_or_idle_slot(
         set_dot_hud(None);
         return (None, 0.0, 0.0);
     }
-    if waiting {
-        let frame = idle_frame_at(now, reduce);
+    // A scene that opens mid-wait shows the plate already settled.
+    let idle = s
+        .hud_from
+        .map_or(IDLE_SETTLED + now.rem_euclid(IDLE_LOOP), |shown| {
+            now - shown
+        });
+    if waiting && let Some(frame) = voice_frame_at(idle, None, reduce) {
         let heat = 0.22 * frame.pose.opacity;
         set_dot_hud(Some(frame));
         return (Some(slot_el(key, centre, scale)), heat, 0.04);

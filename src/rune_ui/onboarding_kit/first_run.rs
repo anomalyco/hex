@@ -23,7 +23,7 @@ use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, live_hold_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, clean_heading, keys, ready, staggered, title_font};
 use super::mic_line::mic_capsule;
-use super::pill::{FLY, PILL, language_capsule, pill, slot};
+use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
 use super::stories::{Onboard, Step, is_live_window};
 use super::{permissions, versus};
@@ -195,14 +195,18 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .radius(16.0)
         .fill(p.k.c.surface_raised)
         .border(p.hair, p.k.c.border_weak)
-        .child(
-            el().key(PILL)
-                .size(18.0, 18.0)
-                .matched(PILL)
-                .motion(FLY)
-                .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed)),
-        )
+        .matched(CAPSULE)
+        .motion(FLY)
+        .width_leads()
+        .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed))
         .child(status_inner);
+    // "Almost ready" receives the capsule back from the top bar, so it
+    // arrives by that flight rather than a staggered entrance.
+    let progress_capsule = if waiting {
+        progress_capsule
+    } else {
+        staggered(progress_capsule, 0.14, 6.0)
+    };
 
     col()
         .key(if waiting { "waiting" } else { "download" })
@@ -210,7 +214,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .items_center()
         .child(flow_box("download-hud", 1.24, s.now, reduced))
         .child(staggered(head, 0.06, 8.0))
-        .child(staggered(progress_capsule, 0.14, 6.0))
+        .child(progress_capsule)
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {

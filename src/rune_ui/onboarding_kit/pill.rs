@@ -10,9 +10,12 @@ use super::super::controls::Paint;
 use super::fixture::{Download, Language};
 use super::hex_meter::hex_meter;
 
-/// Shared-element id carried by the thin single-hexagon mark across the
-/// centerpiece loader, top-bar pill, and Ready landing.
+/// Shared-element id carried by the thin single-hexagon mark from the top-bar
+/// pill to the Ready landing.
 pub(crate) const PILL: &str = "hex-mark";
+/// Shared-element id of the download capsule itself, so the centred progress
+/// capsule and the top-bar pill are one shape that moves and widens.
+pub(crate) const CAPSULE: &str = "download-capsule";
 /// Zero-bounce flight spring (`0.42 s / 0.0`, Abattoir motion guide).
 pub(crate) const FLY: Spring = Spring::new(0.42, 0.0);
 const HEIGHT: f32 = 30.0;
@@ -24,9 +27,9 @@ pub(crate) fn language_label(language: Language) -> &'static str {
     }
 }
 
-/// Top-bar download capsule: only the `16 pt` hexagon mark carries [`PILL`],
-/// so flying between the `124 pt` centerpiece and the top bar scales crisp
-/// vector geometry without stretching pill text.
+/// Top-bar download capsule. The shell carries [`CAPSULE`], so the centred
+/// progress capsule travels up into it as one shape, width leading; the
+/// `16 pt` hexagon mark carries [`PILL`] on to the Ready landing.
 pub(crate) fn pill(p: Paint, download: Download, closed: f32) -> El {
     let k = p.k;
     let done = download.done();
@@ -65,6 +68,9 @@ pub(crate) fn pill(p: Paint, download: Download, closed: f32) -> El {
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
         .transition(super::landing::arrives())
+        .matched(CAPSULE)
+        .motion(FLY)
+        .width_leads()
         .child(
             el().key(PILL)
                 .size(16.0, 16.0)
