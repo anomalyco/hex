@@ -268,6 +268,7 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
         .group_order(GROUPS)
         .start_folded(true);
     let playground = super::onboarding_kit::stories(playground);
+    let playground = super::onboarding_kit::game(playground);
     let playground = super::live_notes::add(playground);
     #[cfg(target_os = "macos")]
     let playground = super::hud_stories::add(playground);
