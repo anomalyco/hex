@@ -116,6 +116,12 @@ impl WaylandKeys {
 
 /// Whether the compositor advertises `zwp_virtual_keyboard_manager_v1`.
 fn offers_virtual_keyboard() -> bool {
+    wayland_offers("zwp_virtual_keyboard_manager_v1")
+}
+
+/// Whether the Wayland compositor advertises the global `interface`; false
+/// without a Wayland connection.
+pub(crate) fn wayland_offers(interface: &str) -> bool {
     use wayland_client::globals::{GlobalListContents, registry_queue_init};
     use wayland_client::protocol::wl_registry::{self, WlRegistry};
     use wayland_client::{Connection, Dispatch, QueueHandle};
@@ -138,10 +144,9 @@ fn offers_virtual_keyboard() -> bool {
     let Ok((globals, _queue)) = registry_queue_init::<Globals>(&connection) else {
         return false;
     };
-    globals.contents().with_list(|list| {
-        list.iter()
-            .any(|global| global.interface == "zwp_virtual_keyboard_manager_v1")
-    })
+    globals
+        .contents()
+        .with_list(|list| list.iter().any(|global| global.interface == interface))
 }
 
 fn on_path(program: &str) -> bool {

@@ -273,11 +273,17 @@ impl HostHandle {
     }
 
     fn status(&self, snapshot: HostSnapshot, session: linux_service::Session) -> Status {
+        let hud_limitation = crate::linux_rune_hud::limitation();
+        let mut desktop = snapshot.desktop;
+        // A running listener also reports the missing HUD as its warning.
+        if desktop.listener.running && desktop.listener.warning.is_none() {
+            desktop.listener.warning = hud_limitation.clone();
+        }
         Status {
-            desktop: snapshot.desktop,
+            desktop,
             settings: snapshot.settings,
             editing: snapshot.editing,
-            hud_limitation: crate::linux_rune_hud::limitation(),
+            hud_limitation,
             window_open: self.window_open(),
             pid: std::process::id(),
             session,

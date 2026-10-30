@@ -123,9 +123,35 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let _ = HUD.set(sender);
 }
 
-/// Why the HUD can't show, once Rune has tried.
+/// Why the HUD can't show: Rune tried and could not, or the Wayland
+/// compositor offers no layer-shell (GNOME's Mutter), which Rune needs for
+/// the overlay. Logged once, the first time it is known.
 pub(crate) fn limitation() -> Option<String> {
-    (HUD.get()?.availability() == Availability::Unavailable).then(|| {
-        "Recording HUD unavailable: this compositor does not support Wayland layer-shell. Dictation still works.".into()
-    })
+    static NO_LAYER_SHELL: OnceLock<bool> = OnceLock::new();
+    static LOGGED: std::sync::Once = std::sync::Once::new();
+    let rune_refused = HUD
+        .get()
+        .is_some_and(|hud| hud.availability() == Availability::Unavailable);
+    let unavailable = rune_refused
+        || *NO_LAYER_SHELL.get_or_init(|| {
+            crate::linux_session::LinuxSession::detect().is_wayland()
+                && wayland_reachable()
+                && !crate::linux_paste::wayland_offers(LAYER_SHELL)
+        });
+    if !unavailable {
+        return None;
+    }
+    LOGGED.call_once(|| {
+        tracing::warn!("HUD unavailable: compositor has no layer-shell; dictation still works")
+    });
+    Some(LIMITATION.into())
+}
+
+const LAYER_SHELL: &str = "zwlr_layer_shell_v1";
+const LIMITATION: &str = "Recording HUD unavailable: this compositor does not support Wayland layer-shell. Dictation still works.";
+
+/// Whether a Wayland connection opens at all, so a missing display is never
+/// read as a compositor without layer-shell.
+fn wayland_reachable() -> bool {
+    wayland_client::Connection::connect_to_env().is_ok()
 }
