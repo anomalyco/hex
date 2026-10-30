@@ -396,6 +396,38 @@ fn general_hides_advanced_options_until_asked() {
     assert!(rt.find("microphone-mode").is_none());
 }
 
+/// General's level bars follow what the microphone hears, settle once it
+/// is quiet, and lie flat and dimmed while no audio arrives.
+#[test]
+fn the_microphone_level_follows_the_voice() {
+    let bar = |rt: &Runtime<Ui>| element(rt, "microphone-control/level/bar1").rect[3];
+    let mut rt = runtime("mac-settings-mic-level", true, PANE_SIZE);
+    let rest = bar(&rt);
+    let mut tallest = rest;
+    for _ in 0..90 {
+        rt.frame(1.0 / 30.0);
+        tallest = tallest.max(bar(&rt));
+    }
+    assert!(
+        tallest > rest + 4.0,
+        "the voice raised the bars ({tallest} vs {rest})"
+    );
+    for _ in 0..30 {
+        rt.frame(1.0 / 30.0);
+    }
+    assert_eq!(bar(&rt), rest, "the bars settle after the voice");
+    assert!(rt.state.mic_level.receiving);
+
+    let released = runtime("mac-settings-mic-released", true, PANE_SIZE);
+    assert_eq!(bar(&released), rest);
+    assert!(!released.state.mic_level.receiving);
+
+    let mut level = general::MicLevel::default();
+    assert!(level.hear(Some(0.5)), "a voice shows at once");
+    assert!(level.hear(None), "no audio flattens the bars");
+    assert!(!level.hear(None));
+}
+
 #[test]
 fn double_tap_to_lock_shows_only_for_hold() {
     let mut rt = runtime("mac-settings", true, TALL_SIZE);

@@ -797,7 +797,7 @@ impl NativeHost for MacHost {
     }
 
     fn practice_level(&self) -> f32 {
-        crate::dictation_indicator::recent_peak()
+        crate::input_level::recent().unwrap_or(0.0)
     }
 }
 

@@ -514,6 +514,7 @@ pub fn run(
                 captured_through: chunk_captured_through,
             } => {
                 captured_through = chunk_captured_through;
+                crate::input_level::record(&samples);
                 if !audio_ready {
                     capture = DictationCapture::new(input.sample_rate());
                     capture.ingest_with_pending(&samples, captured_through, None);

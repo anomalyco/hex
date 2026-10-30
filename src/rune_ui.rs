@@ -663,6 +663,7 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
+    mic_level: general::MicLevel,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -756,6 +757,7 @@ impl Ui {
             microphones_listed_at: 0.0,
             microphones_listing: None,
             confirm_release: false,
+            mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
             build_preview: None,
@@ -1212,6 +1214,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= onboarding::poll(ui);
+    changed |= general::poll_level(ui, clock, tx);
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
     changed |= sound_sets::poll(ui, clock, visible, tx);
@@ -1926,6 +1929,20 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    // The microphone row following a recorded voice (`--video`), and with
+    // the microphone released while idle, when no audio arrives.
+    ("mac-settings-mic-level", |ui| {
+        *ui = mac_fixture();
+        ui.mic_level = general::MicLevel::playing(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/vocabulary/audio/term-opencode-2.wav"
+        )));
+    }),
+    ("mac-settings-mic-released", |ui| {
+        *ui = mac_fixture();
+        ui.settings.release_microphone_while_idle = true;
+        ui.mic_level = general::MicLevel::closed();
+    }),
     ("mac-settings-ducking", |ui| {
         *ui = mac_fixture();
         ui.settings.recording_audio_behavior = crate::app_settings::RecordingAudioBehavior::Duck;

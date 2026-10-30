@@ -91,8 +91,7 @@ impl MicMeter {
             } else if now.duration_since(*self.quiet_since.get_or_insert(now)) >= QUIET_FOR {
                 self.silent = Some(microphone.clone());
             }
-            // Rises at once, falls over a few frames.
-            self.level = (peak * 3.0).clamp(0.0, 1.0).max(self.level - 0.12);
+            self.level = follow_level(self.level, peak);
         } else {
             self.quiet_since = None;
             self.level = 0.0;
@@ -101,8 +100,24 @@ impl MicMeter {
     }
 
     fn step(&self) -> u8 {
-        (self.level * LEVEL_STEPS).round() as u8
+        level_step(self.level)
     }
+}
+
+/// A meter's next level for the latest `peak`: it rises at once and falls
+/// over a few polls.
+pub(super) fn follow_level(level: f32, peak: f32) -> f32 {
+    (peak * 3.0).clamp(0.0, 1.0).max(level - 0.12)
+}
+
+/// `level` in the steps a meter shows, so it redraws only when they change.
+pub(super) fn level_step(level: f32) -> u8 {
+    (level * LEVEL_STEPS).round() as u8
+}
+
+/// `level` rounded to the step a meter shows.
+pub(super) fn shown_level(level: f32) -> f32 {
+    f32::from(level_step(level)) / LEVEL_STEPS
 }
 
 impl Tour {
