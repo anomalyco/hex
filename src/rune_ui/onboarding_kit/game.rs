@@ -40,6 +40,13 @@ const HITSTOP: f64 = 0.07;
 /// After the last word lands, the card holds for a beat, then blows.
 const AFTER_LAND: f64 = 0.28;
 const SHARE_HOLD: f64 = 2.8;
+/// The score pill's top-left, level with Done.
+const SCORE_AT: [f32; 2] = [24.0, 18.0];
+const SHARE_W: f32 = 432.0;
+const SHARE_PAD: f32 = 24.0;
+/// Roughly the share card's height, for centring its flights.
+const SHARE_H: f32 = 360.0;
+const SHARE_Y: f32 = 128.0;
 
 const NAME: &str = "Kit Langton";
 const CERT_H: f32 = 150.0;
@@ -126,26 +133,31 @@ struct Spec {
     from: [f32; 2],
 }
 
+/// Two columns of cards, centred on the stage with a small gutter.
+const LEFT: f32 = (STAGE_W - 2.0 * CARD_W - GUTTER) * 0.5;
+const RIGHT: f32 = LEFT + CARD_W + GUTTER;
+const GUTTER: f32 = 12.0;
+
 const SCRIPT: [Spec; 3] = [
     Spec {
         card: Card::Chat(MILK),
         take: &SAY_MILK,
         heat: 0.5,
-        home: [44.0, 128.0],
+        home: [LEFT, 128.0],
         from: [-520.0, 40.0],
     },
     Spec {
         card: Card::Chat(GREG),
         take: &SAY_GREG,
         heat: 0.92,
-        home: [432.0, 218.0],
+        home: [RIGHT, 218.0],
         from: [520.0, -30.0],
     },
     Spec {
         card: Card::Certificate,
         take: &SAY_NAME,
         heat: 0.62,
-        home: [44.0, 318.0],
+        home: [LEFT, 318.0],
         from: [-80.0, 420.0],
     },
 ];
@@ -155,21 +167,21 @@ const ENDLESS: [Spec; 3] = [
         card: Card::Chat(FRANK),
         take: &SAY_FRANK,
         heat: 0.55,
-        home: [432.0, 140.0],
+        home: [RIGHT, 140.0],
         from: [500.0, -60.0],
     },
     Spec {
         card: Card::Chat(DAX),
         take: &SAY_DAX,
         heat: 0.6,
-        home: [44.0, 260.0],
+        home: [LEFT, 260.0],
         from: [-520.0, 0.0],
     },
     Spec {
         card: Card::Chat(ADAM),
         take: &SAY_ADAM,
         heat: 0.75,
-        home: [432.0, 330.0],
+        home: [RIGHT, 330.0],
         from: [480.0, 300.0],
     },
 ];
@@ -404,14 +416,17 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
             world = world.child(card);
         }
     }
+    world = world.children(fragments(p, &s, t, reduced));
     world = world.child(words(p, &s, t, reduced));
     world = world.child(debris(p, &s, t, reduced));
     world = world.children(share(p, &s, t, destroyed, g.keep, reduced));
 
     el().key("game")
-        .size(STAGE_W, STAGE_H)
+        .w_full()
+        .h_full()
+        .center()
         .instant_changes()
-        .child(world)
+        .child(el().key("stage").size(STAGE_W, STAGE_H).child(world))
 }
 
 /// Screen shake: the site's camera trauma (`cam.trauma += 0.32 · I`),
@@ -449,9 +464,20 @@ fn shake(s: &Schedule, t: f64) -> ([f32; 2], f32) {
 fn header(p: Paint, destroyed: usize, holding: bool, t: f64, s: &Schedule, keep: bool) -> El {
     let k = p.k;
     let caps = vec!["⌥".to_string()];
+    // The count kicks up as each card goes.
+    let pop = s
+        .rounds
+        .iter()
+        .map(|r| (t - r.shatter()) as f32)
+        .filter(|te| *te >= 0.0)
+        .fold(0.0f32, |_, te| {
+            (-te * 7.0).exp() * (te * 22.0).cos().max(0.0)
+        });
     let score = row()
         .key("score")
-        .absolute(0.0, 18.0)
+        .absolute(SCORE_AT[0], SCORE_AT[1])
+        .scale(1.0 + 0.12 * pop)
+        .scale_motion(Anim::INSTANT)
         .h(30.0)
         .px(12.0)
         .gap(8.0)
@@ -504,13 +530,19 @@ fn header(p: Paint, destroyed: usize, holding: bool, t: f64, s: &Schedule, keep:
                         .color(p.muted()),
                 ),
         );
-    let done = row().key("done-at").absolute(STAGE_W - 76.0, 18.0).child(
-        Button::new("Done")
-            .variant(ButtonVariant::Neutral)
-            .on_press(|g: &mut Game| g.from = None)
-            .build_push(k)
-            .key("done"),
-    );
+    let done = row()
+        .key("done-at")
+        .absolute(0.0, SCORE_AT[1])
+        .w(STAGE_W)
+        .pr(SCORE_AT[0])
+        .justify_end()
+        .child(
+            Button::new("Done")
+                .variant(ButtonVariant::Neutral)
+                .on_press(|g: &mut Game| g.from = None)
+                .build_push(k)
+                .key("done"),
+        );
     el().key("header")
         .absolute(0.0, 0.0)
         .size(STAGE_W, 84.0)
@@ -538,6 +570,69 @@ fn hud(p: Paint, s: &Schedule, t: f64) -> El {
         .child(mic_level(p, "level", 16.0, avg, peak, live.is_some()))
 }
 
+/// The notice or certificate as it looks at `t`.
+fn body(p: Paint, r: &Round, t: f64, reduced: bool) -> El {
+    let spec = r.spec;
+    let targeted = t >= r.target;
+    // The placeholder clears just before the first word lands, not under it.
+    let speaking = r.flights.iter().any(|(f, _, _)| {
+        if reduced {
+            f.landed(t, true).is_some()
+        } else {
+            t >= f.arrives() - 0.2
+        }
+    });
+    let done = r.flights.iter().all(|(f, _, _)| t >= f.arrives());
+    match spec.card {
+        Card::Chat(n) => {
+            let lines = CARD.wrap(spec.take.text()).len();
+            let reply = Reply::Lines {
+                sent_bubbles: &[],
+                text: "",
+                caret: None,
+                lines,
+                placeholder: !speaking,
+                focus: targeted && !done,
+                sent: done,
+            };
+            notice(p, &n, reply, false)
+        }
+        Card::Certificate => certificate(p, targeted, speaking),
+    }
+}
+
+/// The card frozen at `t` with its answer typeset in, in card coordinates:
+/// what each fragment of the explosion carries.
+fn face(p: Paint, ri: usize, r: &Round, t: f64, at: [f32; 2]) -> El {
+    el().key(format!("face{ri}"))
+        .absolute(at[0], at[1])
+        .size(r.size[0], r.size[1])
+        .child(body(p, r, t, false))
+        .children(landed_words(p, ri, r, t, false, r.spec.home))
+}
+
+/// The words already in the field, in coordinates relative to `at`.
+fn landed_words(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool, at: [f32; 2]) -> Vec<El> {
+    let (field, origin, _) = field_of(&r.spec);
+    let font = field.font.lh(field.line);
+    let mut out = Vec::new();
+    for (wi, (flight, word, centre)) in r.flights.iter().enumerate() {
+        if let Some(landed) = flight.landed(t, reduced) {
+            let xy = [origin[0] + centre[0] - at[0], origin[1] + centre[1] - at[1]];
+            out.extend(typeset(
+                p,
+                &format!("r{ri}w{wi}"),
+                word,
+                font,
+                xy,
+                landed,
+                flicker(t, wi),
+            ));
+        }
+    }
+    out
+}
+
 fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
     if t < r.arrive || t >= r.shatter() + if reduced { 0.3 } else { 0.0 } {
         return None;
@@ -555,9 +650,13 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
         )
     };
     let targeted = t >= r.target;
-    if !targeted {
-        opacity *= 0.62;
-    }
+    // Waiting cards sit back, dimmed and a touch smaller; the lit one comes forward.
+    let lit = if reduced {
+        if targeted { 1.0 } else { 0.0 }
+    } else {
+        smooth(0.0, 0.32, (t - r.target) as f32)
+    };
+    opacity *= lerp(0.55, 1.0, lit);
     if reduced && t >= r.shatter() {
         opacity *= 1.0 - ((t - r.shatter()) / 0.3) as f32;
     }
@@ -570,44 +669,33 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
         })
     }
     .map(|v| v.clamp(-10.0, 10.0));
-    let flash = if t >= r.explode && !reduced {
-        1.0 - ((t - r.explode) / HITSTOP) as f32 * 0.4
+    let hitstop = t >= r.explode && !reduced;
+    let flash = if hitstop {
+        1.0 - ((t - r.explode) / HITSTOP) as f32 * 0.5
     } else {
         r.flights
             .iter()
             .map(|(f, _, _)| f.flash(t))
             .fold(0.0, f32::max)
     };
-    let speaking = r.flights.iter().any(|(f, _, _)| t >= f.arrives());
     let done = r.flights.iter().all(|(f, _, _)| t >= f.arrives());
-    let body = match spec.card {
-        Card::Chat(n) => {
-            let lines = CARD.wrap(spec.take.text()).len();
-            let reply = Reply::Lines {
-                sent_bubbles: &[],
-                text: "",
-                caret: None,
-                lines,
-                placeholder: !speaking,
-                focus: targeted && !done,
-                sent: done,
-            };
-            notice(p, &n, reply, false)
-        }
-        Card::Certificate => certificate(p, targeted, speaking),
-    };
+    let body = body(p, r, t, reduced);
     let body = floating(body, (!reduced && !targeted).then_some(t), i as f64 * 0.37);
+    // The lit card breathes while it waits for an answer, and burns steady once answered.
+    let breathe = if reduced || done {
+        1.0
+    } else {
+        0.78 + 0.22 * (((t - r.target) * 3.4).sin() as f32)
+    };
+    let ember = ember_tone(p, 0.6);
     let ring = targeted.then(|| {
         el().key("lit")
-            .absolute(-3.0, -3.0)
-            .size(r.size[0] + 6.0, r.size[1] + 6.0)
-            .radius(19.0)
+            .absolute(-2.0, -2.0)
+            .size(r.size[0] + 4.0, r.size[1] + 4.0)
+            .radius(18.0)
             .continuous_corners()
-            .border(
-                1.5,
-                ember_tone(p, 0.55).alpha(if done { 0.9 } else { 0.55 }),
-            )
-            .transition(Transition::opacity())
+            .border(1.0, ember.alpha(lerp(0.0, 0.75, lit) * breathe))
+            .shadow(0.0, 30.0, ember.alpha(lerp(0.0, 0.2, lit) * breathe))
     });
     let flash_el = (flash > 0.02).then(|| {
         el().key("flash")
@@ -615,23 +703,76 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
             .size(r.size[0], r.size[1])
             .radius(16.0)
             .continuous_corners()
-            .fill(ember_tone(p, 0.95).alpha((flash * 0.55).min(0.7)))
+            .fill(ember_tone(p, 0.75).alpha((flash * 0.35).min(0.45)))
     });
-    let hitstop = t >= r.explode && !reduced;
+    let cracks = hitstop.then(|| cracks(p, r, slabs(r, i * 7919 + 13), t));
     Some(
         el().key(format!("card{i}"))
             .absolute(spec.home[0], spec.home[1])
             .size(r.size[0], r.size[1])
             .offset(drift[0] + knock[0], drift[1] + knock[1])
-            .scale(if hitstop { 1.035 } else { 1.0 })
+            .scale(if hitstop { 1.035 } else { lerp(0.97, 1.0, lit) })
             .opacity(opacity)
             .offset_motion(Anim::INSTANT)
             .opacity_motion(Anim::INSTANT)
             .scale_motion(Anim::INSTANT)
             .children(ring)
             .child(body)
-            .children(flash_el),
+            .children(flash_el)
+            .children(cracks),
     )
+}
+
+/// The inner edges between slabs, in card coordinates.
+fn seams(slabs: &[Slab], [w, h]: [f32; 2]) -> Vec<([f32; 2], [f32; 2])> {
+    let mut out = Vec::new();
+    for s in slabs {
+        let [x, y, sw, sh] = s.rect;
+        if x + sw < w - 0.5 {
+            out.push(([x + sw, y], [x + sw, y + sh]));
+        }
+        if y + sh < h - 0.5 {
+            out.push(([x, y + sh], [x + sw, y + sh]));
+        }
+    }
+    out
+}
+
+/// The fracture lines the card splits along, drawn hot during the hit-stop.
+fn cracks(p: Paint, r: &Round, slabs: Vec<Slab>, t: f64) -> El {
+    let u = ((t - r.explode) / HITSTOP).clamp(0.0, 1.0) as f32;
+    let [w, h] = r.size;
+    let hot = ember_tone(p, 0.95);
+    let mut shape = Shape::new();
+    let seams = seams(&slabs, r.size);
+    for (n, (a, b)) in seams.into_iter().enumerate() {
+        // Jagged, like a real crack, and racing out from the middle.
+        let steps = 7;
+        let reach = smooth(0.0, 0.6, u);
+        let mut pts = Vec::with_capacity(steps + 1);
+        for k in 0..=steps {
+            let f = k as f32 / steps as f32;
+            let j = if k == 0 || k == steps {
+                0.0
+            } else {
+                rnd(n * 37 + k, -2.6, 2.6)
+            };
+            let (nx, ny) = if (a[0] - b[0]).abs() < 0.5 {
+                (j, 0.0)
+            } else {
+                (0.0, j)
+            };
+            pts.push([lerp(a[0], b[0], f) + nx, lerp(a[1], b[1], f) + ny]);
+        }
+        let mid = steps / 2;
+        let keep = ((steps as f32 * 0.5) * reach).ceil() as usize;
+        let lo = mid.saturating_sub(keep);
+        let hi = (mid + keep).min(steps);
+        if hi > lo {
+            shape = shape.stroke_with(pts[lo..=hi].to_vec(), false, 1.6, LineCap::Round, hot);
+        }
+    }
+    canvas(shape).key("cracks").absolute(0.0, 0.0).size(w, h)
 }
 
 fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
@@ -695,23 +836,10 @@ fn words(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
         if t >= r.shatter() {
             continue;
         }
-        let (field, origin, _) = field_of(&r.spec);
+        out = out.children(landed_words(p, ri, r, t, reduced, [0.0, 0.0]));
         let weight = 500.0 + 220.0 * r.spec.heat;
-        let font = field.font.lh(field.line);
-        for (wi, (flight, word, centre)) in r.flights.iter().enumerate() {
+        for (wi, (flight, word, _)) in r.flights.iter().enumerate() {
             all.push(*flight);
-            if let Some(landed) = flight.landed(t, reduced) {
-                let at = [origin[0] + centre[0], origin[1] + centre[1]];
-                out = out.children(typeset(
-                    p,
-                    &format!("r{ri}w{wi}"),
-                    word,
-                    font,
-                    at,
-                    landed,
-                    flicker(t, wi),
-                ));
-            }
             if let Some(pose) = flight.pose(t, reduced) {
                 out = out.child(flying(p, &format!("r{ri}f{wi}"), word, weight, pose));
             }
@@ -720,9 +848,131 @@ fn words(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
     out.child(impacts(p, "impacts", [STAGE_W, STAGE_H], &all, t, reduced).absolute(0.0, 0.0))
 }
 
-/// The card's own pieces, as the site cuts them: a jittered grid split into
-/// triangles that fly out from the centre and along the hit, spinning and
-/// tumbling under drag and gravity, their cut edges hot and cooling.
+/// The card's big pieces: two staggered rows of slabs, each carrying its
+/// part of the card, words and all, the way the site clips the card's own
+/// image into every shard.
+struct Slab {
+    /// `[x, y, w, h]` in card coordinates.
+    rect: [f32; 4],
+    /// The card's rounded corners this slab keeps: `[tl, tr, br, bl]`.
+    corners: [f32; 4],
+    v: [f32; 2],
+    spin: f32,
+    life: f32,
+}
+
+const SLAB_DRAG: f32 = 2.2;
+const SLAB_GRAVITY: f32 = 900.0;
+const CARD_RADIUS: f32 = 16.0;
+
+fn slabs(r: &Round, seed: usize) -> Vec<Slab> {
+    let [w, h] = r.size;
+    let i = r.spec.heat;
+    let split = h * rnd(seed, 0.4, 0.6);
+    let [dx, dy] = r.heading();
+    let speed = lerp(300.0, 680.0, i);
+    let mut out = Vec::new();
+    for (row, (y, sh, cols)) in [(0.0, split, 3usize), (split, h - split, 4)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut cuts = vec![0.0];
+        for c in 1..cols {
+            let jitter = rnd(seed + row * 19 + c * 5, -0.26, 0.26);
+            cuts.push(w * (c as f32 + jitter) / cols as f32);
+        }
+        cuts.push(w);
+        for c in 0..cols {
+            let (x, sw) = (cuts[c], cuts[c + 1] - cuts[c]);
+            let s = seed + 401 + row * 53 + c * 11;
+            let rx = (x + sw * 0.5 - w * 0.5) / (w * 0.5);
+            let ry = (y + sh * 0.5 - h * 0.5) / (h * 0.5);
+            let rl = rx.hypot(ry) + 0.3;
+            let sp = speed * rnd(s, 0.7, 1.15);
+            let ox = rx / rl + dx * 0.6 + rnd(s + 1, -0.15, 0.15);
+            let oy = ry / rl * 1.2 + dy * 0.6 - 0.35 + rnd(s + 2, -0.15, 0.15);
+            let round = |on: bool| if on { CARD_RADIUS } else { 0.0 };
+            let (first, last, top) = (c == 0, c == cols - 1, row == 0);
+            out.push(Slab {
+                rect: [x, y, sw, sh],
+                corners: [
+                    round(first && top),
+                    round(last && top),
+                    round(last && !top),
+                    round(first && !top),
+                ],
+                v: [ox * sp, oy * sp],
+                spin: rnd(s + 3, 1.5, 5.5) * if ox < 0.0 { -1.0 } else { 1.0 },
+                life: rnd(s + 4, 0.7, 1.0),
+            });
+        }
+    }
+    out
+}
+
+fn fragments(p: Paint, s: &Schedule, t: f64, reduced: bool) -> Vec<El> {
+    let mut out = Vec::new();
+    if reduced {
+        return out;
+    }
+    let hot = ember_tone(p, 0.9);
+    // A hot tint over a light card reads as pink paint, so it's a rim there.
+    let glow = if p.k.dark { 0.3 } else { 0.08 };
+    for (ri, r) in s.rounds.iter().enumerate() {
+        let te = (t - r.shatter()) as f32;
+        if !(0.0..1.1).contains(&te) {
+            continue;
+        }
+        let [hx, hy] = r.spec.home;
+        let [w, h] = r.size;
+        for (n, sl) in slabs(r, ri * 7919 + 13).into_iter().enumerate() {
+            if te >= sl.life {
+                continue;
+            }
+            let [x, y, sw, sh] = sl.rect;
+            let ([px, py], _) = ballistic([0.0, 0.0], sl.v, SLAB_DRAG, SLAB_GRAVITY, te);
+            let ang = sl.spin * (1.0 - (-1.4 * te).exp()) / 1.4;
+            // Falls away from the camera: starts at the hit-stop's swell, then shrinks.
+            let depth = lerp(1.035, 0.84, 1.0 - (-2.4 * te).exp());
+            let grow = depth - 1.0;
+            let fade = ((sl.life - te) / (sl.life * 0.45)).min(1.0);
+            let heat = (-te / 0.2).exp();
+            out.push(
+                el().key(format!("slab{ri}-{n}"))
+                    .absolute(hx + x, hy + y)
+                    .size(sw, sh)
+                    .offset(
+                        px + (x + sw * 0.5 - w * 0.5) * grow,
+                        py + (y + sh * 0.5 - h * 0.5) * grow,
+                    )
+                    .rotate(ang)
+                    .scale(depth)
+                    .opacity(fade)
+                    .continuous_corners()
+                    .clip_corners(sl.corners)
+                    .offset_motion(Anim::INSTANT)
+                    .rotate_motion(Anim::INSTANT)
+                    .scale_motion(Anim::INSTANT)
+                    .opacity_motion(Anim::INSTANT)
+                    .child(face(p, ri, r, r.shatter(), [-x, -y]))
+                    .children((heat > 0.03).then(|| {
+                        el().key("heat")
+                            .absolute(0.0, 0.0)
+                            .size(sw, sh)
+                            .corners(sl.corners)
+                            .continuous_corners()
+                            .fill(hot.alpha(glow * heat))
+                            .border(1.5, hot.alpha(heat))
+                    })),
+            );
+        }
+    }
+    out
+}
+
+/// Small chips spraying out of the cracks: splinters that fly faster than
+/// the slabs, tumbling under drag and gravity and catching the light as
+/// they turn.
 struct Shard {
     at: [f32; 2],
     v: [f32; 2],
@@ -733,7 +983,7 @@ struct Shard {
 }
 
 const SHARD_DRAG: f32 = 2.6;
-const SHARD_GRAVITY: f32 = 520.0;
+const SHARD_GRAVITY: f32 = 620.0;
 const SPARK_DRAG: f32 = 4.2;
 const SPARK_GRAVITY: f32 = 380.0;
 
@@ -753,56 +1003,38 @@ fn ballistic(at: [f32; 2], v: [f32; 2], drag: f32, gravity: f32, t: f32) -> ([f3
 fn shards(r: &Round, seed: usize) -> Vec<Shard> {
     let [w, h] = r.size;
     let i = r.spec.heat;
-    let cols = (8.0 + 4.0 * i).round() as usize;
-    let rows = ((cols as f32 * h / w).round() as usize + 1).max(2);
-    let mut pts = Vec::with_capacity((cols + 1) * (rows + 1));
-    for j in 0..=rows {
-        for c in 0..=cols {
-            let edge = c == 0 || j == 0 || c == cols || j == rows;
-            let s = seed + j * 31 + c * 7;
-            let jx = if edge { 0.0 } else { rnd(s, -0.38, 0.38) };
-            let jy = if edge { 0.0 } else { rnd(s + 1, -0.38, 0.38) };
-            pts.push([
-                ((c as f32 + jx) / cols as f32 - 0.5) * w,
-                ((j as f32 + jy) / rows as f32 - 0.5) * h,
-            ]);
-        }
-    }
-    let at = |c: usize, j: usize| pts[j * (cols + 1) + c];
+    let seams = seams(&slabs(r, seed), r.size);
     let [dx, dy] = r.heading();
-    let [cx, cy] = r.centre();
-    let speed = lerp(380.0, 900.0, i);
-    let mut out = Vec::new();
-    for j in 0..rows {
-        for c in 0..cols {
-            let (a, b, cc, d) = (at(c, j), at(c + 1, j), at(c + 1, j + 1), at(c, j + 1));
-            let s = seed + j * 131 + c * 17;
-            let tris = if rnd(s, 0.0, 1.0) < 0.5 {
-                [[a, b, cc], [a, cc, d]]
-            } else {
-                [[a, b, d], [b, cc, d]]
-            };
-            for (n, tri) in tris.into_iter().enumerate() {
-                let s = s + n * 3;
-                let mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0;
-                let my = (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0;
-                let (rx, ry) = (mx / (w * 0.5), my / (h * 0.5));
-                let rl = rx.hypot(ry) + 0.25;
-                let sp = speed * rnd(s + 1, 0.55, 1.25);
-                let ox = rx / rl * 0.85 + dx * 0.8 + rnd(s + 2, -0.25, 0.25);
-                let oy = ry / rl * 0.85 + dy * 0.8 + rnd(s + 3, -0.25, 0.25) - 0.1;
-                out.push(Shard {
-                    at: [cx + mx, cy + my],
-                    v: [ox * sp, oy * sp],
-                    spin: rnd(s + 4, -12.0, 12.0),
-                    life: rnd(s + 5, 0.55, 1.1),
-                    verts: tri.map(|[x, y]| [x - mx, y - my]),
-                    tint: rnd(s + 6, 0.0, 1.0),
-                });
+    let [hx, hy] = r.spec.home;
+    let speed = lerp(480.0, 1100.0, i);
+    let count = lerp(36.0, 72.0, i).round() as usize;
+    (0..count)
+        .map(|n| {
+            let s = seed + 3001 + n * 23;
+            let (a, b) = seams[n % seams.len()];
+            let f = rnd(s, 0.05, 0.95);
+            let at = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
+            let (rx, ry) = ((at[0] - w * 0.5) / (w * 0.5), (at[1] - h * 0.5) / (h * 0.5));
+            let rl = rx.hypot(ry) + 0.35;
+            let sp = speed * rnd(s + 1, 0.45, 1.25);
+            let ox = rx / rl * 0.85 + dx * 0.8 + rnd(s + 2, -0.45, 0.45);
+            let oy = ry / rl * 0.85 + dy * 0.8 + rnd(s + 3, -0.45, 0.45) - 0.1;
+            let size = rnd(s + 4, 3.0, 9.0);
+            let verts = [0.0, 2.2, 4.1].map(|turn: f32| {
+                let ang = turn + rnd(s + 5 + (turn * 3.0) as usize, -0.5, 0.5);
+                let reach = size * rnd(s + 9 + (turn * 3.0) as usize, 0.6, 1.2);
+                [ang.cos() * reach, ang.sin() * reach]
+            });
+            Shard {
+                at: [hx + at[0], hy + at[1]],
+                v: [ox * sp, oy * sp],
+                spin: rnd(s + 6, -14.0, 14.0),
+                life: rnd(s + 7, 0.45, 0.95),
+                verts,
+                tint: rnd(s + 8, 0.0, 1.0),
             }
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 struct Spark {
@@ -889,7 +1121,8 @@ fn debris(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
         } else {
             k.c.bg_base
         };
-        let inked = fill.mix(k.c.text_base, 0.07);
+        let shade = fill.mix(k.c.text_base, if k.dark { 0.06 } else { 0.1 });
+        let shine = if k.dark { k.c.text_strong } else { k.c.white };
         for (ri, r) in s.rounds.iter().enumerate() {
             let te = (t - r.shatter()) as f32;
             if !(0.0..1.6).contains(&te) {
@@ -899,22 +1132,22 @@ fn debris(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
             let size = r.size[0].max(r.size[1]);
             let i = r.spec.heat;
             let centre = r.centre();
-            // Shockwave: kind 0, cubic ease-out to rMax over 0.44 s.
-            let u = te / 0.44;
+            let pyro = smooth(0.32, 0.92, i);
+            // Shockwave: kind 0, cubic ease-out, hot white cooling to ember.
+            let u = te / 0.36;
             if u < 1.0 {
-                let rad = (size * 0.78 + 68.0) * lerp(0.85, 1.4, i) * (1.0 - (1.0 - u).powi(3));
-                let pyro = smooth(0.32, 0.92, i);
-                let width = lerp(2.2, 3.6, pyro) * (1.0 - u * 0.7);
+                let rad = (size * 0.42 + 36.0) * lerp(0.9, 1.25, i) * (1.0 - (1.0 - u).powi(3));
+                let width = lerp(2.4, 3.4, pyro) * (1.0 - u * 0.8);
                 let fade = (1.0 - u) * (1.0 - u);
-                let color = k.c.bg_base.mix(ember_tone(p, 1.0 - u * 0.6), fade);
+                let color = ember_tone(p, 1.0 - u * 0.5).alpha(0.9 * fade);
                 shape = ring(shape, centre, rad, width, color);
             }
-            // The scorch's second, slower pressure ring: kind 10.
-            let u = te / lerp(0.32, 0.52, i);
-            if u < 1.0 {
-                let rad = (size * 0.85 + 75.0) * (0.25 + 0.7 * (1.0 - (1.0 - u).powf(2.2)));
-                let color = k.c.bg_base.mix(ember_tone(p, 0.8), (1.0 - u) * 0.6);
-                shape = ring(shape, centre, rad, 2.2, color);
+            // The slower pressure ring behind it: kind 10.
+            let u = (te - 0.04) / lerp(0.4, 0.6, i);
+            if (0.0..1.0).contains(&u) {
+                let rad = (size * 0.55 + 50.0) * (0.3 + 0.7 * (1.0 - (1.0 - u).powf(2.2)));
+                let color = ember_tone(p, 0.7).alpha(0.35 * (1.0 - u));
+                shape = ring(shape, centre, rad, 1.2, color);
             }
             for sh in shards(r, seed) {
                 if te >= sh.life {
@@ -922,8 +1155,8 @@ fn debris(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
                 }
                 let ([x, y], _) = ballistic(sh.at, sh.v, SHARD_DRAG, SHARD_GRAVITY, te);
                 let ang = sh.spin * (1.0 - (-0.95 * te).exp()) / 0.95;
-                let tumble = 1.0 + (sh.spin.abs() * 0.65 + 2.5) * te;
-                let tilt = 0.4 + 0.6 * tumble.cos().abs();
+                let tumble = 1.0 + (sh.spin.abs() * 0.65 + 2.5) * te + sh.tint * 6.0;
+                let tilt = 0.25 + 0.75 * tumble.cos().abs();
                 let (sin, cos) = ang.sin_cos();
                 let pts: Vec<[f32; 2]> = sh
                     .verts
@@ -935,17 +1168,15 @@ fn debris(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
                     .collect();
                 let left = sh.life - te;
                 let fade = (left / (sh.life * 0.35)).min(1.0);
-                let heat = (-te / 0.28).exp();
-                let face = if sh.tint > 0.7 { inked } else { fill };
-                // A shard turns darker as it tumbles edge-on.
-                let face = face.mix(k.c.bg_deep, (1.0 - tilt) * 0.5);
+                let heat = (-te / 0.25).exp();
+                // A chip flashes as its face turns to the light.
+                let glint = tumble.cos().max(0.0).powi(8);
+                let face = if sh.tint > 0.6 { shade } else { fill }
+                    .mix(shine, 0.35 * glint)
+                    .mix(ember_tone(p, 0.8), 0.6 * heat);
                 shape = shape.fill(pts.clone(), face.alpha(fade));
-                let edge = if heat > 0.08 {
-                    k.c.border_weak.mix(ember_tone(p, 0.75), heat)
-                } else {
-                    k.c.border_weak
-                };
-                shape = shape.stroke_with(pts, true, 1.2, LineCap::Round, edge.alpha(fade));
+                let edge = k.c.border_base.mix(ember_tone(p, 0.85), heat);
+                shape = shape.stroke_with(pts, true, 0.8, LineCap::Round, edge.alpha(fade));
             }
             for sp in sparks(r, seed) {
                 if te >= sp.life {
@@ -1005,12 +1236,14 @@ fn glows(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool) -> Vec<El> {
     } else {
         k.c.text_muted
     };
+    // Light on a light page reads as paint, so it's thinner there.
+    let thin = if k.dark { 1.0 } else { 0.55 };
     let mut out = Vec::new();
 
     let u = te / 0.38;
     if u < 1.0 {
-        let rad = (size * 0.8 + 80.0) * lerp(0.85, 1.35, pyro);
-        let a = 0.14 * (1.0 - u).powf(1.85);
+        let rad = (size * 0.45 + 50.0) * lerp(0.9, 1.3, pyro);
+        let a = 0.18 * thin * (1.0 - u).powf(1.85);
         out.push(blob(
             format!("light{ri}"),
             [cx, cy],
@@ -1036,14 +1269,14 @@ fn glows(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool) -> Vec<El> {
                 rnd(s + 1, -r.size[1] * 0.17, r.size[1] * 0.17),
             )
         };
-        let r0 = if li == 0 { size * 0.2 } else { size * 0.15 } * lerp(0.85, 1.35, pyro);
-        let rad = lerp(r0, r0 * lerp(1.85, 2.35, pyro), 1.0 - (1.0 - u).powf(2.2));
+        let r0 = if li == 0 { size * 0.13 } else { size * 0.1 } * lerp(0.85, 1.3, pyro);
+        let rad = lerp(r0, r0 * lerp(1.6, 2.0, pyro), 1.0 - (1.0 - u).powf(2.2));
         let vx = dx * rnd(s + 2, 25.0, 70.0) + ox * 0.6;
         let vy = -rnd(s + 3, 28.0, 65.0) + dy * 25.0;
         let at = [cx + ox + vx * age, cy + oy + vy * age];
-        let hot = ember_tone(p, 1.0 - u);
-        let color = hot.mix(smoke, smooth(0.35, 0.9, u));
-        let a = 0.5 * (1.0 - u).powf(1.6) * lerp(0.85, 1.0, pyro);
+        let hot = ember_tone(p, 1.0 - u * 0.7);
+        let color = hot.mix(smoke, smooth(0.45, 0.95, u));
+        let a = 0.42 * thin * (1.0 - u).powf(1.8) * lerp(0.85, 1.0, pyro);
         out.push(blob(
             format!("fire{ri}-{li}"),
             at,
@@ -1054,13 +1287,15 @@ fn glows(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool) -> Vec<El> {
     }
     let u = te / 0.1;
     if u < 1.0 {
-        let rad = size * 0.3 + 30.0;
+        let rad = size * 0.2 + 24.0;
         let white = if k.dark { k.c.text_strong } else { k.c.white };
         out.push(blob(
             format!("flash{ri}"),
             [cx, cy],
             rad,
-            white.mix(ember_tone(p, 1.0), 0.2).alpha(0.85 * (1.0 - u)),
+            white
+                .mix(ember_tone(p, 1.0), 0.25)
+                .alpha(0.7 * (1.0 - u) * (1.0 - u)),
             rad * 0.3,
         ));
     }
@@ -1078,7 +1313,7 @@ fn glows(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool) -> Vec<El> {
             cx + rnd(s + 2, -r.size[0] * 0.25, r.size[0] * 0.25) + rnd(s + 3, -28.0, 28.0) * age,
             cy - rnd(s + 4, 52.0, 98.0) * age,
         ];
-        let a = 0.2 * (u * std::f32::consts::PI).sin();
+        let a = 0.12 * thin * (u * std::f32::consts::PI).sin();
         out.push(blob(
             format!("smoke{ri}-{si}"),
             at,
@@ -1104,22 +1339,32 @@ fn share(
         return None;
     }
     let k = p.k;
-    let w = 420.0;
+    let w = SHARE_W;
     let cert = &s.rounds[2];
     let [cx, cy] = cert.centre();
+    let x = (age / 0.6).clamp(0.0, 1.0);
     let rise = if reduced {
         1.0
     } else {
-        1.0 - (1.0 - (age / 0.55).clamp(0.0, 1.0)).powi(4)
+        1.0 - (1.0 - x).powi(4)
     };
-    let fold = if keep {
+    // easeOutBack: a touch past full size, then settles.
+    let settle = if reduced {
+        1.0
+    } else {
+        let c = 1.4;
+        1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
+    };
+    let fold = if keep && !reduced {
         smooth(SHARE_HOLD as f32, SHARE_HOLD as f32 + 0.45, age)
     } else {
         0.0
     };
-    let home = [(STAGE_W - w) * 0.5, 150.0];
-    let from = [cx - w * 0.5 - home[0], cy - 120.0 - home[1]];
-    let to_pill = [24.0 - home[0] - w * 0.4, 20.0 - home[1] - 110.0];
+    let home = [(STAGE_W - w) * 0.5, SHARE_Y];
+    let centre = [home[0] + w * 0.5, home[1] + SHARE_H * 0.5];
+    let from = [cx - centre[0], cy - centre[1]];
+    let pill = [SCORE_AT[0] + 52.0, SCORE_AT[1] + 15.0];
+    let to_pill = [pill[0] - centre[0], pill[1] - centre[1]];
     let offset = [
         from[0] * (1.0 - rise) + to_pill[0] * fold,
         from[1] * (1.0 - rise) + to_pill[1] * fold,
@@ -1127,14 +1372,40 @@ fn share(
     let scale = if reduced {
         1.0
     } else {
-        lerp(0.9, 1.0, rise) * lerp(1.0, 0.18, fold)
+        lerp(0.86, 1.0, settle) * lerp(1.0, 0.12, fold)
     };
-    let opacity = smooth(0.0, 0.3, age) * (1.0 - fold);
+    let fade_out = if keep && reduced {
+        1.0 - smooth(SHARE_HOLD as f32, SHARE_HOLD as f32 + 0.3, age)
+    } else {
+        1.0 - fold
+    };
+    let opacity = smooth(0.0, 0.25, age) * fade_out;
     let words: usize = s.rounds[..3]
         .iter()
         .map(|r| r.spec.take.text().split_whitespace().count())
         .sum();
     let secs = s.rounds[2].shatter() - s.rounds[0].hold;
+    // The number counts up, each tick landing with a small kick.
+    let count = if reduced {
+        destroyed as f32
+    } else {
+        smooth(0.15, 0.75, age) * destroyed as f32
+    };
+    let shown = count.ceil() as usize;
+    let since_tick = if reduced || shown == 0 {
+        1.0
+    } else {
+        // When the count passed `shown - 1`: smoothstep's inverse.
+        let y = (shown as f32 - 1.0) / destroyed as f32;
+        let x = 0.5 - ((1.0 - 2.0 * y).asin() / 3.0).sin();
+        age - lerp(0.15, 0.75, x)
+    };
+    let kick = if reduced {
+        0.0
+    } else {
+        (-since_tick.max(0.0) * 9.0).exp()
+    };
+    let ember = ember_tone(p, 0.7);
     let stat = |key: &str, value: String, label: &str| {
         col()
             .key(key.to_string())
@@ -1153,30 +1424,38 @@ fn share(
                     .color(p.muted()),
             )
     };
-    let big = TextStyle::new(72.0, 720.0)
-        .lh(76.0)
+    let rule = |key: &str| {
+        el().key(key.to_string())
+            .size(w - 2.0 * SHARE_PAD, p.hair.max(1.0))
+            .fill(k.c.border_weak)
+    };
+    let big = TextStyle::new(76.0, 720.0)
+        .lh(78.0)
         .tracking(-2.0)
         .features("'tnum' 1");
     let number = el()
         .key("number")
+        .scale(1.0 + 0.1 * kick)
+        .origin(0.5, 0.8)
+        .scale_motion(Anim::INSTANT)
         .child(
-            text(destroyed.to_string())
+            text(shown.to_string())
                 .key("glow")
                 .font(big)
-                .color(ember_tone(p, 0.7).alpha(0.55))
+                .color(ember.alpha(0.45 + 0.35 * kick))
                 .absolute(0.0, 0.0)
-                .blur(10.0),
+                .blur(12.0),
         )
         .child(
-            text(destroyed.to_string())
+            text(shown.to_string())
                 .key("n")
                 .font(big)
-                .color(ember_tone(p, 0.85)),
+                .color(ember_tone(p, 0.85 + 0.15 * kick)),
         );
     let card = col()
         .key("share-card")
         .w(w)
-        .padding(22.0)
+        .padding(SHARE_PAD)
         .gap(16.0)
         .radius(20.0)
         .continuous_corners()
@@ -1185,6 +1464,11 @@ fn share(
         } else {
             k.c.bg_base
         })
+        .radial_gradient(
+            [0.14, 0.28],
+            [240.0, 160.0],
+            [(0.0, ember.alpha(0.12)), (1.0, ember.alpha(0.0))],
+        )
         .border(p.hair, k.c.border_weak)
         .child(
             row()
@@ -1213,7 +1497,7 @@ fn share(
                 .child(
                     col()
                         .key("what")
-                        .pb(12.0)
+                        .pb(14.0)
                         .gap(2.0)
                         .child(
                             text("messages destroyed")
@@ -1229,6 +1513,7 @@ fn share(
                         ),
                 ),
         )
+        .child(rule("rule-1"))
         .child(
             row()
                 .key("stats")
@@ -1237,17 +1522,34 @@ fn share(
                 .child(stat("keys", "0".into(), "keys typed"))
                 .child(stat("time", format!("{secs:.1} s"), "start to finish")),
         )
+        .child(rule("rule-2"))
         .child(
             row()
                 .key("signed")
-                .gap(6.0)
-                .center_y()
-                .child(text("Signed").key("s").font(k.ty.small).color(p.muted()))
+                .gap(10.0)
+                .items_end()
                 .child(
-                    text(NAME)
-                        .key("name")
-                        .font(SIGN.font.lh(28.0))
-                        .color(p.text()),
+                    text("Signed")
+                        .key("s")
+                        .font(k.ty.small)
+                        .color(p.muted())
+                        .pb(6.0),
+                )
+                .child(
+                    col()
+                        .key("sig")
+                        .gap(2.0)
+                        .child(
+                            text(NAME)
+                                .key("name")
+                                .font(SIGN.font.lh(28.0))
+                                .color(p.text()),
+                        )
+                        .child(
+                            el().key("line")
+                                .size(200.0, p.hair.max(1.0))
+                                .fill(k.c.border_base),
+                        ),
                 ),
         )
         .child(
@@ -1278,7 +1580,10 @@ fn share(
                         .key("continue"),
                 ),
         );
-    let card = k.elevate(card, &k.elevation.floating);
+    // Still warm from the blast.
+    let card = k
+        .elevate(card, &k.elevation.floating)
+        .shadow(0.0, 96.0, ember.alpha(0.16));
     Some(
         el().key("share")
             .absolute(home[0], home[1])
@@ -1286,7 +1591,7 @@ fn share(
             .offset(offset[0], offset[1])
             .scale(scale)
             .opacity(opacity)
-            .blur(if reduced { 0.0 } else { 4.0 * (1.0 - rise) })
+            .blur(if reduced { 0.0 } else { 5.0 * (1.0 - rise) })
             .offset_motion(Anim::INSTANT)
             .opacity_motion(Anim::INSTANT)
             .scale_motion(Anim::INSTANT)
