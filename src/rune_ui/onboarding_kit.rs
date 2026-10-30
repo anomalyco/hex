@@ -28,6 +28,7 @@ mod first_run;
 mod fixture;
 mod flight;
 mod flows;
+mod game;
 pub(crate) mod gpu_stage;
 mod hex_meter;
 mod hud_stage;
@@ -44,4 +45,5 @@ mod typing;
 mod versus;
 mod words;
 
+pub(crate) use game::add as game;
 pub(crate) use stories::{add as stories, set_live_window};
