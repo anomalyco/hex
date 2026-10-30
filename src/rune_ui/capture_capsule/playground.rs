@@ -378,18 +378,6 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
     changed
 }
 
-/// 1 to 9 from what a key typed, Shift's US symbols ("!" for 1) too.
-fn digit_of(typed: &str) -> Option<u8> {
-    let mut chars = typed.chars();
-    let (Some(c), None) = (chars.next(), chars.next()) else {
-        return None;
-    };
-    match c {
-        '1'..='9' => Some(c as u8 - b'0'),
-        _ => "!@#$%^&*(".find(c).map(|i| i as u8 + 1),
-    }
-}
-
 /// The keys Hex's tap would hand the capsule, from the window instead.
 fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
     use rune::Key;
@@ -397,11 +385,7 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     };
     let list = keys == crate::capture_host::CapsuleKeys::List;
-    let digits = match keys {
-        crate::capture_host::CapsuleKeys::List => 9,
-        crate::capture_host::CapsuleKeys::Suggest { rows, .. } => usize::from(rows),
-        _ => 0,
-    };
+    let suggest = matches!(keys, crate::capture_host::CapsuleKeys::Suggest { .. });
     let cycle = matches!(
         keys,
         crate::capture_host::CapsuleKeys::Suggest { cycle: true, .. }
@@ -410,21 +394,18 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         keys,
         crate::capture_host::CapsuleKeys::List | crate::capture_host::CapsuleKeys::Picker
     );
-    let digit = match &key.key {
-        Key::Text(t) if !key.mods.alt => digit_of(t)
-            .map(usize::from)
-            .filter(|d| (1..=digits).contains(d)),
-        _ => None,
-    };
     let input = match &key.key {
         Key::Modifier {
             modifier: rune::Modifier::ShiftLeft | rune::Modifier::ShiftRight,
             ..
-        } if digits > 0 => Input::Shift(key.mods.shift),
-        _ if digit.is_some() => Input::SendRow(digit.unwrap_or(1) - 1),
+        } if list || suggest => Input::Shift(key.mods.shift),
         Key::Escape if escape => Input::Escape,
-        Key::Text(t) if key.mods.alt && key.mods.shift && t.eq_ignore_ascii_case("v") => {
-            Input::OpenList
+        // The capture shortcut (⌥⇧S by default) over the suggestions opens
+        // the search.
+        Key::Text(t)
+            if suggest && key.mods.alt && key.mods.shift && t.eq_ignore_ascii_case("s") =>
+        {
+            Input::Record
         }
         Key::Up if list => Input::Move(-1),
         Key::Down if list => Input::Move(1),

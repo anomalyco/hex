@@ -332,9 +332,9 @@ fn every_state_draws_its_pieces() {
         ("failed", &["done", "close"]),
         ("rule-sent", &["done", "why", "undo", "close"]),
         ("rule-final", &["done", "why", "paste", "inspect", "close"]),
-        ("guess", &["done", "paste", "inspect", "list", "row-SEER"]),
-        ("guess-five", &["done", "paste", "list", "row-SEER"]),
-        ("no-answer", &["done", "why", "paste", "list"]),
+        ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
+        ("guess-five", &["done", "ask", "list", "row-SEER"]),
+        ("no-answer", &["done", "why", "ask", "list"]),
         (
             "list-guess",
             &["done", "field", "list", "row-SEER", "footer"],
@@ -355,7 +355,8 @@ fn every_state_draws_its_pieces() {
         ("failed", &["paste", "inspect"]),
         ("failed-start", &["paste", "inspect"]),
         ("list-guess", &["paste", "inspect"]),
-        ("guess", &["field", "ask"]),
+        // Trimmed to Search and ✕: the capture is already copied.
+        ("guess", &["field", "paste", "inspect", "footer"]),
         ("rule-sent", &["paste", "ask", "inspect"]),
         ("rule-final", &["ask"]),
         ("sent", &["paste", "inspect"]),
@@ -431,25 +432,27 @@ fn the_widest_states_fit_the_panel() {
             assert!(
                 items
                     .iter()
-                    .any(|item| matches!(item.id, Id::Paste | Id::Undo)),
+                    .any(|item| matches!(item.id, Id::Paste | Id::Undo | Id::Ask)),
                 "no action for {pres:?}"
             );
         }
     }
 }
 
-/// The capsule says its shortcuts in quiet text ("1–5", "esc"), a hint's
-/// keys in one small rect at most;
-/// keycaps are for Settings.
+/// The capsule says its shortcuts in quiet text ("⏎", "esc"), a hint's
+/// keys in one small rect at most. The one keycap tray is Search's: the
+/// capture shortcut that opens it, drawn as Settings draws it.
 #[test]
-fn the_capsule_draws_no_keycaps() {
+fn the_capsule_draws_keycaps_only_on_search() {
     for (name, pres) in stills() {
         let rt = runtime(pres, false);
         for e in rt.elements() {
+            let keycap = e
+                .key
+                .as_deref()
+                .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
-                !e.key
-                    .as_deref()
-                    .is_some_and(|k| k == "keys" || k.starts_with("keycap")),
+                !keycap || e.path.contains("ask-keys"),
                 "{name}: {} is a keycap",
                 e.path
             );
