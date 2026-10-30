@@ -139,6 +139,7 @@ fn fixture(configure: impl FnOnce(&mut FakeStream)) -> Fixture {
     };
     active.sources.push(SourceRun {
         source: Source::Display(1),
+        label: None,
         name: "recording.mp4".into(),
         path: dir.path().join("recording.mp4"),
         stream: Box::new(stream),
@@ -147,6 +148,7 @@ fn fixture(configure: impl FnOnce(&mut FakeStream)) -> Fixture {
         attached: anchor,
         width: 200,
         height: 200,
+        scale: Some(2.0),
         rect,
         audio_tracks: Vec::new(),
     });
@@ -232,6 +234,7 @@ fn exclusions_reach_every_live_stream_without_stopping_it() {
         0,
         SourceRun {
             source: Source::Window(9),
+            label: Some("Terminal — zsh".into()),
             name: "window.mp4".into(),
             path: fixture.active.dir.join("window.mp4"),
             stream: Box::new(FakeStream {
@@ -248,6 +251,7 @@ fn exclusions_reach_every_live_stream_without_stopping_it() {
             attached: fixture.active.anchor,
             width: 100,
             height: 100,
+            scale: Some(2.0),
             rect,
             audio_tracks: Vec::new(),
         },
@@ -335,6 +339,49 @@ fn a_named_manifest_is_written_under_its_name() {
     assert!(!finished.dir.join(MANIFEST_NAME).exists());
     let manifest = Manifest::read_file(&finished.dir.join("take-1.capture.json")).unwrap();
     assert_eq!(manifest, finished.manifest);
+}
+
+#[test]
+fn markers_and_sidecars_round_trip_through_public_readers() {
+    let mut fixture = fixture(|_| {});
+    fixture.active.names.cursor = Some("cursor.json".into());
+    fixture.active.names.input = Some("input.json".into());
+    fixture.active.sources[0].label = Some("Editor — main.rs".into());
+    let anchor = fixture.active.anchor;
+    let mark_time = HostTime::from_nanos(anchor.as_nanos() + 250_000_000);
+    let mut active_recording = recording(fixture.active);
+    active_recording.mark_at(mark_time, "intro");
+
+    let finished = active_recording.stop().wait().unwrap();
+    assert!(
+        finished
+            .manifest
+            .started_at
+            .as_deref()
+            .is_some_and(|s| s.ends_with('Z'))
+    );
+    assert_eq!(
+        finished.manifest.sources[0].label.as_deref(),
+        Some("Editor — main.rs")
+    );
+    assert_eq!(finished.manifest.sources[0].scale, Some(2.0));
+    assert_eq!(
+        finished.manifest.markers,
+        vec![Marker {
+            host_ns: mark_time.as_nanos(),
+            label: "intro".into(),
+        }]
+    );
+
+    let cursor = crate::CursorBundle::read_file(&finished.dir.join("cursor.json")).unwrap();
+    assert_eq!(cursor.version, crate::SIDECAR_VERSION);
+    assert_eq!(cursor.sources, finished.cursor);
+
+    let input = crate::InputBundle::read_file(&finished.dir.join("input.json")).unwrap();
+    assert_eq!(input.version, crate::SIDECAR_VERSION);
+    assert_eq!(input.clock, Clock::MachHostNs);
+    assert_eq!(input.anchor_ns, anchor.as_nanos());
+    assert_eq!(input.events, finished.input);
 }
 
 #[test]

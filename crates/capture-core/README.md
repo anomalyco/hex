@@ -57,6 +57,7 @@ let finished = finishing.wait()?;   // or poll with finishing.try_wait()
 - `screenshot(&Source, &Exclusions, long_edge) -> Result<Image, Error>`: one RGBA still through
   `SCScreenshotManager`, with the same filter and size a recording of that source would use.
 - `Recording`: `stop()` and `cancel()` (which removes every file) return a `Finishing` at once.
+  `mark(label)` and `mark_at(host_time, label)` record named moments on the bundle's clock.
   `health()` reports output failures and system stream stops as they happen. `external_audio()`
   hands out the microphone sink once. `click_status()` reports the optional tap. Dropping a
   `Recording` stops it and keeps its files.
@@ -121,10 +122,12 @@ recording):
   "version": 1,
   "clock": "mach_host_ns",
   "anchor_ns": 81234000000000,
+  "started_at": "2026-10-30T18:05:12.345Z",
   "sources": [{
     "source": { "kind": "region", "display": 1, "rect": { "x": 100.0, "y": 80.0, "width": 640.0, "height": 400.0 } },
     "file": "recording.mp4",
     "start_ns": 81234041000000, "duration_ms": 5000, "width": 1280, "height": 800,
+    "scale": 2.0,
     "frame": { "x": 100.0, "y": 80.0, "width": 640.0, "height": 400.0 },
     "audio_tracks": []
   }],
@@ -132,16 +135,21 @@ recording):
     { "name": "recording.mp4", "kind": { "type": "video", "source": 0 }, "start_ns": 81234041000000 },
     { "name": "audio.wav", "kind": { "type": "microphone", "sample_rate": 16000 }, "start_ns": 81234000000000 }
   ],
+  "markers": [{ "host_ns": 81235000000000, "label": "intro" }],
   "audio_gaps": [{ "start_ns": 81235200000000, "end_ns": 81235450000000 }],
   "missing_permissions": []
 }
 ```
 
 `anchor_ns` is taken just before the first source starts; sample 0 of the microphone WAV sits
-there. A media file's `start_ns` is where its time zero sits; the cursor and input logs carry
-`host_ns` per entry instead. A source's `frame` is the captured area in global points, and its
-`error` is set when it did not finish cleanly. `Manifest::read` (or `Manifest::read_file` for a named
-one) refuses a manifest newer than it understands.
+there, and `started_at` records the UTC wall-clock time at `anchor_ns` for ordering takes across
+reboots. A media file's `start_ns` is where its time zero sits; the cursor and input logs carry
+`host_ns` per entry instead, and can be read back with `CursorBundle::read_file` and
+`InputBundle::read_file`. External window-layout and transcript sidecars can also be listed in
+`files` as `windows` or `transcript` (`audio_file` optional). A source's `frame` is the captured
+area in global points, `scale` is the backing pixels-per-point factor when opened, `label` records
+any window title, and `error` is set when it did not finish cleanly. `Manifest::read` (or
+`Manifest::read_file` for a named one) refuses a manifest newer than it understands.
 
 ## Seams
 

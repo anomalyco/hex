@@ -221,9 +221,13 @@ fn check_dir<'a>(dir: &Path, names: impl Iterator<Item = &'a str>) -> Result<(),
 /// A source resolved against the current shareable content.
 pub(crate) struct Target {
     pub filter: SCContentFilter,
+    /// Human-readable label captured when the source opened, if any.
+    pub label: Option<String>,
     /// Encoded size in pixels.
     pub width: u32,
     pub height: u32,
+    /// Backing pixels per point when the source opened.
+    pub scale: Option<f64>,
     /// The captured area in global top-left points.
     pub rect: Rect,
     /// For a region, the area in its display's own points.
@@ -237,11 +241,11 @@ impl Target {
         exclude: &Exclusions,
     ) -> Result<Self, Error> {
         let source = plan.source;
-        let (filter, rect, source_rect) = match source {
+        let (filter, label, rect, source_rect) = match source {
             Source::Display(id) => {
                 let display = find_display(content, id).ok_or(Error::SourceUnavailable(source))?;
                 let filter = display_filter(content, &display, exclude)?;
-                (filter, rect_of(display.frame()), None)
+                (filter, None, rect_of(display.frame()), None)
             }
             Source::Window(id) => {
                 let window = content
@@ -249,11 +253,12 @@ impl Target {
                     .into_iter()
                     .find(|window| window.window_id() == id)
                     .ok_or(Error::SourceUnavailable(source))?;
+                let label = window_label(&window);
                 let filter = SCContentFilter::create()
                     .with_window(&window)
                     .build()
                     .map_err(|error| Error::ConfigureStream(error.to_string()))?;
-                (filter, rect_of(window.frame()), None)
+                (filter, label, rect_of(window.frame()), None)
             }
             Source::Region { display: id, rect } => {
                 let display = find_display(content, id).ok_or(Error::SourceUnavailable(source))?;
@@ -272,7 +277,7 @@ impl Target {
                     y: frame.y + local.y,
                     ..local
                 };
-                (filter, global, Some(local))
+                (filter, None, global, Some(local))
             }
         };
         let scale = f64::from(filter.point_pixel_scale());
@@ -280,8 +285,10 @@ impl Target {
             .ok_or(Error::InvalidDimensions)?;
         Ok(Self {
             filter,
+            label,
             width,
             height,
+            scale: (scale.is_finite() && scale > 0.0).then_some(scale),
             rect,
             source_rect,
         })
@@ -312,6 +319,22 @@ fn rect_of(frame: CGRect) -> Rect {
         y: frame.origin.y,
         width: frame.size.width,
         height: frame.size.height,
+    }
+}
+
+fn window_label(window: &SCWindow) -> Option<String> {
+    let app = window
+        .owning_application()
+        .map(|app| app.application_name().trim().to_owned())
+        .filter(|name| !name.is_empty());
+    let title = window
+        .title()
+        .map(|title| title.trim().to_owned())
+        .filter(|title| !title.is_empty());
+    match (app, title) {
+        (Some(app), Some(title)) if app != title => Some(format!("{app} — {title}")),
+        (Some(label), _) | (None, Some(label)) => Some(label),
+        (None, None) => None,
     }
 }
 
@@ -485,6 +508,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     }
     Ok(SourceRun {
         source: context.source,
+        label: target.label.clone(),
         name: context.name,
         path: context.path,
         stream: Box::new(native),
@@ -493,6 +517,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
         attached,
         width: target.width,
         height: target.height,
+        scale: target.scale,
         rect: target.rect,
         audio_tracks,
     })
