@@ -904,7 +904,8 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Hold reaches 300 ms -> Tone already played; mute/pause/sleep begin now
      -> Release microphone while idle -> Output warms on press; tone once
         the microphone is open and the hold counts
-  Dictation pasted -> Done tone                                // dictate.done-tone
+  Dictation pasted >= 2 s after the stop tone -> Done tone      // dictate.done-tone
+     -> Pasted sooner (the usual case) -> Stop tone only; `DONE_MIN_AFTER_STOP`
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
   Tone requested -> Playback worker opens the default output, then plays
@@ -919,7 +920,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
 
 ```ts
 Settings > Sounds (next to Sound volume)                    // dictate.sound-set
-├── Default / older settings -> Hex signature
+├── Default / older settings -> Classic
 ├── Row shows the saved set -> Opens the Sounds sheet
 │   ├── Stage -> Hex's own HUD, where this OS puts it, does what it does
 │   │   │          at each sound of a short dictation
@@ -972,7 +973,10 @@ twice, and success a run of keys up to a full press; it has no done sound
 because the stop already says it. Classic is the
 sounds Hex played before the signature set (start clicks, stop swish, cancel
 thud), restored from git; it has no done tone, errors play macOS Basso as they
-did, and onboarding success plays signature's.
+did, and onboarding success plays its stop sound (the other sets have their own).
+The done sound of every set plays only when the paste lands at least
+`DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
+Sounds sheet's demo still plays it. Checked by `done_plays_only_after_a_slow_paste`.
 
 Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
