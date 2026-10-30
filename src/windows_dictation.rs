@@ -69,6 +69,8 @@ pub struct WindowsDictationConfig {
     pub mode_runtime: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
     pub transformations: Arc<crate::personal_commands::TransformationClient>,
     pub fallback_to_default_device: bool,
+    /// Terminal paste: Ctrl+Shift+V instead of Ctrl+V.
+    pub paste_with_shift: bool,
     /// Where the listener reports a model change that failed to load.
     pub swap_failures: Option<mpsc::Sender<crate::local_transcriber::SwapFailed>>,
 }
@@ -101,6 +103,7 @@ impl WindowsDictationConfig {
             )),
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
             fallback_to_default_device: true,
+            paste_with_shift: settings.paste_with_shift,
             swap_failures: None,
         }
     }
@@ -134,8 +137,11 @@ pub fn run(
         mode_runtime,
         transformations,
         fallback_to_default_device,
+        paste_with_shift,
         swap_failures,
     } = config;
+    // Read by the output worker at each paste, so a change applies in place.
+    let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
     let _indicator_guard = IndicatorGuard(indicator.clone());
     crate::feedback::set_enabled(feedback_volume > 0);
     crate::feedback::set_volume(f32::from(feedback_volume) / 100.0);
@@ -196,10 +202,11 @@ pub fn run(
     let mut finishing: Option<Finishing> = None;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
+    let worker_paste_with_shift = paste_with_shift.clone();
     let worker = thread::Builder::new()
         .name("windows-dictation-output".into())
         .spawn(move || {
-            let mut paster = WindowsPaster::new();
+            let mut paster = WindowsPaster::new(worker_paste_with_shift);
             while let Ok(job) = job_receiver.recv() {
                 let result = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
@@ -252,6 +259,7 @@ pub fn run(
             && finishing.is_none()
         {
             let next_config = WindowsDictationConfig::from_settings(&next);
+            paste_with_shift.store(next_config.paste_with_shift, Ordering::Relaxed);
             let next_shortcuts = Shortcuts {
                 hotkey: next_config.hotkey,
                 paste_last_hotkey: next_config.paste_last_hotkey,

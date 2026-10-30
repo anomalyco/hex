@@ -40,7 +40,7 @@ pub(super) struct Capabilities {
     pub(super) dock_icon: bool,
     /// The listener can be off: the status card and Enable on launch.
     pub(super) listener_control: bool,
-    /// Paste with Ctrl-Shift-V for terminals.
+    /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
     pub(super) terminal_paste: bool,
     /// The dictation shortcut can pass through to other apps (Windows).
     pub(super) share_shortcut: bool,
@@ -112,7 +112,7 @@ impl Capabilities {
         launch_at_login: true,
         dock_icon: false,
         listener_control: true,
-        terminal_paste: false,
+        terminal_paste: true,
         share_shortcut: true,
         hex_microphone: false,
         practice_dictation: false,
