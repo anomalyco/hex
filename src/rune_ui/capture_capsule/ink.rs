@@ -224,6 +224,11 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     let frame = ink.target;
     let rect = [frame.x as f32, frame.y as f32, scene.size[0], scene.size[1]];
     let drawing = crate::capture_host::drawing();
+    // The drawing surface's hit regions come from the view, so a change
+    // must lay it out again even when no ink changed: without it, the
+    // overlay asked for its regions while it had none, and every click went
+    // through to the app.
+    let mut changed = drawing != s.drawing;
     if drawing != s.drawing {
         s.drawing = drawing;
         if let Some(overlay) = &s.overlay {
@@ -263,7 +268,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         }
     }
     tx.wake_after(FRAME);
-    let changed = scene != s.scene;
+    changed |= scene != s.scene;
     if changed {
         // The scene already holds every fade and tail at this instant;
         // springs on top would only make the ink lag the pointer.

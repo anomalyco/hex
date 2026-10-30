@@ -22,6 +22,17 @@ pub const FAILED: &str = ".deliver-failed.json";
 pub const PROMPT: &str = "prompt.json";
 
 const GIVE_UP_AFTER_MS: u64 = 24 * 60 * 60 * 1000;
+/// Nor more tries than this, whatever the backoff.
+const MAX_ATTEMPTS: u32 = 20;
+
+/// Whether OpenCode answered that the session doesn't exist (HTTP 404).
+fn session_gone(err: &anyhow::Error) -> bool {
+    crate::opencode::http_status(err) == Some(404)
+        || err.chain().any(|cause| {
+            let text = cause.to_string();
+            text.contains("Session not found") || text.contains("SessionNotFoundError")
+        })
+}
 const SCAN_EVERY: Duration = Duration::from_secs(15);
 
 /// What happened once a received recording's bundle was built.
@@ -263,9 +274,14 @@ fn retry_due_on(captures: &Path, now: u64, forward: Forward, machine: Option<&st
             Err(err) => {
                 pending.attempts += 1;
                 pending.last_error = short(&format!("{err:#}"));
-                if now.saturating_sub(pending.first_at) >= GIVE_UP_AFTER_MS {
+                // A session that's gone never comes back: no retry reaches it.
+                let gone = session_gone(&err);
+                if gone
+                    || pending.attempts >= MAX_ATTEMPTS
+                    || now.saturating_sub(pending.first_at) >= GIVE_UP_AFTER_MS
+                {
                     scrawl_log(format!(
-                        "deliver: giving up on {} after {} tries over a day ({})",
+                        "deliver: giving up on {} after {} tries ({})",
                         dir.display(),
                         pending.attempts,
                         pending.last_error
@@ -461,6 +477,26 @@ mod tests {
         assert_eq!(pending.machine, crate::util::machine_id());
         #[cfg(target_os = "macos")]
         assert_eq!(pending.machine.as_deref().map(str::len), Some(32));
+    }
+
+    fn gone(_: &Path, session: &str) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Session not found: {session}: OpenCode API failed: HTTP 404"
+        ))
+    }
+
+    #[test]
+    fn gives_up_at_once_when_the_session_is_gone() {
+        let captures = temp_captures();
+        let bundle = captures.join("scrawl-3-c.scrawl");
+        std::fs::create_dir_all(&bundle).unwrap();
+        Pending::new("ses_x", "X", None, "offline", 0)
+            .write(&bundle)
+            .unwrap();
+        let report = retry_due(&captures, 60_000, gone);
+        assert_eq!(report.given_up, 1);
+        assert!(!bundle.join(PENDING).exists() && bundle.join(FAILED).exists());
+        std::fs::remove_dir_all(captures).unwrap();
     }
 
     #[test]
