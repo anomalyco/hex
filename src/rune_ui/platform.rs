@@ -483,7 +483,8 @@ impl PlatformState {
         state.system_audio = true;
         state.login_item = caps.launch_at_login.then_some(LoginItemStatus::Disabled);
         if caps.hex_microphone {
-            let version = env!("CARGO_PKG_VERSION").to_string();
+            // Fixed, so the scenes' goldens don't change with the crate version.
+            let version = "0.0.0".to_string();
             state.hex_microphone = Some(HexMicrophoneStatus {
                 driver_bundle_installed: true,
                 driver_loaded: true,
