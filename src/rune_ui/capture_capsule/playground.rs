@@ -291,6 +291,7 @@ impl Playground {
             | Action::Discard
             | Action::Send { .. }
             | Action::Paste
+            | Action::Pen
             | Action::Inspect => {}
         }
     }

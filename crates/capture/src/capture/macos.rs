@@ -14,7 +14,7 @@ use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
 
 use super::{
     CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY,
-    CARBON_SHIFT_KEY, Event, FRAME_SAMPLE_INTERVAL, InputEvent, Sampler, SharedCaptureTelemetry,
+    CARBON_SHIFT_KEY, FRAME_SAMPLE_INTERVAL, InputEvent, Sampler, SharedCaptureTelemetry,
     ShortcutConfig, ShortcutKind, capture_size, clean_label, hotkey_combos, pick_display,
     poll_clicks, pure_shift_state, track_shift_ink,
 };
