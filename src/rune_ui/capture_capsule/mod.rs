@@ -957,6 +957,16 @@ fn placed(e: El, shown: &Shown) -> El {
         .motion(shown.motion)
 }
 
+/// The capsule's edge in dark: a hairline lit from above, which the list
+/// panel wears too.
+fn rim(k: &rune_kit::Kit, w: f32, h: f32, radius: f32) -> El {
+    el().key("rim")
+        .absolute(0.0, 0.0)
+        .size(w, h)
+        .radius(radius)
+        .border_gradient(0.5, k.light(0.12), k.light(0.03))
+}
+
 fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
     let k = p.k;
     let [x, y, w, h] = surface.shell;
@@ -997,14 +1007,7 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
     );
     if k.dark {
         // Dark, a hairline lit from above, as Scrawl's capsule has.
-        body = body.child(
-            el().key("rim")
-                .absolute(0.0, 0.0)
-                .size(w, h)
-                .radius(corner(h))
-                .border_gradient(0.5, k.light(0.12), k.light(0.03))
-                .motion(surface.shell_motion),
-        );
+        body = body.child(rim(k, w, h, corner(h)).motion(surface.shell_motion));
     }
     body.opacity(if surface.shell_on { 1.0 } else { 0.0 })
         .motion(surface.shell_motion)
@@ -1797,10 +1800,20 @@ fn list_panel(p: Paint, body: El, hints: El, x: f32, w: f32, h: f32, blur: f32) 
     for shadow in &k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
+    // The clip is on an inner box: clipping the panel itself would cut off
+    // its own ring and shadow.
+    panel = panel.child(
+        el().absolute(0.0, 0.0)
+            .size(w, h)
+            .radius(LIST_RADIUS)
+            .clip_rounded(LIST_RADIUS)
+            .child(body)
+            .child(footer_box(p, hints, w, h)),
+    );
+    if k.dark {
+        panel = panel.child(rim(k, w, h, LIST_RADIUS));
+    }
     panel
-        .clip_rounded(LIST_RADIUS)
-        .child(body)
-        .child(footer_box(p, hints, w, h))
         .motion(tuning::get().island)
         .role("list")
         .label("Send to")
