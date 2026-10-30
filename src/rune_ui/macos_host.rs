@@ -579,9 +579,10 @@ impl NativeHost for MacHost {
             }
             PlatformRequest::Permission(PermissionAction::ShowGuide(kind)) => {
                 // Screen Recording may have been granted since the last
-                // refresh; the refresh below then shows Allowed.
+                // refresh; the refresh below then shows Allowed, or Restart.
                 if kind != PermissionKind::ScreenRecording
-                    || !crate::meeting::screen_recording_permitted()
+                    || crate::capture_host::screen_access()
+                        == crate::capture_host::ScreenAccess::Off
                 {
                     crate::permission_guide::show(kind);
                 }
@@ -755,7 +756,9 @@ impl NativeHost for MacHost {
             PermissionKind::Microphone => permissions.microphone != PermissionState::Ready,
             PermissionKind::Accessibility => permissions.accessibility != PermissionState::Ready,
             PermissionKind::SystemAudio => !system_audio,
-            PermissionKind::ScreenRecording => !crate::meeting::screen_recording_permitted(),
+            PermissionKind::ScreenRecording => {
+                crate::capture_host::screen_access() == crate::capture_host::ScreenAccess::Off
+            }
         });
         changed |= state.permissions_asked.len() != asked_len;
         changed |= update(&mut state.login_item_checking, self.login_checking);
@@ -1311,7 +1314,10 @@ impl ScrawlHost {
         if !(refresh || changed) {
             return changed;
         }
-        let screen_recording = crate::meeting::screen_recording_permitted();
+        let screen = crate::capture_host::screen_access();
+        let screen_recording = screen == crate::capture_host::ScreenAccess::Allowed;
+        let needs_restart = screen == crate::capture_host::ScreenAccess::NeedsRestart;
+        changed |= update(&mut view.screen_needs_restart, needs_restart);
         let running = crate::capture_host::scrawl_running();
         changed |= update(&mut view.screen_recording, screen_recording);
         changed |= update(&mut view.scrawl_running, running);

@@ -350,10 +350,17 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                         // The common first-capture failure: the engine's
                         // own reason for it is a ScreenCaptureKit error.
                         #[cfg(target_os = "macos")]
-                        Input::Failed(what @ (Failure::Start | Failure::Save), _)
-                            if !crate::meeting::screen_recording_permitted() =>
-                        {
-                            Input::Failed(what, Some(SCREEN_RECORDING_OFF.into()))
+                        Input::Failed(what @ (Failure::Start | Failure::Save), error) => {
+                            use crate::capture_host::ScreenAccess;
+                            match crate::capture_host::screen_access_now() {
+                                ScreenAccess::Off => {
+                                    Input::Failed(what, Some(SCREEN_RECORDING_OFF.into()))
+                                }
+                                ScreenAccess::NeedsRestart => {
+                                    Input::Failed(what, Some(SCREEN_RECORDING_RESTART.into()))
+                                }
+                                ScreenAccess::Allowed => Input::Failed(what, error),
+                            }
                         }
                         input => input,
                     });
@@ -437,6 +444,10 @@ pub(crate) fn act(action: Action) {
 /// Why a capture failed when Screen Recording isn't granted.
 #[cfg(target_os = "macos")]
 const SCREEN_RECORDING_OFF: &str = "Screen Recording is off";
+
+/// Why it failed when Screen Recording is on but this Hex predates it.
+#[cfg(target_os = "macos")]
+const SCREEN_RECORDING_RESTART: &str = "Restart Hex to record your screen";
 
 /// The pointer, in global top-left points. Wayland tells Hex nothing of it:
 /// the portal picks the screen.

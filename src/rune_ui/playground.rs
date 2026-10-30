@@ -166,6 +166,11 @@ const PATHS: &[(&str, &str)] = &[
         "mac-scrawl-permission",
         "Window/Annotate/Screen Recording missing",
     ),
+    #[cfg(hex_capture)]
+    (
+        "mac-scrawl-restart",
+        "Window/Annotate/Screen Recording needs restart",
+    ),
     ("mac-voice-filter", "Window/Voice Filter/Voice Filter"),
     ("mac-voice-filter-muted", "Window/Voice Filter/Muted"),
     (

@@ -227,6 +227,9 @@ impl NotesAvailability {
 pub(super) struct ScrawlView {
     /// Screen Recording, which a capture needs to record the screen.
     pub(super) screen_recording: bool,
+    /// Screen Recording is on in System Settings, but this Hex can't use it
+    /// until it restarts.
+    pub(super) screen_needs_restart: bool,
     /// Scrawl's own app runs, so it owns the capture shortcut.
     pub(super) scrawl_running: bool,
     /// Use Hex for annotations was pressed and Scrawl has not quit yet.

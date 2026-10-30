@@ -105,11 +105,18 @@ Settings › Annotate                      // capture.pane
 ├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
 │   macOS), the capsule's pen with Esc, stop (tap again), and send, each
 │   with its keys. Check: rune_ui::scrawl tests
-├── Screen Recording -> read (preflight, never a prompt) once a second and again
-│   when the pane opens or the window becomes key; granted -> Allowed, no button
+├── Screen Recording -> read once a second and again when the pane opens or
+│   the window becomes key, never with a prompt (capture_host::screen_access):
+│   the preflight, which keeps its first answer for the life of the process,
+│   then, while it says no, a fresh `scrawl-helper permissions` at most every
+│   2 s on its own thread and a one-frame probe once that says granted
+│   ├── granted -> Allowed, no button
+│   ├── granted in System Settings but unusable until Hex relaunches ->
+│   │   "Turns on when Hex restarts" and Restart Hex, never Allow over a switch
+│   │   already on
 │   └── Allow -> rechecks, then the onboarding permission guide over System
 │       Settings' list (PermissionKind::ScreenRecording), as for Input
-│       Monitoring; flips to Allowed on the next read. Never part of onboarding
+│       Monitoring; flips on the next read. Never part of onboarding
 │       (macOS also asks at the first capture). Check: rune_ui::scrawl tests
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
 │   off; also the menu bar's Show Hex in Screen Recordings checkmark) -> see
@@ -217,7 +224,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── Failed -> "Couldn't start" until the engine reports it
 │   recording (`screen`), then "Couldn't save"; a failed send ->
 │   "Couldn't send to X". Each keeps its `error`, or "Screen Recording is off"
-│   when it isn't granted; a start that fails before any snapshot showed it
+│   when it isn't granted, or "Restart Hex to record your screen" when it was
+│   granted after Hex started (a fresh read, as the pane's); a start that fails before any snapshot showed it
 │   recording still shows, but never over a newer recording, and a capture
 │   already under way that fails in the background never takes it over
 ├── A shown recording that leaves with no outcome (a discard, from a chip or
