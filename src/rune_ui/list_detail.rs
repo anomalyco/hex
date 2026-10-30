@@ -1,8 +1,8 @@
 //! The list-and-detail layout Commands, Meetings, and History share: the
 //! list on the pane title's edge with no rule beside it, and the selected
-//! item in a raised card. Rows have no hover fill; their meta line brightens
-//! and their action (Copy) takes the time's place. Detail actions are ghost
-//! icons in the card's corner.
+//! item in a raised card. A hovered row takes a hover fill and its action
+//! (Copy) takes the time's place. Detail actions are ghost icons in the
+//! card's corner.
 
 use rune::{Align, El, Icon, col, el, icon, row, text};
 
@@ -92,8 +92,9 @@ pub(super) struct Item {
     pub(super) selected: bool,
 }
 
-/// A selectable list row hung past the gutter: no hover fill (the meta
-/// brightens and the row's action shows), a quiet fill when selected.
+/// A selectable list row hung past the gutter: a hover fill (and the row's
+/// action in the time's place), a quiet fill when selected. Nothing on it
+/// animates.
 pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> El {
     let c = &p.k.c;
     let time = text(item.time)
@@ -122,9 +123,8 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
         .py(9.0)
         .gap(2.0)
         .radius(p.k.radius.md)
+        .hover(c.hover)
         .hover_group()
-        .press(c.pressed)
-        .on_press(select)
         .child(
             row()
                 .key("top")
@@ -146,12 +146,12 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                 .key("meta")
                 .font(p.k.ty.small)
                 .color(item.meta_ink.unwrap_or(p.muted()))
-                .group_color(item.meta_ink.unwrap_or(p.text()))
                 .truncate(),
         );
     if item.selected {
         row_el = row_el.fill(c.layer_02);
     }
+    let row_el = super::lists::select_at_once(row_el, item.selected, select);
     super::lists::source_item(row_el, item.selected)
 }
 

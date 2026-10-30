@@ -5,8 +5,8 @@
 use std::sync::LazyLock;
 
 use rune::{
-    Beat, Color, Easing, Edge, El, Sequence, Shadow, Spring, SpringPair, Transition, col, el, row,
-    text,
+    Beat, Color, Easing, Edge, El, Sequence, Shadow, Spring, SpringPair, Transition, Tx, col, el,
+    row, text,
 };
 
 use super::Ui;
@@ -89,6 +89,28 @@ pub(super) fn source_item(item: El, selected: bool) -> El {
     item.focusable(true).focus_selected(selected)
 }
 
+/// Selects a list row as fast as it can: on the pointer's press, as the
+/// sidebar does, with nothing animated. The selected fill and the detail
+/// beside the list swap in that frame. The keyboard (Space, and the arrows
+/// in a [`source_list`]) selects through `on_press`, which leaves a selected
+/// row alone, so a click's release doesn't select it again.
+pub(super) fn select_at_once(row: El, selected: bool, select: impl Fn(&mut Ui) + 'static) -> El {
+    let select = std::rc::Rc::new(select);
+    let on_down = select.clone();
+    row.on_drag(move |ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx| {
+        if d.phase == rune::Phase::Down {
+            tx.instant();
+            on_down(ui);
+        }
+    })
+    .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
+        if !selected {
+            tx.instant();
+            select(ui);
+        }
+    })
+}
+
 /// A selectable list row: title (with trailing pieces) over a meta line.
 pub(super) fn list_row(
     p: Paint,
@@ -109,8 +131,6 @@ pub(super) fn list_row(
         .gap(2.0)
         .radius(p.k.radius.md)
         .hover(c.hover)
-        .press(c.pressed)
-        .on_press(select)
         .child(
             row()
                 .key("top")
@@ -137,7 +157,7 @@ pub(super) fn list_row(
     if selected {
         item = item.fill(c.layer_02);
     }
-    source_item(item, selected)
+    source_item(select_at_once(item, selected, select), selected)
 }
 
 /// A quiet message in a list or detail (empty, no matches, failed load).
