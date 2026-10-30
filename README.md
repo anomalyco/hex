@@ -159,8 +159,8 @@ until you first use it.
   for Screen Recording the first time; Linux asks through the desktop's
   screen-sharing dialog once, then remembers the screen. While it records,
   the dictation shortcut does nothing.
-- **The bar:** the recording bar at the top shows the timer, a pen (click it
-  to draw until you click it again; Esc stops drawing), stop, and ✕ to
+- **The bar:** the recording bar at the top shows the timer, a pen (click it,
+  then drag to draw like a real pen; click it again or press Esc to stop), stop, and ✕ to
   discard. On macOS, holding Shift draws too. Ink fades from the screen
   after about a second but stays in the recording.
 - **Paste or send:** when it stops, the annotation is on your clipboard and

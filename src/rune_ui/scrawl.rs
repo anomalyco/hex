@@ -139,7 +139,7 @@ fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
             "how-pen",
             tr("Pen"),
             Some(tr(
-                "Or click the pen on the capsule to draw until you click it again; Esc stops drawing",
+                "Or click the pen on the bar, then drag to draw; click it again or press Esc to stop",
             )),
             keys("how-pen-keys", &["Esc".to_string()]),
         ),

@@ -2082,17 +2082,38 @@ pub const DRAW_HOLD: Duration = Duration::from_millis(250);
 static DRAW_HELD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 /// The capsule's pen is on.
 static PEN: AtomicBool = AtomicBool::new(false);
+/// The mouse button is down while the pen is on: the pen draws only then.
+static PEN_DOWN: AtomicBool = AtomicBool::new(false);
 
 fn draw_held() -> std::sync::MutexGuard<'static, Option<std::time::Instant>> {
     DRAW_HELD.lock().unwrap_or_else(|error| error.into_inner())
 }
 
-/// Whether the pointer draws now: only while a capture records, with the
-/// pen on or the Annotate key held past [`DRAW_HOLD`].
+/// Whether the overlay takes the pointer now: only while a capture
+/// records, with the pen on or the Annotate key held past [`DRAW_HOLD`].
 pub fn drawing() -> bool {
+    wants_input() && (PEN.load(Ordering::Acquire) || key_held())
+}
+
+fn key_held() -> bool {
+    draw_held().is_some_and(|since| since.elapsed() >= DRAW_HOLD)
+}
+
+/// Whether a pointer move lays ink now: the held key draws as the pointer
+/// moves, with no click; the pen, like a real one, only while the button
+/// is down.
+fn inking() -> bool {
     wants_input()
-        && (PEN.load(Ordering::Acquire)
-            || draw_held().is_some_and(|since| since.elapsed() >= DRAW_HOLD))
+        && (key_held() || (PEN.load(Ordering::Acquire) && PEN_DOWN.load(Ordering::Acquire)))
+}
+
+/// The mouse button went down (true) or up while the pen is on. Letting go
+/// ends the stroke.
+pub fn pen_button(down: bool) {
+    let was = PEN_DOWN.swap(down && drawing(), Ordering::AcqRel);
+    if was && !down && !key_held() {
+        end_stroke();
+    }
 }
 
 /// The Annotate key went down while a capture records.
@@ -2120,6 +2141,7 @@ pub fn annotate_key_up() -> KeyUp {
         return KeyUp::Tap;
     }
     PEN.store(false, Ordering::Release);
+    PEN_DOWN.store(false, Ordering::Release);
     end_stroke();
     KeyUp::Drew
 }
@@ -2135,6 +2157,7 @@ pub fn set_pen(on: bool) {
         PEN.store(false, Ordering::Release);
         return;
     }
+    PEN_DOWN.store(false, Ordering::Release);
     if PEN.swap(on, Ordering::AcqRel) != on {
         tracing::info!(on, "Annotate pen");
         if !on {
@@ -2148,6 +2171,7 @@ pub fn exit_drawing() -> bool {
     let drew = drawing();
     *draw_held() = None;
     PEN.store(false, Ordering::Release);
+    PEN_DOWN.store(false, Ordering::Release);
     if drew {
         end_stroke();
     }
@@ -2158,6 +2182,7 @@ pub fn exit_drawing() -> bool {
 fn reset_drawing() {
     *draw_held() = None;
     PEN.store(false, Ordering::Release);
+    PEN_DOWN.store(false, Ordering::Release);
 }
 
 /// Ends a stroke under way where the pointer is, as letting go of Shift does.
@@ -2188,12 +2213,19 @@ fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture
     if !drawing() {
         return event;
     }
+    // The pen draws between the button's press and release; a press or
+    // release is never the app's click while drawing.
+    match event {
+        InputEvent::ButtonDown { right: false, .. } => pen_button(true),
+        InputEvent::ButtonUp { right: false, .. } => pen_button(false),
+        _ => {}
+    }
     match event {
         InputEvent::Move { t_ms, x, y, .. } => InputEvent::Move {
             t_ms,
             x,
             y,
-            shift_only: true,
+            shift_only: inking(),
         },
         InputEvent::ButtonDown {
             t_ms, x, y, right, ..
@@ -2246,7 +2278,7 @@ pub fn draw(x: f32, y: f32, scale: f32) {
             x: f64::from(x),
             y: f64::from(y),
             modifiers: Modifiers {
-                shift: true,
+                shift: inking(),
                 ..Modifiers::default()
             },
         }),
