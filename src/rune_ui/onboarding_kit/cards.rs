@@ -228,11 +228,9 @@ fn sent_thread(p: Paint, bubbles: &[String]) -> El {
                 .radius(12.0)
                 .fill(bubble_bg)
                 .border(p.hair, bubble_rim)
-                .transition(
-                    Transition::scale(0.94)
-                        .combined(Transition::offset(0.0, 6.0))
-                        .combined(Transition::opacity()),
-                )
+                // The travel comes from the launch out of the field
+                // (`stories::poll`); the bubble itself only fades up.
+                .transition(Transition::opacity())
                 .child(
                     text(msg.clone())
                         .key("msg")

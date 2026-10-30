@@ -11,7 +11,7 @@
 //!    delivering `"Every test is green and prod is warm. Ship it right now."`
 //!    in **1.5 seconds**.
 
-use rune::{Anim, Beat, El, Sequence, Transition, col, el, row, text};
+use rune::{Anim, Beat, Color, El, Sequence, SpringPair, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{CARD_W, FIELD_FONT, JAY, Reply, field_text_origin, lines_card_height, notice};
@@ -325,7 +325,9 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         |id| key_glow(s, id, voice_u),
     );
 
-    // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`.
+    // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
+    // unfolds as it rises a little off the keyboard, where `⌥` lights.
+    let rise = Transition::offset(0.0, 10.0).springs(SpringPair::new(UI_SPRING, UI_SPRING));
     let hud_el = if voice_phase {
         voice_or_idle_slot(
             "onboard-dot-hud",
@@ -337,6 +339,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             s,
         )
         .0
+        .map(|hud| hud.transition(rise))
     } else {
         set_dot_hud(None);
         None
@@ -402,6 +405,14 @@ fn key_glow(s: &Onboard, id: &str, voice_u: f32) -> f32 {
     }
 }
 
+/// How many `"Without Hex"` bubbles Jay's card shows now.
+pub(super) fn sent_count(s: &Onboard) -> usize {
+    match jay_reply(s) {
+        Reply::Lines { sent_bubbles, .. } => sent_bubbles.len(),
+        _ => 0,
+    }
+}
+
 fn jay_reply(s: &Onboard) -> Reply<'static> {
     let lines = reply_lines();
     let empty = Reply::Lines {
@@ -460,21 +471,43 @@ fn jay_reply(s: &Onboard) -> Reply<'static> {
     }
 }
 
+/// One side of [`stopwatch_pill`]: a label and how it felt, the feeling
+/// crossfading in once that side is over.
+fn verdict(p: Paint, key: &str, label: &str, feeling: Option<&str>, tone: Color) -> El {
+    let k = p.k;
+    let feeling = feeling.unwrap_or("…");
+    row()
+        .key(key.to_string())
+        .gap(5.0)
+        .center_y()
+        .transition(Transition::opacity())
+        .child(text(label).key("label").font(k.ty.small).color(p.faint()))
+        .child(
+            text(feeling)
+                .key(format!("feeling-{feeling}"))
+                .font(k.ty.small_medium)
+                .color(tone)
+                .transition(Transition::opacity()),
+        )
+}
+
+/// `Typing … too long` against `Hex … fast`: how each answer felt, not a
+/// stopwatch.
 fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
     let k = p.k;
-    let typed_raw = typing_elapsed(s).filter(|&e| e >= 0.0);
-    let Some(typed_e) = typed_raw else {
+    if typing_elapsed(s).is_none_or(|e| e < 0.0) {
         return el().key("stopwatch-empty");
-    };
-    let typed = typed_e.clamp(0.0, typed_secs());
-    let said = s
-        .take_from
-        .filter(|_| s.step >= Step::Hearing)
-        .map(|from| (s.now - from).clamp(0.0, ANSWER_JAY.release));
+    }
     let voice_stage = s.step >= Step::YourTurn;
     let finished = s.step >= Step::Heard;
+    let typing = verdict(
+        p,
+        "typed-stat",
+        "Typing",
+        typed_done(s).then_some("too long"),
+        if voice_stage { p.muted() } else { p.text() },
+    );
 
-    let num_font = k.ty.small_medium.features("'tnum' 1");
     let mut pill = row()
         .key("stopwatch-pill")
         .h(24.0)
@@ -486,49 +519,25 @@ fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
         .motion(UI_SPRING)
+        .width_leads()
         .transition(arrives())
-        .child(
-            row()
-                .key("typed-stat")
-                .gap(5.0)
-                .center_y()
-                .child(
-                    text("Typing")
-                        .key("typed-lbl")
-                        .font(k.ty.small)
-                        .color(p.faint()),
-                )
-                .child(
-                    text(seconds(typed))
-                        .key("typed-val")
-                        .font(num_font)
-                        .color(if voice_stage { p.muted() } else { p.text() }),
-                ),
-        );
+        .child(typing);
 
     if voice_stage {
-        let voice_color = if finished { p.success() } else { p.text() };
         pill = pill
-            .child(el().key("sep").size(p.hair, 10.0).fill(k.c.border_base))
             .child(
-                row()
-                    .key("voice-stat")
-                    .gap(5.0)
-                    .center_y()
-                    .transition(Transition::opacity())
-                    .child(
-                        text("With Hex")
-                            .key("voice-lbl")
-                            .font(k.ty.small)
-                            .color(if finished { p.success() } else { p.muted() }),
-                    )
-                    .child(
-                        text(seconds(said.unwrap_or(0.0)))
-                            .key("voice-val")
-                            .font(num_font)
-                            .color(voice_color),
-                    ),
-            );
+                el().key("sep")
+                    .size(p.hair, 10.0)
+                    .fill(k.c.border_base)
+                    .transition(Transition::opacity()),
+            )
+            .child(verdict(
+                p,
+                "voice-stat",
+                "Hex",
+                finished.then_some("fast"),
+                if finished { p.success() } else { p.text() },
+            ));
     }
 
     row()

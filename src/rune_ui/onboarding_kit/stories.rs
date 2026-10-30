@@ -14,7 +14,7 @@ use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
 use super::sfx::SfxTrack;
-use super::{flows, permissions, typing};
+use super::{flows, permissions, typing, versus};
 use crate::feedback::KeySoundStyle;
 
 static LIVE_WINDOW: AtomicBool = AtomicBool::new(false);
@@ -80,7 +80,13 @@ pub(crate) struct Onboard {
     pub(crate) parked_from: Option<f64>,
     pub(crate) typing_from: Option<f64>,
     pub(crate) voice_from: Option<f64>,
+    /// When the resting HUD plate first showed on `"With Hex"` or
+    /// `"Your turn"`: the HUD unfolds from here and keeps running through the
+    /// take, so pressing the shortcut never restarts it.
+    pub(crate) hud_from: Option<f64>,
     pub(crate) take_from: Option<f64>,
+    /// How many `"Without Hex"` bubbles have flown out of the field so far.
+    sent_seen: usize,
     pub(crate) partial: &'static str,
     pub(crate) take: &'static Take,
     pub(crate) meter: (f32, f32),
@@ -127,7 +133,9 @@ impl Onboard {
             parked_from: None,
             typing_from: None,
             voice_from: None,
+            hud_from: None,
             take_from: None,
+            sent_seen: 0,
             partial: "",
             take: &ANSWER_JAY,
             meter: (0.0, 0.0),
@@ -292,6 +300,7 @@ impl Onboard {
         let tf = self.now + TYPING_LEAD;
         self.typing_from = Some(tf);
         self.voice_from = None;
+        self.hud_from = None;
         self.take_from = None;
         self.partial = "";
         self.sfx.on_without_hex(self.now, tf, self.had_model);
@@ -316,6 +325,7 @@ impl Onboard {
         self.sfx.clear();
         self.ensure_download(true);
         self.take_from = None;
+        self.hud_from = Some(self.now);
         self.partial = "";
         self.live_hold_from = None;
         self.practice = TextEdit::default();
@@ -533,6 +543,7 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         Step::Parked if s.can_hear() => {
             s.step = Step::YourTurn;
             s.voice_from = Some(play.now());
+            s.hud_from = Some(play.now());
             Some(1.1)
         }
         Step::Parked => Some(WAIT),
@@ -579,6 +590,7 @@ fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         Step::Parked => {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
+            s.hud_from = Some(now);
             Some(1.15)
         }
         Step::YourTurn => {
@@ -612,6 +624,7 @@ fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         Step::Done | Step::Permissions | Step::Waiting => {
             s.step = Step::Try;
             s.take_from = None;
+            s.hud_from = Some(now);
             s.partial = "";
             s.practice = TextEdit::default();
             if s.interactive_try() {
@@ -683,6 +696,12 @@ fn physical_shortcut_held(_: &[String]) -> bool {
 
 fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
+    // A sent `"Without Hex"` reply lifts out of the field into its bubble.
+    let sent = versus::sent_count(s);
+    for i in s.sent_seen..sent {
+        tx.launch("typed/line0", format!("sent-bubble-{i}"));
+    }
+    s.sent_seen = sent;
     if s.manual_override
         && let Some(due) = s.auto_due_at
         && now >= due
