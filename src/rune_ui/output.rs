@@ -20,7 +20,10 @@ use crate::text_replacements::ReplacementSet;
 
 /// The agent card's halo breathes in and out this slowly, from nothing to
 /// most of its faint strength; Reduce Motion holds it off.
-const GLOW: LoopSpec = LoopSpec::opacity(4.0, 0.0, 0.0, 0.8);
+/// The agent mark's halo breathes, and its diamond turns once every
+/// `SPIN` seconds; Reduce Motion stills both.
+const GLOW: LoopSpec = LoopSpec::opacity(4.0, 0.0, 0.25, 1.0);
+const SPIN: LoopSpec = LoopSpec::rotation(16.0);
 /// Each app rule's folding steps, by its place in the list.
 const RULE_STEPS: [&str; 8] = [
     "rule0-steps",
@@ -162,29 +165,31 @@ fn agent_card(ui: &Ui, p: Paint) -> El {
     let glow = el()
         .key("glow")
         .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-        .radius(radius)
+        .radius(p.k.radius.md)
         .box_shadow(Shadow {
-            blur: 18.0,
+            blur: 10.0,
             spread: 0.0,
             color: if p.k.dark {
-                c.info.border.alpha(0.45)
+                c.info.border.alpha(0.7)
             } else {
-                c.info.icon.alpha(0.3)
+                c.info.icon.alpha(0.35)
             },
             ..Shadow::default()
         })
         .looping(GLOW);
-    let mark = row()
-        .key("mark")
-        .size(32.0, 32.0)
-        .center()
-        .radius(p.k.radius.md)
-        .fill(c.info.border)
-        .child(
-            rune::icon(&rune_kit::glyphs::SPARKLE, 16.0)
-                .key("sparkle")
-                .color(c.info.fg),
-        );
+    let diamond = rune::icon(&rune_kit::glyphs::SPARKLE, 16.0)
+        .key("diamond")
+        .color(if p.k.dark { p.text() } else { c.info.fg })
+        .looping(SPIN);
+    let mark = row().key("mark").size(32.0, 32.0).child(glow).child(
+        row()
+            .key("tile")
+            .size(32.0, 32.0)
+            .center()
+            .radius(p.k.radius.md)
+            .fill(c.info.border)
+            .child(diamond),
+    );
     let detail = if ui.output.prompt_copied {
         tr("Copied. Paste it into your agent and say what you want")
     } else {
@@ -227,43 +232,37 @@ fn agent_card(ui: &Ui, p: Paint) -> El {
             ui.output.prompt_copied = true;
         },
     );
-    // The tint sits on an opaque surface, so the halo never shows through.
-    let surface = col().key("surface").radius(radius).fill(c.bg_base);
-    col().key("agent-card").child(glow).child(
-        surface.child(
+    row()
+        .key("agent-card")
+        .px(METRICS.row_px)
+        .py(14.0)
+        .gaps(8.0, 14.0)
+        .center_y()
+        .flex_wrap()
+        .radius(radius)
+        .fill(c.info.bg.alpha(if p.k.dark { 0.45 } else { 1.0 }))
+        .border(
+            p.hair.max(0.5),
+            c.info.border.alpha(if p.k.dark { 0.7 } else { 1.0 }),
+        )
+        .child(
             row()
-                .key("agent")
-                .px(METRICS.row_px)
-                .py(14.0)
-                .gaps(8.0, 14.0)
+                .key("lead")
+                .w(200.0)
+                .grow(1.0)
+                .gap(12.0)
                 .center_y()
-                .flex_wrap()
-                .radius(radius)
-                .fill(c.info.bg.alpha(if p.k.dark { 0.45 } else { 1.0 }))
-                .border(
-                    p.hair.max(0.5),
-                    c.info.border.alpha(if p.k.dark { 0.7 } else { 1.0 }),
-                )
-                .child(
-                    row()
-                        .key("lead")
-                        .w(200.0)
-                        .grow(1.0)
-                        .gap(12.0)
-                        .center_y()
-                        .child(mark)
-                        .child(copy),
-                )
-                .child(
-                    row()
-                        .key("actions")
-                        .gap(4.0)
-                        .center_y()
-                        .child(open)
-                        .child(edit),
-                ),
-        ),
-    )
+                .child(mark)
+                .child(copy),
+        )
+        .child(
+            row()
+                .key("actions")
+                .gap(4.0)
+                .center_y()
+                .child(open)
+                .child(edit),
+        )
 }
 
 /// The steps every dictation goes through, numbered in order.
