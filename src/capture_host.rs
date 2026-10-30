@@ -69,6 +69,7 @@ use crate::transcription_engine::TranscriptionEngine;
 use crate::transcription_models::{ModelRuntime, TranscriptionModelId};
 
 mod library;
+mod permissions;
 mod routing;
 #[cfg(target_os = "macos")]
 mod screen_access;
@@ -76,6 +77,10 @@ mod sink;
 
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
+};
+pub use permissions::{
+    CaptureNeed, NeedState, allow as allow_permission, on_missing,
+    restart as restart_for_permission, state_of as permission_state,
 };
 pub use routing::CaptureRoute;
 pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
@@ -1509,6 +1514,10 @@ impl CaptureHost {
         let reply = self.control(action, audio);
         if let ControlReply::Error { code, message, .. } = &reply {
             tracing::warn!(code, message, "the capture shortcut did nothing");
+            // The capsule's permission helper says what's missing.
+            if code == "permission" {
+                return reply;
+            }
             #[cfg(target_os = "macos")]
             crate::feedback::play(crate::feedback::Tone::Error);
             #[cfg(not(target_os = "macos"))]
@@ -1788,6 +1797,16 @@ impl CaptureHost {
         }
         if let Some(refused) = self.refuse_start() {
             return Ok(refused);
+        }
+        // Never in tests: their engine records no screen.
+        if !cfg!(test)
+            && let Some((need, _)) = permissions::missing(target != CaptureTarget::Phone)
+        {
+            permissions::report(need);
+            return Ok(ControlReply::error(
+                "permission",
+                format!("{} is off for Hex", need.name()),
+            ));
         }
         let Some((jobs, _)) = &self.finisher else {
             return Ok(ControlReply::error("busy", "Hex is stopping"));
@@ -3061,10 +3080,13 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
         HandOff::Paste => {
             let (dir, loaded) = scrawl_capture::handoff::load_bundle(bundle)?;
             let summary = scrawl_capture::sketch::summary_markdown(&loaded, &dir);
-            let sheet = std::fs::read(dir.join(&loaded.contact_sheet));
+            // No screen (no keyframes): the summary alone, never a blank sheet.
+            let sheet = (!loaded.keyframes.is_empty())
+                .then(|| std::fs::read(dir.join(&loaded.contact_sheet)));
             with_linux_paster(|paster| {
                 match &sheet {
-                    Ok(png) => {
+                    None => {}
+                    Some(Ok(png)) => {
                         if let Err(error) = paster.paste_png(png) {
                             tracing::warn!(
                                 error = format!("{error:#}"),
@@ -3072,7 +3094,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
                             );
                         }
                     }
-                    Err(error) => tracing::warn!(%error, "contact sheet unreadable"),
+                    Some(Err(error)) => tracing::warn!(%error, "contact sheet unreadable"),
                 }
                 paster.paste(&summary)
             })
@@ -3801,6 +3823,7 @@ mod tests {
                 frames: Vec::new(),
                 video: None,
                 duration_ms,
+                no_screen: None,
             };
             let (_, bundle, _) = scrawl_capture::pipeline::finalize_capture_bundle_with_flags(
                 &self.dir,

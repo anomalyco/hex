@@ -1196,7 +1196,6 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
-    let mut phase = 0_u32;
     let mut last_excluded = initial_excluded.clone();
     let mut prompts = SystemPrompts::new(&sampler_target);
     while !thread_stopping.load(Ordering::Acquire) {
@@ -1243,20 +1242,17 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         if urgent || last_sample.elapsed() >= interval {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            if urgent {
-                phase = phase.saturating_add(1);
+            // No screen (Screen Recording off, or a failed shot): no frame. A made-up one
+            // would reach agents as if it were the screen.
+            let frame = filter_and_config
+                .as_ref()
+                .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
+            if let Some(frame) = frame {
+                thread_frames
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(frame, urgent);
             }
-            let frame = if let Some((ref filter, ref config)) = filter_and_config {
-                capture_sck_frame(filter, config, t_ms).unwrap_or_else(|| {
-                    crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-                })
-            } else {
-                crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-            };
-            thread_frames
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(frame, urgent);
         }
         thread::park_timeout(Duration::from_millis(30));
     }

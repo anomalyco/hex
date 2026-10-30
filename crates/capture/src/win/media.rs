@@ -674,7 +674,6 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
-    let mut phase = 0_u32;
     let mut failed = false;
     while !stopping.load(Ordering::Acquire) {
         if let Some(r) = recorder.as_mut()
@@ -704,19 +703,16 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         if is_urgent || last_sample.elapsed() >= interval {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            if is_urgent {
-                phase = phase.saturating_add(1);
-            }
-            let frame = recorder
+            // No frame rather than a made-up one, which agents would take for the screen.
+            if let Some(frame) = recorder
                 .as_ref()
                 .and_then(|r| r.candidate(t_ms).ok().flatten())
-                .unwrap_or_else(|| {
-                    crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-                });
-            frames
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(frame, is_urgent);
+            {
+                frames
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(frame, is_urgent);
+            }
         }
         std::thread::park_timeout(Duration::from_millis(8));
     }

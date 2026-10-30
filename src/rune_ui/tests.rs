@@ -1549,7 +1549,7 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
 fn the_sound_sets_sheet_plays_and_chooses_sets() {
     use crate::feedback::{Audition, Cue, SoundSet};
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
-    assert_eq!(rt.state.settings.sound_theme, SoundSet::Signature);
+    assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
     open_advanced(&mut rt, Pane::General);
     tap(&mut rt, "sound-set-control");
     assert!(rt.state.sound_sets.open);
@@ -1557,7 +1557,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
 
     tap(&mut rt, "set-click/top/play");
     assert_eq!(playing(&rt), Some((SoundSet::Click, Audition::Dictation)));
-    assert_eq!(rt.state.settings.sound_theme, SoundSet::Signature);
+    assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
     tap(&mut rt, "set-click/top/play");
     assert_eq!(playing(&rt), None);
 
@@ -1568,7 +1568,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     rt.frame(1.0 / 60.0);
     assert_eq!(
         playing(&rt),
-        Some((SoundSet::Signature, Audition::Cue(Cue::Stop)))
+        Some((SoundSet::Classic, Audition::Cue(Cue::Stop)))
     );
 
     tap(&mut rt, "set-wood");

@@ -332,6 +332,7 @@ and the saved step
 is a scene (`mac-onboarding`, `-setup`, `-progress`, `-denied`, `-restart`,
 `-download-failed`, `-try`, `-listening`, `-landed`, `-reopen`, `-done`).
 Reaching the last step in a live tour plays the onboarding success sound
+(Classic: its stop sound)
 (`remember_step`; fixtures stay silent), checked by reading the code.
 The default model comes from `desktop_i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing

@@ -9,10 +9,11 @@ use rune::text::TextSystem;
 use scrawl_capture::capture::Stage;
 
 use super::flow::{
-    Action, Delivered, Dest, Failure, Flow, Input, Mode, Pres, Route, Undone, undo_s,
+    Action, Delivered, Dest, Failure, Flow, Grant, Input, Mode, Pres, Route, Undone, undo_s,
 };
 use super::surface::{Id, PANEL_H, PANEL_W, TOP};
 use super::{CapsuleState, poll, trace_channels, view};
+use crate::capture_host::CaptureNeed;
 
 fn guess() -> Route {
     Route::Guess {
@@ -258,7 +259,32 @@ fn stills() -> Vec<(&'static str, Pres)> {
             beats.push(In(Input::Undone(Undone::TooLate)));
             after(&beats)
         }),
+        (
+            "permission",
+            after(&[In(Input::NeedsPermission(CaptureNeed::ScreenRecording))]),
+        ),
+        (
+            "permission-asked",
+            after(&[
+                In(Input::NeedsPermission(CaptureNeed::ScreenRecording)),
+                Click(Id::Ask),
+            ]),
+        ),
+        ("permission-restart", permission(Grant::Restart)),
+        ("permission-ready", permission(Grant::Ready)),
+        (
+            "permission-microphone",
+            after(&[In(Input::NeedsPermission(CaptureNeed::Microphone))]),
+        ),
     ]
+}
+
+/// The permission helper for Screen Recording once its grant is `grant`.
+fn permission(grant: Grant) -> Pres {
+    after(&[
+        In(Input::NeedsPermission(CaptureNeed::ScreenRecording)),
+        In(Input::Permission(CaptureNeed::ScreenRecording, grant)),
+    ])
 }
 
 fn text() -> TextSystem {
@@ -527,6 +553,9 @@ const GOLDENS: &[&str] = &[
     "list-guess",
     "sent",
     "queued",
+    "permission",
+    "permission-restart",
+    "permission-ready",
 ];
 
 /// States against `tests/golden/capture-capsule-*.png`;

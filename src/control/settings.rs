@@ -138,7 +138,7 @@ const KEYS: &[Key] = &[
             "analog",
             "thock",
         ]),
-        "Which sounds play; classic is Hex's original tones",
+        "Which sounds play; classic, Hex's original tones, is the default",
     ),
     optional(
         "microphone",
