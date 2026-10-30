@@ -64,12 +64,35 @@ function useCopy(): [boolean, (text: string) => void] {
 type Os = "mac" | "windows" | "linux"
 type Arch = "x64" | "arm64"
 
+interface Choice {
+  id: string
+  label: string
+}
+
 interface Row {
   label: string
   note?: string
   file?: string
   command?: string
+  // A small switch inside the row, e.g. x64/ARM64 or the Linux package format.
+  choices?: Choice[]
+  chosen?: string
+  choose?: (id: string) => void
 }
+
+type Package = "deb" | "rpm" | "nix" | "aur"
+
+interface Choices {
+  arch: Arch
+  setArch: (arch: Arch) => void
+  pkg: Package
+  setPkg: (pkg: Package) => void
+}
+
+const ARCHES: Choice[] = [
+  { id: "x64", label: "x64" },
+  { id: "arm64", label: "ARM64" },
+]
 
 const OSES: { id: Os; label: string; mark: ReactNode }[] = [
   { id: "mac", label: "macOS", mark: <AppleMark /> },
@@ -77,29 +100,39 @@ const OSES: { id: Os; label: string; mark: ReactNode }[] = [
   { id: "linux", label: "Linux", mark: <LinuxMark /> },
 ]
 
-function rows(os: Os, arch: Arch): Row[] {
+function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices): Row[] {
   const linux = RELEASE.linux
-  const all: (Row | false | undefined)[] =
-    os === "mac"
-      ? [
-          { label: "Download", note: "Apple silicon", file: RELEASE.mac.url },
-          { label: "Homebrew", command: RELEASE.homebrew },
-        ]
-      : os === "windows"
-        ? [
-            { label: "Installer", note: "x64", file: RELEASE.windowsX64.url },
-            { label: "Installer", note: "ARM64", file: RELEASE.windowsArm64.url },
-            { label: "PowerShell", command: RELEASE.windows.command },
-          ]
-        : [
-            { label: "Script", command: linux.command },
-            linux.aur !== undefined && { label: "AUR", command: linux.aur },
-            { label: "Debian", command: linux.deb[arch] },
-            { label: "Fedora", command: linux.rpm[arch] },
-            { label: "Nix", command: RELEASE.nix },
-            { label: "Binary", note: arch === "arm64" ? "ARM64" : "x64", file: linux.binary[arch] },
-          ]
-  return all.filter((row): row is Row => Boolean(row))
+  const archSwitch = { choices: ARCHES, chosen: arch, choose: (id: string) => setArch(id as Arch) }
+  // Hex runs only on Apple silicon, so an Intel Mac gets the reason, not a download.
+  if (os === "mac" && intelMac) return [{ label: "Download", note: "Requires an Apple silicon Mac" }]
+  if (os === "mac")
+    return [
+      { label: "Download", note: "Apple silicon, macOS 15 or later", file: RELEASE.mac.url },
+      { label: "Homebrew", command: RELEASE.homebrew },
+    ]
+  if (os === "windows")
+    return [
+      { label: "Installer", file: arch === "arm64" ? RELEASE.windowsArm64.url : RELEASE.windowsX64.url, ...archSwitch },
+      { label: "PowerShell", command: RELEASE.windows.command },
+    ]
+  const packages: (Choice & { command: string })[] = [
+    { id: "deb", label: "Debian", command: linux.deb[arch] },
+    { id: "rpm", label: "Fedora", command: linux.rpm[arch] },
+    { id: "nix", label: "Nix", command: RELEASE.nix },
+    ...(linux.aur !== undefined ? [{ id: "aur", label: "AUR", command: linux.aur }] : []),
+  ]
+  const chosenPackage = packages.find((entry) => entry.id === pkg) ?? packages[0]
+  return [
+    { label: "Script", command: linux.command },
+    {
+      label: "Package",
+      command: chosenPackage.command,
+      choices: packages,
+      chosen: chosenPackage.id,
+      choose: (id) => setPkg(id as Package),
+    },
+    { label: "Binary", file: linux.binary[arch], ...archSwitch },
+  ]
 }
 
 function osOf(platform: Platform): Os {
@@ -143,9 +176,23 @@ function StackRow({ row }: { row: Row }) {
     <div className="stack__row">
       <span className="stack__label">{row.label}</span>
       <span className="stack__value">
+        {row.choices && (
+          <span className="stack__choices" role="group" aria-label={`${row.label} option`}>
+            {row.choices.map((choice) => (
+              <button
+                key={choice.id}
+                type="button"
+                aria-pressed={choice.id === row.chosen}
+                onClick={() => row.choose?.(choice.id)}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </span>
+        )}
         {row.command !== undefined ? <code title={row.command}>{row.command}</code> : <span>{row.note}</span>}
       </span>
-      {row.command !== undefined ? (
+      {row.command === undefined && row.file === undefined ? null : row.command !== undefined ? (
         <button
           type="button"
           className="stack__action"
@@ -196,7 +243,10 @@ function useTabIndicator(list: RefObject<HTMLDivElement | null>, selected: Os) {
 export default function Download({ platform }: { platform: Platform }) {
   const [chosenOs, setOs] = useState<Os>()
   const os = chosenOs ?? osOf(platform)
-  const arch = archOf(platform)
+  const [chosenArch, setArch] = useState<Arch>()
+  const arch = chosenArch ?? archOf(platform)
+  const [pkg, setPkg] = useState<Package>("deb")
+  const choices = { arch, setArch, pkg, setPkg }
   const tabs = useRef<HTMLDivElement>(null)
   useTabIndicator(tabs, os)
 
@@ -233,8 +283,8 @@ export default function Download({ platform }: { platform: Platform }) {
             aria-labelledby={`install-tab-${entry.id}`}
             data-active={entry.id === os ? "" : undefined}
           >
-            {rows(entry.id, arch).map((row) => (
-              <StackRow key={`${row.label}-${row.note ?? ""}`} row={row} />
+            {rows(entry.id, platform === "mac-intel", choices).map((row) => (
+              <StackRow key={row.label} row={row} />
             ))}
           </div>
         ))}
