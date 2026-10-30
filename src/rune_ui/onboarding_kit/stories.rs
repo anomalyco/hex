@@ -772,7 +772,7 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
 /// Moves the story to `now`; true while anything on it still moves.
 pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
-    tx.trace_channel("onboarding.step", "state", s.step as u32 as f32);
+    tx.trace_channel("onboarding.step", "phase", s.step as u32 as f32);
     tx.trace_channel("onboarding.mic", "level", s.listening_peak().unwrap_or(0.0));
     // A sent `"Without Hex"` reply lifts out of the field into its bubble.
     let sent = versus::sent_count(s);
