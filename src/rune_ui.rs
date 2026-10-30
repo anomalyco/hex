@@ -2449,6 +2449,9 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
 mod tests;
 
 #[cfg(test)]
+mod offscreen;
+
+#[cfg(test)]
 mod keyboard_model_tests;
 
 #[cfg(test)]

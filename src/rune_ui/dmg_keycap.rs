@@ -4,9 +4,9 @@
 
 use super::controls::{KeySize, keycap};
 use super::*;
-use rune::render::{Gpu, OFFSCREEN_FORMAT, Offscreen, Renderer};
+use rune::Env;
+use rune::render::Gpu;
 use rune::text::TextSystem;
-use rune::{Env, Runtime};
 
 /// The key, centred, with room for its shadow.
 const SIZE: (f32, f32) = (56.0, 48.0);
@@ -35,12 +35,12 @@ fn draw(gpu: &Gpu, view: fn(&Ui, &mut Cx<Ui>) -> El, scale: f32) -> (u32, u32, V
         scale,
     };
     let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-    let mut rt = Runtime::with_text(state, view, SIZE, env, text);
+    let mut rt = crate::rune_ui::offscreen::runtime(state, view, SIZE, env, text);
     rt.settle_all();
     rt.frame(0.0);
     let (width, height) = ((SIZE.0 * scale) as u32, (SIZE.1 * scale) as u32);
-    let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-    let target = Offscreen::new(&gpu.device, width, height);
+    let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+    let target = crate::rune_ui::offscreen::target(&gpu.device, width, height);
     renderer.prepare(
         &gpu.device,
         &gpu.queue,

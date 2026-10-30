@@ -290,7 +290,8 @@ fn thumb() -> Option<rune::Image> {
 /// `pres` at rest.
 fn runtime(pres: Pres, dark: bool) -> Runtime<CapsuleState> {
     let state = CapsuleState::still(pres, "0:07", thumb());
-    let mut rt = Runtime::with_text(state, view, (PANEL_W, PANEL_H), env(dark), text());
+    let mut rt =
+        crate::rune_ui::offscreen::runtime(state, view, (PANEL_W, PANEL_H), env(dark), text());
     rt.settle_all();
     rt.frame(0.0);
     rt
@@ -458,7 +459,6 @@ fn the_capsule_draws_no_keycaps() {
 
 /// Pixels of the panel's top `height` points, at 2×.
 fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>) {
-    use rune::render::{OFFSCREEN_FORMAT, Offscreen, Renderer};
     let height = match &pres {
         Pres::Done(super::flow::Done {
             open: Some((_, list)),
@@ -473,8 +473,8 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
     };
     let rt = runtime(pres, dark);
     let (w, h) = ((PANEL_W * 2.0) as u32, (PANEL_H * 2.0) as u32);
-    let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-    let target = Offscreen::new(&gpu.device, w, h);
+    let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+    let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
     let mut rt = rt;
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     renderer.prepare(
@@ -872,7 +872,8 @@ fn play(
     state.act = Some(Arc::new(move |action| {
         record.lock().unwrap().push(action);
     }));
-    let mut rt = Runtime::with_text(state, view, (PANEL_W, PANEL_H), env(dark), text());
+    let mut rt =
+        crate::rune_ui::offscreen::runtime(state, view, (PANEL_W, PANEL_H), env(dark), text());
     rt.poll = Some(poll);
     rt.set_system_reduced_motion(variant == Variant::Reduced);
     rt.scene.set_trace(trace);
@@ -1045,7 +1046,6 @@ fn capture_capsule_motion() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_MOTION") else {
         return;
     };
-    use rune::render::{OFFSCREEN_FORMAT, Offscreen, Renderer};
     let folder = std::path::PathBuf::from(folder);
     let frames = std::env::var_os("HEX_CAPSULE_FRAMES").is_some();
     let gpu = if frames {
@@ -1056,8 +1056,8 @@ fn capture_capsule_motion() {
     let (w, h) = ((PANEL_W * 2.0) as u32, (PANEL_H * 2.0) as u32);
     let mut gpu_parts = gpu.as_ref().map(|gpu| {
         (
-            Renderer::new(&gpu.device, OFFSCREEN_FORMAT),
-            Offscreen::new(&gpu.device, w, h),
+            crate::rune_ui::offscreen::renderer(&gpu.device),
+            crate::rune_ui::offscreen::target(&gpu.device, w, h),
         )
     });
     let only = std::env::var("HEX_CAPSULE_SCRIPTS").ok();
@@ -1220,7 +1220,6 @@ fn ink_at(now: u64) -> super::ink::Scene {
 /// whole capture as frames in `<folder>/frames/ink-<theme>/`.
 #[test]
 fn ink_overlay_stills_and_frames() {
-    use rune::render::{OFFSCREEN_FORMAT, Offscreen, Renderer};
     let snaps = std::env::var_os("HEX_CAPSULE_SNAPS").map(std::path::PathBuf::from);
     let motion = std::env::var_os("HEX_CAPSULE_MOTION")
         .filter(|_| std::env::var_os("HEX_CAPSULE_FRAMES").is_some())
@@ -1235,8 +1234,8 @@ fn ink_overlay_stills_and_frames() {
     let size = super::ink::tests::frame();
     let (pw, ph) = (size.width as f32, size.height as f32);
     let (w, h) = ((pw * 2.0) as u32, (ph * 2.0) as u32);
-    let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-    let target = Offscreen::new(&gpu.device, w, h);
+    let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+    let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
     let mut draw = |rt: &mut Runtime<super::ink::InkState>, path: &std::path::Path| {
         renderer.prepare(
             &gpu.device,
@@ -1254,7 +1253,8 @@ fn ink_overlay_stills_and_frames() {
     for dark in [false, true] {
         let theme = if dark { "dark" } else { "light" };
         let state = super::ink::InkState::still(ink_at(0));
-        let mut rt = Runtime::with_text(state, ink_on_screen, (pw, ph), env(dark), text());
+        let mut rt =
+            crate::rune_ui::offscreen::runtime(state, ink_on_screen, (pw, ph), env(dark), text());
         rt.frame(0.0);
         if let Some(folder) = &snaps {
             std::fs::create_dir_all(folder).unwrap();
@@ -1431,7 +1431,7 @@ fn play_picker(
     let actions: Arc<Mutex<Vec<Action>>> = Arc::default();
     let record = actions.clone();
     state.set_act(Arc::new(move |action| record.lock().unwrap().push(action)));
-    let mut rt = Runtime::with_text(
+    let mut rt = crate::rune_ui::offscreen::runtime(
         state,
         picker::view,
         (DISPLAY[0], DISPLAY[1]),
@@ -1596,7 +1596,7 @@ fn the_picker_records_what_it_shows_and_comes_to_rest() {
 fn picker_runtime(aim: Aim) -> Runtime<PickerState> {
     let mut state = PickerState::still(aim, false);
     state.set_act(Arc::new(|_| {}));
-    let mut rt = Runtime::with_text(
+    let mut rt = crate::rune_ui::offscreen::runtime(
         state,
         picker::view,
         (DISPLAY[0], DISPLAY[1]),
@@ -1702,7 +1702,6 @@ fn a_pick_that_goes_nowhere_brings_the_picker_back() {
 /// calm frames in `<folder>/frames/<script>-calm-<theme>/`.
 #[test]
 fn picker_stills_and_motion() {
-    use rune::render::{OFFSCREEN_FORMAT, Offscreen, Renderer};
     let snaps = std::env::var_os("HEX_CAPSULE_SNAPS").map(std::path::PathBuf::from);
     let motion = std::env::var_os("HEX_CAPSULE_MOTION").map(std::path::PathBuf::from);
     if snaps.is_none() && motion.is_none() {
@@ -1713,8 +1712,8 @@ fn picker_stills_and_motion() {
     let (w, h) = ((DISPLAY[0] * 2.0) as u32, (DISPLAY[1] * 2.0) as u32);
     let mut parts = gpu.as_ref().map(|gpu| {
         (
-            Renderer::new(&gpu.device, OFFSCREEN_FORMAT),
-            Offscreen::new(&gpu.device, w, h),
+            crate::rune_ui::offscreen::renderer(&gpu.device),
+            crate::rune_ui::offscreen::target(&gpu.device, w, h),
         )
     });
     let mut draw = |rt: &mut Runtime<PickerState>, path: &std::path::Path| {
@@ -1740,7 +1739,7 @@ fn picker_stills_and_motion() {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };
                 let state = PickerState::still(aim.clone(), true);
-                let mut rt = Runtime::with_text(
+                let mut rt = crate::rune_ui::offscreen::runtime(
                     state,
                     picker::view,
                     (DISPLAY[0], DISPLAY[1]),

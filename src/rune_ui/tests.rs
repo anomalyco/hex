@@ -1,7 +1,7 @@
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
 use crate::transcription_models::TranscriptionSelection;
-use rune::render::{Gpu, OFFSCREEN_FORMAT, Offscreen, Renderer};
+use rune::render::Gpu;
 use rune::text::TextSystem;
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
@@ -23,7 +23,7 @@ fn runtime(scene: &str, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
         scale: GOLDEN_SCALE,
     };
     let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-    let mut rt = Runtime::with_text(state, view, size, env, text);
+    let mut rt = crate::rune_ui::offscreen::runtime(state, view, size, env, text);
     rt.poll = Some(poll);
     rt.on_key = Some(on_key);
     // Fixtures show the state at rest, so sequences that play on mount
@@ -1676,12 +1676,12 @@ fn gpu() -> Option<std::sync::MutexGuard<'static, Gpu>> {
 fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8>)> {
     let gpu = gpu()?;
     let mut rt = runtime(scene, dark, size);
-    let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
+    let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
     let (width, height) = (
         (size.0 * GOLDEN_SCALE) as u32,
         (size.1 * GOLDEN_SCALE) as u32,
     );
-    let target = Offscreen::new(&gpu.device, width, height);
+    let target = crate::rune_ui::offscreen::target(&gpu.device, width, height);
     renderer.prepare(
         &gpu.device,
         &gpu.queue,
@@ -1698,7 +1698,7 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
         queue: &gpu.queue,
         encoder: &mut encoder,
         target: &target.view,
-        format: OFFSCREEN_FORMAT,
+        format: crate::rune_ui::offscreen::format(),
         size: (width, height),
         dt: 0.0,
         update_ms: 0.0,

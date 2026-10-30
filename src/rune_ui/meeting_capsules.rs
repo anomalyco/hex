@@ -1173,7 +1173,7 @@ mod tests {
             scale: 2.0,
         };
         let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-        let mut rt = Runtime::with_text(capsule, view, size, env, text);
+        let mut rt = crate::rune_ui::offscreen::runtime(capsule, view, size, env, text);
         rt.frame(0.0);
         (rt, received, chosen)
     }
@@ -1567,7 +1567,7 @@ mod tests {
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
     #[test]
     fn capsule_snapshots() {
-        use rune::render::{Gpu, OFFSCREEN_FORMAT, Offscreen, Renderer};
+        use rune::render::Gpu;
         let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
             return;
         };
@@ -1681,8 +1681,8 @@ mod tests {
                 rt.settle_all();
                 rt.frame(0.0);
                 let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
-                let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-                let target = Offscreen::new(&gpu.device, w, h);
+                let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+                let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
                 renderer.prepare(
                     &gpu.device,
                     &gpu.queue,

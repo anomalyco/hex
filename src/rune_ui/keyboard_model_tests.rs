@@ -9,7 +9,7 @@ fn runtime(scene: &str) -> Runtime<Ui> {
         state.platform.caps = platform::Capabilities::LINUX;
     }
     let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-    let mut rt = Runtime::with_text(
+    let mut rt = crate::rune_ui::offscreen::runtime(
         state,
         view,
         (980.0, 1720.0),

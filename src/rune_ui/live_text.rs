@@ -186,7 +186,7 @@ mod tests {
             stable: stable.into(),
             tentative: tentative.into(),
         };
-        let mut rt = Runtime::with_text(
+        let mut rt = crate::rune_ui::offscreen::runtime(
             plate,
             view,
             SIZE,
@@ -287,7 +287,6 @@ mod tests {
     #[test]
     #[ignore = "set HEX_LIVE_TEXT_SNAPS to a folder; needs a GPU"]
     fn snapshots() {
-        use rune::render::{OFFSCREEN_FORMAT, Offscreen, Renderer};
         let folder = std::path::PathBuf::from(std::env::var("HEX_LIVE_TEXT_SNAPS").unwrap());
         let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
         for (name, stable, tentative) in [
@@ -298,8 +297,8 @@ mod tests {
             for dark in [false, true] {
                 let mut rt = runtime(stable, tentative, dark);
                 let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
-                let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-                let target = Offscreen::new(&gpu.device, w, h);
+                let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+                let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
                 renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
                 renderer.prepare(
                     &gpu.device,

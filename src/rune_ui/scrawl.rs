@@ -455,8 +455,13 @@ mod tests {
         };
         let text =
             rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-        let mut rt =
-            rune::Runtime::with_text(state, crate::rune_ui::view, (980.0, 760.0), env, text);
+        let mut rt = crate::rune_ui::offscreen::runtime(
+            state,
+            crate::rune_ui::view,
+            (980.0, 760.0),
+            env,
+            text,
+        );
         rt.settle_all();
         rt.frame(0.0);
         rt
