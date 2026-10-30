@@ -60,6 +60,7 @@ mod hex_microphone;
 mod history;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod hud_placement;
+mod input_level;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;

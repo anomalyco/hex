@@ -683,6 +683,7 @@ pub(crate) fn run(
                         });
                     }
                 }
+                crate::input_level::record(&samples);
                 timeline.feed(&samples, input.sample_rate(), captured_through);
                 capture.ingest(&samples, captured_through);
                 if capture.is_recording() {

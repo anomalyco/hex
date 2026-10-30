@@ -526,6 +526,11 @@ General                                  // settings
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
+│   ├── Level bars -> peak of the audio Hex receives, ~30 fps while General shows // input_level
+│   │   ├── Read from one atomic the audio owner stores per chunk; never opens or blocks the mic
+│   │   ├── No audio for 250 ms (released while idle, failed, not allowed) -> flat, dimmed
+│   │   └── Scenes: mac-settings-mic-level (a recorded WAV, `--video`), mac-settings-mic-released
+│   │       // check: the_microphone_level_follows_the_voice (Linux)
 │   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
 │   ├── System default -> The OS default input, followed live
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops

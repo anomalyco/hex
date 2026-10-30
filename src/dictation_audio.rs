@@ -785,6 +785,7 @@ impl Owner {
                 self.state
                     .captured_through
                     .store(captured_through.as_nanos(), Ordering::Release);
+                crate::input_level::record(&samples);
                 self.capture.ingest_with_pending(
                     &samples,
                     captured_through,

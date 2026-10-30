@@ -564,8 +564,8 @@ pub(super) trait NativeHost {
     /// What the tour hears from the runtime: practice dictation outcomes
     /// while `practicing`, and a shortcut listener that failed to start.
     fn tour_inputs(&mut self, practicing: bool) -> Vec<Input>;
-    /// The microphone's latest peak, 0 to 1, while a dictation records;
-    /// silence when no audio arrived lately.
+    /// The microphone's latest peak, 0 to 1; silence when no audio arrived
+    /// lately. The tour reads it only while a practice dictation records.
     fn practice_level(&self) -> f32 {
         0.0
     }

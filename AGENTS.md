@@ -78,6 +78,9 @@ substitute for source inspection or a second roadmap.
   disposable bounded command audio projection, and the bounded capture sink
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
   a Scrawl capture.
+- `input_level`: the latest microphone peak as one atomic, stored per chunk by
+  each OS's audio owner and read by the window's level bars (General and the
+  practice dictation); a stale peak reads as no audio.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior, each held
   from the first dictation or capture session that wants it to the last.
