@@ -11,7 +11,7 @@
 //!    delivering `"Every test is green and prod is warm. Ship it right now."`
 //!    in **1.5 seconds**.
 
-use rune::{Anim, Beat, Color, El, Sequence, SpringPair, Transition, col, el, row, text};
+use rune::{Anim, Color, El, SpringPair, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{CARD_W, FIELD_FONT, JAY, Reply, field_text_origin, lines_card_height, notice};
@@ -19,12 +19,9 @@ use super::field_text::{self, slots};
 use super::fixture::ANSWER_JAY;
 use super::flight::{Flight, caret_x, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hud_stage::voice_or_idle_slot;
 use super::keyboard::{self, keyboard_lit};
-use super::landing::{
-    LEAD, UI_SPRING, arrives, clean_heading, keys, language_pick, ready, title_font,
-};
+use super::landing::{LEAD, UI_SPRING, arrives, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
 use super::pill::{pill, slot};
 use super::stories::{Flow, Onboard, Step};
@@ -99,14 +96,13 @@ fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Ready {
-        set_dot_hud(None);
         return vec![
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
             middle()
                 .pb(TOP_BAR)
-                .child(ready(p, &s.caps, None, s.now, s.reduced.get())),
+                .child(ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion)),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -255,7 +251,7 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             ),
         ),
     };
-    clean_heading(
+    s.motion.heading(
         col()
             .key(key)
             .gap(8.0)
@@ -271,29 +267,18 @@ fn smoothstep(u: f32) -> f32 {
 }
 
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
-    const CARD_IN: &[Beat] = &[
-        Beat::new(0.0).opacity(0.0).scale(0.975),
-        Beat::new(0.42)
-            .opacity(1.0)
-            .scale(1.0)
-            .easing(rune::Easing::EASE_OUT),
-    ];
-    const KB_ARRIVE_SECS: f64 = 1.38;
-
     let (kw, kh) = keyboard::size();
     let nudge = landing_nudge(s);
     let voice_phase = s.step >= Step::YourTurn;
     let reduced = s.reduced.get();
 
-    // Slow, calm `1.38 s` quartic ease-out arrival before typing begins.
+    // A single zero-bounce spring carries the deck and its key sweep. It
+    // starts at rest and settles before the first keystroke.
     let enter_u = if reduced {
         1.0
     } else {
         match s.parked_from {
-            Some(from) => {
-                let raw = ((s.now - from - 0.08) / KB_ARRIVE_SECS).clamp(0.0, 1.0) as f32;
-                1.0 - (1.0 - raw).powi(4)
-            }
+            Some(from) => s.motion.keyboard_progress(s.now - from),
             None => 1.0,
         }
     };
@@ -327,7 +312,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
     // unfolds as it rises a little off the keyboard, where `⌥` lights.
-    let rise = Transition::offset(0.0, 10.0).springs(SpringPair::new(UI_SPRING, UI_SPRING));
+    let rise = s.motion.roll(10.0);
     let hud_el = if voice_phase {
         voice_or_idle_slot(
             "onboard-dot-hud",
@@ -341,26 +326,31 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .0
         .map(|hud| hud.transition(rise))
     } else {
-        set_dot_hud(None);
         None
     };
 
-    let card = el()
-        .key("card-wrap")
-        .absolute(CARD_X, CARD_TOP)
-        .w(CARD_W)
-        .sequence(Sequence::new(CARD_IN).delay(0.06))
-        .transition(Transition::offset(0.0, 10.0))
-        .child(
-            notice(p, &JAY, jay_reply(s), false)
-                .offset(nudge[0], nudge[1])
-                .offset_motion(Anim::INSTANT),
-        );
+    let card = s.motion.staggered(
+        el().key("card-wrap")
+            .absolute(CARD_X, CARD_TOP)
+            .w(CARD_W)
+            .child(
+                notice(p, &JAY, jay_reply(s), false)
+                    .offset(nudge[0], nudge[1])
+                    .offset_motion(Anim::INSTANT),
+            ),
+        1.0,
+        8.0,
+    );
 
     let kb_shift = (1.0 - enter_u) * 14.0 + voice_u * 8.0;
     let keys_el = el()
         .key("keys")
-        .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh + kb_shift)
+        .transition(Transition::opacity().springs(SpringPair::new(
+            UI_SPRING,
+            rune::Spring::new(s.motion.exit, 0.0),
+        )))
+        .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh)
+        .offset(0.0, kb_shift)
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
         .child(kb_el);

@@ -1,109 +1,133 @@
-//! Flat UI + real `Dot scope` phosphor HUD compositor for onboarding:
-//!
-//! Draws the Rune UI flat as usual (`f.draw_ui()`), then composites Hex's real
-//! [`crate::rune_hud::Painter`] (`rune_hud.wgsl`) over any mounted
-//! [`HUD_SLOT_MARK`] element.
+//! Dot scope drawn in Rune's effect slots, including a departing page's slot.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
-
-use rune::compose::Frame;
-use rune::render::{KIND_EFFECT, KIND_LAYER};
 
 use crate::dictation_indicator::DotFrame;
 use crate::hud_placement::Layout;
 use crate::rune_hud::{Painter, Target, WINDOW};
 use crate::rune_ui::Ui;
+use rune::compose::Frame;
 
-pub(crate) const HUD_SLOT_MARK: u32 = 0x4800_0008;
 pub(crate) const KEY_COUNT: usize = 64;
+const FIRST_MARK: u32 = 0x4800_0008;
+const HUD_COUNT: u32 = 4;
 
-pub(crate) const fn is_onboard_mark(m: u32) -> bool {
-    m == HUD_SLOT_MARK
+pub(crate) fn hud_mark(key: &str) -> u32 {
+    FIRST_MARK
+        + match key {
+            "download-hud" => 0,
+            "waiting-hud" => 1,
+            "onboard-dot-hud" => 2,
+            "try-dot-hud" => 3,
+            _ => panic!("unknown onboarding HUD: {key}"),
+        }
 }
 
-static PENDING_HUD: Mutex<Option<DotFrame>> = Mutex::new(None);
+pub(crate) const fn is_onboard_mark(mark: u32) -> bool {
+    mark >= FIRST_MARK && mark < FIRST_MARK + HUD_COUNT
+}
 
-pub(crate) fn set_dot_hud(frame: Option<DotFrame>) {
-    if let Ok(mut g) = PENDING_HUD.lock() {
-        *g = frame;
+// View-to-compositor handoff only. The compositor owns retained frames, so
+// an outgoing page keeps its own waveform after the next page is built.
+static UPDATES: Mutex<Vec<(u32, DotFrame)>> = Mutex::new(Vec::new());
+
+pub(crate) fn update_hud(mark: u32, frame: DotFrame) {
+    let mut updates = UPDATES.lock().expect("HUD handoff");
+    if let Some((_, old)) = updates.iter_mut().find(|(id, _)| *id == mark) {
+        *old = frame;
+    } else {
+        updates.push((mark, frame));
     }
 }
 
+struct Hud {
+    frame: DotFrame,
+    painters: HashMap<wgpu::TextureFormat, Painter>,
+    seen: bool,
+}
+
 pub(crate) struct OnboardingGpu {
-    painter: Painter,
+    format: wgpu::TextureFormat,
+    huds: HashMap<u32, Hud>,
 }
 
 impl OnboardingGpu {
-    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(_: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         Self {
-            painter: Painter::new(device, format),
+            format,
+            huds: HashMap::new(),
         }
     }
 
     pub(crate) fn matches(&self, format: wgpu::TextureFormat) -> bool {
-        self.painter.format == format
+        self.format == format
     }
 
     pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>) {
-        f.draw_ui();
-
-        let Some(drawn) = PENDING_HUD.lock().ok().and_then(|g| g.clone()) else {
-            return;
-        };
-        let (tw, th) = (f.size.0 as f32, f.size.1 as f32);
-
-        let found =
-            f.rt.instances
-                .iter()
-                .zip(f.rt.marks.iter())
-                .enumerate()
-                .find(|(_, (ins, m))| **m == HUD_SLOT_MARK && ins.params[1] == KIND_EFFECT);
-        let Some((idx, (ins, _))) = found else {
-            return;
-        };
-
-        let px = ins.rect;
-        if px[2] <= 1.0 || px[3] <= 1.0 {
-            return;
+        for hud in self.huds.values_mut() {
+            hud.seen = false;
         }
-        let (clip, opacity) = match idx
-            .checked_sub(1)
-            .and_then(|prev| f.rt.instances.get(prev))
-            .filter(|prev| prev.params[1] == KIND_LAYER)
-        {
-            Some(layer) => (layer.clip, layer.fill[3]),
-            None => (ins.clip, ins.fill[3]),
-        };
-        if opacity <= 0.001 {
-            return;
-        }
-        let left = clip[0].max(px[0]).clamp(0.0, tw);
-        let top = clip[1].max(px[1]).clamp(0.0, th);
-        let right = clip[2].min(px[0] + px[2]).clamp(0.0, tw);
-        let bottom = clip[3].min(px[1] + px[3]).clamp(0.0, th);
-        if right - left < 1.0 || bottom - top < 1.0 {
-            return;
+        for (mark, frame) in UPDATES.lock().expect("HUD handoff").drain(..) {
+            match self.huds.get_mut(&mark) {
+                Some(hud) => hud.frame = frame,
+                None => {
+                    self.huds.insert(
+                        mark,
+                        Hud {
+                            frame,
+                            painters: HashMap::new(),
+                            seen: false,
+                        },
+                    );
+                }
+            }
         }
 
-        let mut frame = drawn;
-        frame.pose.opacity *= opacity;
-        let target = Target {
-            viewport: px,
-            clip: [
-                left as u32,
-                top as u32,
-                (right - left) as u32,
-                (bottom - top) as u32,
-            ],
-            scale: px[2] / WINDOW.0,
-            dark: f.rt.env.system_dark,
-        };
-        let uniforms = self
-            .painter
-            .write(&frame, Layout::default(), target, |buffer, data| {
-                f.write_buffer(buffer, 0, data)
+        let clear = f.rt.clear_color();
+        f.ui.prepare(
+            f.device,
+            f.queue,
+            &mut f.rt.text.atlas,
+            &f.rt.instances,
+            f.size,
+        );
+        let dark = f.rt.env.system_dark;
+        f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
+            let Some(hud) = self.huds.get_mut(&site.mark) else {
+                return;
+            };
+            hud.seen = true;
+            let [x, y, w, h] = site.instance.rect;
+            let [ox, oy] = site.origin;
+            let [tw, th] = site.size.map(|v| v as f32);
+            let [cx, cy, right, bottom] = site.instance.clip;
+            let left = (cx.max(x) - ox).clamp(0.0, tw).floor();
+            let top = (cy.max(y) - oy).clamp(0.0, th).floor();
+            let right = (right.min(x + w) - ox).clamp(0.0, tw).ceil();
+            let bottom = (bottom.min(y + h) - oy).clamp(0.0, th).ceil();
+            if w <= 0.0 || h <= 0.0 || right <= left || bottom <= top {
+                return;
+            }
+            let target = Target {
+                viewport: [x - ox, y - oy, w, h],
+                clip: [
+                    left as u32,
+                    top as u32,
+                    (right - left) as u32,
+                    (bottom - top) as u32,
+                ],
+                scale: w / WINDOW.0,
+                dark,
+            };
+            let painter = hud.painters.entry(site.format).or_insert_with(|| {
+                Painter::with_color_space(f.device, site.format, !site.srgb_blend)
             });
-        self.painter
-            .draw_over(f.encoder, f.target, target, &uniforms);
+            let uniforms = painter.write(&hud.frame, Layout::default(), target, |buffer, bytes| {
+                f.queue.write_buffer(buffer, 0, bytes)
+            });
+            painter.draw_slot(pass, target, &uniforms);
+        });
+        self.huds.retain(|_, hud| hud.seen);
     }
 }

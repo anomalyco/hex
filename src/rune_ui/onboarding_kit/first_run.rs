@@ -18,10 +18,9 @@ use super::field_text::Field;
 use super::fixture::{ANSWER_TRY, Download};
 use super::flight::{Flight, caret_x, ember_tone, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
-use super::landing::{LEAD, arrives, clean_heading, keys, ready, staggered, title_font};
+use super::landing::{LEAD, arrives, keys, ready, title_font};
 use super::mic_line::mic_capsule;
 use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
@@ -87,13 +86,13 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
 }
 
 fn ready_page(p: Paint, s: &Onboard) -> El {
-    set_dot_hud(None);
     let core = ready(
         p,
         &s.caps,
         (!s.had_model).then_some(PILL),
         s.now,
         s.reduced.get(),
+        s.motion,
     );
     if s.live.is_some() {
         return col()
@@ -167,8 +166,8 @@ fn lead(p: Paint, copy: impl Into<String>) -> El {
         .transition(Transition::opacity())
 }
 
-fn heading(p: Paint, key: &str, title: &str, under: El) -> El {
-    clean_heading(
+fn heading(p: Paint, s: &Onboard, key: &str, title: &str, under: El) -> El {
+    s.motion.heading(
         col()
             .key(key.to_string())
             .gap(8.0)
@@ -191,11 +190,11 @@ fn hold(p: Paint, s: &Onboard, rest: &str, down: bool) -> El {
 
 fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     let d = download(s);
-    let reduced = s.reduced.get();
 
     let head = if waiting {
         heading(
             p,
+            s,
             "waiting-head",
             "Almost ready",
             lead(p, "Finishing the speech model so Hex can hear you."),
@@ -212,7 +211,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
                 language_capsule(p, d.language, Onboard::cycle_language)
             })
             .child(text("speech model").key("post").font(LEAD).color(p.muted()));
-        heading(p, "download-head", "Setting up Hex", subtitle)
+        heading(p, s, "download-head", "Setting up Hex", subtitle)
     };
 
     let pct = (d.fraction() * 100.0).round() as u32;
@@ -244,7 +243,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     let progress_capsule = if waiting {
         progress_capsule
     } else {
-        staggered(progress_capsule, 0.14, 6.0)
+        s.motion.staggered(progress_capsule, 2.0, 6.0)
     };
 
     let retry = s.live.as_ref().filter(|live| live.failed).map(|_| {
@@ -271,8 +270,16 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .key(if waiting { "waiting" } else { "download" })
         .gap(22.0)
         .items_center()
-        .child(flow_box("download-hud", 1.24, s.now, reduced))
-        .child(staggered(head, 0.06, 8.0))
+        .child(flow_box(
+            if waiting {
+                "waiting-hud"
+            } else {
+                "download-hud"
+            },
+            1.24,
+            s,
+        ))
+        .child(head)
         .child(progress_capsule)
         .children(retry)
 }
@@ -345,12 +352,14 @@ fn try_page(p: Paint, s: &Onboard) -> El {
     let head = match s.step {
         Step::TryHeard => heading(
             p,
+            s,
             "try-heard",
             "That's Hex",
             lead(p, "It types wherever your cursor is, in any app."),
         ),
         _ => heading(
             p,
+            s,
             "try",
             "Your turn",
             hold(p, s, "and say anything.", holding),
@@ -366,21 +375,23 @@ fn try_page(p: Paint, s: &Onboard) -> El {
         .gap(22.0)
         .items_center()
         .child(head)
-        .child(stage)
-        .child(staggered(
-            col()
-                .key("try-foot")
-                .gap(14.0)
-                .items_center()
-                .child(action(if s.step == Step::TryHeard {
-                    continue_button(p, s)
-                } else {
-                    none()
-                }))
-                .child(instrument_bar(p, s)),
-            0.16,
-            8.0,
-        ))
+        .child(s.motion.staggered(stage, 1.0, 8.0))
+        .child(
+            s.motion.staggered(
+                col()
+                    .key("try-foot")
+                    .gap(14.0)
+                    .items_center()
+                    .child(action(if s.step == Step::TryHeard {
+                        continue_button(p, s)
+                    } else {
+                        none()
+                    }))
+                    .child(instrument_bar(p, s)),
+                2.0,
+                8.0,
+            ),
+        )
 }
 
 fn instrument_bar(p: Paint, s: &Onboard) -> El {
@@ -443,6 +454,8 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool, cycles: bool) -> El {
 fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
     let hud_el = if let Some(frame) = s.hud.frame() {
         Some(frame_slot("try-dot-hud", TRY_HUD, 1.14, frame))
+    } else if s.hud.finished() {
+        None
     } else {
         voice_or_idle_slot("try-dot-hud", TRY_HUD, 1.14, true, &ANSWER_TRY, None, s).0
     };

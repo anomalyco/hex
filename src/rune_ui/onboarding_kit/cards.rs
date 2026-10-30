@@ -194,16 +194,10 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
         card = card.child(sent_thread(p, bubbles));
     }
 
-    // Hide the empty input box once both panic bubbles have been fired off.
-    let hide_field = bubbles.len() >= 2
-        && matches!(
-            reply,
-            Reply::Lines {
-                text: "",
-                focus: false,
-                ..
-            }
-        );
+    // Remove the field in the same layout change as the second sent bubble,
+    // not when Return lifts. Otherwise the card first makes room for both,
+    // then shrinks while the departing field is already outside its new edge.
+    let hide_field = bubbles.len() >= 2 && matches!(reply, Reply::Lines { text: "", .. });
     if !hide_field {
         card = card.child(field(p, n, reply));
     }

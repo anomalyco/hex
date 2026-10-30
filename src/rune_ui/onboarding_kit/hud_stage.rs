@@ -6,42 +6,83 @@
 //! [`crate::rune_hud::Painter`] (`rune_hud.wgsl`), identical to `#292`'s Sounds
 //! sheet and the real desktop HUD.
 
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use rune::{El, effect};
 
 use super::fixture::Take;
-use super::gpu_stage::{HUD_SLOT_MARK, set_dot_hud};
+use super::gpu_stage::{hud_mark, update_hud};
 use crate::dictation_indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
 use crate::dot_scope::{Tuning, demo_level};
 use crate::rune_hud::WINDOW;
 
 const STEP: f32 = 1.0 / 60.0;
+/// Integrate all the way to the presentation clock, including between 60 Hz
+/// samples. Equal substeps avoid a tiny remainder that the HUD's minimum dt
+/// would round up; the simulation stays bounded without quantising the pose.
+fn steps(duration: f32) -> (u32, f32) {
+    let count = (duration / STEP).ceil() as u32;
+    (
+        count,
+        if count == 0 {
+            0.0
+        } else {
+            duration / count as f32
+        },
+    )
+}
 const JOB: u64 = 1;
 /// Seconds after shortcut release (`Submitted` + `Transcribing`) when the final
 /// streamed word lands and `JobCompleted` triggers Dot scope's Done wipe.
 pub(crate) const DONE_DELAY: f64 = 0.14;
 
-/// Real `Dot scope` `Processing::Flow` phosphor helix for `"Setting up Hex"` and
-/// `"Almost ready"`.
-pub(crate) fn flow_frame_at(now_secs: f64, reduce: bool) -> DotFrame {
-    let clock = Instant::now();
-    let mut model = IndicatorModel::new(Tuning::default(), clock);
-    model.handle(Event::Started, clock, reduce);
-    model.handle(Event::Submitted { job_id: JOB }, clock, reduce);
-    model.handle(Event::Transcribing { job_id: JOB }, clock, reduce);
+/// The download plate advances from the last presentation time. Rebuilding
+/// its whole history in every view made a long download progressively costly.
+#[derive(Default)]
+pub(crate) struct FlowHud(RefCell<Option<Flow>>);
 
-    // Bounded cyclic window (`0.65 s` warm-in + smooth continuous phase) so step
-    // count stays tiny even at `t = 30 s`.
-    let target = (0.45 + (now_secs.max(0.0) % 12.0)) as f32;
-    let mut time = 0.0_f32;
-    let mut drawn = model.step(clock, 0.0, reduce);
-    while time + STEP <= target + 1e-4 {
-        time += STEP;
-        let at = clock + Duration::from_secs_f32(time);
-        drawn = model.step(at, STEP, reduce);
+struct Flow {
+    model: IndicatorModel,
+    clock: Instant,
+    at: f64,
+    reduced: bool,
+    frame: DotFrame,
+}
+
+impl FlowHud {
+    pub(crate) fn frame(&self, now: f64, reduced: bool) -> DotFrame {
+        let mut cached = self.0.borrow_mut();
+        if cached
+            .as_ref()
+            .is_none_or(|flow| flow.at > now || flow.reduced != reduced)
+        {
+            let clock = Instant::now();
+            let mut model = IndicatorModel::new(Tuning::default(), clock);
+            model.handle(Event::Started, clock, reduced);
+            model.handle(Event::Submitted { job_id: JOB }, clock, reduced);
+            model.handle(Event::Transcribing { job_id: JOB }, clock, reduced);
+            let frame = model.step(clock, 0.0, reduced);
+            *cached = Some(Flow {
+                model,
+                clock,
+                at: now - 0.45,
+                reduced,
+                frame,
+            });
+        }
+        let flow = cached.as_mut().expect("created above");
+        // A window returning after a long pause catches up once, bounded to
+        // one second; ordinary frames advance exactly their clock delta.
+        let delta = (now - flow.at).clamp(0.0, 1.0) as f32;
+        let (count, dt) = steps(delta);
+        for _ in 0..count {
+            flow.clock += Duration::from_secs_f32(dt);
+            flow.frame = flow.model.step(flow.clock, dt, reduced);
+        }
+        flow.at = now;
+        flow.frame.clone()
     }
-    drawn
 }
 
 /// The resting meter the plate hums at while waiting for the user to hold `⌥`.
@@ -86,26 +127,26 @@ pub(crate) fn voice_frame_at(
     let mut drawn = model.step(clock, 0.0, reduce);
 
     let idle = idle_time(idle);
-    let mut time = 0.0_f32;
-    while time + STEP <= idle + 1e-4 {
-        time += STEP;
+    let (count, dt) = steps(idle);
+    for i in 1..=count {
+        let time = i as f32 * dt;
         let at = clock + Duration::from_secs_f32(time);
         model.handle(IDLE_METER, at, reduce);
-        drawn = model.step(at, STEP, reduce);
+        drawn = model.step(at, dt, reduce);
     }
     let Some((take, elapsed)) = take else {
         return Some(drawn);
     };
 
-    let pressed = time;
+    let pressed = idle;
     let target = elapsed as f32;
     let stop_at = take.release as f32;
     let done_at = (take.release + DONE_DELAY) as f32;
     let mut submitted = false;
     let mut completed = false;
-    let mut since = 0.0_f32;
-    while since + STEP <= target + 1e-4 {
-        since += STEP;
+    let (count, dt) = steps(target);
+    for i in 1..=count {
+        let since = i as f32 * dt;
         let now = clock + Duration::from_secs_f32(pressed + since);
         if !submitted && since >= stop_at {
             submitted = true;
@@ -131,7 +172,7 @@ pub(crate) fn voice_frame_at(
         if !model.active() {
             return None;
         }
-        drawn = model.step(now, STEP, reduce);
+        drawn = model.step(now, dt, reduce);
     }
     model.active().then_some(drawn)
 }
@@ -145,10 +186,11 @@ pub(crate) fn frame_at(take: &Take, elapsed: f64, reduce: bool) -> Option<DotFra
 
 fn slot_el(key: &str, centre: [f32; 2], scale: f32) -> El {
     let (w, h) = (WINDOW.0 * scale, WINDOW.1 * scale);
-    effect(HUD_SLOT_MARK)
+    let mark = hud_mark(key);
+    effect(mark)
         .key(key.to_string())
         .role("none")
-        .mark(HUD_SLOT_MARK)
+        .mark(mark)
         .absolute(centre[0] - w * 0.5, centre[1] - h * 0.5)
         .size(w, h)
 }
@@ -158,8 +200,11 @@ fn slot_el(key: &str, centre: [f32; 2], scale: f32) -> El {
 /// desktop HUD is, so silence rests and louder speech moves it more.
 pub(crate) struct LiveHud {
     model: Option<IndicatorModel>,
+    clock: Instant,
     at: Instant,
     held: bool,
+    waiting: bool,
+    finished: bool,
     released: Option<Instant>,
     frame: Option<DotFrame>,
 }
@@ -172,8 +217,11 @@ impl Default for LiveHud {
     fn default() -> Self {
         Self {
             model: None,
+            clock: Instant::now(),
             at: Instant::now(),
             held: false,
+            waiting: true,
+            finished: false,
             released: None,
             frame: None,
         }
@@ -186,23 +234,35 @@ impl LiveHud {
     /// arrived. True while the plate still shows.
     pub(crate) fn step(
         &mut self,
+        seconds: f64,
         held: bool,
         peak: Option<f32>,
         landed: bool,
         reduce: bool,
     ) -> bool {
-        let now = Instant::now();
-        if held && !self.held {
+        let now = self.clock + Duration::from_secs_f64(seconds.max(0.0));
+        if self.model.is_none() && (!self.finished || (held && !self.held)) {
             let mut model = IndicatorModel::new(Tuning::default(), now);
             model.handle(Event::Started, now, reduce);
             self.model = Some(model);
             self.at = now;
+            self.finished = false;
+            self.waiting = true;
         }
         let Some(model) = self.model.as_mut() else {
             self.held = held;
             self.frame = None;
             return false;
         };
+        if held && !self.held {
+            // The waiting plate is already recording a quiet meter. Started
+            // resets Dot scope's scanner, so only restart after a previous take.
+            if !self.waiting {
+                model.handle(Event::Started, now, reduce);
+            }
+            self.waiting = false;
+            self.released = None;
+        }
         if !held && self.held {
             model.handle(Event::Submitted { job_id: JOB }, now, reduce);
             model.handle(Event::Transcribing { job_id: JOB }, now, reduce);
@@ -215,7 +275,6 @@ impl LiveHud {
             self.released = None;
             model.handle(Event::JobCompleted { job_id: JOB }, now, reduce);
         }
-        self.held = held;
         if held {
             // The desktop HUD reads the chunk's RMS; speech runs at about a
             // third of its peak.
@@ -228,8 +287,11 @@ impl LiveHud {
                 now,
                 reduce,
             );
+        } else if self.waiting {
+            model.handle(IDLE_METER, now, reduce);
         }
-        let dt = now.duration_since(self.at).as_secs_f32();
+        self.held = held;
+        let dt = now.saturating_duration_since(self.at).as_secs_f32();
         self.at = now;
         let frame = model.step(now, dt, reduce);
         if model.active() {
@@ -237,12 +299,17 @@ impl LiveHud {
         } else {
             self.model = None;
             self.frame = None;
+            self.finished = true;
         }
         self.frame.is_some()
     }
 
     pub(crate) fn frame(&self) -> Option<&DotFrame> {
         self.frame.as_ref()
+    }
+
+    pub(crate) fn finished(&self) -> bool {
+        self.finished
     }
 
     pub(crate) fn clear(&mut self) {
@@ -252,18 +319,19 @@ impl LiveHud {
 
 /// Mounts `frame` as the plate.
 pub(crate) fn frame_slot(key: &str, centre: [f32; 2], scale: f32, frame: &DotFrame) -> El {
-    set_dot_hud(Some(frame.clone()));
+    update_hud(hud_mark(key), frame.clone());
     slot_el(key, centre, scale)
 }
 
 /// Mounts the real `Dot scope` `Processing::Flow` phosphor HUD centred in a
 /// layout box of `(w, h)` for `"Setting up Hex"` and `"Almost ready"`.
-pub(crate) fn flow_box(key: &str, scale: f32, now: f64, reduce: bool) -> El {
-    set_dot_hud(Some(flow_frame_at(now, reduce)));
+pub(crate) fn flow_box(key: &str, scale: f32, s: &super::stories::Onboard) -> El {
+    update_hud(hud_mark(key), s.flow_hud.frame(s.now, s.reduced.get()));
     let (w, h) = (WINDOW.0 * scale, 62.0 * scale);
     rune::el()
         .key(format!("{key}-wrap"))
         .size(w, h)
+        .transition(s.motion.roll(8.0))
         .child(slot_el(key, [w * 0.5, h * 0.5], scale))
 }
 
@@ -289,10 +357,9 @@ pub(crate) fn voice_or_idle_slot(
             let heat = (frame.pose.opacity * if elapsed < take.release { 1.0 } else { 0.45 })
                 .clamp(0.0, 1.0);
             let (avg, _) = take.meter(elapsed);
-            set_dot_hud(Some(frame));
+            update_hud(hud_mark(key), frame);
             return (Some(slot_el(key, centre, scale)), heat, avg);
         }
-        set_dot_hud(None);
         return (None, 0.0, 0.0);
     }
     // A scene that opens mid-wait shows the plate already settled.
@@ -303,10 +370,9 @@ pub(crate) fn voice_or_idle_slot(
         });
     if waiting && let Some(frame) = voice_frame_at(idle, None, reduce) {
         let heat = 0.22 * frame.pose.opacity;
-        set_dot_hud(Some(frame));
+        update_hud(hud_mark(key), frame);
         return (Some(slot_el(key, centre, scale)), heat, 0.04);
     }
-    set_dot_hud(None);
     (None, 0.0, 0.0)
 }
 
@@ -314,6 +380,44 @@ pub(crate) fn voice_or_idle_slot(
 mod tests {
     use super::super::fixture::ANSWER_JAY;
     use super::*;
+
+    #[test]
+    fn pressing_keeps_the_waiting_hud_open_and_completion_stays_gone() {
+        let mut hud = LiveHud::default();
+        for i in 0..120 {
+            hud.step(i as f64 / 120.0, false, None, false, false);
+        }
+        let before = hud.frame().unwrap().pose;
+        hud.step(1.0, true, Some(0.3), false, false);
+        let pressed = hud.frame().unwrap().pose;
+        assert!(
+            pressed.opacity >= before.opacity - 0.01
+                && pressed.scale >= before.scale - 0.01
+                && pressed.width >= before.width - 0.1,
+            "pressing must keep the waiting plate, not unfold a new one"
+        );
+        hud.step(1.1, false, None, false, false);
+        hud.step(1.2, false, None, true, false);
+        for i in 145..360 {
+            hud.step(i as f64 / 120.0, false, None, false, false);
+        }
+        assert!(hud.finished());
+        assert!(hud.frame().is_none());
+        hud.step(3.0, true, Some(0.3), false, false);
+        assert!(hud.frame().is_some(), "the next press starts a new plate");
+    }
+
+    #[test]
+    fn the_hud_advances_between_sixty_hertz_frames() {
+        let a = voice_frame_at(0.25, None, false).unwrap();
+        let b = voice_frame_at(0.25 + 1.0 / 120.0, None, false).unwrap();
+        assert_ne!(a, b, "a 120 Hz frame must not repeat the previous pose");
+        let flow = FlowHud::default();
+        assert_ne!(
+            flow.frame(0.25, false),
+            flow.frame(0.25 + 1.0 / 120.0, false)
+        );
+    }
 
     #[test]
     fn dot_hud_appears_listens_wipes_done_and_leaves() {
@@ -330,7 +434,7 @@ mod tests {
             "HUD collapses away cleanly after Done"
         );
 
-        let flow = flow_frame_at(0.9, false);
+        let flow = FlowHud::default().frame(0.9, false);
         assert!(flow.pose.opacity > 0.8);
     }
 }
