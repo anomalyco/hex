@@ -1080,7 +1080,8 @@ mod tests {
 
     #[test]
     fn manager_environment_reads_one_exact_key() {
-        let environment = "XAUTHORITY_OLD=/a\nXAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.X1\nDISPLAY=:0\n";
+        let environment =
+            "XAUTHORITY_OLD=/a\nXAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.X1\nDISPLAY=:0\n";
         assert_eq!(
             environment_value(environment, "XAUTHORITY").as_deref(),
             Some("/run/user/1000/.mutter-Xwaylandauth.X1")
