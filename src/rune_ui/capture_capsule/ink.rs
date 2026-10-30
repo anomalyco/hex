@@ -205,7 +205,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             s.placed = None;
             s.scene = Scene::default();
             if let Some(overlay) = &s.overlay {
-                super::set_shown(overlay, false, |s: &InkState| !s.shown);
+                overlay.hide();
             }
             return true;
         }
@@ -272,7 +272,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         }
         if !s.shown {
             s.shown = true;
-            super::set_shown(overlay, true, |s: &InkState| !s.shown);
+            overlay.show();
         }
     }
     tx.wake_after(FRAME);
@@ -322,8 +322,7 @@ impl InkOverlay {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DisplayTarget::Primary,
                 level: OverlayLevel::AboveStatus,
-                // Hidden until shown; `set_shown` excludes it then.
-                exclude_from_capture: false,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::None,
                 prewarm: true,
                 // Escape while drawing, asked for only then.
@@ -350,7 +349,7 @@ impl InkOverlay {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the ink, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        super::follow_recordings(&self.overlay, shown, |s: &InkState| s.shown);
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Looks for a recording capture's strokes now; it keeps looking while

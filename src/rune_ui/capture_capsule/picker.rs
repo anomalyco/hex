@@ -801,9 +801,13 @@ pub(crate) fn poll(s: &mut PickerState, now: f64, tx: &mut Tx) -> bool {
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
-            super::set_shown(overlay, shown, |s: &PickerState| !s.shown);
-            if !shown && (s.want.is_none() || s.want == Some(Mode::Iphone)) {
-                s.aim = None;
+            if shown {
+                overlay.show();
+            } else {
+                overlay.hide();
+                if s.want.is_none() || s.want == Some(Mode::Iphone) {
+                    s.aim = None;
+                }
             }
         }
     }
@@ -850,8 +854,7 @@ impl PickerOverlay {
                 display: DISPLAY,
                 // Under the capsule, so its chips still take clicks.
                 level: OverlayLevel::AboveStatus,
-                // Hidden until shown; `set_shown` excludes it then.
-                exclude_from_capture: false,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::All,
                 prewarm: true,
                 ..Default::default()
@@ -885,7 +888,7 @@ impl PickerOverlay {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the picker, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        super::follow_recordings(&self.overlay, shown, |s: &PickerState| s.shown);
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.
