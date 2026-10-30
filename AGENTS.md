@@ -743,8 +743,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   a tap (under `DRAW_HOLD`) starts and stops; held while recording, the
   pointer draws with no click until it comes up (Linux: portal
   Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
-  icons only, with no target chips; its pen turns drawing on until
-  clicked again, and Esc stops drawing, never the recording. Shift still
+  icons only, with no target chips; its pen stays on until clicked
+  again and draws only while the mouse button is down (drag to draw,
+  move freely otherwise), and Esc stops drawing, never the recording. Shift still
   draws on the Mac. While drawing, the ink overlay takes the pointer with
   a pen cursor (Linux leaves a hole over the capsule's pill), so clicks
   reach neither the app nor anything but the capsule. Ink has no pins and

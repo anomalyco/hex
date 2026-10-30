@@ -161,6 +161,10 @@ pub(crate) struct InkState {
     shown: bool,
     /// The overlay takes the pointer to draw.
     drawing: bool,
+    /// Where the pointer last was on the overlay, and where the pen went
+    /// down (Linux).
+    pointer: [f32; 2],
+    pressed_at: [f32; 2],
 }
 
 impl InkState {
@@ -182,6 +186,8 @@ impl InkState {
             overlay: None,
             shown: true,
             drawing: false,
+            pointer: [0.0; 2],
+            pressed_at: [0.0; 2],
         }
     }
 }
@@ -453,7 +459,29 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
     if !drawing {
         return root;
     }
-    let taken = || el().hit().cursor(pen_cursor());
+    // A press anywhere on the screen puts the pen down; the drag's travel
+    // from where the pointer was moves it (Drag's own points are the
+    // piece's, and the pieces' places aren't known here).
+    let taken = move || {
+        el().hit().cursor(pen_cursor()).on_drag(
+            move |s: &mut InkState, d: &mut rune::Drag, tx: &mut Tx| {
+                match d.phase {
+                    rune::Phase::Down => {
+                        s.pressed_at = s.pointer;
+                        crate::capture_host::pen_button(true);
+                        crate::capture_host::draw(s.pointer[0], s.pointer[1], scale);
+                    }
+                    rune::Phase::Move => {
+                        let at = [s.pressed_at[0] + d.dx, s.pressed_at[1] + d.dy];
+                        s.pointer = at;
+                        crate::capture_host::draw(at[0], at[1], scale);
+                    }
+                    rune::Phase::Up => crate::capture_host::pen_button(false),
+                }
+                tx.wake_after(Duration::ZERO);
+            },
+        )
+    };
     let [px, py, pw, ph] = crate::capture_host::capsule_pill().unwrap_or([0.0; 4]);
     // The pill's offset from the panel's centre, which is the screen's.
     let off = px + pw * 0.5 - PANEL_W * 0.5;
@@ -476,7 +504,8 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
     root.focusable(true)
         .on_key(escape)
         .on_pointer_move_local(
-            move |_: &mut InkState, p: rune::PointerEvent, tx: &mut Tx| {
+            move |s: &mut InkState, p: rune::PointerEvent, tx: &mut Tx| {
+                s.pointer = [p.x, p.y];
                 crate::capture_host::draw(p.x, p.y, scale);
                 tx.wake_after(Duration::ZERO);
             },

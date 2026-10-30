@@ -31,8 +31,11 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   (macOS: CaptureShortcut tells the tap from the hold at release; Linux:
 │   the portal's Activated/Deactivated or the X11 grab's press and release,
 │   linux_input Capture/CaptureUp -> CaptureHost::annotate_down/up)
-├── The capsule's pen -> drawing on until clicked again, or the key is
-│   tapped, or held and let go (Action::Pen -> capture_host::toggle_pen)
+├── The capsule's pen -> on until clicked again, or the key is tapped, or
+│   held and let go (Action::Pen -> capture_host::toggle_pen). Like a real
+│   pen it inks only between mouse-down and mouse-up (capture_host::
+│   pen_button; Linux: the overlay's drag, macOS: the tap's buttons); moving
+│   with the button up draws nothing, and clicks still never reach the app
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
 │   on macOS; Escape bound through the portal or grab on Linux, and the
 │   overlay's own key handler where it gets the keyboard)
