@@ -306,6 +306,14 @@ impl Animated {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+/// The pieces the pointer can be on: the pill, and the list hanging under
+/// it, which sits outside the pill's clip.
+#[derive(Clone, Copy)]
+enum Part {
+    Pill,
+    List,
+}
+
 /// The host's side of a press or key: what to do with the capture.
 pub(crate) type Act = Arc<dyn Fn(Action) + Send + Sync>;
 
@@ -339,6 +347,8 @@ pub(crate) struct CapsuleState {
         crate::capture_host::CapsuleKeys,
         crate::capture_host::CapsuleKeyGrab,
     )>,
+    /// Whether the pointer is on each [`Part`].
+    hovering: [bool; 2],
     /// The on-screen picker, and the mode it was last told to pick.
     picker: Option<picker::PickerOverlay>,
     picker_mode: Option<Mode>,
@@ -374,6 +384,7 @@ impl CapsuleState {
             replace: false,
             placed: surface::Anchor::Top,
             keys: None,
+            hovering: [false; 2],
             picker: None,
             picker_mode: None,
             still: false,
@@ -451,8 +462,15 @@ impl CapsuleState {
         tx.wake_after(Duration::ZERO);
     }
 
-    /// The pointer came onto the capsule or left it: chips never fold under it.
-    fn hover(&mut self, on: bool, tx: &mut Tx) {
+    /// The pointer came onto `part` of the capsule or left it: chips never
+    /// fold under it, and a press there is never a click away.
+    fn hover(&mut self, part: Part, on: bool, tx: &mut Tx) {
+        let was = self.hovering != [false; 2];
+        self.hovering[part as usize] = on;
+        let on = self.hovering != [false; 2];
+        if on == was {
+            return;
+        }
         let now = self.now;
         self.flow.hover(on, now);
         self.present(now);
@@ -931,7 +949,7 @@ fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleStat
         .size(w, h)
         .motion(surface.shell_motion)
         .clip_rounded(corner(h))
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(on, tx));
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
         open: Some((_, list)),
@@ -1812,6 +1830,9 @@ fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blu
         .role("list")
         .label("Send to")
         .hit()
+        // Hex's tap reports a press on the list before the list hears it:
+        // the pointer being here keeps it from reading as a click away.
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::List, on, tx))
         .transition(
             Transition::offset(0.0, -LIST_DROP)
                 .combined(Transition::opacity())

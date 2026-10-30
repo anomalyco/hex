@@ -1038,6 +1038,134 @@ fn presses_reach_the_host() {
     }
 }
 
+/// The live capsule after `inputs`, at rest, with every action it hands the
+/// host recorded.
+fn live(inputs: Vec<Input>) -> (Runtime<CapsuleState>, Arc<Mutex<Vec<Action>>>) {
+    let mut state = CapsuleState::new(false);
+    let actions: Arc<Mutex<Vec<Action>>> = Arc::default();
+    let record = actions.clone();
+    state.act = Some(Arc::new(move |action| record.lock().unwrap().push(action)));
+    let mut rt =
+        crate::rune_ui::offscreen::runtime(state, view, (PANEL_W, PANEL_H), env(true), text());
+    rt.poll = Some(poll);
+    rt.frame(0.0);
+    for input in inputs {
+        rt.update(move |s, tx| {
+            s.inbox.push(input);
+            tx.wake_after(std::time::Duration::ZERO);
+        });
+        settle(&mut rt);
+    }
+    (rt, actions)
+}
+
+/// A second of frames, enough for anything to land.
+fn settle(rt: &mut Runtime<CapsuleState>) {
+    for _ in 0..FPS as usize {
+        rt.frame(1.0 / FPS);
+    }
+}
+
+/// Clicks the middle of the live element keyed `key` as a Mac delivers it:
+/// the pointer gets there, Hex's session tap hears the press first and
+/// tells the capsule it may be a click away (`CapsuleKey::Press`), and only
+/// then does the overlay get the press and the release.
+fn click_on(rt: &mut Runtime<CapsuleState>, key: &str, nth: usize) {
+    let [x, y, w, h] = rt
+        .elements()
+        .iter()
+        .filter(|e| !e.exiting && e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key))
+        .nth(nth)
+        .unwrap_or_else(|| panic!("no {key} {nth} in {:?}", keys(rt)))
+        .rect;
+    let (cx, cy) = (x + w * 0.5, y + h * 0.5);
+    assert!(
+        rt.hit_regions()
+            .iter()
+            .any(|r| cx >= r[0] && cx <= r[2] && cy >= r[1] && cy <= r[3]),
+        "{key} at ({cx}, {cy}) is outside the overlay's hit regions {:?}",
+        rt.hit_regions()
+    );
+    rt.pointer_move(cx, cy);
+    rt.frame(1.0 / FPS);
+    rt.update(|s, tx| {
+        s.inbox.push(Input::ClickAway);
+        tx.wake_after(std::time::Duration::ZERO);
+    });
+    rt.frame(1.0 / FPS);
+    rt.pointer_down(cx, cy);
+    rt.frame(1.0 / FPS);
+    rt.pointer_up(cx, cy);
+    settle(rt);
+}
+
+/// Clicking any of the capsule's choices does what it says, in every flow:
+/// a suggestion, a search result, Search, Undo and the list it brings
+/// back, ✕, and each flow's picks. The tap's press
+/// arrives before the click, so a click on the list must not read as a
+/// click away from it.
+#[test]
+fn clicks_on_the_capsule_do_what_they_say() {
+    use super::tuning::{self, CapsuleFlow};
+    let routed = |route: Route| vec![processing_input(), Input::Routed(route)];
+    let send = |to: &str| Action::Send {
+        to: to.into(),
+        always: None,
+    };
+    tuning::with_flow(CapsuleFlow::List, || {
+        // A suggestion in the list under the capsule.
+        let (mut rt, actions) = live(routed(guess()));
+        click_on(&mut rt, "row-HEX", 0);
+        assert_eq!(*actions.lock().unwrap(), vec![send("HEX")]);
+
+        // A search result, opened over the suggestions.
+        let mut inputs = routed(guess());
+        inputs.push(Input::OpenList);
+        let (mut rt, actions) = live(inputs);
+        click_on(&mut rt, "row-RUNE", 0);
+        assert_eq!(*actions.lock().unwrap(), vec![send("RUNE")]);
+
+        // Search, beside "Copied", opens the search.
+        let (mut rt, _) = live(routed(guess()));
+        click_on(&mut rt, "ask", 0);
+        assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
+
+        // A rule's send: Undo takes it back and offers the list again, where
+        // a click redirects it.
+        let (mut rt, actions) = live(routed(rule()));
+        click_on(&mut rt, "undo", 0);
+        assert_eq!(
+            *actions.lock().unwrap(),
+            vec![Action::Undo { to: "SEER".into() }]
+        );
+        click_on(&mut rt, "row-HOME", 0);
+        assert_eq!(
+            *actions.lock().unwrap(),
+            vec![Action::Undo { to: "SEER".into() }, send("HOME")]
+        );
+
+        // ✕ closes.
+        let (mut rt, _) = live(routed(rule()));
+        click_on(&mut rt, "close", 0);
+        assert_eq!(rt.state.surface.pres, Pres::Hidden);
+    });
+    for flow in [
+        CapsuleFlow::Cursor,
+        CapsuleFlow::Notch,
+        CapsuleFlow::MenuBar,
+    ] {
+        tuning::with_flow(flow, || {
+            let (mut rt, actions) = live(routed(guess()));
+            click_on(&mut rt, "pick", 1);
+            assert_eq!(*actions.lock().unwrap(), vec![send("HEX")], "{flow:?}");
+        });
+    }
+}
+
+fn processing_input() -> Input {
+    Input::Stage(Stage::Transcribing)
+}
+
 /// `HEX_CAPSULE_MOTION=<folder>` plays every script, light and dark, calm
 /// and under Reduce Motion: motion-lint traces in
 /// `<folder>/runs/<script>-<variant>/trace.jsonl` (`motion-lint analyze
