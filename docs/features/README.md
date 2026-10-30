@@ -1125,8 +1125,9 @@ Linux beta                               // not macOS feature parity
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
 ├── Escape -> Cancel active capture, not newest accepted job
-│   ├── Bound only while recording (portal: own session, also with held modifiers)
-│   └── X11 grab conflict / portal refusal -> Warn without stopping dictation
+│   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
+│   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
+│       the user assigns one, idle presses do nothing (#482)
 ├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
 │   └── Selected text from the primary selection -> OpenCode -> Paste the reply
 ├── Recording HUD -> Dot scope, as on macOS, on the
@@ -1273,7 +1274,7 @@ through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-s
 checks that commands fail without a listening Hex.
 On 2026-10-22 the portal path was observed on niri with xdg-desktop-portal-gnome
 using synthetic uinput keys against an isolated service: granted triggers,
-hold and Escape while held, double-tap lock, Paste Last, and commands. A
+hold and Escape while held (since replaced by Cancel dictation), double-tap lock, Paste Last, and commands. A
 physical keyboard press has not been recorded.
 
 `linux.hud`: [linux_rune_hud.rs](../../src/linux_rune_hud.rs) keeps the

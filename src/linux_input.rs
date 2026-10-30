@@ -264,12 +264,7 @@ impl LinuxHotkey {
                 "Wayland's shortcuts portal cannot request mouse buttons; bind the hex commands in the desktop settings"
             ));
         }
-        self.portal_trigger_for(&keysym_name(&self.key)?)
-    }
-
-    /// This shortcut's modifiers with another key: Escape pressed while
-    /// the shortcut is still held arrives with its modifiers.
-    fn portal_trigger_for(&self, key: &str) -> Result<String> {
+        let key = keysym_name(&self.key)?;
         let mut parts = Vec::new();
         for (held, name) in [
             (self.control, "CTRL"),
@@ -281,7 +276,7 @@ impl LinuxHotkey {
                 parts.push(name);
             }
         }
-        parts.push(key);
+        parts.push(&key);
         Ok(parts.join("+"))
     }
 
@@ -1012,14 +1007,13 @@ impl Backend {
             shortcuts.push(crate::linux_portal::Shortcut {
                 id,
                 description,
-                trigger: key.portal_trigger()?,
+                trigger: Some(key.portal_trigger()?),
             });
         }
-        let granted = if shortcuts.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            portal.bind(&shortcuts, &self.stop)?
-        };
+        // Every shortcut, cancel included, goes in this one bind: a second
+        // bind would replace the set on KDE.
+        shortcuts.push(crate::linux_portal::Shortcut::cancel());
+        let granted = portal.bind(&shortcuts, &self.stop)?;
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             requested
                 .iter()
@@ -1056,22 +1050,16 @@ impl Backend {
             .store(portal.configurable(), Ordering::Release);
         self.status.configure.store(false, Ordering::Release);
         self.mark_ready(DesktopShortcuts::Portal(granted));
-        // Escape while the recording shortcut is still held carries its modifiers.
-        let held_escape = || -> Option<String> {
-            let trigger = binding.portal_trigger_for("Escape").ok()?;
-            (trigger != "Escape").then_some(trigger)
-        };
         let shortcut_for = |id: &str| {
             Shortcut::ALL
                 .into_iter()
                 .find(|shortcut| shortcut.portal_id().0 == id)
         };
-        let mut escape_bound = false;
         while !self.stopping() {
             for event in portal.events() {
                 let input = match event {
                     crate::linux_portal::Event::Pressed(id)
-                        if crate::linux_portal::is_escape(&id) =>
+                        if id == crate::linux_portal::CANCEL_ID =>
                     {
                         Input::Escape
                     }
@@ -1116,19 +1104,6 @@ impl Backend {
                     error = format!("{error:#}"),
                     "could not open the desktop's shortcut settings"
                 );
-            }
-            // Escape belongs to Hex only while something records, or
-            // Annotate draws.
-            let wants_escape = dispatcher.state.wants_escape() || annotate_drawing();
-            if wants_escape && !escape_bound {
-                escape_bound = true;
-                let available = portal.bind_escape(held_escape(), &self.stop)?;
-                if self.status.update_escape_availability(available) {
-                    tracing::warn!("{ESCAPE_CANCEL_WARNING}; continuing without Escape-cancel");
-                }
-            } else if !wants_escape && escape_bound {
-                escape_bound = false;
-                portal.release_escape();
             }
             if !dispatcher.flush()? {
                 return Ok(());

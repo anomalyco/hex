@@ -217,9 +217,8 @@ substitute for source inspection or a second roadmap.
   or, without the portal, the `hex` commands alone.
 - `linux_portal`: the portal bus (a private zbus connection, `Register("hex")`
   after writing a managed `hex.desktop` for a loose binary, requests and
-  sessions) and the GlobalShortcuts client on it: one session for Hex's
-  shortcuts, a second session binding Escape only while recording,
-  granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
+  sessions) and the GlobalShortcuts client on it: one session binding all of
+  Hex's shortcuts once, Cancel dictation included, granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
   session-closed reporting.
 - `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
@@ -961,8 +960,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   A loose binary writes its own managed `hex.desktop` so the portal can
-  identify it. Escape is bound only while
-  something records. Modifier-only shortcuts stay unsupported on Linux.
+  identify it. Every portal shortcut, Cancel dictation included, is bound
+  in one session with one BindShortcuts call, and that set never changes
+  while Hex runs: desktops keep one set per app, and KDE replaces it with
+  each call (a second session once wiped Hex's shortcuts,
+  [#482](https://github.com/anomalyco/hex/issues/482)). A portal shortcut
+  is held for as long as it is bound and consumed before the focused app
+  sees it, so the portal never binds Escape: Cancel dictation has no
+  suggested trigger, the user assigns one in the desktop, and it acts only
+  while something records or Annotate draws. Modifier-only shortcuts stay
+  unsupported on Linux.
 - Every Linux shortcut source (X11 grabs, portal presses, `hex` commands) feeds
   the same `linux_input` state machine and emits the same events. Commands are
   idempotent: starting while recording or stopping while idle does nothing.
