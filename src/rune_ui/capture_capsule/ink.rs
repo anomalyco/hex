@@ -163,7 +163,9 @@ pub(crate) struct InkState {
     drawing: bool,
     /// Where the pointer last was on the overlay, and where the pen went
     /// down (Linux).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pointer: [f32; 2],
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pressed_at: [f32; 2],
 }
 
