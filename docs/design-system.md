@@ -55,7 +55,9 @@ by a Rune overlay's compositor on every OS, hand-tuned in HUD Lab.
    window's root does too), so every hover below it, kit controls and popups
    included, switches with no fade either way. Never give an element its own
    `hover_motion`. Press and selection motion stay as the
-   kit draws them.
+   kit draws them, except in lists: a `list_row` or list + detail `item`
+   selects on the pointer's press with no press overlay, and the selected
+   fill and the detail swap in that frame (`select_at_once`).
 6. **Verify by looking.** Render every view you touched with a `--snap` scene
    in light and dark (see [Verification](#verification)).
 

@@ -1006,6 +1006,93 @@ fn history_selects_deletes_and_clears_in_two_steps() {
     assert!(rt.state.history.entries.is_empty());
 }
 
+/// What is still changing one short frame after an input: hover and press
+/// overlays between their ends, fades, travel, and fills that differ from
+/// where they settle.
+fn still_changing(rt: &mut Runtime<Ui>, within: &str) -> Vec<String> {
+    rt.frame(1.0 / 120.0);
+    let now = rt.elements();
+    settle(rt);
+    let later = rt.elements();
+    let mut changing = Vec::new();
+    for e in now.iter().filter(|e| e.path.contains(within) && !e.exiting) {
+        let rest = later.iter().find(|l| l.path == e.path && !l.exiting);
+        if e.moving || (e.opacity > 0.001 && e.opacity < 0.999) {
+            changing.push(format!("{} moving or fading ({})", e.path, e.opacity));
+        }
+        if let Some(rest) = rest
+            && (e.fill != rest.fill
+                || e.text_color != rest.text_color
+                || (e.hover - rest.hover).abs() > 0.001
+                || (e.press - rest.press).abs() > 0.001
+                || (e.opacity - rest.opacity).abs() > 0.001)
+        {
+            changing.push(format!("{} differs from its rest", e.path));
+        }
+    }
+    changing
+}
+
+/// List rows are as fast as they can be: hover is a fill that lands at once,
+/// and a press selects the row and swaps the detail in the same frame.
+#[test]
+fn list_rows_select_and_hover_at_once() {
+    for (scene, row, pane) in [
+        ("history", "history-entry3", "history-pane"),
+        ("modes", "mode-global", "/panel/"),
+    ] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        settle(&mut rt);
+        let (x, y) = rt.find(row).expect("a row");
+        rt.pointer_move(x, y);
+        let hovered = still_changing(&mut rt, pane);
+        assert!(hovered.is_empty(), "{scene}: hover animates: {hovered:#?}");
+        assert!(element(&rt, row).hover > 0.999, "{scene}: no hover fill");
+        rt.pointer_down(x, y);
+        let pressed = still_changing(&mut rt, pane);
+        assert!(
+            pressed.is_empty(),
+            "{scene}: selection animates: {pressed:#?}"
+        );
+        rt.pointer_up(x, y);
+        let released = still_changing(&mut rt, pane);
+        assert!(
+            released.is_empty(),
+            "{scene}: release animates: {released:#?}"
+        );
+    }
+    let mut rt = runtime("history", true, PANE_SIZE);
+    let (x, y) = rt.find("history-entry3").expect("a row");
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 120.0);
+    assert_eq!(rt.state.history.selected, Some(3), "selects on the press");
+    rt.pointer_up(x, y);
+}
+
+/// A row's Copy copies that entry without selecting it.
+#[test]
+fn a_rows_copy_leaves_the_selection() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    let (x, y) = rt.find("history-entry1").expect("a row");
+    rt.pointer_move(x, y);
+    settle(&mut rt);
+    let copy = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.path.contains("history-entry1/") && e.key.as_deref() == Some("row-copy"))
+        .expect("the row's Copy");
+    let (x, y) = (
+        copy.rect[0] + copy.rect[2] / 2.0,
+        copy.rect[1] + copy.rect[3] / 2.0,
+    );
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.history.copied, Some(1));
+    assert_eq!(rt.state.history.selected, Some(2));
+}
+
 #[test]
 fn history_copy_writes_the_clipboard() {
     let mut rt = runtime("history", true, PANE_SIZE);
