@@ -95,8 +95,9 @@ The known experiments are compiled into
   ```ts
   Prototypes        stories that aren't the window
   ├── Onboarding    the options and First run
-  ├── Meetings      Live notes: a canned call's notes floating under a
-  │                 draggable capsule (nothing real runs; live_notes.rs)
+  ├── Meetings      Live notes: a canned call's chapters and notes under a
+  │                 draggable capsule, hidable, copied whole, new, or by
+  │                 chapter (nothing real runs; live_notes.rs)
   ├── HUD           (macOS) each placement × look × ending, Processing, Your voice
   └── Capture capsule   (macOS) whole flow and each state × flow, notch, family
   Window            every macOS-window fixture scene by pane, under a readable name

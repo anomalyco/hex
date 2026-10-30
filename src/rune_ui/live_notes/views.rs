@@ -2,24 +2,23 @@
 //! and the notes floating under it, and the side column's clock and pass
 //! log.
 
-use rune::{Cursor, Cx, Drag, El, Phase as Gesture, Transition, Tx, col, el, row, text};
+use rune::{Cursor, Cx, Drag, Edge, El, Phase as Gesture, Transition, Tx, col, el, row, text};
 
 use super::super::controls::{DESCRIPTION, Paint, pulsing_dot, status_dot};
 use super::super::lists::section_label;
-use super::notes::{Note, card};
+use super::copy::Copy;
+use super::notes::{Note, row_for};
 use super::pipeline::clock;
 use super::script::{NoteKind, lantern};
-use super::{Corner, LiveNotes, Phase, SPEEDS, Under};
+use super::{Corner, LiveNotes, Phase, SPEEDS};
 
 const PILL_H: f32 = 36.0;
 /// The capsule's column: the notes' width, and the most the pill takes.
-const COLUMN_W: f32 = 300.0;
+const COLUMN_W: f32 = 340.0;
 const COLUMN_GAP: f32 = 6.0;
 const SCREEN_PAD: f32 = 16.0;
-/// How many notes [`Under::Stack`] keeps.
-const STACK: usize = 3;
-/// How many [`Under::Hover`] shows under the pointer.
-const HOVER_MAX: usize = 6;
+const CHAPTER_H: f32 = 30.0;
+const CHIP_H: f32 = 22.0;
 const STOP_SIZE: f32 = 22.0;
 const SIDE_W: f32 = 240.0;
 
@@ -39,30 +38,52 @@ impl LiveNotes {
         Some(lantern().topics[chapter.topic].name)
     }
 
-    /// The notes under the capsule, nearest it first.
-    fn floating(&self) -> Vec<usize> {
-        if self.phase != Phase::Recording {
-            return Vec::new();
-        }
-        let newest = self.notes_newest_first();
-        match self.under {
-            Under::Stack => newest.into_iter().take(STACK).collect(),
-            Under::Fade => newest
-                .into_iter()
-                .filter(|&note| {
-                    self.fresh.is_some_and(|(fresh, _)| fresh == note)
-                        || self.open_note == Some(note)
-                })
-                .collect(),
-            Under::Hover if self.hovered => newest.into_iter().take(HOVER_MAX).collect(),
-            Under::Hover => Vec::new(),
-        }
+    /// The chapter showing its notes: one pressed open, else the current
+    /// one while recording.
+    fn open_chapter_index(&self) -> Option<usize> {
+        self.open_chapter.or_else(|| {
+            (self.phase == Phase::Recording)
+                .then(|| self.pipeline.chapters.len().checked_sub(1))
+                .flatten()
+        })
+    }
+
+    /// The notes found in chapter `index`, in the order they were said.
+    fn chapter_notes(&self, index: usize) -> Vec<usize> {
+        let script = lantern();
+        let chapters = &self.pipeline.chapters;
+        let start = chapters[index].start_ms;
+        let end = chapters
+            .get(index + 1)
+            .map_or(u64::MAX, |next| next.start_ms);
+        let mut notes: Vec<usize> = self
+            .pipeline
+            .found
+            .iter()
+            .copied()
+            .filter(|&note| (start..end).contains(&script.note_at(note)))
+            .collect();
+        notes.sort_by_key(|&note| script.note_at(note));
+        notes
     }
 }
 
-fn toggle(s: &mut LiveNotes, note: usize) {
+fn toggle_note(s: &mut LiveNotes, note: usize) {
     s.take_over();
     s.open_note = (s.open_note != Some(note)).then_some(note);
+}
+
+fn toggle_chapter(s: &mut LiveNotes, index: usize) {
+    s.take_over();
+    s.open_note = None;
+    s.open_chapter = (s.open_chapter_index() != Some(index)).then_some(index);
+}
+
+fn copy(what: Copy) -> impl Fn(&mut LiveNotes, &mut Tx) + 'static {
+    move |s: &mut LiveNotes, tx: &mut Tx| {
+        s.take_over();
+        s.copy(what, tx);
+    }
 }
 
 pub(super) fn stage(s: &LiveNotes, cx: &mut Cx<LiveNotes>) -> El {
@@ -145,30 +166,16 @@ fn capsule_column(
     screen: Option<[f32; 4]>,
     column: Option<[f32; 4]>,
 ) -> El {
-    let mut under: Vec<El> = s
-        .floating()
-        .into_iter()
-        .enumerate()
-        .map(|(age, id)| {
-            let note = Note::from_script(lantern(), id);
-            // Older notes recede into the screen.
-            let ink = match age {
-                0 => p.text(),
-                1 => p.muted(),
-                _ => p.faint(),
-            };
-            let enter = Transition::opacity().combined(Transition::offset(
-                0.0,
-                if s.corner.bottom { 8.0 } else { -8.0 },
-            ));
-            card(p, &note, s.open_note == Some(id), ink)
-                .key(format!("note{id}"))
-                .on_press(move |s: &mut LiveNotes| toggle(s, id))
-                .transition(Transition::asymmetric(enter, Transition::opacity()))
-        })
-        .collect();
+    let mut under: Vec<El> = Vec::new();
     if s.phase == Phase::Done {
         under.push(summary(s, p));
+    }
+    if s.notes_open && !s.pipeline.chapters.is_empty() {
+        let enter = Transition::opacity().combined(Transition::offset(
+            0.0,
+            if s.corner.bottom { 8.0 } else { -8.0 },
+        ));
+        under.push(chapters(s, p).transition(enter));
     }
     if s.corner.bottom {
         under.reverse();
@@ -180,8 +187,7 @@ fn capsule_column(
         .key("capsule")
         .w(COLUMN_W)
         .gap(COLUMN_GAP)
-        .offset(s.drag.0, s.drag.1)
-        .on_hover_change(|s: &mut LiveNotes, inside, _| s.hovered = inside);
+        .offset(s.drag.0, s.drag.1);
     column_el = if s.corner.right {
         column_el.items_end()
     } else {
@@ -192,6 +198,147 @@ fn capsule_column(
     } else {
         column_el.child(pill).children(under)
     }
+}
+
+/// The chapters so far, oldest first, with the open one's notes under it.
+fn chapters(s: &LiveNotes, p: Paint) -> El {
+    let c = &p.k.c;
+    let script = lantern();
+    let open = s.open_chapter_index();
+    let last = s.pipeline.chapters.len() - 1;
+    let mut panel = col()
+        .key("chapters")
+        .w_full()
+        .gap(2.0)
+        .padding(4.0)
+        .radius(p.k.radius.lg)
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak);
+    for shadow in &p.k.elevation.overlay {
+        panel = panel.box_shadow(*shadow);
+    }
+    for (index, chapter) in s.pipeline.chapters.iter().enumerate() {
+        let name = script.topics[chapter.topic].name;
+        let current = index == last && s.phase == Phase::Recording;
+        let hovered = s.hovered_chapter == Some(index);
+        let trailing = if hovered {
+            let mut actions = row().key("actions").gap(2.0).child(chip(
+                p,
+                "copy",
+                "Copy",
+                copy(Copy::Chapter(index)),
+            ));
+            // From the last chapter on is the chapter itself.
+            if index < last {
+                actions = actions.child(chip(p, "from", "From here", copy(Copy::From(index))));
+            }
+            actions
+        } else {
+            row().key("time").child(
+                text(clock(chapter.start_ms))
+                    .key("start")
+                    .font(p.k.ty.mono)
+                    .color(p.faint()),
+            )
+        };
+        let mut title = row()
+            .key("title")
+            .grow(1.0)
+            .min_w(0.0)
+            .h(CHAPTER_H)
+            .gap(8.0)
+            .center_y()
+            .cursor(Cursor::Pointer)
+            .on_press(move |s: &mut LiveNotes| toggle_chapter(s, index));
+        if current {
+            title = title.child(status_dot(p.danger()));
+        }
+        title = title.child(
+            text(name)
+                .key("name")
+                .shrink()
+                .min_w(0.0)
+                .truncate()
+                .font(if open == Some(index) {
+                    p.k.ty.ui_medium
+                } else {
+                    p.k.ty.ui
+                })
+                .color(if open == Some(index) {
+                    p.text()
+                } else {
+                    p.muted()
+                }),
+        );
+        let mut chapter_el = col().key(format!("chapter{index}")).w_full().child(
+            row()
+                .key("row")
+                .w_full()
+                .pl(8.0)
+                .pr(4.0)
+                .gap(8.0)
+                .center_y()
+                .radius(p.k.radius.md)
+                .hover(c.hover)
+                .on_hover_change(move |s: &mut LiveNotes, inside, _| {
+                    if inside {
+                        s.hovered_chapter = Some(index);
+                    } else if s.hovered_chapter == Some(index) {
+                        s.hovered_chapter = None;
+                    }
+                })
+                .child(title)
+                .child(trailing),
+        );
+        if open == Some(index) {
+            let mut notes = col()
+                .key("notes")
+                .w_full()
+                .pb(4.0)
+                .transition(Transition::reveal(Edge::Top));
+            for id in s.chapter_notes(index) {
+                let note = Note::from_script(script, id);
+                notes = notes.child(
+                    row_for(p, &note, s.open_note == Some(id))
+                        .key(format!("note{id}"))
+                        .on_press(move |s: &mut LiveNotes| toggle_note(s, id))
+                        .transition(Transition::opacity()),
+                );
+            }
+            chapter_el = chapter_el.child(notes);
+        }
+        panel = panel.child(chapter_el);
+    }
+    panel
+}
+
+/// A small quiet text button.
+fn chip(
+    p: Paint,
+    key: &str,
+    label: &'static str,
+    press: impl Fn(&mut LiveNotes, &mut Tx) + 'static,
+) -> El {
+    let c = &p.k.c;
+    row()
+        .key(key)
+        .role("button")
+        .label(label)
+        .h(CHIP_H)
+        .px(8.0)
+        .center()
+        .radius(CHIP_H / 2.0)
+        .fill(c.layer_02)
+        .hover(c.hover)
+        .press(c.pressed)
+        .cursor(Cursor::Pointer)
+        .on_press_tx(press)
+        .child(
+            text(label)
+                .key("label")
+                .font(p.k.ty.small_medium)
+                .color(p.text()),
+        )
 }
 
 /// The capsule follows the pointer and, let go, settles in the screen
@@ -223,37 +370,36 @@ fn drag_capsule(
     }
 }
 
-/// Dot, title, and on the right the elapsed time; under the pointer a stop
-/// button joins it. The title is keyed by its words, so a new chapter blurs
-/// in over the old.
+/// Dot, title, and on the right the elapsed time. Under the pointer the
+/// time gives way to copying, hiding the notes, and stopping: Copy all,
+/// then, once something is copied, Copy new beside it. What a copy did
+/// shows for a moment where the time was. The title is keyed by its words,
+/// so a new chapter blurs in over the old.
 fn pill(s: &LiveNotes, p: Paint) -> El {
     let c = &p.k.c;
-    let (dot, title, trailing) = match s.phase {
+    let (dot, title) = match s.phase {
         Phase::Recording => (
             pulsing_dot(p.danger()),
             s.current_chapter().unwrap_or(s.base_title()),
-            Some(clock(s.clock_ms)),
         ),
-        Phase::Transcribing | Phase::Writing => (pulsing_dot(p.muted()), "Finishing notes…", None),
-        Phase::Done => (status_dot(p.success()), s.base_title(), None),
+        Phase::Transcribing | Phase::Writing => (pulsing_dot(p.muted()), "Finishing notes…"),
+        Phase::Done => (status_dot(p.success()), s.base_title()),
     };
+    let actions = s.hovered && matches!(s.phase, Phase::Recording | Phase::Done);
     let mut pill = row()
         .key("pill")
         .h(PILL_H)
         .max_w(COLUMN_W)
-        .gap(10.0)
+        .gap(8.0)
         .pl(14.0)
-        .pr(if s.hovered && s.phase == Phase::Recording {
-            7.0
-        } else {
-            14.0
-        })
+        .pr(if actions { 7.0 } else { 14.0 })
         .center_y()
         .radius(999.0)
         .fill(c.bg_base)
         .border(p.hair, c.border_base)
         .cursor(Cursor::Grab)
-        .child(dot)
+        .on_hover_change(|s: &mut LiveNotes, inside, _| s.hovered = inside)
+        .child(dot.key("dot"))
         .child(
             text(title)
                 .key(format!("title:{title}"))
@@ -267,18 +413,66 @@ fn pill(s: &LiveNotes, p: Paint) -> El {
     for shadow in &p.k.elevation.overlay {
         pill = pill.box_shadow(*shadow);
     }
-    if let Some(trailing) = trailing {
+    if let Some((flash, _)) = &s.flash {
         pill = pill.child(
-            text(trailing)
+            text(flash.clone())
+                .key("flash")
+                .font(p.k.ty.small_medium)
+                .color(p.success())
+                .transition(Transition::opacity()),
+        );
+    } else if actions {
+        if s.copied_through.is_some() {
+            pill = pill.child(chip(p, "copy-new", "Copy new", copy(Copy::New)));
+        }
+        pill = pill.child(chip(p, "copy-all", "Copy all", copy(Copy::All)));
+    } else if s.phase == Phase::Recording {
+        pill = pill.child(
+            text(clock(s.clock_ms))
                 .key("clock")
                 .font(p.k.ty.mono)
                 .color(p.faint()),
         );
     }
-    if s.hovered && s.phase == Phase::Recording {
+    if actions && !s.pipeline.chapters.is_empty() {
+        pill = pill.child(hide(s, p));
+    }
+    if actions && s.phase == Phase::Recording {
         pill = pill.child(stop(p));
     }
     pill
+}
+
+/// Folds the notes away toward the capsule, or brings them back.
+fn hide(s: &LiveNotes, p: Paint) -> El {
+    let c = &p.k.c;
+    // The chevron points where the notes go.
+    let toward_pill = s.notes_open != s.corner.bottom;
+    let glyph = if toward_pill {
+        p.k.glyph.chevron_up
+    } else {
+        p.k.glyph.chevron_down
+    };
+    row()
+        .key("hide")
+        .role("button")
+        .label(if s.notes_open {
+            "Hide notes"
+        } else {
+            "Show notes"
+        })
+        .size(STOP_SIZE, STOP_SIZE)
+        .center()
+        .radius(STOP_SIZE / 2.0)
+        .fill(c.layer_02)
+        .hover(c.hover)
+        .press(c.pressed)
+        .cursor(Cursor::Pointer)
+        .on_press(|s: &mut LiveNotes| {
+            s.take_over();
+            s.notes_open = !s.notes_open;
+        })
+        .child(rune::icon(glyph, 14.0).key("chevron").color(c.icon_muted))
 }
 
 fn stop(p: Paint) -> El {
@@ -376,10 +570,10 @@ pub(super) fn side(s: &LiveNotes, cx: &mut Cx<LiveNotes>) -> El {
         Phase::Writing => "Stopped: writing the title and summary".into(),
         Phase::Done => "Done".into(),
     };
-    let what = match s.under {
-        Under::Stack => "The three newest notes stay under the capsule.",
-        Under::Fade => "Each new note shows for a few seconds, then goes.",
-        Under::Hover => "Nothing shows until the pointer is on the capsule.",
+    let what = if s.notes_open {
+        "The chapters so far float under the capsule, the current one open to its notes."
+    } else {
+        "The notes are hidden; the capsule's chevron brings them back."
     };
     let mut log = col().key("log").gap(4.0);
     for (index, entry) in s.pipeline.log.iter().enumerate().rev().take(8) {
@@ -419,11 +613,14 @@ pub(super) fn side(s: &LiveNotes, cx: &mut Cx<LiveNotes>) -> El {
                 .wrap(),
         )
         .child(
-            text("Drag the capsule to any corner. Press a note for what was said.")
-                .key("how")
-                .font(DESCRIPTION)
-                .color(p.faint())
-                .wrap(),
+            text(
+                "Hover the capsule to copy the transcript (Copy new shows after a first copy), \
+                 or a chapter to copy it or everything from it on. Drag the capsule to any corner.",
+            )
+            .key("how")
+            .font(DESCRIPTION)
+            .color(p.faint())
+            .wrap(),
         )
         .child(el().key("rule").h(p.hair).w_full().fill(p.k.c.border_weak))
         .child(section_label(p, "log-label", "Passes, newest first"))
