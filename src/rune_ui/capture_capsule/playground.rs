@@ -24,6 +24,7 @@ use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
 mod family;
+mod send_to;
 mod stories;
 pub(crate) use stories::add as stories;
 

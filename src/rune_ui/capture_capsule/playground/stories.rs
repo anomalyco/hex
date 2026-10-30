@@ -26,7 +26,7 @@ const _: () = assert!(SCENES.len() == 9);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
-    playground
+    let playground = playground
         .story(
             story("Prototypes/Capture capsule/whole flow", init_flow).trigger(
                 'r',
@@ -44,7 +44,8 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(scene::<7>())
         .story(scene::<8>())
         .story(notch_story())
-        .story(super::family::story())
+        .story(super::family::story());
+    super::send_to::add(playground)
 }
 
 fn scene<const I: usize>() -> Story<CapsuleState> {
