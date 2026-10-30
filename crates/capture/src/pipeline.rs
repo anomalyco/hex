@@ -199,6 +199,8 @@ pub struct SourceExtras {
     pub autocrop: Option<Option<autocrop::Settings>>,
     /// Whether the `agentContext` summary format is enabled (`None` reads `handoff::engine_config()`).
     pub agent_context: Option<bool>,
+    /// Why there is no picture of the screen (`ScreenRecording::no_screen`).
+    pub no_screen: Option<String>,
     /// Decodes the chosen keyframes again at full quality, for sources that select on small
     /// candidate frames (phone movies).
     pub full_frames: Option<FullFrames>,
@@ -375,6 +377,7 @@ pub fn finalize_capture_bundle_for_config(
         frames,
         video: movie,
         duration_ms,
+        no_screen,
     } = recording;
     if let Some(ref audio) = recorded_audio
         && let Ok(wav_bytes) = audio.wav_bytes_16k()
@@ -528,6 +531,7 @@ pub fn finalize_capture_bundle_for_config(
             video_offset_ms,
             autocrop: Some(crop_settings),
             agent_context,
+            no_screen,
             full_frames: video_path
                 .map(|movie| movie_keyframes_with_cache(movie, video_offset_ms, predecoded)),
             prepared,
@@ -835,6 +839,7 @@ pub fn build_bundle_from_parts(
         cursor: extras.activity.cursor,
         autocrop,
         destination: None,
+        no_screen: extras.no_screen,
     };
     let summary = match extras.agent_context {
         Some(agent_context) => {

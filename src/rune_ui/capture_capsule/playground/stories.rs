@@ -22,7 +22,7 @@ const SIDE_H: f32 = 440.0;
 const GROUP: &str = "Prototypes/Capture capsule";
 
 // One story per scene below; adding a scene means adding its index too.
-const _: () = assert!(SCENES.len() == 9);
+const _: () = assert!(SCENES.len() == 10);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
@@ -43,6 +43,7 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(scene::<6>())
         .story(scene::<7>())
         .story(scene::<8>())
+        .story(scene::<9>())
         .story(notch_story())
         .story(super::family::story())
 }

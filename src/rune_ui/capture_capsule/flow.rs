@@ -6,6 +6,8 @@
 
 use scrawl_capture::capture::Stage;
 
+use crate::capture_host::CaptureNeed;
+
 use super::tuning::{self, CapsuleFlow};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
@@ -31,6 +33,9 @@ pub(crate) const SUGGEST_ROWS: usize = 5;
 /// The menu-bar flow's hint of the guesses stays this long, then the
 /// capsule folds into Hex's menu-bar item, where the capture waits.
 pub(crate) const MENU_HINT_S: f64 = 4.0;
+/// The permission helper waits this long for a grant, then folds; the
+/// capture shortcut brings it back.
+pub(crate) const PERMISSION_HOLD_S: f64 = 120.0;
 /// Session names in the capsule are cut to this many characters.
 const ROUTE_NAME_MAX: usize = 18;
 
@@ -161,9 +166,26 @@ pub(crate) enum Failure {
     Send(String),
 }
 
+/// Where the permission helper's grant stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Grant {
+    Off,
+    /// Allow was pressed: System Settings and its guide are open.
+    Asked,
+    /// Granted, but Hex must restart to use it.
+    Restart,
+    /// Granted: the next capture records.
+    Ready,
+}
+
 /// Everything that moves the capsule.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Input {
+    /// A capture was refused for a permission Hex lacks: the helper opens
+    /// in its place.
+    NeedsPermission(CaptureNeed),
+    /// How that permission stands now, while the helper shows.
+    Permission(CaptureNeed, Grant),
     /// A capture's stage, from `capture_host`'s engine events.
     Stage(Stage),
     Delivered(Delivered),
@@ -234,6 +256,11 @@ pub(crate) enum Action {
     Record(Mode),
     /// Start recording what the picker picked on screen.
     Start(crate::capture_host::CaptureTarget),
+    /// The permission helper's Allow: macOS's prompt, or System Settings
+    /// with the guide beside it.
+    Allow(CaptureNeed),
+    /// The permission helper's Restart Hex.
+    Restart,
     /// Switch the recording's mode.
     Switch(Mode),
     Finish,
@@ -355,6 +382,9 @@ pub(crate) struct Done {
     pub(crate) cycle: bool,
     /// The label is the toast's one guess: a click on it sends there.
     pub(crate) sends: bool,
+    /// About no capture (the permission helper): its glyph never gives
+    /// way to an earlier capture's frame.
+    pub(crate) no_frame: bool,
 }
 
 impl Done {
@@ -371,6 +401,7 @@ impl Done {
             picks: Vec::new(),
             cycle: false,
             sends: false,
+            no_frame: false,
         }
     }
 }
@@ -459,6 +490,12 @@ enum Phase {
         at: f64,
         what: Failure,
         why: Option<String>,
+    },
+    /// The permission helper: a capture needs `need`.
+    Permission {
+        need: CaptureNeed,
+        grant: Grant,
+        at: f64,
     },
 }
 
@@ -583,6 +620,9 @@ pub(crate) struct Flow {
     suggest_on_route: bool,
     /// Annotate draws now.
     drawing: bool,
+    /// A capture that just finished with no screen asked for the
+    /// permission helper: it opens once that capture's capsule folds.
+    helper_next: Option<CaptureNeed>,
 }
 
 impl Default for Flow {
@@ -608,6 +648,7 @@ impl Flow {
             superseded: false,
             suggest_on_route: true,
             drawing: false,
+            helper_next: None,
         }
     }
 
@@ -810,6 +851,62 @@ impl Flow {
                 }
                 return actions;
             }
+        }
+        match input {
+            // A capture finishing without its screen: its capsule says
+            // where it went first.
+            Input::NeedsPermission(need)
+                if matches!(
+                    self.phase,
+                    Phase::Processing
+                        | Phase::Saved { .. }
+                        | Phase::Routed(_)
+                        | Phase::Sent(_)
+                        | Phase::Queued { .. }
+                ) =>
+            {
+                self.helper_next = Some(need);
+                return actions;
+            }
+            Input::NeedsPermission(need) => {
+                self.helper_next = None;
+                // Pressed again while it's up: it stays as it stands.
+                let grant = match &self.phase {
+                    Phase::Permission {
+                        need: shown, grant, ..
+                    } if *shown == need => *grant,
+                    _ => Grant::Off,
+                };
+                self.phase = Phase::Permission {
+                    need,
+                    grant,
+                    at: now,
+                };
+                return actions;
+            }
+            Input::Permission(need, grant) => {
+                if let Phase::Permission {
+                    need: shown,
+                    grant: was,
+                    at,
+                } = &mut self.phase
+                {
+                    // Still off once Allow was pressed: it waits on System
+                    // Settings.
+                    let grant = if grant == Grant::Off && *was == Grant::Asked {
+                        Grant::Asked
+                    } else {
+                        grant
+                    };
+                    if (*shown, *was) != (need, grant) {
+                        *shown = need;
+                        *was = grant;
+                        *at = now;
+                    }
+                }
+                return actions;
+            }
+            _ => {}
         }
         if let Input::Phone(phone) = input {
             self.phone = phone;
@@ -1247,6 +1344,24 @@ impl Flow {
                 vec![Action::Inspect]
             }
             (_, Id::Undo) => self.input(Input::Undo, now),
+            (Phase::Permission { need, grant, .. }, Id::Ask) => {
+                let need = *need;
+                match *grant {
+                    Grant::Off | Grant::Asked => {
+                        self.phase = Phase::Permission {
+                            need,
+                            grant: Grant::Asked,
+                            at: now,
+                        };
+                        vec![Action::Allow(need)]
+                    }
+                    Grant::Restart => vec![Action::Restart],
+                    Grant::Ready => {
+                        self.phase = Phase::Hidden;
+                        vec![Action::Record(Mode::Screen)]
+                    }
+                }
+            }
             (_, Id::Ask) => self.input(Input::OpenList, now),
             (_, Id::Row(row) | Id::Pick(row)) => self.input(Input::SendRow(row), now),
             (_, Id::Next) => self.input(Input::Cycle(1), now),
@@ -1338,6 +1453,13 @@ impl Flow {
                     let before = std::mem::replace(&mut self.phase, Phase::Hidden);
                     self.closed = true;
                     self.left_waiting(before, &[]);
+                    if let Some(need) = self.helper_next.take() {
+                        self.phase = Phase::Permission {
+                            need,
+                            grant: Grant::Off,
+                            at: now,
+                        };
+                    }
                 }
                 due
             }
@@ -1431,6 +1553,7 @@ impl Flow {
                     },
                 )
             }),
+            Phase::Permission { need, grant, .. } => Pres::Done(permission_done(*need, *grant)),
             Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, "Taken back")),
             Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, "Kept")),
             Phase::TooLate { to, .. } => Pres::Done(Done {
@@ -1453,6 +1576,46 @@ impl Flow {
             }),
             Phase::Routed(routed) => Pres::Done(routed_done(routed, undo_left(routed.at))),
         }
+    }
+}
+
+/// The permission helper as the finished capsule draws it: what's needed
+/// and why in one line, and the one thing to do about it.
+fn permission_done(need: CaptureNeed, grant: Grant) -> Done {
+    Done {
+        no_frame: true,
+        ..permission_lines(need, grant)
+    }
+}
+
+fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
+    let name = need.name();
+    let why = match need {
+        CaptureNeed::ScreenRecording => "to see your screen",
+        CaptureNeed::Microphone => "to hear you",
+        CaptureNeed::Accessibility => "to follow your clicks",
+    };
+    match grant {
+        Grant::Off => Done {
+            why: Some(why.into()),
+            ask: Some("Allow".into()),
+            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+        },
+        Grant::Asked => Done {
+            why: Some("turn Hex on in System Settings".into()),
+            ask: Some("Allow".into()),
+            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+        },
+        Grant::Restart => Done {
+            why: Some("turns on when Hex restarts".into()),
+            ask: Some("Restart Hex".into()),
+            ..Done::plain(Lead::Warning, format!("{name} is on"))
+        },
+        Grant::Ready => Done {
+            ask: Some("Capture".into()),
+            ask_keys: true,
+            ..Done::plain(Lead::Check, format!("{name} is on"))
+        },
     }
 }
 
@@ -1518,6 +1681,13 @@ fn hold_until(phase: &Phase) -> Option<f64> {
         Phase::Kept { at } | Phase::TakenBack { at } | Phase::Failed { at, .. } => {
             Some(at + tuning::get().brief_hold_s)
         }
+        Phase::Permission {
+            grant: Grant::Ready,
+            at,
+            ..
+        } => Some(at + tuning::get().done_hold_s),
+        // Waiting on Kit: it stays a good while, and ✕ closes it.
+        Phase::Permission { at, .. } => Some(at + PERMISSION_HOLD_S),
         _ => None,
     }
 }
@@ -3492,5 +3662,66 @@ mod tests {
             short_reason("Screen Recording permission is off for Hex"),
             "Screen Recording permission is…"
         );
+    }
+
+    #[test]
+    fn the_permission_helper_asks_follows_the_grant_and_records_once_ready() {
+        use super::super::surface::Id;
+        let screen = CaptureNeed::ScreenRecording;
+        let mut flow = Flow::new();
+        // News of a grant with no helper up shows nothing.
+        flow.input(Input::Permission(screen, Grant::Ready), 0.5);
+        assert_eq!(flow.pres(0.5), Pres::Hidden);
+
+        flow.input(Input::NeedsPermission(screen), 1.0);
+        let shown = done(&flow, 1.0);
+        assert_eq!(shown.lead, Lead::Warning);
+        assert_eq!(shown.text, "Hex needs Screen Recording");
+        assert_eq!(shown.why.as_deref(), Some("to see your screen"));
+        assert_eq!(shown.ask.as_deref(), Some("Allow"));
+        assert_eq!(flow.keys(), None);
+
+        assert_eq!(flow.click(Id::Ask, 2.0), vec![Action::Allow(screen)]);
+        // Still off: it waits on System Settings, and the shortcut again
+        // leaves it as it stands.
+        flow.input(Input::Permission(screen, Grant::Off), 3.0);
+        flow.input(Input::NeedsPermission(screen), 4.0);
+        let waiting = done(&flow, 4.0);
+        assert_eq!(
+            waiting.why.as_deref(),
+            Some("turn Hex on in System Settings")
+        );
+        // It waits a good while, and never folds under the pointer.
+        flow.tick(60.0);
+        assert_ne!(flow.pres(60.0), Pres::Hidden);
+
+        flow.input(Input::Permission(screen, Grant::Restart), 61.0);
+        let restart = done(&flow, 61.0);
+        assert_eq!(restart.text, "Screen Recording is on");
+        assert_eq!(restart.ask.as_deref(), Some("Restart Hex"));
+        assert_eq!(flow.click(Id::Ask, 62.0), vec![Action::Restart]);
+
+        flow.input(Input::Permission(screen, Grant::Ready), 63.0);
+        let ready = done(&flow, 63.0);
+        assert_eq!(ready.lead, Lead::Check);
+        assert!(ready.ask_keys);
+        assert_eq!(
+            flow.click(Id::Ask, 64.0),
+            vec![Action::Record(Mode::Screen)]
+        );
+        assert_eq!(flow.pres(64.0), Pres::Hidden);
+
+        // Unanswered, it folds; ✕ closes it at once.
+        flow.input(Input::NeedsPermission(CaptureNeed::Microphone), 70.0);
+        assert_eq!(done(&flow, 70.0).text, "Hex needs Microphone");
+        assert!(flow.tick(70.0 + PERMISSION_HOLD_S));
+        assert_eq!(flow.pres(70.0 + PERMISSION_HOLD_S), Pres::Hidden);
+        flow.input(Input::NeedsPermission(screen), 300.0);
+        flow.click(Id::Close, 301.0);
+        assert_eq!(flow.pres(301.0), Pres::Hidden);
+        // A capture that starts takes its place.
+        flow.input(Input::NeedsPermission(screen), 302.0);
+        flow.input(Input::Stage(Stage::Recording), 303.0);
+        assert!(matches!(flow.pres(303.0), Pres::Recording { .. }));
     }
 }

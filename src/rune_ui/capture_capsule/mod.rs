@@ -496,6 +496,7 @@ impl CapsuleState {
     fn with_thumb(&self, mut pres: Pres) -> Pres {
         if let Pres::Done(done) = &mut pres
             && done.lead == Lead::Check
+            && !done.no_frame
             && self
                 .live
                 .thumb
