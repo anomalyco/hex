@@ -201,8 +201,9 @@ that macOS sees a new app: grant Microphone, Accessibility, and (for
 meetings) Screen & System Audio Recording once more, removing any
 stale Hex entry in System Settings first; turn Launch at login on again; and
 point `DisableUpdates` profiles at `anomaly.hex`. Settings, history, and
-models carry over. Decide how 2.3.1 installs reach it first (same doc,
-"Existing installs").
+models do not carry over from 2.3.1 on any OS: 2.3.1 kept them in
+`voice-control`, and Hex now reads only `hex` and imports nothing. Decide how
+2.3.1 installs reach it first (same doc, "Existing installs").
 
 Versions are display text and never compared: each channel has one current
 release, which installs follow.
