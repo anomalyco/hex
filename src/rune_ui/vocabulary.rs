@@ -24,11 +24,22 @@ const ROW_HEIGHT: f32 = 36.0;
 const FADES: (f32, f32) = (0.0, 6.0);
 const TERM_WIDTH: f32 = 200.0;
 
-/// The term and "sounds like" fields of each row, and whether the sheet is
-/// open.
+/// One term row: its term and "sounds like" fields, and an identity that
+/// stays with the row as rows before it are removed, so a callback built
+/// for a removed row never reaches another one.
+struct TermRow {
+    id: u64,
+    term: TextEdit,
+    sounds_like: TextEdit,
+}
+
+/// The term rows, and whether the sheet is open.
 #[derive(Default)]
 pub(super) struct VocabularyEditor {
-    rows: Vec<(TextEdit, TextEdit)>,
+    rows: Vec<TermRow>,
+    next_id: u64,
+    /// What an edit for a row that is gone lands in; never saved.
+    detached: TextEdit,
     pub(super) open: bool,
 }
 
@@ -41,15 +52,39 @@ impl VocabularyEditor {
 
     /// Replaces the rows with `entries`, keeping the sheet open or shut.
     pub(super) fn reload(&mut self, entries: &[VocabularyEntry]) {
-        self.rows = entries
-            .iter()
-            .map(|entry| {
-                (
-                    TextEdit::new(entry.term.clone()),
-                    TextEdit::new(entry.sounds_like.join(", ")),
-                )
-            })
-            .collect();
+        self.rows.clear();
+        for entry in entries {
+            self.push(
+                TextEdit::new(entry.term.clone()),
+                TextEdit::new(entry.sounds_like.join(", ")),
+            );
+        }
+    }
+
+    /// Adds a row at the end and returns its identity.
+    fn push(&mut self, term: TextEdit, sounds_like: TextEdit) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.rows.push(TermRow {
+            id,
+            term,
+            sounds_like,
+        });
+        id
+    }
+
+    /// The term (or, with `sounds_like`, the spellings) field of row `id`.
+    /// A row already removed gets a detached field instead, so a late edit
+    /// or focus change for it touches nothing that is saved.
+    fn field(&mut self, id: u64, sounds_like: bool) -> &mut TextEdit {
+        match self.rows.iter_mut().find(|row| row.id == id) {
+            Some(row) if sounds_like => &mut row.sounds_like,
+            Some(row) => &mut row.term,
+            None => {
+                self.detached = TextEdit::default();
+                &mut self.detached
+            }
+        }
     }
 
     /// The rows as saved entries: blank terms are left out and repeated
@@ -66,11 +101,11 @@ impl VocabularyEditor {
     fn projection(&self) -> (Vec<VocabularyEntry>, bool) {
         let mut entries = Vec::new();
         let mut clamped = false;
-        for (term, sounds_like) in &self.rows {
+        for row in &self.rows {
             clamped |= vocabulary::add_clamped(
                 &mut entries,
-                &term.text,
-                &vocabulary::parse_sounds_like(&sounds_like.text),
+                &row.term.text,
+                &vocabulary::parse_sounds_like(&row.sounds_like.text),
             );
         }
         (entries, clamped)
@@ -119,51 +154,52 @@ pub(super) fn close(ui: &mut Ui) {
     }
     ui.vocabulary.open = false;
     ui.flush_drafts();
-    ui.vocabulary.rows.retain(|(term, sounds_like)| {
-        !term.text.trim().is_empty() || !sounds_like.text.trim().is_empty()
-    });
+    ui.vocabulary
+        .rows
+        .retain(|row| !row.term.text.trim().is_empty() || !row.sounds_like.text.trim().is_empty());
 }
 
 fn add_row(ui: &mut Ui) {
-    for (term, sounds_like) in &mut ui.vocabulary.rows {
-        term.focused = false;
-        sounds_like.focused = false;
+    for row in &mut ui.vocabulary.rows {
+        row.term.focused = false;
+        row.sounds_like.focused = false;
     }
     let mut term = TextEdit::default();
     term.focused = true;
-    ui.vocabulary.rows.push((term, TextEdit::default()));
+    ui.vocabulary.push(term, TextEdit::default());
 }
 
-fn remove_row(ui: &mut Ui, index: usize) {
-    if index < ui.vocabulary.rows.len() {
+/// Removes row `id`; a second press for a row already gone does nothing.
+fn remove_row(ui: &mut Ui, id: u64) {
+    if let Some(index) = ui.vocabulary.rows.iter().position(|row| row.id == id) {
         ui.vocabulary.rows.remove(index);
         ui.flush_drafts();
     }
 }
 
-fn term_row(ui: &Ui, p: Paint, index: usize) -> El {
-    let (term, sounds_like) = &ui.vocabulary.rows[index];
+fn term_row(p: Paint, entry: &TermRow) -> El {
+    let id = entry.id;
     row()
-        .key(format!("term{index}"))
+        .key(format!("term{id}"))
         .h(ROW_HEIGHT)
         .gap(8.0)
         .center_y()
         .child(
-            TextInput::new(term)
+            TextInput::new(&entry.term)
                 .placeholder(tr("Term (e.g. abattoir)"))
                 .width(Some(TERM_WIDTH))
                 .on_edit(edit_access(move |ui: &mut Ui| {
-                    &mut ui.vocabulary.rows[index].0
+                    ui.vocabulary.field(id, false)
                 }))
                 .build(p.k)
                 .key("term"),
         )
         .child(
-            TextInput::new(sounds_like)
+            TextInput::new(&entry.sounds_like)
                 .placeholder(tr("Sounds like (e.g. avatar, a bat war)"))
                 .width(None)
                 .on_edit(edit_access(move |ui: &mut Ui| {
-                    &mut ui.vocabulary.rows[index].1
+                    ui.vocabulary.field(id, true)
                 }))
                 .build(p.k)
                 .key("sounds-like")
@@ -173,7 +209,7 @@ fn term_row(ui: &Ui, p: Paint, index: usize) -> El {
         .child(remove_button(
             p,
             ControlSize::Regular,
-            move |ui: &mut Ui| remove_row(ui, index),
+            move |ui: &mut Ui| remove_row(ui, id),
         ))
 }
 
@@ -184,7 +220,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let c = &p.k.c;
     let rows = col()
         .key("terms")
-        .children((0..ui.vocabulary.rows.len()).map(|index| term_row(ui, p, index)));
+        .children(ui.vocabulary.rows.iter().map(|entry| term_row(p, entry)));
     let height = ui.vocabulary.rows.len() as f32 * ROW_HEIGHT + FADES.0 + FADES.1;
     let terms = col()
         .key("term-column")
@@ -335,8 +371,8 @@ pub(super) fn fixture(ui: &mut Ui, filled: bool) {
     };
     ui.vocabulary = VocabularyEditor::new(&ui.settings.vocabulary);
     open(ui);
-    if let Some((term, _)) = ui.vocabulary.rows.last_mut() {
-        term.focused = false;
+    if let Some(row) = ui.vocabulary.rows.last_mut() {
+        row.term.focused = false;
     }
 }
 
@@ -363,7 +399,7 @@ mod tests {
         assert_eq!(summary(&ui), "None");
 
         open(&mut ui);
-        ui.vocabulary.rows[0].0 = TextEdit::new("abattoir");
+        ui.vocabulary.rows[0].term = TextEdit::new("abattoir");
         add_row(&mut ui);
         close(&mut ui);
         assert_eq!(ui.vocabulary.rows.len(), 1);
@@ -380,16 +416,10 @@ mod tests {
             term: "abattoir".into(),
             sounds_like: vec!["avatar".into(), "a bat war".into()],
         }]);
-        assert_eq!(editor.rows[0].1.text, "avatar, a bat war");
-        editor
-            .rows
-            .push((TextEdit::default(), TextEdit::new("ignored")));
-        editor
-            .rows
-            .push((TextEdit::new(" Abattoir "), TextEdit::new("abba toy,")));
-        editor
-            .rows
-            .push((TextEdit::new("Rune"), TextEdit::new(" roon ")));
+        assert_eq!(editor.rows[0].sounds_like.text, "avatar, a bat war");
+        editor.push(TextEdit::default(), TextEdit::new("ignored"));
+        editor.push(TextEdit::new(" Abattoir "), TextEdit::new("abba toy,"));
+        editor.push(TextEdit::new("Rune"), TextEdit::new(" roon "));
         assert_eq!(
             editor.project(),
             [
@@ -410,18 +440,100 @@ mod tests {
     fn rows_past_the_limits_keep_their_term_and_what_fits() {
         let spellings: Vec<String> = (0..17).map(|index| format!("spelling {index}")).collect();
         let mut editor = VocabularyEditor::new(&[]);
-        editor.rows.push((
+        editor.push(
             TextEdit::new("abattoir"),
             TextEdit::new(format!("{}, {}", spellings.join(", "), "y".repeat(65))),
-        ));
-        editor
-            .rows
-            .push((TextEdit::new("Rune"), TextEdit::new("roon")));
+        );
+        editor.push(TextEdit::new("Rune"), TextEdit::new("roon"));
         let entries = editor.project();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].term, "abattoir");
         assert_eq!(entries[0].sounds_like, spellings[..16]);
         assert_eq!(entries[1].sounds_like, ["roon"]);
         assert!(editor.clamped());
+    }
+
+    /// The sheet open on four terms, and their row identities.
+    fn four_terms() -> (Ui, Vec<u64>) {
+        let mut ui = ui();
+        fixture(&mut ui, false);
+        ui.vocabulary.rows.clear();
+        for term in ["one", "two", "three", "four"] {
+            let sounds_like = TextEdit::new(format!("{term} sound"));
+            ui.vocabulary.push(TextEdit::new(term), sounds_like);
+        }
+        let ids = ui.vocabulary.rows.iter().map(|row| row.id).collect();
+        (ui, ids)
+    }
+
+    fn terms(ui: &Ui) -> Vec<&str> {
+        ui.vocabulary
+            .rows
+            .iter()
+            .map(|row| row.term.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn removing_a_focused_row_leaves_the_others_and_late_edits_touch_nothing() {
+        let (mut ui, ids) = four_terms();
+        ui.vocabulary.rows[1].term.focused = true;
+        remove_row(&mut ui, ids[1]);
+        assert_eq!(terms(&ui), ["one", "three", "four"]);
+        // The removed field's queued edit and focus loss arrive afterwards.
+        let stale = ui.vocabulary.field(ids[1], false);
+        stale.text = "edited".into();
+        stale.focused = false;
+        let stale = ui.vocabulary.field(ids[1], true);
+        stale.text = "edited".into();
+        assert_eq!(terms(&ui), ["one", "three", "four"]);
+        assert_eq!(ui.vocabulary.rows[1].sounds_like.text, "three sound");
+        assert_eq!(
+            ui.settings
+                .vocabulary
+                .iter()
+                .map(|entry| entry.term.as_str())
+                .collect::<Vec<_>>(),
+            ["one", "three", "four"]
+        );
+    }
+
+    #[test]
+    fn removing_the_last_row_then_editing_it_is_harmless() {
+        let (mut ui, ids) = four_terms();
+        remove_row(&mut ui, ids[3]);
+        ui.vocabulary.field(ids[3], false).text = "late".into();
+        ui.vocabulary.field(ids[3], true).text = "late".into();
+        assert_eq!(terms(&ui), ["one", "two", "three"]);
+        remove_row(&mut ui, ids[3]);
+        assert_eq!(terms(&ui), ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn rapid_removals_from_one_frame_remove_only_their_own_rows() {
+        let (mut ui, ids) = four_terms();
+        // Presses built in one frame, run before the next: the same row
+        // twice, then the rows after it.
+        remove_row(&mut ui, ids[1]);
+        remove_row(&mut ui, ids[1]);
+        remove_row(&mut ui, ids[2]);
+        remove_row(&mut ui, ids[3]);
+        assert_eq!(terms(&ui), ["one"]);
+        ui.vocabulary.field(ids[3], false).text = "late".into();
+        remove_row(&mut ui, ids[0]);
+        assert!(ui.vocabulary.rows.is_empty());
+        ui.vocabulary.field(ids[0], true).text = "late".into();
+        assert!(ui.vocabulary.project().is_empty());
+    }
+
+    #[test]
+    fn a_reload_retires_the_old_rows() {
+        let (mut ui, ids) = four_terms();
+        ui.vocabulary.reload(&[VocabularyEntry {
+            term: "Rune".into(),
+            sounds_like: vec!["roon".into()],
+        }]);
+        ui.vocabulary.field(ids[0], false).text = "late".into();
+        assert_eq!(terms(&ui), ["Rune"]);
     }
 }
