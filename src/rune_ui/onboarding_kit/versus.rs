@@ -312,7 +312,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
     // unfolds as it rises a little off the keyboard, where `⌥` lights.
-    let rise = Transition::offset(0.0, 10.0).springs(SpringPair::new(UI_SPRING, UI_SPRING));
+    let rise = s.motion.roll(10.0);
     let hud_el = if voice_phase {
         voice_or_idle_slot(
             "onboard-dot-hud",
@@ -345,6 +345,10 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let kb_shift = (1.0 - enter_u) * 14.0 + voice_u * 8.0;
     let keys_el = el()
         .key("keys")
+        .transition(Transition::opacity().springs(SpringPair::new(
+            UI_SPRING,
+            rune::Spring::new(s.motion.exit, 0.0),
+        )))
         .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh)
         .offset(0.0, kb_shift)
         .size(kw, kh)

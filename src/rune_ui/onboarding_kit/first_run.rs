@@ -375,7 +375,7 @@ fn try_page(p: Paint, s: &Onboard) -> El {
         .gap(22.0)
         .items_center()
         .child(head)
-        .child(stage)
+        .child(s.motion.staggered(stage, 1.0, 8.0))
         .child(
             s.motion.staggered(
                 col()

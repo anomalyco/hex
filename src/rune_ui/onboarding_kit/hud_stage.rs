@@ -331,6 +331,7 @@ pub(crate) fn flow_box(key: &str, scale: f32, s: &super::stories::Onboard) -> El
     rune::el()
         .key(format!("{key}-wrap"))
         .size(w, h)
+        .transition(s.motion.roll(8.0))
         .child(slot_el(key, [w * 0.5, h * 0.5], scale))
 }
 
