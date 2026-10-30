@@ -18,7 +18,6 @@ use super::field_text::Field;
 use super::fixture::{ANSWER_TRY, Download};
 use super::flight::{Flight, caret_x, ember_tone, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, keys, ready, title_font};
@@ -87,7 +86,6 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
 }
 
 fn ready_page(p: Paint, s: &Onboard) -> El {
-    set_dot_hud(None);
     let core = ready(
         p,
         &s.caps,
@@ -192,7 +190,6 @@ fn hold(p: Paint, s: &Onboard, rest: &str, down: bool) -> El {
 
 fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     let d = download(s);
-    let reduced = s.reduced.get();
 
     let head = if waiting {
         heading(
@@ -273,7 +270,15 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .key(if waiting { "waiting" } else { "download" })
         .gap(22.0)
         .items_center()
-        .child(flow_box("download-hud", 1.24, s.now, reduced))
+        .child(flow_box(
+            if waiting {
+                "waiting-hud"
+            } else {
+                "download-hud"
+            },
+            1.24,
+            s,
+        ))
         .child(head)
         .child(progress_capsule)
         .children(retry)
@@ -449,6 +454,8 @@ fn shortcut_capsule(p: Paint, caps: &[String], down: bool, cycles: bool) -> El {
 fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
     let hud_el = if let Some(frame) = s.hud.frame() {
         Some(frame_slot("try-dot-hud", TRY_HUD, 1.14, frame))
+    } else if s.hud.finished() {
+        None
     } else {
         voice_or_idle_slot("try-dot-hud", TRY_HUD, 1.14, true, &ANSWER_TRY, None, s).0
     };

@@ -459,6 +459,16 @@ impl Painter {
     pub(crate) const FEATURES: wgpu::Features = wgpu::Features::IMMEDIATES;
 
     pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Painter {
+        Self::with_color_space(device, format, format.is_srgb())
+    }
+
+    /// Rune's isolated layers may be linear float targets rather than sRGB
+    /// textures; the compositor supplies their blend space explicitly.
+    pub(crate) fn with_color_space(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        linear: bool,
+    ) -> Painter {
         let immediates = device.features().contains(wgpu::Features::IMMEDIATES)
             && device.limits().max_immediate_size >= DOT_UNIFORM_BYTES;
         let source = include_str!("rune_hud.wgsl");
@@ -520,7 +530,7 @@ impl Painter {
             immediate_size: if immediates { DOT_UNIFORM_BYTES } else { 0 },
         });
         // Display values; a linear target decodes them.
-        let constants = [("linear_target", f64::from(u8::from(format.is_srgb())))];
+        let constants = [("linear_target", f64::from(u8::from(linear)))];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dot_scope_fragment"),
             layout: Some(&pipeline_layout),
@@ -619,11 +629,22 @@ impl Painter {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        self.draw_slot(&mut pass, target, uniforms);
+    }
+
+    /// Draw inside Rune's effect-slot pass, preserving its painter order and
+    /// the containing layer's opacity.
+    pub(crate) fn draw_slot(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        target: Target,
+        uniforms: &DotUniforms,
+    ) {
         let [x, y, width, height] = target.viewport;
         pass.set_viewport(x, y, width, height, 0.0, 1.0);
         let [cx, cy, cw, ch] = target.clip;
         pass.set_scissor_rect(cx, cy, cw, ch);
-        self.draw_in(&mut pass, uniforms);
+        self.draw_in(pass, uniforms);
     }
 }
 

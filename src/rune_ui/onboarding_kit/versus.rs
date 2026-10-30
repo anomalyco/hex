@@ -19,7 +19,6 @@ use super::field_text::{self, slots};
 use super::fixture::ANSWER_JAY;
 use super::flight::{Flight, caret_x, flicker, flying, typeset};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hud_stage::voice_or_idle_slot;
 use super::keyboard::{self, keyboard_lit};
 use super::landing::{LEAD, UI_SPRING, arrives, keys, language_pick, ready, title_font};
@@ -97,7 +96,6 @@ fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     if s.step == Step::Ready {
-        set_dot_hud(None);
         return vec![
             top_bar()
                 .justify_center()
@@ -328,7 +326,6 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .0
         .map(|hud| hud.transition(rise))
     } else {
-        set_dot_hud(None);
         None
     };
 

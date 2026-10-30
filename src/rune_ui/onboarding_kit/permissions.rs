@@ -16,7 +16,6 @@ use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
@@ -85,7 +84,6 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
-    set_dot_hud(None);
     if let Some(live) = &s.live {
         return live_page(p, live, s.motion);
     }

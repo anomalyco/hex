@@ -13,7 +13,7 @@ use super::super::controls::Paint;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
-use super::hud_stage::LiveHud;
+use super::hud_stage::{FlowHud, LiveHud};
 use super::live::Live;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
@@ -111,6 +111,7 @@ pub(crate) struct Onboard {
     pub(crate) live_hold_from: Option<f64>,
     /// The `"Your turn"` plate, on the microphone's real level.
     pub(crate) hud: LiveHud,
+    pub(crate) flow_hud: FlowHud,
     /// A dictation's text landed since the plate last stepped.
     pub(crate) hud_landed: bool,
     pub(crate) sfx: SfxTrack,
@@ -171,6 +172,7 @@ impl Onboard {
             practice: TextEdit::default(),
             live_hold_from: None,
             hud: LiveHud::default(),
+            flow_hud: FlowHud::default(),
             hud_landed: false,
             sfx: SfxTrack::default(),
             live: None,
@@ -549,6 +551,7 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
 /// returned seconds.
 pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> f64 {
     s.now = now;
+    s.flow_hud = FlowHud::default();
     s.examples_from = Some(now);
     s.pick(s.wants);
     if s.had_model {
@@ -806,6 +809,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         }
         let landed = std::mem::take(&mut s.hud_landed);
         s.hud.step(
+            now,
             s.live_hold_from.is_some(),
             crate::input_level::recent(),
             landed,

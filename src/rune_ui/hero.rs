@@ -127,7 +127,7 @@ impl Compositor<Ui> for HeroCompositor {
     }
 
     fn render(&mut self, f: &mut Frame<'_, Ui>) {
-        if f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
+        if self.onboarding.is_some() || f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
             if self
                 .onboarding
                 .as_ref()
