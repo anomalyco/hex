@@ -426,8 +426,10 @@ jobs:
     if: >-
       ${{ !cancelled() && needs.plan.outputs.channel != 'check'
       && needs.build.result == 'success' && needs.installers.result == 'success'
-      && needs.sign-macos.result == 'success' && needs.sign-windows.result == 'success'
-      && (needs.verify-macos.result == 'success' || needs.sign-macos.outputs.signed != 'true')
+      && needs.sign-windows.result == 'success'
+      && (needs.plan.outputs.channel == 'dev'
+          || (needs.sign-macos.result == 'success'
+              && (needs.verify-macos.result == 'success' || needs.sign-macos.outputs.signed != 'true')))
       && (needs.sign-windows-installers.result == 'success' || needs.sign-windows.outputs.signed != 'true') }}
     runs-on: ubuntu-24.04
     environment: release
@@ -446,7 +448,10 @@ jobs:
       - name: Download
         uses: ./.github/release/download
         with:
-          pattern: "{build-linux-*,sign-macos,sign-windows,sign-windows-installers}"
+          # A dev release goes out without macOS when its signing or
+          # verification fails (the run still fails, so it is seen); only a
+          # verified macOS build is ever published.
+          pattern: ${{ (needs.sign-macos.result == 'success' && needs.verify-macos.result == 'success') && '{build-linux-*,sign-macos,sign-windows,sign-windows-installers}' || '{build-linux-*,sign-windows,sign-windows-installers}' }}
           digests: >-
             build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
             build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
