@@ -1,27 +1,30 @@
 //! Without Hex, then with it, in one Messages conversation:
 //!
 //! 1. `"Watch what happens"` starts it once the user is looking.
-//! 2. Jay (CEO) asks whether we're ready to ship, investors in the room. You
-//!    type the answer by hand, faster as panic builds, and a finger slips
-//!    onto Return: `"Yse, we're dead"`. Silence, then `"Read"`. Every fix
-//!    makes it worse until Jay removes you from #launch ([`typing::Scene`]).
-//! 3. A clean cut to `"With Hex"`: the same question, the keyboard recedes,
-//!    Hex's real `Dot scope` HUD (`rune_hud.wgsl`) lights `⌥`, and the answer
-//!    lands in about 1.5 seconds. Jay is delighted.
-//! 4. The score: typing time and typos against Hex's time.
+//! 2. In the `"Launch Room"` group, Jay (CEO) has asked whether we're ready
+//!    to ship, investors in the room. You type the answer by hand, faster as
+//!    panic builds, and a finger slips onto Return: `"Yse, we're dead"`.
+//!    Silence, then `"Read"`. Every fix makes it worse until Jay removes you
+//!    from the group mid-word ([`typing::Scene`]).
+//! 3. `"With Hex"` in two beats: the disaster rewinds back to Jay's question,
+//!    then the keyboard melts away to `⌥`, Hex's real `Dot scope` HUD
+//!    (`rune_hud.wgsl`) rises, and the answer lands in about 1.5 seconds.
+//!    Jay is delighted.
+//! 4. The score: what answering by hand cost against Hex's time.
 //!
-//! One thing has the eye at a time; the rest dims.
+//! One thing has the eye at a time; the rest dims, deeply only when the
+//! story freezes.
 
 use rune::{Anim, El, Spring, SpringPair, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{
-    CARD_W, FIELD_FONT, JAY, Reply, Side, bubble, chat, chat_height, field_text_origin, receipt,
-    system_line, typing_dots,
+    CHAT_W, FIELD_FONT, LAUNCH_ROOM, Reply, Side, bubble, chat, chat_height, field_text_origin,
+    receipt, system_line, typing_dots,
 };
-use super::field_text::{self, slots};
+use super::field_text::{self, CHAT};
 use super::fixture::ANSWER_JAY;
-use super::flight::{Flight, caret_x, flicker, flying, typeset};
+use super::flight::{Flight, flicker, flying, typeset};
 use super::flows::continue_button;
 use super::hud_stage::voice_or_idle_slot;
 use super::keyboard::{self, keyboard_lit};
@@ -29,34 +32,57 @@ use super::landing::{LEAD, UI_SPRING, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
 use super::pill::{pill, slot};
 use super::stories::{Flow, Onboard, Step};
-use super::typing::{Focus, TYPOS, Timing, Who};
+use super::typing::{Focus, Line, TYPOS, Timing, Who};
 
 const STAGE_W: f32 = 500.0;
-const STAGE_H: f32 = 452.0;
+const STAGE_H: f32 = 516.0;
 const CENTRE_X: f32 = STAGE_W * 0.5;
-const CARD_X: f32 = CENTRE_X - CARD_W * 0.5;
+const CARD_X: f32 = CENTRE_X - CHAT_W * 0.5;
 const CARD_TOP: f32 = 0.0;
-/// Over the keyboard's upper rows, which recede, above the lit `⌥`.
-const HUD_CENTRE: [f32; 2] = [CENTRE_X, 330.0];
+/// Over the keyboard's upper rows, which melt away, above the lit `⌥`.
+const HUD_CENTRE: [f32; 2] = [CENTRE_X, 392.0];
 const HUD_SCALE: f32 = 1.05;
 const CALM: f32 = 0.20;
 const BURST: f64 = 0.04;
 const ACTION_H: f32 = 32.0;
 const TOP_BAR: f32 = 48.0;
-/// What isn't the focus fades to this.
-const DIM: f32 = 0.34;
+/// The last few lines, while they aren't the focus.
+const RECENT: f32 = 0.80;
+/// Older lines.
+const OLDER: f32 = 0.65;
+/// Everything but the focus while the story freezes.
+const FROZEN: f32 = 0.28;
 /// The message being answered while you type.
-const CONTEXT: f32 = 0.72;
+const CONTEXT: f32 = 0.9;
 /// `"Without Hex"`'s field holds one line.
 const WITHOUT_LINES: usize = 1;
+/// From the stage settling to the button's clock: Jay's question arrives
+/// as the stage settles ([`typing::Scene`]'s lines before the button).
+const PRE_ROLL: f64 = 1.2;
+/// `"With Hex"`'s first beat: the disaster zips back out, newest first.
+pub(crate) const REWIND: f64 = 0.55;
+const REWIND_STAGGER: f64 = 0.035;
+/// The second beat: the keyboard melts to `⌥` and the HUD rises; then `⌥`
+/// goes down this long after `"With Hex"` begins.
+pub(crate) const BEFORE_KEY: f64 = 1.5;
+const MELT: f64 = 0.9;
+/// The keys start melting as the rewind settles, so the keyboard never
+/// brightens on its way out.
+const MELT_FROM: f64 = 0.1;
+/// The HUD rises once the keys have mostly melted out of its way.
+const HUD_RISES: f64 = MELT_FROM + MELT * 0.6;
+/// Keys other than the shortcut once they've melted away.
+const MELTED: f32 = 0.10;
 
-/// Jay's question again, on `"With Hex"`.
-const HEX_QUESTION: [&str; 2] = ["The investors are in the room.", "Are we ready to ship?"];
+/// The least time Jay's delighted reply holds before the score.
+const REPLY_HOLD: f64 = 1.75;
+/// How long a landed word takes to settle into the field.
+const SETTLE: f64 = 0.15;
 /// Jay, delighted.
 pub(crate) const HEX_REPLY: &str = "perfect, they're clapping 👏";
 
 fn reply_lines() -> usize {
-    field_text::wrap(ANSWER_JAY.text()).len()
+    CHAT.wrap(ANSWER_JAY.text()).len()
 }
 
 fn card_bottom(lines: usize) -> f32 {
@@ -71,6 +97,15 @@ fn field_origin() -> [f32; 2] {
 /// Seconds into `"Without Hex"`, once it has started.
 fn scene_time(s: &Onboard) -> Option<f64> {
     s.typing_from.map(|from| s.now - from)
+}
+
+/// The thread's time: [`scene_time`], or before the button, Jay's question
+/// arriving as the stage settles.
+fn thread_time(s: &Onboard) -> Option<f64> {
+    scene_time(s).or_else(|| {
+        s.parked_from
+            .map(|from| (s.now - from - PRE_ROLL).min(-1e-3))
+    })
 }
 
 fn scene_over(s: &Onboard) -> bool {
@@ -101,7 +136,7 @@ pub(crate) fn heard_at(streams: bool) -> Vec<f64> {
 
 fn flights_from(streams: bool, from: f64) -> Vec<(Flight, field_text::Slot<'static>)> {
     let origin = field_origin();
-    slots(ANSWER_JAY.text())
+    CHAT.slots(ANSWER_JAY.text())
         .into_iter()
         .zip(heard_at(streams))
         .enumerate()
@@ -139,7 +174,8 @@ pub(crate) fn hex_beats(streams: bool, timing: &Timing) -> HexBeats {
     HexBeats {
         send,
         reply,
-        done: reply + timing.read(HEX_REPLY),
+        // Long enough for the applause to land.
+        done: reply + timing.read(HEX_REPLY).max(REPLY_HOLD),
     }
 }
 
@@ -264,7 +300,7 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             "Without Hex".to_string(),
             line(
                 "lead-usual",
-                "Jay needs an answer. Type it the usual way.".into(),
+                "Investors are waiting. One quick reply by hand.".into(),
             ),
         ),
         Step::Parked => (
@@ -282,8 +318,8 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             line(
                 "lead-score",
                 format!(
-                    "Typing: {:.1} seconds, {TYPOS} typos, and one job.",
-                    s.scene.typing_secs()
+                    "Typing: {} seconds, {TYPOS} typos, and one job.",
+                    s.scene.score_secs().round()
                 ),
             ),
         ),
@@ -308,12 +344,22 @@ fn smoothstep(u: f32) -> f32 {
     u * u * (3.0 - 2.0 * u)
 }
 
+/// Seconds into `"With Hex"`, from the rewind.
+fn hex_time(s: &Onboard) -> Option<f64> {
+    (s.step >= Step::YourTurn)
+        .then_some(s.voice_from)
+        .flatten()
+        .map(|from| s.now - from)
+}
+
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let (kw, kh) = keyboard::size();
     let voice_phase = s.step >= Step::YourTurn;
     let reduced = s.reduced.get();
     let t = scene_time(s);
     let focus = t.map_or(Focus::Waiting, |t| s.scene.focus(t));
+    let frozen = t.is_some_and(|t| s.scene.frozen(t));
+    let since = hex_time(s);
 
     // A single zero-bounce spring carries the deck and its key sweep.
     let enter_u = if reduced {
@@ -322,30 +368,39 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         s.parked_from
             .map_or(1.0, |from| s.motion.keyboard_progress(s.now - from))
     };
-    let voice_u = if reduced {
-        if voice_phase { 1.0 } else { 0.0 }
-    } else {
-        s.voice_from
-            .filter(|_| voice_phase)
-            .map_or(0.0, |from| smoothstep(((s.now - from) / 0.85) as f32))
+    // As the rewind settles, every key but the shortcut melts away.
+    let melt_u = match since {
+        Some(_) if reduced => 1.0,
+        Some(since) => smoothstep(((since - MELT_FROM) / MELT) as f32),
+        None => 0.0,
     };
 
-    // The keyboard is the focus only while you type; otherwise it recedes.
-    let keys_opacity = match (voice_phase, focus) {
-        (true, _) if s.step == Step::Done || hex_sent(s) => 0.28,
-        (true, _) | (false, Focus::Field) => 1.0,
-        (false, Focus::Waiting) => 0.6,
-        _ => 0.28,
+    // While you type the keyboard comes up, and recedes while Jay talks; it
+    // drops away only when the story freezes, after Return's flash.
+    let flash = |id: &str| match t {
+        Some(t) if !voice_phase => s.scene.flash(t, id),
+        _ => 0.0,
+    };
+    // On `"With Hex"` the deck comes back up only as its keys melt, so only
+    // the shortcut brightens.
+    let keys_opacity = match focus {
+        _ if since.is_some_and(|since| since < MELT_FROM + MELT * 0.5) => 0.52,
+        _ if voice_phase => 1.0,
+        Focus::Field => 0.92,
+        _ if flash("return") > 0.0 => 0.92,
+        _ if frozen => FROZEN,
+        _ => 0.52,
     };
     let kb_el = keyboard_lit(
         p,
         "keyboard",
         enter_u,
-        1.0 + (0.34 - 1.0) * voice_u,
+        1.0 + (MELTED - 1.0) * melt_u,
         |id| key_depth(s, id),
-        |id| key_glow(s, id, voice_u),
+        |id| key_glow(s, id, melt_u),
+        flash,
     );
-    let kb_shift = (1.0 - enter_u) * 14.0 + voice_u * 6.0;
+    let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0;
     let keys_el = el()
         .key("keys")
         .transition(
@@ -361,9 +416,10 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .child(kb_el);
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
-    // unfolds as it rises a little off the keyboard, where `⌥` lights.
-    let hud_el = voice_phase
-        .then(|| {
+    // unfolds as it rises into the space the keys melted out of, above `⌥`.
+    let hud_el = since
+        .filter(|&since| reduced || since >= HUD_RISES)
+        .and_then(|_| {
             voice_or_idle_slot(
                 "onboard-dot-hud",
                 HUD_CENTRE,
@@ -375,7 +431,6 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             )
             .0
         })
-        .flatten()
         .map(|hud| hud.transition(s.motion.roll(10.0)));
 
     let nudge = landing_nudge(s);
@@ -383,19 +438,15 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         Some(t) if !reduced && !voice_phase => s.scene.knock(t),
         _ => 0.0,
     };
-    let card = if voice_phase {
-        with_hex_card(p, s)
-    } else {
-        without_hex_card(p, s, t, focus)
+    // One card throughout, so `"With Hex"` rewinds the same thread.
+    let card = match since {
+        Some(since) => with_hex_card(p, s, since),
+        None => without_hex_card(p, s, focus, frozen),
     };
     let card = el()
-        .key(if voice_phase {
-            "card-with"
-        } else {
-            "card-without"
-        })
+        .key("card")
         .absolute(CARD_X, CARD_TOP)
-        .w(CARD_W)
+        .w(CHAT_W)
         .transition(Transition::opacity().springs(SpringPair::new(
             Spring::new(0.3, 0.0),
             Spring::new(0.16, 0.0),
@@ -407,7 +458,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
     el().key("stage")
         .size(STAGE_W, STAGE_H)
-        .opacity(if waiting_to_start(s) { 0.62 } else { 1.0 })
+        .opacity(if waiting_to_start(s) { 0.85 } else { 1.0 })
         .opacity_motion(Spring::new(0.4, 0.0))
         .child(keys_el)
         .children(hud_el)
@@ -415,79 +466,95 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .child(words(p, s, nudge))
 }
 
-/// The conversation as `"Without Hex"` stands at `t`.
-fn without_hex_card(p: Paint, s: &Onboard, t: Option<f64>, focus: Focus) -> El {
+/// Why the field is gone once Jay removes you.
+const NO_LONGER: &str = "You are no longer in this conversation.";
+
+/// `"Without Hex"`'s thread at `t`: every line so far and the `"Read"`
+/// receipt, each at `opacity(line index, line)`, the receipt at `read`, and
+/// Jay's typing dots.
+fn thread_at(
+    p: Paint,
+    s: &Onboard,
+    t: f64,
+    opacity: impl Fn(usize, &Line) -> f32,
+    read: f32,
+) -> Vec<El> {
     let reduced = s.reduced.get();
     let scene = &s.scene;
-    let Some(t) = t else {
-        return chat(
-            p,
-            &JAY,
-            Vec::new(),
-            Reply::Lines {
-                text: "",
-                caret: None,
-                lines: WITHOUT_LINES,
-                placeholder: true,
-                focus: false,
-                sent: false,
-            },
-            1.0,
-        );
-    };
-    let shown = scene.shown(t);
-    let lines = &scene.lines()[..shown];
-    let answering = lines.iter().rposition(|l| l.who == Who::Jay);
-    let read = scene.read(t);
-    let removed = scene.removed(t);
+    let lines = &scene.lines()[..scene.shown(t)];
+    let receipt_at = scene.read(t);
     let mut thread = Vec::new();
     let mut sent = 0;
     for (i, line) in lines.iter().enumerate() {
-        let lit = match focus {
-            Focus::Line(j) | Focus::Read(j) => i == j,
-            _ => false,
-        };
-        let opacity = if lit {
-            1.0
-        } else if focus == Focus::Field && Some(i) == answering {
-            CONTEXT
-        } else {
-            DIM
-        };
+        let o = opacity(i, line);
         thread.push(match line.who {
-            Who::Jay => bubble(p, format!("l{i}"), Side::Them, &line.text, opacity, reduced),
+            Who::Jay => {
+                // The sender's name over the first of a run, as in a group.
+                let named = i == 0 || lines[i - 1].who != Who::Jay;
+                bubble(
+                    p,
+                    format!("l{i}"),
+                    Side::Them,
+                    named.then_some("Jay"),
+                    &line.text,
+                    o,
+                    reduced,
+                )
+            }
             Who::You => {
                 sent += 1;
                 bubble(
                     p,
                     format!("sent-bubble-{}", sent - 1),
                     Side::You,
+                    None,
                     &line.text,
-                    opacity,
+                    o,
                     reduced,
                 )
             }
-            Who::System => system_line(p, format!("l{i}"), &line.text, opacity, reduced),
+            Who::System => system_line(p, format!("l{i}"), &line.text, o, reduced),
         });
-        if read == Some(i) {
-            let lit = matches!(focus, Focus::Read(_));
-            thread.push(receipt(p, if lit { 1.0 } else { DIM }, reduced));
+        if receipt_at == Some(i) {
+            thread.push(receipt(p, read, reduced));
         }
     }
     if scene.dots(t).is_some() {
         thread.push(typing_dots(p, "dots".into(), s.now, 1.0, reduced));
     }
-    let (draft, caret) = scene.draft(t);
-    let field_opacity = if focus == Focus::Field {
-        1.0
-    } else if removed {
-        0.25
-    } else {
-        0.5
+    thread
+}
+
+/// The conversation as `"Without Hex"` stands now, Jay's question already
+/// there before the button.
+fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
+    let scene = &s.scene;
+    let t = thread_time(s).unwrap_or(-1e-3);
+    let shown = scene.shown(t);
+    let answering = scene.lines()[..shown]
+        .iter()
+        .rposition(|l| l.who == Who::Jay);
+    let opacity = |i: usize, _: &Line| match focus {
+        Focus::Waiting => 1.0,
+        Focus::Line(j) | Focus::Read(j) if i == j => 1.0,
+        _ if frozen => FROZEN,
+        Focus::Field if Some(i) == answering => CONTEXT,
+        _ if shown - i <= 3 => RECENT,
+        _ => OLDER,
     };
+    let read = match focus {
+        Focus::Read(_) => 1.0,
+        _ if frozen => FROZEN,
+        _ => RECENT,
+    };
+    let thread = thread_at(p, s, t, opacity, read);
+    if scene.removed(t) {
+        return chat(p, &LAUNCH_ROOM, thread, Reply::Locked(NO_LONGER), 1.0);
+    }
+    let (draft, caret) = scene.draft(t);
     chat(
         p,
-        &JAY,
+        &LAUNCH_ROOM,
         thread,
         Reply::Lines {
             text: draft,
@@ -497,12 +564,14 @@ fn without_hex_card(p: Paint, s: &Onboard, t: Option<f64>, focus: Focus) -> El {
             focus: caret.is_some(),
             sent: false,
         },
-        field_opacity,
+        if focus == Focus::Field { 1.0 } else { 0.6 },
     )
 }
 
-/// The same question, answered by voice.
-fn with_hex_card(p: Paint, s: &Onboard) -> El {
+/// The same question, answered by voice, `since` seconds into `"With Hex"`.
+/// It opens on the rewind: the disaster zips back out, newest first, until
+/// Jay's question is all that's left.
+fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let reduced = s.reduced.get();
     let beats = hex_beats(s.streams(), &s.timing);
     let t = take_time(s);
@@ -510,30 +579,25 @@ fn with_hex_card(p: Paint, s: &Onboard) -> El {
     let replied = t.is_some_and(|t| t >= beats.reply);
     let typing = t.is_some_and(|t| t >= beats.send + 0.4 && t < beats.reply);
     let composing = !sent;
-    let mut thread = Vec::new();
-    for (i, copy) in HEX_QUESTION.iter().enumerate() {
-        let opacity = if composing && i == HEX_QUESTION.len() - 1 {
-            CONTEXT
-        } else {
-            DIM
-        };
-        thread.push(bubble(
-            p,
-            format!("q{i}"),
-            Side::Them,
-            copy,
-            opacity,
-            reduced,
-        ));
-    }
+    let asked = s.scene.lines().iter().filter(|l| l.at < 0.0).count();
+    let mut thread = if since < REWIND && !reduced {
+        let end = s.scene.duration();
+        let mut all = thread_at(p, s, end, |i, _| if i < asked { 1.0 } else { 0.5 }, 0.5);
+        let gone = ((since / REWIND_STAGGER) as usize + 1).min(all.len() - asked);
+        all.truncate(all.len() - gone);
+        all
+    } else {
+        let question = if composing { 1.0 } else { OLDER };
+        thread_at(p, s, -1e-3, |_, _| question, 0.0)
+    };
     if sent {
-        let opacity = if replied { DIM } else { 1.0 };
         thread.push(bubble(
             p,
             "hex-bubble".into(),
             Side::You,
+            None,
             ANSWER_JAY.text(),
-            opacity,
+            if replied { RECENT } else { 1.0 },
             reduced,
         ));
     }
@@ -545,25 +609,34 @@ fn with_hex_card(p: Paint, s: &Onboard) -> El {
             p,
             "hex-reply".into(),
             Side::Them,
+            Some("Jay"),
             HEX_REPLY,
             1.0,
             reduced,
         ));
     }
-    let started = flights(s).iter().any(|(f, _)| s.now >= f.start());
+    let flights = flights(s);
+    let started = flights.iter().any(|(f, _)| s.now >= f.start());
+    // The field grows a line only once a word heads for it.
+    let lines = flights
+        .iter()
+        .filter(|(f, _)| s.now >= f.start())
+        .map(|(_, slot)| slot.line + 1)
+        .max()
+        .unwrap_or(1);
     chat(
         p,
-        &JAY,
+        &LAUNCH_ROOM,
         thread,
         Reply::Lines {
             text: "",
             caret: None,
-            lines: reply_lines(),
+            lines: if sent { 1 } else { lines },
             placeholder: !started || sent,
             focus: composing,
             sent: false,
         },
-        if composing { 1.0 } else { 0.5 },
+        if composing { 1.0 } else { 0.6 },
     )
 }
 
@@ -581,12 +654,12 @@ fn key_depth(s: &Onboard, id: &str) -> f32 {
     }
 }
 
-fn key_glow(s: &Onboard, id: &str, voice_u: f32) -> f32 {
+fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
     if !shortcut_keys(s).any(|k| k == id) {
         return 0.0;
     }
     match s.step {
-        Step::YourTurn => 0.74 * voice_u,
+        Step::YourTurn => 0.85 * melt_u,
         Step::Hearing => 1.0,
         Step::Heard => {
             let fade = s.take_from.map_or(0.0, |from| {
@@ -620,7 +693,8 @@ fn words(p: Paint, s: &Onboard, nudge: [f32; 2]) -> El {
     // Once sent, the answer is its bubble.
     let flights = if hex_sent(s) { Vec::new() } else { flights(s) };
     let weight = 500.0 + 240.0 * CALM;
-    let mut targets = Vec::new();
+    // Just before the placeholder's first glyph until a word lands.
+    let mut caret = -1.5;
     let mut line = 0;
     for (i, (flight, slot)) in flights.iter().enumerate() {
         if let Some(landed) = flight.landed(s.now, reduced) {
@@ -638,27 +712,25 @@ fn words(p: Paint, s: &Onboard, nudge: [f32; 2]) -> El {
                 flicker(s.now, i),
             ));
         }
-        if reduced || s.now >= flight.arrives() - 0.10 {
-            if slot.line != line {
-                targets.clear();
-                line = slot.line;
-            }
-            targets.push((flight.arrives() - 0.10, slot.right + 1.5));
+        if reduced || s.now >= flight.arrives() {
+            line = slot.line;
+            caret = slot.right + 1.5;
         }
         if let Some(pose) = flight.pose(s.now, reduced) {
             out = out.child(flying(p, &format!("f{i}"), slot.word, weight, pose));
         }
     }
-    if matches!(s.step, Step::YourTurn | Step::Hearing) {
-        let x = if reduced {
-            targets.last().map_or(0.0, |t| t.1)
-        } else {
-            caret_x(0.0, &targets, s.now)
-        };
+    // The words take over from the caret while they fly in and settle, so
+    // it never sits under one; it waits after the last that landed.
+    let settling = !reduced
+        && flights
+            .iter()
+            .any(|(f, _)| s.now >= f.start() && s.now < f.arrives() + SETTLE);
+    if matches!(s.step, Step::YourTurn | Step::Hearing) && !settling {
         out = out.child(
             el().key("caret-at")
                 .absolute(origin[0], origin[1])
-                .child(field_text::caret(p, "caret", x, line)),
+                .child(field_text::caret(p, "caret", caret, line)),
         );
     }
     out
@@ -671,8 +743,8 @@ mod tests {
     #[test]
     fn streamed_words_leave_within_one_and_a_half_seconds() {
         let at = heard_at(true);
-        assert_eq!(at.len(), 12);
-        assert_eq!(at[0], 0.14);
+        assert_eq!(at.len(), 7);
+        assert_eq!(at[0], 0.16);
         assert!(at.windows(2).all(|w| w[0] <= w[1]));
         assert!(*at.last().unwrap() <= ANSWER_JAY.release);
         let burst = heard_at(false);
@@ -682,7 +754,8 @@ mod tests {
     #[test]
     fn card_keyboard_and_voice_hud_share_the_central_spine() {
         let (_, kh) = keyboard::size();
-        assert!(((CARD_X + CARD_W * 0.5) - STAGE_W * 0.5).abs() < 0.01);
+        assert!(((CARD_X + CHAT_W * 0.5) - STAGE_W * 0.5).abs() < 0.01);
+        assert!((CHAT_W - keyboard::size().0).abs() < 0.01, "one rail");
         assert!((HUD_CENTRE[0] - STAGE_W * 0.5).abs() < 0.01);
         let [x, y] = field_origin();
         let bottom = card_bottom(reply_lines());

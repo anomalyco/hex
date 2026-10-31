@@ -207,6 +207,7 @@ pub(crate) fn keyboard_lit(
     dim: f32,
     depth: impl Fn(&str) -> f32,
     glow: impl Fn(&str) -> f32,
+    flash: impl Fn(&str) -> f32,
 ) -> El {
     let k = p.k;
     let c = &k.c;
@@ -236,7 +237,13 @@ pub(crate) fn keyboard_lit(
     } else {
         c.white.mix(c.bg_base, 0.06)
     };
-    let cap_pressed = if k.dark { c.bg_deep } else { c.layer_01 };
+    // A pressed key lights up rather than sinking into the dark, so it reads
+    // in peripheral vision.
+    let cap_pressed = if k.dark {
+        c.surface_raised.mix(c.border_strong, 0.55)
+    } else {
+        c.layer_02.mix(c.border_base, 0.6)
+    };
     let cap_rim = if k.dark {
         c.border_weak.mix(c.white, 0.05)
     } else {
@@ -258,16 +265,23 @@ pub(crate) fn keyboard_lit(
         };
         let down = depth(slot.id).clamp(0.0, 1.0);
         let lit = glow(slot.id).clamp(0.0, 1.0);
+        let red = flash(slot.id).clamp(0.0, 1.0);
 
         let vis = (dim + (1.0 - dim) * lit).clamp(0.0, 1.0) * rise;
         let lit_cap = warm.mix(c.white, if k.dark { 0.30 } else { 0.42 });
+        let vis = vis.max(red * rise);
         let fill_raw = cap_base
-            .mix(cap_pressed, down * 0.55)
-            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 });
+            .mix(cap_pressed, down)
+            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 })
+            .mix(c.danger.bg, red);
         let fill = bg.mix(fill_raw, vis);
-        let border = bg.mix(cap_rim.mix(lit_cap, lit * 0.82), vis);
+        let rim = cap_rim
+            .mix(c.border_strong, down)
+            .mix(lit_cap, lit * 0.82)
+            .mix(c.danger.border, red);
+        let border = bg.mix(rim, vis);
 
-        let press_dy = 1.15 * down + (1.0 - rise) * 1.5;
+        let press_dy = 2.2 * down + (1.0 - rise) * 1.5;
         let radius = if slot.id == "up" || slot.id == "down" {
             3.5
         } else {
@@ -320,7 +334,11 @@ pub(crate) fn keyboard_lit(
                 m.ink
             };
             let lit_ink = if k.dark { c.bg_deep } else { c.text_strong };
-            let ink = bg.mix(base_ink.mix(lit_ink, lit * 0.88), vis);
+            let ink = base_ink
+                .mix(c.text_strong, down)
+                .mix(lit_ink, lit * 0.88)
+                .mix(c.danger.fg, red);
+            let ink = bg.mix(ink, vis);
 
             let left_word = matches!(slot.id, "tab" | "caps" | "shift" | "fn");
             let right_word = matches!(slot.id, "delete" | "return" | "shift-right");

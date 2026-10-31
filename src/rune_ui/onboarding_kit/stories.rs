@@ -731,7 +731,7 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
             s.hud_from = Some(now);
-            Some(1.4)
+            Some(versus::BEFORE_KEY)
         }
         Step::Parked => Some(WAIT),
         Step::YourTurn => {
@@ -749,6 +749,7 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::Heard if s.downloaded() => {
             s.step = Step::Done;
+            s.sfx.on_score(now);
             Some(SCORE_HOLD)
         }
         Step::Heard => Some(WAIT),
@@ -762,7 +763,8 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
     }
 }
 
-/// How long the score holds before the story moves on.
+/// How long the score holds before the story moves on, when nobody is
+/// there to press `Continue →`.
 const SCORE_HOLD: f64 = 4.5;
 
 /// `"With Hex"`: the shortcut goes down and Jay's answer is spoken.
@@ -790,7 +792,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
             s.hud_from = Some(now);
-            Some(1.4)
+            Some(versus::BEFORE_KEY)
         }
         Step::YourTurn => {
             s.step = Step::Hearing;
@@ -801,9 +803,11 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::Heard;
             Some(versus::reply_secs(s))
         }
+        // In the real first run the score waits for `Continue →`.
         Step::Heard => {
             s.step = Step::Done;
-            Some(SCORE_HOLD)
+            s.sfx.on_score(now);
+            s.live.is_none().then_some(SCORE_HOLD)
         }
         Step::Done if !s.granted => {
             s.step = Step::Permissions;

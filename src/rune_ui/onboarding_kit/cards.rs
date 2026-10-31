@@ -1,5 +1,5 @@
 //! Example macOS notifications to answer by voice, and the Messages
-//! conversation `"Without Hex"` plays out in, drawn strictly with OpenCode
+//! group conversation `"Without Hex"` plays out in, drawn strictly with OpenCode
 //! theme tokens.
 
 use rune::{
@@ -23,6 +23,10 @@ pub(crate) const FIELD_FONT: TextStyle = TextStyle::new(13.0, 440.0);
 pub(crate) const FIELD_LINE: f32 = 18.0;
 const SENT_W: f32 = 58.0;
 pub(crate) const REPLY_W: f32 = CARD_W - 2.0 * CARD_PAD - 2.0 * FIELD_PX - SENT_W;
+/// [`chat`] runs as wide as the keyboard under it.
+pub(crate) const CHAT_W: f32 = 472.0;
+/// [`chat`]'s field has no `"Sent"` badge.
+pub(crate) const CHAT_REPLY_W: f32 = CHAT_W - 2.0 * CARD_PAD - 2.0 * FIELD_PX;
 const DRIFT: f32 = 2.5;
 const DRIFT_SECS: f64 = 5.0;
 
@@ -67,6 +71,15 @@ pub(crate) const JAY: Notice = Notice {
     body: "The investors are in the room. Are we ready to ship?",
     field: "iMessage",
 };
+/// The group `"Without Hex"` plays out in: Jay and the investors.
+pub(crate) const LAUNCH_ROOM: Notice = Notice {
+    key: "launch-room",
+    app: App::Messages,
+    from: "Launch Room",
+    place: Some("Jay, you, and 3 investors"),
+    body: "The investors are in the room. Are we ready to ship?",
+    field: "iMessage",
+};
 pub(crate) const DAX: Notice = Notice {
     key: "dax",
     app: App::Slack,
@@ -105,6 +118,8 @@ pub(crate) enum Reply<'a> {
         focus: bool,
         sent: bool,
     },
+    /// No field any more, only why.
+    Locked(&'a str),
 }
 
 /// Height of [`notice`] when its reply field uses [`Reply::Lines`] with
@@ -185,23 +200,26 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .child(app_icon(p, n.app))
                 .child(message),
         )
-        .child(field(p, n, reply));
+        .child(field(p, n, reply, field_text::CARD));
     k.elevate(card, &k.elevation.floating)
 }
 
 /// The conversation's visible thread, between its header and the field.
-pub(crate) const THREAD_H: f32 = 132.0;
+pub(crate) const THREAD_H: f32 = 196.0;
 const HEADER_H: f32 = 34.0;
 const BUBBLE_MAX: f32 = 280.0;
 const BUBBLE_FONT: TextStyle = FIELD_FONT.lh(17.0);
+/// Older lines fade out under the header over this much.
+const THREAD_FADE: f32 = 36.0;
 
 /// Height of [`chat`] with a reply field `lines` tall.
 pub(crate) fn chat_height(lines: usize) -> f32 {
     2.0 * CARD_PAD + HEADER_H + 10.0 + THREAD_H + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
 }
 
-/// A Messages conversation with `n.from`: header, the newest of `thread`'s
-/// lines (older ones scroll up under a soft edge), and the reply field.
+/// A Messages conversation with `n.from` (a group when `n.place` names its
+/// members): header, the newest of `thread`'s lines (older ones scroll up
+/// under a soft edge), and the reply field.
 pub(crate) fn chat(
     p: Paint,
     n: &Notice,
@@ -229,7 +247,12 @@ pub(crate) fn chat(
                         })
                         .color(p.text()),
                 )
-                .child(text(n.field).key("app").font(k.ty.small).color(p.faint())),
+                .child(
+                    text(n.place.unwrap_or(n.field))
+                        .key("app")
+                        .font(k.ty.small)
+                        .color(p.faint()),
+                ),
         );
     let thread = col()
         .key("thread")
@@ -237,12 +260,12 @@ pub(crate) fn chat(
         .h(THREAD_H)
         .justify_end()
         .gap(6.0)
-        .clip_fade(0.0, 26.0, 0.0, 0.0)
+        .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
         .children(thread);
     let (fill, rim) = material(p);
     let card = col()
         .key(n.key)
-        .w(CARD_W)
+        .w(CHAT_W)
         .padding(CARD_PAD)
         .gap(10.0)
         .radius(RADIUS)
@@ -253,7 +276,7 @@ pub(crate) fn chat(
         .child(head)
         .child(thread)
         .child(
-            field(p, n, reply)
+            field(p, n, reply, field_text::CHAT)
                 .opacity(field_opacity)
                 .opacity_motion(Spring::new(0.32, 0.0)),
         );
@@ -268,11 +291,13 @@ pub(crate) enum Side {
 }
 
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
-/// in cobalt. It glides up as newer lines arrive and fades to `opacity`.
+/// in cobalt, with the sender's name over the first of theirs in a group.
+/// It glides up as newer lines arrive and fades to `opacity`.
 pub(crate) fn bubble(
     p: Paint,
     key: String,
     side: Side,
+    from: Option<&str>,
     copy: &str,
     opacity: f32,
     reduced: bool,
@@ -305,7 +330,23 @@ pub(crate) fn bubble(
                 .wrap()
                 .shrink(),
         );
-    line(key, side, opacity, reduced).child(bubble.shrink())
+    let Some(from) = from else {
+        return line(key, side, opacity, reduced).child(bubble.shrink());
+    };
+    line(key, side, opacity, reduced).child(
+        col()
+            .key("named")
+            .gap(2.0)
+            .shrink()
+            .child(
+                text(from.to_string())
+                    .key("from")
+                    .font(k.ty.small)
+                    .color(p.faint())
+                    .ml(11.0),
+            )
+            .child(bubble.shrink()),
+    )
 }
 
 /// A row of [`chat`]'s thread, aligned to `side`. Under Reduce Motion it
@@ -370,15 +411,27 @@ pub(crate) fn receipt(p: Paint, opacity: f32, reduced: bool) -> El {
     )
 }
 
-/// A centred system notice, such as someone removing you.
+/// A centred system notice, such as someone removing you, in a tinted
+/// pill with the weight of a message.
 pub(crate) fn system_line(p: Paint, key: String, copy: &str, opacity: f32, reduced: bool) -> El {
+    let danger = &p.k.c.danger;
     line(key, Side::Them, opacity, reduced)
         .justify_center()
         .child(
-            text(copy.to_string())
-                .key("system")
-                .font(p.k.ty.small_medium)
-                .color(p.danger()),
+            row()
+                .key("pill")
+                .px(12.0)
+                .py(5.0)
+                .radius(13.0)
+                .continuous_corners()
+                .fill(danger.bg)
+                .border(p.hair, danger.border)
+                .child(
+                    text(copy.to_string())
+                        .key("system")
+                        .font(p.k.ty.small_medium)
+                        .color(danger.fg),
+                ),
         )
 }
 
@@ -474,7 +527,7 @@ pub(crate) fn floating(card: El, now: Option<f64>, phase: f64) -> El {
     card.offset(0.0, y).offset_motion(Spring::new(0.08, 0.0))
 }
 
-fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {
+fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El {
     let k = p.k;
     let focus = match reply {
         Reply::Hearing { .. } => true,
@@ -510,13 +563,17 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {
             placeholder: empty,
             ..
         } => {
-            let body = field_text::typed(p, "typed", typed, caret, lines);
+            let body = shape.typed(p, "typed", typed, caret, lines);
             if empty {
-                body.child(placeholder(p, n.field).absolute(4.0, 0.0))
+                body.child(placeholder(p, n.field).absolute(0.0, 0.0))
             } else {
                 body
             }
         }
+        Reply::Locked(why) => text(why)
+            .key("locked")
+            .font(FIELD_FONT.lh(FIELD_LINE))
+            .color(p.faint()),
     };
     let trailing = match reply {
         Reply::Hearing { meter, .. } => Some(mic_level(p, "mic", 16.0, meter.0, meter.1, true)),
@@ -525,6 +582,19 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {
         _ => None,
     };
     let drawn = matches!(reply, Reply::Lines { .. });
+    if matches!(reply, Reply::Locked(_)) {
+        // A dead bar: no border, nothing to click into.
+        return row()
+            .key("field")
+            .px(FIELD_PX)
+            .py(FIELD_PY)
+            .radius(k.radius.lg)
+            .fill(k.c.surface_weak)
+            .border(p.hair, Color::TRANSPARENT)
+            .justify_center()
+            .instant_changes()
+            .child(body);
+    }
     let field = row()
         .key("field")
         .px(FIELD_PX)
@@ -543,7 +613,8 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {
         .child(body)
         .children(trailing);
     if drawn {
-        field.items_end()
+        // A draft is wiped or locked on the spot, never cross-faded.
+        field.items_end().instant_changes()
     } else {
         field.min_h(FIELD_H).center_y()
     }

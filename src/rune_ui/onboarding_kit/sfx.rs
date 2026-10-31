@@ -122,6 +122,13 @@ impl SfxTrack {
                 }
             };
             self.push(at, Tone::Onboarding(tone));
+            // The finger slipping onto Return lands with a heavy clunk.
+            if stroke.key == "return" && scene.flash(stroke.at + 1e-3, "return") > 0.0 {
+                self.push(
+                    at + 0.004,
+                    Tone::Onboarding(OnboardingTone::KeyBackspace(style)),
+                );
+            }
             if stroke.hard && matches!(tone, OnboardingTone::Key(..)) {
                 self.push(
                     at + 0.004,
@@ -129,7 +136,8 @@ impl SfxTrack {
                 );
             }
         }
-        for line in scene.lines() {
+        // Lines from before the button were already there.
+        for line in scene.lines().iter().filter(|l| l.at >= 0.0) {
             let at = from + line.at;
             match line.who {
                 typing::Who::Jay => self.push(at, Tone::Onboarding(OnboardingTone::Incoming)),
@@ -189,6 +197,11 @@ impl SfxTrack {
             from + permissions::AX_GRANT,
             Tone::Onboarding(OnboardingTone::PermissionTick),
         );
+    }
+
+    /// `"With Hex"`'s score landing.
+    pub(crate) fn on_score(&mut self, now: f64) {
+        self.push(now + 0.05, Tone::Onboarding(OnboardingTone::AlmostReady));
     }
 
     /// `"Almost ready"` waiting screen (fires at most once per run).
@@ -294,7 +307,8 @@ mod tests {
             }
         }
         assert!(key_count >= 18, "{key_count}");
-        assert_eq!(back_count, 1);
+        // The one delete, and the clunk under the slip onto Return.
+        assert_eq!(back_count, 2);
         assert_eq!(sent, 3);
         assert_eq!(read, 1);
         assert!(track.fired_cues().iter().any(|&(_, t)| t == Tone::Error));
