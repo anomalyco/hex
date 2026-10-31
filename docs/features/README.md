@@ -1359,6 +1359,9 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │       the data folder, same version; cleared by a window or HUD frame or a
 │       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in
 │       process.log, until Hex updates or the file is deleted
+├── Present cadence -> after any change the window presents every refresh for
+│   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
+│   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
 │   a failed GPU load retries on the CPU
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the
