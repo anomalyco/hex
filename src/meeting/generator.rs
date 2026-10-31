@@ -211,7 +211,7 @@ fn opencode<T: DeserializeOwned>(
          without code fences or any other text."
     );
     let text =
-        crate::dictation_processor::generate_text(&request, timeout, &AtomicBool::new(false))
+        crate::dictation::processor::generate_text(&request, timeout, &AtomicBool::new(false))
             .map_err(|error| GenerationError::Failed(format!("{error:#}")))?;
     parse_json(&text)
 }

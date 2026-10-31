@@ -571,7 +571,7 @@ impl LinuxDesktopHost {
             .modes
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
-            crate::dictation_modes::ModeRuntime::from_settings(&self.settings);
+            crate::dictation::modes::ModeRuntime::from_settings(&self.settings);
         if let Some(history) = &self.output.history
             && let Err(error) = history.set_retention(self.settings.history_retention)
         {

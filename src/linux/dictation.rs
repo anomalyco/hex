@@ -124,7 +124,7 @@ fn microphone_input(settings: &AppSettings, device: Option<&str>) -> RecoveringA
 #[derive(Clone)]
 pub(crate) struct DictationOutput {
     pub(crate) history: Option<crate::history::History>,
-    pub(crate) modes: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
+    pub(crate) modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     pub(crate) transformations: Arc<crate::personal_commands::TransformationClient>,
 }
 
@@ -136,7 +136,7 @@ impl DictationOutput {
         Self {
             history,
             modes: Arc::new(RwLock::new(
-                crate::dictation_modes::ModeRuntime::from_settings(settings),
+                crate::dictation::modes::ModeRuntime::from_settings(settings),
             )),
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
         }
@@ -156,7 +156,7 @@ impl DictationOutput {
     ) -> Result<String> {
         let context = crate::linux::context::capture();
         let processed = if raw {
-            crate::dictation_processor::Processed::unchanged(raw_text.trim())
+            crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             let modes = self
                 .modes
@@ -173,7 +173,7 @@ impl DictationOutput {
             paster.paste(&processed.text)?;
         }
         if let Some(history) = &self.history {
-            let mut draft = crate::dictation_modes::history_draft(
+            let mut draft = crate::dictation::modes::history_draft(
                 raw_text,
                 &processed,
                 context.application,

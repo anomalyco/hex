@@ -44,7 +44,7 @@ use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::dictation_indicator::DictationIndicatorEvent;
+use crate::dictation::indicator::DictationIndicatorEvent;
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
 use crate::recognition::RecognitionControl;
@@ -146,7 +146,7 @@ pub(crate) struct RuntimeHandle {
     recognition_controls: SyncSender<RecognitionControl>,
     history: Option<crate::history::History>,
     event_path: PathBuf,
-    indicator: crate::dictation_indicator::DictationIndicatorSender,
+    indicator: crate::dictation::indicator::DictationIndicatorSender,
 }
 
 impl RuntimeHandle {
@@ -324,7 +324,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let (controller_events_sender, controller_events) = mpsc::sync_channel(32);
     let (controller_commands, controller_command_receiver) = mpsc::sync_channel(8);
     let (meeting_requests, meeting_request_receiver) = mpsc::sync_channel(8);
-    let (indicator, indicator_events) = crate::dictation_indicator::channel();
+    let (indicator, indicator_events) = crate::dictation::indicator::channel();
 
     // The controller idles without inspecting microphone activity until the
     // user opts in to meetings (always available in developer builds).

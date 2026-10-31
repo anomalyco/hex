@@ -62,7 +62,7 @@ use crate::control::{
 };
 use crate::dictation::StreamingResampler;
 #[cfg(target_os = "macos")]
-use crate::dictation_audio::DictationAudio;
+use crate::dictation::audio::DictationAudio;
 #[cfg(target_os = "macos")]
 pub use crate::recording_environment::RecordingEnvironmentController as Environment;
 #[cfg(target_os = "macos")]

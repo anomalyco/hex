@@ -1,3 +1,13 @@
+#[cfg(target_os = "macos")]
+pub(crate) mod audio;
+#[cfg(target_os = "macos")]
+pub(crate) mod diagnostics;
+pub(crate) mod indicator;
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) mod modes;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod processor;
+
 use std::collections::VecDeque;
 use std::time::Duration;
 

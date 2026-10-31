@@ -1,7 +1,7 @@
 use std::sync::{OnceLock, RwLock};
 
 use crate::app_settings::DictationProcessingSettings;
-use crate::dictation_processor::{Profile, Profiles};
+use crate::dictation::processor::{Profile, Profiles};
 
 static DICTATION_PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
 
