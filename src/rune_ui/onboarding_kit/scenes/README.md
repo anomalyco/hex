@@ -9,7 +9,7 @@ reports errors with their line numbers.
 **Setting** (at the top)
 - `title Launch Room`: the thread's name. `rename` can change it later.
 - `group Jay, you, and 3 investors`: makes it a group chat, with that subtitle. Leave it out for a one-on-one.
-- `boss Jay amber`: the main other person, with an optional colour (`amber apple blue cobalt coral cyan ember lilac mint purple solaris yuzu`). Initials come from the name.
+- `boss Jay amber`: the main other person, with an optional colour (`amber apple blue cobalt coral ember lilac mint solaris yuzu`). Initials come from the name.
 - `side Priya`: up to three side characters, each with an optional colour.
 - `pill Jay is presenting`: the red status pill under the header (optional).
 - `lead Investors are waiting. One quick reply by hand.`: the line under the title.

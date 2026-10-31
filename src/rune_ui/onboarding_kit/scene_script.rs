@@ -24,9 +24,8 @@ pub(crate) const SCENES: [(&str, &str); 4] = [
 ];
 
 /// The colours a person can have: OpenCode theme scales.
-pub(crate) const COLOURS: [&str; 12] = [
-    "amber", "apple", "blue", "cobalt", "coral", "cyan", "ember", "lilac", "mint", "purple",
-    "solaris", "yuzu",
+pub(crate) const COLOURS: [&str; 10] = [
+    "amber", "apple", "blue", "cobalt", "coral", "ember", "lilac", "mint", "solaris", "yuzu",
 ];
 
 /// Who has no colour of their own, in order.
@@ -624,6 +623,13 @@ impl<'a> Parser<'a> {
     fn person(&self, rest: &'a str, used: usize) -> Result<Person<'a>, String> {
         let (name, colour) = match rest.rsplit_once(char::is_whitespace) {
             Some((name, colour)) if COLOURS.contains(&colour) => (name.trim(), colour),
+            // A lowercase last word reads as a colour, not part of a name.
+            Some((_, colour)) if colour.chars().all(|c| c.is_ascii_lowercase()) => {
+                return Err(format!(
+                    "no colour `{colour}`; use one of {}",
+                    COLOURS.join(" ")
+                ));
+            }
             _ => (rest, DEFAULT_COLOURS[used % DEFAULT_COLOURS.len()]),
         };
         if name.is_empty() {
@@ -1221,6 +1227,17 @@ mod tests {
             "Typing: 27 seconds, 1 typo."
         );
         assert_eq!(fill("{hex}, {typos}", 1.5, 0.0, 0), "1.5 seconds, no typos");
+    }
+
+    #[test]
+    fn every_colour_is_in_the_theme() {
+        for colour in COLOURS {
+            for dark in [false, true] {
+                rune_theme_opencode::scale(colour, dark, 11);
+            }
+        }
+        let errors = errors(&TINY.replace("boss Sam coral", "boss Sam purple"));
+        assert!(errors[0].contains("no colour `purple`"), "{errors:?}");
     }
 
     #[test]
