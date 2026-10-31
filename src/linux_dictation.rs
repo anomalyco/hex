@@ -201,6 +201,8 @@ pub(crate) fn run(
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    // The local API transcribes host audio on this engine's model.
+    engine.share();
     // Drop audio/hotkeys and close the job queue before joining slow output on
     // every exit, including failures during startup or recording.
     let mut output = OutputWorker {
@@ -419,6 +421,7 @@ pub(crate) fn run(
             {
                 let old =
                     std::mem::replace(&mut engine, Arc::new(TranscriptionEngine::start(next)?));
+                engine.share();
                 crate::capture_host::use_engine(&engine);
                 // A capture still transcribing holds the old engine a moment.
                 if let Ok(old) = Arc::try_unwrap(old) {

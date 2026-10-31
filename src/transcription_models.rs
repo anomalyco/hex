@@ -81,7 +81,6 @@ impl ModelPreparationStage {
         stage.store(self as u8, Ordering::Release);
     }
 
-    #[cfg(not(target_os = "windows"))]
     pub fn load(stage: &AtomicU8) -> Self {
         match stage.load(Ordering::Acquire) {
             value if value == Self::Downloading as u8 => Self::Downloading,
@@ -244,7 +243,6 @@ impl ModelDefinition {
         }
     }
 
-    #[cfg(target_os = "macos")]
     pub fn presentation_languages(&self) -> Vec<&'static str> {
         self.languages
             .iter()
@@ -772,7 +770,6 @@ pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn is_verified(model: &ModelDefinition) -> bool {
     let Ok(path) = model_path(model) else {
         return false;

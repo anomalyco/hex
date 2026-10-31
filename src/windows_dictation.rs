@@ -198,7 +198,9 @@ pub fn run(
     let mut audio_suppressor =
         crate::windows_audio_control::AudioSuppressor::start(while_dictating);
     let mut model = crate::local_transcriber::ModelSwap::new(selection);
-    let mut engine = TranscriptionEngine::start(transcriber)?;
+    let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    // The local API transcribes host audio on this engine's model.
+    engine.share();
     let mut finishing: Option<Finishing> = None;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
@@ -315,7 +317,12 @@ pub fn run(
             && pending == 0
             && let Some(next) = model.take_ready()
         {
-            std::mem::replace(&mut engine, TranscriptionEngine::start(next)?).retire();
+            let old = std::mem::replace(&mut engine, Arc::new(TranscriptionEngine::start(next)?));
+            engine.share();
+            // A request on the local API holds the old engine a moment.
+            if let Ok(old) = Arc::try_unwrap(old) {
+                old.retire();
+            }
         }
         if let Ok(error) = hotkey.errors.try_recv() {
             return Err(eyre!("Windows hotkey monitor stopped: {error}"));

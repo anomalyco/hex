@@ -27,7 +27,12 @@ enum Command {
         rune_args: Vec<String>,
     },
     /// Run Hex in the foreground without opening the window (systemd's entry point).
-    Service,
+    Service {
+        /// Run only the local API as a direct child whose stdin is owned by
+        /// the host application (the TypeScript SDK).
+        #[arg(long, hide = true)]
+        embedded: bool,
+    },
     /// Start Hex in the background.
     Start,
     /// Quit Hex after its accepted work finishes (same as `hex quit`).
@@ -159,7 +164,10 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         }
         Command::App { hidden, .. } => launch(&activation, !hidden, event_path, shutdown),
         Command::Start => launch(&activation, false, event_path, shutdown),
-        Command::Service => {
+        Command::Service { embedded: true } => {
+            crate::local_api::run_service(&log_dir, event_path, true, shutdown)
+        }
+        Command::Service { embedded: false } => {
             match crate::linux_app::run(event_path, shutdown, None) {
                 // A unit start that lost the race to another launch has nothing to do.
                 Err(_) if crate::linux_service::another_instance_answers() => Ok(()),

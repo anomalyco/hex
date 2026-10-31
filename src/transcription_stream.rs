@@ -210,7 +210,7 @@ impl SharedEngine {
 
 impl Engine for SharedEngine {
     fn dictation_busy(&self) -> bool {
-        crate::parakeet::dictation_busy()
+        crate::transcription_engine::dictation_busy()
     }
 
     fn streams(&self) -> bool {
@@ -229,7 +229,7 @@ impl Engine for SharedEngine {
     }
 
     fn transcribe(&self, window: Vec<f32>, stop: &dyn Fn() -> bool) -> Result<String, String> {
-        while crate::parakeet::dictation_busy() {
+        while crate::transcription_engine::dictation_busy() {
             if stop() {
                 return Err("the stream ended".into());
             }
@@ -245,13 +245,9 @@ impl Engine for SharedEngine {
                 window,
                 Box::new(move |model, samples| {
                     // Never load or switch a model for a stream.
-                    let transcriber = model
-                        .active()
-                        .filter(|transcriber| transcriber.matches_selection(&selection))
+                    let transcriber = crate::transcription_engine::held(model, &selection)
                         .ok_or_else(|| MODEL_CHANGED.to_string())?;
-                    transcriber
-                        .transcribe_segments(samples)
-                        .map(|transcript| transcript.text)
+                    crate::transcription_engine::transcribe_clip(transcriber, samples)
                         .map_err(|error| format!("{error:#}"))
                 }),
             )
@@ -261,7 +257,11 @@ impl Engine for SharedEngine {
     }
 
     fn quitting(&self) -> bool {
-        crate::process_exit::quitting()
+        #[cfg(target_os = "macos")]
+        return crate::process_exit::quitting();
+        // Elsewhere the engine itself goes when Hex quits.
+        #[cfg(not(target_os = "macos"))]
+        false
     }
 }
 

@@ -171,8 +171,11 @@ The CLI reads the owner-only discovery file
 `~/Library/Application Support/hex/local-api.json` (`HEX_APPLICATION_SUPPORT_DIR`
 overrides the folder), checks that its pid is alive, and sends one
 `POST /control` to `127.0.0.1:<port>` with `Authorization: Bearer <token>`.
-The route is always on in the desktop app; the headless `hex service` doesn't
-offer it.
+The route is always on in the macOS desktop app; the headless `hex service`
+doesn't offer it. Linux and Windows Hex publish the same local API (the
+discovery file lives in `~/.local/share/hex` and `%APPDATA%\hex`) for
+transcription and `/streams`, but answer `/control` with
+`404 control-unavailable` until their hosts carry the commands.
 
 - Request bodies are JSON up to 64 KiB; replies are at most 1 MiB.
 - The app answers within 10 s (`504 control-timeout` otherwise); the CLI waits

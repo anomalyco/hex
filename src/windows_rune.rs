@@ -200,6 +200,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             history: history.clone(),
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path);
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime = std::thread::Builder::new()
@@ -237,6 +238,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     shutdown.store(true, Ordering::Relaxed);
     drop(requests);
     let _ = runtime.join();
+    drop(local_api);
     drop(tray);
     Ok(())
 }

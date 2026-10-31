@@ -59,6 +59,13 @@ enum Command {
         #[command(flatten)]
         selection: SelectionArgs,
     },
+    /// Run the headless local API service.
+    #[command(hide = true)]
+    Service {
+        /// Run as a direct child whose stdin is owned by the host application.
+        #[arg(long)]
+        embedded: bool,
+    },
     /// List microphone devices visible through WASAPI.
     Devices,
     /// Print recent local observations.
@@ -237,6 +244,13 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             &selection.resolve()?,
             shutdown,
         ),
+        Command::Service { embedded } => {
+            shutdown.store(false, Ordering::Relaxed);
+            if !embedded {
+                crate::app_settings::AppSettings::load()?;
+            }
+            crate::local_api::run_service(&log_dir, event_path, embedded, shutdown)
+        }
         Command::Devices => {
             for device in crate::audio::input_device_names()? {
                 println!("{device}");
