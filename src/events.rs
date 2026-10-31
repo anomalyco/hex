@@ -66,16 +66,6 @@ pub enum VoiceEvent {
         method: String,
         path: String,
     },
-    /// One Smart Turn end-of-turn check in a hands-free dictation.
-    SmartTurn {
-        timestamp_ms: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        probability: Option<f32>,
-        silence_ms: u64,
-        decision: SmartTurnDecision,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        inference_ms: Option<u64>,
-    },
 }
 
 impl VoiceEvent {
@@ -89,8 +79,7 @@ impl VoiceEvent {
             | Self::Context { timestamp_ms, .. }
             | Self::ApiServerStarted { timestamp_ms, .. }
             | Self::ApiServerStopped { timestamp_ms }
-            | Self::ApiAuthFailed { timestamp_ms, .. }
-            | Self::SmartTurn { timestamp_ms, .. } => *timestamp_ms,
+            | Self::ApiAuthFailed { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -105,24 +94,8 @@ impl VoiceEvent {
             Self::ApiServerStarted { .. } => "api_server_started",
             Self::ApiServerStopped { .. } => "api_server_stopped",
             Self::ApiAuthFailed { .. } => "api_auth_failed",
-            Self::SmartTurn { .. } => "smart_turn",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SmartTurnDecision {
-    /// The model heard the end of the turn; dictation finished.
-    Stop,
-    /// The model heard more to come; dictation kept listening.
-    Continue,
-    /// The silence outlasted the fallback; dictation finished.
-    Fallback,
-    /// The answer arrived after speech resumed or the capture ended.
-    Stale,
-    /// Inference failed; dictation kept listening.
-    Failed,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

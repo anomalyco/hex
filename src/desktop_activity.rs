@@ -149,15 +149,6 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
         VoiceEvent::ApiAuthFailed { method, path, .. } => {
             format!("Rejected unauthenticated {method} {path}")
         }
-        VoiceEvent::SmartTurn {
-            probability,
-            silence_ms,
-            decision,
-            ..
-        } => {
-            let probability = probability.map_or_else(String::new, |p| format!(", P {p:.2}"));
-            format!("Smart Turn after {silence_ms} ms of silence{probability}: {decision:?}")
-        }
     }
 }
 

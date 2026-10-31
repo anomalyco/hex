@@ -91,7 +91,7 @@ On Linux                                 // capture.linux
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
 │   GlobalShortcuts portal ("Annotate") or X11 grabs. There is no separate
 │   draw shortcut and no send-to list shortcut on any OS
-├── While it records, dictation and Voice Action start nothing (the portal
+├── While it records, dictation starts nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
@@ -165,9 +165,9 @@ While a capture records                  // capture.quiet
 │   assertion, and it never counts as an intentional dictation
 ├── Stop, cancel, discard, failed start, captures off, quit -> released; a
 │   switch carries it to the next capture without restoring in between
-├── Dictation and Voice Action shortcuts -> start nothing while it records
-│   (macOS: recognition.rs swallows them in the tap; Linux: linux_dictation
-│   ignores Start and VoiceStart). Nothing leaks to the app in front
+├── Dictation shortcut -> starts nothing while it records
+│   (macOS: recognition.rs swallows it in the tap; Linux: linux_dictation
+│   ignores Start). Nothing leaks to the app in front
 └── Dictation that began before the capture -> each effect is held from the first session that
     wants it to the last, so neither unmutes or resumes what the other still
     holds; a While dictating change mid-capture composes too (the capture keeps
