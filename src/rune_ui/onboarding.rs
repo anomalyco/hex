@@ -409,7 +409,9 @@ pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
         .px(20.0)
         .center_y()
         .justify_end()
-        .children(view.show_download.then(|| download(p, view.model)));
+        .children(
+            (view.show_download && !waiting_for_model(&view)).then(|| download(p, view.model)),
+        );
     Some(
         col()
             .key("tour")
@@ -668,6 +670,12 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
     icon_row(p, key, glyph, title, Some(&description), control)
 }
 
+/// Give it a try while dictation can't run yet: the speech model is still
+/// downloading, or its download stopped. Permissions are ready by then.
+fn waiting_for_model(view: &View) -> bool {
+    view.step == Step::TryIt && !view.reopen && !view.dictation_ready
+}
+
 fn holds(ui: &Ui) -> bool {
     ui.settings.shortcut_mode == ShortcutMode::Hold
 }
@@ -687,15 +695,26 @@ fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View, layer: &mut Vec<El>) -> E
         })
         .build(p.k)
         .key("practice-field");
-    let body = if holds(ui) {
-        tr_fill("Hold {}, say a sentence, then let go.", &shortcut)
+    let (heading, body) = if waiting_for_model(view) {
+        (
+            tr("Almost ready"),
+            tr("Hex starts listening once the speech model has downloaded.").to_string(),
+        )
+    } else if holds(ui) {
+        (
+            tr("Give it a try"),
+            tr_fill("Hold {}, say a sentence, then let go.", &shortcut),
+        )
     } else {
-        tr_fill("Press {}, say a sentence, then press it again.", &shortcut)
+        (
+            tr("Give it a try"),
+            tr_fill("Press {}, say a sentence, then press it again.", &shortcut),
+        )
     };
     col()
         .key("try-it")
         .gap(28.0)
-        .child(title(p, tr("Give it a try"), Some(&body)))
+        .child(title(p, heading, Some(&body)))
         .child(
             col().key("practice").gap(12.0).child(field).child(
                 col()
@@ -867,11 +886,10 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
                 |ui: &mut Ui, _| input(ui, Input::Reopen),
             ));
     }
-    if !view.dictation_ready {
-        return line.child(hint(
-            tr("Hex starts listening once the speech model has downloaded."),
-            p.faint(),
-        ));
+    // The heading and body say why the shortcut does nothing yet; the
+    // download's progress, or its Retry, sits here instead of the corner.
+    if waiting_for_model(view) {
+        return line.child(download(p, view.model));
     }
     let (dot, copy, color) = match view.practice {
         Practice::Waiting => (
@@ -1208,5 +1226,30 @@ mod tests {
         assert_eq!(tour.flow.view().practice, Practice::Landed);
         assert!(!focus_practice(&mut tour, true));
         assert!(!tour.practice.focused, "a landed practice frees the field");
+    }
+
+    #[test]
+    fn try_it_waits_for_the_model_until_it_is_ready() {
+        let downloading = crate::onboarding::SetupStatus {
+            microphone: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            transcription_model: false,
+        };
+        let mut flow = Flow::new(Step::TryIt, downloading, true, true);
+        assert_eq!(flow.step(), Step::TryIt);
+        assert!(waiting_for_model(&flow.view()));
+
+        let ready = crate::onboarding::SetupStatus {
+            transcription_model: true,
+            ..downloading
+        };
+        flow.on(Input::Status(
+            ready,
+            ModelProgress {
+                installed: true,
+                ..ModelProgress::default()
+            },
+        ));
+        assert!(!waiting_for_model(&flow.view()));
     }
 }
