@@ -145,6 +145,9 @@ pub(crate) struct Onboard {
     pub(crate) taps: u8,
     /// The shortcut starts and stops dictation instead of being held.
     pub(crate) toggle: bool,
+    /// A story that plays the whole first run by itself: it presses
+    /// `"Watch what happens"`, and its scripted player ends the game.
+    pub(crate) autoplay: bool,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -261,6 +264,7 @@ impl Onboard {
             practice_field: false,
             taps: 0,
             toggle: false,
+            autoplay: false,
         }
     }
 
@@ -379,6 +383,18 @@ impl Onboard {
         } else {
             self.jump_to_accessibility();
         }
+    }
+
+    /// Leaves the practice as Continue would, but keeps the soundtrack so
+    /// far, for a story that plays itself.
+    pub(super) fn leave_game_keeping_sound(&mut self, now: f64) {
+        self.manual_override = true;
+        self.auto_due_at = if self.granted {
+            self.jump_to_ready();
+            None
+        } else {
+            to_accessibility(self, now).map(|secs| now + secs)
+        };
     }
 
     pub(crate) fn jump_to_download(&mut self) {
@@ -727,6 +743,10 @@ fn first_run() -> Story<Onboard> {
     .variant("Your turn, model doesn't stream", |s| {
         s.rehearsal = Some(Rehearsal::new(false));
     })
+    .variant("Whole run, scripted game", |s| {
+        s.rehearsal = Some(Rehearsal::new(true));
+        s.autoplay = true;
+    })
     .variant("Your turn, keeps tapping", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
         s.taps = TAPS_BEFORE_TOGGLE;
@@ -785,7 +805,7 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     s.live_hold_from = None;
     s.sfx.clear();
     s.examples_from = Some(play.now());
-    if s.rehearsal.is_some() {
+    if s.rehearsal.is_some() && !s.autoplay {
         s.had_model = true;
         s.granted = true;
         s.jump_to_try();
@@ -940,7 +960,15 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::Pick | Step::Started => {
             park(s, now);
-            None
+            s.autoplay.then_some(WATCH_AFTER)
+        }
+        Step::Parked if s.autoplay && s.typing_from.is_none() => {
+            let at = s.parked_from.unwrap_or(now) + WATCH_AFTER;
+            if at - now > 1e-3 {
+                return Some(at - now);
+            }
+            s.start_scene();
+            Some(s.scene.duration() + COMEDY_HOLD)
         }
         // `"Without Hex"` waits for `"Watch what happens"`, plays out, and
         // its last line holds a beat.
@@ -992,6 +1020,9 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
 
 /// Short presses on the practice before it offers tap to start instead.
 pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
+
+/// How long an autoplaying story waits on `"Watch what happens"`.
+const WATCH_AFTER: f64 = 1.8;
 
 /// How long `"Without Hex"`'s last line holds before the first run moves on.
 const COMEDY_HOLD: f64 = 1.6;
@@ -1709,6 +1740,27 @@ mod tests {
         let at = |step| steps.iter().position(|s| *s == step).unwrap();
         assert!(order.windows(2).all(|w| at(w[0]) < at(w[1])), "{steps:?}");
         assert!(!steps.contains(&Step::YourTurn), "{steps:?}");
+    }
+
+    #[test]
+    fn the_autoplaying_story_plays_the_game_and_reaches_ready_by_itself() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.speech = Speech::AfterDownload;
+        s.rehearsal = Some(Rehearsal::new(true));
+        s.autoplay = true;
+        s.manual_override = true;
+        s.auto_due_at = begin_first_run(&mut s, 0.0);
+        let mut tx = Tx::default();
+        let mut now = 0.0;
+        let mut played = false;
+        while now < 150.0 && s.step != Step::Ready {
+            poll(&mut s, now, &mut tx);
+            played |= s.game.is_some();
+            now += 1.0 / 60.0;
+        }
+        assert!(played);
+        assert_eq!(s.step, Step::Ready);
+        assert!(now < 120.0, "{now}");
     }
 
     #[test]

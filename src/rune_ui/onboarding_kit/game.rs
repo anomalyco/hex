@@ -68,6 +68,8 @@ const LINES: usize = 3;
 const SLOTS: usize = 200;
 /// The story's Keep playing variant presses it after this long.
 const SHARE_HOLD: f64 = 2.8;
+/// Cards an autoplaying story burns before it presses Done.
+const AUTOPLAY_CARDS: usize = 4;
 /// Keep playing folds the share card into the score pill.
 const FOLD: f32 = 0.45;
 /// The score pill's top-left, level with Done, and its size.
@@ -604,6 +606,8 @@ struct Script {
     streams: bool,
     /// Presses Keep playing once the score card has shown a while.
     keep: bool,
+    /// Presses Done once this many cards have burnt.
+    done_after: Option<usize>,
     /// Which card, and when its shortcut went down.
     held: Option<(usize, f64)>,
     meter: Option<(f32, f32)>,
@@ -620,6 +624,13 @@ impl Script {
     fn run(&mut self, play: &mut Play, now: f64) {
         if self.keep && play.share.is_some_and(|at| now >= at + SHARE_HOLD) {
             play.keep(now);
+        }
+        if play.share.is_none()
+            && self
+                .done_after
+                .is_some_and(|n| play.destroyed(now) >= n && play.playing())
+        {
+            play.finish(now);
         }
         self.meter = None;
         let next = play
@@ -682,7 +693,10 @@ impl Session {
     fn preview(s: &Onboard, now: f64) -> Self {
         Self {
             play: Play::new(now, 0, 0),
-            script: s.rehearsal.map(|r| Script::new(r.streams)),
+            script: s.rehearsal.map(|r| Script {
+                done_after: s.autoplay.then_some(AUTOPLAY_CARDS),
+                ..Script::new(r.streams)
+            }),
             typed: String::new(),
             practice: None,
             saved: None,
@@ -722,7 +736,15 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         session
             .hud
             .step(&session.play, now, peak.is_some(), peak, reduced);
+        let leave = s.autoplay
+            && session
+                .play
+                .share
+                .is_some_and(|at| now >= at + SHARE_HOLD + 1.2);
         s.game = Some(session);
+        if leave {
+            s.leave_game_keeping_sound(now);
+        }
         return true;
     }
     // Hex's own dictation sounds its own tones; without it, the story
