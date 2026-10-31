@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>HEX</string>
+	<string>Hex</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -36,9 +36,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HEX records only while you dictate and transcribes the recording locally on this iPhone.</string>
+	<string>Hex records only while you dictate and transcribes locally on this iPhone.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>HEX uses Apple's on-device SpeechTranscriber to turn your temporary recording into text.</string>
+	<string>Hex uses Apple's on-device SpeechTranscriber to turn your recording into text.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
