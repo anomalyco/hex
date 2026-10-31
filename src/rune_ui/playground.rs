@@ -248,13 +248,6 @@ pub(crate) fn enabled() -> bool {
     crate::labs::playground()
 }
 
-static ATTACHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// This window has the playground: the sidebar shows its item.
-pub(super) fn attached() -> bool {
-    ATTACHED.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// `spec` with the playground's scenes: every fixture scene but `live`, at
 /// its path in [`PATHS`], each starting from a plain fixture. Only the
 /// window's app uses it: headless renders keep the plain scene names that
@@ -268,7 +261,6 @@ pub(super) fn spec(spec: AppSpec<Ui>) -> AppSpec<Ui> {
 }
 
 pub(super) fn attach(app: App<Ui>) -> App<Ui> {
-    ATTACHED.store(true, std::sync::atomic::Ordering::Relaxed);
     let playground = Playground::new()
         .enabled(true)
         .bar(false)

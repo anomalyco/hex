@@ -69,9 +69,9 @@ fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str
         .child(item.grow(1.0))
 }
 
-/// The Playground item while the playground is on: it opens the playground.
-pub(super) fn playground_nav(p: Paint) -> Option<El> {
-    super::playground::attached().then(|| {
+/// The Playground item while the window has the playground: it opens it.
+pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
+    ui.platform.playground.then(|| {
         nav_row(p, "nav-playground", &SPARKLES, "Playground", false)
             .on_press_tx(|_: &mut Ui, tx: &mut Tx| tx.open_playground())
     })

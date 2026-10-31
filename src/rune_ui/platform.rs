@@ -298,6 +298,9 @@ pub(super) struct PlatformState {
     /// native host; `true` in fixtures except `"mac-production"`). Production
     /// builds hide Annotate and the developer panes.
     pub(super) dev_build: bool,
+    /// The window has the playground (Labs › Playground at launch): the
+    /// sidebar shows its item.
+    pub(super) playground: bool,
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
@@ -370,6 +373,7 @@ impl PlatformState {
             relaunch_failed: false,
             dev_build: true,
             developer: false,
+            playground: false,
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,

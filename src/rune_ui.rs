@@ -724,6 +724,7 @@ impl Ui {
         let dev_build = crate::dev_build::is_dev_build();
         ui.platform.dev_build = dev_build;
         ui.platform.developer = dev_build && crate::DEVELOPER_FEATURES_ENABLED;
+        ui.platform.playground = playground::enabled();
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
@@ -1342,7 +1343,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             NAV_ROW_GAP / 2.0,
         ));
     }
-    nav = nav.children(labs::playground_nav(p));
+    nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => Some((
