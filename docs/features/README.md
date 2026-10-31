@@ -1240,6 +1240,10 @@ Linux beta                               // not macOS feature parity
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
 │       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms; session lives with Hex
+│       │   ├── New session -> 250 ms for the approval dialog to hand focus back
+│       │   └── Existing session -> 150 ms after wl-copy, so the target holds the new
+│       │       selection before Ctrl+V (GNOME pasted nothing or the old clipboard, #578)
+│       │       // fixed delay, no acknowledgement; not observed on a real GNOME session
 │       └── Neither works -> Failed: "Copied to the clipboard; press Ctrl+V…" naming
 │           the RemoteDesktop portal; the clipboard keeps the transcript
 └── Portal identity -> No hex.desktop in XDG data dirs (a loose binary) ->
