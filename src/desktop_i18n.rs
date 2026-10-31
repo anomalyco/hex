@@ -899,6 +899,10 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("You're all set", ["Wszystko gotowe", "一切就绪", "準備完了", "Alles bereit", "Todo listo", "Усе готово"]),
     ("Your words will appear here", ["Tu pojawią się twoje słowa", "你的文字会显示在这里", "ここに言葉が表示されます", "Hier erscheinen deine Worte", "Tus palabras aparecerán aquí", "Тут зʼявиться ваш текст"]),
     // Fun / Hex Microphone (experimental)
+    ("Available", ["Dostępny", "可用", "利用可能", "Verfügbar", "Disponible", "Доступний"]),
+    ("Virtual microphone", ["Wirtualny mikrofon", "虚拟麦克风", "仮想マイク", "Virtuelles Mikrofon", "Micrófono virtual", "Віртуальний мікрофон"]),
+    ("Could not start Hex Microphone: {}", ["Nie udało się uruchomić Hex Microphone: {}", "无法启动 Hex Microphone：{}", "Hex Microphone を開始できませんでした: {}", "Hex Microphone konnte nicht gestartet werden: {}", "No se pudo iniciar Hex Microphone: {}", "Не вдалося запустити Hex Microphone: {}"]),
+    ("Starting Hex Microphone…", ["Uruchamianie Hex Microphone…", "正在启动 Hex Microphone…", "Hex Microphone を開始中…", "Hex Microphone wird gestartet…", "Iniciando Hex Microphone…", "Запуск Hex Microphone…"]),
     ("Call hears", ["Rozmówcy słyszą", "通话对方听到", "通話相手に聞こえる音", "Anruf hört", "La llamada oye", "Що чує співрозмовник"]),
     ("Carrier", ["Fala nośna", "载波频率", "キャリア周波数", "Trägerfrequenz", "Portadora", "Несуча частота"]),
     ("Chipmunk", ["Wiewiórka", "花栗鼠", "チップマンク", "Chipmunk", "Ardilla", "Бурундук"]),

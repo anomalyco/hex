@@ -314,6 +314,7 @@ pub(crate) fn run(
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
     crate::labs::log_launch();
+    crate::hex_microphone::host_service();
     let (settings, error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (

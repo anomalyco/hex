@@ -225,9 +225,11 @@ substitute for source inspection or a second roadmap.
 - `onboarding`, `permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
-- `hex_microphone`, `voice_filter`: the experimental macOS CoreAudio virtual
-  microphone (`Hex Microphone`), lock-free capture-to-sink ring buffer,
-  real-time voice-filter DSP presets, and the offline WAV renderer behind
+- `hex_microphone`, `voice_filter`: the experimental virtual microphone
+  (`Hex Microphone`: a CoreAudio driver on macOS, a PipeWire virtual source
+  fed through `pw-cat` on Linux, none on Windows, which would need a signed
+  kernel driver), the lock-free capture-to-sink ring buffer, real-time
+  voice-filter DSP presets, and the offline WAV renderer behind
   `hex dev voice-filter render`.
 - `linux`, `linux_app`, `linux_dictation`, `linux_paste`:
   the Linux beta CLI (including the `hex dictation` and

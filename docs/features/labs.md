@@ -10,7 +10,7 @@ setup again.
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
 ├── Meetings (beta) yes   meetings.enabled             (macOS)   Meetings joins the sidebar: call detection, recording, transcripts
-├── Voice Filter    yes   experimental.hex_microphone  (macOS)   Voice Filter joins the sidebar; feeds the Hex Microphone, watches its driver
+├── Voice Filter    yes   experimental.hex_microphone  (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
 ├── Playground      yes   labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser (restart)
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating (restart)
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
@@ -162,8 +162,9 @@ Terminal paste.
   `every_capsule_story_and_flow_opens_from_its_link` in
   playground.rs open every HUD and capsule link headlessly. The URL
   handler and the replay have no automated end-to-end check.
-- Voice Filter: the Voice Filter pane (macOS), the only home of the Hex
-  Microphone driver, its filter modes, and Try it
+- Voice Filter: the Voice Filter pane (macOS and Linux), the only home of
+  the Hex Microphone (macOS's driver, Linux's PipeWire virtual source), its
+  filter modes, and Try it
   ([Hex Microphone](README.md#experimental-hex-microphone-and-voice-filter)).
   Its toggle is `experimental.hex_microphone` (off by default). Off, the pane
   is hidden and Hex neither reads the driver's status nor starts its sink
