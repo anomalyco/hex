@@ -5,7 +5,7 @@
 use std::f32::consts::{PI, TAU};
 
 use super::{AutoLevel, Processing, Tuning, fixed_level};
-use crate::spring::{REDUCED_FADE, Spec, Spring};
+use crate::rune_hud::spring::{REDUCED_FADE, Spec, Spring};
 
 const STEP: f32 = 1.0 / 240.0;
 const HISTORY: usize = 512;

@@ -4,7 +4,7 @@
 //! capsule can place alike; `dictation_indicator` reads the metrics from
 //! `NSScreen` and applies the result.
 
-use crate::dot_scope::Placement;
+use crate::rune_hud::dot_scope::Placement;
 
 /// The plate's gap under the menu bar: as close as it sits and still
 /// reads as its own thing.

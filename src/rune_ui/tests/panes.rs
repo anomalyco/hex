@@ -1520,7 +1520,7 @@ fn voice_filter_shows_only_while_its_labs_toggle_is_on() {
 fn hud_lab_tunes_dot_scope() {
     let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
     assert!(rt.find("dot-glow").is_some());
-    rt.state.platform.hud.tuning = crate::dot_scope::Tuning {
+    rt.state.platform.hud.tuning = crate::rune_hud::dot_scope::Tuning {
         glow: 2.0,
         ..Default::default()
     };
@@ -1547,14 +1547,14 @@ fn hud_lab_tunes_dot_scope() {
     tap(&mut rt, "dot-scope-reset");
     assert_eq!(
         rt.state.platform.hud.tuning,
-        crate::dot_scope::Tuning::default()
+        crate::rune_hud::dot_scope::Tuning::default()
     );
     assert!(!rt.state.hud_saved);
 }
 
 #[test]
 fn hud_lab_picks_dot_scope_processing_placement_and_level() {
-    use crate::dot_scope::{Placement, Processing};
+    use crate::rune_hud::dot_scope::{Placement, Processing};
     let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
     tap(&mut rt, "dot-processing/segments/segment2");
     tap(&mut rt, "dot-placement/segments/segment2");

@@ -653,7 +653,7 @@ impl NativeHost for MacHost {
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
         // The playground's HUD stories change the tuning HUD Lab shows.
-        let shared = crate::dot_scope::lab();
+        let shared = crate::rune_hud::dot_scope::lab();
         if shared != state.hud.tuning {
             state.hud.tuning = shared;
             changed = true;

@@ -11,7 +11,7 @@ use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
 
 use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, WINDOW, set_live_text};
 use crate::app_settings::IndicatorPosition;
-use crate::hud_placement;
+use crate::rune_hud::hud_placement;
 use crate::rune_ui::live_text::Spot;
 
 /// `NSStatusWindowLevel`: over other apps' windows, under the menu bar.
@@ -62,7 +62,7 @@ fn content(island_spread: f32) -> hud_placement::Content {
         window: (f64::from(width), f64::from(height)),
         plate: (
             f64::from(width) - 24.0,
-            f64::from(crate::dot_scope::PLATE_HEIGHT),
+            f64::from(crate::rune_hud::dot_scope::PLATE_HEIGHT),
         ),
         island_spread: f64::from(island_spread),
     }

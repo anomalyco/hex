@@ -29,8 +29,6 @@ mod dev_build;
 mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod dot_scope;
 mod durable;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
@@ -38,8 +36,6 @@ mod events;
 mod feedback;
 mod file_dialog;
 mod history;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod hud_placement;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -77,7 +73,6 @@ mod process_exit;
 mod recognition;
 mod rune_hud;
 mod rune_ui;
-mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
 #[cfg(target_os = "macos")]

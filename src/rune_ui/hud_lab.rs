@@ -15,7 +15,7 @@ use super::controls::{
 use super::lists::{group_label, slider};
 use super::platform::{HudDemo, HudLab, PlatformRequest};
 use crate::desktop::i18n::tr;
-use crate::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
+use crate::rune_hud::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
 
 const SLIDER_WIDTH: f32 = 360.0;
 
