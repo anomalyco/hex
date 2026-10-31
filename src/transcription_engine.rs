@@ -381,9 +381,9 @@ pub struct TranscriptionEngine {
     requests: Arc<AtomicU64>,
     /// Whether the loaded model can stream on its device.
     streams: Arc<AtomicBool>,
-    /// Whether dictation streams publish their text as they go (Labs ›
-    /// Live text, read as each stream begins); a
-    /// [`crate::live_text::Demand`] also asks.
+    /// Whether dictation streams publish their text as they go, asked as
+    /// each stream begins: Labs › Live text, or a
+    /// [`crate::live_text::Demand`].
     live_text: fn() -> bool,
     held: Held,
     /// Whether the worker is running a dictation stream or finish.
@@ -543,7 +543,7 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: crate::labs::live_text,
+            live_text: || crate::labs::live_text() || crate::live_text::demanded(),
             held,
             dictating,
             next_stream: AtomicU64::new(0),
@@ -601,7 +601,7 @@ impl TranscriptionEngine {
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = CancelToken::new();
-        let partials = ((self.live_text)() || crate::live_text::demanded()).then(Partials::default);
+        let partials = (self.live_text)().then(Partials::default);
         self.requests.fetch_add(1, Ordering::AcqRel);
         self.commands
             .send(Command::Begin {
