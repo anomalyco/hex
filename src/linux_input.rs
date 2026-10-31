@@ -1294,7 +1294,10 @@ impl Backend {
         self.mark_ready(DesktopShortcuts::Registered);
 
         let lock_bits = u16::from(ModMask::LOCK) | u16::from(grabs.num_lock);
-        let mut keys = X11Keys::default();
+        let mut keys = X11Keys {
+            detectable_repeat: enable_detectable_auto_repeat(&connection),
+            ..X11Keys::default()
+        };
         let mut escape_down = false;
         while !self.stopping() {
             let mut inputs = keys.expire(Instant::now());
@@ -1331,7 +1334,7 @@ impl Backend {
                             .iter()
                             .filter(|grab| !grab.mouse && grab.code == event.detail)
                         {
-                            keys.release(grab.shortcut, Instant::now());
+                            inputs.extend(keys.release(grab.shortcut, Instant::now()));
                         }
                     }
                     Event::ButtonPress(event) => {
@@ -1382,13 +1385,51 @@ impl Backend {
     }
 }
 
-/// Turns X11 key events into presses and releases. X11 auto-repeat sends a
-/// release before every repeated press, so a release counts only once
-/// [`RELEASE_GRACE`] passes without a new press.
+/// Asks the X server to report a held key's auto-repeat as repeated presses
+/// with one release at the end (XKB detectable auto-repeat), so a release is
+/// always physical. Returns whether the server granted it.
+fn enable_detectable_auto_repeat(connection: &RustConnection) -> bool {
+    use x11rb::protocol::xkb::{self, ConnectionExt as _};
+    const CORE_KEYBOARD: xkb::DeviceSpec = 0x0100;
+    let result = (|| -> Result<bool> {
+        if !connection.xkb_use_extension(1, 0)?.reply()?.supported {
+            return Ok(false);
+        }
+        let flag = xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT;
+        let reply = connection
+            .xkb_per_client_flags(
+                CORE_KEYBOARD,
+                flag,
+                flag,
+                xkb::BoolCtrl::from(0u32),
+                xkb::BoolCtrl::from(0u32),
+                xkb::BoolCtrl::from(0u32),
+            )?
+            .reply()?;
+        Ok(u32::from(reply.value) & u32::from(flag) != 0)
+    })();
+    match result {
+        Ok(granted) => granted,
+        Err(error) => {
+            tracing::debug!(
+                error = format!("{error:#}"),
+                "no XKB detectable auto-repeat"
+            );
+            false
+        }
+    }
+}
+
+/// Turns X11 key events into presses and releases. With detectable
+/// auto-repeat a held key repeats only its press, so a release counts at
+/// once. Without it, auto-repeat sends a release before every repeated
+/// press, so a release counts only once [`RELEASE_GRACE`] passes without a
+/// new press.
 #[derive(Default)]
 struct X11Keys {
     held: [bool; Shortcut::ALL.len()],
     releasing: [Option<Instant>; Shortcut::ALL.len()],
+    detectable_repeat: bool,
 }
 
 impl X11Keys {
@@ -1405,11 +1446,18 @@ impl X11Keys {
         Some(Input::Pressed(shortcut))
     }
 
-    fn release(&mut self, shortcut: Shortcut, now: Instant) {
+    fn release(&mut self, shortcut: Shortcut, now: Instant) -> Option<Input> {
         let index = shortcut.index();
-        if self.held[index] {
-            self.releasing[index] = Some(now);
+        if !self.held[index] {
+            return None;
         }
+        if self.detectable_repeat {
+            self.held[index] = false;
+            self.releasing[index] = None;
+            return Some(Input::Released(shortcut));
+        }
+        self.releasing[index] = Some(now);
+        None
     }
 
     fn expire(&mut self, now: Instant) -> Vec<Input> {
@@ -2450,6 +2498,44 @@ mod tests {
             [Input::Released(Shortcut::PasteLast)]
         );
         assert!(keys.held(Shortcut::Dictation));
+    }
+
+    /// #638: with detectable auto-repeat, a release under 50 ms before the
+    /// next press still counts, so a fast double tap starts double-tap-only
+    /// dictation; a held key's repeated presses stay ignored.
+    #[test]
+    fn x11_detectable_repeat_releases_at_once_for_fast_double_taps() {
+        let mut keys = X11Keys {
+            detectable_repeat: true,
+            ..X11Keys::default()
+        };
+        let mut test = Test::with(HotkeyOptions {
+            double_tap: true,
+            double_tap_only: true,
+            ..HotkeyOptions::default()
+        });
+        let feed = |input: Option<Input>, test: &mut Test| {
+            if let Some(input) = input {
+                test.input(input);
+            }
+        };
+        feed(keys.press(Shortcut::Dictation), &mut test);
+        test.now += Duration::from_millis(40);
+        let released = keys.release(Shortcut::Dictation, test.now);
+        assert_eq!(released, Some(Input::Released(Shortcut::Dictation)));
+        feed(released, &mut test);
+        test.now += Duration::from_millis(20);
+        feed(keys.press(Shortcut::Dictation), &mut test);
+        assert_eq!(test.events, [START]);
+        // Held: the server repeats only the press.
+        for _ in 0..5 {
+            test.now += Duration::from_millis(30);
+            assert_eq!(keys.press(Shortcut::Dictation), None);
+        }
+        assert!(keys.expire(test.now + RELEASE_GRACE).is_empty());
+        feed(keys.release(Shortcut::Dictation, test.now), &mut test);
+        assert_eq!(test.events, [START]);
+        assert_eq!(test.state.capture, Capture::Locked);
     }
 
     use std::sync::MutexGuard;
