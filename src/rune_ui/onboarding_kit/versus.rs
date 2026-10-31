@@ -19,8 +19,8 @@ use rune::{Anim, El, Spring, SpringPair, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{
-    CHAT_W, FIELD_FONT, LAUNCH_ROOM, Reply, Side, bubble, chat, chat_height, field_text_origin,
-    receipt, system_line, typing_dots,
+    CHAT_W, Caption, FIELD_FONT, LAUNCH_ROOM, Reply, Side, bubble, chat, chat_height,
+    field_text_origin, system_line, typing_dots,
 };
 use super::field_text::{self, CHAT};
 use super::fixture::ANSWER_JAY;
@@ -35,17 +35,21 @@ use super::stories::{Flow, Onboard, Step};
 use super::typing::{Focus, Line, TYPOS, Timing, Who};
 
 const STAGE_W: f32 = 500.0;
-const STAGE_H: f32 = 516.0;
+const STAGE_H: f32 = 540.0;
 const CENTRE_X: f32 = STAGE_W * 0.5;
 const CARD_X: f32 = CENTRE_X - CHAT_W * 0.5;
 const CARD_TOP: f32 = 0.0;
 /// Over the keyboard's upper rows, which melt away, above the lit `⌥`.
-const HUD_CENTRE: [f32; 2] = [CENTRE_X, 392.0];
+const HUD_CENTRE: [f32; 2] = [CENTRE_X, 416.0];
+/// The keys behind the HUD go dark around it, this far out from its centre.
+const POCKET: [f32; 2] = [136.0, 58.0];
 const HUD_SCALE: f32 = 1.05;
 const CALM: f32 = 0.20;
 const BURST: f64 = 0.04;
 const ACTION_H: f32 = 32.0;
 const TOP_BAR: f32 = 48.0;
+/// Room under the demo, kept small so the thread can be tall.
+const BOTTOM: f32 = 24.0;
 /// The last few lines, while they aren't the focus.
 const RECENT: f32 = 0.80;
 /// Older lines.
@@ -60,8 +64,12 @@ const WITHOUT_LINES: usize = 1;
 /// as the stage settles ([`typing::Scene`]'s lines before the button).
 const PRE_ROLL: f64 = 1.2;
 /// `"With Hex"`'s first beat: the disaster zips back out, newest first.
-pub(crate) const REWIND: f64 = 0.55;
-const REWIND_STAGGER: f64 = 0.035;
+pub(crate) const REWIND: f64 = 0.48;
+const REWIND_STAGGER: f64 = 0.045;
+/// The rewind keeps the field locked until the removal has peeled away.
+const UNLOCK: f64 = 0.1;
+/// How long the field stays empty after a send, before its placeholder.
+const CLEAR: f64 = 0.22;
 /// The second beat: the keyboard melts to `⌥` and the HUD rises; then `⌥`
 /// goes down this long after `"With Hex"` begins.
 pub(crate) const BEFORE_KEY: f64 = 1.5;
@@ -72,14 +80,20 @@ const MELT_FROM: f64 = 0.1;
 /// The HUD rises once the keys have mostly melted out of its way.
 const HUD_RISES: f64 = MELT_FROM + MELT * 0.6;
 /// Keys other than the shortcut once they've melted away.
-const MELTED: f32 = 0.10;
+const MELTED: f32 = 0.14;
+/// The keyboard while Jay talks, and before the button.
+const IDLE: f32 = 0.52;
+/// The keyboard while you type.
+const TYPING: f32 = 0.92;
+/// The shortcut's ember on the score.
+const EMBER: f32 = 0.22;
 
 /// The least time Jay's delighted reply holds before the score.
 const REPLY_HOLD: f64 = 1.75;
 /// How long a landed word takes to settle into the field.
 const SETTLE: f64 = 0.15;
 /// Jay, delighted.
-pub(crate) const HEX_REPLY: &str = "perfect, they're clapping 👏";
+pub(crate) const HEX_REPLY: &str = "perfect. they're actually clapping";
 
 fn reply_lines() -> usize {
     CHAT.wrap(ANSWER_JAY.text()).len()
@@ -192,6 +206,21 @@ fn take_time(s: &Onboard) -> Option<f64> {
         .map(|from| s.now - from)
 }
 
+/// How long the comedy plays before `Skip →` shows, on a first watch.
+const SKIP_AFTER: f64 = 2.0;
+
+/// The comedy is playing and `Skip →` shows: two seconds in, or at once
+/// for someone who has seen it before, until the answer sends.
+pub(super) fn skippable(s: &Onboard) -> bool {
+    let Some(from) = s.typing_from else {
+        return false;
+    };
+    // Once the answer is out there's nothing left to skip.
+    matches!(s.step, Step::Parked | Step::YourTurn | Step::Hearing)
+        && !hex_sent(s)
+        && (s.had_model && s.granted || s.now - from >= SKIP_AFTER)
+}
+
 /// `"With Hex"`'s answer has left the field.
 pub(crate) fn hex_sent(s: &Onboard) -> bool {
     take_time(s).is_some_and(|t| t >= hex_beats(s.streams(), &s.timing).send)
@@ -232,12 +261,13 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .transition(Transition::opacity()),
         Step::Done => continue_button(p, s),
         Step::Parked if waiting_to_start(s) => super::flows::watch_button(p, s),
+        _ if skippable(s) => super::flows::skip_button(p, s),
         _ => el().key("none"),
     };
     vec![
         top,
         middle()
-            .pb(TOP_BAR)
+            .pb(BOTTOM)
             .gap(16.0)
             .child(heading(p, s))
             .children(parked.then(|| stage(p, s)))
@@ -329,14 +359,28 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             line("lead-done", "The same reply, typed and then spoken.".into()),
         ),
     };
-    s.motion.heading(
-        col()
-            .key(key)
-            .gap(8.0)
-            .items_center()
-            .child(text(title).key("title").font(title_font(p)).color(p.text()))
-            .child(row().key("lead-row").h(24.0).center().child(lead)),
-    )
+    col()
+        .key(key)
+        .gap(8.0)
+        .items_center()
+        .transition(act_break())
+        .enter_delay(HEADING_GAP)
+        .child(text(title).key("title").font(title_font(p)).color(p.text()))
+        .child(row().key("lead-row").h(24.0).center().child(lead))
+}
+
+/// How long the outgoing heading has alone before the next sharpens in.
+const HEADING_GAP: f32 = 0.09;
+
+/// One heading gives way to the next in place: the outgoing one blurs away
+/// fast, mostly gone before the incoming one sharpens in, so two titles
+/// never sit on each other.
+fn act_break() -> Transition {
+    let soft = |scale| Transition::blur(3.5).combined(Transition::scale(scale));
+    Transition::asymmetric(soft(0.98), soft(1.02)).springs(SpringPair::new(
+        Spring::new(0.28, 0.0),
+        Spring::new(0.14, 0.0),
+    ))
 }
 
 fn smoothstep(u: f32) -> f32 {
@@ -375,30 +419,34 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         None => 0.0,
     };
 
-    // While you type the keyboard comes up, and recedes while Jay talks; it
-    // drops away only when the story freezes, after Return's flash.
     let flash = |id: &str| match t {
         Some(t) if !voice_phase => s.scene.flash(t, id),
         _ => 0.0,
     };
-    // On `"With Hex"` the deck comes back up only as its keys melt, so only
-    // the shortcut brightens.
-    let keys_opacity = match focus {
-        _ if since.is_some_and(|since| since < MELT_FROM + MELT * 0.5) => 0.52,
-        _ if voice_phase => 1.0,
-        Focus::Field => 0.92,
-        _ if flash("return") > 0.0 => 0.92,
-        _ if frozen => FROZEN,
-        _ => 0.52,
+    // From where the removal left it, the deck only ever goes down as its
+    // keys melt; the shortcut alone lights up, and the keys behind the HUD
+    // go dark.
+    let level = match since {
+        Some(_) => FROZEN + (MELTED - FROZEN) * melt_u,
+        None => keyboard_level(s),
     };
+    let deck = [(STAGE_W - kw) * 0.5, STAGE_H - kh];
+    let pocket = [HUD_CENTRE[0] - deck[0], HUD_CENTRE[1] - deck[1]];
     let kb_el = keyboard_lit(
         p,
         "keyboard",
-        enter_u,
-        1.0 + (MELTED - 1.0) * melt_u,
-        |id| key_depth(s, id),
-        |id| key_glow(s, id, melt_u),
-        flash,
+        keyboard::Lighting {
+            enter: enter_u,
+            level,
+            depth: &|id| key_depth(s, id),
+            glow: &|id| key_glow(s, id, melt_u),
+            flash: &flash,
+            hollow: &|[x, y, w, h]| {
+                let dx = (x + w * 0.5 - pocket[0]) / POCKET[0];
+                let dy = (y + h * 0.5 - pocket[1]) / POCKET[1];
+                melt_u * (1.0 - smoothstep(((dx * dx + dy * dy).sqrt() - 1.0) / 0.35))
+            },
+        },
     );
     let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0;
     let keys_el = el()
@@ -407,12 +455,10 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             Transition::opacity()
                 .springs(SpringPair::new(UI_SPRING, Spring::new(s.motion.exit, 0.0))),
         )
-        .absolute((STAGE_W - kw) * 0.5, STAGE_H - kh)
+        .absolute(deck[0], deck[1])
         .offset(0.0, kb_shift)
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
-        .opacity(keys_opacity)
-        .opacity_motion(Spring::new(0.36, 0.0))
         .child(kb_el);
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
@@ -469,16 +515,10 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 /// Why the field is gone once Jay removes you.
 const NO_LONGER: &str = "You are no longer in this conversation.";
 
-/// `"Without Hex"`'s thread at `t`: every line so far and the `"Read"`
-/// receipt, each at `opacity(line index, line)`, the receipt at `read`, and
+/// `"Without Hex"`'s thread at `t`: every line so far, each at
+/// `opacity(line index, line)` with `"Read"` under the one it reads, and
 /// Jay's typing dots.
-fn thread_at(
-    p: Paint,
-    s: &Onboard,
-    t: f64,
-    opacity: impl Fn(usize, &Line) -> f32,
-    read: f32,
-) -> Vec<El> {
+fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f32) -> Vec<El> {
     let reduced = s.reduced.get();
     let scene = &s.scene;
     let lines = &scene.lines()[..scene.shown(t)];
@@ -495,7 +535,11 @@ fn thread_at(
                     p,
                     format!("l{i}"),
                     Side::Them,
-                    named.then_some("Jay"),
+                    if named {
+                        Caption::From("Jay")
+                    } else {
+                        Caption::None
+                    },
                     &line.text,
                     o,
                     reduced,
@@ -507,7 +551,11 @@ fn thread_at(
                     p,
                     format!("sent-bubble-{}", sent - 1),
                     Side::You,
-                    None,
+                    if receipt_at == Some(i) {
+                        Caption::Read
+                    } else {
+                        Caption::None
+                    },
                     &line.text,
                     o,
                     reduced,
@@ -515,9 +563,6 @@ fn thread_at(
             }
             Who::System => system_line(p, format!("l{i}"), &line.text, o, reduced),
         });
-        if receipt_at == Some(i) {
-            thread.push(receipt(p, read, reduced));
-        }
     }
     if scene.dots(t).is_some() {
         thread.push(typing_dots(p, "dots".into(), s.now, 1.0, reduced));
@@ -534,24 +579,31 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
     let answering = scene.lines()[..shown]
         .iter()
         .rposition(|l| l.who == Who::Jay);
+    let removed = scene.removed(t);
     let opacity = |i: usize, _: &Line| match focus {
         Focus::Waiting => 1.0,
         Focus::Line(j) | Focus::Read(j) if i == j => 1.0,
+        // Jay's last two lines stay readable over the removal: the firing
+        // reads as one stack.
+        _ if removed && i + 2 == shown => 0.82,
+        _ if removed && i + 3 == shown => 0.55,
         _ if frozen => FROZEN,
         Focus::Field if Some(i) == answering => CONTEXT,
         _ if shown - i <= 3 => RECENT,
         _ => OLDER,
     };
-    let read = match focus {
-        Focus::Read(_) => 1.0,
-        _ if frozen => FROZEN,
-        _ => RECENT,
-    };
-    let thread = thread_at(p, s, t, opacity, read);
-    if scene.removed(t) {
+    let thread = thread_at(p, s, t, opacity);
+    if removed {
         return chat(p, &LAUNCH_ROOM, thread, Reply::Locked(NO_LONGER), 1.0);
     }
     let (draft, caret) = scene.draft(t);
+    // The field stays empty a moment after a send, so the bubble lifts out
+    // of it before the placeholder comes back.
+    let just_sent = scene.lines()[..shown]
+        .iter()
+        .rev()
+        .find(|l| l.who == Who::You)
+        .is_some_and(|l| t - l.at < CLEAR);
     chat(
         p,
         &LAUNCH_ROOM,
@@ -560,7 +612,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
             text: draft,
             caret,
             lines: WITHOUT_LINES,
-            placeholder: draft.is_empty(),
+            placeholder: draft.is_empty() && !just_sent,
             focus: caret.is_some(),
             sent: false,
         },
@@ -580,22 +632,23 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let typing = t.is_some_and(|t| t >= beats.send + 0.4 && t < beats.reply);
     let composing = !sent;
     let asked = s.scene.lines().iter().filter(|l| l.at < 0.0).count();
-    let mut thread = if since < REWIND && !reduced {
+    let rewinding = since < REWIND && !reduced;
+    let mut thread = if rewinding {
         let end = s.scene.duration();
-        let mut all = thread_at(p, s, end, |i, _| if i < asked { 1.0 } else { 0.5 }, 0.5);
+        let mut all = thread_at(p, s, end, |i, _| if i < asked { 1.0 } else { 0.5 });
         let gone = ((since / REWIND_STAGGER) as usize + 1).min(all.len() - asked);
         all.truncate(all.len() - gone);
         all
     } else {
         let question = if composing { 1.0 } else { OLDER };
-        thread_at(p, s, -1e-3, |_, _| question, 0.0)
+        thread_at(p, s, -1e-3, |_, _| question)
     };
     if sent {
         thread.push(bubble(
             p,
             "hex-bubble".into(),
             Side::You,
-            None,
+            Caption::None,
             ANSWER_JAY.text(),
             if replied { RECENT } else { 1.0 },
             reduced,
@@ -609,7 +662,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             p,
             "hex-reply".into(),
             Side::Them,
-            Some("Jay"),
+            Caption::From("Jay"),
             HEX_REPLY,
             1.0,
             reduced,
@@ -624,6 +677,12 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         .map(|(_, slot)| slot.line + 1)
         .max()
         .unwrap_or(1);
+    if rewinding && since < UNLOCK {
+        return chat(p, &LAUNCH_ROOM, thread, Reply::Locked(NO_LONGER), 1.0);
+    }
+    // The field waits, unfocused, until the shortcut goes down.
+    let listening = s.step >= Step::Hearing && !sent;
+    let cleared = t.is_some_and(|t| t >= beats.send + CLEAR);
     chat(
         p,
         &LAUNCH_ROOM,
@@ -632,12 +691,51 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             text: "",
             caret: None,
             lines: if sent { 1 } else { lines },
-            placeholder: !started || sent,
-            focus: composing,
+            placeholder: !started || cleared,
+            focus: listening,
             sent: false,
         },
         if composing { 1.0 } else { 0.6 },
     )
+}
+
+/// What the keyboard is lit to at scene time `t` in `"Without Hex"`: up
+/// while you type and through Return's flash, back while Jay talks, and down
+/// only when the story freezes.
+fn keyboard_target(s: &Onboard, t: f64) -> f32 {
+    if t < 0.0 {
+        return IDLE;
+    }
+    let scene = &s.scene;
+    if scene.focus(t) == Focus::Field || scene.flash(t, "return") > 0.0 {
+        TYPING
+    } else if scene.frozen(t) {
+        FROZEN
+    } else {
+        IDLE
+    }
+}
+
+/// [`keyboard_target`] followed by a critically damped spring, worked out
+/// from the scene's clock over the last second so any frame can be drawn
+/// on its own.
+fn keyboard_level(s: &Onboard) -> f32 {
+    const RESPONSE: f64 = 0.36;
+    const STEP: f64 = 1.0 / 240.0;
+    let Some(t) = scene_time(s) else {
+        return IDLE;
+    };
+    let omega = std::f64::consts::TAU / RESPONSE;
+    let mut at = t - 1.0;
+    let mut level = f64::from(keyboard_target(s, at));
+    let mut speed = 0.0;
+    while at < t {
+        let goal = f64::from(keyboard_target(s, at));
+        speed += (omega * omega * (goal - level) - 2.0 * omega * speed) * STEP;
+        level += speed * STEP;
+        at += STEP;
+    }
+    level as f32
 }
 
 fn shortcut_keys(s: &Onboard) -> impl Iterator<Item = &'static str> + '_ {
@@ -661,12 +759,14 @@ fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
     match s.step {
         Step::YourTurn => 0.85 * melt_u,
         Step::Hearing => 1.0,
+        // It cools to an ember that stays through the score.
         Step::Heard => {
             let fade = s.take_from.map_or(0.0, |from| {
                 1.0 - smoothstep(((s.now - from - ANSWER_JAY.release) / 0.45) as f32)
             });
-            0.70 * fade
+            EMBER + (0.70 - EMBER) * fade
         }
+        Step::Done => EMBER,
         _ => 0.0,
     }
 }
@@ -726,7 +826,7 @@ fn words(p: Paint, s: &Onboard, nudge: [f32; 2]) -> El {
         && flights
             .iter()
             .any(|(f, _)| s.now >= f.start() && s.now < f.arrives() + SETTLE);
-    if matches!(s.step, Step::YourTurn | Step::Hearing) && !settling {
+    if s.step == Step::Hearing && !settling {
         out = out.child(
             el().key("caret-at")
                 .absolute(origin[0], origin[1])

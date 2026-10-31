@@ -205,12 +205,12 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
 }
 
 /// The conversation's visible thread, between its header and the field.
-pub(crate) const THREAD_H: f32 = 196.0;
+pub(crate) const THREAD_H: f32 = 232.0;
 const HEADER_H: f32 = 34.0;
-const BUBBLE_MAX: f32 = 280.0;
+const BUBBLE_MAX: f32 = 328.0;
 const BUBBLE_FONT: TextStyle = FIELD_FONT.lh(17.0);
 /// Older lines fade out under the header over this much.
-const THREAD_FADE: f32 = 36.0;
+const THREAD_FADE: f32 = 28.0;
 
 /// Height of [`chat`] with a reply field `lines` tall.
 pub(crate) fn chat_height(lines: usize) -> f32 {
@@ -290,14 +290,24 @@ pub(crate) enum Side {
     You,
 }
 
+/// The small print around a [`bubble`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Caption<'a> {
+    None,
+    /// The sender's name over the first of theirs in a group.
+    From(&'a str),
+    /// `"Read"` under one of yours, moving with it.
+    Read,
+}
+
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
-/// in cobalt, with the sender's name over the first of theirs in a group.
-/// It glides up as newer lines arrive and fades to `opacity`.
+/// in cobalt, with its [`Caption`]. It glides up as newer lines arrive and
+/// fades to `opacity`.
 pub(crate) fn bubble(
     p: Paint,
     key: String,
     side: Side,
-    from: Option<&str>,
+    caption: Caption<'_>,
     copy: &str,
     opacity: f32,
     reduced: bool,
@@ -330,27 +340,45 @@ pub(crate) fn bubble(
                 .wrap()
                 .shrink(),
         );
-    let Some(from) = from else {
-        return line(key, side, opacity, reduced).child(bubble.shrink());
-    };
-    line(key, side, opacity, reduced).child(
-        col()
-            .key("named")
-            .gap(2.0)
-            .shrink()
-            .child(
-                text(from.to_string())
-                    .key("from")
-                    .font(k.ty.small)
-                    .color(p.faint())
-                    .ml(11.0),
-            )
-            .child(bubble.shrink()),
-    )
+    let line = line(key, side, opacity, reduced);
+    match caption {
+        Caption::None => line.child(bubble.shrink()),
+        Caption::From(from) => line.child(
+            col()
+                .key("named")
+                .gap(2.0)
+                .shrink()
+                .child(
+                    text(from.to_string())
+                        .key("from")
+                        .font(k.ty.small)
+                        .color(p.faint())
+                        .ml(11.0),
+                )
+                .child(bubble.shrink()),
+        ),
+        Caption::Read => line.child(
+            col()
+                .key("read-under")
+                .gap(2.0)
+                .items_end()
+                .shrink()
+                .child(bubble.shrink())
+                .child(
+                    text("Read")
+                        .key("read")
+                        .font(k.ty.small_medium)
+                        .color(p.muted())
+                        .transition(Transition::opacity()),
+                ),
+        ),
+    }
 }
 
-/// A row of [`chat`]'s thread, aligned to `side`. Under Reduce Motion it
-/// only fades.
+/// A row of [`chat`]'s thread, aligned to `side`. Theirs rise in; yours
+/// arrive whole, launched from the field. Any line leaves by peeling up
+/// fast, so a rewind never piles ghosts up. Under Reduce Motion it only
+/// fades.
 pub(crate) fn line(key: String, side: Side, opacity: f32, reduced: bool) -> El {
     let row = row().key(key).w_full();
     let row = match side {
@@ -361,14 +389,18 @@ pub(crate) fn line(key: String, side: Side, opacity: f32, reduced: bool) -> El {
     if reduced {
         return row.transition(Transition::opacity());
     }
-    row.motion(Spring::new(0.34, 0.0)).transition(
-        Transition::opacity()
-            .combined(Transition::offset(0.0, 10.0))
-            .springs(SpringPair::new(
-                Spring::new(0.34, 0.0),
-                Spring::new(0.2, 0.0),
-            )),
-    )
+    let enter = match side {
+        Side::Them => Transition::opacity().combined(Transition::offset(0.0, 10.0)),
+        Side::You => Transition::identity(),
+    };
+    let peel = Transition::opacity()
+        .combined(Transition::scale(0.95))
+        .combined(Transition::offset(0.0, -8.0));
+    row.motion(Spring::new(0.34, 0.0))
+        .transition(Transition::asymmetric(enter, peel).springs(SpringPair::new(
+            Spring::new(0.34, 0.0),
+            Spring::new(0.09, 0.0),
+        )))
 }
 
 /// Their three typing dots, pulsing in turn at `now`.
@@ -398,16 +430,6 @@ pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced
             .child(dot(0))
             .child(dot(1))
             .child(dot(2)),
-    )
-}
-
-/// `"Read"` under the message it reads.
-pub(crate) fn receipt(p: Paint, opacity: f32, reduced: bool) -> El {
-    line("read".into(), Side::You, opacity, reduced).child(
-        text("Read")
-            .key("read")
-            .font(p.k.ty.small_medium)
-            .color(p.muted()),
     )
 }
 
@@ -535,7 +557,7 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
         _ => false,
     };
     let body = match reply {
-        Reply::Empty => placeholder(p, n.field),
+        Reply::Empty => placeholder(p, n.field).ml(PLACEHOLDER_X),
         Reply::Ask { keys, hint } => row()
             .key("ask")
             .gap(8.0)
@@ -565,15 +587,12 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
         } => {
             let body = shape.typed(p, "typed", typed, caret, lines);
             if empty {
-                body.child(placeholder(p, n.field).absolute(0.0, 0.0))
+                body.child(placeholder(p, n.field).absolute(PLACEHOLDER_X, 0.0))
             } else {
                 body
             }
         }
-        Reply::Locked(why) => text(why)
-            .key("locked")
-            .font(FIELD_FONT.lh(FIELD_LINE))
-            .color(p.faint()),
+        Reply::Locked(why) => text(why).key("locked").font(k.ty.small).color(p.faint()),
     };
     let trailing = match reply {
         Reply::Hearing { meter, .. } => Some(mic_level(p, "mic", 16.0, meter.0, meter.1, true)),
@@ -583,15 +602,14 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
     };
     let drawn = matches!(reply, Reply::Lines { .. });
     if matches!(reply, Reply::Locked(_)) {
-        // A dead bar: no border, nothing to click into.
+        // No field at all, only why, in the field's place.
         return row()
             .key("field")
-            .px(FIELD_PX)
-            .py(FIELD_PY)
+            .h(2.0 * FIELD_PY + FIELD_LINE)
             .radius(k.radius.lg)
-            .fill(k.c.surface_weak)
+            .fill(Color::TRANSPARENT)
             .border(p.hair, Color::TRANSPARENT)
-            .justify_center()
+            .center()
             .instant_changes()
             .child(body);
     }
@@ -619,6 +637,9 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
         field.min_h(FIELD_H).center_y()
     }
 }
+
+/// The placeholder sits clear of the caret before it.
+const PLACEHOLDER_X: f32 = 2.5;
 
 fn placeholder(p: Paint, copy: &str) -> El {
     text(copy)

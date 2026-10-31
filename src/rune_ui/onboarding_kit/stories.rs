@@ -405,6 +405,21 @@ impl Onboard {
 
     /// `"Watch what happens"`: plays `"Without Hex"` from the top, then the
     /// story moves on by itself.
+    /// `Skip →` or Escape: leaves the comedy for whatever follows it. True
+    /// when there was one to skip.
+    pub(crate) fn skip_scene(&mut self) -> bool {
+        if !versus::skippable(self) {
+            return false;
+        }
+        self.manual_override = true;
+        self.sfx.clear();
+        self.sfx.on_capsule_tap();
+        self.step = Step::Done;
+        let now = self.now;
+        self.auto_due_at = next_beat(self, now).map(|secs| now + secs);
+        true
+    }
+
     pub(crate) fn start_scene(&mut self) {
         if self.step != Step::Parked || self.typing_from.is_some() {
             return;
@@ -731,6 +746,7 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
             s.hud_from = Some(now);
+            s.sfx.on_rewind(now);
             Some(versus::BEFORE_KEY)
         }
         Step::Parked => Some(WAIT),
@@ -792,6 +808,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
             s.hud_from = Some(now);
+            s.sfx.on_rewind(now);
             Some(versus::BEFORE_KEY)
         }
         Step::YourTurn => {
@@ -1469,7 +1486,7 @@ mod tests {
 
     #[test]
     fn reduced_motion_does_not_suppress_onboarding_sounds() {
-        let simulate = |reduced: bool| -> Vec<(f64, crate::feedback::Tone)> {
+        let simulate = |reduced: bool| -> Vec<(f64, crate::feedback::Tone, u8)> {
             let mut s = Onboard::new(Flow::FirstRun);
             s.speech = Speech::AfterDownload;
             s.scripted_try = true;

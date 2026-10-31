@@ -302,6 +302,8 @@ fn demo_page(p: Paint, s: &Onboard) -> El {
             continue_button(p, s)
         } else if versus::waiting_to_start(s) {
             super::flows::watch_button(p, s)
+        } else if versus::skippable(s) {
+            super::flows::skip_button(p, s)
         } else {
             none()
         }))

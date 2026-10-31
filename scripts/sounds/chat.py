@@ -8,6 +8,8 @@ library only, so it runs anywhere:
 - `chat_incoming`: a message arriving, two quick bright pips (G5 -> B5).
 - `chat_sent`: a message leaving, a breathy upward swish (500 Hz -> 2.4 kHz).
 - `chat_read`: the deadpan `"Read"`, one dry low pip (about 360 Hz).
+- `chat_rewind`: the story winding back, a soft downward swish that swells
+  and stops short, like tape pulled back (2.6 kHz -> 420 Hz).
 
 Peaks are set to sit with the other onboarding cues (about -14 dBFS)."""
 
@@ -42,8 +44,9 @@ def pip(hz, secs, tau, attack=0.002, h2=0.0):
     return out
 
 
-def swish(secs, lo, hi):
-    """White noise through a resonant band-pass sweeping `lo` -> `hi`."""
+def swish(secs, lo, hi, backwards=False):
+    """White noise through a resonant band-pass sweeping `lo` -> `hi`.
+    `backwards` swells toward the end instead and stops short."""
     n = int(secs * SR)
     low = band = 0.0
     out = []
@@ -57,7 +60,7 @@ def swish(secs, lo, hi):
         high = x - low - q * band
         band += g * high
         # Swells in quickly and trails off, like breath.
-        env = math.sin(math.pi * u ** 0.7) ** 1.5
+        env = math.sin(math.pi * (1 - u if backwards else u) ** 0.7) ** 1.5
         out.append(env * band)
     return out
 
@@ -89,9 +92,13 @@ def main():
     add(sent, 0.0, swish(0.105, 500.0, 2400.0))
     write("chat_sent", finish(sent, -14.0))
 
-    read = silence(0.035)
-    add(read, 0.0, pip(360.0, 0.035, 0.008, attack=0.0008, h2=0.25))
-    write("chat_read", finish(read, -19.0, fade=0.004))
+    read = silence(0.055)
+    add(read, 0.0, pip(360.0, 0.055, 0.014, attack=0.0008, h2=0.25))
+    write("chat_read", finish(read, -14.5, fade=0.006))
+
+    rewind = silence(0.18)
+    add(rewind, 0.0, swish(0.18, 2600.0, 420.0, backwards=True))
+    write("chat_rewind", finish(rewind, -16.5, fade=0.008))
 
 
 if __name__ == "__main__":

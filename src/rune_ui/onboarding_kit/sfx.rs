@@ -25,7 +25,8 @@ use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tone};
 #[derive(Default)]
 pub(crate) struct SfxTrack {
     pub(crate) style: KeySoundStyle,
-    cues: Vec<(f64, Tone)>,
+    /// Each cue's time, tone, and percent of its level.
+    cues: Vec<(f64, Tone, u8)>,
     fired: usize,
     almost_ready_scheduled: bool,
     flushed: bool,
@@ -42,7 +43,7 @@ impl SfxTrack {
     pub(crate) fn has_pending(&self, now: f64) -> bool {
         self.cues
             .get(self.fired)
-            .is_some_and(|&(at, _)| at <= now + 1.0)
+            .is_some_and(|&(at, ..)| at <= now + 1.0)
     }
 
     /// Switches the active typing sound candidate (including any unfired
@@ -50,7 +51,7 @@ impl SfxTrack {
     /// the candidate can be heard immediately on click.
     pub(crate) fn set_style_and_preview(&mut self, style: KeySoundStyle, now: f64) {
         self.style = style;
-        for (_, tone) in &mut self.cues[self.fired..] {
+        for (_, tone, _) in &mut self.cues[self.fired..] {
             *tone = match *tone {
                 Tone::Onboarding(OnboardingTone::Key(_, v)) => {
                     Tone::Onboarding(OnboardingTone::Key(style, v))
@@ -79,7 +80,11 @@ impl SfxTrack {
     }
 
     fn push(&mut self, at: f64, tone: Tone) {
-        self.cues.push((at, tone));
+        self.push_at(at, tone, 100);
+    }
+
+    fn push_at(&mut self, at: f64, tone: Tone, percent: u8) {
+        self.cues.push((at, tone, percent));
         let start = self.fired.min(self.cues.len());
         self.cues[start..]
             .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -106,6 +111,8 @@ impl SfxTrack {
         let mut prev_variant: Option<u8> = None;
         for (i, stroke) in scene.strokes().iter().enumerate() {
             let at = from + stroke.at;
+            // Calm typing sits under the chat sounds; panic brings it up.
+            let level = (62.0 + 28.0 * stroke.panic).round() as u8;
             let tone = match stroke.key {
                 "space" | "return" => OnboardingTone::KeySpace(style),
                 "delete" => OnboardingTone::KeyBackspace(style),
@@ -121,7 +128,7 @@ impl SfxTrack {
                     OnboardingTone::Key(style, v)
                 }
             };
-            self.push(at, Tone::Onboarding(tone));
+            self.push_at(at, Tone::Onboarding(tone), level);
             // The finger slipping onto Return lands with a heavy clunk.
             if stroke.key == "return" && scene.flash(stroke.at + 1e-3, "return") > 0.0 {
                 self.push(
@@ -130,9 +137,10 @@ impl SfxTrack {
                 );
             }
             if stroke.hard && matches!(tone, OnboardingTone::Key(..)) {
-                self.push(
+                self.push_at(
                     at + 0.004,
                     Tone::Onboarding(OnboardingTone::KeySpace(style)),
+                    level,
                 );
             }
         }
@@ -148,6 +156,11 @@ impl SfxTrack {
         if let Some(at) = scene.read_at() {
             self.push(from + at, Tone::Onboarding(OnboardingTone::Read));
         }
+    }
+
+    /// The story winding back into `"With Hex"`.
+    pub(crate) fn on_rewind(&mut self, now: f64) {
+        self.push(now, Tone::Onboarding(OnboardingTone::Rewind));
     }
 
     /// `"With Hex"`'s answer sending at `send`, and Jay's reply at `reply`.
@@ -226,16 +239,16 @@ impl SfxTrack {
     /// Advances playback to `now`, dispatching every newly-reached cue to
     /// [`feedback::play`] (no-op when headless or volume is 0).
     pub(crate) fn advance_to(&mut self, now: f64) {
-        while let Some(&(at, tone)) = self.cues.get(self.fired) {
+        while let Some(&(at, tone, percent)) = self.cues.get(self.fired) {
             if at > now + 1e-4 {
                 break;
             }
             self.fired += 1;
-            feedback::play(tone);
+            feedback::play_at(tone, percent);
         }
     }
 
-    pub(crate) fn fired_cues(&self) -> &[(f64, Tone)] {
+    pub(crate) fn fired_cues(&self) -> &[(f64, Tone, u8)] {
         &self.cues[..self.fired]
     }
 
@@ -290,7 +303,7 @@ mod tests {
         let mut back_count = 0;
         let mut sent = 0;
         let mut read = 0;
-        for &(_, tone) in track.fired_cues() {
+        for &(_, tone, _) in track.fired_cues() {
             match tone {
                 Tone::Onboarding(OnboardingTone::Key(_, v)) => {
                     assert_ne!(last_key, Some(v), "adjacent key clacks repeated Key({v})");
@@ -311,7 +324,7 @@ mod tests {
         assert_eq!(back_count, 2);
         assert_eq!(sent, 3);
         assert_eq!(read, 1);
-        assert!(track.fired_cues().iter().any(|&(_, t)| t == Tone::Error));
+        assert!(track.fired_cues().iter().any(|&(_, t, _)| t == Tone::Error));
     }
 
     #[test]
@@ -332,7 +345,7 @@ mod tests {
             track
                 .fired_cues()
                 .iter()
-                .filter(|&&(t, tone)| {
+                .filter(|&&(t, tone, _)| {
                     (t - at).abs() < 0.01
                         && matches!(tone, Tone::Onboarding(OnboardingTone::KeySpace(_)))
                 })
@@ -352,7 +365,7 @@ mod tests {
         track.on_ready(28.0);
         track.advance_to(30.0);
 
-        let tones: Vec<Tone> = track.fired_cues().iter().map(|&(_, t)| t).collect();
+        let tones: Vec<Tone> = track.fired_cues().iter().map(|&(_, t, _)| t).collect();
         assert!(tones.contains(&Tone::Onboarding(OnboardingTone::ShortcutDown)));
         assert!(tones.contains(&Tone::DictationStart));
         assert!(tones.contains(&Tone::Onboarding(OnboardingTone::ShortcutUp)));
