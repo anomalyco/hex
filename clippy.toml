@@ -1,0 +1,10 @@
+# abattoir-lints begin
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+disallowed-methods = [
+  { path = "std::env::var", reason = "read env in config.rs at startup" },
+  { path = "std::time::SystemTime::now", reason = "use config::now() or an injected clock" },
+]
+# abattoir-lints end
