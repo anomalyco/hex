@@ -1,10 +1,10 @@
 # Silently installs, reinstalls, installs over another version with, and
-# uninstalls a Hex-Setup-*.exe on a disposable Windows machine (CI), checking
+# uninstalls a hex-setup-*.exe on a disposable Windows machine (CI), checking
 # the managed layout that src/updater/windows.rs expects at every step. It
 # uses the real %APPDATA%, so never run it on a machine with Hex installed.
 #
-#   scripts/test-windows-installer.ps1 -Installer dist\Hex-Setup-2.4.0-windows-x64.exe `
-#     -Executable dist\Hex-2.4.0-windows-x64.exe -Version 2.4.0
+#   scripts/test-windows-installer.ps1 -Installer dist\hex-setup-2.4.0-windows-x64.exe `
+#     -Executable dist\hex-2.4.0-windows-x64.exe -Version 2.4.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Installer,

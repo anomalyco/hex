@@ -47,12 +47,12 @@ publish() {
   # files apart. A run without a platform's signed build publishes the others.
   set --
   for entry in \
-    "macos-arm64=Hex-$version-macos-arm64.zip=Hex.zip" \
-    "macos-arm64-dmg=Hex-$version-macos-arm64.dmg=Hex.dmg" \
-    "windows-x64=Hex-$version-windows-x64.exe=hex.exe" \
-    "windows-x64-setup=Hex-Setup-$version-windows-x64.exe=HexSetup.exe" \
-    "windows-arm64=Hex-$version-windows-arm64.exe=hex.exe" \
-    "windows-arm64-setup=Hex-Setup-$version-windows-arm64.exe=HexSetup.exe" \
+    "macos-arm64=hex-$version-macos-arm64.zip=Hex.zip" \
+    "macos-arm64-dmg=hex-$version-macos-arm64.dmg=Hex.dmg" \
+    "windows-x64=hex-$version-windows-x64.exe=hex.exe" \
+    "windows-x64-setup=hex-setup-$version-windows-x64.exe=HexSetup.exe" \
+    "windows-arm64=hex-$version-windows-arm64.exe=hex.exe" \
+    "windows-arm64-setup=hex-setup-$version-windows-arm64.exe=HexSetup.exe" \
     "linux-x64=hex-$version-linux-x64=hex" \
     "linux-x64-sig=hex-$version-linux-x64.sig=hex.sig" \
     "linux-x64-deb=hex-$version-linux-x64.deb=hex.deb" \

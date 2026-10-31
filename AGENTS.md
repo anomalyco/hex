@@ -1295,8 +1295,8 @@ The move to Anomaly's team (`5NZ4Q7NXJ4`) is planned in
 `docs/plans/macos-signing.md`; the manual `macOS signed build` workflow signs
 and notarizes an unpublished candidate once the Apple secrets are in the
 `release` environment.
-`scripts/release-app.sh prepare` leaves `Hex-<version>-macos-arm64.dmg` and
-`Hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
+`scripts/release-app.sh prepare` leaves `hex-<version>-macos-arm64.dmg` and
+`hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
 contain the same signed, stapled app. Do not reuse a released version for
 changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
 one informational appcast item, `packaging/macos/legacy-appcast.xml`, that
@@ -1367,7 +1367,7 @@ required reviewer; its deployment policy admits `dev` and `production`. Rerunnin
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 
-`Hex-Setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
+`hex-setup-<version>-windows-<x64|arm64>.exe` is a per-user Inno Setup
 installer (`packaging/windows/hex.iss`, built by
 `scripts/build-windows-installer.ps1`) that installs exactly the managed
 layout `install-windows.ps1` creates, so self-updates keep working:

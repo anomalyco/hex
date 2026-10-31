@@ -65,7 +65,7 @@ jobs:
     env:
       HEX_TEST_BUILD: "1"
       HEX_VERSION: ${{ needs.resolve.outputs.version }}
-      DMG: Hex-Test-${{ needs.resolve.outputs.short }}-arm64.dmg
+      DMG: hex-test-${{ needs.resolve.outputs.short }}-arm64.dmg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -127,6 +127,6 @@ jobs:
           Unsigned builds for testing; they never update themselves. Sign in to GitHub to download. Kept 14 days. Full instructions: [docs/test-builds.md]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/dev/docs/test-builds.md).
 
           - **macOS (Apple silicon):** $(link macos-arm64). Quit Hex, open the DMG, drag **Hex Test** to Applications, run \`xattr -dr com.apple.quarantine "/Applications/Hex Test.app"\`, then open it and grant the permissions again.
-          - **Windows:** installers $(link windows-installers); bare executables x64 $(link windows-x86_64), ARM64 $(link windows-aarch64). Quit Hex from the tray, run \`Hex-Setup-$VERSION-windows-<x64|arm64>.exe\`, and choose More info, Run anyway at the SmartScreen warning. The bare \`Hex-*.exe\` also runs without installing.
+          - **Windows:** installers $(link windows-installers); bare executables x64 $(link windows-x86_64), ARM64 $(link windows-aarch64). Quit Hex from the tray, run \`hex-setup-$VERSION-windows-<x64|arm64>.exe\`, and choose More info, Run anyway at the SmartScreen warning. The bare \`hex-*.exe\` also runs without installing.
           - **Linux:** x86_64 $(link linux-x86_64), ARM64 $(link linux-aarch64), each the bare executable plus a .deb and .rpm. Run \`hex quit\`, \`chmod +x hex-*-linux-<x64|arm64>\`, start it with \`./hex-*-linux-<x64|arm64> service\`, and open the window with \`./hex-*-linux-<x64|arm64>\` in another terminal.
           EOF

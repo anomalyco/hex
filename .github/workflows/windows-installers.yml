@@ -1,6 +1,6 @@
 name: Windows installers
 
-# Builds Hex-Setup-<version>-windows-<x64|arm64>.exe (packaging/windows/hex.iss)
+# Builds hex-setup-<version>-windows-<x64|arm64>.exe (packaging/windows/hex.iss)
 # around the Windows executables in the artifacts that match `pattern`, then
 # installs, reinstalls, installs over another version, and uninstalls each
 # silently on native x64 and ARM64 runners. Release passes the signed
@@ -63,11 +63,11 @@ jobs:
           $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/installers"
           foreach ($arch in 'x86_64', 'aarch64') {
             $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
-            $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-$env:HEX_VERSION-windows-$label.exe")
-            if ($exe.Count -ne 1) { throw "Expected one Hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
+            $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.exe")
+            if ($exe.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
             scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out
           }
-          Get-ChildItem $out | Where-Object { $_.Name -notlike 'Hex-Setup-*.exe' } | Remove-Item -Recurse -Force
+          Get-ChildItem $out | Where-Object { $_.Name -notlike 'hex-setup-*.exe' } | Remove-Item -Recurse -Force
       - id: upload
         uses: ./.github/release/upload
         with:
@@ -102,8 +102,8 @@ jobs:
       - name: Install, reinstall, install over another version, and uninstall silently
         shell: pwsh
         run: |
-          $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
-          $setup = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
+          $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
+          $setup = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
           scripts/test-windows-installer.ps1 -Installer $setup -Executable $exe -Version $env:HEX_VERSION
       - name: Upload installer logs
         if: failure()

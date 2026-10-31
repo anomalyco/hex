@@ -53,7 +53,7 @@ scripts/build-app.sh       // cargo build → Hex.app; signs Moonshine and ONNX 
                            // HEX_TEST_BUILD=1: ad-hoc "Hex Test.app" (anomaly.hex.test)
 scripts/macos-signing.sh   // identity must be "Developer ID Application: … (TEAM)"
 scripts/release-app.sh     // clean pushed tree → notarized, stapled app and DMG
-                           // (scripts/notarize-app.sh) → dist/Hex-<v>-macos-arm64.dmg
+                           // (scripts/notarize-app.sh) → dist/hex-<v>-macos-arm64.dmg
                            // and .zip (root Hex.app, the updater's archive)
 scripts/validate-app.sh    // bundle id anomaly.hex, team, Developer ID, entitlements,
                            // no Sparkle left

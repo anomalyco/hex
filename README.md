@@ -35,27 +35,25 @@ for what stays on your device and what optional features send to a provider.
 
 ### Downloads
 
-Each link serves the current release: the newest dev build (published on
-every change to `dev`, and updating itself from the Dev channel) until Hex's
-first stable release, then the stable release.
+Stable is the current release. Dev is the newest build of `dev`, published
+on every change; it updates itself from the Dev channel.
 
-| Platform | Download |
-| --- | --- |
-| macOS (Apple silicon) | [DMG](https://anoma.ly/hex/download/macos-arm64-dmg) |
-| Windows x64 | [Installer](https://anoma.ly/hex/download/windows-x64-setup) |
-| Windows ARM64 | [Installer](https://anoma.ly/hex/download/windows-arm64-setup) |
-| Linux x86_64 | [Executable](https://anoma.ly/hex/download/linux-x64) |
-| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-x64-deb) |
-| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-x64-rpm) |
-| Linux ARM64 | [Executable](https://anoma.ly/hex/download/linux-arm64) |
-| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-arm64-deb) |
-| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-arm64-rpm) |
+| Platform | Stable | Dev |
+| --- | --- | --- |
+| macOS (Apple silicon) | [DMG](https://anoma.ly/hex/download/macos-arm64-dmg) | [DMG](https://anoma.ly/hex/download/dev/macos-arm64-dmg) |
+| Windows x64 | [Installer](https://anoma.ly/hex/download/windows-x64-setup) | [Installer](https://anoma.ly/hex/download/dev/windows-x64-setup) |
+| Windows ARM64 | [Installer](https://anoma.ly/hex/download/windows-arm64-setup) | [Installer](https://anoma.ly/hex/download/dev/windows-arm64-setup) |
+| Linux x86_64 | [Executable](https://anoma.ly/hex/download/linux-x64) | [Executable](https://anoma.ly/hex/download/dev/linux-x64) |
+| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-x64-deb) | [.deb](https://anoma.ly/hex/download/dev/linux-x64-deb) |
+| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-x64-rpm) | [.rpm](https://anoma.ly/hex/download/dev/linux-x64-rpm) |
+| Linux ARM64 | [Executable](https://anoma.ly/hex/download/linux-arm64) | [Executable](https://anoma.ly/hex/download/dev/linux-arm64) |
+| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/hex/download/linux-arm64-deb) | [.deb](https://anoma.ly/hex/download/dev/linux-arm64-deb) |
+| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/hex/download/linux-arm64-rpm) | [.rpm](https://anoma.ly/hex/download/dev/linux-arm64-rpm) |
+| macOS updater | [ZIP](https://anoma.ly/hex/download/macos-arm64) | [ZIP](https://anoma.ly/hex/download/dev/macos-arm64) |
+| Windows x64 updater | [EXE](https://anoma.ly/hex/download/windows-x64) | [EXE](https://anoma.ly/hex/download/dev/windows-x64) |
+| Windows ARM64 updater | [EXE](https://anoma.ly/hex/download/windows-arm64) | [EXE](https://anoma.ly/hex/download/dev/windows-arm64) |
 
-Updater files: [macOS ZIP](https://anoma.ly/release/hex/desktop/dev/macos-arm64),
-[Windows x64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-x64),
-[Windows ARM64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-arm64).
-Windows links work once Windows signing is configured. On Linux you can also
-use `yay -S hex-bin` or the install script below.
+On Arch Linux you can also use `yay -S hex-bin`, or the install script below.
 
 With Homebrew:
 

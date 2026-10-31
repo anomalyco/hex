@@ -15,9 +15,9 @@ for file in "$in"/*/*; do
   case "$name" in
     "hex-$v-linux-x64" | "hex-$v-linux-x64.deb" | "hex-$v-linux-x64.rpm" | \
       "hex-$v-linux-arm64" | "hex-$v-linux-arm64.deb" | "hex-$v-linux-arm64.rpm" | \
-      "Hex-$v-macos-arm64.zip" | "Hex-$v-macos-arm64.dmg" | \
-      "Hex-$v-windows-x64.exe" | "Hex-$v-windows-arm64.exe" | \
-      "Hex-Setup-$v-windows-x64.exe" | "Hex-Setup-$v-windows-arm64.exe") ;;
+      "hex-$v-macos-arm64.zip" | "hex-$v-macos-arm64.dmg" | \
+      "hex-$v-windows-x64.exe" | "hex-$v-windows-arm64.exe" | \
+      "hex-setup-$v-windows-x64.exe" | "hex-setup-$v-windows-arm64.exe") ;;
     *) die "$name is not a release file of Hex $v." ;;
   esac
   [ ! -e "$dist/$name" ] || die "Two artifacts hold $name."

@@ -2,8 +2,8 @@
 # sign-macos.sh <unsigned Hex.app zip> <out dir>: signs Hex.app inside-out
 # with the Developer ID identity (hardened runtime, secure timestamp, Hex's
 # entitlements), notarizes and staples it, then writes the release service's
-# two macOS targets from the stapled app: Hex-<version>-macos-arm64.zip (root
-# Hex.app, for the updater) and Hex-<version>-macos-arm64.dmg (signed,
+# two macOS targets from the stapled app: hex-<version>-macos-arm64.zip (root
+# Hex.app, for the updater) and hex-<version>-macos-arm64.dmg (signed,
 # notarized, stapled, with an Applications link). The app is data here: it is
 # never launched. The DMG's window comes from dmg-background.tiff and
 # dmg-DS_Store beside the zip (packaging/macos/dmg), also data: they are
@@ -19,8 +19,8 @@ release=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$out"
-zip="$out/Hex-$HEX_VERSION-macos-arm64.zip"
-dmg="$out/Hex-$HEX_VERSION-macos-arm64.dmg"
+zip="$out/hex-$HEX_VERSION-macos-arm64.zip"
+dmg="$out/hex-$HEX_VERSION-macos-arm64.dmg"
 
 /usr/bin/ditto -x -k "$input" "$work/unpacked"
 app="$work/unpacked/Hex.app"

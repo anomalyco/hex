@@ -24,7 +24,7 @@ source=${HEX_RELEASE_SOURCE:?Set HEX_RELEASE_SOURCE}
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-assets=$(cd "$dist" && { ls Hex-*.zip Hex-*.dmg Hex-*.exe hex-*-linux-* 2>/dev/null || true; })
+assets=$(cd "$dist" && { ls hex-*.zip hex-*.dmg hex-*.exe hex-*-linux-* 2>/dev/null || true; })
 [ -n "$assets" ] || {
   echo "No release files in $dist." >&2
   exit 1
