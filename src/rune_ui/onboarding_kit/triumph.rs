@@ -14,6 +14,8 @@ const HOLD: f64 = 1.75;
 /// A first reply that types first shows its dots from this long after the
 /// send.
 const DOTS_FROM: f64 = 0.4;
+/// How long a changed pill flares.
+const PILL_FLARE: f64 = 0.6;
 /// Effects called together go off this far apart.
 const EFFECT_STEP: f64 = 0.3;
 /// An untimed tapback lands this long after the last, the first this long
@@ -50,6 +52,8 @@ pub(crate) struct HexBeats {
     pub(crate) taps: Vec<(f64, Glyph)>,
     pub(crate) lines: Vec<(f64, Said)>,
     pub(crate) renames: Vec<(f64, &'static str)>,
+    /// The pill under the header changing, or going.
+    pub(crate) pills: Vec<(f64, Option<&'static str>)>,
     pub(crate) effects: Vec<(f64, Effect)>,
     /// Everything has landed and been read: the score.
     pub(crate) done: f64,
@@ -64,6 +68,7 @@ impl HexBeats {
             taps: Vec::new(),
             lines: Vec::new(),
             renames: Vec::new(),
+            pills: Vec::new(),
             effects: Vec::new(),
             done: send,
         };
@@ -103,6 +108,7 @@ impl HexBeats {
                     b.renames.push((at, name));
                     b.lines.push((at, Said::Pill(renamed(script.boss(), name))));
                 }
+                Cheer::Pill(copy) => b.pills.push((at, copy)),
                 Cheer::Effect(effect) => {
                     fx = at.max(fx + EFFECT_STEP);
                     b.effects.push((fx, effect));
@@ -114,6 +120,17 @@ impl HexBeats {
         let read = b.lines.last().map_or(0.0, |(_, said)| t.read(said.text()));
         b.done = last + read.max(HOLD);
         b
+    }
+
+    /// The pill at `t`, from `pill`, and how hard it flares from changing.
+    pub(crate) fn pill(&self, t: f64, pill: Option<&'static str>) -> (Option<&'static str>, f32) {
+        match self.pills.iter().take_while(|&&(at, _)| at <= t).last() {
+            Some(&(at, copy)) => {
+                let since = ((t - at) / PILL_FLARE) as f32;
+                (copy, (1.0 - since).clamp(0.0, 1.0).powi(2))
+            }
+            None => (pill, 0.0),
+        }
     }
 
     /// The thread's name at `t`, from `title`.

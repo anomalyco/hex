@@ -211,11 +211,15 @@ pub(crate) fn chat_height(lines: usize) -> f32 {
     2.0 * CARD_PAD + HEADER_H + 10.0 + THREAD_H + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
 }
 
+/// The banner's row over a thread, and the space under it.
+const BANNER_H: f32 = 20.0;
+const BANNER_GAP: f32 = 6.0;
+
 /// A Messages conversation with `n.from` (a group when `n.place` names its
 /// members): header, the newest of `thread`'s lines (older ones scroll up
 /// under a soft edge), and the reply field.
-/// `banner`, such as [`presenting`], sits centred at the thread's top, over
-/// the soft edge older lines scroll under.
+/// `banner`, such as [`presenting`], keeps its own row, centred at the
+/// thread's top.
 pub(crate) fn chat(
     p: Paint,
     n: &Notice,
@@ -251,28 +255,34 @@ pub(crate) fn chat(
                         .color(p.faint()),
                 ),
         );
-    let thread = col()
-        .key("thread")
-        .w_full()
-        .h(THREAD_H)
-        .justify_end()
-        .gap(6.0)
-        .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
-        .children(thread);
+    // A banner keeps its own row at the top, so lines fade out before
+    // they'd pass under it.
+    let lines = |h: f32| {
+        col()
+            .key("thread")
+            .w_full()
+            .h(h)
+            .justify_end()
+            .gap(6.0)
+            .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
+            .children(thread)
+    };
     let thread = match banner {
-        Some(banner) => el()
+        Some(banner) => col()
             .key("thread-wrap")
             .w_full()
             .h(THREAD_H)
-            .child(thread)
+            .gap(BANNER_GAP)
             .child(
                 row()
                     .key("banner")
-                    .pin(Some(0.0), Some(0.0), Some(0.0), None)
+                    .h(BANNER_H)
                     .justify_center()
+                    .center_y()
                     .child(banner),
-            ),
-        None => thread,
+            )
+            .child(lines(THREAD_H - BANNER_H - BANNER_GAP)),
+        None => lines(THREAD_H),
     };
     let (fill, rim) = material(p);
     let card = col()

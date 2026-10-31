@@ -306,8 +306,9 @@ impl Scene {
         // with the name a tapback finds them by.
         let mut pending: Vec<(Line, Option<&str>)> = Vec::new();
         let mut labels: Vec<(&str, usize)> = Vec::new();
-        // Tapbacks, placed once every line is: when, on what, which.
-        let mut taps: Vec<(f64, Option<&str>, Glyph)> = Vec::new();
+        // Tapbacks, placed once every line is: when, which, and on what: a
+        // named line, else the newest of the lines written before the tap.
+        let mut taps: Vec<(f64, Glyph, Option<&str>, usize)> = Vec::new();
         let stroke = |s: &mut Scene, at: f64, gap: f64, key, modifier, text: &str, caret, panic| {
             s.strokes.push(Stroke {
                 at,
@@ -549,7 +550,7 @@ impl Scene {
                     let mut last = at + TAP_FIRST - TAP_STEP;
                     for &(glyph, after) in glyphs {
                         last = after.map_or(last + TAP_STEP, |after| at + after);
-                        taps.push((last, line, glyph));
+                        taps.push((last, glyph, line, s.lines.len()));
                     }
                 }
                 Op::Elbow => {
@@ -634,10 +635,10 @@ impl Scene {
         }
         // Anyone cutting in after the removal is never heard.
         drop(pending);
-        for (when, label, glyph) in taps {
+        for (when, glyph, label, written) in taps {
             let line = match label {
                 Some(name) => labels.iter().find(|(n, _)| *n == name).map(|&(_, i)| i),
-                None => s.lines.iter().rposition(|l| l.at <= when),
+                None => s.lines[..written].iter().rposition(|l| l.at <= when),
             };
             if let Some(line) = line {
                 s.taps.push(Tap {
@@ -1066,6 +1067,17 @@ mod tests {
         assert_eq!(scene.flash(at + 0.3, "return"), 0.0);
         assert!(scene.frozen(at + 0.1));
         assert!(scene.shudder(at + 0.02)[0].abs() > 0.5);
+    }
+
+    #[test]
+    fn a_tapback_stays_on_the_line_above_it() {
+        // The second haha lands after Jay's next line, still on yours.
+        let src = "title Room\nboss Jay coral\nJay: so?\nstart\ntype ok\nsend\ntap haha 0.2 haha 0.8\nwait 0.3\nJay: STOP [0.5]\nend removed\nwith\nhex Yes, on my way.\nscore {hex}\ntyped {secs}\n";
+        let script: &'static Script = Box::leak(Box::new(scene_script::parse(src).unwrap()));
+        let scene = Scene::play(&Timing::default(), script);
+        let mine = scene.lines().iter().position(|l| l.text == "ok").unwrap();
+        assert_eq!(scene.all_taps().len(), 2);
+        assert!(scene.all_taps().iter().all(|tap| tap.line == mine));
     }
 
     #[test]

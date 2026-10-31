@@ -192,6 +192,9 @@ pub(crate) enum Cheer<'a> {
     },
     Status(&'a str),
     Rename(&'a str),
+    /// The pill under the header changes as the last step lands, or goes
+    /// (`pill off`).
+    Pill(Option<&'a str>),
     Effect(Effect),
     Wait(f64),
 }
@@ -667,6 +670,16 @@ impl<'a> Parser<'a> {
                 }
                 let person = self.person(rest, self.sides.len() + 1)?;
                 self.sides.push(person);
+            }
+            "pill" if self.part == Part::With => {
+                needs("its new words, or `off`")?;
+                if self.pill.is_none() {
+                    return Err(
+                        "`pill` here changes the one set at the top; set one there first".into(),
+                    );
+                }
+                self.cheers
+                    .push(Cheer::Pill((rest != "off").then_some(rest)));
             }
             "pill" => {
                 self.setting(word)?;
@@ -1208,6 +1221,22 @@ mod tests {
             "Typing: 27 seconds, 1 typo."
         );
         assert_eq!(fill("{hex}, {typos}", 1.5, 0.0, 0), "1.5 seconds, no typos");
+    }
+
+    #[test]
+    fn the_payoff_can_change_the_pill_set_at_the_top() {
+        let with_pill = TINY.replace("boss Sam coral", "boss Sam coral\npill Sam is waiting");
+        let src = with_pill.replace("effect confetti", "pill You're late\npill off");
+        let script = parse(&src).unwrap();
+        assert!(
+            script
+                .with
+                .cheers
+                .contains(&Cheer::Pill(Some("You're late")))
+        );
+        assert!(script.with.cheers.contains(&Cheer::Pill(None)));
+        let errors = errors(&TINY.replace("effect confetti", "pill off"));
+        assert!(errors[0].contains("set at the top"), "{errors:?}");
     }
 
     #[test]

@@ -23,13 +23,14 @@ reports errors with their line numbers.
 - `send` sends the draft. Add `meant <text>` when it went out wrong: each word that differs counts as a typo. `send slip` means a finger hit Return by accident. Type what the fingers hit (`sorry fart fingers`), and put what you meant on the send.
 - `autocorrect inconvience -> incontinence`: slow motion as Return goes down, the swap, and the AUTOCORRECT slam. The next `send` sends it.
 - `read` puts "Read" under your last message. `dots 0.5` shows the boss typing (`dots` alone is the usual length, `dots 0.4 after 0.2` runs under what follows). `flare` flashes the pill. `elbow` knocks Caps Lock on, or off again.
-- `tap ❤ 👍 1.1 ‼`: tapbacks on the newest line (`tap @desk …` for a named one). Each lands 0.2 s after the last unless you give it a time. Glyphs: `❤ 👍 👎 ‼ ? haha`.
+- `tap ❤ 👍 1.1 ‼`: tapbacks on the line just above (`tap @desk …` for a named one), even if a later line lands first. Each lands 0.2 s after the last unless you give it a time. Glyphs: `❤ 👍 👎 ‼ ? haha`.
 - `end removed`, `end left`, `end blocked` or `end undelivered` cuts you off mid-word with that system line ("Jay removed you from “Launch Room”", "Jay left the conversation", "Jay blocked you", "Message not delivered"). `end removed: custom text` changes the wording.
 
 **With Hex** (after `with`): your one spoken sentence, then an out-of-proportion triumph. Aim for about 8 s.
 - `hex Yes, we're ready. Everything's tested, go ahead.`: the sentence, spoken in about 1.5 s.
 - Then `tap` rains on it, and replies land fast (0.35 s apart unless given a time). Build the escalation in threes.
 - `status Jay made you CEO`: a celebratory system pill. `rename Bow Before You` renames the thread with a pill. You can use more than one of each.
+- `pill You're presenting`: changes the red pill as the line before it lands (`pill off` hides it). It needs a `pill` at the top.
 - `effect confetti` or `effect fireworks` (both are allowed).
 - `score {hex}, no typos, one company.` and `typed Typing: {secs}, {typos}, and one job.`: the score. `{hex}` becomes "1.5 seconds", and `{secs}` and `{typos}` are filled in from the run ("27 seconds", "5 typos").
 
