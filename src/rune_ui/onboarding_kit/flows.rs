@@ -118,9 +118,15 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle()
-                .pb(TOP_BAR)
-                .child(ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion)),
+            middle().pb(TOP_BAR).child(ready(
+                p,
+                &s.caps,
+                None,
+                s.ready_age(),
+                s.now,
+                s.reduced.get(),
+                s.motion,
+            )),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -138,11 +144,13 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 notice(p, &FRANK, example(s, 0), true),
                 drift(s),
                 0.0,
+                p.hair,
             ))
             .child(floating(
                 notice(p, &ADAM, example(s, 1), true),
                 drift(s),
                 0.4,
+                p.hair,
             ))
             .children(parked.then(|| {
                 notice(p, &JAY, jay_reply(s, "to answer Jay"), false).transition(arrives())
@@ -214,6 +222,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 p,
                 &s.caps,
                 Some(PILL),
+                s.ready_age(),
                 s.now,
                 s.reduced.get(),
                 s.motion,
@@ -225,7 +234,12 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     let card = |n: &Notice, index: usize, reply: Reply<'_>| {
         let dim = hearing && n.key != JAY.key;
         arriving(
-            floating(notice(p, n, reply, false), drift(s), index as f64 * 0.5),
+            floating(
+                notice(p, n, reply, false),
+                drift(s),
+                index as f64 * 0.5,
+                p.hair,
+            ),
             index,
         )
         .opacity(if dim { 0.45 } else { 1.0 })
@@ -327,7 +341,15 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion),
+        Step::Ready => ready(
+            p,
+            &s.caps,
+            None,
+            s.ready_age(),
+            s.now,
+            s.reduced.get(),
+            s.motion,
+        ),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

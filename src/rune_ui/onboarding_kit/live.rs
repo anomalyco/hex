@@ -1,5 +1,5 @@
-//! Hex's first run on the onboarding story, replayed by Labs' Run setup
-//! again and `hex onboarding reset`; a new install still gets the tour.
+//! Hex's first run on the onboarding story, replayed by General's Replay
+//! onboarding and `hex onboarding reset`; a new install still gets the tour.
 //! The window's tour ([`onboarding`](super::super::onboarding)) stays the state machine underneath: it starts the model download, asks
 //! for the permissions, relaunches when macOS needs it, watches the practice
 //! dictation, and records completion. This module shows the story's pages
@@ -97,7 +97,7 @@ fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
         .is_ok_and(|model| ui.picker.installed(model, &selection.language))
 }
 
-/// Builds the first run over the tour Run setup again just started.
+/// Builds the first run over the tour Replay onboarding just started.
 fn start(ui: &mut Ui) {
     let Some(tour_step) = ui.tour.as_ref().map(|tour| tour.flow.step()) else {
         return;
@@ -154,8 +154,8 @@ fn start(ui: &mut Ui) {
     }
 }
 
-/// "Run setup again" and `hex onboarding reset`: forgets that onboarding
-/// finished and opens it now. Settings, history, models, and permissions
+/// General's Replay onboarding and `hex onboarding reset`: forgets that
+/// onboarding finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     if ui.live() {

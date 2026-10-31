@@ -70,6 +70,9 @@ pub enum OnboardingTone {
     PermissionTick,
     /// `"Almost ready"` appearing while finishing a slow model download.
     AlmostReady,
+    /// One of the Hex logo's three hexagons landing on `"Hex is ready"`,
+    /// outside in (`0..3`), rising to resolve on the last.
+    Build(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -692,6 +695,7 @@ struct OnboardingSounds {
     panel_escape: SamplesBuffer,
     permission_tick: SamplesBuffer,
     almost_ready: SamplesBuffer,
+    build: [SamplesBuffer; 3],
 }
 
 impl OnboardingSounds {
@@ -731,6 +735,11 @@ impl OnboardingSounds {
             panel_escape: decode_wav(bundled_sound!("onboarding", "panel_escape"))?,
             permission_tick: decode_wav(bundled_sound!("onboarding", "permission_tick"))?,
             almost_ready: decode_wav(bundled_sound!("onboarding", "almost_ready"))?,
+            build: [
+                decode_wav(bundled_sound!("onboarding", "build_1"))?,
+                decode_wav(bundled_sound!("onboarding", "build_2"))?,
+                decode_wav(bundled_sound!("onboarding", "build_3"))?,
+            ],
         })
     }
 
@@ -760,6 +769,7 @@ impl OnboardingSounds {
             OnboardingTone::PanelEscape => &self.panel_escape,
             OnboardingTone::PermissionTick => &self.permission_tick,
             OnboardingTone::AlmostReady => &self.almost_ready,
+            OnboardingTone::Build(i) => &self.build[usize::from(i).min(2)],
         })
     }
 }
@@ -1333,12 +1343,21 @@ mod tests {
             OnboardingTone::PanelEscape,
             OnboardingTone::PermissionTick,
             OnboardingTone::AlmostReady,
+            OnboardingTone::Build(0),
+            OnboardingTone::Build(1),
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");
             assert!(buf.total_duration().unwrap() <= Duration::from_millis(250));
         }
+        let land = sounds
+            .get(
+                SoundSet::Signature,
+                Tone::Onboarding(OnboardingTone::Build(2)),
+            )
+            .expect("the logo's last note");
+        assert!(land.total_duration().unwrap() <= Duration::from_millis(500));
 
         let k0: Vec<f32> = sounds.onboarding.felt_keys[0].clone().collect();
         let k1: Vec<f32> = sounds.onboarding.felt_keys[1].clone().collect();

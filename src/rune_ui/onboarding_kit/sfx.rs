@@ -4,8 +4,9 @@
 //!   default, `Muted felt`, `Soft warm`, and `Silent typing`), never repeating
 //!   an adjacent sample.
 //! - Tactile shortcut keycap press and release (`⌥` down / up).
-//! - Hex's real `#292` `DictationStart`, `DictationStop`, `DictationDone`, and
-//!   `OnboardingSuccess` tones played through [`crate::feedback`], respecting
+//! - Hex's real `#292` `DictationStart`, `DictationStop`, and `DictationDone`
+//!   tones and the ready logo's three rising notes, played through
+//!   [`crate::feedback`], respecting
 //!   the user's sound set and feedback volume (`volume == 0` is silent;
 //!   `reduced_motion` never suppresses sound).
 //! - Quiet motion landing cues: the hexagon mark, permission rows ticking to
@@ -18,6 +19,7 @@
 use std::path::Path;
 
 use super::fixture::Take;
+use super::hex_meter::BUILD_AT;
 use super::hud_stage::DONE_DELAY;
 use super::{permissions, typing};
 use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tone};
@@ -169,10 +171,17 @@ impl SfxTrack {
         }
     }
 
-    /// `"Hex is ready"` finale: hexagon arrival + Hex's `#292` success motif.
-    pub(crate) fn on_ready(&mut self, now: f64) {
-        self.push(now, Tone::Onboarding(OnboardingTone::Hexagon));
-        self.push(now + 0.12, Tone::OnboardingSuccess);
+    /// `"Hex is ready"` finale: one rising note as each of the logo's
+    /// hexagons lands, resolving on the last; Reduced Motion shows the logo
+    /// built, with only the last.
+    pub(crate) fn on_ready(&mut self, now: f64, reduced: bool) {
+        if reduced {
+            self.push(now, Tone::Onboarding(OnboardingTone::Build(2)));
+            return;
+        }
+        for (i, at) in BUILD_AT.into_iter().enumerate() {
+            self.push(now + at, Tone::Onboarding(OnboardingTone::Build(i as u8)));
+        }
     }
 
     /// Interactive capsule tap (language or shortcut toggle).
@@ -275,7 +284,7 @@ mod tests {
         track.on_voice_take(10.0, &ANSWER_JAY);
         track.on_permissions(14.0);
         track.on_almost_ready(21.5);
-        track.on_ready(28.0);
+        track.on_ready(28.0, false);
         track.advance_to(30.0);
 
         let tones: Vec<Tone> = track.fired_cues().iter().map(|&(_, t)| t).collect();
@@ -287,6 +296,23 @@ mod tests {
         assert!(tones.contains(&Tone::Onboarding(OnboardingTone::PanelEscape)));
         assert!(tones.contains(&Tone::Onboarding(OnboardingTone::PermissionTick)));
         assert!(tones.contains(&Tone::Onboarding(OnboardingTone::AlmostReady)));
-        assert!(tones.contains(&Tone::OnboardingSuccess));
+        let built: Vec<i64> = track
+            .fired_cues()
+            .iter()
+            .filter(|(_, t)| matches!(t, Tone::Onboarding(OnboardingTone::Build(_))))
+            .map(|&(at, _)| ((at - 28.0) * 1000.0).round() as i64)
+            .collect();
+        assert_eq!(built, [0, 150, 300], "rising notes 150 ms apart");
+    }
+
+    #[test]
+    fn reduce_motion_finishes_the_logo_on_one_note() {
+        let mut track = SfxTrack::default();
+        track.on_ready(1.0, true);
+        track.advance_to(5.0);
+        assert_eq!(
+            track.fired_cues(),
+            [(1.0, Tone::Onboarding(OnboardingTone::Build(2)))]
+        );
     }
 }

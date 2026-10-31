@@ -54,10 +54,12 @@ Settings › Labs                          // labs.page
 │   feature on. An unknown or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
-├── One row per feature this OS has -> press flips it, saved at once
-│   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
-│   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
-└── Run setup again -> replays the new onboarding (below)
+└── One row per feature this OS has -> press flips it, saved at once
+    ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
+    └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
+
+Settings › General › Advanced › Application
+└── Replay onboarding (quiet Ghost "Replay") -> replays the new onboarding (below), as hex onboarding reset
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
@@ -415,16 +417,31 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   (`onboarding_kit/game.rs`): one lit message card at a time, answered by a
   real dictation (live words fly in while the shortcut is held, the paste
   lands in an unseen focused field), struck by lightning and burnt away,
-  then a score card with Keep playing and Continue; Done always skips on.
+  then a score card with Keep playing and Continue. Messages come in
+  themes of three that escalate, mundane to absurd
+  (`onboarding_kit/game_lines.rs`); a real run plays the themes in a random
+  order, a story as written. Done shows the score card too once anything
+  burnt (straight on otherwise). The score card lists every message cleared
+  with the player's reply (scrolling past 150 pt) and this run's count
+  against the best ever, calling out a new high score. The best lives in
+  `game-best` in the data folder (owner-only, replaced whole, not a
+  setting); only a real first run reads or writes it. Words fly out of the
+  real Dot scope HUD on the microphone's level. "Hex is ready" builds the
+  Hex logo outside in (`onboarding_kit/hex_meter.rs` `hex_logo`): the
+  outline, the middle line, then the filled centre, 150 ms apart, each on a
+  0.36 s spring with 0.12 bounce and one rising note (A5, B5, then D6,
+  `OnboardingTone::Build`) at the feedback volume. With Reduce Motion the
+  logo shows built, with only the last note. Checks:
+  `the_logo_builds_outside_in_and_settles`,
+  `reduce_motion_finishes_the_logo_on_one_note`.
   The window's tour stays
-  the state machine underneath. Labs' **Run setup again** and
+  the state machine underneath. General's **Replay onboarding** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
   and a named event on Windows) forget that onboarding finished
   (`desktop::onboarding::reset_at`) and replay the first run without touching
   settings, history, models, or permissions; ready steps pass at once. A new
   install still gets the tour as its first run. Checks:
-  `labs_run_setup_again_opens_the_first_run` and
-  `run_setup_again_opens_the_first_run_on_linux_and_windows` in
+  `replay_onboarding_opens_the_first_run_on_every_os` in
   [panes.rs](../../src/rune_ui/tests/panes.rs). Every OS reads the practice
   dictation from the listener's event log (`rune_ui/practice.rs`). The
   game's checks are the `onboarding_kit::game` tests; not yet observed: a

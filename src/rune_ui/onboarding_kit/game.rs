@@ -16,31 +16,32 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, Playground, Story, TextEdit, TextStyle, Transition, Tx, col, effect, el,
-    row, text,
+    Anim, Color, Cx, El, Playground, ScrollSpec, Story, TextEdit, TextStyle, Transition, Tx, col,
+    effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, TextInput};
 
 use super::super::Ui;
 use super::super::controls::{Paint, PushSize};
-use super::cards::{
-    ADAM, App, CARD_W, DAX, FRANK, Notice, Reply, field_text_origin, floating, lines_card_height,
-    notice,
-};
+use super::cards::{CARD_W, Notice, Reply, field_text_origin, floating, lines_card_height, notice};
 use super::field_text::{CARD, Field};
 use super::fixture::Take;
 use super::flight::{Flight, ember_tone, flicker, flying, typeset};
 use super::game_fx::{self, BURN, BURN_MARK, Bolt, Burn, Fx, Mote, STRIKE_MARK, Tones};
+use super::game_lines;
+use super::high_score;
+use super::hud_stage::{LiveHud, frame_slot};
 use super::landing::{LEAD, keys, title_font};
 use super::live;
-use super::mic::mic_level;
 use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
 use crate::desktop::onboarding::Practice;
+use crate::dictation::indicator::DotFrame;
 
 const STAGE_W: f32 = 880.0;
 const STAGE_H: f32 = 620.0;
 const HUD_AT: [f32; 2] = [STAGE_W * 0.5, STAGE_H - 34.0];
+const HUD_SCALE: f32 = 1.0;
 const FRAME: Duration = Duration::from_millis(16);
 
 /// When the first card shows, and when it lights.
@@ -72,19 +73,13 @@ const PILL: [f32; 2] = [112.0, 30.0];
 const SHARE_W: f32 = 432.0;
 const SHARE_PAD: f32 = 24.0;
 const SHARE_GAP: f32 = 16.0;
-/// The share card's rows, top to bottom, each a fixed height so the card's
-/// own height is known: brand, score, rule, stats, rule, signature, actions.
+/// The share card's fixed rows, top to bottom: brand, score, rule, stats,
+/// rule, signature, actions. The transcript sits between the second rule
+/// and the signature, as tall as it needs up to [`SAID_MAX`].
 const SHARE_ROWS: [f32; 7] = [20.0, 78.0, 1.0, 42.0, 1.0, 32.0, 28.0];
-const SHARE_H: f32 = 2.0 * SHARE_PAD
-    + SHARE_ROWS[0]
-    + SHARE_ROWS[1]
-    + SHARE_ROWS[2]
-    + SHARE_ROWS[3]
-    + SHARE_ROWS[4]
-    + SHARE_ROWS[5]
-    + SHARE_ROWS[6]
-    + 6.0 * SHARE_GAP;
-const SHARE_Y: f32 = 128.0;
+/// The transcript's most height; a longer one scrolls.
+const SAID_MAX: f32 = 150.0;
+const SAID_GAP: f32 = 10.0;
 const BIG_SIZE: f32 = 76.0;
 const BIG_LINE: f32 = 78.0;
 
@@ -98,62 +93,9 @@ const SIGN: Field = Field {
 };
 const SIGN_Y: f32 = CERT_H - CERT_PAD - 8.0 - 30.0;
 
-const MILK: Notice = Notice {
-    key: "milk",
-    app: App::Messages,
-    from: "Sam next door",
-    place: None,
-    body: "hey are you near the shop? could you grab some milk",
-    field: "iMessage",
-};
-const GREG: Notice = Notice {
-    key: "greg",
-    app: App::Slack,
-    from: "Greg",
-    place: Some("#general"),
-    body: "quick question. actually, can we hop on a call? just 30 mins",
-    field: "Reply in thread",
-};
-
-const SAY_MILK: Take = Take {
-    updates: &[
-        (0.25, "Sure,"),
-        (0.45, "Sure, oat"),
-        (0.62, "Sure, oat or"),
-        (0.85, "Sure, oat or normal?"),
-        (1.05, "Sure, oat or normal? Back"),
-        (1.2, "Sure, oat or normal? Back in"),
-        (1.42, "Sure, oat or normal? Back in ten."),
-    ],
-    release: 1.6,
-};
-const SAY_GREG: Take = Take {
-    updates: &[(0.3, "Nope.")],
-    release: 0.65,
-};
 const SAY_NAME: Take = Take {
     updates: &[(0.35, "Kit"), (0.7, NAME)],
     release: 0.95,
-};
-const SAY_FRANK: Take = Take {
-    updates: &[(0.3, "It"), (0.5, "It is"), (0.75, "It is now.")],
-    release: 1.0,
-};
-const SAY_DAX: Take = Take {
-    updates: &[
-        (0.3, "On"),
-        (0.45, "On it,"),
-        (0.75, "On it, five minutes."),
-    ],
-    release: 1.0,
-};
-const SAY_ADAM: Take = Take {
-    updates: &[
-        (0.3, "Figma"),
-        (0.55, "Figma deserved"),
-        (0.85, "Figma deserved it."),
-    ],
-    release: 1.05,
 };
 
 #[derive(Clone, Copy)]
@@ -179,69 +121,49 @@ const LEFT: f32 = (STAGE_W - 2.0 * CARD_W - GUTTER) * 0.5;
 const RIGHT: f32 = LEFT + CARD_W + GUTTER;
 const GUTTER: f32 = 12.0;
 
-const SCRIPT: [Spec; 3] = [
-    Spec {
-        card: Card::Chat(MILK),
-        demo: &SAY_MILK,
-        heat: 0.5,
-        home: [LEFT, 128.0],
-        from: [-520.0, 40.0],
-    },
-    Spec {
-        card: Card::Chat(GREG),
-        demo: &SAY_GREG,
-        heat: 0.92,
-        home: [RIGHT, 218.0],
-        from: [520.0, -30.0],
-    },
-    Spec {
-        card: Card::Certificate,
-        demo: &SAY_NAME,
-        heat: 0.62,
-        home: [LEFT, 318.0],
-        from: [-80.0, 420.0],
-    },
+/// Where the first three cards sit (two messages, then the certificate),
+/// and where each drifts in from.
+const OPENING: [([f32; 2], [f32; 2]); 3] = [
+    ([LEFT, 128.0], [-520.0, 40.0]),
+    ([RIGHT, 218.0], [520.0, -30.0]),
+    ([LEFT, 318.0], [-80.0, 420.0]),
 ];
-const CERTIFICATE: usize = SCRIPT.len() - 1;
+const CERTIFICATE: usize = OPENING.len() - 1;
 
-/// Keep playing's messages, round and round, each in the other column
-/// from the one before.
-const ENDLESS: [Spec; 4] = [
-    Spec {
-        card: Card::Chat(FRANK),
-        demo: &SAY_FRANK,
-        heat: 0.55,
-        home: [RIGHT, 140.0],
-        from: [500.0, -60.0],
-    },
-    Spec {
-        card: Card::Chat(DAX),
-        demo: &SAY_DAX,
-        heat: 0.6,
-        home: [LEFT, 260.0],
-        from: [-520.0, 0.0],
-    },
-    Spec {
-        card: Card::Chat(ADAM),
-        demo: &SAY_ADAM,
-        heat: 0.75,
-        home: [RIGHT, 330.0],
-        from: [480.0, 300.0],
-    },
-    Spec {
-        card: Card::Chat(GREG),
-        demo: &SAY_GREG,
-        heat: 0.92,
-        home: [LEFT, 128.0],
-        from: [-520.0, -30.0],
-    },
+/// Keep playing's places, round and round, each in the other column from
+/// the one before.
+const ENDLESS: [([f32; 2], [f32; 2]); 4] = [
+    ([RIGHT, 140.0], [500.0, -60.0]),
+    ([LEFT, 260.0], [-520.0, 0.0]),
+    ([RIGHT, 330.0], [480.0, 300.0]),
+    ([LEFT, 128.0], [-520.0, -30.0]),
 ];
 
-fn spec(n: usize) -> Spec {
-    SCRIPT
+/// The `n`th card of a run with `seed`: the opening theme's first two
+/// messages, the certificate, then (on Keep playing) the rest of the
+/// messages in threes ([`game_lines`]).
+fn spec(seed: u64, n: usize) -> Spec {
+    let (home, from) = OPENING
         .get(n)
         .copied()
-        .unwrap_or_else(|| ENDLESS[(n - SCRIPT.len()) % ENDLESS.len()])
+        .unwrap_or_else(|| ENDLESS[(n - OPENING.len()) % ENDLESS.len()]);
+    if n == CERTIFICATE {
+        return Spec {
+            card: Card::Certificate,
+            demo: &SAY_NAME,
+            heat: 0.62,
+            home,
+            from,
+        };
+    }
+    let line = game_lines::nth(seed, if n < CERTIFICATE { n } else { n - 1 });
+    Spec {
+        card: Card::Chat(line.notice),
+        demo: line.demo,
+        heat: line.heat,
+        home,
+        from,
+    }
 }
 
 /// One card, from drifting in to burning away.
@@ -262,10 +184,10 @@ struct Round {
 }
 
 impl Round {
-    fn new(n: usize, arrive: f64) -> Self {
+    fn new(n: usize, spec: Spec, arrive: f64) -> Self {
         Self {
             n,
-            spec: spec(n),
+            spec,
             arrive,
             target: None,
             text: String::new(),
@@ -380,8 +302,25 @@ fn field_of(r: &Round) -> (Field, [f32; 2], [f32; 2]) {
     }
 }
 
+/// A cleared message and what the player said to it, for the score card's
+/// transcript.
+struct Cleared {
+    notice: Notice,
+    reply: String,
+}
+
+/// What the score card counts: the messages destroyed when it showed, and
+/// the best score before them.
+#[derive(Clone, Copy)]
+struct Score {
+    destroyed: usize,
+    best: usize,
+}
+
 /// The game, on the caller's clock.
 pub(crate) struct Play {
+    /// Which order the run plays the themes in ([`game_lines::order`]).
+    seed: u64,
     rounds: Vec<Round>,
     /// Cards shown so far, including burnt ones dropped from `rounds`.
     spawned: usize,
@@ -391,17 +330,29 @@ pub(crate) struct Play {
     first_hold: Option<f64>,
     /// When the dictation that sent the live words ended, until its paste.
     ended: Option<f64>,
-    /// When the score card shows.
+    /// When the score card shows: after the certificate, and after Done.
     share: Option<f64>,
-    /// When Keep playing was pressed.
+    /// Where it rises from.
+    share_from: [f32; 2],
+    /// When Keep playing folded it away.
     kept: Option<f64>,
+    score: Option<Score>,
+    /// The best score ever, this run's included.
+    best: usize,
+    /// Every message answered, in order.
+    log: Vec<Cleared>,
+    /// Words said, all run.
+    words: usize,
+    /// Answers that landed, all run: the HUD's Done.
+    landed: usize,
     /// Keys typed into the answer field.
     keys: usize,
 }
 
 impl Play {
-    pub(crate) fn new(now: f64) -> Self {
+    pub(crate) fn new(now: f64, seed: u64, best: usize) -> Self {
         let mut play = Self {
+            seed,
             rounds: Vec::new(),
             spawned: 0,
             dropped: 0,
@@ -409,7 +360,13 @@ impl Play {
             first_hold: None,
             ended: None,
             share: None,
+            share_from: [STAGE_W * 0.5, STAGE_H * 0.5],
             kept: None,
+            score: None,
+            best,
+            log: Vec::new(),
+            words: 0,
+            landed: 0,
             keys: 0,
         };
         play.spawn(now + FIRST_ARRIVES);
@@ -419,10 +376,11 @@ impl Play {
 
     /// The next card drifts in; after the certificate, only on Keep playing.
     fn spawn(&mut self, at: f64) {
-        if self.spawned >= SCRIPT.len() && self.kept.is_none() {
+        if self.spawned >= OPENING.len() && self.kept.is_none() {
             return;
         }
-        self.rounds.push(Round::new(self.spawned, at));
+        let n = self.spawned;
+        self.rounds.push(Round::new(n, spec(self.seed, n), at));
         self.spawned += 1;
     }
 
@@ -482,7 +440,7 @@ impl Play {
         // Keep playing goes on for good; cards long burnt stop counting.
         let before = self.rounds.len();
         self.rounds
-            .retain(|r| r.n < SCRIPT.len() || now < r.shatter() + 3.0);
+            .retain(|r| r.n < OPENING.len() || now < r.shatter() + 3.0);
         self.dropped += before - self.rounds.len();
     }
 
@@ -503,10 +461,21 @@ impl Play {
             .map(|(f, _, _)| f.arrives())
             .fold(now, f64::max);
         round.explode = landed + AFTER_LAND;
-        let (n, shatter) = (round.n, round.shatter());
+        let (n, shatter, centre) = (round.n, round.shatter(), round.centre());
+        let cleared = match round.spec.card {
+            Card::Chat(notice) => Some(Cleared {
+                notice,
+                reply: round.text.clone(),
+            }),
+            Card::Certificate => None,
+        };
+        self.words += round.text.split_whitespace().count();
+        self.landed += 1;
+        self.log.extend(cleared);
         if n == CERTIFICATE {
             // The certificate all but burns away before the score card takes its place.
-            self.share = Some(shatter + 0.85);
+            self.share_from = centre;
+            self.show_score(shatter + 0.85);
             return;
         }
         if self.waiting() == 0 {
@@ -517,6 +486,40 @@ impl Play {
         {
             next.target = Some((next.arrive + 1.1).max(shatter + 0.6));
         }
+    }
+
+    /// Done: once the last answered card has burnt, the score card shows
+    /// what this run destroyed against the best. False when nothing was
+    /// destroyed, so Done just leaves.
+    pub(crate) fn finish(&mut self, now: f64) -> bool {
+        if !self.playing() {
+            return true;
+        }
+        let answered = self.rounds.iter().filter(|r| r.answered);
+        if self.dropped + answered.clone().count() == 0 {
+            return false;
+        }
+        let burnt = answered.map(|r| r.shatter() + 0.35).fold(now, f64::max);
+        self.forget();
+        self.share_from = [STAGE_W * 0.5, HUD_AT[1]];
+        self.show_score(burnt);
+        true
+    }
+
+    fn show_score(&mut self, at: f64) {
+        let destroyed = self.dropped
+            + self
+                .rounds
+                .iter()
+                .filter(|r| r.answered && r.shatter() <= at)
+                .count();
+        self.share = Some(at);
+        self.kept = None;
+        self.score = Some(Score {
+            destroyed,
+            best: self.best,
+        });
+        self.best = self.best.max(destroyed);
     }
 
     /// Drops the live words of a dictation that never pasted.
@@ -534,8 +537,10 @@ impl Play {
             return;
         }
         self.kept = Some(now);
-        self.spawn(now);
-        if let Some(round) = self.rounds.last_mut() {
+        if self.waiting() == 0 {
+            self.spawn(now);
+        }
+        if let Some(round) = self.rounds.iter_mut().find(|r| !r.answered) {
             round.target = Some(now + FIRST_LIGHTS);
         }
     }
@@ -548,30 +553,27 @@ impl Play {
         self.rounds.iter().find(|r| r.n == CERTIFICATE)
     }
 
-    /// The score card's numbers: words said up to the certificate, keys
-    /// typed, and seconds from the first press to the certificate's burn.
+    /// The score card's numbers: words said, keys typed, and seconds from
+    /// the first press to the score card.
     fn stats(&self) -> (usize, usize, f64) {
-        let words = self
-            .rounds
-            .iter()
-            .filter(|r| r.answered && r.n <= CERTIFICATE)
-            .map(|r| r.text.split_whitespace().count())
-            .sum();
-        let secs = match (self.first_hold, self.certificate()) {
-            (Some(from), Some(cert)) => (cert.shatter() - from).max(0.0),
+        let secs = match (self.first_hold, self.share) {
+            (Some(from), Some(to)) => (to - from).max(0.0),
             _ => 0.0,
         };
-        (words, self.keys, secs)
+        (self.words, self.keys, secs)
     }
 }
 
 /// What the game shows around [`Play`], and what its buttons do.
 struct Look<'a, S> {
     caps: &'a [String],
-    /// The microphone's level while dictation records.
-    meter: Option<(f32, f32)>,
+    /// Hex's Dot scope, the words' launch pad.
+    hud: Option<&'a DotFrame>,
     /// What the last try needs said.
     hint: Option<&'static str>,
+    /// Done: the score card, or straight on when nothing was destroyed.
+    finish: Rc<dyn Fn(&mut S)>,
+    /// The score card's Continue.
     done: Rc<dyn Fn(&mut S)>,
     keep: Rc<dyn Fn(&mut S)>,
 }
@@ -644,15 +646,44 @@ pub(crate) struct Session {
     /// words; Return or a paste sends it.
     typed: String,
     practice: Option<Practice>,
+    /// The best score on disk, for a real run; a story's game keeps none.
+    saved: Option<usize>,
+    hud: GameHud,
 }
 
 impl Session {
     fn new(s: &Onboard, now: f64) -> Self {
+        let saved = s.live.is_some().then(high_score::load);
+        let seed = match s.rehearsal {
+            Some(_) => 0,
+            None => game_lines::fresh_seed(),
+        };
         Self {
-            play: Play::new(now),
+            play: Play::new(now, seed, saved.unwrap_or(0)),
+            saved,
+            ..Self::preview(s, now)
+        }
+    }
+
+    /// The game as it will start, before the step's first poll.
+    fn preview(s: &Onboard, now: f64) -> Self {
+        Self {
+            play: Play::new(now, 0, 0),
             script: s.rehearsal.map(|r| Script::new(r.streams)),
             typed: String::new(),
             practice: None,
+            saved: None,
+            hud: GameHud::default(),
+        }
+    }
+
+    /// Writes a new best score down.
+    fn keep_best(&mut self) {
+        if let Some(saved) = self.saved
+            && self.play.best > saved
+        {
+            high_score::save(self.play.best);
+            self.saved = Some(self.play.best);
         }
     }
 }
@@ -671,8 +702,13 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         return false;
     }
     let mut session = s.game.take().unwrap_or_else(|| Session::new(s, now));
+    let reduced = s.reduced.get();
     if let Some(script) = session.script.as_mut() {
         script.run(&mut session.play, now);
+        let peak = script.meter.map(|(_, peak)| peak);
+        session
+            .hud
+            .step(&session.play, now, peak.is_some(), peak, reduced);
         s.game = Some(session);
         return true;
     }
@@ -714,6 +750,9 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         _ => Some(session.typed.as_str()).filter(|typed| !typed.trim().is_empty()),
     };
     session.play.hear(held, words, now);
+    let peak = crate::input_level::recent().filter(|_| held);
+    session.hud.step(&session.play, now, held, peak, reduced);
+    session.keep_best();
     s.game = Some(session);
     true
 }
@@ -759,6 +798,19 @@ pub(super) fn answer(s: &mut Onboard) {
     s.sfx.on_live_dictation_landed(now);
 }
 
+/// Done: the score card first, if anything was destroyed.
+fn finish(s: &mut Onboard) {
+    let now = s.now;
+    let scored = s.game.as_mut().is_some_and(|session| {
+        let scored = session.play.finish(now);
+        session.keep_best();
+        scored
+    });
+    if !scored {
+        s.jump_to_ready();
+    }
+}
+
 fn keep(s: &mut Onboard) {
     let now = s.now;
     if let Some(session) = s.game.as_mut() {
@@ -778,23 +830,18 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     let session = match &s.game {
         Some(session) => session,
         None => {
-            fresh = Session::new(s, s.now);
+            fresh = Session::preview(s, s.now);
             &fresh
         }
     };
-    let meter = match &session.script {
-        Some(script) => script.meter,
-        None => s.live_hold_from.is_some().then(|| {
-            let level = crate::audio::input_level::recent().unwrap_or(0.0);
-            (level * 0.6, level)
-        }),
-    };
+    let hud = session.hud.frame();
     let hint = s.live.as_ref().and_then(live::hint_copy);
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
-            meter,
+            hud,
             hint,
+            finish: Rc::new(live::on_ui(finish)),
             done: Rc::new(live::on_ui(Onboard::jump_to_ready)),
             keep: Rc::new(live::on_ui(keep)),
         };
@@ -809,8 +856,9 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     } else {
         let look = Look::<Onboard> {
             caps: &s.caps,
-            meter,
+            hud,
             hint,
+            finish: Rc::new(finish),
             done: Rc::new(Onboard::jump_to_ready),
             keep: Rc::new(keep),
         };
@@ -851,6 +899,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
 pub(crate) struct Game {
     play: Play,
     script: Script,
+    hud: GameHud,
     now: f64,
     started: bool,
     force_reduced: bool,
@@ -860,8 +909,9 @@ pub(crate) struct Game {
 impl Game {
     fn new() -> Self {
         Self {
-            play: Play::new(0.0),
+            play: Play::new(0.0, 0, 0),
             script: Script::new(true),
+            hud: GameHud::default(),
             now: 0.0,
             started: false,
             force_reduced: false,
@@ -869,8 +919,14 @@ impl Game {
         }
     }
 
+    /// Plays again, in a new order after the first time.
     fn restart(&mut self) {
-        self.play = Play::new(self.now);
+        let seed = if self.started {
+            game_lines::fresh_seed()
+        } else {
+            0
+        };
+        self.play = Play::new(self.now, seed, self.play.best);
         self.script = Script {
             keep: self.script.keep,
             ..Script::new(self.script.streams)
@@ -898,10 +954,13 @@ fn poll(g: &mut Game, now: f64, tx: &mut Tx) -> bool {
     g.now = now;
     // Plays on open, so headless renders and recordings start at once.
     if !g.started {
-        g.started = true;
         g.restart();
+        g.started = true;
     }
     g.script.run(&mut g.play, now);
+    let peak = g.script.meter.map(|(_, peak)| peak);
+    g.hud
+        .step(&g.play, now, peak.is_some(), peak, g.reduced.get());
     tx.wake_after(FRAME);
     true
 }
@@ -926,8 +985,13 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         g.reduced.get(),
         &Look::<Game> {
             caps: &caps,
-            meter: g.script.meter,
+            hud: g.hud.frame(),
             hint: None,
+            finish: Rc::new(|g: &mut Game| {
+                if !g.play.finish(g.now) {
+                    g.restart();
+                }
+            }),
             done: Rc::new(Game::restart),
             keep: Rc::new(|g: &mut Game| g.play.keep(g.now)),
         },
@@ -952,7 +1016,7 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
         .offset_motion(Anim::INSTANT)
         .rotate_motion(Anim::INSTANT)
         .child(header(p, g, destroyed, t, reduced, look))
-        .child(hud(p, g, t, look.meter))
+        .children(hud(g, t, look.hud))
         .children(look.hint.map(|copy| hint(p, copy)));
 
     for r in &g.rounds {
@@ -972,7 +1036,7 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
         );
     }
     game_fx::publish(fx);
-    world = world.children(share(p, g, t, destroyed, reduced, look));
+    world = world.children(share(p, g, t, reduced, look));
 
     el().key("stage")
         .size(STAGE_W, STAGE_H)
@@ -1144,7 +1208,7 @@ fn header<S: 'static>(
             .child(
                 Button::new("Done")
                     .variant(ButtonVariant::Neutral)
-                    .on_press(act(&look.done))
+                    .on_press(act(&look.finish))
                     .build_push(k)
                     .key("done"),
             )
@@ -1157,22 +1221,36 @@ fn header<S: 'static>(
         .children(done)
 }
 
-/// A stand-in for the Dot scope HUD the words fly out of, on the
-/// microphone's level while dictation records.
-fn hud(p: Paint, g: &Play, t: f64, meter: Option<(f32, f32)>) -> El {
-    let (avg, peak) = meter.unwrap_or((0.04, 0.06));
-    let k = p.k;
-    row()
-        .key("hud")
-        .absolute(HUD_AT[0] - 46.0, HUD_AT[1] - 15.0)
-        .size(92.0, 30.0)
-        .opacity(chrome(g, t))
-        .opacity_motion(Anim::INSTANT)
-        .center()
-        .radius(15.0)
-        .fill(if k.dark { k.c.bg_deep } else { k.c.text_strong })
-        .border(p.hair, k.c.border_weak)
-        .child(mic_level(p, "level", 16.0, avg, peak, meter.is_some()))
+/// Hex's Dot scope, which the words fly out of; it steps aside for the
+/// score card.
+fn hud(g: &Play, t: f64, frame: Option<&DotFrame>) -> Option<El> {
+    let frame = frame.filter(|_| chrome(g, t) > 0.5)?;
+    Some(frame_slot("game-dot-hud", HUD_AT, HUD_SCALE, frame))
+}
+
+/// The game's Dot scope, as the desktop HUD runs: it rests while the game
+/// waits, records on the microphone's level while the shortcut is held,
+/// shows Done when the answer lands, and then rests again.
+#[derive(Default)]
+struct GameHud {
+    hud: LiveHud,
+    landed: usize,
+}
+
+impl GameHud {
+    fn step(&mut self, play: &Play, now: f64, held: bool, peak: Option<f32>, reduced: bool) {
+        let landed = play.landed != self.landed;
+        self.landed = play.landed;
+        self.hud.step(now, held, peak, landed, reduced);
+        if self.hud.finished() {
+            self.hud.clear();
+            self.hud.step(now, held, peak, false, reduced);
+        }
+    }
+
+    fn frame(&self) -> Option<&DotFrame> {
+        self.hud.frame()
+    }
 }
 
 /// What the last try needs said, over the HUD.
@@ -1317,7 +1395,12 @@ fn card(p: Paint, r: &Round, t: f64, reduced: bool, clear: f32) -> Option<El> {
     };
     let done = r.answered && flights.iter().all(|(f, _, _)| t >= f.arrives());
     let body = body(p, r, &flights, t, reduced);
-    let body = floating(body, (!reduced && !targeted).then_some(t), i as f64 * 0.37);
+    let body = floating(
+        body,
+        (!reduced && !targeted).then_some(t),
+        i as f64 * 0.37,
+        p.hair,
+    );
     // The lit card breathes while it waits for an answer, and burns steady once answered.
     let breathe = if reduced || done {
         1.0
@@ -1869,26 +1952,120 @@ fn ease_in_out(x: f32) -> f32 {
     }
 }
 
+/// How the share card stacks up: its transcript's height (0 for none),
+/// whether that scrolls, whether it's signed, and its whole height.
+struct ShareLayout {
+    said: f32,
+    scrolls: bool,
+    signed: bool,
+    h: f32,
+}
+
+fn share_layout(p: Paint, g: &Play) -> ShareLayout {
+    let width = SHARE_W - 2.0 * SHARE_PAD;
+    let all = g.log.iter().map(|c| said_height(p, c, width)).sum::<f32>()
+        + SAID_GAP * g.log.len().saturating_sub(1) as f32;
+    let said = all.min(SAID_MAX);
+    let signed = g.certificate().is_some_and(|c| c.answered);
+    let rows = [
+        Some(SHARE_ROWS[0]),
+        Some(SHARE_ROWS[1]),
+        Some(SHARE_ROWS[2]),
+        Some(SHARE_ROWS[3]),
+        Some(SHARE_ROWS[4]),
+        (said > 0.0).then_some(said),
+        signed.then_some(SHARE_ROWS[5]),
+        Some(SHARE_ROWS[6]),
+    ];
+    let shown = rows.iter().flatten();
+    let h = 2.0 * SHARE_PAD + shown.clone().sum::<f32>() + SHARE_GAP * (shown.count() - 1) as f32;
+    ShareLayout {
+        said,
+        scrolls: all > SAID_MAX,
+        signed,
+        h,
+    }
+}
+
+fn said_lines(c: &Cleared) -> (String, String) {
+    (
+        format!("{}: {}", c.notice.from, c.notice.body),
+        format!("You: {}", c.reply),
+    )
+}
+
+fn said_height(p: Paint, c: &Cleared, width: f32) -> f32 {
+    let (them, you) = said_lines(c);
+    let (_, a) = rune::text::measure(&them, &[], p.k.ty.small, Some(width));
+    let (_, b) = rune::text::measure(&you, &[], p.k.ty.ui, Some(width));
+    a + 2.0 + b
+}
+
+/// Every message cleared and what the player said back, oldest first.
+fn transcript(p: Paint, g: &Play, layout: &ShareLayout) -> El {
+    let k = p.k;
+    let width = SHARE_W - 2.0 * SHARE_PAD;
+    let lines = col()
+        .key("lines")
+        .w(width)
+        .gap(SAID_GAP)
+        .children(g.log.iter().enumerate().map(|(i, c)| {
+            let (them, you) = said_lines(c);
+            col()
+                .key(format!("said-{i}"))
+                .w(width)
+                .gap(2.0)
+                .child(
+                    text(them)
+                        .key("them")
+                        .font(k.ty.small)
+                        .color(p.muted())
+                        .wrap(),
+                )
+                .child(text(you).key("you").font(k.ty.ui).color(p.text()).wrap())
+        }));
+    let said = col().key("transcript").w(width).h(layout.said);
+    if layout.scrolls {
+        said.clip_fade(0.0, 0.0, 0.0, 18.0)
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(col().key("inset").pb(18.0).child(lines))
+    } else {
+        said.child(lines)
+    }
+}
+
+/// The score's second line: the best so far, or a new one.
+fn best_copy(score: Score) -> String {
+    let Score { destroyed, best } = score;
+    if destroyed > best && best > 0 {
+        format!("New high score · best was {best}")
+    } else if destroyed > best {
+        "New high score".to_string()
+    } else if destroyed == best {
+        "Ties your best".to_string()
+    } else {
+        format!("Your best is {best}")
+    }
+}
+
 /// The shareable moment: the certificate's blast becomes a score card. Its
 /// surface goes opaque at once, then its content shows; Keep playing folds
 /// the surface and the number into the score pill.
-fn share<S: 'static>(
-    p: Paint,
-    g: &Play,
-    t: f64,
-    destroyed: usize,
-    reduced: bool,
-    look: &Look<'_, S>,
-) -> Option<El> {
+fn share<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_, S>) -> Option<El> {
     let age = (t - g.share?) as f32;
     let fold = fold(g, t);
-    let cert = g.certificate()?;
+    let score = g.score?;
     if age < 0.0 || fold >= 1.0 {
         return None;
     }
+    let destroyed = score.destroyed;
+    let layout = share_layout(p, g);
+    let share_h = layout.h;
     let k = p.k;
     let w = SHARE_W;
-    let [cx, cy] = cert.centre();
+    let [cx, cy] = g.share_from;
     let x = (age / 0.6).clamp(0.0, 1.0);
     let rise = if reduced {
         1.0
@@ -1902,8 +2079,8 @@ fn share<S: 'static>(
         let c = 1.4;
         1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
     };
-    let home = [(STAGE_W - w) * 0.5, SHARE_Y];
-    let from = [cx - (home[0] + w * 0.5), cy - (home[1] + SHARE_H * 0.5)];
+    let home = [(STAGE_W - w) * 0.5, ((STAGE_H - share_h) * 0.5).max(16.0)];
+    let from = [cx - (home[0] + w * 0.5), cy - (home[1] + share_h * 0.5)];
     let surface_in = smooth(0.0, 0.11, age);
     let content_in = smooth(0.11, 0.23, age);
     let pill = pill_in(fold, reduced);
@@ -2030,12 +2207,13 @@ fn share<S: 'static>(
                                 .font(LEAD)
                                 .color(p.text()),
                         )
-                        .child(
-                            text("by voice, no typing")
+                        .child({
+                            let high = score.destroyed > score.best;
+                            text(best_copy(score))
                                 .key("b")
-                                .font(k.ty.small)
-                                .color(p.muted()),
-                        ),
+                                .font(if high { k.ty.small_medium } else { k.ty.small })
+                                .color(if high { ember } else { p.muted() })
+                        }),
                 ),
         )
         .child(rule("rule-1"))
@@ -2049,7 +2227,8 @@ fn share<S: 'static>(
                 .child(stat("time", format!("{secs:.1} s"), "start to finish")),
         )
         .child(rule("rule-2"))
-        .child(
+        .children((layout.said > 0.0).then(|| transcript(p, g, &layout)))
+        .children(g.certificate().filter(|_| layout.signed).map(|cert| {
             row()
                 .key("signed")
                 .h(SHARE_ROWS[5])
@@ -2077,8 +2256,8 @@ fn share<S: 'static>(
                                 .size(200.0, p.hair.max(1.0))
                                 .fill(k.c.border_base),
                         ),
-                ),
-        )
+                )
+        }))
         .child(
             row()
                 .key("actions")
@@ -2108,7 +2287,7 @@ fn share<S: 'static>(
         PILL[0],
         PILL[1],
     ];
-    let card_rect = [0.0, 0.0, w, SHARE_H];
+    let card_rect = [0.0, 0.0, w, share_h];
     let [sx, sy, sw, sh]: [f32; 4] =
         std::array::from_fn(|n| lerp(card_rect[n], pill_rect[n], morph));
     let fill = if k.dark {
@@ -2158,7 +2337,7 @@ fn share<S: 'static>(
     Some(
         el().key("share")
             .absolute(home[0], home[1])
-            .size(w, SHARE_H)
+            .size(w, share_h)
             .offset(from[0] * (1.0 - rise), from[1] * (1.0 - rise))
             .scale(if reduced {
                 1.0
@@ -2180,7 +2359,7 @@ mod tests {
 
     /// The script plays the game to `until`.
     fn played(streams: bool, keep: bool, until: f64) -> Play {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         let mut script = Script {
             keep,
             ..Script::new(streams)
@@ -2215,7 +2394,7 @@ mod tests {
 
     #[test]
     fn a_paste_answers_the_lit_card_and_lights_the_next() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.hear(true, None, 1.5);
         assert_eq!(play.rounds.len(), 2, "the next card comes in");
         play.hear(true, Some("sure oat"), 2.0);
@@ -2231,7 +2410,7 @@ mod tests {
 
     #[test]
     fn live_words_that_never_paste_are_dropped() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.hear(true, Some("hello"), 1.5);
         play.hear(false, None, 2.0);
         play.hear(false, None, 2.0 + WAIT - 0.1);
@@ -2242,7 +2421,7 @@ mod tests {
 
     #[test]
     fn the_certificate_is_signed_with_the_answer() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.paste("On my way.", 1.5);
         play.paste("Nope.", 4.0);
         play.paste("Alex Rivera", 7.0);

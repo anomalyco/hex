@@ -100,9 +100,15 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle()
-                .pb(TOP_BAR)
-                .child(ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion)),
+            middle().pb(TOP_BAR).child(ready(
+                p,
+                &s.caps,
+                None,
+                s.ready_age(),
+                s.now,
+                s.reduced.get(),
+                s.motion,
+            )),
         ];
     }
     let parked = s.step >= Step::Parked;

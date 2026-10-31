@@ -97,6 +97,7 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
         p,
         &s.caps,
         (!s.had_model).then_some(PILL),
+        s.ready_age(),
         s.now,
         s.reduced.get(),
         s.motion,

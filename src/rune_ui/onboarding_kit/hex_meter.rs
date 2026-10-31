@@ -1,5 +1,6 @@
 //! The Hex mark: a thin single-hexagon outline matching Round 3 of the icon
-//! (`t573`, Hairline), built from one swappable [`HexGlyphSpec`].
+//! (`t573`, Hairline), built from one swappable [`HexGlyphSpec`], and the
+//! full three-hexagon logo `"Hex is ready"` builds.
 
 use rune::{El, LineCap, Shape, canvas};
 
@@ -150,18 +151,95 @@ pub(crate) fn hex_meter(p: Paint, key: &str, size: f32, progress: f32, closed: f
         .label(format!("{}%", (progress.clamp(0.0, 1.0) * 100.0).round()))
 }
 
-/// Thin single-hexagon outline with a quiet breathing corona for `"Hex is ready"`.
-pub(crate) fn hex_meter_glowing(p: Paint, key: &str, size: f32, now: f64, reduced: bool) -> El {
-    let spec = ACTIVE_GLYPH;
-    let w = spec.stroke_width(size);
+/// When each of the logo's hexagons lands on `"Hex is ready"`, outside in,
+/// in seconds after the page appears; each sounds one rising note.
+pub(crate) const BUILD_AT: [f64; 3] = [0.0, 0.15, 0.30];
+/// When the last hexagon has settled.
+pub(crate) const BUILD_SECS: f64 = 0.30 + SETTLE.0 * 1.5;
+/// Each hexagon's spring: duration and bounce.
+const SETTLE: (f64, f64) = (0.36, 0.12);
+/// How long a hexagon takes to appear as it starts to settle.
+const APPEAR: f64 = 0.08;
+
+/// The app icon's three hexagons, in half the mark's size: the outline's and
+/// middle line's centres, the filled centre's radius, and the lines' width.
+const OUTER: f32 = 0.965;
+const MIDDLE: f32 = 0.617;
+const INNER: f32 = 0.305;
+const LINE: f32 = 0.109;
+/// How far beyond its place each hexagon starts, as a fraction of its size.
+const TRAVEL: [f32; 3] = [0.12, 0.22, 0.45];
+
+/// Progress of a critically-ish damped spring from 0 to 1 at `t` seconds.
+fn settle(t: f64) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    let (duration, bounce) = SETTLE;
+    let omega = std::f64::consts::TAU / duration;
+    let zeta = 1.0 - bounce;
+    let damped = omega * (1.0 - zeta * zeta).sqrt();
+    let decay = (-zeta * omega * t).exp();
+    (1.0 - decay * ((damped * t).cos() + zeta * omega / damped * (damped * t).sin())) as f32
+}
+
+/// A pointy-top hexagon around `centre` with corners rounded by `corner`.
+fn rounded_hex(centre: Point, radius: f32, corner: f32) -> Vec<Point> {
+    let v: Vec<Point> = (0..6)
+        .map(|i| {
+            let a = (i as f32 * 60.0 - 90.0).to_radians();
+            [centre[0] + radius * a.cos(), centre[1] + radius * a.sin()]
+        })
+        .collect();
+    let r = corner.min(radius * 0.4);
+    let mut pts = Vec::with_capacity(6 * 7);
+    for i in 0..6 {
+        let (prev, curr, next) = (v[(i + 5) % 6], v[i], v[(i + 1) % 6]);
+        let toward = |to: Point| {
+            let d = [to[0] - curr[0], to[1] - curr[1]];
+            let len = d[0].hypot(d[1]).max(1e-4);
+            [curr[0] + d[0] / len * r, curr[1] + d[1] / len * r]
+        };
+        let (a, b) = (toward(prev), toward(next));
+        for step in 0..=6 {
+            let u = step as f32 / 6.0;
+            let inv = 1.0 - u;
+            pts.push([
+                inv * inv * a[0] + 2.0 * inv * u * curr[0] + u * u * b[0],
+                inv * inv * a[1] + 2.0 * inv * u * curr[1] + u * u * b[1],
+            ]);
+        }
+    }
+    pts
+}
+
+/// The Hex logo for `"Hex is ready"`, built outside in `age` seconds after
+/// the page appears: the outline, the middle line, then the filled centre,
+/// each springing in from just beyond its place. `handed`: the outline
+/// arrives from the download pill already drawn. Reduced Motion shows it
+/// built.
+pub(crate) fn hex_logo(
+    p: Paint,
+    key: &str,
+    size: f32,
+    age: f64,
+    now: f64,
+    reduced: bool,
+    handed: bool,
+) -> El {
     let pad = 12.0;
     let total = size + 2.0 * pad;
-    let mut ring: Vec<Point> = spec
-        .poly(size, 1.0)
-        .into_iter()
-        .map(|[x, y]| [x + pad, y + pad])
-        .collect();
-    ring.pop();
+    let half = size * 0.5;
+    let centre = [total * 0.5, total * 0.5];
+    let line = LINE * half;
+    let stage = |i: usize| -> (f32, f32) {
+        if reduced || (i == 0 && handed) {
+            return (1.0, 1.0);
+        }
+        let t = age - BUILD_AT[i];
+        let shown = (t / APPEAR).clamp(0.0, 1.0) as f32;
+        (1.0 + TRAVEL[i] * (1.0 - settle(t)), shown)
+    };
 
     let breath = if reduced {
         1.0
@@ -173,26 +251,39 @@ pub(crate) fn hex_meter_glowing(p: Paint, key: &str, size: f32, now: f64, reduce
     } else {
         rune_theme_opencode::scale("cobalt", false, 8)
     };
-    let outer_a = (if p.k.dark { 0.08 } else { 0.05 }) * breath;
-    let inner_a = (if p.k.dark { 0.19 } else { 0.11 }) * breath;
+    // The glow comes up as the last hexagon lands.
+    let lit = stage(2).1 * breath;
+    let outer_a = (if p.k.dark { 0.08 } else { 0.05 }) * lit;
+    let inner_a = (if p.k.dark { 0.17 } else { 0.10 }) * lit;
 
-    let shape = Shape::new()
+    let (scale, shown) = stage(0);
+    let outline = rounded_hex(centre, OUTER * half * scale, line * 0.9);
+    let mut shape = Shape::new()
         .stroke_with(
-            ring.clone(),
+            outline.clone(),
             true,
-            w * 5.2,
+            line * 3.4,
             LineCap::Round,
             halo.alpha(outer_a),
         )
         .stroke_with(
-            ring.clone(),
+            outline.clone(),
             true,
-            w * 2.5,
+            line * 1.9,
             LineCap::Round,
             halo.alpha(inner_a),
         )
-        .stroke_with(ring, true, w, LineCap::Round, p.text());
-
+        .stroke_with(outline, true, line, LineCap::Round, p.text().alpha(shown));
+    let (scale, shown) = stage(1);
+    if shown > 0.0 {
+        let ring = rounded_hex(centre, MIDDLE * half * scale, line * 0.8);
+        shape = shape.stroke_with(ring, true, line, LineCap::Round, p.text().alpha(shown));
+    }
+    let (scale, shown) = stage(2);
+    if shown > 0.0 {
+        let core = rounded_hex(centre, INNER * half * scale, line * 0.75);
+        shape = shape.fill(core, p.text().alpha(shown));
+    }
     canvas(shape).key(key).size(total, total).label("Hex")
 }
 
@@ -234,6 +325,29 @@ mod tests {
         for spec in [HAIRLINE, SOFT_NUT, FLAT_TOP] {
             assert!(spec.stroke_width(14.0) >= 1.1 && spec.stroke_width(14.0) <= 1.6);
             assert!(spec.stroke_width(136.0) <= 3.0);
+        }
+    }
+
+    #[test]
+    fn the_logo_builds_outside_in_and_settles() {
+        assert_eq!(settle(-0.1), 0.0);
+        let peak = (1..200)
+            .map(|i| settle(i as f64 / 200.0))
+            .fold(0.0, f32::max);
+        assert!(
+            peak > 1.0 && peak < 1.05,
+            "a soft settle, not a bounce: {peak}"
+        );
+        assert!((settle(BUILD_SECS - BUILD_AT[2]) - 1.0).abs() < 0.01);
+        assert!(
+            BUILD_AT
+                .windows(2)
+                .all(|w| (0.12..=0.18).contains(&(w[1] - w[0])))
+        );
+        // A hexagon starting out never touches the one outside it.
+        const {
+            assert!(OUTER - LINE / 2.0 > MIDDLE * (1.0 + TRAVEL[1]) + LINE / 2.0);
+            assert!(MIDDLE - LINE / 2.0 > INNER * (1.0 + TRAVEL[2]));
         }
     }
 

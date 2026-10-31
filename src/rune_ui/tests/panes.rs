@@ -1590,7 +1590,6 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
     }
     tap(&mut rt, "nav-labs");
     assert!(rt.find("send-feedback").is_some());
-    assert!(rt.find("restart-onboarding").is_some());
     let settings = &rt.state.settings;
     for (row, on) in [
         ("lab-meetings", settings.meetings.enabled),
@@ -1657,23 +1656,23 @@ fn a_labs_link_to_an_unknown_name_opens_labs_without_a_pulse() {
 }
 
 #[test]
-fn labs_run_setup_again_opens_the_first_run() {
-    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
-    assert!(rt.state.first_run.is_none());
-    tap(&mut rt, "restart-onboarding");
-    assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
-    assert!(rt.state.first_run.is_some(), "the first run opens at once");
-}
-
-#[test]
-fn run_setup_again_opens_the_first_run_on_linux_and_windows() {
-    for scene in ["portal", "windows-settings"] {
-        let mut rt = runtime(scene, true, (980.0, 2000.0));
-        tap(&mut rt, "nav-labs");
-        tap(&mut rt, "restart-onboarding");
+fn replay_onboarding_opens_the_first_run_on_every_os() {
+    for scene in ["mac-settings", "portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2400.0));
+        assert!(rt.state.first_run.is_none());
+        tap(&mut rt, "nav-general");
+        tap(&mut rt, "advanced-toggle");
+        tap(&mut rt, "replay-onboarding");
         assert!(rt.state.error.is_none(), "{scene}: {:?}", rt.state.error);
         assert!(rt.state.first_run.is_some(), "{scene}: the first run opens");
     }
+}
+
+#[test]
+fn replay_onboarding_golden() {
+    let _goldens = Goldens::collect();
+    // General with Advanced open, down to Replay onboarding at its end.
+    check_golden("mac-settings-advanced", true, (980.0, 2400.0));
 }
 
 #[test]

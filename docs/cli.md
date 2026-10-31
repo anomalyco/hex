@@ -115,8 +115,8 @@ first-run onboarding at once, as on a new install, for trying it again, on
 macOS, Linux, and Windows. It removes only the onboarding markers (`onboarding-complete`, `onboarding-step`,
 `onboarding-relaunch`) from the data folder. Settings, history, models, and
 permissions are untouched, so the run finds them ready: the download passes at
-once and the permission step is skipped. Labs' Run setup again row does the
-same.
+once and the permission step is skipped. General's Replay onboarding row
+(under Advanced) does the same.
 
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The

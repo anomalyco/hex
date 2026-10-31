@@ -14,6 +14,7 @@ use rune::Color;
 use rune::compose::Frame;
 use rune::render::EffectSite;
 
+use super::gpu_stage::{OnboardingGpu, is_onboard_mark};
 use crate::rune_ui::Ui;
 
 pub(crate) const BURN_MARK: u32 = 0x4800_0100;
@@ -382,7 +383,10 @@ impl GameFx {
     }
 
     /// Draws the frame, painting the game's slots where they fall.
-    pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>) {
+    /// Draws the frame, painting the game's slots and, through `hud`,
+    /// onboarding's Dot scope.
+    pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>, hud: &mut OnboardingGpu) {
+        hud.begin();
         let fx = FX.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
         let (device, queue) = (f.device, f.queue);
 
@@ -456,6 +460,7 @@ impl GameFx {
         let bolts = fx.bolts.len() as u32;
         let motes = fx.motes.len() as u32;
         let tones = fx.tones;
+        let dark = f.rt.env.system_dark;
         let mut used = 0u64;
         f.ui.draw_with(
             f.encoder,
@@ -465,6 +470,10 @@ impl GameFx {
                 let Some(&mark) = marks.get(site.index as usize) else {
                     return;
                 };
+                if is_onboard_mark(site.mark) {
+                    hud.paint(pass, site, device, queue, dark);
+                    return;
+                }
                 if !is_game_mark(mark) || used >= SLOTS {
                     return;
                 }
@@ -533,6 +542,7 @@ impl GameFx {
                 }
             },
         );
+        hud.end();
     }
 }
 
