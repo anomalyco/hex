@@ -187,13 +187,13 @@ mod windows;
 #[cfg(target_os = "windows")]
 mod windows_app;
 #[cfg(target_os = "windows")]
-mod windows_gpu_fallback;
-#[cfg(target_os = "windows")]
 mod windows_audio_control;
 #[cfg(target_os = "windows")]
 mod windows_context;
 #[cfg(target_os = "windows")]
 mod windows_dictation;
+#[cfg(target_os = "windows")]
+mod windows_gpu_fallback;
 #[cfg(target_os = "windows")]
 mod windows_input;
 #[cfg(target_os = "windows")]
