@@ -1,13 +1,14 @@
-//! The agent card's copy, cycling through examples of what to ask an agent
-//! for, each written the way it asks: "all lowercase" in lowercase, "ALL
-//! CAPS" in caps. Each change is a letter-by-letter edit: the request
-//! changes first, then the title, a wave running left to right. Only the
-//! letters that change move, each arriving in the accent colour and
-//! cooling to ink, while its neighbours slide to make room. The window's
-//! poll steps the wave from the clock, and Rune's springs carry each
-//! letter's entrance, exit and slide. Reduce Motion holds the first example.
+//! The agent card's copy: its title over a prompt to an agent, cycling
+//! through examples in a shuffled order. A case is written the way it
+//! asks, title included: "all lowercase" in lowercase, "ALL CAPS" in caps.
+//! Each change is a letter-by-letter edit: the prompt changes first, then
+//! the title, a wave running left to right. Only the letters that change
+//! move, each popping in in the accent colour and cooling to ink, while
+//! its neighbours slide to make room. The window's poll steps the wave
+//! from the clock, and Rune's springs carry each letter's entrance, exit
+//! and slide. Reduce Motion holds the first example.
 
-use rune::{Color, Edge, El, Spring, SpringPair, TextStyle, Transition, col, row, text};
+use rune::{Color, El, Spring, SpringPair, TextStyle, Transition, col, row, text};
 
 use super::super::controls::{DESCRIPTION, Paint};
 use super::super::spark;
@@ -16,12 +17,11 @@ use crate::personal_commands::apply_builtin_transformation;
 
 /// Seconds each example shows: one flip of the spark.
 const SLOT: f64 = spark::PERIOD as f64;
-const EXAMPLES: usize = 4;
 /// When in its slot an example starts changing into the next, so the
 /// title's wave crosses its middle as the spark turns edge-on.
 const CHANGE: f64 = spark::EDGE_ON as f64 - 0.62;
 /// Seconds between one request letter changing and the next.
-const REQUEST_STEP: f64 = 0.03;
+const REQUEST_STEP: f64 = 0.022;
 /// When the title's wave starts, after the request's.
 const TITLE_DELAY: f64 = 0.28;
 /// Seconds between one title letter changing and the next.
@@ -31,49 +31,58 @@ const TINT: f64 = 0.32;
 /// How often the poll steps the wave while it runs.
 const FRAME: f64 = 1.0 / 60.0;
 
-/// How a changing letter leaves and arrives. One ships; the others are
-/// here to compare.
-#[derive(Clone, Copy, PartialEq)]
-enum Style {
-    /// An odometer: the old letter rolls up and out, the new one rolls in
-    /// from below, inside a soft-edged window.
-    Roll,
-    /// The old letter blurs out in place as the new one sharpens in.
-    Blur,
-    /// The new letter pops in from small with a little overshoot.
-    Pop,
+/// How a changing letter arrives and leaves: it pops in from small with a
+/// little overshoot, and the old one swells and blurs away.
+fn pop() -> Transition {
+    Transition::asymmetric(
+        Transition::scale(0.55).allow_small_scale(),
+        Transition::scale(1.1).combined(Transition::blur(2.0)),
+    )
+    .springs(SpringPair::new(
+        Spring::new(0.32, 0.28),
+        Spring::new(0.2, 0.0),
+    ))
 }
 
-impl Style {
-    fn current() -> Self {
-        match std::env::var("HEX_OUTPUT_MORPH").as_deref() {
-            Ok("blur") => Self::Blur,
-            Ok("pop") => Self::Pop,
-            _ => Self::Roll,
-        }
-    }
+/// The order the examples show in: shuffled for each window, in order for
+/// fixtures.
+#[derive(Clone, Debug, PartialEq)]
+pub(in super::super) struct Order(Vec<usize>);
 
-    fn transition(self) -> Transition {
-        match self {
-            Self::Roll => Transition::push(Edge::Bottom)
-                .springs(SpringPair::new(Spring::new(0.34, 0.12), Spring::new(0.26, 0.0))),
-            Self::Blur => Transition::blur(3.0)
-                .combined(Transition::scale(0.92))
-                .springs(SpringPair::new(Spring::new(0.36, 0.0), Spring::new(0.28, 0.0))),
-            Self::Pop => Transition::asymmetric(
-                Transition::scale(0.55).allow_small_scale(),
-                Transition::scale(1.1).combined(Transition::blur(2.0)),
-            )
-            .springs(SpringPair::new(Spring::new(0.32, 0.28), Spring::new(0.2, 0.0))),
-        }
+impl Default for Order {
+    fn default() -> Self {
+        Self((0..EXAMPLES).collect())
     }
 }
 
-/// Where the cycle stands: which example shows, and how far its change
-/// into the next has run, counted in letters.
+impl Order {
+    pub(in super::super) fn shuffled() -> Self {
+        let mut seed = [0; 8];
+        if getrandom::fill(&mut seed).is_err() {
+            return Self::default();
+        }
+        let mut state = u64::from_le_bytes(seed) | 1;
+        let mut order: Vec<usize> = (0..EXAMPLES).collect();
+        for i in (1..EXAMPLES).rev() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            order.swap(i, (state % (i as u64 + 1)) as usize);
+        }
+        Self(order)
+    }
+
+    /// The example shown in `slot`.
+    fn example(&self, slot: usize) -> usize {
+        self.0[slot % self.0.len()]
+    }
+}
+
+/// Where the cycle stands: which slot shows, and how far its change into
+/// the next has run, counted in letters.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(in super::super) struct Moment {
-    example: usize,
+    slot: usize,
     request: Wave,
     title: Wave,
 }
@@ -104,7 +113,10 @@ impl Wave {
     /// A letter's state: whether it has changed yet, and whether it still
     /// shows the accent colour.
     fn letter(self, index: usize) -> (bool, bool) {
-        (index < self.changed, index < self.changed && index >= self.cooled)
+        (
+            index < self.changed,
+            index < self.changed && index >= self.cooled,
+        )
     }
 }
 
@@ -113,15 +125,15 @@ impl Moment {
     fn at(clock: f64) -> Self {
         let slot = (clock / SLOT).floor().max(0.0);
         let elapsed = clock - slot * SLOT - CHANGE;
-        let example = slot as usize % EXAMPLES;
+        let slot = slot as usize;
         if elapsed < 0.0 {
             return Self {
-                example,
+                slot,
                 ..Self::default()
             };
         }
         Self {
-            example,
+            slot,
             request: Wave::at(elapsed, 0.0, REQUEST_STEP),
             title: Wave::at(elapsed, TITLE_DELAY, TITLE_STEP),
         }
@@ -151,20 +163,52 @@ struct Example {
     request: String,
 }
 
-fn examples() -> [Example; EXAMPLES] {
-    let title = tr("Ask an agent to change these steps");
-    let written = |request: &str, style: fn(&str) -> String| Example {
-        title: style(title),
-        request: style(request),
-    };
+/// What to ask for: a case written the way it asks, title included, or a
+/// request written plainly under the plain title.
+enum Ask {
+    Written(&'static str, fn(&str) -> String),
+    Plain(&'static str),
+}
+
+const EXAMPLES: usize = 10;
+
+fn asks() -> [Ask; EXAMPLES] {
     [
-        written(tr("Title Case"), title_case),
-        written(tr("all lowercase"), str::to_lowercase),
-        written(tr("all caps"), str::to_uppercase),
-        written(tr("SpongeBob case"), |text| {
+        Ask::Written(
+            tr("Use all lowercase in my messaging apps"),
+            str::to_lowercase,
+        ),
+        Ask::Written(tr("Use all caps when I sound excited"), str::to_uppercase),
+        Ask::Written(tr("Use SpongeBob case when I’m being sarcastic"), |text| {
             apply_builtin_transformation("spongebob-case", text).unwrap_or_else(|| text.to_string())
         }),
+        Ask::Written(tr("Use Title Case for my email subjects"), title_case),
+        Ask::Plain(tr("Spell it “Kubernetes”, not “Cooper Netties”")),
+        Ask::Plain(tr("Delete every “um” and “like”")),
+        Ask::Plain(tr("Turn “let’s circle back” into “no”")),
+        Ask::Plain(tr("Talk like a pirate on Fridays")),
+        Ask::Plain(tr("Write my commit messages like Shakespeare")),
+        Ask::Plain(tr("Make “per my last email” sound friendly")),
     ]
+}
+
+/// The card's title.
+fn title() -> &'static str {
+    tr("Tell your agent how Hex should write")
+}
+
+fn example(index: usize) -> Example {
+    let title = title();
+    match &asks()[index] {
+        Ask::Written(request, style) => Example {
+            title: style(title),
+            request: style(request),
+        },
+        Ask::Plain(request) => Example {
+            title: title.to_string(),
+            request: (*request).to_string(),
+        },
+    }
 }
 
 /// Every word starting with a capital, the rest as written.
@@ -185,17 +229,10 @@ fn title_case(text: &str) -> String {
 
 /// The card's title and request at `moment`; Reduce Motion holds the first
 /// example.
-pub(super) fn copy(p: Paint, moment: Moment, reduced: bool) -> El {
+pub(super) fn copy(p: Paint, moment: Moment, order: &Order, reduced: bool) -> El {
     let moment = if reduced { Moment::default() } else { moment };
-    let examples = examples();
-    let from = &examples[moment.example];
-    let to = &examples[(moment.example + 1) % EXAMPLES];
-    let style = Style::current();
-    let request_font = TextStyle {
-        size: DESCRIPTION.size,
-        line_height: DESCRIPTION.line_height,
-        ..p.k.ty.mono
-    };
+    let from = example(order.example(moment.slot));
+    let to = example(order.example(moment.slot + 1));
     let title = line(
         "example-title",
         LineStyle {
@@ -203,41 +240,50 @@ pub(super) fn copy(p: Paint, moment: Moment, reduced: bool) -> El {
             ink: p.text(),
             accent: p.accent(),
             space: p.k.ty.ui_medium.size * 0.27,
-            style,
         },
         &from.title,
         &to.title,
         moment.title,
-    )
-    .flex_wrap();
-    let request = row()
-        .key("example-request")
-        .child(
-            text("› ")
-                .key("example-prompt")
-                .font(request_font)
-                .color(p.muted()),
-        )
-        .child(line(
-            "example-request-line",
-            LineStyle {
-                font: request_font,
-                ink: p.muted(),
-                accent: p.accent(),
-                space: request_font.size * 0.6,
-                style,
-            },
-            &from.request,
-            &to.request,
-            moment.request,
-        ));
+    );
     col()
         .key("copy")
         .grow(1.0)
         .shrink()
-        .gap(3.0)
+        .gap(6.0)
         .child(title)
-        .child(request)
+        .child(prompt(p, &from.request, &to.request, moment.request))
+}
+
+/// The request as a prompt typed to an agent: a mono line behind a `›`, in
+/// a sunken field.
+fn prompt(p: Paint, from: &str, to: &str, wave: Wave) -> El {
+    let font = TextStyle {
+        size: DESCRIPTION.size,
+        line_height: DESCRIPTION.line_height,
+        ..p.k.ty.mono
+    };
+    row()
+        .key("example-request")
+        .self_start()
+        .fill(p.k.c.bg_deep)
+        .border(p.hair, p.k.c.border_weak)
+        .radius(p.k.radius.md)
+        .px(8.0)
+        .py(4.0)
+        .gap(font.size * 0.6)
+        .child(text("›").key("example-prompt").font(font).color(p.accent()))
+        .child(line(
+            "example-request-line",
+            LineStyle {
+                font,
+                ink: p.text(),
+                accent: p.accent(),
+                space: font.size * 0.6,
+            },
+            from,
+            to,
+            wave,
+        ))
 }
 
 #[derive(Clone, Copy)]
@@ -247,7 +293,6 @@ struct LineStyle {
     accent: Color,
     /// The gap between words.
     space: f32,
-    style: Style,
 }
 
 /// `from` part way to `to`: the first `wave.changed` letters written as in
@@ -276,16 +321,17 @@ fn line(key: &str, s: LineStyle, from: &str, to: &str, wave: Wave) -> El {
                     .key(format!("{key}-{w}-{c}-{shown}"))
                     .font(s.font)
                     .color(if tinted && moved { s.accent } else { s.ink })
-                    .transition(s.style.transition()),
+                    .transition(pop()),
             );
         }
-        words.push(if s.style == Style::Roll {
-            word.clip_fade(0.0, 3.0, 0.0, 3.0)
-        } else {
-            word
-        });
+        words.push(word);
     }
-    row().key(key.to_string()).gaps(0.0, s.space).children(words)
+    row()
+        .key(key.to_string())
+        .shrink()
+        .gaps(0.0, s.space)
+        .flex_wrap()
+        .children(words)
 }
 
 /// The copy after Edit with agent: no examples, just what to do next.
@@ -296,7 +342,7 @@ pub(super) fn copied(p: Paint) -> El {
         .shrink()
         .gap(3.0)
         .child(
-            text(tr("Ask an agent to change these steps"))
+            text(title())
                 .key("title")
                 .font(p.k.ty.ui_medium)
                 .color(p.text()),
@@ -322,9 +368,19 @@ mod tests {
         assert_eq!(rest, Moment::default());
         let early = Moment::at(CHANGE + 0.1);
         assert!(early.request.changed > 0 && early.title.changed == 0);
-        let late = Moment::at(CHANGE + 1.5);
-        assert!(late.title.changed >= 34 && late.title.cooled >= 34);
-        assert_eq!(Moment::at(SLOT + 0.1).example, 1);
+        let late = Moment::at(CHANGE + 1.3);
+        assert!(late.title.changed >= 31 && late.title.cooled >= 31);
+        assert!(late.request.changed >= 45 && late.request.cooled >= 45);
+        assert_eq!(Moment::at(SLOT + 0.1).slot, 1);
+    }
+
+    /// A shuffled order still shows every example once a round.
+    #[test]
+    fn a_shuffled_order_shows_every_example() {
+        let order = Order::shuffled();
+        let mut seen: Vec<usize> = (0..EXAMPLES).map(|slot| order.example(slot)).collect();
+        seen.sort_unstable();
+        assert_eq!(seen, Order::default().0);
     }
 
     #[test]

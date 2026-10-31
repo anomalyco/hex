@@ -816,6 +816,7 @@ impl Ui {
             });
         }
         ui.history = history::HistoryPane::shared(store);
+        ui.output = output::OutputPane::shuffled();
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;

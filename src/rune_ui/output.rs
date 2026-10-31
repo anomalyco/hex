@@ -15,7 +15,7 @@ use super::controls::{
 use super::icons::MIC;
 use super::lists::{Tone, tone_tag};
 use super::modes::{application_icon, monogram};
-use super::spark::spark;
+use super::spark::{Spark, spark};
 use super::{ShortcutTarget, Ui};
 use crate::app_settings::DictationMode;
 use crate::desktop_i18n::{tr, tr_fill};
@@ -49,11 +49,26 @@ pub(super) struct OutputPane {
     pub(super) expanded: Option<usize>,
     /// Where the agent card's examples stand.
     pub(super) examples: examples::Moment,
+    /// The order they show in.
+    pub(super) order: examples::Order,
+    /// The agent card's turning spark.
+    pub(super) spark: Spark,
+}
+
+impl OutputPane {
+    /// The pane for a window, its examples in a fresh order.
+    pub(super) fn shuffled() -> Self {
+        Self {
+            order: examples::Order::shuffled(),
+            ..Self::default()
+        }
+    }
 }
 
 /// Steps the agent card's examples to `clock`; true when they changed.
 pub(super) fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let (changed, wait) = examples::poll(&mut ui.output.examples, clock);
+    let wait = wait.min(super::spark::poll(&ui.output.spark, clock));
     if ui.window.as_ref().is_none_or(rune::AppHandle::is_visible) {
         tx.wake_after(std::time::Duration::from_secs_f64(wait.max(0.0)));
     }
@@ -175,11 +190,11 @@ pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
 /// The pane's one action: the agent writes the steps, so this card is how
 /// to change them.
 fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
-    let mark = spark(p, "spark", SPARK);
+    let mark = spark(&ui.output.spark, p, "spark", SPARK, reduced);
     let copy = if ui.output.prompt_copied {
         examples::copied(p)
     } else {
-        examples::copy(p, ui.output.examples, reduced)
+        examples::copy(p, ui.output.examples, &ui.output.order, reduced)
     };
     let open = Button::new(tr("Open file"))
         .variant(ButtonVariant::Ghost)
