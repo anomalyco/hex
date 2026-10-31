@@ -1999,11 +1999,14 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
         );
     }
     let (golden_width, golden_height, golden) = read_png(&path);
-    assert_eq!(
-        (golden_width, golden_height),
-        (width, height),
-        "{name} size changed"
-    );
+    if (golden_width, golden_height) != (width, height) {
+        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
+        rune::render::write_png(&actual, width, height, &pixels).unwrap();
+        panic!(
+            "{name} size changed from {golden_width}x{golden_height} to {width}x{height}; actual render at {}",
+            actual.display()
+        );
+    }
     // GPU drivers differ in the last bit of blending and glyph coverage;
     // a layout or colour change moves far more than this.
     let differing = pixels
