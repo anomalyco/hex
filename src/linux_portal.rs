@@ -49,6 +49,14 @@ const STOP_POLL: Duration = Duration::from_millis(50);
 /// Cancel dictation, which the user assigns in the desktop. Not `cancel`:
 /// KDE still holds Escape under that id from builds that bound it.
 pub(crate) const CANCEL_ID: &str = "cancel-dictation";
+/// Cancel dictation's id before #492, when Hex suggested Escape for it.
+const LEGACY_CANCEL_ID: &str = "cancel";
+/// What Cancel dictation is called in the shortcuts the portal granted.
+pub(crate) const CANCEL_DESCRIPTION: &str = "Cancel dictation";
+/// KDE's global shortcuts service, which keeps what portal apps bound.
+const KGLOBALACCEL: &str = "org.kde.kglobalaccel";
+const KGLOBALACCEL_PATH: &str = "/kglobalaccel";
+const KGLOBALACCEL_INTERFACE: &str = "org.kde.KGlobalAccel";
 
 /// One shortcut Hex asks the desktop for.
 pub(crate) struct Shortcut {
@@ -66,7 +74,7 @@ impl Shortcut {
     pub(crate) fn cancel() -> Self {
         Self {
             id: CANCEL_ID.into(),
-            description: "Cancel dictation",
+            description: CANCEL_DESCRIPTION,
             trigger: None,
         }
     }
@@ -271,11 +279,27 @@ impl PortalBus {
         B: serde::Serialize + zbus::Type,
         R: for<'d> serde::Deserialize<'d> + zbus::Type,
     {
+        self.call_service(DESKTOP, path, interface, method, body)
+    }
+
+    /// Calls a method of another service on this bus.
+    fn call_service<B, R>(
+        &self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        method: &str,
+        body: &B,
+    ) -> zbus::Result<R>
+    where
+        B: serde::Serialize + zbus::Type,
+        R: for<'d> serde::Deserialize<'d> + zbus::Type,
+    {
         self.runtime.block_on(async {
             let reply = tokio::time::timeout(
                 CALL_TIMEOUT,
                 self.connection
-                    .call_method(Some(DESKTOP), path, Some(interface), method, body),
+                    .call_method(Some(destination), path, Some(interface), method, body),
             )
             .await
             .map_err(|_| zbus::Error::Failure(format!("{method} timed out")))??;
@@ -669,6 +693,51 @@ impl Portal {
         Ok(())
     }
 
+    /// Before #579 Hex registered with the portal as `hex`, and before #492
+    /// its Cancel dictation id `cancel` asked for Escape. KDE keeps every
+    /// shortcut a portal app bound under that app's id, so an upgraded Hex
+    /// left `hex`'s set (Cancel dictation on Escape among it) grabbed with
+    /// nothing able to rebind it, taking Escape from every app (#624).
+    /// Removes that set, and `cancel` under the current id, from KDE's
+    /// global shortcuts. Only on KDE, only those entries.
+    pub(crate) fn forget_legacy_kde_shortcuts(&self) -> Result<()> {
+        if !desktop_is("KDE") {
+            return Ok(());
+        }
+        let actions: Vec<Vec<String>> = self
+            .bus
+            .call_service(
+                KGLOBALACCEL,
+                KGLOBALACCEL_PATH,
+                KGLOBALACCEL_INTERFACE,
+                "allActionsForComponent",
+                &(vec![LEGACY_APP_ID],),
+            )
+            .wrap_err("could not list Hex's old KDE shortcuts")?;
+        let mut legacy = actions
+            .iter()
+            .filter_map(|action| action.get(1))
+            .map(|action| (LEGACY_APP_ID, action.as_str()))
+            .collect::<Vec<_>>();
+        legacy.push((APP_ID, LEGACY_CANCEL_ID));
+        for (component, action) in legacy {
+            let removed: bool = self
+                .bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "unregister",
+                    &(component, action),
+                )
+                .wrap_err_with(|| format!("could not remove Hex's old KDE shortcut {action}"))?;
+            if removed {
+                tracing::info!(component, action, "removed an old Hex shortcut from KDE");
+            }
+        }
+        Ok(())
+    }
+
     /// The presses, releases, and changes that arrived since the last call.
     pub(crate) fn events(&mut self) -> Vec<Event> {
         let shortcuts = self.session.as_ref().map(|session| session.as_str());
@@ -802,10 +871,14 @@ fn string_list_text(items: &[&str]) -> String {
 }
 
 fn gnome() -> bool {
+    desktop_is("GNOME")
+}
+
+fn desktop_is(name: &str) -> bool {
     std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
         desktops
             .split(':')
-            .any(|desktop| desktop.eq_ignore_ascii_case("GNOME"))
+            .any(|desktop| desktop.eq_ignore_ascii_case(name))
     })
 }
 

@@ -1212,6 +1212,13 @@ Linux beta                               // not macOS feature parity
 │   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
 │   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
 │       the user assigns one, idle presses do nothing (#482)
+│       ├── Desktop gave it a key anyway -> General shows a "Cancel dictation"
+│       │   row, "Your desktop granted <key>", and process.log warns (#624)
+│       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
+│           pre-#492 `cancel` on Escape) and `cancel` under `anomaly.hex` are
+│           removed from kglobalaccel (`unregister`); other apps untouched
+│           // check: a_key_the_desktop_gave_cancel_dictation_is_shown (the row's
+│           // data only); the KDE removal is not run on a Plasma session
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud

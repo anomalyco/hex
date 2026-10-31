@@ -677,6 +677,19 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     granted.iter().find(|shortcut| shortcut.name == name)
 }
 
+/// The key a shortcuts portal's desktop gave Cancel dictation. Hex suggests
+/// none, so a key here comes from the desktop (#624), and it takes that key
+/// from every app.
+pub(super) fn cancel_grant(ui: &Ui) -> Option<&str> {
+    let Some(DesktopShortcuts::Portal(granted)) = ui.shortcuts() else {
+        return None;
+    };
+    granted
+        .iter()
+        .find(|shortcut| shortcut.name == "Cancel dictation")
+        .and_then(|shortcut| shortcut.trigger.as_deref())
+}
+
 /// The desktop kept `target`'s shortcut for itself: the note under its row.
 pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
     portal_grant(ui, target)
