@@ -1246,8 +1246,13 @@ Linux beta                               // not macOS feature parity
 │       │       // fixed delay, no acknowledgement; not observed on a real GNOME session
 │       └── Neither works -> Failed: "Copied to the clipboard; press Ctrl+V…" naming
 │           the RemoteDesktop portal; the clipboard keeps the transcript
-└── Portal identity -> No hex.desktop in XDG data dirs (a loose binary) ->
-    Hex writes ~/.local/share/applications/hex.desktop (X-Hex-Managed) for itself
+└── Portal identity -> Register as `anomaly.hex` (reverse-DNS: GNOME 49/50's
+    shortcuts provider refused the bare `hex`, so binding failed, #579)
+    └── No anomaly.hex.desktop in XDG data dirs -> Hex writes
+        ~/.local/share/applications/anomaly.hex.desktop (X-Hex-Managed),
+        NoDisplay when an installed hex.desktop launcher already shows Hex
+        // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
+        // checked by unit tests only, not on a GNOME 49 session
 ```
 
 Clipboard restoration lives in [linux_paste.rs](../../src/linux_paste.rs)
