@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavSpec, WavWriter};
-use screencapturekit::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::events::now_ms;
@@ -24,23 +23,38 @@ const FINAL_PENDING_FILE: &str = "final.pending";
 mod capture;
 #[path = "meeting_chapters.rs"]
 mod chapters;
-pub(crate) use capture::create_tap_aggregate;
-pub use capture::{
-    SystemAudioAuthorization, request_system_audio_access, system_audio_authorization,
+#[cfg(target_os = "linux")]
+#[path = "meeting_linux.rs"]
+mod os;
+#[cfg(target_os = "macos")]
+#[path = "meeting_macos.rs"]
+mod os;
+#[cfg(target_os = "windows")]
+#[path = "meeting_windows.rs"]
+mod os;
+pub(crate) use os::reveal;
+#[cfg(target_os = "macos")]
+pub(crate) use os::{
+    SystemAudioAuthorization, create_tap_aggregate, request_system_audio_access,
+    screen_recording_permitted, system_audio_authorization, system_audio_ready,
 };
 #[path = "meeting_echo.rs"]
 mod echo;
+#[path = "meeting_generator.rs"]
+pub(crate) mod generator;
 #[path = "meeting_notes.rs"]
 mod notes;
 #[path = "meeting_query.rs"]
 pub mod query;
 #[path = "meeting_transcript.rs"]
 mod transcript;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
-pub use chapters::{Chapter, chapter_entries, section_for_id, section_markdown};
+#[cfg(target_os = "macos")]
+pub use chapters::section_for_id;
+pub use chapters::{Chapter, chapter_entries, section_markdown};
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, target_os = "macos"))]
 pub use notes::{summarize, summarize_file};
 pub use transcript::TranscriptReader;
 
@@ -100,50 +114,6 @@ pub fn default_title(app: Option<&str>, created_at_ms: u64) -> String {
     match app {
         Some(app) => format!("{app} call — {clock}"),
         None => format!("Meeting — {clock}"),
-    }
-}
-
-unsafe extern "C" {
-    fn CGPreflightScreenCaptureAccess() -> bool;
-    fn CGRequestScreenCaptureAccess() -> bool;
-}
-
-/// Whether macOS currently allows Screen & System Audio Recording, which
-/// meeting capture needs for remote audio.
-pub fn screen_recording_permitted() -> bool {
-    // SAFETY: A CoreGraphics query without arguments or side effects.
-    unsafe { CGPreflightScreenCaptureAccess() }
-}
-
-/// Asks macOS to list Hex under Screen & System Audio Recording. The system
-/// prompts at most once; later requests return the current state.
-pub fn request_screen_recording() -> bool {
-    // SAFETY: A CoreGraphics request without arguments.
-    unsafe { CGRequestScreenCaptureAccess() }
-}
-
-/// Whether meeting capture can hear the other participants: through the
-/// System Audio Recording consent process taps need, or Screen Recording for
-/// the ScreenCaptureKit fallback.
-pub fn system_audio_permitted() -> bool {
-    system_audio_ready() || screen_recording_permitted()
-}
-
-/// Whether system audio uses the display-independent process tap.
-pub fn system_audio_ready() -> bool {
-    matches!(
-        system_audio_authorization(),
-        SystemAudioAuthorization::Granted | SystemAudioAuthorization::Unknown
-    )
-}
-
-pub fn reveal(path: &Path) {
-    if let Err(error) = std::process::Command::new("/usr/bin/open")
-        .arg("-R")
-        .arg(path)
-        .spawn()
-    {
-        tracing::error!(%error, "could not reveal meeting file");
     }
 }
 
@@ -404,14 +374,7 @@ pub fn record(
     ) {
         return Err(eyre!("{} is not installed", transcription_model.name));
     }
-    if !system_audio_permitted() {
-        if !request_system_audio_access() {
-            request_screen_recording();
-        }
-        return Err(eyre!(
-            "Allow Hex in System Settings › Privacy & Security › Screen & System Audio Recording, then try again"
-        ));
-    }
+    os::ensure_system_audio()?;
     let created_at_ms = now_ms();
     let id = format!("{created_at_ms}-{}", std::process::id());
     let meeting_dir = root()?.join(&id);
@@ -739,113 +702,6 @@ fn prepare_for_transcription(
     manifest.status = MeetingStatus::Transcribing;
     manifest.error = None;
     write_manifest(directory, manifest)
-}
-
-fn media_time_us(time: CMTime) -> Option<i64> {
-    if !time.is_valid()
-        || time.is_indefinite()
-        || time.is_positive_infinity()
-        || time.is_negative_infinity()
-    {
-        return None;
-    }
-    let microseconds = time.as_seconds()? * 1_000_000.0;
-    microseconds
-        .is_finite()
-        .then(|| microseconds.round() as i64)
-}
-
-fn decode_audio(sample: &CMSampleBuffer) -> Option<Vec<f32>> {
-    let format = sample.format_description()?;
-    if format.audio_is_big_endian() {
-        return None;
-    }
-    let channels = format.audio_channel_count()? as usize;
-    let bytes_per_frame = format.audio_bytes_per_frame()? as usize;
-    let bytes_per_sample = bytes_per_frame.checked_div(channels)?;
-    let bits_per_channel = format.audio_bits_per_channel()?;
-    let flags = format.audio_format_flags()?;
-    let frames = usize::try_from(sample.num_samples()).ok()?;
-    let buffers = sample.audio_buffer_list().ok()?;
-    if buffers.num_buffers() == channels && channels > 1 {
-        let channel_samples: Vec<Vec<f32>> = buffers
-            .iter()
-            .map(|buffer| {
-                decode_samples(
-                    buffer.data(),
-                    frames,
-                    bytes_per_sample,
-                    bits_per_channel,
-                    flags,
-                )
-            })
-            .collect::<Option<_>>()?;
-        return Some(
-            (0..frames)
-                .map(|frame| {
-                    channel_samples
-                        .iter()
-                        .map(|samples| samples[frame])
-                        .sum::<f32>()
-                        / channels as f32
-                })
-                .collect(),
-        );
-    }
-    let buffer = buffers.get(0)?;
-    let available_channels = usize::try_from(buffer.number_channels).ok()?.max(1);
-    let samples = decode_samples(
-        buffer.data(),
-        frames.checked_mul(available_channels)?,
-        bytes_per_sample,
-        bits_per_channel,
-        flags,
-    )?;
-    Some(
-        samples
-            .chunks_exact(available_channels)
-            .map(|frame| frame.iter().sum::<f32>() / available_channels as f32)
-            .collect(),
-    )
-}
-
-fn decode_samples(
-    bytes: &[u8],
-    samples: usize,
-    bytes_per_sample: usize,
-    bits_per_channel: u32,
-    flags: u32,
-) -> Option<Vec<f32>> {
-    let required = samples.checked_mul(bytes_per_sample)?;
-    if bytes.len() < required {
-        return None;
-    }
-    let is_float = flags & 1 != 0;
-    let is_signed_integer = flags & 4 != 0;
-    bytes[..required]
-        .chunks_exact(bytes_per_sample)
-        .map(
-            |sample| match (is_float, is_signed_integer, bytes_per_sample) {
-                (true, _, 4) => Some(f32::from_le_bytes(sample.try_into().ok()?)),
-                (_, true, 2) => {
-                    Some(f32::from(i16::from_le_bytes(sample.try_into().ok()?)) / 32_768.0)
-                }
-                (_, true, 3) => {
-                    let raw = i32::from_le_bytes([
-                        sample[0],
-                        sample[1],
-                        sample[2],
-                        if sample[2] & 0x80 == 0 { 0 } else { 0xff },
-                    ]);
-                    Some(raw as f32 / 8_388_608.0)
-                }
-                (_, true, 4) if bits_per_channel <= 32 => {
-                    Some(i32::from_le_bytes(sample.try_into().ok()?) as f32 / 2_147_483_648.0)
-                }
-                _ => None,
-            },
-        )
-        .collect()
 }
 
 fn write_tracks(
@@ -1201,7 +1057,7 @@ pub fn transcript_markdown(entries: &[TranscriptEntry]) -> String {
 /// its recording folder. Refuses while it records, transcribes, or writes
 /// notes. A missing Markdown file is skipped.
 pub fn trash(id: &str) -> Result<()> {
-    trash_meeting(&root()?.join(id), move_to_trash)
+    trash_meeting(&root()?.join(id), os::move_to_trash)
 }
 
 fn trash_meeting(
@@ -1219,20 +1075,6 @@ fn trash_meeting(
         move_to_trash(&path)?;
     }
     move_to_trash(directory)
-}
-
-fn move_to_trash(path: &Path) -> Result<()> {
-    use objc2_foundation::{NSFileManager, NSString, NSURL};
-    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-    NSFileManager::defaultManager()
-        .trashItemAtURL_resultingItemURL_error(&url, None)
-        .map_err(|error| {
-            eyre!(
-                "could not move {} to the Trash: {}",
-                path.display(),
-                error.localizedDescription()
-            )
-        })
 }
 
 /// Renames a meeting. The Markdown heading follows only while it still reads
@@ -1645,6 +1487,7 @@ pub fn format_duration(milliseconds: u64) -> String {
     format!("{:02}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
+#[cfg(unix)]
 fn set_owner_only(path: &Path, directory: bool) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(
@@ -1654,14 +1497,21 @@ fn set_owner_only(path: &Path, directory: bool) -> Result<()> {
     Ok(())
 }
 
+/// The meetings folder is inside the user's own profile, which Windows
+/// already keeps from other users.
+#[cfg(windows)]
+fn set_owner_only(_path: &Path, _directory: bool) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "meeting_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "meeting_echo_replay_tests.rs"]
 mod echo_replay_tests;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "meeting_live_replay_tests.rs"]
 mod live_replay_tests;

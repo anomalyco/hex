@@ -22,7 +22,8 @@ pub struct LocalTranscriber {
     device_label: String,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
-    /// The finest timestamps the model gives, for a capture's word times.
+    /// The finest timestamps the model gives, for a capture's or a
+    /// meeting's word times.
     finest_timestamps: TimestampKind,
 }
 
@@ -278,13 +279,48 @@ impl LocalTranscriber {
     /// chunks the model takes whole. A model without word times gives its
     /// segments instead.
     pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
+        let transcript = self.timed(samples)?;
+        let spans = if transcript.words.is_empty() {
+            transcript.segments
+        } else {
+            transcript.words
+        };
+        let words = spans
+            .into_iter()
+            .map(|word| (word.start_ms, word.end_ms, word.text))
+            .collect();
+        Ok((transcript.text, words))
+    }
+
+    /// One meeting chunk with segment and word timings, padded as dictation
+    /// pads a clip.
+    pub(crate) fn transcribe_segments(
+        &mut self,
+        mut samples: Vec<f32>,
+    ) -> Result<crate::transcript::Transcript> {
+        crate::dictation::pad_for_parakeet(&mut samples);
+        self.timed(&samples)
+    }
+
+    /// Text, segments, and words, in chunks the model takes whole.
+    fn timed(&mut self, samples: &[f32]) -> Result<crate::transcript::Transcript> {
+        use crate::transcript::TranscriptSegment;
         const CHUNK: usize = 30 * 16_000;
         let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
         let options = RunOptions {
             timestamps: self.finest_timestamps,
             ..self.options.clone()
         };
-        let (mut texts, mut words) = (Vec::new(), Vec::new());
+        let span = |offset: i64, t0: i64, t1: i64, text: String| {
+            let text = text.trim().to_owned();
+            (!text.is_empty()).then(|| TranscriptSegment {
+                start_ms: t0.max(0) + offset,
+                end_ms: t1.max(t0) + offset,
+                text,
+            })
+        };
+        let mut timed = crate::transcript::Transcript::default();
+        let mut texts = Vec::new();
         for (index, part) in samples.chunks(chunk.max(1)).enumerate() {
             let offset = (index * chunk / 16) as i64;
             let transcript = self
@@ -295,25 +331,21 @@ impl LocalTranscriber {
             if !text.is_empty() {
                 texts.push(text.to_owned());
             }
-            let spans = if transcript.words.is_empty() {
+            timed.segments.extend(
                 transcript
                     .segments
                     .into_iter()
-                    .map(|s| (s.t0_ms, s.t1_ms, s.text))
-                    .collect::<Vec<_>>()
-            } else {
+                    .filter_map(|s| span(offset, s.t0_ms, s.t1_ms, s.text)),
+            );
+            timed.words.extend(
                 transcript
                     .words
                     .into_iter()
-                    .map(|w| (w.t0_ms, w.t1_ms, w.text))
-                    .collect()
-            };
-            words.extend(spans.into_iter().filter_map(|(t0, t1, text)| {
-                let text = text.trim().to_owned();
-                (!text.is_empty()).then(|| (t0.max(0) + offset, t1.max(t0) + offset, text))
-            }));
+                    .filter_map(|w| span(offset, w.t0_ms, w.t1_ms, w.text)),
+            );
         }
-        Ok((texts.join(" "), words))
+        timed.text = texts.join(" ");
+        Ok(timed)
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {

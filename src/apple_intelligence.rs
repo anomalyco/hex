@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use crate::meeting::generator::{
+    GeneratedChapter, GeneratedChapterLines, GeneratedNotes, GenerationError,
+};
+
 unsafe extern "C" {
     fn hex_apple_intelligence_availability() -> i32;
     fn hex_apple_intelligence_context_size() -> isize;
@@ -97,49 +101,6 @@ pub fn availability() -> Availability {
 pub fn context_tokens() -> usize {
     // SAFETY: A synchronous property read without arguments.
     usize::try_from(unsafe { hex_apple_intelligence_context_size() }).unwrap_or(0)
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-pub struct GeneratedNotes {
-    pub title: String,
-    #[serde(default)]
-    pub summary: String,
-}
-
-/// One live chapter pass: what the new lines are about, and whether that is
-/// still the current chapter's topic.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-pub struct GeneratedChapter {
-    pub title: String,
-    #[serde(default)]
-    pub summary: String,
-    #[serde(default)]
-    pub same_topic: bool,
-}
-
-#[derive(Deserialize)]
-struct GeneratedChapterLines {
-    #[serde(default)]
-    lines: Vec<i64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GenerationError {
-    /// The prompt exceeded the model's context window.
-    ContextWindow,
-    /// The model refused the prompt or its guardrails blocked it.
-    Refused,
-    Failed(String),
-}
-
-impl std::fmt::Display for GenerationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ContextWindow => formatter.write_str("the transcript exceeded the model context"),
-            Self::Refused => formatter.write_str("the model refused the transcript"),
-            Self::Failed(message) => formatter.write_str(message),
-        }
-    }
 }
 
 /// Generates a meeting title and short summary with guided generation.

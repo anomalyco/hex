@@ -29,7 +29,7 @@ pub(super) enum Os {
 pub(super) struct Capabilities {
     pub(super) os: Os,
     /// Meeting recording and its pane, with the recordings and their
-    /// settings (macOS beta).
+    /// settings (beta, in Labs).
     pub(super) meetings: bool,
     /// Calendar meeting reminders: the Calendar card under Meetings
     /// (macOS, EventKit).
@@ -65,7 +65,7 @@ pub(super) struct Capabilities {
 impl Capabilities {
     pub(super) const LINUX: Self = Self {
         os: Os::Linux,
-        meetings: false,
+        meetings: true,
         calendar: false,
         permissions: false,
         launch_at_login: true,
@@ -99,7 +99,7 @@ impl Capabilities {
 
     pub(super) const WINDOWS: Self = Self {
         os: Os::Windows,
-        meetings: false,
+        meetings: true,
         calendar: false,
         permissions: false,
         launch_at_login: true,

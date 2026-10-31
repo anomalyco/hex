@@ -317,6 +317,16 @@ impl Profiles {
     }
 }
 
+/// One generation from OpenCode's default ranked models, for work outside
+/// dictation such as meeting notes.
+pub(crate) fn generate_text(
+    prompt: &str,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    generate_cancellable(prompt, None, deadline, cancelled)
+}
+
 /// Runs one generation and reports it as a processing observation. The text is
 /// `None` whenever the caller must fall back, with the reason recorded in the
 /// observation.

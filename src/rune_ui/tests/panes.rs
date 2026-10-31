@@ -21,10 +21,11 @@ fn refresh(rt: &mut Runtime<Ui>) {
 
 #[test]
 fn each_os_lists_only_the_panes_it_can_run() {
-    let mut linux = runtime("portal", true, PANE_SIZE);
-    tap(&mut linux, "nav-labs");
-    for key in ["lab-meetings", "nav-meetings"] {
-        assert!(linux.find(key).is_none(), "Linux has no {key}");
+    // Meetings (beta) is a Labs switch on every OS; this Mac fixture has it on.
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        tap(&mut rt, "nav-labs");
+        assert!(rt.find("lab-meetings").is_some(), "{scene} offers Meetings");
     }
     let mut mac = runtime("mac-settings", true, PANE_SIZE);
     tap(&mut mac, "nav-labs");
@@ -34,11 +35,6 @@ fn each_os_lists_only_the_panes_it_can_run() {
     ] {
         tap(&mut mac, key);
         assert_eq!(mac.state.pane, pane);
-    }
-    let mut windows = runtime("windows-settings", true, PANE_SIZE);
-    tap(&mut windows, "nav-labs");
-    for key in ["lab-meetings", "nav-meetings"] {
-        assert!(windows.find(key).is_none(), "Windows has no {key}");
     }
 }
 
@@ -1575,7 +1571,10 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
     tap(&mut rt, "nav-labs");
     tap(&mut rt, "lab-terminal-paste");
     assert!(rt.state.settings.paste_with_shift);
-    assert!(rt.find("lab-meetings").is_none());
+    assert!(
+        rt.find("lab-meetings").is_some(),
+        "Meetings runs on Windows too"
+    );
 }
 
 #[test]

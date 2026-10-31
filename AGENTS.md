@@ -35,8 +35,8 @@ Labs has no master switch; Settings › Labs is one flat list of rows (name,
 description, toggle), each off by default, plus Send feedback and Run setup
 again. A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
-Meetings (beta, macOS), Voice Filter (macOS; locked on while its driver is
-installed), Playground, Live text, Live chapters (macOS), Vocabulary biasing,
+Meetings (beta), Voice Filter (macOS; locked on while its driver is
+installed), Playground, Live text, Live chapters, Vocabulary biasing,
 and Terminal paste (Windows). Dev, local, and test builds
 (`dev_build::is_dev_build()`) add Annotate to the main sidebar; production
 builds keep it dormant.
@@ -370,11 +370,25 @@ substitute for source inspection or a second roadmap.
   auto-levelled oscilloscope trace), the same on every OS and drawn by
   `rune_hud`; `spring` holds the frame-rate-independent springs.
 - `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
-  artifacts, Screen Recording permission checks, final local-model publication,
-  the user-facing Markdown copy, and recovery.
+  artifacts, final local-model publication, the user-facing Markdown copy, and
+  recovery, on every OS. Its `os` adapter (`meeting_macos`, `meeting_linux`,
+  `meeting_windows`) owns the system audio source and its consent, idle-sleep
+  prevention while recording, and reveal and Trash.
 - `meeting_capture`: independent self-healing microphone (cpal) and system
-  audio (Core Audio process tap, ScreenCaptureKit fallback) sources; one
-  failing never stops the other, and resumed audio is padded onto the timeline.
+  audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
+  Linux: `pw-record` of the default output's monitor; Windows: WASAPI
+  loopback); one failing never stops the other, and resumed audio is padded
+  onto the timeline.
+- `meeting_runtime`: the Linux and Windows apps' meeting controller thread,
+  capsules, recording state, and tray items (macOS runs the same controller
+  from `macos_rune`).
+- `meeting_generator`: who writes notes and live chapters: Apple
+  Intelligence on a Mac that has it, else OpenCode when
+  `meetings.summarize_with_opencode` is on (off by default; it sends the
+  transcript excerpt).
+- `dictation_activity`: whether dictation is capturing or transcribing, so
+  meeting chunks and the local API yield, and the background priority they
+  run at, on every OS.
 - `meeting_transcript`: streaming 16 kHz resampling, short pause-aware
   overlapping chunks transcribed as background work on the dictation engine's
   loaded model (a process without the engine, such as the CLI, loads its own),
@@ -399,7 +413,10 @@ substitute for source inspection or a second roadmap.
   `meeting_query` as read-only tools and `hex-meeting://` resources.
 - `apple_intelligence`: the weak-linked FoundationModels Swift bridge:
   availability, context size, and guided-generation notes at utility priority.
-- `microphone_activity`: permission-light CoreAudio process input observation.
+- `microphone_activity`: permission-light observation of which apps use the
+  microphone: CoreAudio processes (macOS), a `pw-dump --monitor` of PipeWire
+  capture streams (Linux), audio sessions on capture devices (Windows). No
+  samples are read.
 - `meeting_detection`: pure provider classification, debounce, per-call snooze,
   and call-ended presence.
 - `calendar`: calendar meetings on every OS as a pure model (which events
@@ -791,14 +808,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   Option-Control-V, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
   can replace; after Stop they read the final transcript.
-- Meeting system audio uses a Core Audio process tap (System Audio Recording
-  consent), never requiring a display; ScreenCaptureKit is only the fallback.
+- Meeting system audio uses a Core Audio process tap on macOS (System Audio
+  Recording consent), never requiring a display; ScreenCaptureKit is only the
+  fallback. Linux records the default output's PipeWire monitor through
+  `pw-record` and Windows its WASAPI loopback; neither asks for consent.
   Losing either source never stops the other or the meeting: it retries until
   Stop, and resumed audio is padded with silence so WAV positions stay on the
   shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
-- Apple Intelligence meeting notes run only after final publication, on a
+- Meeting notes (Apple Intelligence, or OpenCode only once the user turns on
+  Summarize with OpenCode) run only after final publication, on a
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes never rename the file and rewrite only the heading Hex wrote

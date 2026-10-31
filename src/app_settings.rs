@@ -21,6 +21,7 @@ static MEETINGS_ENABLED: AtomicBool = AtomicBool::new(false);
 static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
 static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
+static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
@@ -1079,6 +1080,10 @@ pub struct MeetingSettings {
     /// Title meetings and write a two-sentence summary with Apple
     /// Intelligence when it is available.
     pub summarize_with_apple_intelligence: bool,
+    /// Title meetings and write a two-sentence summary with the OpenCode
+    /// model, which sends the transcript to it. On a Mac, only when Apple
+    /// Intelligence is unavailable or off.
+    pub summarize_with_opencode: bool,
     /// Show the floating recording indicator while a meeting is recording.
     pub show_recording_indicator: bool,
     /// Screen corner the floating recording indicator snaps to after dragging.
@@ -1193,6 +1198,7 @@ impl Default for MeetingSettings {
             enabled: false,
             output_folder: None,
             summarize_with_apple_intelligence: true,
+            summarize_with_opencode: false,
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
@@ -2115,6 +2121,7 @@ impl AppSettings {
             self.meetings.summarize_with_apple_intelligence,
             Ordering::Release,
         );
+        MEETING_NOTES_OPENCODE.store(self.meetings.summarize_with_opencode, Ordering::Release);
         MEETING_INDICATOR_ENABLED.store(self.meetings.show_recording_indicator, Ordering::Release);
         MEETING_INDICATOR_CORNER.store(
             self.meetings.recording_indicator_corner as u8,
@@ -2500,8 +2507,15 @@ pub fn hex_microphone_enabled() -> bool {
     )
 }
 
+/// Apple Intelligence may write meeting notes (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_notes_enabled() -> bool {
     MEETING_NOTES_ENABLED.load(Ordering::Acquire)
+}
+
+/// The OpenCode model may write meeting notes.
+pub fn meeting_notes_with_opencode() -> bool {
+    MEETING_NOTES_OPENCODE.load(Ordering::Acquire)
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2571,7 +2585,6 @@ pub fn save_meeting_provider(choice: MeetingProviderChoice) {
 }
 
 /// Saves the corner the recording capsule was dragged to.
-#[cfg(target_os = "macos")]
 pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
     match AppSettings::load() {
         Ok(mut settings) => {

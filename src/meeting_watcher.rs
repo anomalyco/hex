@@ -1,4 +1,4 @@
-//! Meeting detection and recording control for the macOS app: watches which
+//! Meeting detection and recording control for the app: watches which
 //! applications use the microphone, offers a recording for supported calls,
 //! runs the recorder, reports when the call app leaves, and starts notes. The
 //! menu bar and the meeting capsules show its events.
@@ -191,6 +191,10 @@ pub(crate) fn controller_loop(
         thread::sleep(Duration::from_millis(500));
     }
 
+    // The app is quitting: a recording keeps its audio, and its transcript
+    // finishes at the next launch. macOS marks this before it drains.
+    #[cfg(not(target_os = "macos"))]
+    crate::process_exit::begin_quitting();
     if let Some(active) = recording {
         active.stop.store(true, Ordering::Relaxed);
         active

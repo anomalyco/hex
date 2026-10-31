@@ -388,6 +388,7 @@ fn run_host(
     let mut stopping = false;
     let mut shown: Option<HostSnapshot> = None;
     let mut tray_view = None;
+    let mut tray_meetings = None;
     loop {
         let (done, route, snapshot) = {
             let mut guard = host.lock();
@@ -408,7 +409,9 @@ fn run_host(
         };
         *published.shortcuts.lock().unwrap() = route;
         *published.status.lock().unwrap() = Some(host.status(snapshot.clone(), session.clone()));
-        if shown.as_ref() != Some(&snapshot) {
+        let meetings = crate::meeting_runtime::tray_state();
+        if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
+            tray_meetings = meetings;
             if let Some(tray) = tray {
                 let view = crate::linux_tray::view(&snapshot);
                 if tray_view.as_ref() != Some(&view) {
@@ -439,7 +442,7 @@ fn run_window(
 ) {
     let app = host.clone();
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::rune_ui::run_app(app, requests, first)
+        crate::rune_ui::run_app(app, requests, first, shutdown)
     }))
     .is_err()
     {

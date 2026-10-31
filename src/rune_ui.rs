@@ -31,9 +31,9 @@ mod list_detail;
 mod lists;
 mod live_notes;
 pub(crate) mod live_text;
-#[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
 mod meetings;
+mod meetings_host;
 mod models;
 mod modes;
 mod onboarding;
@@ -133,6 +133,7 @@ pub(crate) fn run_app(
     host: crate::linux_app::HostHandle,
     requests: std::sync::mpsc::Receiver<crate::linux_service::Control>,
     first: Option<crate::linux_service::Activation>,
+    shutdown: &'static std::sync::atomic::AtomicBool,
 ) {
     use crate::linux_service::{Activation, Control};
     rune::set_app_id("hex");
@@ -145,6 +146,9 @@ pub(crate) fn run_app(
     // The capture capsule, picker, and ink, in dev builds only.
     let _capture_overlays = crate::dev_build::is_dev_build()
         .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    let meetings = crate::meeting_runtime::Meetings::install(&mut app, shutdown)
+        .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
+        .ok();
     let handle = app.handle();
     host.set_window_visible({
         let handle = handle.clone();
@@ -180,6 +184,11 @@ pub(crate) fn run_app(
         })
         .expect("could not start the window request thread");
     app.run();
+    // A recording stops, keeping its audio for the next launch.
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    if let Some(meetings) = meetings {
+        meetings.join();
+    }
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
@@ -316,7 +325,7 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
 }
 
 /// Where the menu bar, a meeting, or the local API sends the window.
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Destination {
     Settings,
@@ -329,7 +338,6 @@ pub(crate) enum Destination {
 }
 
 /// Shows `destination` in the window (the caller opens it).
-#[cfg(target_os = "macos")]
 pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     let pane = match &destination {
         Destination::Settings | Destination::Models => Pane::General,
@@ -395,7 +403,6 @@ pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
 
 /// A capsule's "Never offer" or "Always record" choice, kept in the window's
 /// live settings so its next save doesn't drop it.
-#[cfg(target_os = "macos")]
 pub(crate) fn meeting_provider_chosen(
     ui: &mut Ui,
     choice: crate::app_settings::MeetingProviderChoice,
@@ -405,7 +412,6 @@ pub(crate) fn meeting_provider_chosen(
 
 /// The corner the recording capsule was dragged to, kept in the window's live
 /// settings so its next save doesn't move it back.
-#[cfg(target_os = "macos")]
 pub(crate) fn meeting_corner_moved(
     ui: &mut Ui,
     corner: crate::app_settings::MeetingIndicatorCorner,
@@ -414,7 +420,6 @@ pub(crate) fn meeting_corner_moved(
 }
 
 /// A meeting recording could not start or finish; the Meetings pane says why.
-#[cfg(target_os = "macos")]
 pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;
     ui.meetings.stop_pending = false;
@@ -958,6 +963,21 @@ impl Ui {
             },
             _ => {}
         }
+        #[cfg(not(target_os = "macos"))]
+        if let platform::PlatformRequest::Meeting(meeting) = &request
+            && matches!(self.host, platform::PlatformHost::Local(_))
+        {
+            let waker = self.modes.waker.clone();
+            let wake = move || {
+                if let Some(waker) = &waker {
+                    waker();
+                }
+            };
+            if let Err(error) = self.meetings.local.send(meeting.clone(), wake) {
+                self.error = Some(error);
+            }
+            return;
+        }
         let is_relaunch = request == platform::PlatformRequest::Relaunch;
         match self.host.send(request) {
             // The frame draws right after its actions, before the next poll,
@@ -1110,6 +1130,33 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
+/// Linux and Windows: the listing and a chosen transcript folder, from the
+/// meetings the window keeps itself.
+#[cfg(not(target_os = "macos"))]
+fn local_meetings(ui: &mut Ui) -> bool {
+    let mut changed = false;
+    if ui.pane == Pane::Meetings
+        && meetings::available(ui)
+        && let Some(listed) = ui.meetings.local.meetings()
+    {
+        ui.meetings.adopt(listed);
+        changed = true;
+    }
+    match ui.meetings.local.chosen_folder() {
+        Some(Ok(folder)) => {
+            ui.platform.meeting_folder_error = None;
+            ui.update(|settings| settings.meetings.output_folder = Some(folder));
+            changed = true;
+        }
+        Some(Err(error)) => {
+            ui.platform.meeting_folder_error = Some(error);
+            changed = true;
+        }
+        None => {}
+    }
+    changed
+}
+
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
@@ -1179,6 +1226,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     {
         ui.meetings.adopt(listed);
         changed = true;
+    }
+    #[cfg(not(target_os = "macos"))]
+    if matches!(ui.host, platform::PlatformHost::Local(_)) {
+        changed |= local_meetings(ui);
     }
     changed |= ui
         .activity

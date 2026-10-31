@@ -69,6 +69,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 transcribe-cpp = "=0.4.1"
 transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "e37c66b6df43af51fde8dec34f98a07aaf09564c", features = ["onnx"], optional = true }
+unicode-normalization = "0.1.25"
 unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
@@ -89,7 +90,6 @@ ratatui = "0.30.2"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
-unicode-normalization = "0.1.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ctrlc = { version = "3.5.2", features = ["termination"] }
