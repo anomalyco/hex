@@ -36,7 +36,7 @@ mod tests {
         let output = super::command(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "background_process::tests::background_child_has_no_console_window",
+                "desktop::background_process::tests::background_child_has_no_console_window",
                 "--nocapture",
             ])
             .env(CHILD, "1")

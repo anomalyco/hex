@@ -26,11 +26,11 @@ use super::models::{self, Target};
 use super::{Menu, Ui};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
+use crate::desktop::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
-use crate::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
-use crate::opencode_catalog::OpenCodeFeature;
+use crate::desktop::opencode_catalog::OpenCodeFeature;
+use crate::dictation::text_replacements::TextReplacement;
 use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};
-use crate::text_replacements::TextReplacement;
 
 const LIST_WIDTH: f32 = 240.0;
 const FIELD_WIDTH: f32 = 280.0;
@@ -478,11 +478,14 @@ fn choose_application(ui: &mut Ui) {
         return;
     }
     let waker = ui.modes.waker.clone();
-    ui.modes.chooser = Some(crate::file_dialog::open(application_dialog(), move || {
-        if let Some(waker) = &waker {
-            waker();
-        }
-    }));
+    ui.modes.chooser = Some(crate::desktop::file_dialog::open(
+        application_dialog(),
+        move || {
+            if let Some(waker) = &waker {
+                waker();
+            }
+        },
+    ));
 }
 
 fn application_dialog() -> Dialog {

@@ -2,8 +2,10 @@
 //! data: Meetings, the OS-only General rows, and the full tour.
 
 use super::*;
-use crate::login_item::LoginItemStatus;
-use crate::onboarding::{Input, Observation, PermissionAction, PermissionKind, Practice, Step};
+use crate::desktop::login_item::LoginItemStatus;
+use crate::desktop::onboarding::{
+    Input, Observation, PermissionAction, PermissionKind, Practice, Step,
+};
 use platform::{CalendarRequest, MeetingRequest, PlatformHost, PlatformRequest};
 
 fn asked(rt: &Runtime<Ui>) -> &[PlatformRequest] {
@@ -99,8 +101,8 @@ fn login_item(status: LoginItemStatus) -> platform::PlatformState {
     state
 }
 
-fn login_failed(status: Option<LoginItemStatus>) -> crate::login_item::LoginItemResult {
-    Err(crate::login_item::LoginItemFailure {
+fn login_failed(status: Option<LoginItemStatus>) -> crate::desktop::login_item::LoginItemResult {
+    Err(crate::desktop::login_item::LoginItemFailure {
         status,
         message: "Operation not permitted".into(),
     })
@@ -1305,7 +1307,7 @@ fn the_mac_tour_asks_each_permission_then_practices() {
         )]
     );
     // macOS grants everything and the model lands: setup moves on.
-    use crate::onboarding::PermissionState::Ready;
+    use crate::desktop::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
@@ -1414,7 +1416,7 @@ fn platform_goldens() {
 
 #[test]
 fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
-    use crate::voice_filter::VoiceFilterMode;
+    use crate::audio::voice_filter::VoiceFilterMode;
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
     tap(&mut rt, "fun-mode/segment1");
     assert_eq!(
@@ -1466,10 +1468,10 @@ fn try_it_records_and_plays_through_the_host() {
         [
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Record),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Play(
-                crate::hex_microphone::DemoPlaybackTrack::CallHears
+                crate::audio::hex_microphone::DemoPlaybackTrack::CallHears
             )),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::SelectSource(
-                crate::hex_microphone::DemoSourceKind::Recording
+                crate::audio::hex_microphone::DemoSourceKind::Recording
             )),
         ]
     );
@@ -1520,7 +1522,7 @@ fn voice_filter_shows_only_while_its_labs_toggle_is_on() {
 fn hud_lab_tunes_dot_scope() {
     let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
     assert!(rt.find("dot-glow").is_some());
-    rt.state.platform.hud.tuning = crate::dot_scope::Tuning {
+    rt.state.platform.hud.tuning = crate::rune_hud::dot_scope::Tuning {
         glow: 2.0,
         ..Default::default()
     };
@@ -1547,14 +1549,14 @@ fn hud_lab_tunes_dot_scope() {
     tap(&mut rt, "dot-scope-reset");
     assert_eq!(
         rt.state.platform.hud.tuning,
-        crate::dot_scope::Tuning::default()
+        crate::rune_hud::dot_scope::Tuning::default()
     );
     assert!(!rt.state.hud_saved);
 }
 
 #[test]
 fn hud_lab_picks_dot_scope_processing_placement_and_level() {
-    use crate::dot_scope::{Placement, Processing};
+    use crate::rune_hud::dot_scope::{Placement, Processing};
     let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
     tap(&mut rt, "dot-processing/segments/segment2");
     tap(&mut rt, "dot-placement/segments/segment2");

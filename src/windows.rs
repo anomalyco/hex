@@ -23,8 +23,10 @@ use windows_sys::Win32::System::Console::{
 };
 
 use crate::audio::{AudioInput, AudioInputEvent};
-use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
-use crate::local_transcriber::LocalTranscriber;
+use crate::desktop::events::{
+    DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+};
+use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
 const DEFAULT_MODEL: &str = "parakeet_unified_en";
@@ -173,7 +175,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         }
         Command::Listen { device, selection } => {
             shutdown.store(false, Ordering::Relaxed);
-            let _instance = crate::instance::acquire("windows-listener")?;
+            let _instance = crate::desktop::instance::acquire("windows-listener")?;
             crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
@@ -260,7 +262,7 @@ fn detach_from_console() {
 /// Feeds the clip to a live stream as capture would, holding back the last
 /// 200 ms as the release tail, then measures each path's release latency.
 fn stream_bench(wav: &Path, speed: f64, selection: &TranscriptionSelection) -> Result<()> {
-    let samples = crate::local_transcriber::read_wav_for_parakeet(wav)?;
+    let samples = crate::transcription::local_transcriber::read_wav_for_parakeet(wav)?;
     let audio_ms = samples.len() / 16;
     let mut transcriber = LocalTranscriber::load(selection)?;
     // A warm app has already run inputs of this size; exclude first-run setup.
@@ -342,7 +344,7 @@ fn capture(
     shutdown: &AtomicBool,
 ) -> Result<()> {
     shutdown.store(false, Ordering::Relaxed);
-    let _instance = crate::instance::acquire("windows-capture")?;
+    let _instance = crate::desktop::instance::acquire("windows-capture")?;
     let mut transcriber = LocalTranscriber::load(selection)?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,

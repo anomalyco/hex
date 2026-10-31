@@ -13,7 +13,7 @@ struct Cli {
 }
 
 use crate::control::cli::ControlCli;
-const FIXTURE: &str = include_str!("../tests/fixtures/history.json");
+const FIXTURE: &str = include_str!("../../tests/fixtures/history.json");
 
 fn args(extra: &[&str]) -> HistoryArgs {
     let cli =
@@ -295,7 +295,7 @@ fn meeting_json_contract_snapshot() {
     let meeting = library.meeting("1790000500000-1002").unwrap();
     let json = meeting_json(&meeting, OffsetRange::default(), NOW).unwrap();
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/meeting-cli.json")).unwrap();
+        serde_json::from_str(include_str!("../../tests/fixtures/meeting-cli.json")).unwrap();
     assert_eq!(json, expected);
     let scan = crate::meeting::query::Scan {
         meetings: vec![meeting],

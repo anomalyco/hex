@@ -321,7 +321,7 @@ mod tests {
 
     use super::super::{LocalApi, LocalApiOptions, current_health};
     use super::*;
-    use crate::events::EventLog;
+    use crate::desktop::events::EventLog;
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 

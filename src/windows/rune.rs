@@ -37,10 +37,10 @@ use crate::desktop::host::{
     DesktopUpdateStatus,
 };
 use crate::desktop::i18n::tr_fill;
+use crate::desktop::tray_menu::{TrayCommand, TrayView};
 use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription::models::TranscriptionModelId;
-use crate::tray_menu::{TrayCommand, TrayView};
 use crate::windows::app::WindowsDesktopHost;
 
 /// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
@@ -96,14 +96,14 @@ pub(crate) enum ShortcutTarget {
 #[derive(Clone, PartialEq)]
 pub(crate) struct Published {
     /// What the listener last reported doing, from the event log.
-    pub(crate) activity: Option<crate::events::VoiceState>,
+    pub(crate) activity: Option<crate::desktop::events::VoiceState>,
     pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
     pub(crate) settings: AppSettings,
     /// The running listener's state, for the tray.
-    pub(crate) state: Option<crate::events::VoiceState>,
+    pub(crate) state: Option<crate::desktop::events::VoiceState>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -559,7 +559,7 @@ fn tray_view_for(published: &Published) -> TrayView {
             published.listener.running,
             published.state,
             &published.update_status,
-            crate::tray_menu::model_menu_entries(
+            crate::desktop::tray_menu::model_menu_entries(
                 &published.settings,
                 published.transcription.preparing.is_some(),
                 crate::transcription::models::is_installed,
@@ -714,7 +714,7 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                     }
                     TrayCommand::Update => {
                         let Some(action) = published.and_then(|published| {
-                            crate::tray_menu::update_action(&published.update_status)
+                            crate::desktop::tray_menu::update_action(&published.update_status)
                         }) else {
                             return;
                         };

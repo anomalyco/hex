@@ -14,114 +14,50 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
-mod background_priority;
-mod background_process;
-#[cfg(target_os = "macos")]
-mod browser_media;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]
 mod capture_host;
-#[cfg(target_os = "macos")]
-mod config;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod context;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
-#[cfg(all(
-    target_arch = "x86_64",
-    any(target_os = "linux", target_os = "windows")
-))]
-mod cpu_floor;
-#[cfg(all(debug_assertions, target_os = "macos"))]
-mod dashboard;
 mod desktop;
 mod dev_build;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod dot_scope;
 mod durable;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod events;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
-mod file_dialog;
-mod filler_words;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod gguf_session;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod hex_microphone;
 mod history;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod hud_placement;
-mod idle_sleep;
-mod input_level;
-mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
-mod keyboard_model_switching;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
-mod live_text;
 mod local_api;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-mod local_transcriber;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod login_item;
 #[cfg(target_os = "macos")]
 mod macos_rune;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod onboarding;
-mod opencode_catalog;
-mod opencode_service;
-mod output_ducking;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
-mod pause_segmenter;
-#[cfg(target_os = "macos")]
-mod permission_guide;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod personal_commands;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod process_exit;
 #[cfg(target_os = "macos")]
 mod recognition;
-#[cfg(target_os = "macos")]
-mod recording_environment;
 mod rune_hud;
 mod rune_ui;
-mod speech_detector;
-mod spoken_formatting;
-mod spoken_symbols;
-mod spring;
-#[cfg(target_os = "macos")]
-mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
-mod text_replacements;
-mod transcript;
-mod transcript_cli;
 mod transcription;
-mod tray_menu;
 mod updater;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod vocabulary;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod voice_filter;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -248,13 +184,13 @@ enum DevCommand {
     /// Drive a deterministic HUD state.
     Hud {
         #[arg(value_enum)]
-        state: developer_control::DeveloperHudState,
+        state: control::developer_control::DeveloperHudState,
     },
     #[cfg(debug_assertions)]
     /// Open the app and select a pane.
     Show {
         #[arg(value_enum)]
-        pane: developer_control::DeveloperPane,
+        pane: control::developer_control::DeveloperPane,
     },
     #[cfg(all(debug_assertions, hex_capture))]
     /// Run a capture headlessly, feeding WAV files in place of the
@@ -378,23 +314,25 @@ fn main() -> Result<()> {
         Some(Command::Meeting {
             command: MeetingCommand::List,
         }) => {
-            return transcript_cli::meetings(&transcript_cli::MeetingsCommand::List(
-                Default::default(),
-            ));
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::List(Default::default()),
+            );
         }
         Some(Command::Meeting {
             command: MeetingCommand::Show { id },
         }) => {
-            return transcript_cli::meetings(&transcript_cli::MeetingsCommand::Show {
-                id: id.clone(),
-                md: true,
-                json: false,
-                srt: false,
-                vtt: false,
-                from: None,
-                to: None,
-                chapter: None,
-            });
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::Show {
+                    id: id.clone(),
+                    md: true,
+                    json: false,
+                    srt: false,
+                    vtt: false,
+                    from: None,
+                    to: None,
+                    chapter: None,
+                },
+            );
         }
         _ => {}
     }
@@ -413,7 +351,7 @@ fn main() -> Result<()> {
             },
     }) = &cli.command
     {
-        return voice_filter::render_wav_command(
+        return audio::voice_filter::render_wav_command(
             input,
             mode,
             params.as_deref(),
@@ -441,11 +379,11 @@ fn main() -> Result<()> {
     match command {
         Command::App { device, rune_args } => open_app(event_path, device, rune_args),
         Command::Listen { device } => {
-            let _instance = instance::acquire("listener")?;
+            let _instance = desktop::instance::acquire("listener")?;
             labs::log_launch();
             let settings = app_settings::AppSettings::load()?;
-            hex_microphone::host_service();
-            let events = events::EventLog::create(&event_path)?;
+            audio::hex_microphone::host_service();
+            let events = desktop::events::EventLog::create(&event_path)?;
             let history = match history::History::open_default(settings.history_retention) {
                 Ok(history) => Some(history),
                 Err(error) => {
@@ -467,10 +405,10 @@ fn main() -> Result<()> {
         Command::Dev { command } => {
             #[cfg(debug_assertions)]
             {
-                use developer_control::{DeveloperCommand, DeveloperReply};
+                use control::developer_control::{DeveloperCommand, DeveloperReply};
                 let command = match command {
                     DevCommand::Dashboard => {
-                        return dashboard::run(event_path);
+                        return control::dashboard::run(event_path);
                     }
                     DevCommand::Status => DeveloperCommand::Status,
                     DevCommand::Hud { state } => DeveloperCommand::Hud { state },
@@ -635,9 +573,9 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
         crate::rune_ui::render_app(rune_args).run();
         return Ok(());
     }
-    let _instance = instance::acquire("listener")?;
+    let _instance = desktop::instance::acquire("listener")?;
     labs::log_launch();
-    hex_microphone::host_service();
+    audio::hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
         meeting::watcher::ListenerConfig { event_path, device },
@@ -709,7 +647,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn developer_show_accepts_every_developer_pane_spelling() {
-        use super::{DevCommand, developer_control::DeveloperPane};
+        use super::DevCommand;
+        use crate::control::developer_control::DeveloperPane;
 
         for (pane, expected) in [
             ("hud-lab", DeveloperPane::HudLab),
@@ -730,8 +669,8 @@ mod tests {
 
     #[test]
     fn control_commands_parse_beside_the_read_commands() {
-        use super::transcript_cli;
         use crate::control::cli::CommandsCommand;
+        use crate::control::transcript_cli;
         use clap::CommandFactory;
 
         Cli::command().debug_assert();
@@ -912,7 +851,7 @@ mod tests {
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
-    cpu_floor::require();
+    transcription::cpu_floor::require();
     linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
@@ -923,6 +862,6 @@ fn main() -> Result<()> {
     windows::restrict_dll_search();
     windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
-    cpu_floor::require();
+    transcription::cpu_floor::require();
     windows::run(&SHUTDOWN)
 }

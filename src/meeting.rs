@@ -12,8 +12,8 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
 use crate::app_settings::MeetingRetention;
+use crate::desktop::events::now_ms;
 use crate::durable::{sync_directory, sync_file};
-use crate::events::now_ms;
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
@@ -456,7 +456,7 @@ pub fn record(
                 }
             };
         let capture_clock = Instant::now();
-        let sleep_prevention = crate::idle_sleep::prevent_sleep();
+        let sleep_prevention = crate::audio::idle_sleep::prevent_sleep();
         let sink = |source, drops: &Arc<AtomicU64>| capture::PacketSink {
             source,
             sender: sender.clone(),
@@ -522,7 +522,7 @@ pub fn record(
         stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
-        if crate::process_exit::quitting() && has_recorded_audio(&manifest) {
+        if crate::desktop::process_exit::quitting() && has_recorded_audio(&manifest) {
             // Final transcription would outlast quitting's drain.
             drop(rolling.finish());
             fs::write(meeting_dir.join(FINAL_PENDING_FILE), b"")?;
@@ -917,7 +917,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
             write_manifest(&directory, &manifest)?;
             Ok(Some(manifest))
         }
-        Err(error) if crate::process_exit::quitting() => Err(error),
+        Err(error) if crate::desktop::process_exit::quitting() => Err(error),
         Err(error) => {
             manifest.status = MeetingStatus::Interrupted;
             manifest.error = Some(error.to_string());

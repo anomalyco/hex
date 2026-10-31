@@ -1,4 +1,4 @@
-use crate::events::{
+use crate::desktop::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
 };
 

@@ -14,7 +14,7 @@
 //! Closing the window hides it; Quit (menu bar, ⌘Q, `hex quit`, `hex restart`
 //! and the onboarding relaunch after scheduling the new copy, or Ctrl-C) ends
 //! the loop, then stops and joins everything and ends the process with
-//! `_exit` ([`crate::process_exit`]). AppKit's own terminate
+//! `_exit` ([`crate::desktop::process_exit`]). AppKit's own terminate
 //! (the quit Apple event, logout) does the same from its
 //! will-terminate notification.
 //!
@@ -45,18 +45,19 @@ use crate::desktop::host::{
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::dictation::indicator::DictationIndicatorEvent;
+use crate::macos_rune::status_item::StatusItemAction;
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
-use crate::status_item::StatusItemAction;
 use crate::transcription::models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
 use crate::transcription::preparation::TranscriptionPreparation;
 
 mod control;
+pub(crate) mod status_item;
 
 #[cfg(test)]
 mod tests;
@@ -247,7 +248,7 @@ pub(crate) fn window_closed() {
         .unwrap_or(false);
     crate::app_settings::set_dock_icon_visible(crate::app_settings::dock_icon_visible(
         show_dock_icon,
-        crate::status_item::installed(),
+        crate::macos_rune::status_item::installed(),
     ));
 }
 
@@ -296,9 +297,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         .enabled
         .then(|| crate::keyboard_input_sources::current(mtm))
         .flatten();
-    let setup_ready = crate::onboarding::status(&settings.transcription).ready();
-    crate::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
-    let onboarding_completed = crate::onboarding::completion_recorded();
+    let setup_ready = crate::desktop::onboarding::status(&settings.transcription).ready();
+    crate::desktop::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
+    let onboarding_completed = crate::desktop::onboarding::completion_recorded();
     let history = match crate::history::History::open_default(settings.history_retention) {
         Ok(history) => Some(history),
         Err(error) => {
@@ -307,7 +308,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         }
     };
     let event_path = listener.event_path.clone();
-    let event_log = crate::events::EventLog::create(&event_path)?;
+    let event_log = crate::desktop::events::EventLog::create(&event_path)?;
     let drained_event_log = event_log.clone();
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
@@ -382,7 +383,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     tracing::error!(%error, "desktop recognition stopped");
                     let message = format!("{error:#}");
                     if message.contains("event tap") {
-                        crate::onboarding::note_listener_failure();
+                        crate::desktop::onboarding::note_listener_failure();
                     }
                     message
                 }
@@ -509,7 +510,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 tracing::error!("{name} worker panicked during shutdown");
             }
         }
-        crate::recording_environment::wait_until_restored(Duration::from_secs(2));
+        crate::audio::recording_environment::wait_until_restored(Duration::from_secs(2));
         if let Err(error) = drained_event_log.flush_within(Duration::from_millis(500)) {
             tracing::warn!(%error, "could not flush the event log before quitting");
         }
@@ -548,11 +549,11 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
             state.timer.invalidate();
         }
     });
-    crate::process_exit::finish(&DRAIN)
+    crate::desktop::process_exit::finish(&DRAIN)
 }
 
 /// Stops and joins the runtime, listener, meeting controller, and local API.
-static DRAIN: crate::process_exit::Drain = crate::process_exit::Drain::new();
+static DRAIN: crate::desktop::process_exit::Drain = crate::desktop::process_exit::Drain::new();
 
 // ---------------------------------------------------------------------------
 // Runtime thread
@@ -567,7 +568,7 @@ fn run_runtime(
     listener_failure: Arc<Mutex<Option<String>>>,
 ) {
     let mut runtime = Runtime {
-        keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+        keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
             initial_input_source,
         ),
@@ -617,7 +618,7 @@ fn same_model_and_language(left: &TranscriptionSelection, right: &TranscriptionS
 struct Runtime {
     settings: AppSettings,
     preparation: TranscriptionPreparation,
-    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     automatic_preparation: bool,
     /// Starts the listener once setup is ready; `None` once started.
     recognition_start: Option<SyncSender<()>>,
@@ -739,7 +740,7 @@ impl Runtime {
             }
         }
         if self.recognition_start.is_some()
-            && crate::onboarding::status(&self.settings.transcription).ready()
+            && crate::desktop::onboarding::status(&self.settings.transcription).ready()
             && let Some(start) = self.recognition_start.take()
         {
             let _ = start.try_send(());
@@ -795,7 +796,7 @@ struct Pump {
     hud: crate::rune_hud::HudSender,
     status_actions: Option<Receiver<StatusItemAction>>,
     controller_events: Receiver<ControllerEvent>,
-    developer_calls: Receiver<crate::developer_control::DeveloperCall>,
+    developer_calls: Receiver<crate::control::developer_control::DeveloperCall>,
     control_calls: Receiver<crate::control::ControlCall>,
     meeting_waiters: Vec<control::MeetingWaiter>,
     meeting_state: MeetingMenuState,
@@ -825,7 +826,7 @@ struct Launch {
 }
 
 /// AppKit's terminate (the quit Apple event, logout) calls `exit` right after
-/// this notification, so Hex finishes there ([`crate::process_exit`]).
+/// this notification, so Hex finishes there ([`crate::desktop::process_exit`]).
 fn observe_termination(target: &MenuTarget) {
     // SAFETY: the target outlives the observer (kept in LAUNCH, then PUMP,
     // for the app's life), and the selector matches its method.
@@ -860,7 +861,7 @@ fn start_main_thread() {
     let Some(Launch { mut pump, target }) = LAUNCH.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
-    pump.status_actions = match crate::status_item::install() {
+    pump.status_actions = match crate::macos_rune::status_item::install() {
         Ok(actions) => Some(actions),
         Err(error) => {
             tracing::error!(%error, "could not install Hex status item; opening the window");
@@ -1023,7 +1024,7 @@ impl Pump {
         if let Some(overlays) = &mut self.capture_overlays
             && let Some(shown) = overlays.follow_recordings()
         {
-            crate::status_item::update_overlays_in_recordings(shown);
+            crate::macos_rune::status_item::update_overlays_in_recordings(shown);
         }
         if self.status_actions.is_none() {
             return;
@@ -1031,7 +1032,7 @@ impl Pump {
         let now = Instant::now();
         if now >= self.model_menu_at {
             if let Some(published) = self.runtime.published() {
-                crate::status_item::update_transcription(
+                crate::macos_rune::status_item::update_transcription(
                     &published.settings,
                     &published.preparation,
                 );
@@ -1039,11 +1040,11 @@ impl Pump {
             self.model_menu_at = now + MODEL_MENU_REFRESH;
         }
         if now >= self.meeting_menu_at {
-            crate::status_item::update_meeting(
+            crate::macos_rune::status_item::update_meeting(
                 &self.meeting_state,
                 crate::app_settings::meetings_enabled(),
             );
-            crate::status_item::update_software(&update_status());
+            crate::macos_rune::status_item::update_software(&update_status());
             self.meeting_menu_at = now + MEETING_MENU_REFRESH;
         }
     }
@@ -1189,10 +1190,10 @@ impl Pump {
 
     fn developer(
         &mut self,
-        command: crate::developer_control::DeveloperCommand,
+        command: crate::control::developer_control::DeveloperCommand,
         indicator: &mut DictationIndicatorUi,
-    ) -> crate::developer_control::DeveloperReply {
-        use crate::developer_control::{
+    ) -> crate::control::developer_control::DeveloperReply {
+        use crate::control::developer_control::{
             DeveloperCommand, DeveloperHudState, DeveloperPane, DeveloperReply,
         };
         match command {
@@ -1299,7 +1300,7 @@ objc2::define_class!(
         /// `-[NSApplication terminate:]` calls `exit` right after this.
         #[unsafe(method(applicationWillTerminate:))]
         fn application_will_terminate(&self, _notification: Option<&AnyObject>) {
-            crate::process_exit::finish(&DRAIN);
+            crate::desktop::process_exit::finish(&DRAIN);
         }
     }
 );

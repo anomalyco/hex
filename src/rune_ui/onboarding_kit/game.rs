@@ -36,7 +36,7 @@ use super::live;
 use super::mic::mic_level;
 use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
-use crate::onboarding::Practice;
+use crate::desktop::onboarding::Practice;
 
 const STAGE_W: f32 = 880.0;
 const STAGE_H: f32 = 620.0;
@@ -708,7 +708,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         session.play.forget();
     }
     session.practice = practice;
-    let partial = crate::live_text::current().filter(|_| held);
+    let partial = crate::dictation::live_text::current().filter(|_| held);
     let words = match &partial {
         Some(partial) if !partial.stable.trim().is_empty() => Some(partial.stable.as_str()),
         _ => Some(session.typed.as_str()).filter(|typed| !typed.trim().is_empty()),
@@ -785,7 +785,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     let meter = match &session.script {
         Some(script) => script.meter,
         None => s.live_hold_from.is_some().then(|| {
-            let level = crate::input_level::recent().unwrap_or(0.0);
+            let level = crate::audio::input_level::recent().unwrap_or(0.0);
             (level * 0.6, level)
         }),
     };

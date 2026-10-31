@@ -15,7 +15,9 @@ use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, advance_to};
-use crate::onboarding::{Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep};
+use crate::desktop::onboarding::{
+    Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep,
+};
 use crate::transcription::models::{
     self as transcription_models, TranscriptionModelId, TranscriptionSelection,
 };
@@ -41,7 +43,7 @@ pub(crate) struct Live {
     granted_at: Option<f64>,
     checked: Option<Checked>,
     /// Dictation streams send their live words to the practice field.
-    _live_words: crate::live_text::Demand,
+    _live_words: crate::dictation::live_text::Demand,
 }
 
 /// The last look at the disk and macOS.
@@ -114,8 +116,8 @@ fn start(ui: &mut Ui) {
     set_other_label(transcription_models::language_name(&other.language));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
-    let granted = status.microphone == crate::onboarding::PermissionState::Ready
-        && status.accessibility == crate::onboarding::PermissionState::Ready;
+    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
+        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
 
     let mut s = Onboard::new(Flow::FirstRun);
     s.speech = Speech::AfterDownload;
@@ -133,7 +135,7 @@ fn start(ui: &mut Ui) {
         choice,
         granted_at: None,
         checked: None,
-        _live_words: crate::live_text::demand(),
+        _live_words: crate::dictation::live_text::demand(),
     });
     let now = clock();
     s.now = now;
@@ -157,7 +159,7 @@ fn start(ui: &mut Ui) {
 /// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
     if ui.live() {
-        crate::onboarding::reset().map_err(|error| format!("{error:#}"))?;
+        crate::desktop::onboarding::reset().map_err(|error| format!("{error:#}"))?;
     }
     ui.select_pane(super::super::Pane::General, tx);
     ui.first_run = None;
@@ -251,8 +253,8 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         live.restart = view.restart;
         live.practice = view.practice;
     }
-    let granted = status.microphone == crate::onboarding::PermissionState::Ready
-        && status.accessibility == crate::onboarding::PermissionState::Ready;
+    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
+        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
     if granted {
         live.granted_at.get_or_insert(now);
     } else {
@@ -314,8 +316,8 @@ pub(super) fn finish(ui: &mut Ui) {
     let installed = ui.picker.selected_installed(&ui.settings);
     if ui.live()
         && ui.platform.setup_status(installed).ready()
-        && !crate::onboarding::completion_recorded()
-        && let Err(error) = crate::onboarding::record_completion()
+        && !crate::desktop::onboarding::completion_recorded()
+        && let Err(error) = crate::desktop::onboarding::record_completion()
     {
         tracing::warn!(%error, "could not record onboarding completion");
     }

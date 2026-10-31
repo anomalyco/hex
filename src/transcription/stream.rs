@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::pause_segmenter::{FRAME_SAMPLES, PauseSegmenter};
 use crate::transcription::engine::{Partial, TranscriptionEngine, YieldingStream};
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::pause_segmenter::{FRAME_SAMPLES, PauseSegmenter};
 
 pub(crate) const SAMPLE_RATE: usize = 16_000;
 /// How long a stream lives without audio or a heartbeat.
@@ -258,7 +258,7 @@ impl Engine for SharedEngine {
 
     fn quitting(&self) -> bool {
         #[cfg(target_os = "macos")]
-        return crate::process_exit::quitting();
+        return crate::desktop::process_exit::quitting();
         // Elsewhere the engine itself goes when Hex quits.
         #[cfg(not(target_os = "macos"))]
         false

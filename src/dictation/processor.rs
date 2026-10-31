@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::context::{ContextSelector, ContextSnapshot};
-use crate::opencode_service::Service;
-use crate::text_replacements::ReplacementSet;
-use crate::vocabulary::VocabularyEntry;
+use crate::desktop::opencode_service::Service;
+use crate::dictation::context::{ContextSelector, ContextSnapshot};
+use crate::dictation::text_replacements::ReplacementSet;
+use crate::dictation::vocabulary::VocabularyEntry;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const CATALOG_DEADLINE: Duration = Duration::from_secs(10);
@@ -273,7 +273,7 @@ impl Profiles {
         // corrections, so it is off for raw dictation and meetings.
         let formatted;
         let transcript = if crate::labs::spoken_formatting() {
-            formatted = crate::spoken_formatting::apply(transcript);
+            formatted = crate::dictation::spoken_formatting::apply(transcript);
             formatted.as_str()
         } else {
             transcript
@@ -281,7 +281,7 @@ impl Profiles {
         // Labs › Spoken symbols, likewise ahead of the corrections.
         let symbolized;
         let transcript = if crate::labs::spoken_symbols() {
-            symbolized = crate::spoken_symbols::apply(transcript);
+            symbolized = crate::dictation::spoken_symbols::apply(transcript);
             symbolized.as_str()
         } else {
             transcript
@@ -289,7 +289,7 @@ impl Profiles {
         // Labs › Remove filler words, likewise ahead of the corrections.
         let unfilled;
         let transcript = if crate::labs::filler_words() {
-            unfilled = crate::filler_words::apply(transcript);
+            unfilled = crate::dictation::filler_words::apply(transcript);
             unfilled.as_str()
         } else {
             transcript
@@ -302,7 +302,12 @@ impl Profiles {
                 transformations: profile.transformations.clone(),
             };
         }
-        let prompt = prompt(profile, &corrected, context, &crate::vocabulary::entries());
+        let prompt = prompt(
+            profile,
+            &corrected,
+            context,
+            &crate::dictation::vocabulary::entries(),
+        );
         let (text, observation) = generate_observed(
             &prompt,
             profile.model.as_ref(),
@@ -529,7 +534,7 @@ fn ranked_candidates_for(service: &Service) -> Vec<Model> {
 /// The running service's model catalog. Reads OpenCode's registration and
 /// talks loopback HTTP; never starts anything. Call off the UI thread.
 pub fn load_model_catalog() -> Result<Option<ModelCatalog>> {
-    let Some(service) = crate::opencode_service::find() else {
+    let Some(service) = crate::desktop::opencode_service::find() else {
         return Ok(None);
     };
     let models: ModelsResponse = opencode_api(&service, "/api/model")?;
@@ -626,7 +631,7 @@ pub struct Processed {
     pub transformations: Vec<String>,
 }
 
-pub type ProcessingObservation = crate::events::DictationProcessing;
+pub type ProcessingObservation = crate::desktop::events::DictationProcessing;
 
 impl Processed {
     /// `text` as heard, with no step run (Dictate without processing on the
@@ -737,8 +742,8 @@ fn generate_cancellable(
     cancelled: &AtomicBool,
 ) -> Result<String> {
     let started = Instant::now();
-    let service = crate::opencode_service::find()
-        .ok_or_else(|| eyre!(crate::opencode_service::NOT_RUNNING))?;
+    let service = crate::desktop::opencode_service::find()
+        .ok_or_else(|| eyre!(crate::desktop::opencode_service::NOT_RUNNING))?;
     generate_with_candidates(
         prompt,
         model,
@@ -1154,7 +1159,7 @@ mod tests {
     fn mode_corrections_run_before_registered_transformations() {
         let profile = Profile::new("Global", "")
             .replacements(ReplacementSet::new(&[
-                crate::text_replacements::TextReplacement {
+                crate::dictation::text_replacements::TextReplacement {
                     matched_phrase: "open code".into(),
                     output: "OpenCode".into(),
                 },
@@ -1198,7 +1203,7 @@ mod tests {
     fn generation_server(
         routes: Vec<(&'static str, u16, &'static str)>,
     ) -> (Service, thread::JoinHandle<Vec<Vec<u8>>>) {
-        let (url, server) = crate::opencode_service::tests::serve(
+        let (url, server) = crate::desktop::opencode_service::tests::serve(
             routes
                 .into_iter()
                 .map(|(path, status, body)| (format!("POST {path}"), status, body.to_owned()))
@@ -1212,7 +1217,10 @@ mod tests {
                 .map(|(_, body)| body)
                 .collect()
         });
-        (crate::opencode_service::tests::fixture(&url), server)
+        (
+            crate::desktop::opencode_service::tests::fixture(&url),
+            server,
+        )
     }
 
     #[test]

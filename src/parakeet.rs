@@ -10,16 +10,16 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
-use crate::gguf_session::OfflineGgufSession;
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
 use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::gguf_session::OfflineGgufSession;
 use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, model_path, validate,
 };
@@ -623,12 +623,13 @@ fn run_processor_worker(
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
             continue;
         }
-        let mut processed = process_job_text(&job, crate::config::dictation_profiles, || {
-            let _ = events.send(WorkerEvent::Stage {
-                job_id: job.job_id,
-                stage: DictationJobStage::Processing,
+        let mut processed =
+            process_job_text(&job, crate::dictation::config::dictation_profiles, || {
+                let _ = events.send(WorkerEvent::Stage {
+                    job_id: job.job_id,
+                    stage: DictationJobStage::Processing,
+                });
             });
-        });
         processed.apply_transformations(transformations, &job.context, &job.control.cancelled);
         if job.control.is_cancelled() {
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
@@ -733,12 +734,12 @@ pub fn transcribe_with_words(
 fn wait_for_dictation_idle() -> Result<()> {
     let started = Instant::now();
     while dictation_busy()
-        && !crate::process_exit::quitting()
+        && !crate::desktop::process_exit::quitting()
         && started.elapsed() < WORD_DICTATION_WAIT
     {
         thread::sleep(std::time::Duration::from_millis(50));
     }
-    if crate::process_exit::quitting() {
+    if crate::desktop::process_exit::quitting() {
         return Err(eyre!("Hex is quitting"));
     }
     Ok(())
@@ -945,8 +946,8 @@ pub(crate) fn dictation_busy_for_test() -> DictationBusyForTest {
 /// and release tail, before the clip needs the model.
 pub(crate) fn dictation_busy() -> bool {
     DICTATION_INFERENCE.load(Ordering::Acquire) > 0
-        || crate::recording_environment::capture_active()
-        || crate::recording_environment::intentional_recording_active()
+        || crate::audio::recording_environment::capture_active()
+        || crate::audio::recording_environment::intentional_recording_active()
 }
 
 /// Runs `work` at utility QoS on the dictation inference thread, then
@@ -1240,7 +1241,7 @@ impl Parakeet {
             ..Default::default()
         };
         if let (Some(selection), Some(definition)) = (selection, definition) {
-            let runtime_language = crate::gguf_session::validate_gguf_artifact(
+            let runtime_language = crate::transcription::gguf_session::validate_gguf_artifact(
                 model_path,
                 definition,
                 &architecture,

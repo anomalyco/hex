@@ -44,7 +44,7 @@ fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::ContextSnapshot;
+    use crate::dictation::context::ContextSnapshot;
 
     #[test]
     fn configured_mode_profiles_match_application_context() {

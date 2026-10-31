@@ -832,7 +832,7 @@ impl Ui {
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.hud.tuning = crate::dot_scope::lab();
+        ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
         ui
@@ -984,17 +984,17 @@ impl Ui {
     fn ask(&mut self, request: platform::PlatformRequest) {
         match &request {
             platform::PlatformRequest::Permission(
-                crate::onboarding::PermissionAction::RequestMicrophone,
+                crate::desktop::onboarding::PermissionAction::RequestMicrophone,
             ) => self
                 .platform
-                .note_asked(crate::onboarding::PermissionKind::Microphone),
+                .note_asked(crate::desktop::onboarding::PermissionKind::Microphone),
             platform::PlatformRequest::Permission(
-                crate::onboarding::PermissionAction::ShowGuide(kind),
+                crate::desktop::onboarding::PermissionAction::ShowGuide(kind),
             ) => {
                 // Previews grant Screen Recording on the second ask, as for
                 // system audio.
                 #[cfg(hex_capture)]
-                if *kind == crate::onboarding::PermissionKind::ScreenRecording
+                if *kind == crate::desktop::onboarding::PermissionKind::ScreenRecording
                     && self.host.is_fixture()
                     && self.platform.asked(*kind)
                     && let Some(view) = self.platform.scrawl.as_mut()
@@ -1004,7 +1004,7 @@ impl Ui {
                 self.platform.note_asked(*kind);
             }
             platform::PlatformRequest::SystemAudio => {
-                let kind = crate::onboarding::PermissionKind::SystemAudio;
+                let kind = crate::desktop::onboarding::PermissionKind::SystemAudio;
                 // Previews grant on the second ask, so a scene can play
                 // Allow, waiting, and Allowed in turn.
                 if self.host.is_fixture() && self.platform.asked(kind) {
@@ -1038,7 +1038,7 @@ impl Ui {
                 platform::PlatformHost::Native(_) => {
                     self.platform.request_login_item(*enabled);
                     if let Err(message) = self.host.send(request) {
-                        let failure = crate::login_item::LoginItemFailure {
+                        let failure = crate::desktop::login_item::LoginItemFailure {
                             status: None,
                             message,
                         };
@@ -2081,11 +2081,11 @@ const SCENES: &[Scene] = &[
     }),
     ("onboarding", |ui| {
         *ui = portal_fixture();
-        onboarding::fixture(ui, crate::onboarding::Step::Welcome, false);
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Welcome, false);
     }),
     ("onboarding-setup", |ui| {
         *ui = portal_fixture();
-        onboarding::fixture(ui, crate::onboarding::Step::Setup, true);
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
@@ -2142,7 +2142,7 @@ const SCENES: &[Scene] = &[
         ]
         .into_iter()
         .map(
-            |(id, name, language)| crate::keyboard_model_switching::InputSource {
+            |(id, name, language)| crate::transcription::keyboard_model_switching::InputSource {
                 id: id.into(),
                 name: name.into(),
                 languages: vec![language.into()],
@@ -2223,13 +2223,14 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-permissions", |ui| {
         *ui = mac_fixture();
-        use crate::onboarding::PermissionState;
+        use crate::desktop::onboarding::PermissionState;
         ui.platform.permissions.microphone = PermissionState::NeedsSettings;
         ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
         ui.platform
             .permissions_asked
-            .push(crate::onboarding::PermissionKind::Accessibility);
-        ui.platform.login_item = Some(crate::login_item::LoginItemStatus::RequiresApproval);
+            .push(crate::desktop::onboarding::PermissionKind::Accessibility);
+        ui.platform.login_item =
+            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
         ui.platform.accessibility_renamed = true;
     }),
     ("mac-settings-pause-browser", |ui| {
@@ -2379,10 +2380,10 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-voice-filter-muted", |ui| {
         *ui = mac_fixture();
-        ui.platform.tuning.mode = crate::voice_filter::VoiceFilterMode::Muted;
+        ui.platform.tuning.mode = crate::audio::voice_filter::VoiceFilterMode::Muted;
         ui.platform.demo = Some(fun::preview_demo(
             false,
-            Some(crate::hex_microphone::DemoPlaybackTrack::CallHears),
+            Some(crate::audio::hex_microphone::DemoPlaybackTrack::CallHears),
         ));
         ui.pane = Pane::VoiceFilter;
     }),
@@ -2410,7 +2411,7 @@ const SCENES: &[Scene] = &[
         ui.host = platform::PlatformHost::Fixture(Vec::new());
         if let Some(source) = &mut ui.platform.hex_microphone {
             source.driver_loaded = false;
-            source.action_state = crate::hex_microphone::DriverActionState::Failed(
+            source.action_state = crate::audio::hex_microphone::DriverActionState::Failed(
                 "pw-cat was not found; Hex Microphone needs PipeWire".into(),
             );
         }

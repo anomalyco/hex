@@ -23,9 +23,9 @@ use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{IndicatorPosition, RecordingAudioBehavior, UpdateChannel};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::desktop::login_item::LoginItemStatus;
+use crate::desktop::onboarding::PermissionKind;
 use crate::dictation::ShortcutMode;
-use crate::login_item::LoginItemStatus;
-use crate::onboarding::PermissionKind;
 use crate::transcription::models as transcription_models;
 
 /// The missing permissions, the listener (Windows and Linux), the basics,
@@ -189,7 +189,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// The selected speech model's download, while it is not installed, so
 /// Hex can't listen yet. Fixtures that name no installed models say nothing,
 /// so their rows never depend on this machine's models.
-fn missing_model(ui: &Ui) -> Option<crate::onboarding::ModelProgress> {
+fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }
@@ -579,7 +579,7 @@ impl MicLevel {
     /// Plays the mono WAV at `path` from virtual time zero.
     pub(super) fn playing(path: &Path) -> Self {
         Self {
-            recording: crate::voice_filter::read_wav_mono_f32(path).ok(),
+            recording: crate::audio::voice_filter::read_wav_mono_f32(path).ok(),
             ..Self::default()
         }
     }
@@ -645,7 +645,7 @@ pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     let (peak, playing) = match ui.mic_level.recording_peak(clock) {
         Some(peak) => (peak.or(Some(0.0)), peak.is_some()),
-        None if ui.live() && visible => (crate::input_level::recent(), true),
+        None if ui.live() && visible => (crate::audio::input_level::recent(), true),
         // Other fixtures keep the level they set.
         _ => return false,
     };

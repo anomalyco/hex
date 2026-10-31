@@ -32,7 +32,7 @@ General › Vocabulary   // vocabulary.settings; after Language
     `hex settings set vocabulary_boost off|light|normal|strong`
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
-Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; gguf_session::with_vocabulary
+Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
 ├── Only with Labs › Vocabulary biasing on (`labs.vocabulary_biasing`, off by
 │   default; labs.md) -> off: no run takes the list; the sheet says so, and
 │   rewriting and search still use it
@@ -55,7 +55,7 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transc
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
 └── SenseVoice, Cohere, Apple Speech -> no vocabulary in transcription
 
-Context prompt (Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; gguf_session::with_vocabulary
+Context prompt (Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
 ├── Every whole-clip run reads the list at its start: dictation, meetings,
 │   captures, the local API; live streams run without it
@@ -124,18 +124,18 @@ hex vocabulary listed in --help          // control/cli.rs: add #[command(hide =
 Prompt wording                           // dictation/processor.rs: vocabulary_lines
 Chapter prompt wording                   // meeting/chapters.rs: vocabulary_line
 Short-name rule                          // meeting/query.rs: SOUND_ALIKE_MIN_CONSONANTS
-Suggested terms                          // vocabulary.rs: SUGGESTED
-Boost strengths (nats per term piece)    // vocabulary.rs: VocabularyBoost::nats
+Suggested terms                          // dictation/vocabulary.rs: SUGGESTED
+Boost strengths (nats per term piece)    // dictation/vocabulary.rs: VocabularyBoost::nats
 ```
 
-Sources: [vocabulary.rs](../../src/vocabulary.rs),
+Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
 [meeting/query.rs](../../src/meeting/query.rs) (`vocabulary_aliases`,
 `sounds_alike`), [dictation/processor.rs](../../src/dictation/processor.rs)
 (`vocabulary_lines`), and [control.rs](../../src/control.rs)
 (`edit_vocabulary`).
 
-Checks: `vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
+Checks: `dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
 first 64 terms and their spellings reaching transcription, the bounded prompt,
 folding hints, boost names);

@@ -21,7 +21,7 @@ const RESCAN: Duration = Duration::from_secs(1);
 pub(super) struct LocalMeetings {
     feed: MeetingFeed,
     /// The transcript folder panel, while it is open.
-    folder_choice: Option<crate::file_dialog::Pending>,
+    folder_choice: Option<crate::desktop::file_dialog::Pending>,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -57,9 +57,9 @@ impl LocalMeetings {
                 Ok(())
             }
             MeetingRequest::ChooseFolder => {
-                use crate::file_dialog::{Dialog, Target};
+                use crate::desktop::file_dialog::{Dialog, Target};
                 if self.folder_choice.is_none() {
-                    self.folder_choice = Some(crate::file_dialog::open(
+                    self.folder_choice = Some(crate::desktop::file_dialog::open(
                         Dialog {
                             title: tr("Transcript folder").into(),
                             target: Target::Folder,
@@ -119,7 +119,7 @@ impl MeetingFeed {
             }
         };
         let scan = library.scan().map_err(|error| format!("{error:#}"))?;
-        let now_ms = crate::events::now_ms();
+        let now_ms = crate::desktop::events::now_ms();
         Ok(scan
             .meetings
             .iter()
@@ -251,7 +251,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "hex-copy-section-{}-{}",
             std::process::id(),
-            crate::events::now_ms()
+            crate::desktop::events::now_ms()
         ));
         let id = "1790003000000-1005";
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -285,7 +285,7 @@ mod tests {
 
         let library = crate::meeting::query::Library::new(&root);
         let meeting = library.meeting(id).unwrap();
-        let now_ms = crate::events::now_ms();
+        let now_ms = crate::desktop::events::now_ms();
         let pane = pane_meeting(&meeting, now_ms);
         let chapters = &meeting.manifest.chapters;
         for (index, chapter) in pane.chapters.iter().enumerate() {

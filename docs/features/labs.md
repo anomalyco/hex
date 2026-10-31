@@ -101,7 +101,7 @@ settings load (macOS), with a one-time note in General
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
 on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
 `transcription/engine`'s worker unloads a loaded GGUF model once no command
-has reached it for that long and nothing records (`idle_sleep::held()`: a
+has reached it for that long and nothing records (`audio::idle_sleep::held()`: a
 dictation past its hold or a meeting; a macOS capture from its press via
 `dictation_busy`), freeing its RAM and VRAM; between commands no request
 runs. Apple Speech stays loaded. The unloaded model still counts as held
@@ -166,7 +166,7 @@ Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_formatting()` as each dictation's processing starts and runs
-`spoken_formatting::apply` before the mode's corrections, OpenCode
+`dictation::spoken_formatting::apply` before the mode's corrections, OpenCode
 rewriting, and transformations (on Windows and Linux, after the Global
 replacements). Whole phrases, ignoring case, are replaced: "new line" and
 "line break" by one line break, "new paragraph" by two, "open quote" and
@@ -175,7 +175,7 @@ command go with it ("Hello. New line. Next" becomes "Hello.\nNext"). Words
 such as "newline" or "new liner" stay as they are. Only English phrases are
 recognized. Dictate without processing, meetings, and live text are
 unchanged, and with the toggle off processing is exactly as before. Checks:
-the tests in [spoken_formatting.rs](../../src/spoken_formatting.rs);
+the tests in [dictation/spoken_formatting.rs](../../src/dictation/spoken_formatting.rs);
 `spoken_formatting_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
@@ -187,7 +187,7 @@ Spoken symbols (`spoken-symbols`, issue 678, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_symbols()` as each dictation's processing starts and runs
-`spoken_symbols::apply` right after spoken formatting and before filler
+`dictation::spoken_symbols::apply` right after spoken formatting and before filler
 words, the mode's corrections, OpenCode rewriting, and transformations.
 Whole English words, ignoring case, become symbols joined to their
 neighbours: "hashtag" and "hash sign" become `#` and "at sign" `@`, joined to
@@ -200,7 +200,7 @@ spoken symbol go with it. Words such as "commas", "hashtags", "slashed", or
 "colonel" stay as they are, and the word list is fixed (no per-user symbol
 sets yet). Dictate without processing, meetings, and live text are
 unchanged, and with the toggle off processing is exactly as before. Checks:
-the tests in [spoken_symbols.rs](../../src/spoken_symbols.rs);
+the tests in [dictation/spoken_symbols.rs](../../src/dictation/spoken_symbols.rs);
 `spoken_symbols_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
@@ -212,7 +212,7 @@ Remove filler words (`filler-words`, issue 631, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::filler_words()` as each dictation's processing starts and runs
-`filler_words::apply` right after spoken formatting and before the mode's
+`dictation::filler_words::apply` right after spoken formatting and before the mode's
 corrections, OpenCode rewriting, and transformations. It is rule-based, with
 no model and no added latency. The English fillers "um", "umm", "uh", "uhh",
 "erm", "er", and "ah" are removed as whole words, lowercase or capitalised
@@ -223,7 +223,7 @@ started a sentence passes its capital to the next word ("Um, so I think"
 becomes "So I think"), and line breaks stay. Dictate without processing,
 meetings, and live text are unchanged, and with the toggle off processing is
 exactly as before. Checks: the tests in
-[filler_words.rs](../../src/filler_words.rs);
+[dictation/filler_words.rs](../../src/dictation/filler_words.rs);
 `filler_words_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
@@ -244,7 +244,7 @@ and every other output is exactly as before. There is no export button in the
 window yet. Checks:
 `subtitles_render_speaker_turns_as_srt_and_vtt_cues` and
 `subtitles_follow_the_range_and_need_the_labs_toggle` in
-[transcript_cli_tests.rs](../../src/transcript_cli_tests.rs);
+[control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
 `subtitle_export_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real meeting exported and
 loaded in a player; the Labs page goldens need regenerating on Linux with the
@@ -325,7 +325,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   the state machine underneath. Labs' **Run setup again** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
   and a named event on Windows) forget that onboarding finished
-  (`onboarding::reset_at`) and replay the first run without touching
+  (`desktop::onboarding::reset_at`) and replay the first run without touching
   settings, history, models, or permissions; ready steps pass at once. A new
   install still gets the tour as its first run. Checks:
   `labs_run_setup_again_opens_the_first_run` and
@@ -351,7 +351,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [transcription/engine.rs](../../src/transcription/engine.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
-  [live_text.rs](../../src/live_text.rs) (a recording's end clears only its
+  [dictation/live_text.rs](../../src/dictation/live_text.rs) (a recording's end clears only its
   own text); `a_spot_places_the_plate_just_past_the_hud`,
   `a_short_line_hugs_its_words_in_the_middle`,
   `a_long_line_stays_inside_the_overlay_on_one_line`, and
@@ -359,7 +359,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), whose opt-in
   `snapshots` renders the line in light and dark; and
   `live_text_hangs_just_past_the_plate_wherever_it_sits` in
-  [hud_placement.rs](../../src/hud_placement.rs). The line has no golden
+  [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
@@ -454,7 +454,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Vocabulary biasing: Parakeet transcription biased toward the
   [vocabulary](vocabulary.md) (`transcribe_cpp::RunExtension::ParakeetVocabulary`),
   the request behind issue 452 / PR 457. Off (the default),
-  `vocabulary::transcription_bias` returns nothing, so no run or stream takes
+  `dictation::vocabulary::transcription_bias` returns nothing, so no run or stream takes
   the list; rewriting and search still use it, and the Vocabulary sheet says
   so.
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for

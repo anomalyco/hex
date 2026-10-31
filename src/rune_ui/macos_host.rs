@@ -37,10 +37,10 @@ use crate::app_settings::{
 use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::tr;
-use crate::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
+use crate::desktop::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
+use crate::desktop::onboarding::{Input, PermissionAction, PermissionKind, PermissionState};
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
-use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState};
 
 /// The window saves a recorded shortcut; the listener follows `settings.json`.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = false;
@@ -492,7 +492,7 @@ struct MacHost {
     meetings: MeetingFeed,
     practice: Option<PracticeFeed>,
     /// The meetings folder panel, while it is open.
-    folder_choice: Option<crate::file_dialog::Pending>,
+    folder_choice: Option<crate::desktop::file_dialog::Pending>,
     calendar: CalendarFeed,
     #[cfg(hex_capture)]
     scrawl: ScrawlHost,
@@ -583,7 +583,7 @@ impl NativeHost for MacHost {
     fn send(&mut self, request: PlatformRequest) -> Result<(), String> {
         match request {
             PlatformRequest::Permission(PermissionAction::RequestMicrophone) => {
-                crate::onboarding::request_microphone();
+                crate::desktop::onboarding::request_microphone();
             }
             PlatformRequest::Permission(PermissionAction::ShowGuide(kind)) => {
                 // Screen Recording may have been granted since the last
@@ -592,11 +592,11 @@ impl NativeHost for MacHost {
                     || crate::capture_host::screen_access()
                         == crate::capture_host::ScreenAccess::Off
                 {
-                    crate::permission_guide::show(kind);
+                    crate::desktop::permission_guide::show(kind);
                 }
             }
             PlatformRequest::Permission(PermissionAction::Restart) => {
-                if !crate::onboarding::spawn_relaunch() {
+                if !crate::desktop::onboarding::spawn_relaunch() {
                     return Err("could not restart Hex".into());
                 }
                 crate::macos_rune::quit();
@@ -605,7 +605,7 @@ impl NativeHost for MacHost {
                 // macOS prompts once; after that the switch is in System
                 // Settings, with the guide beside it.
                 if !crate::meeting::request_system_audio_access() {
-                    crate::permission_guide::show(PermissionKind::SystemAudio);
+                    crate::desktop::permission_guide::show(PermissionKind::SystemAudio);
                 }
             }
             PlatformRequest::SetLaunchAtLogin(enabled) => {
@@ -625,11 +625,12 @@ impl NativeHost for MacHost {
                 crate::calendar::open_privacy_settings();
             }
             PlatformRequest::Relaunch => {
-                if let Err(error) = crate::onboarding::record_relaunch(crate::onboarding::unix_ms())
-                {
+                if let Err(error) = crate::desktop::onboarding::record_relaunch(
+                    crate::desktop::onboarding::unix_ms(),
+                ) {
                     tracing::warn!(%error, "could not record the onboarding relaunch");
                 }
-                if !crate::onboarding::spawn_relaunch() {
+                if !crate::desktop::onboarding::spawn_relaunch() {
                     return Err("could not relaunch Hex".into());
                 }
                 crate::macos_rune::quit();
@@ -653,7 +654,7 @@ impl NativeHost for MacHost {
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
         // The playground's HUD stories change the tuning HUD Lab shows.
-        let shared = crate::dot_scope::lab();
+        let shared = crate::rune_hud::dot_scope::lab();
         if shared != state.hud.tuning {
             state.hud.tuning = shared;
             changed = true;
@@ -716,7 +717,8 @@ impl NativeHost for MacHost {
         changed |= self.calendar.poll(&mut state.calendar);
         changed |= update(
             &mut state.accessibility_renamed,
-            crate::permission_guide::list_name(PermissionKind::Accessibility) != "Accessibility",
+            crate::desktop::permission_guide::list_name(PermissionKind::Accessibility)
+                != "Accessibility",
         );
         changed |= update(
             &mut state.activity_log,
@@ -724,7 +726,7 @@ impl NativeHost for MacHost {
                 .ok()
                 .map(|logs| logs.join("live.ndjson")),
         );
-        let permissions = crate::onboarding::status_with_transcription_model(
+        let permissions = crate::desktop::onboarding::status_with_transcription_model(
             state.permissions.transcription_model,
         );
         let system_audio = crate::meeting::system_audio_ready();
@@ -755,9 +757,11 @@ impl NativeHost for MacHost {
 
     fn tour_inputs(&mut self, practicing: bool) -> Vec<Input> {
         let mut inputs = Vec::new();
-        if crate::onboarding::take_listener_failure() {
+        if crate::desktop::onboarding::take_listener_failure() {
             inputs.push(Input::ListenerFailed {
-                relaunch_allowed: crate::onboarding::relaunch_allowed(crate::onboarding::unix_ms()),
+                relaunch_allowed: crate::desktop::onboarding::relaunch_allowed(
+                    crate::desktop::onboarding::unix_ms(),
+                ),
             });
         }
         if !practicing {
@@ -1047,9 +1051,9 @@ fn save_calendar_connected() -> Result<(), String> {
 
 /// Opens the folder panel beside the window, starting at the current
 /// meetings folder.
-fn choose_folder() -> crate::file_dialog::Pending {
-    use crate::file_dialog::{Dialog, Target};
-    crate::file_dialog::open(
+fn choose_folder() -> crate::desktop::file_dialog::Pending {
+    use crate::desktop::file_dialog::{Dialog, Target};
+    crate::desktop::file_dialog::open(
         Dialog {
             title: tr("Transcript folder").into(),
             target: Target::Folder,
@@ -1064,7 +1068,7 @@ fn choose_folder() -> crate::file_dialog::Pending {
 #[cfg(hex_capture)]
 #[derive(Default)]
 struct ScrawlHost {
-    folder_choice: Option<crate::file_dialog::Pending>,
+    folder_choice: Option<crate::desktop::file_dialog::Pending>,
     folder_error: Option<String>,
 }
 
@@ -1088,8 +1092,8 @@ impl ScrawlHost {
             }
             ScrawlRequest::ChooseFolder => {
                 if self.folder_choice.is_none() {
-                    use crate::file_dialog::{Dialog, Target};
-                    self.folder_choice = Some(crate::file_dialog::open(
+                    use crate::desktop::file_dialog::{Dialog, Target};
+                    self.folder_choice = Some(crate::desktop::file_dialog::open(
                         Dialog {
                             title: tr("Annotations folder").into(),
                             target: Target::Folder,

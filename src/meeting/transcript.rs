@@ -21,13 +21,13 @@ use hound::WavReader;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::StreamingResampler;
-#[cfg(not(target_os = "macos"))]
-use crate::local_transcriber::LocalTranscriber as Transcriber;
-use crate::pause_segmenter::PauseSegmenter;
-use crate::transcript::{Transcript, TranscriptSegment};
 #[cfg(target_os = "macos")]
 use crate::transcription::Transcriber;
+#[cfg(not(target_os = "macos"))]
+use crate::transcription::local_transcriber::LocalTranscriber as Transcriber;
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::pause_segmenter::PauseSegmenter;
+use crate::transcription::transcript::{Transcript, TranscriptSegment};
 
 use super::echo::{EchoEnvelope, Signal};
 use super::{
@@ -191,7 +191,7 @@ fn transcribe_speech(
 /// Whether the speech detector heard no speech in `samples`, so they skip the
 /// model.
 fn speechless(samples: &[f32]) -> bool {
-    let speechless = crate::speech_detector::contains_speech(samples) == Some(false);
+    let speechless = crate::transcription::speech_detector::contains_speech(samples) == Some(false);
     if speechless {
         tracing::debug!(
             audio_ms = samples_ms(samples.len()),
@@ -679,7 +679,7 @@ fn source_index(source: MeetingSource) -> usize {
 fn wait_for_dictation() {
     let started = Instant::now();
     while crate::transcription::engine::dictation_busy()
-        && !crate::process_exit::quitting()
+        && !crate::desktop::process_exit::quitting()
         && started.elapsed() < DICTATION_WAIT
     {
         thread::sleep(Duration::from_millis(50));
@@ -718,7 +718,7 @@ impl ChunkModel {
     fn transcribe(&mut self, samples: &[f32]) -> Result<Chunked> {
         // Quitting drops the dictation engine; a model loaded now would
         // outlast the drain.
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
         }
         if speechless(samples) {
@@ -751,7 +751,7 @@ impl ChunkModel {
                 "meeting transcriber is unavailable"
             )));
         }
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
         }
         let model = match load_model(&mut self.owned, &selection) {
@@ -783,11 +783,11 @@ impl ChunkModel {
                 return Shared::Busy;
             }
             match engine_model(model) {
-                Some(transcriber) => {
-                    Shared::Ran(crate::background_priority::at_background_priority(|| {
+                Some(transcriber) => Shared::Ran(
+                    crate::transcription::background_priority::at_background_priority(|| {
                         transcriber.transcribe_segments(samples)
-                    }))
-                }
+                    }),
+                ),
                 None => Shared::NoModel,
             }
         });
@@ -1027,7 +1027,7 @@ impl RollingFlusher {
     /// Quitting ends the wait.
     pub(super) fn transcribe_up_to_now(&self, wait: Duration) -> Option<Vec<TranscriptEntry>> {
         const STEP: Duration = Duration::from_millis(50);
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return None;
         }
         let deadline = Instant::now() + wait;
@@ -1038,7 +1038,7 @@ impl RollingFlusher {
             match entries.recv_timeout(left.min(STEP)) {
                 Ok(entries) => return Some(entries),
                 Err(RecvTimeoutError::Timeout)
-                    if !left.is_zero() && !crate::process_exit::quitting() => {}
+                    if !left.is_zero() && !crate::desktop::process_exit::quitting() => {}
                 Err(_) => return None,
             }
         }
@@ -1212,7 +1212,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
             thread::sleep(PREEMPTED_RETRY.min(deadline.saturating_duration_since(Instant::now())))
         };
         let give_up = |model_failed: bool| {
-            model_failed || crate::process_exit::quitting() || Instant::now() >= deadline
+            model_failed || crate::desktop::process_exit::quitting() || Instant::now() >= deadline
         };
         while !self.pending.is_empty() {
             if give_up(self.model_failed) {
@@ -1310,7 +1310,7 @@ fn run_rolling(
     receiver: Receiver<RollingInput>,
     incomplete: &[AtomicBool; 2],
 ) -> RollingOutcome {
-    crate::background_priority::deprioritize_background_thread();
+    crate::transcription::background_priority::deprioritize_background_thread();
     let mut worker = RollingWorker::new(directory, ChunkModel::new(selection.clone()));
     loop {
         let mut disconnected = false;
@@ -1339,7 +1339,7 @@ fn run_rolling(
         // A preempted chunk falls through to the wait below before retrying.
         if !worker.pending.is_empty()
             && !worker.model_failed
-            && !crate::process_exit::quitting()
+            && !crate::desktop::process_exit::quitting()
             && !crate::transcription::engine::dictation_busy()
             && worker.transcribe_next()
         {
@@ -1369,7 +1369,7 @@ fn run_rolling(
             track.end(index, &mut envelope, &mut pending);
         }
     }
-    while !pending.is_empty() && !model_failed && !crate::process_exit::quitting() {
+    while !pending.is_empty() && !model_failed && !crate::desktop::process_exit::quitting() {
         wait_for_dictation();
         if !transcribe_pending(
             directory,
@@ -1498,7 +1498,7 @@ fn transcribe_pending(
             pending.push_front((index, chunk));
             return false;
         }
-        Ok(Chunked::Unavailable(_)) if crate::process_exit::quitting() => {
+        Ok(Chunked::Unavailable(_)) if crate::desktop::process_exit::quitting() => {
             *model_failed = true;
             return true;
         }
@@ -1760,7 +1760,7 @@ pub(super) fn transcribe(
     selection: &TranscriptionSelection,
     rolling: Option<RollingOutcome>,
 ) -> Result<(Vec<TranscriptEntry>, u64)> {
-    crate::background_priority::deprioritize_background_thread();
+    crate::transcription::background_priority::deprioritize_background_thread();
     let (mut rolled, mut cuts, mut envelope, mut model) = match rolling {
         Some(outcome) => (
             outcome.tracks,
@@ -2310,7 +2310,7 @@ mod tests {
     }
 
     fn speech(seconds: usize) -> Vec<f32> {
-        crate::pause_segmenter::tests::utterance(&[(seconds * 1_000, 0)], -70.0)
+        crate::transcription::pause_segmenter::tests::utterance(&[(seconds * 1_000, 0)], -70.0)
     }
 
     fn chunks_of(audio: &[f32], block: usize) -> Vec<Chunk> {
@@ -2360,7 +2360,7 @@ mod tests {
 
     #[test]
     fn chunks_end_at_the_first_pause_after_the_target_length() {
-        let audio = crate::pause_segmenter::tests::utterance(
+        let audio = crate::transcription::pause_segmenter::tests::utterance(
             &[(4_000, 800), (3_000, 800), (5_000, 800), (2_000, 0)],
             -70.0,
         );
@@ -2404,7 +2404,7 @@ mod tests {
 
     #[test]
     fn a_speechless_chunk_skips_the_shared_model() {
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let mut model = ChunkModel::new(TranscriptionSelection::default());
         let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
             panic!("a speechless chunk must not reach the model");
@@ -2415,7 +2415,7 @@ mod tests {
 
     #[test]
     fn speechless_chunks_skip_the_model_and_still_advance_coverage() {
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let mut track = TrackTranscript::new(MeetingSource::Microphone, 1_000);
         let chunk = Chunk {
             start: 0,
@@ -2454,7 +2454,7 @@ mod tests {
             &first,
             transcribe_speech(&first.samples, || Ok(spoken)).unwrap(),
         );
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let second = Chunk {
             start: 28 * RATE,
             overlap: 2 * RATE,
@@ -2606,7 +2606,7 @@ mod tests {
         let mut feed = rolling.feed().unwrap();
         // Set before any audio arrives so no chunk can start a load first.
         if mode == "quit" {
-            crate::process_exit::begin_quitting_for_test();
+            crate::desktop::process_exit::begin_quitting_for_test();
         }
         let quit = Instant::now();
         let audio = speech(30);
@@ -3204,7 +3204,7 @@ mod tests {
         let flusher = RollingFlusher(sender);
         thread::spawn(|| {
             thread::sleep(Duration::from_millis(200));
-            crate::process_exit::begin_quitting_for_test();
+            crate::desktop::process_exit::begin_quitting_for_test();
         });
         let started = Instant::now();
         let answered = flusher.transcribe_up_to_now(Duration::from_secs(3));
@@ -3936,7 +3936,7 @@ mod tests {
         let folder = std::env::temp_dir().join(format!(
             "hex-meeting-export-{}-{}",
             std::process::id(),
-            crate::events::now_ms()
+            crate::desktop::events::now_ms()
         ));
         let mut manifest = manifest();
         manifest.title = "Design/sync: Q4?".into();

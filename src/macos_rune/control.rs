@@ -14,9 +14,9 @@ use crate::control::{
     PermissionReport, StatusReport, WindowReport, settings,
 };
 use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::onboarding::PermissionState;
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
-use crate::onboarding::PermissionState;
 use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};
 use crate::rune_ui::{Destination, Ui};
@@ -72,7 +72,7 @@ impl Pump {
                 spawn(move || {
                     let capture = capture_snapshot(&runtime);
                     let answer = control::check_quit(&meeting, capture, force).and_then(|()| {
-                        if restart && !crate::onboarding::spawn_relaunch() {
+                        if restart && !crate::desktop::onboarding::spawn_relaunch() {
                             return Err(ControlError::new(
                                 "unsupported",
                                 "only an installed Hex.app can restart itself; quit it and open \
@@ -497,7 +497,7 @@ impl Pump {
                     crate::app_settings::set_dock_icon_visible(
                         crate::app_settings::dock_icon_visible(
                             change.settings.show_dock_icon,
-                            crate::status_item::installed(),
+                            crate::macos_rune::status_item::installed(),
                         ),
                     );
                 }
@@ -643,7 +643,7 @@ fn clear_history(runtime: &RuntimeHandle) -> Result<ControlReply, ControlError> 
 /// The signed app's `SMAppService` registration; an open Settings window
 /// picks the change up on its next status poll.
 fn launch_at_login(enabled: Option<bool>) -> Result<ControlReply, ControlError> {
-    use crate::login_item::LoginItemStatus;
+    use crate::desktop::login_item::LoginItemStatus;
 
     let describe = |status| match status {
         LoginItemStatus::Enabled => "on",
@@ -652,7 +652,7 @@ fn launch_at_login(enabled: Option<bool>) -> Result<ControlReply, ControlError> 
             "waiting for approval in System Settings › General › Login Items"
         }
     };
-    let before = crate::login_item::set_now(None)
+    let before = crate::desktop::login_item::set_now(None)
         .map_err(|error| ControlError::new("failed", format!("{error:#}")))?;
     let Some(enabled) = enabled else {
         return Ok(ControlReply::unchanged(format!(
@@ -678,7 +678,7 @@ fn launch_at_login(enabled: Option<bool>) -> Result<ControlReply, ControlError> 
             "only an installed Hex.app can launch at login",
         ));
     }
-    let after = crate::login_item::set_now(Some(enabled)).map_err(|error| {
+    let after = crate::desktop::login_item::set_now(Some(enabled)).map_err(|error| {
         ControlError::new(
             "failed",
             format!("couldn't change launch at login: {error:#}"),
@@ -840,7 +840,7 @@ fn status(
     let settings = &published.settings;
     let selection = &settings.transcription;
     let definition = crate::transcription::models::definition(selection.model);
-    let setup = crate::onboarding::status(selection);
+    let setup = crate::desktop::onboarding::status(selection);
     Ok(ControlReply::Status(Box::new(StatusReport {
         app_version: crate::VERSION.into(),
         pid: std::process::id(),
@@ -914,7 +914,7 @@ mod tests {
         ));
         let mut runtime = super::super::Runtime {
             settings: Default::default(),
-            keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+            keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
                 Default::default(),
                 None,
             ),

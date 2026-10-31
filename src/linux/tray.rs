@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use crate::desktop::host::DesktopAction;
+use crate::desktop::tray_menu::{TrayCommand, TrayView};
 use crate::linux::app::{HostHandle, HostRequest, HostSnapshot};
 use crate::linux::input::ShortcutCommand;
 use crate::linux::service::{Activation, Control, Published};
-use crate::tray_menu::{TrayCommand, TrayView};
 
 /// The white Hex mark the Windows tray uses, raw 32×32 RGBA.
 const ICON_RGBA: &[u8] = include_bytes!("../../resources/windows/tray-32.rgba");
@@ -63,7 +63,7 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
             language: snapshot.settings.transcription_for_model(model).language,
         }),
         TrayCommand::Update => {
-            match crate::tray_menu::update_action(&snapshot.desktop.update_status) {
+            match crate::desktop::tray_menu::update_action(&snapshot.desktop.update_status) {
                 Some(action) => host.request(HostRequest::Desktop(action)),
                 None => Ok(()),
             }
@@ -105,7 +105,7 @@ pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
             desktop.listener.running,
             desktop.activity.state,
             &desktop.update_status,
-            crate::tray_menu::model_menu_entries(
+            crate::desktop::tray_menu::model_menu_entries(
                 &snapshot.settings,
                 desktop.transcription.preparing.is_some(),
                 crate::transcription::models::is_installed,

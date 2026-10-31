@@ -112,7 +112,7 @@ pub(crate) fn open_url(url: &str) -> color_eyre::eyre::Result<()> {
     #[cfg(target_os = "linux")]
     let status = std::process::Command::new("xdg-open").arg(url).status()?;
     #[cfg(target_os = "windows")]
-    let status = crate::background_process::command("rundll32")
+    let status = crate::desktop::background_process::command("rundll32")
         .arg("url.dll,FileProtocolHandler")
         .arg(url)
         .status()?;

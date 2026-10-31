@@ -10,10 +10,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
-use crate::context::ContextSnapshot;
-use crate::events::{
+use crate::desktop::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
 };
+use crate::dictation::context::ContextSnapshot;
 use crate::meeting::{self, MeetingManifest, MeetingStatus};
 
 #[derive(Clone, Copy, Eq, PartialEq)]

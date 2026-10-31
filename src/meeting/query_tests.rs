@@ -467,7 +467,7 @@ fn a_held_lock_marks_the_meeting_in_progress() {
     let root = std::env::temp_dir().join(format!(
         "hex-meeting-query-{}-{}",
         std::process::id(),
-        crate::events::now_ms()
+        crate::desktop::events::now_ms()
     ));
     let directory = root.join(STANDUP);
     fs::create_dir_all(&directory).unwrap();

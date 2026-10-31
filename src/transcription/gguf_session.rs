@@ -171,11 +171,11 @@ impl OfflineGgufSession {
 
     /// `options` with the vocabulary added, read now so a settings change
     /// applies from the next run. Parakeet biases toward it
-    /// (`crate::vocabulary::transcription_bias`): the engine writes a term in
+    /// (`crate::dictation::vocabulary::transcription_bias`): the engine writes a term in
     /// place of the heard words only when the audio supports it (an RNN-T
     /// whole-clip run decodes the term alongside the greedy path; streams and
     /// TDT heads rescore the greedy transcript). Whisper and Qwen3-ASR read it
-    /// as their context prompt (`crate::vocabulary::transcription_prompt`),
+    /// as their context prompt (`crate::dictation::vocabulary::transcription_prompt`),
     /// in whole-clip runs only.
     fn with_vocabulary<'a>(
         &self,
@@ -184,7 +184,7 @@ impl OfflineGgufSession {
     ) -> Cow<'a, transcribe_cpp::RunOptions> {
         match self.vocabulary {
             VocabularySlot::Bias if options.family.is_none() => {
-                match crate::vocabulary::transcription_bias() {
+                match crate::dictation::vocabulary::transcription_bias() {
                     Some((terms, bias)) => Cow::Owned(transcribe_cpp::RunOptions {
                         vocabulary: terms,
                         family: Some(transcribe_cpp::RunExtension::ParakeetVocabulary(bias)),
@@ -194,7 +194,7 @@ impl OfflineGgufSession {
                 }
             }
             VocabularySlot::Prompt(max_chars) if !stream && options.prompt.is_none() => {
-                match crate::vocabulary::transcription_prompt(max_chars) {
+                match crate::dictation::vocabulary::transcription_prompt(max_chars) {
                     Some(prompt) => Cow::Owned(transcribe_cpp::RunOptions {
                         prompt: Some(prompt),
                         ..options.clone()

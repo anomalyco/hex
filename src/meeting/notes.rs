@@ -20,7 +20,7 @@ use super::{
     MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
 };
-use crate::events::now_ms;
+use crate::desktop::events::now_ms;
 
 /// Room left in the context for instructions, the schema, and the response.
 const RESERVED_TOKENS: usize = 1_000;
@@ -511,7 +511,7 @@ impl ProvisionalTitles {
         if let Err(error) = thread::Builder::new()
             .name("meeting-title".into())
             .spawn(move || {
-                crate::background_priority::deprioritize_background_thread();
+                crate::transcription::background_priority::deprioritize_background_thread();
                 name_while_recording(&id, &stop, &latest);
             })
         {
@@ -991,7 +991,7 @@ pub fn spawn_summary(
     thread::Builder::new()
         .name("meeting-notes".into())
         .spawn(move || {
-            crate::background_priority::deprioritize_background_thread();
+            crate::transcription::background_priority::deprioritize_background_thread();
             done(summarize_claimed(&id, claim));
         })
         .map_err(|error| tracing::error!(%error, "could not start meeting notes"))

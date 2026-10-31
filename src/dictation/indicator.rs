@@ -9,8 +9,8 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use crate::dot_scope::{self, Pose, Scope, Stage, Tuning};
-use crate::hud_placement::Island;
+use crate::rune_hud::dot_scope::{self, Pose, Scope, Stage, Tuning};
+use crate::rune_hud::hud_placement::Island;
 
 /// The loudness before any meter arrives, dBFS.
 const SILENT: f32 = -120.0;

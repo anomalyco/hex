@@ -429,7 +429,7 @@ impl Updater {
         let State::Download { url } = lock(&self.shared.state).clone() else {
             return;
         };
-        if let Err(error) = crate::opencode_catalog::open_url(&url) {
+        if let Err(error) = crate::desktop::opencode_catalog::open_url(&url) {
             tracing::warn!(%error, "could not open the Hex download");
         }
     }

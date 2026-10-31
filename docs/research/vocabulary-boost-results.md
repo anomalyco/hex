@@ -37,8 +37,8 @@ greedy decode, unchanged ─▶ words with their frames
 ```
 
 Hex passes the list at the start of each run or stream
-(`gguf_session::with_vocabulary`), only to Parakeet models that accept it and
-only when no Whisper-style hint family is set. `local_transcriber` shares that
+(`transcription::gguf_session::with_vocabulary`), only to Parakeet models that accept it and
+only when no Whisper-style hint family is set. `transcription/local_transcriber` shares that
 path, so macOS, Linux and Windows all get it. The list is capped at 64 terms and
 each term at 12 pieces, with at most 16 candidate spans per decode. Rescoring runs on the transcription engine thread after
 decoding, never on the audio thread.

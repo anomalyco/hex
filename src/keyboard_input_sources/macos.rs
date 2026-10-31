@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use objc2::MainThreadMarker;
 use objc2_core_foundation::CFString;
 
-use crate::keyboard_model_switching::InputSource;
+use crate::transcription::keyboard_model_switching::InputSource;
 
 type Ref = *const c_void;
 

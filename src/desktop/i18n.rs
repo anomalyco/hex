@@ -1079,7 +1079,7 @@ mod tests {
 
     /// Every source that translates, on every OS.
     const SOURCES: &[&str] = &[
-        include_str!("../opencode_catalog.rs"),
+        include_str!("opencode_catalog.rs"),
         include_str!("../rune_ui.rs"),
         include_str!("../rune_ui/activity.rs"),
         include_str!("../rune_ui/explainer.rs"),
@@ -1106,7 +1106,7 @@ mod tests {
         include_str!("../rune_ui/sound_sets.rs"),
         include_str!("../rune_ui/vocabulary.rs"),
         include_str!("../rune_ui/windows_host.rs"),
-        include_str!("../tray_menu.rs"),
+        include_str!("tray_menu.rs"),
         include_str!("../rune_ui/meetings_host.rs"),
         include_str!("../windows/app.rs"),
         include_str!("../windows/rune.rs"),

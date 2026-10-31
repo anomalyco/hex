@@ -11,8 +11,13 @@
 //!
 //! The Sounds sheet draws its preview of the HUD with the same [`Painter`].
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod dot_scope;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod hud_placement;
 #[cfg(target_os = "macos")]
 mod macos;
+pub(crate) mod spring;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,10 +28,10 @@ use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
 use crate::dictation::indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
+use crate::rune_hud::dot_scope::MAX_DOTS;
 #[cfg(not(target_os = "macos"))]
-use crate::dot_scope::PLATE_HEIGHT;
-use crate::dot_scope::{self, MAX_DOTS};
-use crate::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
+use crate::rune_hud::dot_scope::PLATE_HEIGHT;
+use crate::rune_hud::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
 use crate::rune_ui::live_text::Spot;
 
 #[cfg(target_os = "macos")]
@@ -195,7 +200,7 @@ pub(crate) struct Hud {
     /// Whether the compositor wants the display's frames.
     animating: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
-    placed: Option<crate::hud_placement::Placed>,
+    placed: Option<crate::rune_hud::hud_placement::Placed>,
     /// The position the overlay was last placed for, while it stays on that
     /// display; a capture's start or a hide picks the display again.
     #[cfg(not(target_os = "macos"))]

@@ -31,8 +31,11 @@ pub struct ManifestCache {
 }
 
 fn curl(user_agent: &str) -> Command {
-    let mut command =
-        crate::background_process::command(if cfg!(windows) { "curl.exe" } else { "curl" });
+    let mut command = crate::desktop::background_process::command(if cfg!(windows) {
+        "curl.exe"
+    } else {
+        "curl"
+    });
     command.args([
         "--silent",
         "--show-error",

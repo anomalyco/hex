@@ -34,7 +34,7 @@ pub(super) fn metadata(path: &Path) -> Result<InstalledApplication> {
         let display_name = NSFileManager::defaultManager()
             .displayNameAtPath(&path_string)
             .to_string();
-        let name = crate::context::strip_bundle_extension(&display_name).to_owned();
+        let name = crate::dictation::context::strip_bundle_extension(&display_name).to_owned();
         let bundle_id = bundle
             .bundleIdentifier()
             .map(|identifier| identifier.to_string());

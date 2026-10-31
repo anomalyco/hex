@@ -14,7 +14,7 @@ use super::{
     CONTROL_VERSION, CaptureAction, ControlCommand, ControlReply, ControlRequest, ControlResponse,
     ModelInfo, Pane, StatusReport, settings::SettingValue,
 };
-use crate::vocabulary::VocabularyEntry;
+use crate::dictation::vocabulary::VocabularyEntry;
 
 pub const EXIT_REFUSED: u8 = 1;
 pub const EXIT_NOT_RUNNING: u8 = 3;
@@ -125,12 +125,12 @@ pub enum ControlCli {
     /// Read retained dictation history without starting the app, or clear
     /// it in the running Hex (`hex history clear --yes`).
     #[command(args_conflicts_with_subcommands = true)]
-    History(crate::transcript_cli::HistoryArgs),
+    History(crate::control::transcript_cli::HistoryArgs),
     /// Read and search recorded meetings without starting the app; record
     /// and stop them in the running Hex.
     Meetings {
         #[command(subcommand)]
-        command: crate::transcript_cli::MeetingsCommand,
+        command: crate::control::transcript_cli::MeetingsCommand,
     },
     /// Serve recorded meetings to agents over MCP (stdio). Read-only.
     Mcp {
@@ -466,11 +466,11 @@ pub fn run(command: ControlCli) -> u8 {
             lines,
             follow,
         } => logs(process, lines, follow),
-        ControlCli::History(crate::transcript_cli::HistoryArgs {
-            action: Some(crate::transcript_cli::HistoryAction::Clear { yes, output }),
+        ControlCli::History(crate::control::transcript_cli::HistoryArgs {
+            action: Some(crate::control::transcript_cli::HistoryAction::Clear { yes, output }),
             ..
         }) => clear_history(yes, output),
-        ControlCli::History(args) => report(crate::transcript_cli::history(&args)),
+        ControlCli::History(args) => report(crate::control::transcript_cli::history(&args)),
         ControlCli::Meetings { command } => meetings(command),
         ControlCli::Mcp { meetings_dir } => report(mcp(meetings_dir)),
         ControlCli::Commands { command } => report(match command {
@@ -499,7 +499,7 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
     #[cfg(not(target_os = "macos"))]
     if !running() {
         return report(selection(Some(model), language).and_then(|selection| {
-            crate::local_transcriber::install(
+            crate::transcription::local_transcriber::install(
                 &selection,
                 &std::sync::atomic::AtomicBool::new(false),
             )
@@ -544,14 +544,15 @@ fn offline_model(command: ModelCommand) -> u8 {
             Ok(())
         }
         ModelCommand::Devices => {
-            for device in crate::local_transcriber::devices()? {
+            for device in crate::transcription::local_transcriber::devices()? {
                 println!("{device}");
             }
             Ok(())
         }
         ModelCommand::Check { model, language } => {
-            let transcriber =
-                crate::local_transcriber::LocalTranscriber::load(&selection(model, language)?)?;
+            let transcriber = crate::transcription::local_transcriber::LocalTranscriber::load(
+                &selection(model, language)?,
+            )?;
             println!("ready\t{}", transcriber.device_label());
             Ok(())
         }
@@ -562,7 +563,7 @@ fn offline_model(command: ModelCommand) -> u8 {
         } => {
             println!(
                 "{}",
-                crate::local_transcriber::transcribe_wav_with_selection(
+                crate::transcription::local_transcriber::transcribe_wav_with_selection(
                     &wav,
                     &selection(model, language)?
                 )?
@@ -595,15 +596,15 @@ fn report(result: color_eyre::Result<()>) -> u8 {
 
 /// `hex meetings`: record, stop, and copy in the running Hex; the rest
 /// read the meetings folder here.
-fn meetings(command: crate::transcript_cli::MeetingsCommand) -> u8 {
-    use crate::transcript_cli::MeetingsCommand;
+fn meetings(command: crate::control::transcript_cli::MeetingsCommand) -> u8 {
+    use crate::control::transcript_cli::MeetingsCommand;
     match command {
         MeetingsCommand::Record { title, output } => {
             send(ControlCommand::MeetingRecord { title }, output)
         }
         MeetingsCommand::Stop { output } => send(ControlCommand::MeetingStop, output),
         MeetingsCommand::CopyLast { output } => send(ControlCommand::MeetingCopyLast, output),
-        command => report(crate::transcript_cli::meetings(&command)),
+        command => report(crate::control::transcript_cli::meetings(&command)),
     }
 }
 
@@ -840,7 +841,7 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
         // A Hex that holds the service lock may have read settings.json
         // already; wait for it to answer instead of writing behind it.
         #[cfg(target_os = "linux")]
-        let lock = crate::instance::acquire("service");
+        let lock = crate::desktop::instance::acquire("service");
         #[cfg(not(target_os = "linux"))]
         let lock: color_eyre::Result<()> = Ok(());
         match lock {
@@ -1053,7 +1054,7 @@ fn open_arguments(
     test_build: bool,
     vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> Vec<std::ffi::OsString> {
-    let mut arguments = crate::onboarding::open_env_arguments(vars);
+    let mut arguments = crate::desktop::onboarding::open_env_arguments(vars);
     match bundle {
         Some(bundle) => arguments.push(bundle.into()),
         None => arguments.extend([

@@ -37,7 +37,7 @@ Wayland while preserving `Runtime<Ui>` state in-process.
 Exclusivity and forwarding are keyed to the **data root** (`settings.json`,
 History, the listener lock, models, and isolated `HEX_APPLICATION_SUPPORT_DIR`
 roots used by tests, Nix, and development). `linux_service.rs` guards
-`service.sock` in that root with `instance::acquire("service")`, owner-only
+`service.sock` in that root with `desktop::instance::acquire("service")`, owner-only
 permissions, peer-UID checks, bounded version-2 frames, deadlines, and
 stale-socket recovery (`scripts/test-linux-service.py`):
 
@@ -81,7 +81,7 @@ no instance, otherwise    -> become the instance in this process (custom data ro
   variables when switching session types.
 - `service`, `app`, `app --hidden`, `start`, `stop`, and `quit` remain valid
   entry points so self-updates only swap the executable.
-- At startup on Linux, `local_transcriber::initialize_backends()` creates
+- At startup on Linux, `transcription::local_transcriber::initialize_backends()` creates
   `transcribe.cpp`'s Vulkan instance on the main thread before any worker or
   Rune window starts, avoiding concurrent Vulkan instance creation in the
   loader.
@@ -124,7 +124,7 @@ no instance, otherwise    -> become the instance in this process (custom data ro
   `NSAppleEventManager` handler for `kAEReopenApplication` to answer Dock and
   Finder reopen events.
 - An initial `AppHandle::update` closure on the main thread starts the updater,
-  `NSStatusItem` (`status_item.rs`), the Hex/File/Window main menu (omitting an
+  `NSStatusItem` (`macos_rune/status_item.rs`), the Hex/File/Window main menu (omitting an
   Edit menu so ⌘C/⌘V reach Rune text fields), the reopen handler, and the
   native Metal HUD (`dictation_indicator.rs`). A 16 ms `NSTimer` in common
   run-loop modes drains HUD, status-item, meeting, and developer-control

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use url::Url;
 
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 use crate::dictation::modes::normalize_host;
 
 /// Executable stems whose foreground document exposes the page URL.

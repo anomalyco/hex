@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::voice_filter::{DictationSpan, HexMicEngine, ModeSpec, StageSpec, VoiceFilterMode};
+use crate::audio::voice_filter::{
+    DictationSpan, HexMicEngine, ModeSpec, StageSpec, VoiceFilterMode,
+};
 
 const HEX_MICROPHONE_NAME: &str = "Hex Microphone";
 const HEX_MICROPHONE_UID: &str = "anomaly.hex.microphone";
@@ -331,7 +333,7 @@ pub fn sync_from_settings(mode: VoiceFilterMode, comfort_noise: bool, strength: 
 /// Whether a dictation is past its hold threshold, so the filter applies.
 #[cfg(target_os = "macos")]
 fn dictating() -> bool {
-    crate::recording_environment::intentional_recording_active()
+    crate::audio::recording_environment::intentional_recording_active()
 }
 
 #[cfg(target_os = "linux")]
@@ -974,7 +976,7 @@ fn schedule_demo_recompute() {
                 };
                 let span = span_for_source(source, active_samples.len());
                 let spec = cfg.build_mode_spec();
-                let processed_samples = crate::voice_filter::render(
+                let processed_samples = crate::audio::voice_filter::render(
                     &active_samples,
                     f64::from(HEX_MICROPHONE_SAMPLE_RATE),
                     &spec,
@@ -1107,7 +1109,7 @@ fn recompute_demo_cache(buffers: &mut DemoBuffers) {
     let active_samples = buffers.active_samples();
     let span = span_for_source(buffers.source, active_samples.len());
     let spec = cfg.build_mode_spec();
-    let processed_samples = crate::voice_filter::render(
+    let processed_samples = crate::audio::voice_filter::render(
         active_samples,
         f64::from(HEX_MICROPHONE_SAMPLE_RATE),
         &spec,
@@ -2090,7 +2092,7 @@ mod tests {
 
     #[test]
     fn driver_plist_version_and_status_mismatch_are_detected() {
-        let plist = include_str!("../macos/HexMicrophoneDriver/Info.plist");
+        let plist = include_str!("../../macos/HexMicrophoneDriver/Info.plist");
         assert_eq!(
             plist_string_value(plist, "CFBundleIdentifier").as_deref(),
             Some(EXPECTED_DRIVER_BUNDLE_ID)

@@ -1568,7 +1568,7 @@ fn the_vocabulary_row_opens_its_sheet() {
 fn add_term_scrolls_the_new_row_into_view() {
     let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
     rt.state.settings.vocabulary = (0..14)
-        .map(|index| crate::vocabulary::VocabularyEntry {
+        .map(|index| crate::dictation::vocabulary::VocabularyEntry {
             term: format!("term {index}"),
             sounds_like: Vec::new(),
         })

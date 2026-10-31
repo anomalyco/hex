@@ -6,7 +6,7 @@ use std::ffi::CStr;
 
 use objc2::MainThreadMarker;
 
-use crate::onboarding::PermissionKind;
+use crate::desktop::onboarding::PermissionKind;
 
 unsafe extern "C" {
     fn hex_show_permission_guide(permission: i32);

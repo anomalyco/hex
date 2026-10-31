@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::dictation::indicator::DotFrame;
-use crate::hud_placement::Layout;
+use crate::rune_hud::hud_placement::Layout;
 use crate::rune_hud::{Painter, Target, WINDOW};
 use crate::rune_ui::Ui;
 use rune::compose::Frame;

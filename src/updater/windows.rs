@@ -14,7 +14,7 @@ use fs2::FileExt;
 
 use super::Method;
 use super::protocol::is_version_name;
-use crate::background_process;
+use crate::desktop::background_process;
 
 #[cfg(target_arch = "x86_64")]
 pub const TARGET: &str = "windows-x64";

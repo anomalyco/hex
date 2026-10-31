@@ -12,7 +12,7 @@ use super::controls::{DESCRIPTION, Paint};
 use super::hud_lab::DOT_SCOPE_GROUPS;
 use super::lists::{group_label, slider_in};
 use crate::dictation::indicator::DictationIndicatorEvent as Event;
-use crate::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
+use crate::rune_hud::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
 
 const SIDE_W: f32 = 240.0;
 /// Leaves room under the side column for the story's triggers.

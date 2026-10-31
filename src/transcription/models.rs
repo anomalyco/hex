@@ -1002,7 +1002,7 @@ pub fn download_with_stage_progress(
     // offline. Until the detector lands, dictation and meetings keep their
     // level-only silence handling.
     if !speech_detector_installed() {
-        crate::speech_detector::start_download();
+        crate::transcription::speech_detector::start_download();
     }
     Ok(path)
 }
@@ -1092,7 +1092,7 @@ fn download_artifact(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = crate::background_process::command("curl")
+    let mut child = crate::desktop::background_process::command("curl")
         .args([
             "--fail",
             "--location",
@@ -1864,7 +1864,7 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         fs::write(directory.join("fixture.gguf"), b"hello").unwrap();
         TEST_MODELS_DIR.with(|models| *models.borrow_mut() = Some(directory.clone()));
-        let requests = crate::speech_detector::download_requests_for_test();
+        let requests = crate::transcription::speech_detector::download_requests_for_test();
         let downloaded = download_with_progress(
             &fixture_model(),
             &AtomicBool::new(false),
@@ -1879,7 +1879,7 @@ mod tests {
         fs::remove_dir_all(&directory).unwrap();
         assert_eq!(downloaded.unwrap(), directory.join("fixture.gguf"));
         assert_eq!(
-            crate::speech_detector::download_requests_for_test(),
+            crate::transcription::speech_detector::download_requests_for_test(),
             requests + 1
         );
         assert!(!detector_touched);

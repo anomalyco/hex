@@ -1301,7 +1301,7 @@ impl MeetingSettings {
 #[serde(default)]
 pub struct ExperimentalSettings {
     pub hex_microphone: bool,
-    pub hex_microphone_mode: crate::voice_filter::VoiceFilterMode,
+    pub hex_microphone_mode: crate::audio::voice_filter::VoiceFilterMode,
     pub hex_microphone_comfort_noise: bool,
     pub hex_microphone_strength: f32,
 }
@@ -1310,7 +1310,7 @@ impl Default for ExperimentalSettings {
     fn default() -> Self {
         Self {
             hex_microphone: false,
-            hex_microphone_mode: crate::voice_filter::VoiceFilterMode::Muffled,
+            hex_microphone_mode: crate::audio::voice_filter::VoiceFilterMode::Muffled,
             hex_microphone_comfort_noise: true,
             hex_microphone_strength: 1.0,
         }
@@ -1688,7 +1688,7 @@ impl CaptureTranscriber {
     pub const ALL: [Self; 2] = [Self::Parakeet, Self::Apple];
 }
 
-pub use crate::text_replacements::TextReplacement;
+pub use crate::dictation::text_replacements::TextReplacement;
 
 impl RecordingAudioBehavior {
     pub const ALL: [Self; 4] = [Self::Mute, Self::PauseMedia, Self::Duck, Self::DoNothing];
@@ -1807,12 +1807,12 @@ pub struct AppSettings {
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
     pub updates: UpdateSettings,
-    /// The shared vocabulary (`crate::vocabulary`). Left out of the file
+    /// The shared vocabulary (`crate::dictation::vocabulary`). Left out of the file
     /// while empty, so settings without one stay as they were.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub vocabulary: Vec<crate::vocabulary::VocabularyEntry>,
+    pub vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
     /// How readily transcription swaps heard words for a vocabulary term.
-    pub vocabulary_boost: crate::vocabulary::VocabularyBoost,
+    pub vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -1910,7 +1910,7 @@ impl Default for AppSettings {
             indicator_position: IndicatorPosition::default(),
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
-            vocabulary_boost: crate::vocabulary::VocabularyBoost::default(),
+            vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost::default(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
         }
@@ -2198,7 +2198,7 @@ impl AppSettings {
                 settings.normalize_mode_application_names();
                 settings.migrate_disabled_transcription_model();
                 for hints in &hints {
-                    crate::vocabulary::fold_hints(&mut settings.vocabulary, hints);
+                    crate::dictation::vocabulary::fold_hints(&mut settings.vocabulary, hints);
                 }
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
@@ -2245,7 +2245,7 @@ impl AppSettings {
         #[cfg(target_os = "macos")]
         if !path.exists() {
             // Saving new preferences does not imply onboarding completion.
-            crate::onboarding::record_pending_at(parent)?;
+            crate::desktop::onboarding::record_pending_at(parent)?;
         }
         crate::durable::write(path, &serde_json::to_vec_pretty(self)?)?;
         Ok(())
@@ -2298,7 +2298,7 @@ impl AppSettings {
             CAPSULE_FLOW.store(flow as u8, Ordering::Release);
         }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
-        crate::hex_microphone::sync_from_settings(
+        crate::audio::hex_microphone::sync_from_settings(
             self.experimental.hex_microphone_mode,
             self.experimental.hex_microphone_comfort_noise,
             self.experimental.hex_microphone_strength,
@@ -2337,8 +2337,8 @@ impl AppSettings {
         set_transcription_selection(&self.transcription);
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
-        crate::config::update_dictation_profiles(&self.dictation_processing);
-        crate::vocabulary::apply(&self.vocabulary, self.vocabulary_boost);
+        crate::dictation::config::update_dictation_profiles(&self.dictation_processing);
+        crate::dictation::vocabulary::apply(&self.vocabulary, self.vocabulary_boost);
     }
 
     /// Mode activations saved while Finder showed filename extensions carry a
@@ -2353,7 +2353,8 @@ impl AppSettings {
         for mode in modes {
             let mut mode_migrated = false;
             for application in &mut mode.applications {
-                let normalized = crate::context::strip_bundle_extension(application).to_owned();
+                let normalized =
+                    crate::dictation::context::strip_bundle_extension(application).to_owned();
                 if normalized != *application {
                     *application = normalized;
                     mode_migrated = true;
@@ -2759,7 +2760,7 @@ pub fn hex_microphone_enabled() -> bool {
     crate::labs::Feature::VoiceFilter.shipped()
         && voice_filter_enabled(
             HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-            crate::hex_microphone::driver_bundle_installed(),
+            crate::audio::hex_microphone::driver_bundle_installed(),
         )
 }
 
@@ -3081,7 +3082,7 @@ mod tests {
 
     #[test]
     fn loading_folds_saved_recognition_hints_into_the_vocabulary_once() {
-        use crate::vocabulary::VocabularyEntry;
+        use crate::dictation::vocabulary::VocabularyEntry;
         let dir = TestSettingsDir::new("folded-hints");
         let mut file = serde_json::to_value(AppSettings {
             transcription: TranscriptionSelection {
@@ -3500,7 +3501,7 @@ mod tests {
 
     #[test]
     fn vocabulary_round_trips_and_stays_out_of_files_without_one() {
-        use crate::vocabulary::VocabularyEntry;
+        use crate::dictation::vocabulary::VocabularyEntry;
         // A file from before the vocabulary loads with an empty one and is
         // not rewritten to gain the field.
         let dir = TestSettingsDir::new("vocabulary");
@@ -3573,7 +3574,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn new_settings_require_onboarding_across_reloads() {
-        use crate::onboarding::{completion_recorded_at, record_completion_at};
+        use crate::desktop::onboarding::{completion_recorded_at, record_completion_at};
         use std::os::unix::fs::PermissionsExt;
 
         let dir = TestSettingsDir::new("new-onboarding");
@@ -3672,7 +3673,9 @@ mod tests {
         let settings = AppSettings::load_from(&dir.path).unwrap();
         settings.write_to(&dir.path).unwrap();
         assert!(!dir.directory.join("onboarding-pending").exists());
-        assert!(crate::onboarding::completion_recorded_at(&dir.directory));
+        assert!(crate::desktop::onboarding::completion_recorded_at(
+            &dir.directory
+        ));
         assert!(dir.directory.join("onboarding-complete").is_file());
     }
 

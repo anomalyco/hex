@@ -20,11 +20,11 @@ use color_eyre::Result;
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
 use crate::desktop::activity::DesktopActivity;
+use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
     DesktopTranscriptionSnapshot,
 };
-use crate::events::EventReader;
 use crate::linux::dictation::ListenerUpdate;
 use crate::linux::input::{LinuxHotkey, ListenerCommand, ShortcutCommand};
 use crate::linux::service::{
@@ -54,7 +54,7 @@ pub(crate) enum ShortcutTarget {
 
 struct PreparedTranscription {
     selection: crate::transcription::models::TranscriptionSelection,
-    transcriber: crate::local_transcriber::LocalTranscriber,
+    transcriber: crate::transcription::local_transcriber::LocalTranscriber,
 }
 
 struct TranscriptionPreparation {
@@ -130,7 +130,7 @@ struct LinuxDesktopHost {
     // Dismissing a load error must not authorize recording with fallback defaults.
     settings_valid: bool,
     shortcut_edit: Option<ShortcutEdit>,
-    prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
+    prepared_transcriber: Option<crate::transcription::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     updater: crate::updater::Updater,
@@ -138,7 +138,7 @@ struct LinuxDesktopHost {
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
-    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     /// The XKB connection, only while keyboard model switching is on.
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
     input_sources_polled_at: Instant,
@@ -331,7 +331,7 @@ pub(crate) fn run(
         tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
     crate::labs::log_launch();
-    crate::hex_microphone::host_service();
+    crate::audio::hex_microphone::host_service();
     let (settings, error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -341,7 +341,7 @@ pub(crate) fn run(
     };
     crate::linux::dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
-    crate::local_transcriber::initialize_backends();
+    crate::transcription::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let enable_on_launch = settings.enable_on_launch;
@@ -523,7 +523,7 @@ impl LinuxDesktopHost {
         let output = crate::linux::dictation::DictationOutput::from_settings(&settings, history);
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
-        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+        let keyboard_switcher = crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
             settings
                 .keyboard_model_switching
@@ -629,7 +629,7 @@ impl LinuxDesktopHost {
         let (commands, command_receiver) = mpsc::sync_channel(16);
         let (updates, update_receiver) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let result = crate::instance::acquire("listener").and_then(|_instance| {
+            let result = crate::desktop::instance::acquire("listener").and_then(|_instance| {
                 crate::linux::dictation::run(
                     &event_path,
                     None,
@@ -994,7 +994,8 @@ impl LinuxDesktopHost {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
                 crate::transcription::models::ModelPreparationStage::Loading.store(&worker_stage);
-                let transcriber = crate::local_transcriber::LocalTranscriber::load(&selection)?;
+                let transcriber =
+                    crate::transcription::local_transcriber::LocalTranscriber::load(&selection)?;
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }

@@ -22,7 +22,7 @@ use transcribe_cpp::CancelToken;
 #[cfg(target_os = "macos")]
 pub(crate) type Model = crate::transcription::WarmTranscriber;
 #[cfg(not(target_os = "macos"))]
-pub(crate) type Model = crate::local_transcriber::LocalTranscriber;
+pub(crate) type Model = crate::transcription::local_transcriber::LocalTranscriber;
 
 /// Transcribes a complete 16 kHz clip offline on the engine thread.
 pub(crate) type Offline = Box<dyn FnOnce(&mut Model, Vec<f32>) -> Result<String, String> + Send>;
@@ -385,7 +385,7 @@ pub struct TranscriptionEngine {
     streams: Arc<AtomicBool>,
     /// Whether dictation streams publish their text as they go, asked as
     /// each stream begins: Labs › Live text, or a
-    /// [`crate::live_text::Demand`].
+    /// [`crate::dictation::live_text::Demand`].
     live_text: fn() -> bool,
     held: Held,
     /// Whether the worker is running a dictation stream or finish.
@@ -547,7 +547,7 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: || crate::labs::live_text() || crate::live_text::demanded(),
+            live_text: || crate::labs::live_text() || crate::dictation::live_text::demanded(),
             held,
             dictating,
             next_stream: AtomicU64::new(0),
@@ -816,7 +816,7 @@ impl TranscriptionEngine {
 /// both hold idle-sleep prevention while they record, and a macOS capture
 /// counts from its press.
 fn recording() -> bool {
-    crate::idle_sleep::held() || dictation_busy()
+    crate::audio::idle_sleep::held() || dictation_busy()
 }
 
 /// The model `selection` loads into, prewarmed, as the engine held it.
@@ -853,7 +853,7 @@ pub(crate) fn dictation_busy() -> bool {
 #[cfg(target_os = "macos")]
 pub(crate) type HeldModel = crate::transcription::Transcriber;
 #[cfg(not(target_os = "macos"))]
-pub(crate) type HeldModel = crate::local_transcriber::LocalTranscriber;
+pub(crate) type HeldModel = crate::transcription::local_transcriber::LocalTranscriber;
 
 /// The engine's model when it is the GGUF `selection`, never loading or
 /// switching one.
@@ -1245,12 +1245,14 @@ impl Worker {
             job.finish(Err("the speech model could not be reloaded".into()));
             return;
         };
-        let result = crate::gguf_session::with_job_cancel(&job.cancel, || offline(model, clip))
-            .map(|text| Transcribed {
-                text: text.trim().to_string(),
-                source,
-                finish_ms: started.elapsed().as_millis() as u64,
-            });
+        let result = crate::transcription::gguf_session::with_job_cancel(&job.cancel, || {
+            offline(model, clip)
+        })
+        .map(|text| Transcribed {
+            text: text.trim().to_string(),
+            source,
+            finish_ms: started.elapsed().as_millis() as u64,
+        });
         // An offline run may switch the model (macOS activates a selection).
         self.publish_streams();
         job.finish(result);
@@ -1314,7 +1316,7 @@ const PAUSE_TAIL_SAMPLES: usize = 4_800;
 /// offline fallback, keeps every sample.
 struct PauseCap<'a, S> {
     stream: &'a mut S,
-    speech: crate::pause_segmenter::SpeechFrames,
+    speech: crate::transcription::pause_segmenter::SpeechFrames,
     /// Samples not yet a whole 20 ms frame.
     frame: Vec<f32>,
     /// Quiet samples since the last frame above the noise floor.
@@ -1331,7 +1333,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
         Self {
             stream,
             speech: Default::default(),
-            frame: Vec::with_capacity(crate::pause_segmenter::FRAME_SAMPLES),
+            frame: Vec::with_capacity(crate::transcription::pause_segmenter::FRAME_SAMPLES),
             pause: 0,
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
@@ -1367,10 +1369,10 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         while !samples.is_empty() {
             let take = samples
                 .len()
-                .min(crate::pause_segmenter::FRAME_SAMPLES - self.frame.len());
+                .min(crate::transcription::pause_segmenter::FRAME_SAMPLES - self.frame.len());
             self.frame.extend_from_slice(&samples[..take]);
             samples = &samples[take..];
-            if self.frame.len() == crate::pause_segmenter::FRAME_SAMPLES {
+            if self.frame.len() == crate::transcription::pause_segmenter::FRAME_SAMPLES {
                 self.frame(&mut out);
             }
         }
@@ -1722,7 +1724,7 @@ mod tests {
 
     #[test]
     fn quiet_speech_over_steady_noise_is_never_cut_as_a_pause() {
-        use crate::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
+        use crate::transcription::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
         // #458: 17 s of -28 dBFS syllables over -35 dBFS noise, too close
         // to the floor for the meeting detector's 12 dB speech margin.
         let mut seed = 11;
@@ -2254,7 +2256,8 @@ mod tests {
                     Vec::new(),
                     Box::new(move |_, _| {
                         // What transcribe-cpp's abort callback polls.
-                        let cancel = crate::gguf_session::job_cancel().expect("installed");
+                        let cancel =
+                            crate::transcription::gguf_session::job_cancel().expect("installed");
                         while !cancel.is_cancelled() {
                             thread::sleep(Duration::from_millis(5));
                         }

@@ -73,7 +73,7 @@ Reading it:
   Nemotron streaming.
 
 **Compute shape.** Unified is *buffered* streaming: NVIDIA's card says "left
-context is recomputed for each chunk", and Hex's `gguf_session.rs` uses 5.6 s
+context is recomputed for each chunk", and Hex's `transcription/gguf_session.rs` uses 5.6 s
 left, 1.04 s chunk, 1.04 s right. Each step encodes about 7.7 s of audio for
 1.04 s of new audio, roughly 7.4x redundancy (12x at the 0.56 s setting). At the
 cards' M4 Max Metal throughput of about 190 to 230x realtime offline, that is
@@ -152,7 +152,7 @@ Moonshine's one structural advantage over the transcribe.cpp route is that
 moonshine-voice ships its own VAD and line events. transcribe.cpp's Moonshine
 stream returns committed/tentative text, caps one stream at 81.9 s, and has no
 line segmentation; Hex would drive it with Silero VAD v6.2 (shipped in
-transcribe.cpp) or `pause_segmenter` and start a new stream per line.
+transcribe.cpp) or `transcription/pause_segmenter` and start a new stream per line.
 
 ### 2. Landscape (as of 2026-10-22)
 
@@ -245,7 +245,7 @@ Apple Speech. Moonshine is a separate ONNX path outside the catalog.
 │   Gain: streaming WER equals offline (2.31% LS clean), 80 to 1120 ms chunks, constant memory, no 5.6 s
 │   recompute, native PnC. Right choice if the live meeting draft should read like final text, or if
 │   Kit wants always-on streaming with a Parakeet-family model.
-│   Cost: medium. gguf_session.rs only sets the buffered Parakeet extension; Nemotron needs
+│   Cost: medium. transcription/gguf_session.rs only sets the buffered Parakeet extension; Nemotron needs
 │   StreamExtension::ParakeetStream{att_context_right}. Runs in 0.2.4. License is the NVIDIA Open
 │   Model License. Do not make it the dictation default: Unified is more accurate offline (5.91 vs 6.92).
 │

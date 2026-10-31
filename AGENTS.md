@@ -78,40 +78,40 @@ substitute for source inspection or a second roadmap.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
-- `keyboard_input_sources`, `keyboard_model_switching`: keyboard input-source
+- `keyboard_input_sources`, `transcription/keyboard_model_switching`: keyboard input-source
   observation (macOS TIS, Windows foreground-window layout, X11 XKB groups;
   Wayland has no general protocol) and the shared debounced policy that turns a
   mapped source into an installed-only model-picker choice.
 - `dictation`, `dictation/diagnostics`: warm pre-roll, growable capture, 16 kHz
   local-transcription resampling, and owner-only diagnostic WAV retention when
   `HEX_RETAIN_DICTATION_AUDIO` is set.
-- `pause_segmenter`: pure 16 kHz pause detection that cuts meeting audio into
+- `transcription/pause_segmenter`: pure 16 kHz pause detection that cuts meeting audio into
   rolling transcription chunks.
 - `dictation/audio`: the authoritative microphone timeline, lazy stream
   lifecycle, recording owner, exact shortcut boundaries, recovery handoff,
   disposable bounded command audio projection, and the bounded capture sink
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
   a Scrawl capture.
-- `input_level`: the latest microphone peak as one atomic, stored per chunk by
+- `audio/input_level`: the latest microphone peak as one atomic, stored per chunk by
   each OS's audio owner and read by the window's level bars (General and the
   practice dictation); a stale peak reads as no audio.
-- `recording_environment`: serialized RAII ownership of idle-sleep prevention,
+- `audio/recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting and lowering, and supported media-player pause/resume
   behavior on macOS, each held from the first dictation or capture session
   that wants it to the last.
-- `output_ducking`: the shared Lower audio ramp (relative, channel-preserving,
+- `audio/output_ducking`: the shared Lower audio ramp (relative, channel-preserving,
   respecting manual changes, rolled back on failure) over each OS's volume
   adapter: CoreAudio output channels, the Linux default sink's channels
   (`pactl`, else `wpctl`), and other apps' WASAPI session volumes.
-- `idle_sleep`: idle-sleep prevention while a dictation records: an IOKit
+- `audio/idle_sleep`: idle-sleep prevention while a dictation records: an IOKit
   assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
   polkit refuses a process outside the seat session) on Linux, and a
   system-required power request on Windows.
 - `dictation/processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
-  model catalog, and the transformation stage, over `opencode_service`.
-- `opencode_service`: the only way Hex reaches OpenCode, on every OS. It reads
+  model catalog, and the transformation stage, over `desktop/opencode_service`.
+- `desktop/opencode_service`: the only way Hex reaches OpenCode, on every OS. It reads
   the running service's owner-only registration
   (`${XDG_STATE_HOME:-~/.local/state}/opencode/service.json`, then other
   channels' `service-*.json`), confirms the registered PID through
@@ -128,14 +128,14 @@ substitute for source inspection or a second roadmap.
 - `transcription`, `transcription/benchmark`: runtime selection, transactional
   warm-model activation, and the fixed-corpus benchmark runner behind
   `hex benchmark-transcription`.
-- `gguf_session`: the `transcribe.cpp` session owner shared by `parakeet` and
-  `local_transcriber`; it recreates the native session around each run (and
+- `transcription/gguf_session`: the `transcribe.cpp` session owner shared by `parakeet` and
+  `transcription/local_transcriber`; it recreates the native session around each run (and
   each live stream) so inference scratch stays bounded, and owns chunked
   long-audio transcription.
-- `speech_detector`: the optional Silero voice activity detector, loaded once on
+- `transcription/speech_detector`: the optional Silero voice activity detector, loaded once on
   the CPU and downloaded in the background, that keeps speechless dictation
   captures and meeting chunks away from the transcription models.
-- `local_transcriber`: the Linux and Windows GGUF loader, prewarm, whole-clip
+- `transcription/local_transcriber`: the Linux and Windows GGUF loader, prewarm, whole-clip
   transcription, and stream entry point.
 - `transcription/engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
@@ -149,7 +149,7 @@ substitute for source inspection or a second roadmap.
   on macOS, and on Linux and Windows only the engine's dictation streams and
   finishes, so a host clip can start during a CPU-only capture's hold. With
   Labs › Unload model when idle on, its worker unloads the GGUF model after
-  the chosen idle time when nothing records (`idle_sleep::held`) and reloads
+  the chosen idle time when nothing records (`audio::idle_sleep::held`) and reloads
   it before the next command that needs it; the parked model still counts as
   held, so callers never load a second copy.
 - `transcription/preparation`: application-owned model preparation shared by
@@ -161,7 +161,7 @@ substitute for source inspection or a second roadmap.
 - `transcription/service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
-  service loads its own (`WarmTranscriber` on macOS, `local_transcriber::WarmLocal`
+  service loads its own (`WarmTranscriber` on macOS, `transcription::local_transcriber::WarmLocal`
   on Linux and Windows), released after a long clip when the engine holds it.
 - `transcription/stream`: live `/streams` transcription of another app's
   pushed audio on the engine's loaded model: pause-cut windows fed through
@@ -193,7 +193,7 @@ substitute for source inspection or a second roadmap.
   `unsupported` at runtime. Contract: `docs/cli.md`.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
-- `developer_control`: the typed debug-only command/reply protocol the local
+- `control/developer_control`: the typed debug-only command/reply protocol the local
   API uses to drive the running app from `hex dev`.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
@@ -209,13 +209,13 @@ substitute for source inspection or a second roadmap.
   and managed `hex.d.ts` typings, watch-reloaded deterministic transformation
   calls, per-call time and runtime memory limits, status snapshots, and
   `hex commands init|check`. macOS, Windows, and Linux share it.
-- `background_process`: the one constructor for child processes Hex starts for
+- `desktop/background_process`: the one constructor for child processes Hex starts for
   its own work (OpenCode CLI, curl, PowerShell); on Windows they
   never open a console window.
-- `text_replacements`: phrase-boundary-aware compilation of configured text
+- `dictation/text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
-- `config`: dictation profiles.
-- `context`: the foreground context snapshot and selectors for modes,
+- `dictation/config`: dictation profiles.
+- `dictation/context`: the foreground context snapshot and selectors for modes,
   plus native macOS capture. Browser host is the domain concept. macOS
   reads the front tab of a table of scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
@@ -229,15 +229,15 @@ substitute for source inspection or a second roadmap.
   selection, recording behavior, processing, sound volume, indicator position,
   interface language, and Dock policy. It records one-time changes in
   `migrations`.
-- `login_item`: the native `SMAppService.mainAppService` adapter and its worker
+- `desktop/login_item`: the native `SMAppService.mainAppService` adapter and its worker
   thread. macOS owns registration state; it is deliberately not duplicated in
   `settings.json`.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
   logs and shared state.
-- `onboarding`, `permission_guide`: required permission health, the native
+- `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
-- `hex_microphone`, `voice_filter`: the experimental virtual microphone
+- `audio/hex_microphone`, `audio/voice_filter`: the experimental virtual microphone
   (`Hex Microphone`: a CoreAudio driver on macOS, a PipeWire virtual source
   fed through `pw-cat` on Linux, none on Windows, which would need a signed
   kernel driver), the lock-free capture-to-sink ring buffer, real-time
@@ -275,7 +275,7 @@ substitute for source inspection or a second roadmap.
   Wayland, matched by title and process and bounded by a deadline. Chromium
   exposes pages only with renderer accessibility on.
 - `linux/audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
-  audio through `output_ducking`, and MPRIS pause over D-Bus (zbus),
+  audio through `audio/output_ducking`, and MPRIS pause over D-Bus (zbus),
   restoring only what it changed, plus idle-sleep prevention for dictations.
 - `linux/input_route`: System default's Bluetooth avoidance on Linux. ALSA's
   default cannot name another PipeWire source, so Hex marks its ALSA streams
@@ -297,13 +297,13 @@ substitute for source inspection or a second roadmap.
   whose compositor steps `dictation/indicator`'s model on Rune's frame clock
   (the display's refresh) and draws Dot scope on the GPU with
   `rune_hud.wgsl`. `rune_hud/macos` places it on the pointer's screen
-  through `hud_placement` (below the menu bar, in it, or out of the notch);
+  through `rune_hud/hud_placement` (below the menu bar, in it, or out of the notch);
   Linux and Windows place it at the top or bottom edge.
   `rune_hud_frames` renders a fixed dictation through the shaders offscreen.
 - `linux/tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
-  with a dbusmenu built by `tray_menu`). It registers whenever a tray host
+  with a dbusmenu built by `desktop/tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
-- `tray_menu`: the tray menu Linux and Windows share (recording state, Show
+- `desktop/tray_menu`: the tray menu Linux and Windows share (recording state, Show
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
   lists too. Each tray maps a `TrayCommand` onto its own runtime.
@@ -326,7 +326,7 @@ substitute for source inspection or a second roadmap.
   low-level keyboard hook, clipboard paste, UI Automation context, While
   dictating (mute, lower, or pause other apps' audio) with idle-sleep
   prevention, and the login item.
-- `live_text`: Labs' live text of the recording in
+- `dictation/live_text`: Labs' live text of the recording in
   progress: the recording's `Publisher` shows it and its drop clears it, and
   each OS's host installs `rune_ui::live_text`, one click-through line just
   past the HUD, as a watcher, placed where `rune_hud` last showed the HUD
@@ -340,12 +340,12 @@ substitute for source inspection or a second roadmap.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata only, never audio.
-- `transcript_cli`: read-only release commands `hex history` and
+- `control/transcript_cli`: read-only release commands `hex history` and
   `hex meetings list|show|search` on every OS, versioned JSON projections and
   filters.
   Reads history snapshots without opening the writable store, and shares
   meeting selection, search, and Markdown with `meeting::query` / MCP.
-- `events`, `dashboard`: bounded asynchronous append-only NDJSON observations
+- `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections.
 - `desktop/activity`: the shared listener, device, session, and latest-failure
@@ -367,10 +367,10 @@ substitute for source inspection or a second roadmap.
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to
   each OS's host. Keep shared UI in the pane modules and only OS behavior in
   the hosts.
-- `opencode_catalog`: the OpenCode model catalog as the window shows it:
+- `desktop/opencode_catalog`: the OpenCode model catalog as the window shows it:
   loading off the UI thread, the missing/failing notice, model names, search,
   and thinking variants.
-- `status_item`: the persistent macOS menu-bar owner for Settings, Paste Last
+- `macos_rune/status_item`: the persistent macOS menu-bar owner for Settings, Paste Last
   Dictation, meeting recording state and Stop & Transcribe, update checks, and
   orderly application shutdown.
 - `macos_rune`: the macOS app as one menu-bar process on
@@ -378,13 +378,13 @@ substitute for source inspection or a second roadmap.
   and HUD on the main AppKit loop, and a runtime thread for model
   preparation and the window's state. `rune_ui/macos_host.rs` is the
   window's host and the panes' `NativeHost`.
-- `hud_placement`: pure geometry for where a HUD sits on its screen (below
+- `rune_hud/hud_placement`: pure geometry for where a HUD sits on its screen (below
   the menu bar, in it, or as an island grown out of the notch), shared by
   the dictation HUD and, later, the capture capsule.
-- `dictation/indicator`, `dot_scope`, `spring`: the HUD's events, phases,
+- `dictation/indicator`, `rune_hud/dot_scope`, `rune_hud/spring`: the HUD's events, phases,
   jobs, and Dot scope (the one HUD look: a plate of dots lit by a braided,
   auto-levelled oscilloscope trace), the same on every OS and drawn by
-  `rune_hud`; `spring` holds the frame-rate-independent springs.
+  `rune_hud`; `rune_hud/spring` holds the frame-rate-independent springs.
 - `meeting`: explicit capture through `meeting/capture`, owner-only WAV and transcript
   artifacts, final local-model publication, the user-facing Markdown copy, and
   recovery, on every OS. Its `os` adapter (`meeting/macos`, `meeting/linux`,
@@ -446,7 +446,7 @@ substitute for source inspection or a second roadmap.
   calendar reminders, recording workers, call-ended presence, notes, and the
   menu-bar meeting state. The capsules that show its events are
   `rune_ui::meeting_capsules`.
-- `file_dialog`: the one native open dialog for a file or folder (Modes'
+- `desktop/file_dialog`: the one native open dialog for a file or folder (Modes'
   "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
@@ -510,9 +510,9 @@ substitute for source inspection or a second roadmap.
   Linux reads the folder itself and hands start/stop/cancel to the
   listener over `linux/service`; Windows sends every `hex annotate` command
   to the running Hex).
-- `instance`: the exclusive Application Support lock that prevents concurrent
+- `desktop/instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
-- `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
+- `desktop/process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
   and `hex restart`, Ctrl-C, and AppKit's terminate) stops and joins Hex's
   workers, bounded by a 5 s deadline, then calls `_exit`, so C++ static
   destructors (such as ggml's Metal device) never run
@@ -732,7 +732,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   It applies to Paste, not meetings.
 - Hex never starts, probes, or searches for an OpenCode executable, and never
   starts the service: it only talks to an already running OpenCode service
-  found through its registration file (`opencode_service`). Nothing touches
+  found through its registration file (`desktop/opencode_service`). Nothing touches
   OpenCode unless a feature that uses it runs: mode rewriting, meeting notes
   with Summarize with OpenCode, sending an Annotate capture, or the model
   catalog while the Modes pane shows. Checks stay off the UI thread. A stopped
@@ -1157,7 +1157,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   changes the shown status. Shortcut changes register the shortcuts again,
   a microphone change reopens the stream, and a model or recognition-hint
   change loads the new model beside the old one and swaps it in once no
-  transcription is pending (`local_transcriber::ModelSwap`). Recording a
+  transcription is pending (`transcription::local_transcriber::ModelSwap`). Recording a
   shortcut in the window suspends only global matching.
 - Linux shortcut capture uses focused input in the window. Recording a
   shortcut suspends the running listener's global matching and registers the

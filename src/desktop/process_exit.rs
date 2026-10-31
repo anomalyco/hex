@@ -174,7 +174,7 @@ mod tests {
         std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                &format!("process_exit::tests::{name}"),
+                &format!("desktop::process_exit::tests::{name}"),
                 "--nocapture",
             ])
             .env(CHILD, "1")

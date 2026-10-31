@@ -9,12 +9,14 @@
 //! and are tested on Linux; a native host fills the same data on its own OS.
 
 use super::meetings::Meeting;
-use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
-use crate::hex_microphone::{
+use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
 };
-use crate::login_item::{LoginItemResult, LoginItemStatus};
-use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState, SetupStatus};
+use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
+use crate::desktop::login_item::{LoginItemResult, LoginItemStatus};
+use crate::desktop::onboarding::{
+    Input, PermissionAction, PermissionKind, PermissionState, SetupStatus,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Os {
@@ -266,7 +268,7 @@ pub(super) enum ScrawlRequest {
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
-    pub(super) input_sources: Vec<crate::keyboard_model_switching::InputSource>,
+    pub(super) input_sources: Vec<crate::transcription::keyboard_model_switching::InputSource>,
     /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
     /// none.
@@ -329,7 +331,7 @@ pub(super) enum HudDemo {
 /// state.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct HudLab {
-    pub(super) tuning: crate::dot_scope::Tuning,
+    pub(super) tuning: crate::rune_hud::dot_scope::Tuning,
     pub(super) demo: HudDemo,
 }
 
@@ -349,7 +351,7 @@ impl PlatformState {
         Self {
             caps,
             input_sources: Vec::new(),
-            permissions: crate::onboarding::status_with_transcription_model(false),
+            permissions: crate::desktop::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
             system_audio: false,
             login_item: None,
@@ -376,7 +378,9 @@ impl PlatformState {
     /// which knows the selected model.
     pub(super) fn setup_status(&self, transcription_model: bool) -> SetupStatus {
         if !self.caps.permissions {
-            return crate::onboarding::status_with_transcription_model(transcription_model);
+            return crate::desktop::onboarding::status_with_transcription_model(
+                transcription_model,
+            );
         }
         SetupStatus {
             transcription_model,
@@ -482,7 +486,7 @@ impl PlatformState {
                 } else {
                     Vec::new()
                 },
-                action_state: crate::hex_microphone::DriverActionState::Idle,
+                action_state: crate::audio::hex_microphone::DriverActionState::Idle,
             });
             state.demo = Some(super::fun::preview_demo(false, None));
         }
@@ -533,7 +537,7 @@ pub(super) enum PlatformRequest {
     EndHudDemo,
     /// Save Dot scope's tuning as `dot-scope.json`, which the HUD loads at
     /// launch.
-    SaveDotScope(crate::dot_scope::Tuning),
+    SaveDotScope(crate::rune_hud::dot_scope::Tuning),
     #[cfg(hex_capture)]
     Scrawl(ScrawlRequest),
 }
@@ -541,7 +545,7 @@ pub(super) enum PlatformRequest {
 /// Performs a Voice Filter request on the Hex Microphone in this process.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn voice_filter_request(request: PlatformRequest) {
-    use crate::hex_microphone as mic;
+    use crate::audio::hex_microphone as mic;
     match request {
         PlatformRequest::InstallHexMicrophone => mic::install_driver_async(),
         PlatformRequest::UninstallHexMicrophone => mic::uninstall_driver_async(),
@@ -563,7 +567,7 @@ pub(super) fn voice_filter_request(request: PlatformRequest) {
 /// Voice Filter is off.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn poll_voice_filter(state: &mut PlatformState, refresh: bool) -> bool {
-    use crate::hex_microphone as mic;
+    use crate::audio::hex_microphone as mic;
     let mut changed = false;
     let on = crate::app_settings::hex_microphone_enabled();
     if on
@@ -610,7 +614,7 @@ pub(super) trait NativeHost {
     /// The microphone's latest peak, 0 to 1; silence when no audio arrived
     /// lately. The tour reads it only while a practice dictation records.
     fn practice_level(&self) -> f32 {
-        crate::input_level::recent().unwrap_or(0.0)
+        crate::audio::input_level::recent().unwrap_or(0.0)
     }
 }
 
@@ -645,8 +649,8 @@ impl PlatformHost {
                         PermissionKind::Microphone,
                     ))
                 {
-                    crate::opencode_catalog::open_url(
-                        crate::onboarding::WINDOWS_MICROPHONE_SETTINGS,
+                    crate::desktop::opencode_catalog::open_url(
+                        crate::desktop::onboarding::WINDOWS_MICROPHONE_SETTINGS,
                     )
                     .map_err(|error| format!("{error:#}"))?;
                 }
@@ -696,7 +700,7 @@ impl PlatformHost {
     pub(super) fn practice_level(&self) -> f32 {
         match self {
             Self::Native(host) => host.practice_level(),
-            Self::Local(_) => crate::input_level::recent().unwrap_or(0.0),
+            Self::Local(_) => crate::audio::input_level::recent().unwrap_or(0.0),
             Self::Fixture(_) => 0.0,
         }
     }

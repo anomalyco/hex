@@ -361,7 +361,7 @@ option to `benchmark-transcription` so every approach runs through one harness.
 ## Sources
 
 - Hex: `src/parakeet.rs` (hints are Whisper-only), `src/transcription_models.rs`
-  (`supports_recognition_hints`), `src/text_replacements.rs`,
+  (`supports_recognition_hints`), `src/dictation/text_replacements.rs`,
   `src/dictation_processor.rs`, `src/history.rs`, and the issues above.
 - transcribe.cpp:
   `handy-computer/transcribe.cpp` at `4d7c1cc` (`docs/prompting.md`,

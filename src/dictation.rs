@@ -1,12 +1,23 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod audio;
 #[cfg(target_os = "macos")]
+pub(crate) mod config;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod context;
+#[cfg(target_os = "macos")]
 pub(crate) mod diagnostics;
+pub(crate) mod filler_words;
 pub(crate) mod indicator;
+pub(crate) mod live_text;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
+pub(crate) mod spoken_formatting;
+pub(crate) mod spoken_symbols;
+pub(crate) mod text_replacements;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod vocabulary;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -18,7 +29,9 @@ use crate::audio::CaptureInstant;
 use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
 
 #[cfg(target_os = "macos")]
-use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
+use crate::audio::recording_environment::{
+    RecordingEnvironmentController, RecordingEnvironmentSession,
+};
 
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
@@ -116,7 +129,7 @@ pub struct DictationClip {
     stream: Option<LiveStream>,
     /// Keeps background work deferring until the clip is submitted.
     #[cfg(target_os = "macos")]
-    capture: Option<crate::recording_environment::CaptureMarker>,
+    capture: Option<crate::audio::recording_environment::CaptureMarker>,
 }
 
 impl DictationClip {
@@ -132,7 +145,9 @@ impl DictationClip {
     /// Takes the marker that defers background work; hold it until the clip
     /// is submitted.
     #[cfg(target_os = "macos")]
-    pub fn take_capture_marker(&mut self) -> Option<crate::recording_environment::CaptureMarker> {
+    pub fn take_capture_marker(
+        &mut self,
+    ) -> Option<crate::audio::recording_environment::CaptureMarker> {
         self.capture.take()
     }
 
@@ -224,7 +239,7 @@ impl DictationClip {
         }
         let released = self.samples.len().saturating_sub(self.tail_samples);
         let started = std::time::Instant::now();
-        match crate::speech_detector::contains_speech(&self.samples[..released]) {
+        match crate::transcription::speech_detector::contains_speech(&self.samples[..released]) {
             Some(false) => {
                 tracing::info!(
                     level_dbfs,
@@ -397,15 +412,15 @@ struct Recording {
     stream: Option<LiveStream>,
     /// This recording's hold on the HUDs' live text, from its first text;
     /// dropping the recording clears it.
-    live_text: Option<crate::live_text::Publisher>,
+    live_text: Option<crate::dictation::live_text::Publisher>,
     #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
     #[cfg(target_os = "macos")]
-    capture: Option<crate::recording_environment::CaptureMarker>,
+    capture: Option<crate::audio::recording_environment::CaptureMarker>,
     /// Filters Hex Microphone from the hold threshold until the recording
     /// ends (macOS follows its recording environment instead).
     #[cfg(target_os = "linux")]
-    voice_filter: Option<crate::hex_microphone::Dictation>,
+    voice_filter: Option<crate::audio::hex_microphone::Dictation>,
 }
 
 #[cfg(target_os = "macos")]
@@ -653,7 +668,8 @@ impl DictationCapture {
         recording.intentional = intentional;
         #[cfg(target_os = "linux")]
         {
-            recording.voice_filter = intentional.then(crate::hex_microphone::Dictation::begin);
+            recording.voice_filter =
+                intentional.then(crate::audio::hex_microphone::Dictation::begin);
         }
         #[cfg(target_os = "macos")]
         {
@@ -667,7 +683,7 @@ impl DictationCapture {
             recording.capture = self
                 .recording_environment
                 .is_some()
-                .then(crate::recording_environment::CaptureMarker::new);
+                .then(crate::audio::recording_environment::CaptureMarker::new);
         }
         recording.pre_press = crate::audio::duration_for_frames(pre_roll, self.sample_rate);
         let skip = self.ring.len() - pre_roll;
@@ -730,7 +746,7 @@ impl DictationCapture {
         }
         #[cfg(target_os = "linux")]
         if became_intentional {
-            recording.voice_filter = Some(crate::hex_microphone::Dictation::begin());
+            recording.voice_filter = Some(crate::audio::hex_microphone::Dictation::begin());
         }
         became_intentional
     }
@@ -847,7 +863,7 @@ impl DictationCapture {
         );
         recording
             .live_text
-            .get_or_insert_with(crate::live_text::Publisher::new)
+            .get_or_insert_with(crate::dictation::live_text::Publisher::new)
             .show(&partial);
     }
 
@@ -1009,10 +1025,10 @@ mod tests {
     fn speech_detector_discards_loud_captures_without_speech() {
         let clip = |samples: Vec<f32>| DictationClip::for_test(samples);
         {
-            let _detector = crate::speech_detector::override_for_test(Some(false));
+            let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
             assert!(clip(tone(0.1, 16_000).collect()).is_near_silent());
         }
-        let _detector = crate::speech_detector::override_for_test(Some(true));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(true));
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
         // The level gate runs first: a silent capture never reaches the
         // detector.
@@ -1311,7 +1327,7 @@ mod tests {
 
     /// Speech with pauses ending near 4.3 s and 9.3 s, at `sample_rate`.
     fn paused_speech(sample_rate: u32) -> Vec<f32> {
-        let speech = crate::pause_segmenter::tests::utterance(
+        let speech = crate::transcription::pause_segmenter::tests::utterance(
             &[(4_000, 1_000), (4_000, 1_000), (2_000, 0)],
             -70.0,
         );
