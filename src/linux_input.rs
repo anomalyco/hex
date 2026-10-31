@@ -437,6 +437,9 @@ pub(crate) struct HotkeyStatus {
     configurable: Arc<AtomicBool>,
     /// Settings asked for that dialog.
     configure: Arc<AtomicBool>,
+    /// The person disabled Hex: clear its shortcuts from the desktop's list
+    /// when the listener stops.
+    forget: Arc<AtomicBool>,
     keys: ShortcutKeys,
 }
 
@@ -471,6 +474,12 @@ impl HotkeyStatus {
     /// Opens the desktop's dialog for Hex's shortcuts, when it has one.
     pub(crate) fn configure(&self) {
         self.configure.store(true, Ordering::Release);
+    }
+
+    /// Clears Hex's shortcuts from the desktop's list once the listener
+    /// stops, as Disable does; a restart for a settings change keeps them.
+    pub(crate) fn forget_on_stop(&self) {
+        self.forget.store(true, Ordering::Release);
     }
 
     fn set_shortcuts(&self, shortcuts: DesktopShortcuts) {
@@ -1124,9 +1133,17 @@ impl Backend {
                 );
             }
             if !dispatcher.flush()? {
-                return Ok(());
+                break;
             }
             thread::sleep(POLL_INTERVAL);
+        }
+        if self.status.forget.load(Ordering::Acquire)
+            && let Err(error) = portal.forget()
+        {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not clear Hex's shortcuts from the desktop"
+            );
         }
         Ok(())
     }

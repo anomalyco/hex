@@ -230,6 +230,7 @@ impl WindowsDesktopHost {
                 } else {
                     self.start();
                 }
+                self.remember_listening(self.listen_when_ready);
             }
             Request::ChooseModel { model, language } => self.choose_model(model, language),
             Request::CancelModel => {
@@ -258,8 +259,14 @@ impl WindowsDesktopHost {
 
     fn dispatch(&mut self, action: DesktopAction) -> bool {
         match action {
-            DesktopAction::StartListening => self.start(),
-            DesktopAction::StopListening => self.stop(),
+            DesktopAction::StartListening => {
+                self.start();
+                self.remember_listening(true);
+            }
+            DesktopAction::StopListening => {
+                self.stop();
+                self.remember_listening(false);
+            }
             DesktopAction::ClearError => self.error = None,
             DesktopAction::CheckForUpdates
             | DesktopAction::OpenUpdate
@@ -422,6 +429,20 @@ impl WindowsDesktopHost {
                 self.status = "Couldn't enable".into();
                 self.error = Some(tr_fill("Could not start listener: {}", &error.to_string()));
             }
+        }
+    }
+
+    /// Enable and Disable also decide whether Hex listens at its next launch,
+    /// so a disabled Hex stays disabled after a restart (#575).
+    fn remember_listening(&mut self, enabled: bool) {
+        if self.settings.enable_on_launch == enabled {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.enable_on_launch = enabled;
+        match save_listening(&candidate) {
+            Ok(()) => self.apply_settings(&candidate),
+            Err(error) => tracing::warn!(%error, "could not save Enable on launch"),
         }
     }
 
@@ -745,6 +766,17 @@ fn visible_failure(activity: &DesktopActivity, last_completed_at: Option<u64>) -
         .as_ref()
         .filter(|(failed_at, _)| last_completed_at.is_none_or(|completed| completed < *failed_at))
         .map(|(_, message)| message.clone())
+}
+
+#[cfg(not(test))]
+fn save_listening(settings: &AppSettings) -> Result<()> {
+    settings.save()
+}
+
+/// Tests never write the person's `settings.json`.
+#[cfg(test)]
+fn save_listening(_: &AppSettings) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
