@@ -219,6 +219,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Spoken formatting"),
         tr("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks"),
     ));
+    rows.push(row(
+        Feature::FillerWords,
+        &HINTS,
+        tr("Remove filler words"),
+        tr("Remove filler words such as um and uh from dictations, without an AI model"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -256,6 +262,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::KeepOnClipboard => "lab-keep-on-clipboard",
         Feature::CopyOnly => "lab-copy-only",
         Feature::SpokenFormatting => "lab-spoken-formatting",
+        Feature::FillerWords => "lab-filler-words",
     }
 }
 

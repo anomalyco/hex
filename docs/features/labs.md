@@ -26,6 +26,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks (#630)
+├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -153,6 +154,29 @@ recognized. Dictate without processing, meetings, and live text are
 unchanged, and with the toggle off processing is exactly as before. Checks:
 the tests in [spoken_formatting.rs](../../src/spoken_formatting.rs);
 `spoken_formatting_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation with the toggle on; the Labs page goldens need regenerating on
+Linux with the new row.
+
+Remove filler words (`filler-words`, issue 631, every OS): while on,
+`Profiles::process_cancellable` in
+[dictation_processor.rs](../../src/dictation_processor.rs) reads
+`labs::filler_words()` as each dictation's processing starts and runs
+`filler_words::apply` right after spoken formatting and before the mode's
+corrections, OpenCode rewriting, and transformations. It is rule-based, with
+no model and no added latency. The English fillers "um", "umm", "uh", "uhh",
+"erm", "er", and "ah" are removed as whole words, lowercase or capitalised
+only, so "umbrella", "ahead", "error", "Uhura", "uh-huh", and "ER" stay. The
+comma or ellipsis that comes with a filler goes too, the spaces around it
+close up, no space is left before punctuation, a capitalised filler that
+started a sentence passes its capital to the next word ("Um, so I think"
+becomes "So I think"), and line breaks stay. Dictate without processing,
+meetings, and live text are unchanged, and with the toggle off processing is
+exactly as before. Checks: the tests in
+[filler_words.rs](../../src/filler_words.rs);
+`filler_words_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real

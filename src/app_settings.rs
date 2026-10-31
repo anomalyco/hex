@@ -1332,6 +1332,9 @@ pub struct LabsSettings {
     /// Spoken "new line", "new paragraph", and "open/close quote" become
     /// line breaks and quotation marks (issue 630).
     pub spoken_formatting: bool,
+    /// Filler words such as "um" and "uh" are removed from dictations
+    /// (issue 631).
+    pub filler_words: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1351,6 +1354,7 @@ impl Default for LabsSettings {
             keep_on_clipboard: false,
             copy_only: false,
             spoken_formatting: false,
+            filler_words: false,
         }
     }
 }

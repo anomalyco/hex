@@ -278,6 +278,14 @@ impl Profiles {
         } else {
             transcript
         };
+        // Labs › Remove filler words, likewise ahead of the corrections.
+        let unfilled;
+        let transcript = if crate::labs::filler_words() {
+            unfilled = crate::filler_words::apply(transcript);
+            unfilled.as_str()
+        } else {
+            transcript
+        };
         let corrected = profile.replacements.replace(transcript);
         if !profile.ai_enabled {
             return Processed {

@@ -311,6 +311,11 @@ const KEYS: &[Key] = &[
         "Labs: turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks",
     ),
     key(
+        "labs.filler_words",
+        Kind::Bool,
+        "Labs: remove filler words such as um and uh from dictations, without an AI model",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
