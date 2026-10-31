@@ -3,7 +3,7 @@
 # Inno Setup 6 when ISCC is missing. The installer embeds the executable byte
 # for byte.
 #
-#   scripts/build-windows-installer.ps1 -Executable dist\Hex-2.4.0-windows-x64.exe `
+#   scripts/build-windows-installer.ps1 -Executable dist\hex-2.4.0-windows-x64.exe `
 #     -Version 2.3.0 -Arch x86_64 -OutDir dist
 [CmdletBinding()]
 param(

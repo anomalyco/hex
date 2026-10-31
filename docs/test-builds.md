@@ -7,7 +7,7 @@ Artifacts are kept 14 days, and downloading one requires a GitHub login with
 access to the repository.
 
 ```ts
-hex-test-<commit>-macos-arm64       // Hex-Test-<commit>-arm64.dmg
+hex-test-<commit>-macos-arm64       // hex-test-<commit>-arm64.dmg
 hex-test-<commit>-windows-x86_64    // hex-setup-<version>-windows-x64.exe + bare hex-<version>-windows-x64.exe
 hex-test-<commit>-windows-aarch64   // hex-setup-<version>-windows-arm64.exe + bare hex-<version>-windows-arm64.exe
 hex-test-<commit>-linux-x86_64      // hex-<version>-linux-x64
