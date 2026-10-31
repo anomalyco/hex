@@ -252,45 +252,7 @@ pub(super) fn driver_installed(ui: &Ui) -> bool {
         .is_some_and(|status| status.driver_bundle_installed)
 }
 
-/// Turns the Voice Filter on or off. Off, Hex doesn't watch the driver or
-/// feed the Hex Microphone. While the driver is installed it shows on and
-/// can't be turned off: the driver card's Uninstall is the way.
-fn switch(ui: &Ui, p: Paint) -> El {
-    let title = tr("Turn on Voice Filter");
-    let row = if driver_installed(ui) {
-        setting_row(
-            p,
-            "fun-enabled",
-            title,
-            Some(tr(
-                "On while the Hex Microphone driver is installed. Uninstall the driver below to turn it off.",
-            )),
-            rune_kit::Switch::new(true)
-                .disabled(true)
-                .build(p.k)
-                .key("switch")
-                .focusable(false),
-        )
-    } else {
-        toggle_row(
-            p,
-            "fun-enabled",
-            title,
-            tr("Feeds the Hex Microphone virtual input through a voice filter while you dictate"),
-            ui.settings.experimental.hex_microphone,
-            |ui: &mut Ui| {
-                let on = !ui.settings.experimental.hex_microphone;
-                ui.update(|settings| settings.experimental.hex_microphone = on);
-            },
-        )
-    };
-    card(p, "fun-switch", vec![row])
-}
-
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
-    if !running(ui) {
-        return super::scroll_body("fun-scroll", page("content").child(switch(ui, p)));
-    }
     let cfg = &ui.platform.tuning;
     let mode = cfg.mode;
     let labels: Vec<&str> = VoiceFilterMode::ALL
@@ -427,7 +389,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .child(header_status(ui, p)),
         )
         .child(card(p, "card", rows));
-    let content = page("content").child(switch(ui, p)).child(section);
+    let content = page("content").child(section);
     super::scroll_body("fun-scroll", content)
 }
 

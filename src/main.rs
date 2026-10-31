@@ -238,10 +238,10 @@ enum Command {
         #[command(subcommand)]
         command: transcript_cli::MeetingsCommand,
     },
-    /// Turn Labs, every unfinished feature, on or off.
+    /// List the Labs features, or turn one on or off.
     Labs {
         #[command(subcommand)]
-        command: labs::LabsCommand,
+        command: Option<labs::LabsCommand>,
     },
     /// Replaced by `hex labs`.
     #[command(hide = true)]
@@ -1078,11 +1078,16 @@ mod tests {
         use super::labs::LabsCommand;
 
         assert!(matches!(
-            Cli::try_parse_from(["hex", "labs", "on"]).map(|cli| cli.command),
+            Cli::try_parse_from(["hex", "labs", "on", "live-text"]).map(|cli| cli.command),
             Ok(Some(Command::Labs {
-                command: LabsCommand::On
-            }))
+                command: Some(LabsCommand::On { feature })
+            })) if feature == "live-text"
         ));
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "labs"]).map(|cli| cli.command),
+            Ok(Some(Command::Labs { command: None }))
+        ));
+        assert!(Cli::try_parse_from(["hex", "labs", "off"]).is_err());
         assert!(matches!(
             Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
                 .map(|cli| cli.command),

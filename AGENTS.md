@@ -28,21 +28,18 @@ and keep consequential behavior explicit. Deterministic personal transcript
 transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-Every build shows General, Output, History, and Labs. Labs is one persisted
-switch (`labs.enabled`, on by default in every build, stable included) that
-shows every unfinished feature (`Voice Filter`, `Live text`,
-`Live chapters`, `Playground`, the new onboarding) so people can try them and
-send feedback. Labs on only shows them: a feature with side effects or
-background work keeps its own switch, off by default (`experimental.hex_microphone`
-in the Voice Filter pane, `labs.live_text` and `labs.live_chapters` on their
-Labs rows), and nothing starts at launch because Labs is on. Labs also holds
-the opt-in `Meetings (beta)` switch on macOS (`meetings.enabled`, default off:
-no call detection or EventKit reads while off). Dev, local, and test builds
-(`dev_build::is_dev_build()`) add Annotate to Labs; production builds keep it
-dormant. HUD Lab's live Dot scope tuning lives inside
-Playground (`⇧⌘D`, `Prototypes/HUD/*`). `DEVELOPER_FEATURES_ENABLED` keeps
-Meetings available by default in debug builds and keeps the meeting CLI
-debug-only.
+Every build shows General, Output, History, and Labs. Labs holds features
+we're unsure about, especially ones people asked for that we built: **new or
+user-requested features land in Labs, off by default, not on by default.**
+Labs has no master switch; Settings › Labs is one flat list of rows (name,
+description, toggle), each off by default, plus Send feedback and Run setup
+again. A feature with its own pane joins the sidebar as a normal item while
+on and is hidden while off; a behaviour-only feature is just its toggle. Today:
+Meetings (beta, macOS), Voice Filter (macOS; locked on while its driver is
+installed), Playground, Live text, Live chapters (macOS), Vocabulary biasing,
+and Terminal paste (Windows). Dev, local, and test builds
+(`dev_build::is_dev_build()`) add Annotate to the main sidebar; production
+builds keep it dormant.
 
 ## Feature Map
 
@@ -371,9 +368,9 @@ substitute for source inspection or a second roadmap.
   "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
-- `labs`: the Labs switch (`labs.enabled`, what shows) and the per-feature
-  switches it gates (`labs::live_text`, `labs::live_chapters`), plus
-  `hex labs on|off|status`. `dev_build`: whether this is a dev, local, test,
+- `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
+  description), the runtime gates (`labs::live_text`, `live_chapters`,
+  `playground`, `vocabulary_biasing`), and `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
   `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
@@ -557,7 +554,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   and last 0.3 s (Parakeet drops words after pauses past its left context),
   the finish always carries the complete clip, and a failed, empty, overfed, late, or interrupted stream
   falls back to the whole clip. Nothing pastes or reaches the focused app
-  before the final text. With Labs on, a hotkey capture's
+  before the final text. With Labs › Live text on, a hotkey capture's
   stream publishes its provisional text for Hex's own HUD only; it is never
   pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live
   stream holds the model's compute lease. Streams run only on GPU devices
@@ -1087,15 +1084,13 @@ git diff --check
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
-Unfinished features land on `dev` behind Labs
-([docs/features/labs.md](docs/features/labs.md)): gate where the feature's work
-starts (worker, thread, capture), not just its UI, and list it on the Labs
-page. Labs on only shows a feature; one with side effects or background work
-(devices, workers, polls, dictation output, UI outside its pane) also gets
-its own switch, off by default, persisted in settings.json and named in
-`hex settings`, and runs only while both are on (as `labs::live_text()`
-does). Pure views need no switch. Remove the gate when the feature ships or
-is dropped.
+New, unproven, and user-requested features (including ones the issue
+pipeline builds) land in Labs, off by default
+([docs/features/labs.md](docs/features/labs.md)): add a `labs::Feature` with
+its settings key and description, a row on the Labs page, and a
+`hex settings` key; gate where the feature's work starts (worker, thread,
+capture), not just its UI. Never add a master switch or ship such a feature
+on by default. Remove it from Labs when it graduates or is dropped.
 
 Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
 tests through cargo-nextest (`brew install cargo-nextest`) with

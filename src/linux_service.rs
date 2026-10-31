@@ -153,9 +153,9 @@ pub(crate) struct Status {
     pub(crate) window_open: bool,
     pub(crate) pid: u32,
     pub(crate) session: Session,
-    /// Labs is on (`crate::labs`).
+    /// The Labs features turned on (`crate::labs`).
     #[serde(default)]
-    pub(crate) labs: bool,
+    pub(crate) labs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

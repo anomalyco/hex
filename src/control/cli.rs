@@ -1110,7 +1110,10 @@ fn human_status(report: &StatusReport) -> String {
         on(features.release_microphone_while_idle),
         features.history_retention,
         report.update,
-        on(report.labs),
+        match report.labs.as_slice() {
+            [] => "none".to_string(),
+            names => names.join(", "),
+        },
     )
 }
 
@@ -1224,21 +1227,21 @@ mod tests {
         let text = human_status(&report);
         assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
-        assert!(text.ends_with("Labs         off\n"));
-        report.labs = true;
-        assert!(human_status(&report).ends_with("Labs         on\n"));
+        assert!(text.ends_with("Labs         none\n"));
+        report.labs = vec!["live-text".into(), "meetings".into()];
+        assert!(human_status(&report).ends_with("Labs         live-text, meetings\n"));
     }
 
     #[test]
     fn status_reports_labs_and_reads_older_replies_without_it() {
         let report = StatusReport {
-            labs: true,
+            labs: vec!["live-text".into()],
             ..Default::default()
         };
         let mut json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["labs"], serde_json::json!(true));
+        assert_eq!(json["labs"], serde_json::json!(["live-text"]));
         json.as_object_mut().unwrap().remove("labs");
         let older: StatusReport = serde_json::from_value(json).unwrap();
-        assert!(!older.labs);
+        assert!(older.labs.is_empty());
     }
 }

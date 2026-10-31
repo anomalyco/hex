@@ -1,5 +1,6 @@
-//! The playground (Labs): Rune's playground in Hex's window. ⇧⌘D
-//! (Ctrl+Shift+D off macOS) swaps the window for a folded list of
+//! The playground (Labs › Playground): Rune's playground in Hex's window,
+//! opened from its sidebar item or ⇧⌘D (Ctrl+Shift+D off macOS). It swaps
+//! the window for a folded list of
 //! prototypes (the onboarding options, live meeting notes, and on macOS
 //! the HUD and the capture capsule), then every fixture
 //! scene in [`SCENES`] under a readable name, by pane. Each opens on a fresh
@@ -179,7 +180,6 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-production", "Window/General/Production build"),
-    ("mac-production-labs", "Window/General/Production Labs"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding tour/Welcome"),
     ("onboarding-hero", "Window/Onboarding tour/Welcome · hero"),
@@ -243,8 +243,9 @@ const PATHS: &[(&str, &str)] = &[
     ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
 ];
 
+/// Labs › Playground is on (read at launch).
 pub(crate) fn enabled() -> bool {
-    crate::labs::enabled()
+    crate::labs::playground()
 }
 
 /// `spec` with the playground's scenes: every fixture scene but `live`, at

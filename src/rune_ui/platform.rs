@@ -40,7 +40,7 @@ pub(super) struct Capabilities {
     pub(super) dock_icon: bool,
     /// The listener can be off: the status card and Enable on launch.
     pub(super) listener_control: bool,
-    /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
+    /// The Terminal paste row in General (Linux; on Windows it is in Labs).
     pub(super) terminal_paste: bool,
     /// The dictation shortcut can pass through to other apps (Windows).
     pub(super) share_shortcut: bool,
@@ -108,7 +108,7 @@ impl Capabilities {
         launch_at_login: true,
         dock_icon: false,
         listener_control: true,
-        terminal_paste: true,
+        terminal_paste: false,
         share_shortcut: true,
         hex_microphone: false,
         practice_dictation: false,
@@ -298,6 +298,9 @@ pub(super) struct PlatformState {
     /// native host; `true` in fixtures except `"mac-production"`). Production
     /// builds hide Annotate and the developer panes.
     pub(super) dev_build: bool,
+    /// The window has the playground (Labs › Playground at launch): the
+    /// sidebar shows its item.
+    pub(super) playground: bool,
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
@@ -370,6 +373,7 @@ impl PlatformState {
             relaunch_failed: false,
             dev_build: true,
             developer: false,
+            playground: false,
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,

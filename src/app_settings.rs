@@ -1235,33 +1235,27 @@ impl Default for ExperimentalSettings {
     }
 }
 
-/// Labs (`crate::labs`): on by default so everyone can see the unfinished
-/// features and send feedback. Features with side effects have their own
-/// switch, off by default, and run only while Labs is on too.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// The `labs` switches (`crate::labs`), every one off by default. Labs
+/// features that already had a home keep it: `meetings.enabled`,
+/// `experimental.hex_microphone`, and `paste_with_shift`. An older
+/// `labs.enabled` master switch is read and ignored.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
-    pub enabled: bool,
     /// Live text beside the HUD while dictating (applies on restart).
     pub live_text: bool,
     /// Live chapters while a meeting records.
     pub live_chapters: bool,
-}
-
-impl Default for LabsSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            live_text: false,
-            live_chapters: false,
-        }
-    }
+    /// The playground in the window (applies on restart).
+    pub playground: bool,
+    /// Parakeet transcription biased toward the vocabulary.
+    pub vocabulary_biasing: bool,
 }
 
 /// Whether the Voice Filter runs: the listener streams the Hex Microphone
-/// and Hex watches its driver. Its pane's switch (`experimental.hex_microphone`,
+/// and Hex watches its driver. Its Labs toggle (`experimental.hex_microphone`,
 /// or `HEX_EXPERIMENTAL_MIC`) or an installed driver turns it on, so a driver
-/// apps already use keeps receiving audio. Labs alone never does.
+/// apps already use keeps receiving audio.
 pub fn voice_filter_enabled(setting: bool, driver_installed: bool) -> bool {
     setting || env_hex_experimental_mic() || driver_installed
 }
@@ -1644,7 +1638,7 @@ pub struct AppSettings {
     pub capture_from_other_build: Option<serde_json::Value>,
     #[serde(default)]
     pub experimental: ExperimentalSettings,
-    /// The one switch for every unfinished feature (`crate::labs`).
+    /// The Labs features' own switches (`crate::labs`).
     pub labs: LabsSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
     /// listener can be off).

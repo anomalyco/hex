@@ -77,7 +77,10 @@ fn settings_rows_follow_each_os() {
     assert!(present(&windows, "launch-at-login"));
     assert!(present(&windows, "toggle-listening"));
     assert!(!present(&windows, "dock-icon"));
-    assert!(present(&windows, "terminal-paste"));
+    assert!(
+        !present(&windows, "terminal-paste"),
+        "Windows has it in Labs"
+    );
     assert!(!present(&windows, "meetings-enabled"));
 }
 
@@ -1451,17 +1454,19 @@ fn hud_lab_and_activity_stay_out_of_the_window_sidebar() {
 }
 
 #[test]
-fn voice_filter_needs_labs_or_hex_microphone() {
+fn voice_filter_shows_only_while_its_labs_toggle_is_on() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     rt.state.settings.experimental.hex_microphone = false;
-    rt.state.settings.labs.enabled = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
-    tap(&mut rt, "nav-labs");
     assert!(rt.find("nav-voice-filter").is_none());
-    rt.state.settings.labs.enabled = true;
-    refresh(&mut rt);
-    assert!(rt.find("nav-voice-filter").is_some());
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-voice-filter");
+    assert!(rt.state.settings.experimental.hex_microphone);
+    assert!(
+        rt.find("nav-voice-filter").is_some(),
+        "a top-level sidebar item"
+    );
 }
 
 #[test]
@@ -1519,112 +1524,58 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 }
 
 #[test]
-fn production_builds_offer_meetings_and_labs() {
-    let mut rt = runtime("mac-production", true, PANE_SIZE);
-    assert!(!rt.state.platform.dev_build);
-    assert!(rt.find("nav-general").is_some());
-    assert!(rt.find("nav-output").is_some());
-    assert!(rt.find("nav-history").is_some());
-    assert!(rt.find("nav-labs").is_some());
+fn labs_is_one_flat_list_of_toggles_off_by_default() {
+    let mut rt = runtime("mac-production", true, (980.0, 1400.0));
+    rt.state.settings.experimental.hex_microphone = false;
+    rt.state.platform.hex_microphone = None;
+    refresh(&mut rt);
     for hidden in [
         "nav-meetings",
         "nav-annotate",
         "nav-voice-filter",
+        "nav-playground",
         "nav-hud-lab",
         "nav-activity",
     ] {
-        assert!(rt.find(hidden).is_none(), "production showed {hidden}");
+        assert!(rt.find(hidden).is_none(), "the sidebar showed {hidden}");
     }
-
     tap(&mut rt, "nav-labs");
-    assert!(rt.find("lab-meetings").is_some());
-    assert!(rt.find("labs-enabled").is_some());
-    assert!(
-        rt.find("lab-annotate").is_none(),
-        "production Labs listed Annotate"
-    );
-    assert!(rt.find("exp-live-text").is_some(), "Labs is on by default");
+    assert!(rt.find("send-feedback").is_some());
+    assert!(rt.find("restart-onboarding").is_some());
+    let settings = &rt.state.settings;
+    for (row, on) in [
+        ("lab-meetings", settings.meetings.enabled),
+        ("lab-voice-filter", settings.experimental.hex_microphone),
+        ("lab-playground", settings.labs.playground),
+        ("lab-live-text", settings.labs.live_text),
+        ("lab-live-chapters", settings.labs.live_chapters),
+        ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
+    ] {
+        assert!(rt.find(row).is_some(), "Labs lacks {row}");
+        assert!(!on, "{row} is on");
+    }
+    assert!(rt.find("lab-terminal-paste").is_none(), "Windows only");
 
     tap(&mut rt, "lab-meetings");
     assert!(rt.state.settings.meetings.enabled);
     assert!(
         rt.find("nav-meetings").is_some(),
-        "enabling Meetings (beta) in Labs adds Meetings to the sidebar"
+        "Meetings joins the main sidebar"
     );
-
-    // Linux and Windows have the Labs switch in production builds too.
-    for scene in ["portal", "windows-settings"] {
-        let mut os_rt = runtime(scene, true, PANE_SIZE);
-        os_rt.state.platform.dev_build = false;
-        refresh(&mut os_rt);
-        assert!(
-            os_rt.find("nav-labs").is_some(),
-            "{scene} hid Labs in production"
-        );
-    }
-}
-
-#[test]
-fn the_labs_switch_turns_every_feature_on_and_off() {
-    let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
-    assert!(rt.find("nav-output").is_some(), "Output is a main tab");
-    assert!(rt.find("nav-hud-lab").is_none());
-    assert!(rt.find("nav-activity").is_none());
-    assert!(rt.state.settings.labs.enabled, "Labs is on by default");
-    assert!(rt.find("send-feedback").is_some());
-
-    // Clear the preview driver bundle and the Hex Microphone so Labs alone
-    // decides the Voice Filter pane.
-    rt.state.platform.hex_microphone = None;
-    rt.state.settings.experimental.hex_microphone = false;
-    refresh(&mut rt);
-    assert!(rt.find("nav-voice-filter").is_some());
-    assert!(rt.find("exp-live-text").is_some());
-    assert!(rt.find("restart-onboarding").is_some());
-
-    tap(&mut rt, "labs-enabled");
-    assert!(!rt.state.settings.labs.enabled);
-    assert!(
-        rt.find("nav-voice-filter").is_none(),
-        "Voice Filter hides live"
-    );
-    assert!(rt.find("exp-live-text").is_none());
-    assert!(rt.find("restart-onboarding").is_none());
-
-    tap(&mut rt, "labs-enabled");
-    assert!(rt.state.settings.labs.enabled);
-    assert!(
-        rt.find("nav-voice-filter").is_some(),
-        "Voice Filter joins Labs live"
-    );
-}
-
-#[test]
-fn labs_features_with_side_effects_stay_off_until_their_own_switch() {
-    let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
-    assert!(rt.state.settings.labs.enabled);
-    assert!(!rt.state.settings.labs.live_text);
-    assert!(!rt.state.settings.labs.live_chapters);
-    tap(&mut rt, "exp-live-text");
+    tap(&mut rt, "lab-live-text");
     assert!(rt.state.settings.labs.live_text);
-    tap(&mut rt, "exp-live-chapters");
-    assert!(rt.state.settings.labs.live_chapters);
-    tap(&mut rt, "exp-live-text");
-    assert!(!rt.state.settings.labs.live_text);
+    tap(&mut rt, "lab-vocabulary-biasing");
+    assert!(rt.state.settings.labs.vocabulary_biasing);
+    tap(&mut rt, "lab-meetings");
+    assert!(rt.find("nav-meetings").is_none(), "hidden while off");
 
-    // Labs shows the Voice Filter pane, but only its own switch runs it.
-    rt.state.platform.hex_microphone = None;
-    rt.state.settings.experimental.hex_microphone = false;
-    refresh(&mut rt);
-    tap(&mut rt, "nav-voice-filter");
-    assert!(rt.find("fun-enabled").is_some());
-    assert!(
-        rt.find("fun-hex-microphone").is_none(),
-        "nothing runs while off"
-    );
-    tap(&mut rt, "fun-enabled");
-    assert!(rt.state.settings.experimental.hex_microphone);
-    assert!(rt.find("fun-hex-microphone").is_some());
+    // Windows lists Terminal paste in Labs, not General.
+    let mut rt = runtime("windows-settings", true, (980.0, 1400.0));
+    assert!(rt.find("terminal-paste").is_none());
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-terminal-paste");
+    assert!(rt.state.settings.paste_with_shift);
+    assert!(rt.find("lab-meetings").is_none());
 }
 
 #[test]
@@ -1828,42 +1779,35 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
     rt.state.settings.experimental.hex_microphone = false;
     refresh(&mut rt);
     assert!(
-        rt.find("fun-hex-microphone").is_some(),
-        "the driver keeps it running"
+        rt.find("nav-voice-filter").is_some(),
+        "the driver keeps it in the sidebar"
     );
-    tap(&mut rt, "fun-enabled");
-    assert!(
-        !rt.state.settings.experimental.hex_microphone,
-        "the switch is locked"
-    );
+    assert!(rt.find("fun-hex-microphone").is_some());
     tap(&mut rt, "uninstall");
     assert!(matches!(
         asked(&rt).last(),
         Some(PlatformRequest::UninstallHexMicrophone)
     ));
-
-    rt.state.settings.experimental.hex_microphone = true;
     tap(&mut rt, "nav-labs");
-    tap(&mut rt, "labs-enabled");
-    assert!(!rt.state.settings.labs.enabled);
+    tap(&mut rt, "lab-voice-filter");
     assert!(
-        rt.state.settings.experimental.hex_microphone,
-        "Labs off leaves an installed driver's Voice Filter on"
+        !rt.state.settings.experimental.hex_microphone,
+        "the toggle is locked"
     );
     assert!(rt.find("nav-voice-filter").is_some());
 
     if let Some(driver) = &mut rt.state.platform.hex_microphone {
         driver.driver_bundle_installed = false;
     }
-    rt.state.settings.experimental.hex_microphone = false;
-    rt.state.settings.labs.enabled = true;
-    rt.state.pane = Pane::VoiceFilter;
-    rt.state.labs_open = false;
     refresh(&mut rt);
-    tap(&mut rt, "fun-enabled");
+    assert!(
+        rt.find("nav-voice-filter").is_none(),
+        "off once uninstalled"
+    );
+    tap(&mut rt, "lab-voice-filter");
     assert!(
         rt.state.settings.experimental.hex_microphone,
-        "without the driver the switch works"
+        "without the driver the toggle works"
     );
 }
 

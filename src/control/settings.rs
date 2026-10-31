@@ -239,11 +239,6 @@ const KEYS: &[Key] = &[
         "How long dictation history is kept",
     ),
     key(
-        "labs.enabled",
-        Kind::Bool,
-        "Labs: show every unfinished feature (hex labs on|off)",
-    ),
-    key(
         "labs.live_text",
         Kind::Bool,
         "Labs: provisional words beside the HUD while dictating (applies on restart)",
@@ -254,9 +249,19 @@ const KEYS: &[Key] = &[
         "Labs: chapter meeting transcripts while recording",
     ),
     key(
+        "labs.playground",
+        Kind::Bool,
+        "Labs: the scene and story browser in the window (applies on restart)",
+    ),
+    key(
+        "labs.vocabulary_biasing",
+        Kind::Bool,
+        "Labs: bias Parakeet transcription toward the vocabulary",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
-        "Meetings (beta): call detection, recording, and transcripts",
+        "Labs: Meetings (beta), call detection, recording, and transcripts",
     ),
     optional(
         "meetings.output_folder",

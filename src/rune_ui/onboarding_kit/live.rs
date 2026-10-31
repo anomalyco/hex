@@ -1,5 +1,6 @@
-//! Hex's real first run on the onboarding story, while Labs is on. The window's tour ([`onboarding`](super::super::onboarding))
-//! stays the state machine underneath: it starts the model download, asks
+//! Hex's first run on the onboarding story, replayed by Labs' Run setup
+//! again and `hex onboarding reset`; a new install still gets the tour.
+//! The window's tour ([`onboarding`](super::super::onboarding)) stays the state machine underneath: it starts the model download, asks
 //! for the permissions, relaunches when macOS needs it, watches the practice
 //! dictation, and records completion. This module shows the story's pages
 //! over the window and feeds them that real state each frame.
@@ -59,15 +60,6 @@ fn clock() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64() + 1.0
 }
 
-/// Whether this run shows the new first run in place of the tour.
-pub(in crate::rune_ui) fn wanted(ui: &Ui) -> bool {
-    wanted_for(&ui.settings)
-}
-
-pub(in crate::rune_ui) fn wanted_for(settings: &crate::app_settings::AppSettings) -> bool {
-    settings.labs.enabled
-}
-
 fn english(selection: &TranscriptionSelection) -> bool {
     selection.model == TranscriptionModelId::ParakeetUnifiedEnglish
 }
@@ -101,11 +93,8 @@ fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
         .is_ok_and(|model| ui.picker.installed(model, &selection.language))
 }
 
-/// Builds the first run when the tour starts and this run wants it.
-pub(in crate::rune_ui) fn start(ui: &mut Ui) {
-    if !wanted(ui) {
-        return;
-    }
+/// Builds the first run over the tour Run setup again just started.
+fn start(ui: &mut Ui) {
     let Some(tour_step) = ui.tour.as_ref().map(|tour| tour.flow.step()) else {
         return;
     };
@@ -160,18 +149,10 @@ pub(in crate::rune_ui) fn start(ui: &mut Ui) {
     }
 }
 
-/// Why Hex can't replay its first run here, if it can't.
-pub(crate) fn restart_unavailable(ui: &Ui) -> Option<&'static str> {
-    (!ui.settings.labs.enabled).then_some("Turn on Labs first: hex labs on")
-}
-
 /// "Run setup again" and `hex onboarding reset`: forgets that onboarding
 /// finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
-    if let Some(why) = restart_unavailable(ui) {
-        return Err(why.into());
-    }
     if ui.live() {
         crate::onboarding::reset().map_err(|error| format!("{error:#}"))?;
     }
