@@ -77,10 +77,10 @@ enum Command {
         #[command(subcommand)]
         command: crate::control::cli::SettingsCommand,
     },
-    /// Turn Labs, every unfinished feature, on or off.
+    /// List the Labs features, or turn one on or off.
     Labs {
         #[command(subcommand)]
-        command: crate::labs::LabsCommand,
+        command: Option<crate::labs::LabsCommand>,
     },
     /// Replaced by `hex labs`.
     #[command(hide = true)]
@@ -169,7 +169,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     }
     // Like a read command: no log, lock, or running Hex.
     match &command {
-        Command::Labs { command } => return crate::labs::run(command),
+        Command::Labs { command } => return crate::labs::run(command.as_ref()),
         Command::Experiments { .. } => return crate::labs::run_retired_experiments(),
         Command::Onboarding {
             command: crate::control::cli::OnboardingCommand::Reset { output },
@@ -549,10 +549,17 @@ fn fail_capture(events: &EventLog, device: &str, error: &str) -> Result<()> {
 }
 
 fn print_status(path: &Path, limit: usize) -> Result<()> {
-    println!(
-        "labs\t{}",
-        if crate::labs::enabled() { "on" } else { "off" }
-    );
+    if let Ok(settings) = crate::app_settings::AppSettings::load() {
+        let labs = crate::labs::active_names(&settings);
+        println!(
+            "labs\t{}",
+            if labs.is_empty() {
+                "none".into()
+            } else {
+                labs.join(",")
+            }
+        );
+    }
     if !path.exists() {
         println!("No observations yet at {}", path.display());
         return Ok(());

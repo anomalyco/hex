@@ -874,7 +874,7 @@ fn status(
             | DesktopUpdateStatus::PackageManager => "current",
         }
         .into(),
-        labs: crate::labs::enabled(),
+        labs: crate::labs::active_names(settings),
     })))
 }
 

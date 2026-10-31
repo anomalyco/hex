@@ -514,11 +514,11 @@ enum Pane {
     History,
     /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
     /// permission, transcriber, folder, retention, and Scrawl's own app.
-    /// Listed under Experiments; macOS and Linux only.
+    /// Dev builds, macOS and Linux only.
     #[cfg(hex_capture)]
     Annotate,
-    /// The Hex Microphone's driver, tuning, and try-it demo (macOS, under
-    /// Experiments).
+    /// The Hex Microphone's driver, tuning, and try-it demo (macOS, while
+    /// its Labs toggle is on).
     VoiceFilter,
     /// The dictation indicator's tuning scene (Playground only).
     HudLab,
@@ -544,23 +544,13 @@ impl Pane {
         let caps = ui.platform.caps;
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
-            Pane::Meetings => caps.meetings,
-            // Labs shows the pane; its own switch or a driver apps already
-            // use also keeps it, so nobody loses those controls.
-            Pane::VoiceFilter => caps.fun && (ui.settings.labs.enabled || fun::running(ui)),
+            Pane::Meetings => caps.meetings && meetings::available(ui),
+            // On from Labs, or kept by a driver apps already use.
+            Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.dev_build && ui.platform.scrawl.is_some(),
             _ => true,
         }
-    }
-
-    /// Listed under the sidebar's Labs group.
-    fn experimental(self) -> bool {
-        #[cfg(hex_capture)]
-        if self == Pane::Annotate {
-            return true;
-        }
-        matches!(self, Pane::VoiceFilter)
     }
 
     fn title(self) -> &'static str {
@@ -735,7 +725,6 @@ impl Ui {
         ui.platform.developer = dev_build && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
-        onboarding_kit::live::start(&mut ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
@@ -1352,6 +1341,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             NAV_ROW_GAP / 2.0,
         ));
     }
+    nav = nav.children(labs::playground_nav(p));
     nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => Some((
@@ -2254,12 +2244,6 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         ui.platform.dev_build = false;
         ui.settings.meetings.enabled = false;
-    }),
-    ("mac-production-labs", |ui| {
-        *ui = mac_fixture();
-        ui.platform.dev_build = false;
-        ui.settings.meetings.enabled = false;
-        ui.labs_open = true;
     }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();

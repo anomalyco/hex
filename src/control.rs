@@ -500,9 +500,9 @@ pub struct StatusReport {
     pub window: WindowReport,
     /// current, checking, available, or unavailable.
     pub update: String,
-    /// Labs is on (`crate::labs`).
+    /// The Labs features turned on (`crate::labs`), by `hex labs` name.
     #[serde(default)]
-    pub labs: bool,
+    pub labs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

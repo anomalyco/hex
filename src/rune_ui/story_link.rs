@@ -9,7 +9,7 @@ use super::playground;
 
 /// Why a link opened only the window.
 pub(crate) const PLAYGROUND_OFF: &str = "the playground is in Labs; turn it on with \
-     `hex labs on` and restart Hex";
+     `hex labs on playground` and restart Hex";
 
 /// Longer links are ignored: they come from outside Hex.
 const MAX_LINK: usize = 2048;

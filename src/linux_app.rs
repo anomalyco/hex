@@ -281,13 +281,13 @@ impl HostHandle {
         }
         Status {
             desktop,
+            labs: crate::labs::active_names(&snapshot.settings),
             settings: snapshot.settings,
             editing: snapshot.editing,
             hud_limitation,
             window_open: self.window_open(),
             pid: std::process::id(),
             session,
-            labs: crate::labs::enabled(),
         }
     }
 }

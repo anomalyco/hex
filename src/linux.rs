@@ -68,10 +68,10 @@ enum Command {
         #[command(subcommand)]
         command: crate::control::cli::SettingsCommand,
     },
-    /// Turn Labs, every unfinished feature, on or off.
+    /// List the Labs features, or turn one on or off.
     Labs {
         #[command(subcommand)]
-        command: crate::labs::LabsCommand,
+        command: Option<crate::labs::LabsCommand>,
     },
     /// Replaced by `hex labs`.
     #[command(hide = true)]
@@ -134,7 +134,7 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     });
     // Like a read command: no log, lock, or running Hex.
     match &command {
-        Command::Labs { command } => return crate::labs::run(command),
+        Command::Labs { command } => return crate::labs::run(command.as_ref()),
         Command::Experiments { .. } => return crate::labs::run_retired_experiments(),
         Command::Onboarding {
             command: crate::control::cli::OnboardingCommand::Reset { output },
