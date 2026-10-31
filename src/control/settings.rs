@@ -241,7 +241,17 @@ const KEYS: &[Key] = &[
     key(
         "labs.enabled",
         Kind::Bool,
-        "Labs: every unfinished feature (hex labs on|off)",
+        "Labs: show every unfinished feature (hex labs on|off)",
+    ),
+    key(
+        "labs.live_text",
+        Kind::Bool,
+        "Labs: provisional words beside the HUD while dictating (applies on restart)",
+    ),
+    key(
+        "labs.live_chapters",
+        Kind::Bool,
+        "Labs: chapter meeting transcripts while recording",
     ),
     key(
         "meetings.enabled",
@@ -297,7 +307,7 @@ const KEYS: &[Key] = &[
     key(
         "experimental.hex_microphone",
         Kind::Bool,
-        "The experimental Hex Microphone virtual device",
+        "Labs: the Voice Filter and its Hex Microphone virtual input",
     ),
     key(
         "experimental.hex_microphone_mode",

@@ -237,7 +237,41 @@ fn tunable(ui: &Ui, p: Paint, which: Tunable, label: &str) -> El {
     )
 }
 
+/// Whether the Voice Filter runs (`app_settings::voice_filter_enabled`): its
+/// switch is on, or the host found its driver installed.
+pub(super) fn running(ui: &Ui) -> bool {
+    ui.settings.experimental.hex_microphone
+        || ui
+            .platform
+            .hex_microphone
+            .as_ref()
+            .is_some_and(|status| status.driver_bundle_installed)
+}
+
+/// Turns the Voice Filter on or off. Off, Hex doesn't watch the driver or
+/// feed the Hex Microphone (unless the driver is installed).
+fn switch(ui: &Ui, p: Paint) -> El {
+    card(
+        p,
+        "fun-switch",
+        vec![toggle_row(
+            p,
+            "fun-enabled",
+            tr("Turn on Voice Filter"),
+            tr("Feeds the Hex Microphone virtual input through a voice filter while you dictate"),
+            ui.settings.experimental.hex_microphone,
+            |ui: &mut Ui| {
+                let on = !ui.settings.experimental.hex_microphone;
+                ui.update(|settings| settings.experimental.hex_microphone = on);
+            },
+        )],
+    )
+}
+
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
+    if !running(ui) {
+        return super::scroll_body("fun-scroll", page("content").child(switch(ui, p)));
+    }
     let cfg = &ui.platform.tuning;
     let mode = cfg.mode;
     let labels: Vec<&str> = VoiceFilterMode::ALL
@@ -374,7 +408,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .child(header_status(ui, p)),
         )
         .child(card(p, "card", rows));
-    let content = page("content").child(section);
+    let content = page("content").child(switch(ui, p)).child(section);
     super::scroll_body("fun-scroll", content)
 }
 

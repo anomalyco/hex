@@ -1,60 +1,95 @@
-//! Labs: one switch for every unfinished feature (Voice Filter, Live text,
-//! Live chapters, the playground, and the new onboarding). It is
+//! Labs: one switch that shows every unfinished feature (Voice Filter, Live
+//! text, Live chapters, the playground, and the new onboarding). It is
 //! `labs.enabled` in `settings.json`, on by default in every build so people
 //! can try the features and tell us how they work; `hex labs off` or the
-//! switch on Settings › Labs turns all of them off at once.
+//! switch on Settings › Labs hides all of them at once.
 //!
-//! Gate a Labs feature where it starts (the worker, thread, or capture that
-//! does its work), not only where its UI shows: a hidden pane whose worker
-//! still runs is still on.
+//! Labs on only shows a feature. A feature with side effects or background
+//! work (a device, a worker, a poll, different dictation output, UI outside
+//! its pane) has its own switch, off by default, in its pane or its Labs row,
+//! and runs only while both are on. Nothing starts at launch because Labs is.
+//! Gate such a feature where it starts (the worker, thread, or capture that
+//! does its work), not only where its UI shows.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
 
+use crate::app_settings::LabsSettings;
+
 /// Where people send feedback on Labs features.
 pub const FEEDBACK_URL: &str = "https://github.com/anomalyco/hex/issues/new";
 
-const UNKNOWN: u8 = 0;
-const OFF: u8 = 1;
-const ON: u8 = 2;
+/// Set once this process knows its settings.
+const KNOWN: u8 = 1;
+const ENABLED: u8 = 1 << 1;
+const LIVE_TEXT: u8 = 1 << 2;
+const LIVE_CHAPTERS: u8 = 1 << 3;
 
-/// This process's switch: unknown until settings load or it is first read.
-static STATE: AtomicU8 = AtomicU8::new(UNKNOWN);
+/// This process's switches: unknown until settings load or one is first read.
+static STATE: AtomicU8 = AtomicU8::new(0);
 
-/// Whether Labs is on for this process.
-pub fn enabled() -> bool {
+fn state() -> u8 {
     match STATE.load(Ordering::Acquire) {
-        UNKNOWN => {
-            let on = crate::app_settings::AppSettings::saved_labs();
-            let _ =
-                STATE.compare_exchange(UNKNOWN, encode(on), Ordering::AcqRel, Ordering::Acquire);
-            STATE.load(Ordering::Acquire) == ON
+        0 => {
+            let saved = encode(&crate::app_settings::AppSettings::saved_labs());
+            let _ = STATE.compare_exchange(0, saved, Ordering::AcqRel, Ordering::Acquire);
+            STATE.load(Ordering::Acquire)
         }
-        state => state == ON,
+        state => state,
     }
 }
 
-/// Records the switch the loaded or saved settings hold.
-pub(crate) fn apply(on: bool) {
-    STATE.store(encode(on), Ordering::Release);
+/// Whether Labs is on for this process: its features show.
+pub fn enabled() -> bool {
+    state() & ENABLED != 0
 }
 
-const fn encode(on: bool) -> u8 {
-    if on { ON } else { OFF }
+/// Whether Live text runs: Labs and its own switch are on.
+pub fn live_text() -> bool {
+    state() & (ENABLED | LIVE_TEXT) == ENABLED | LIVE_TEXT
+}
+
+/// Whether Live chapters run: Labs and its own switch are on.
+pub fn live_chapters() -> bool {
+    state() & (ENABLED | LIVE_CHAPTERS) == ENABLED | LIVE_CHAPTERS
+}
+
+/// Records the switches the loaded or saved settings hold.
+pub(crate) fn apply(settings: &LabsSettings) {
+    STATE.store(encode(settings), Ordering::Release);
+}
+
+fn encode(settings: &LabsSettings) -> u8 {
+    let mut state = KNOWN;
+    for (on, bit) in [
+        (settings.enabled, ENABLED),
+        (settings.live_text, LIVE_TEXT),
+        (settings.live_chapters, LIVE_CHAPTERS),
+    ] {
+        if on {
+            state |= bit;
+        }
+    }
+    state
 }
 
 /// Logs the switch to process.log; call once logging is up in a long-lived Hex.
 pub fn log_launch() {
-    tracing::info!(labs = enabled(), "labs");
+    tracing::info!(
+        labs = enabled(),
+        live_text = live_text(),
+        live_chapters = live_chapters(),
+        "labs"
+    );
 }
 
 #[derive(Debug, Subcommand)]
 pub enum LabsCommand {
-    /// Turn every Labs feature on.
+    /// Show every Labs feature (each with side effects keeps its own switch).
     On,
-    /// Turn every Labs feature off.
+    /// Hide every Labs feature and stop them all.
     Off,
     /// Show whether Labs is on.
     Status,

@@ -331,7 +331,7 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade planning");
     // Only live chapters read the title's source; with the experiment off
     // the manifest gains no field.
-    let live_chapters = crate::labs::enabled();
+    let live_chapters = crate::labs::live_chapters();
     assert_eq!(
         fs::read_to_string(directory.join("manifest.json"))
             .unwrap()

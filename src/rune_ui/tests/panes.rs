@@ -1600,6 +1600,34 @@ fn the_labs_switch_turns_every_feature_on_and_off() {
 }
 
 #[test]
+fn labs_features_with_side_effects_stay_off_until_their_own_switch() {
+    let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
+    assert!(rt.state.settings.labs.enabled);
+    assert!(!rt.state.settings.labs.live_text);
+    assert!(!rt.state.settings.labs.live_chapters);
+    tap(&mut rt, "exp-live-text");
+    assert!(rt.state.settings.labs.live_text);
+    tap(&mut rt, "exp-live-chapters");
+    assert!(rt.state.settings.labs.live_chapters);
+    tap(&mut rt, "exp-live-text");
+    assert!(!rt.state.settings.labs.live_text);
+
+    // Labs shows the Voice Filter pane, but only its own switch runs it.
+    rt.state.platform.hex_microphone = None;
+    rt.state.settings.experimental.hex_microphone = false;
+    refresh(&mut rt);
+    tap(&mut rt, "nav-voice-filter");
+    assert!(rt.find("fun-enabled").is_some());
+    assert!(
+        rt.find("fun-hex-microphone").is_none(),
+        "nothing runs while off"
+    );
+    tap(&mut rt, "fun-enabled");
+    assert!(rt.state.settings.experimental.hex_microphone);
+    assert!(rt.find("fun-hex-microphone").is_some());
+}
+
+#[test]
 fn labs_run_setup_again_opens_the_first_run() {
     let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
     assert!(rt.state.first_run.is_none());

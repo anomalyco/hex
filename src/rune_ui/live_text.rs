@@ -67,7 +67,7 @@ pub(crate) type Place = fn() -> Spot;
 
 /// Adds the plate to the app when Labs is on.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
-    if !crate::labs::enabled() {
+    if !crate::labs::live_text() {
         return;
     }
     let spec = OverlaySpec {

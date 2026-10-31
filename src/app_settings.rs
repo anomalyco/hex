@@ -1235,33 +1235,35 @@ impl Default for ExperimentalSettings {
     }
 }
 
-/// Labs (`crate::labs`): on by default so everyone can try the unfinished
-/// features and send feedback.
+/// Labs (`crate::labs`): on by default so everyone can see the unfinished
+/// features and send feedback. Features with side effects have their own
+/// switch, off by default, and run only while Labs is on too.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
     pub enabled: bool,
+    /// Live text beside the HUD while dictating (applies on restart).
+    pub live_text: bool,
+    /// Live chapters while a meeting records.
+    pub live_chapters: bool,
 }
 
 impl Default for LabsSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            live_text: false,
+            live_chapters: false,
+        }
     }
 }
 
-impl ExperimentalSettings {
-    /// [`voice_filter_enabled`] with this setting.
-    pub fn voice_filter_enabled(&self, labs: bool, driver_installed: bool) -> bool {
-        voice_filter_enabled(self.hex_microphone, labs, driver_installed)
-    }
-}
-
-/// Whether the Voice Filter is on: its pane shows and the listener streams
-/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), Labs, or an
-/// installed driver each turn it on, so a driver apps already use keeps
-/// receiving audio.
-pub fn voice_filter_enabled(setting: bool, labs: bool, driver_installed: bool) -> bool {
-    setting || env_hex_experimental_mic() || labs || driver_installed
+/// Whether the Voice Filter runs: the listener streams the Hex Microphone
+/// and Hex watches its driver. Its pane's switch (`experimental.hex_microphone`,
+/// or `HEX_EXPERIMENTAL_MIC`) or an installed driver turns it on, so a driver
+/// apps already use keeps receiving audio. Labs alone never does.
+pub fn voice_filter_enabled(setting: bool, driver_installed: bool) -> bool {
+    setting || env_hex_experimental_mic() || driver_installed
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -1968,9 +1970,9 @@ impl AppSettings {
         }
     }
 
-    /// The saved `labs.enabled`, read without loading, normalizing, or
+    /// The saved `labs` switches, read without loading, normalizing, or
     /// writing anything else.
-    pub fn saved_labs() -> bool {
+    pub fn saved_labs() -> LabsSettings {
         #[derive(Deserialize)]
         struct File {
             #[serde(default)]
@@ -1980,7 +1982,8 @@ impl AppSettings {
             .ok()
             .and_then(|path| fs::read(path).ok())
             .and_then(|data| serde_json::from_slice::<File>(&data).ok())
-            .map_or_else(|| LabsSettings::default().enabled, |file| file.labs.enabled)
+            .map(|file| file.labs)
+            .unwrap_or_default()
     }
 
     /// The saved `updates.channel`, read without loading, normalizing, or
@@ -2093,7 +2096,7 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
-        crate::labs::apply(self.labs.enabled);
+        crate::labs::apply(&self.labs);
         #[cfg(hex_capture)]
         {
             *CAPTURE_SETTINGS
@@ -2500,7 +2503,6 @@ pub fn meetings_enabled() -> bool {
 pub fn hex_microphone_enabled() -> bool {
     voice_filter_enabled(
         HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-        crate::labs::enabled(),
         crate::hex_microphone::driver_bundle_installed(),
     )
 }
@@ -2908,14 +2910,13 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_labs_or_an_installed_driver_turns_the_voice_filter_on() {
+    fn the_setting_or_an_installed_driver_turns_the_voice_filter_on_and_labs_never_does() {
         if env_hex_experimental_mic() {
             return;
         }
-        assert!(!voice_filter_enabled(false, false, false));
-        assert!(voice_filter_enabled(true, false, false));
-        assert!(voice_filter_enabled(false, true, false));
-        assert!(voice_filter_enabled(false, false, true));
+        assert!(!voice_filter_enabled(false, false));
+        assert!(voice_filter_enabled(true, false));
+        assert!(voice_filter_enabled(false, true));
     }
 
     #[test]

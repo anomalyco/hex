@@ -174,7 +174,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
 }
 
 /// The Labs page: the Labs switch, the opt-in features with their
-/// switches, then, while Labs is on, what it turns on and Run setup again.
+/// switches, then, while Labs is on, what it shows (Live text and Live
+/// chapters with their own switches, off by default) and Run setup again.
 pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let mut content =
         controls::page("content").child(card(p, "labs-switch", vec![labs_switch_row(ui, p)]));
@@ -320,6 +321,9 @@ struct Feature {
     title: &'static str,
     about: &'static str,
     pane: Option<Pane>,
+    /// The feature's own switch, off by default, for one with side effects
+    /// and no pane of its own: whether it is on, and what flips it.
+    switch: Option<(bool, fn(&mut Ui))>,
 }
 
 fn features(ui: &Ui) -> Vec<Feature> {
@@ -332,6 +336,7 @@ fn features(ui: &Ui) -> Vec<Feature> {
             title: tr("Voice Filter"),
             about: tr("Hex Microphone virtual input and real-time voice filters"),
             pane: Some(Pane::VoiceFilter).filter(|pane| pane.shown(ui)),
+            switch: None,
         });
     }
     items.push(Feature {
@@ -340,6 +345,10 @@ fn features(ui: &Ui) -> Vec<Feature> {
         title: tr("Live text"),
         about: tr("Show provisional words beside the HUD while dictating (applies on restart)"),
         pane: None,
+        switch: Some((ui.settings.labs.live_text, |ui| {
+            let on = !ui.settings.labs.live_text;
+            ui.update(|settings| settings.labs.live_text = on);
+        })),
     });
     if caps.meetings {
         items.push(Feature {
@@ -348,6 +357,10 @@ fn features(ui: &Ui) -> Vec<Feature> {
             title: tr("Live chapters"),
             about: tr("Break meeting transcripts into chapters while recording"),
             pane: None,
+            switch: Some((ui.settings.labs.live_chapters, |ui| {
+                let on = !ui.settings.labs.live_chapters;
+                ui.update(|settings| settings.labs.live_chapters = on);
+            })),
         });
     }
     items.push(Feature {
@@ -356,19 +369,32 @@ fn features(ui: &Ui) -> Vec<Feature> {
         title: "Playground",
         about: tr("Scene and story browser in the window (applies on restart)"),
         pane: None,
+        switch: None,
     });
     items
 }
 
 fn feature_row(p: Paint, feature: Feature) -> CardRow {
     let open = feature.pane.map(|pane| open_pane_button(p, pane));
-    icon_row(
+    let trailing = row()
+        .key("trailing")
+        .gap(8.0)
+        .center_y()
+        .children(open)
+        .children(feature.switch.map(|(on, _)| row_switch(p, on)));
+    let row = icon_row(
         p,
         feature.key,
         feature.icon,
         feature.title,
         Some(feature.about),
-        row().key("trailing").gap(8.0).center_y().children(open),
-    )
-    .into()
+        trailing,
+    );
+    match feature.switch {
+        Some((_, flip)) => pressable_row(row)
+            .hover(p.k.c.hover)
+            .on_press(move |ui: &mut Ui| flip(ui))
+            .into(),
+        None => row.into(),
+    }
 }
