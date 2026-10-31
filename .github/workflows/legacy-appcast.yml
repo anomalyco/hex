@@ -33,6 +33,13 @@ jobs:
           python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' "$appcast"
           grep -Fq '<sparkle:informationalUpdate' "$appcast"
           grep -Fq 'https://anoma.ly/hex' "$appcast"
+          # 2.3.1 Macs read the appcast through Kit's old hosts, which must
+          # redirect here first (packaging/legacy-downloads).
+          for host in downloads.hex.kitlangton.dev downloads.hex.kitlangton.com; do
+            answer=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "https://$host/appcast.xml")
+            [ "$answer" = '302 https://anoma.ly/hex/files/appcast.xml' ] \
+              || { echo "::error::$host/appcast.xml answers '$answer'; deploy packaging/legacy-downloads first"; exit 1; }
+          done
           curl -fsS https://anoma.ly/hex/files/appcast.xml -o live.xml
           { echo '### Live → new appcast'; echo '```diff'; diff -u live.xml "$appcast" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload it
@@ -43,3 +50,7 @@ jobs:
           sh .github/release/r2-put.sh appcast.xml packaging/macos/legacy-appcast.xml application/xml no-cache
           curl -fsS -H 'Cache-Control: no-cache' "https://anoma.ly/hex/files/appcast.xml?check=$(date +%s)" \
             | cmp - packaging/macos/legacy-appcast.xml
+          for host in downloads.hex.kitlangton.dev downloads.hex.kitlangton.com; do
+            curl -fsSL -H 'Cache-Control: no-cache' "https://$host/appcast.xml?check=$(date +%s)" \
+              | cmp - packaging/macos/legacy-appcast.xml
+          done
