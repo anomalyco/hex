@@ -28,6 +28,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks (#630)
 ├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
+├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
+│                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -202,6 +204,31 @@ window yet. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: a real meeting exported and
 loaded in a player; the Labs page goldens need regenerating on Linux with the
 new row.
+
+Second dictation shortcut (`second-dictation-shortcut`, issue 627, macOS):
+for a Globe/Fn shortcut on the laptop keyboard and another key on an
+external keyboard. While on, General shows a "Second dictation shortcut"
+recorder under Shortcut, unbound by default and clearable
+(`second_dictation_hotkey`, also `hex settings set second_dictation_hotkey
+f5`). It is refused when it shares a key with another Hex shortcut, and the
+others' checks count it while the toggle is on. The gate is
+`AppSettings::active_second_dictation_hotkey`: only on macOS, with the toggle
+on, a binding saved, and no overlap does `RuntimeHotkeys::second_dictation`
+carry it, so the event tap suppresses its keys and the listener
+(`recognition::Hotkeys`) runs a second shortcut machine with the dictation
+shortcut's Hold/Toggle, double-tap lock, and double-tap-only settings. It
+dictates and pastes with processing, as the dictation shortcut does; Paste
+last and meeting paste still come only from the main machine. The shortcut
+that starts a capture finishes or cancels it, and the other stands down
+until its keys lift while it records. Turning the toggle off or clearing the
+binding mid-capture cancels that capture. Off, nothing is matched,
+suppressed, or checked for it, and Hex is unchanged. Checks:
+`the_second_dictation_shortcut_needs_its_lab_and_its_own_keys` in
+[app_settings.rs](../../src/app_settings.rs) and
+`the_shortcut_that_starts_a_capture_owns_it` in
+[recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
+real Mac with an external keyboard, or the recorder row's rendering (macOS
+builds only; no golden).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

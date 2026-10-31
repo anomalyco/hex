@@ -79,6 +79,20 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ShortcutTarget::Dictation,
             None,
         ));
+        // Labs › Second dictation shortcut (macOS): another key that
+        // dictates like the one above, such as on an external keyboard.
+        #[cfg(target_os = "macos")]
+        if crate::labs::Feature::SecondDictationShortcut.on(&ui.settings) {
+            rows.extend(shortcut_rows(
+                ui,
+                p,
+                "second-dictation-shortcut",
+                &KEYBOARD,
+                tr("Second dictation shortcut"),
+                ShortcutTarget::SecondDictation,
+                Some(tr("Dictates like the shortcut above")),
+            ));
+        }
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
         rows.extend(cancel_shortcut_row(ui, p).map(CardRow::from));
     }
@@ -140,10 +154,15 @@ pub(super) fn shortcut_rows(
         .center_y()
         .child(keys_button(ui, p, target));
     // The optional shortcuts can be turned off.
-    let optional = matches!(
-        target,
-        ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
-    );
+    #[cfg(target_os = "macos")]
+    let second = target == ShortcutTarget::SecondDictation;
+    #[cfg(not(target_os = "macos"))]
+    let second = false;
+    let optional = second
+        || matches!(
+            target,
+            ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
+        );
     if optional && s::binding(&ui.settings, target).is_some() {
         control = control.child(icon_button(
             p,
@@ -153,6 +172,7 @@ pub(super) fn shortcut_rows(
             move |ui: &mut Ui| {
                 ui.update(|settings| match target {
                     ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
+                    _ if second => settings.second_dictation_hotkey = None,
                     _ => settings.paste_last_hotkey = None,
                 });
             },

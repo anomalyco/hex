@@ -376,6 +376,11 @@ observe input-source changes or show these controls.
   layout, the OS's rules for Settings' recorder apply, and a binding another
   Hex shortcut uses is refused with `shortcut-in-use`. `double_tap_only`
   needs a key chord, as in Settings.
+- `second_dictation_hotkey` (macOS, unbound by default; `none` clears it) is
+  a second shortcut that dictates exactly as `dictation_hotkey` does, such as
+  a key on an external keyboard. It acts only while
+  `labs.second_dictation_shortcut` is on (`hex labs on
+  second-dictation-shortcut`) and shares no key with another shortcut.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
 - `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
@@ -410,7 +415,7 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`show_dock_icon`, `transcription.recognition_hints`, `vocabulary_boost`,
+`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `show_dock_icon`, `transcription.recognition_hints`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,

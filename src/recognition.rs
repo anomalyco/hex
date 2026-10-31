@@ -182,10 +182,28 @@ impl ProgrammaticCompletion {
     }
 }
 
-/// The dictation shortcut machines: dictation, and Dictate without
-/// processing while it is bound. One records at a time.
+/// One of the dictation shortcut machines.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Shortcut {
+    Dictation,
+    /// Labs › Second dictation shortcut: dictates as the dictation shortcut
+    /// does.
+    Second,
+    /// Dictate without processing.
+    Raw,
+}
+
+impl Shortcut {
+    const ALL: [Self; 3] = [Self::Dictation, Self::Second, Self::Raw];
+}
+
+/// The dictation shortcut machines: dictation, Labs › Second dictation
+/// shortcut while it is on and bound, and Dictate without processing while
+/// it is bound. One records at a time, and the one that started a capture
+/// finishes or cancels it.
 struct Hotkeys {
     dictation: DictationHotkey,
+    second: Option<DictationHotkey>,
     raw: Option<DictationHotkey>,
     /// The recording (or the last) skips processing: the raw shortcut or
     /// `hex dictation start --raw` started it.
@@ -194,23 +212,56 @@ struct Hotkeys {
 
 impl Hotkeys {
     fn machines(&mut self) -> impl Iterator<Item = &mut DictationHotkey> {
-        std::iter::once(&mut self.dictation).chain(self.raw.as_mut())
+        std::iter::once(&mut self.dictation)
+            .chain(self.second.as_mut())
+            .chain(self.raw.as_mut())
+    }
+
+    fn machine(&self, shortcut: Shortcut) -> Option<&DictationHotkey> {
+        match shortcut {
+            Shortcut::Dictation => Some(&self.dictation),
+            Shortcut::Second => self.second.as_ref(),
+            Shortcut::Raw => self.raw.as_ref(),
+        }
+    }
+
+    fn machine_mut(&mut self, shortcut: Shortcut) -> Option<&mut DictationHotkey> {
+        match shortcut {
+            Shortcut::Dictation => Some(&mut self.dictation),
+            Shortcut::Second => self.second.as_mut(),
+            Shortcut::Raw => self.raw.as_mut(),
+        }
+    }
+
+    /// Whether a machine other than `shortcut`'s records.
+    fn recording_besides(&self, shortcut: Shortcut) -> bool {
+        Shortcut::ALL
+            .into_iter()
+            .filter(|other| *other != shortcut)
+            .filter_map(|other| self.machine(other))
+            .any(DictationHotkey::is_recording)
     }
 
     fn any_recording(&self) -> bool {
-        self.dictation.is_recording() || self.raw_recording()
-    }
-
-    fn raw_recording(&self) -> bool {
-        self.raw.as_ref().is_some_and(DictationHotkey::is_recording)
+        Shortcut::ALL
+            .into_iter()
+            .filter_map(|shortcut| self.machine(shortcut))
+            .any(DictationHotkey::is_recording)
     }
 
     fn suppresses_recognition(&self) -> bool {
-        self.dictation.suppresses_recognition()
-            || self
-                .raw
-                .as_ref()
-                .is_some_and(DictationHotkey::suppresses_recognition)
+        Shortcut::ALL
+            .into_iter()
+            .filter_map(|shortcut| self.machine(shortcut))
+            .any(DictationHotkey::suppresses_recognition)
+    }
+
+    /// Stands `shortcut`'s machine down, as when its start was refused.
+    fn suspend(&mut self, shortcut: Shortcut) {
+        match self.machine_mut(shortcut) {
+            Some(machine) => machine.suspend(),
+            None => self.dictation.suspend(),
+        };
     }
 
     /// Suspends every machine (never stopping at the first, as `any`
@@ -241,56 +292,41 @@ impl Hotkeys {
         }
     }
 
-    /// Applies the saved shortcut options. Unbinding the raw shortcut while
-    /// it records reports true: the caller cancels that recording.
+    /// Applies the saved shortcut options. Unbinding the raw or second
+    /// shortcut (or turning the second's Labs toggle off) while it records
+    /// reports true: the caller cancels that recording.
     fn configure(&mut self, now: CaptureInstant) -> bool {
-        let raw_binding = crate::app_settings::runtime_hotkeys().raw_dictation;
-        let mut cancelled = false;
-        match raw_binding {
-            None => cancelled = self.raw.take().is_some_and(|raw| raw.is_recording()),
-            Some(binding) => match self.raw.as_mut() {
-                Some(raw) => raw.set_binding(binding),
-                None => {
-                    self.raw = Some(DictationHotkey::new(
-                        now,
-                        crate::app_settings::double_tap_lock(),
-                        binding,
-                    ));
-                }
-            },
-        }
-        self.dictation
-            .set_binding(crate::app_settings::dictation_hotkey());
+        let hotkeys = crate::app_settings::runtime_hotkeys();
+        let raw_cancelled = rebind(&mut self.raw, hotkeys.raw_dictation, now);
+        let second_cancelled = rebind(&mut self.second, hotkeys.second_dictation, now);
+        self.dictation.set_binding(hotkeys.dictation);
         for machine in self.machines() {
             machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
             machine.set_double_tap_only(crate::app_settings::double_tap_only());
             machine.set_toggle(crate::app_settings::shortcut_toggle());
         }
-        cancelled
+        raw_cancelled || second_cancelled
     }
 
-    /// Feeds one input to both machines, and returns what each did with
-    /// whether it was the raw machine. A machine that starts while the other
-    /// records stands down until its keys come up, and only the dictation
-    /// machine pastes.
-    fn process(&mut self, event: InputEvent, at: CaptureInstant) -> Vec<(bool, HotkeyAction)> {
+    /// Feeds one input to every machine, and returns what each did with
+    /// which machine it was. A machine that starts while another records
+    /// stands down until its keys come up, and only the dictation machine
+    /// pastes.
+    fn process(&mut self, event: InputEvent, at: CaptureInstant) -> Vec<(Shortcut, HotkeyAction)> {
         let mut actions = Vec::new();
-        let raw_recording = self.raw_recording();
-        match self.dictation.process(event, at) {
-            Some(HotkeyAction::Start) if raw_recording => {
-                self.dictation.suspend();
-            }
-            Some(action) => actions.push((false, action)),
-            None => {}
-        }
-        let dictation_recording = self.dictation.is_recording();
-        if let Some(raw) = &mut self.raw {
-            match raw.process(event, at) {
-                Some(HotkeyAction::Start) if dictation_recording => {
-                    raw.suspend();
+        for shortcut in Shortcut::ALL {
+            let others_recording = self.recording_besides(shortcut);
+            let Some(machine) = self.machine_mut(shortcut) else {
+                continue;
+            };
+            match machine.process(event, at) {
+                Some(HotkeyAction::Start) if others_recording => {
+                    machine.suspend();
                 }
-                Some(HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) | None => {}
-                Some(action) => actions.push((true, action)),
+                Some(HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
+                    if shortcut != Shortcut::Dictation => {}
+                Some(action) => actions.push((shortcut, action)),
+                None => {}
             }
         }
         actions
@@ -298,11 +334,35 @@ impl Hotkeys {
 
     /// Stops whichever machine records, as a `stop` or `cancel` command does.
     fn suspend_recording(&mut self) {
-        if self.dictation.is_recording() {
-            self.dictation.suspend();
+        for machine in self.machines() {
+            if machine.is_recording() {
+                machine.suspend();
+            }
         }
-        if let Some(raw) = self.raw.as_mut().filter(|raw| raw.is_recording()) {
-            raw.suspend();
+    }
+}
+
+/// Creates, rebinds, or removes an optional shortcut machine. Returns
+/// whether a removed machine was recording.
+fn rebind(
+    slot: &mut Option<DictationHotkey>,
+    binding: Option<crate::app_settings::RuntimeHotkey>,
+    now: CaptureInstant,
+) -> bool {
+    match binding {
+        None => slot.take().is_some_and(|machine| machine.is_recording()),
+        Some(binding) => {
+            match slot.as_mut() {
+                Some(machine) => machine.set_binding(binding),
+                None => {
+                    *slot = Some(DictationHotkey::new(
+                        now,
+                        crate::app_settings::double_tap_lock(),
+                        binding,
+                    ));
+                }
+            }
+            false
         }
     }
 }
@@ -333,6 +393,7 @@ pub fn listen(
             crate::app_settings::double_tap_lock(),
             crate::app_settings::dictation_hotkey(),
         ),
+        second: None,
         raw: None,
         raw_capture: false,
     };
@@ -903,9 +964,9 @@ pub fn listen(
                 hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }
-            for (raw, action) in hotkeys.process(input_event, capture_at) {
+            for (shortcut, action) in hotkeys.process(input_event, capture_at) {
                 if action == HotkeyAction::Start {
-                    hotkeys.raw_capture = raw;
+                    hotkeys.raw_capture = shortcut == Shortcut::Raw;
                 }
                 let accepted = handle_hotkey_action(
                     action,
@@ -920,10 +981,7 @@ pub fn listen(
                     microphone_policy.release_while_idle,
                 )?;
                 if !accepted {
-                    match &mut hotkeys.raw {
-                        Some(machine) if raw => machine.suspend(),
-                        _ => hotkeys.dictation.suspend(),
-                    };
+                    hotkeys.suspend(shortcut);
                 }
             }
         }
@@ -1945,6 +2003,63 @@ fn handle_dictation_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Labs › Second dictation shortcut (issue 627): each shortcut follows
+    /// the same double-tap lock, the one that started a capture finishes
+    /// it, and the other stands down while it records.
+    #[test]
+    fn the_shortcut_that_starts_a_capture_owns_it() {
+        use crate::app_settings::{
+            CONTROL_KEY_MASK, HotkeyModifiers, ModifierSide, OPTION_KEY_MASK, RuntimeHotkey,
+        };
+        let base = CaptureInstant::from_nanos(60_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let option = RuntimeHotkey {
+            modifiers: HotkeyModifiers::option(),
+            key_code: None,
+        };
+        let control = RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key_code: None,
+        };
+        let mut hotkeys = Hotkeys {
+            dictation: DictationHotkey::new(base, true, option),
+            second: Some(DictationHotkey::new(base, true, control)),
+            raw: None,
+            raw_capture: false,
+        };
+        let mut press = |flags: u64, ms: u64| hotkeys.process(InputEvent::Flags(flags), at(ms));
+        const START: HotkeyAction = HotkeyAction::Start;
+        const FINISH: HotkeyAction = HotkeyAction::Finish;
+        const DICTATION: Shortcut = Shortcut::Dictation;
+        const SECOND: Shortcut = Shortcut::Second;
+
+        // The second shortcut double-tap locks its own capture.
+        assert_eq!(press(CONTROL_KEY_MASK, 0), [(SECOND, START)]);
+        assert_eq!(press(0, 80), [(SECOND, FINISH)]);
+        assert_eq!(press(CONTROL_KEY_MASK, 180), [(SECOND, START)]);
+        assert!(press(0, 260).is_empty());
+        // The dictation shortcut stands down while it records.
+        assert!(press(OPTION_KEY_MASK, 1_000).is_empty());
+        assert!(press(0, 1_100).is_empty());
+        // Only the second shortcut finishes it.
+        assert_eq!(press(CONTROL_KEY_MASK, 2_000), [(SECOND, FINISH)]);
+        assert!(press(0, 2_100).is_empty());
+
+        // And the reverse.
+        assert_eq!(press(OPTION_KEY_MASK, 5_000), [(DICTATION, START)]);
+        assert_eq!(press(0, 5_080), [(DICTATION, FINISH)]);
+        assert_eq!(press(OPTION_KEY_MASK, 5_180), [(DICTATION, START)]);
+        assert!(press(0, 5_260).is_empty());
+        assert!(press(CONTROL_KEY_MASK, 6_000).is_empty());
+        assert!(press(0, 6_100).is_empty());
+        assert_eq!(press(OPTION_KEY_MASK, 7_000), [(DICTATION, FINISH)]);
+        assert!(press(0, 7_100).is_empty());
+        assert!(!hotkeys.any_recording());
+    }
 
     #[test]
     fn programmatic_meter_reports_rms_and_peak_in_decibels() {

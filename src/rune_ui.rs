@@ -449,6 +449,12 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
         #[cfg(hex_capture)]
         HotkeySlot::Capture => ShortcutTarget::Capture,
+        #[cfg(target_os = "macos")]
+        HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
+        // Labs › Second dictation shortcut is macOS's; elsewhere a saved one
+        // meets the dictation shortcut's rules.
+        #[cfg(not(target_os = "macos"))]
+        HotkeySlot::SecondDictation => ShortcutTarget::Dictation,
     };
     host::validate_hotkey(target, binding)
 }

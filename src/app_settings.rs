@@ -1019,17 +1019,20 @@ pub struct RuntimeHotkeys {
     pub capture: Option<RuntimeHotkey>,
     /// Dictate without processing, while it is bound.
     pub raw_dictation: Option<RuntimeHotkey>,
+    /// Labs › Second dictation shortcut (macOS), while it is on and bound.
+    pub second_dictation: Option<RuntimeHotkey>,
 }
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 5] {
+    pub fn all(self) -> [Option<RuntimeHotkey>; 6] {
         [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
             self.capture,
             self.raw_dictation,
+            self.second_dictation,
         ]
     }
 }
@@ -1043,6 +1046,7 @@ impl Default for RuntimeHotkeys {
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
             capture: None,
             raw_dictation: None,
+            second_dictation: None,
         }
     }
 }
@@ -1338,6 +1342,9 @@ pub struct LabsSettings {
     /// `hex meetings show --srt|--vtt` exports a meeting transcript as
     /// timed subtitles (macOS, issue 633).
     pub subtitle_export: bool,
+    /// `second_dictation_hotkey` dictates like the dictation shortcut
+    /// (macOS, issue 627).
+    pub second_dictation_shortcut: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1359,6 +1366,7 @@ impl Default for LabsSettings {
             spoken_formatting: false,
             filler_words: false,
             subtitle_export: false,
+            second_dictation_shortcut: false,
         }
     }
 }
@@ -1729,6 +1737,10 @@ pub struct AppSettings {
     /// Dictate without processing: records like the dictation shortcut and
     /// pastes the transcript as heard. Unbound by default.
     pub raw_dictation_hotkey: Option<HotkeyBinding>,
+    /// Labs › Second dictation shortcut: another shortcut that dictates
+    /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
+    /// ignored while its Labs toggle is off.
+    pub second_dictation_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
@@ -1842,6 +1854,7 @@ impl Default for AppSettings {
             retired_edit_hotkey: None,
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             raw_dictation_hotkey: None,
+            second_dictation_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
@@ -2433,7 +2446,23 @@ impl AppSettings {
                 .raw_dictation_hotkey
                 .as_ref()
                 .map(HotkeyBinding::runtime),
+            second_dictation: self
+                .active_second_dictation_hotkey()
+                .map(HotkeyBinding::runtime),
         }
+    }
+
+    /// Labs › Second dictation shortcut's binding while it takes effect:
+    /// macOS, its toggle on, bound, and sharing no key with another active
+    /// shortcut. Otherwise Hex matches, suppresses, and checks nothing for
+    /// it.
+    pub fn active_second_dictation_hotkey(&self) -> Option<&HotkeyBinding> {
+        if !cfg!(target_os = "macos") || !self.labs.second_dictation_shortcut {
+            return None;
+        }
+        self.second_dictation_hotkey
+            .as_ref()
+            .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
     }
 
     /// Annotate is on: the person hasn't turned it off.
@@ -2463,6 +2492,10 @@ impl AppSettings {
         }
         if self.raw_dictation_hotkey.as_ref().is_some_and(mouse) {
             self.raw_dictation_hotkey = None;
+            self.mouse_shortcut_notice = true;
+        }
+        if self.second_dictation_hotkey.as_ref().is_some_and(mouse) {
+            self.second_dictation_hotkey = None;
             self.mouse_shortcut_notice = true;
         }
         #[cfg(hex_capture)]
@@ -2496,6 +2529,14 @@ impl AppSettings {
             tracing::warn!("cleared a left-click raw dictation shortcut");
             self.raw_dictation_hotkey = None;
         }
+        if self
+            .second_dictation_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click second dictation shortcut");
+            self.second_dictation_hotkey = None;
+        }
         #[cfg(hex_capture)]
         if self.capture.hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click capture shortcut with the default");
@@ -2521,6 +2562,8 @@ pub enum HotkeySlot {
     RawDictation,
     #[cfg(hex_capture)]
     Capture,
+    /// Labs › Second dictation shortcut (macOS).
+    SecondDictation,
 }
 
 impl AppSettings {
@@ -2542,6 +2585,13 @@ impl AppSettings {
             && let Some(raw) = &self.raw_dictation_hotkey
         {
             others.push(raw.clone());
+        }
+        if slot != HotkeySlot::SecondDictation
+            && cfg!(target_os = "macos")
+            && self.labs.second_dictation_shortcut
+            && let Some(second) = &self.second_dictation_hotkey
+        {
+            others.push(second.clone());
         }
         if cfg!(target_os = "macos") && self.meetings.available() {
             others.push(HotkeyBinding::paste_meeting_default());
@@ -2994,6 +3044,44 @@ mod tests {
         fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
         let loaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(loaded.transcription, whisper);
+    }
+
+    /// Labs › Second dictation shortcut (issue 627): its binding takes
+    /// effect only on macOS with its toggle on, never sharing a key with
+    /// another shortcut, and the other shortcuts' checks count it.
+    #[test]
+    fn the_second_dictation_shortcut_needs_its_lab_and_its_own_keys() {
+        let function = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                function: true,
+                ..HotkeyModifiers::default()
+            },
+            key: None,
+        };
+        let mut settings = AppSettings {
+            second_dictation_hotkey: Some(function.clone()),
+            ..AppSettings::default()
+        };
+        assert!(!settings.labs.second_dictation_shortcut);
+        assert_eq!(settings.runtime_hotkeys().second_dictation, None);
+        assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
+
+        settings.labs.second_dictation_shortcut = true;
+        let active = settings.runtime_hotkeys().second_dictation;
+        if cfg!(target_os = "macos") {
+            assert_eq!(active, Some(function.runtime()));
+            assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
+            assert!(settings.hotkey_in_use(HotkeySlot::Dictation, &function));
+        } else {
+            assert_eq!(active, None);
+        }
+
+        // The dictation shortcut's own keys are refused, and a saved overlap
+        // is dropped rather than matched twice.
+        let dictation = settings.dictation_hotkey.clone();
+        assert!(settings.hotkey_in_use(HotkeySlot::SecondDictation, &dictation));
+        settings.second_dictation_hotkey = Some(dictation);
+        assert_eq!(settings.runtime_hotkeys().second_dictation, None);
     }
 
     #[test]
