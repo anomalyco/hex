@@ -1131,8 +1131,9 @@ impl Worker {
         let Some(model) = self.model.as_mut() else {
             return;
         };
+        let trailing_silence = stream_trailing_silence(model);
         let ended = model.with_stream(&options, cancel, |stream| {
-            let mut capped = PauseCap::new(stream);
+            let mut capped = PauseCap::new(stream, trailing_silence);
             let ended = drive_stream(
                 id,
                 &mut capped,
@@ -1287,6 +1288,19 @@ impl StreamFeed for transcribe_cpp::Stream<'_> {
     }
 }
 
+/// Silence a dictation stream of `model` hears after the clip, before it
+/// finalizes: on macOS the trailing silence its whole-clip runs get, so a
+/// streamed sentence keeps its closing punctuation (issue 657).
+#[cfg(target_os = "macos")]
+fn stream_trailing_silence(model: &Model) -> usize {
+    model.stream_trailing_silence()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stream_trailing_silence(_model: &Model) -> usize {
+    0
+}
+
 /// Pause audio a dictation stream still hears before its long pauses are
 /// cut: longer than a chunk plus its lookahead (2.08 s for Unified English),
 /// so the words before a pause decode during it.
@@ -1308,10 +1322,12 @@ struct PauseCap<'a, S> {
     /// The newest pause samples past the head, released if speech resumes.
     tail: VecDeque<f32>,
     dropped: usize,
+    /// Silence fed after the clip, just before finalizing.
+    trailing_silence: usize,
 }
 
 impl<'a, S: StreamFeed> PauseCap<'a, S> {
-    fn new(stream: &'a mut S) -> Self {
+    fn new(stream: &'a mut S, trailing_silence: usize) -> Self {
         Self {
             stream,
             speech: Default::default(),
@@ -1319,6 +1335,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             pause: 0,
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
+            trailing_silence,
         }
     }
 
@@ -1363,7 +1380,8 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         self.stream.feed(&out)
     }
 
-    /// A trailing pause keeps only its head.
+    /// A trailing pause keeps only its head; then the model's trailing
+    /// silence follows.
     fn finalize(&mut self) -> Result<String, String> {
         if self.pause <= PAUSE_HEAD_SAMPLES && !self.frame.is_empty() {
             let rest = std::mem::take(&mut self.frame);
@@ -1373,6 +1391,9 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         }
         self.dropped += self.tail.len();
         self.tail.clear();
+        if self.trailing_silence > 0 {
+            self.stream.feed(&vec![0.0; self.trailing_silence])?;
+        }
         self.stream.finalize()
     }
 
@@ -1682,7 +1703,7 @@ mod tests {
         clip.extend(tone(16_000));
         clip.extend(vec![0.0; 80_000]);
         let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake);
+        let mut capped = PauseCap::new(&mut fake, 0);
         for chunk in clip.chunks(1_234) {
             capped.feed(chunk).unwrap();
         }
@@ -1723,13 +1744,32 @@ mod tests {
             "the speech margin misses this speech"
         );
         let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake);
+        let mut capped = PauseCap::new(&mut fake, 0);
         for chunk in clip.chunks(1_234) {
             capped.feed(chunk).unwrap();
         }
         capped.finalize().unwrap();
         assert_eq!(capped.dropped, 0);
         assert_eq!(fake.fed, clip);
+    }
+
+    #[test]
+    fn a_dictation_stream_hears_trailing_silence_before_it_finalizes() {
+        // #657: without trailing silence the stream dropped the closing
+        // full stop or question mark the whole clip kept.
+        let clip = tone(16_000);
+        let mut fake = FakeStream::default();
+        let mut capped = PauseCap::new(&mut fake, 6_400);
+        for chunk in clip.chunks(1_234) {
+            capped.feed(chunk).unwrap();
+        }
+        assert_eq!(
+            capped.finalize(),
+            Ok(format!("streamed {}", 16_000 + 6_400))
+        );
+        assert_eq!(capped.dropped, 0);
+        assert_eq!(fake.fed[..16_000], clip[..]);
+        assert!(fake.fed[16_000..].iter().all(|&sample| sample == 0.0));
     }
 
     fn heard(samples: usize) -> Partial {

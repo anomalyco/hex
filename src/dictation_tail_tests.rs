@@ -87,7 +87,10 @@ fn capture(audio: &[f32], rate: u32, release: usize) -> DictationClip {
 fn run(model: &mut Parakeet, mut samples: Vec<f32>) -> String {
     // Mirror Transcriber's Unified English preparation.
     pad_for_parakeet(&mut samples);
-    samples.resize(samples.len() + 3_200, 0.0);
+    samples.resize(
+        samples.len() + crate::transcription::UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES,
+        0.0,
+    );
     model.transcribe(&samples).unwrap()
 }
 

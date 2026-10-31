@@ -7,7 +7,10 @@ use crate::transcription_models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
 };
 
-const UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES: usize = 3_200;
+/// Silence after a Unified English clip (400 ms at 16 kHz), so the model
+/// has the context to emit the final word and its closing punctuation
+/// (issue 657: sentences lost their full stop or question mark).
+pub(crate) const UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES: usize = 6_400;
 
 pub enum Transcriber {
     Gguf(Box<Parakeet>),
@@ -99,11 +102,15 @@ impl Transcriber {
 
 fn prepare_gguf_samples(samples: &mut Vec<f32>, model: Option<TranscriptionModelId>) {
     crate::dictation::pad_for_parakeet(samples);
+    samples.resize(samples.len() + trailing_silence_samples(model), 0.0);
+}
+
+/// Silence a clip of `model` gets after its audio, whole clip or stream.
+fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> usize {
     if model == Some(TranscriptionModelId::ParakeetUnifiedEnglish) {
-        samples.resize(
-            samples.len() + UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES,
-            0.0,
-        );
+        UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
+    } else {
+        0
     }
 }
 
@@ -127,6 +134,15 @@ impl WarmTranscriber {
         match &self.active {
             Some(Transcriber::Gguf(model)) => model.selection(),
             _ => None,
+        }
+    }
+
+    /// Silence a live stream of the warm model hears before it finalizes,
+    /// the same trailing silence its whole-clip runs get.
+    pub(crate) fn stream_trailing_silence(&self) -> usize {
+        match &self.active {
+            Some(Transcriber::Gguf(model)) => trailing_silence_samples(model.model_id()),
+            _ => 0,
         }
     }
 
@@ -225,7 +241,7 @@ mod tests {
             Some(TranscriptionModelId::ParakeetUnifiedEnglish),
         );
 
-        // The 200 ms context is additional to the 1.5 s minimum, not part of it.
+        // The 400 ms context is additional to the 1.5 s minimum, not part of it.
         assert_eq!(
             samples.len(),
             24_000 + UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
