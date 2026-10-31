@@ -94,11 +94,6 @@ impl Router {
         self.with(|env| env.pages = Some(pages))
     }
 
-    /// Where `opencode2` is found when it isn't on `PATH` (a GUI app's `PATH` is launchd's).
-    pub fn with_opencode(self, opencode: env::Opencode) -> Self {
-        self.with(|env| env.opencode = Some(opencode))
-    }
-
     /// Whether OpenCode's history and sessions' last lines are read (on by default).
     pub fn with_live(self, live: bool) -> Self {
         self.with(|env| env.live = live)

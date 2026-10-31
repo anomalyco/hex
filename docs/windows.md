@@ -325,7 +325,8 @@ The Windows window uses the shared design system
 ([design-system.md](design-system.md)): the same Rune panes as macOS and
 Linux under the native title bar. Mode processing, OpenCode rewriting, and transformations run
 through the same `dictation_processor` and `personal_commands` modules as
-macOS; Windows reaches OpenCode through the `opencode2 api` CLI. Like macOS,
+macOS, and Windows reaches the running OpenCode service the same way: its
+registration file and loopback HTTP, never a CLI. Like macOS,
 an unset OpenCode model tries the ranked recommended models before the
 OpenCode default.
 Remaining panes should be added only with their complete Windows behavior;

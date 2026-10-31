@@ -133,8 +133,9 @@ the menu. **Manage Models…** opens the full picker for downloads and language 
 
 ## Optional OpenCode Features
 
-[OpenCode V2 beta](https://v2.opencode.ai/) (`opencode2`) is optional. Ordinary
-dictation does not require it.
+[OpenCode](https://v2.opencode.ai/) is optional, and ordinary dictation does not
+require it. Hex never launches OpenCode: these features use an OpenCode service
+that is already running, and say "OpenCode isn't running" otherwise.
 
 - **Post-processing:** enable OpenCode in Modes to rewrite a transcript before
   paste. Hex sends the transcript, foreground application, and Brave website

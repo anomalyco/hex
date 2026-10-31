@@ -77,7 +77,7 @@ Serde camelCase, every field optional. `parse_scrawl_config(&str)` reads them fr
 | `jev` | `jevRouting` (an object) | Jev's thresholds and options. |
 | `jev_api_key` | `jevApiKey` | The key Jev is called with; absent uses `$OPENCODE_API_KEY`, then OpenCode's own credential. |
 | `agent_host` | `agentHost` | The SSH host whose OpenCode server holds the sessions, when it isn't this Mac. |
-| `agent_opencode` | `agentOpencode` | The `opencode2` command on that host. |
+| `agent_opencode` | `agentOpencode` | The `opencode` command on that host. |
 | `send_captures` | `autoSend` | Whether a capture of a dev site goes straight to its session (default on). |
 
 ## The folders (`RouterDirs`)
@@ -96,6 +96,6 @@ Each is `Option<PathBuf>`; `None` turns off what needs it. `RouterDirs::under(ro
 
 ## What it reads and never touches
 
-It reads OpenCode's own files to reach the server and its history: `service.json` under `$XDG_STATE_HOME/opencode`, `~/.local/state/opencode` and `$OPENCODE_CONFIG_DIR` / `$XDG_CONFIG_HOME/opencode`; OpenCode's database read-only (`$OPENCODE_DB`, else found through the server); and `$PATH`, `$OPENCODE_BIN`, `$OPENCODE_PASSWORD` / `$OPENCODE_SERVER_PASSWORD`, `$OPENCODE_SESSION_ID`, `$OPENCODE_API_KEY` and `$SCRAWL_NO_OPENCODE`.
+It reads OpenCode's own files to reach the server and its history: `service.json` under `$XDG_STATE_HOME/opencode`, `~/.local/state/opencode` and `$OPENCODE_CONFIG_DIR` / `$XDG_CONFIG_HOME/opencode`; OpenCode's database read-only (`$OPENCODE_DB`, else found through the server); and `$OPENCODE_PASSWORD` / `$OPENCODE_SERVER_PASSWORD`, `$OPENCODE_SESSION_ID`, `$OPENCODE_API_KEY` and `$SCRAWL_NO_OPENCODE`.
 
 It never reads `~/.config/scrawl/config.json` or `$SCRAWL_CONFIG`, never writes under `~/Library/Application Support/scrawl` unless the host's `RouterDirs` point there, and never reads `$SCRAWL_ROUTER_DIR`, `$SCRAWL_ROUTING_LOG` or `$SCRAWL_AGENT_HOST` (Scrawl reads those and passes the result in). Outside a `Router` call with no fallback installed it is inert: default settings, no folders, no log, and no OpenCode history read. Tests rely on that.

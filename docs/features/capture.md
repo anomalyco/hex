@@ -105,9 +105,10 @@ On Linux                                 // capture.linux
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
-├── Sending -> OpenCode's sessions from its service registration
-│   (service.json, HTTP) and prompts through the `opencode2` CLI Hex's
-│   dictation processor finds; the capsule's rows are clicked (no keyboard).
+├── Sending -> OpenCode's sessions and prompts over HTTP to the running
+│   service its registration names (service.json); nothing is started, and
+│   with no service the send says "OpenCode isn't running". The capsule's
+│   rows are clicked (no keyboard).
 │   See capture.send: everything goes inline, so a remote server works
 └── Gaps: no Area (Wayland gives Hex no pointer to aim it), no iPhone, no
     laser or click log outside draw mode, no window log, `hex capture status`
@@ -601,9 +602,8 @@ What a send carries                      // capture.send (router opencode::send_
 │   left out). Nothing in it depends on the bundle's folder, so an OpenCode
 │   server on another machine reads all of it; the text only names where it
 │   was recorded
-├── A body past 64 KiB goes to the local service over HTTP (service.json),
-│   not `opencode2 api --data`: one argument can't pass 128 KiB on Linux. A
-│   service that isn't up is started by one small `opencode2 api` call first
+├── Every request goes to the running local service over HTTP
+│   (service.json); a service that isn't up is never started
 ├── With an agent host (routing's agentHost) the bundle is synced there and
 │   the contact sheet goes as a `file://` part instead; SSH can't carry the
 │   images

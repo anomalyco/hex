@@ -132,7 +132,7 @@ const PATHS: &[(&str, &str)] = &[
         "modes-transformation-menu",
         "Window/Modes/Transformation menu",
     ),
-    ("modes-opencode-v1", "Window/Modes/OpenCode V1"),
+    ("modes-opencode-not-running", "Window/Modes/OpenCode not running"),
     (
         "mac-input-source-models",
         "Window/General/Input source models",

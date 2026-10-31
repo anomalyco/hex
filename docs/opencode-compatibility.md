@@ -23,31 +23,26 @@ new provider-backed validation must record its own CLI and server versions.
 
 ## Integration Contract
 
-Hex discovers a separately installed `opencode2`, optionally overridden by
-`HEX_OPENCODE_CLI`. It does not bundle or pin the runtime CLI, own the
-managed service, or restart or update it. `opencode2 api` discovers or starts
-the service through OpenCode's own lifecycle.
+Hex never runs an OpenCode executable, never starts or restarts the service,
+and never searches for or probes an installed CLI. It only talks to an already
+running service (`src/opencode_service.rs`):
 
-Catalog loading and generation use `opencode2 api get /api/info` to identify
-the authenticated active server, starting it through the CLI when needed. A
-CLI `HTTP 404 Not Found` as the last stderr line (earlier lines may be warnings,
-such as a client/server version mismatch) falls back to the older
-`/api/status`, then `/api/health`, names within the same deadline; any other
-failure is final. Hex reads endpoint and password together from the bounded,
-owner-only service registration matching that server's PID and version, in the
-state directory `opencode2 debug paths` reports and in OpenCode's default one
-(`$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`). A wrapper that
-rejects `debug paths` or redirects the CLI's own state still finds the default
-service's registration.
-It never reads or regenerates the configured password, changes service settings,
-or includes credentials in diagnostics.
+- It reads the bounded registration `service.json` (the stable, beta and dev
+  channels), then other channels' `service-<channel>.json`, in
+  `$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`; OpenCode uses the
+  same path on Windows. On macOS and Linux the file must be a regular file the
+  user owns with no group or other permissions.
+- The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
+  and `::` are reached through loopback); anything else is refused.
+- `GET /api/info` with the registration's password (HTTP Basic, user
+  `opencode`) must answer with the registered `pid` (and `version`, when
+  registered). Otherwise the registration is stale and OpenCode isn't running.
+- Requests are HTTP/1.1 over `TcpStream`; content-length and chunked answers are
+  decoded, bounded to 16 MiB, and every wait observes the caller's deadline and
+  cancellation. Credentials never reach diagnostics.
 
-The system curl sends the authenticated request over loopback HTTP. Credentials
-and JSON travel in a curl configuration through stdin, never command arguments
-or temporary files. Curl configuration files, proxies, and redirects are not
-used. Wildcard bind addresses (`0.0.0.0` and `::`) and `localhost` are normalized
-to loopback; other non-loopback endpoints are rejected. Discovery, request writing,
-and response waiting share the generation deadline and cancellation signal.
+When no service answers, features report "OpenCode isn't running" and link to
+the OpenCode docs; Hex starts nothing.
 
 Hex reads `/api/model` and `/api/model/default` through authenticated HTTP, avoiding
 large piped CLI responses. It supplies `x-opencode-directory` for its Application
@@ -60,9 +55,7 @@ model selections are preserved.
 One-shot generation accepts a prompt and optional model reference and returns
 `data.text`. Current OpenCode serves it at `/api/experimental/generate`; Hex
 falls back to the older `/api/generate` only when the server answers the new
-route with HTTP 404, within the same generation deadline. curl reports the
-status on a trailing line so a missing route is distinguished from a served
-error body. It is stateless and uses the server's base configuration, not the
+route with HTTP 404, within the same generation deadline. It is stateless and uses the server's base configuration, not the
 catalog request's directory header. Existing saved selections whose catalog and
 upstream IDs match need no migration. Previously broken alias selections can be
 fixed by reselecting the model; Hex does not guess an ID migration.
@@ -76,9 +69,8 @@ published to npm's `dev` tag; `next` was an older beta, not the newest V2 build.
 Resolve the published version rather than assuming a moving tag identifies the
 desired source commit.
 
-Check the connected server's `/api/info` version as well as the CLI version:
-the CLI's `api` command permits a server version mismatch. Do not replace a
-user's running service to perform compatibility validation.
+Record the connected server's `/api/info` version. Do not replace a user's
+running service to perform compatibility validation.
 
-Keep regression coverage for body/credential privacy, curl configuration escaping,
-large bodies, loopback-only admission, blocked input pipes, and cancellation.
+Keep regression coverage for registration privacy, stale registrations,
+loopback-only admission, chunked answers, deadlines, and cancellation.

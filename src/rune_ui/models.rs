@@ -1,8 +1,8 @@
 //! The OpenCode model catalog and the model and thinking pickers that each
-//! mode's rewriting uses: the catalog loads off the UI thread, a missing or
-//! V1-only OpenCode is retried at a coarse interval, failures wait for an
-//! explicit retry, and choosing a model also picks its recommended thinking
-//! variant.
+//! mode's rewriting uses: the catalog loads off the UI thread only while
+//! the Modes pane shows, a stopped OpenCode is looked for again at a coarse
+//! interval, failures wait for an explicit retry, and choosing a model also
+//! picks its recommended thinking variant.
 
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -19,8 +19,8 @@ use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::opencode_catalog::{
-    ModelCatalogState, OPENCODE_INSTALL_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
-    model_variants, open_opencode_beta_docs, opencode_unavailable_copy, provider_label,
+    ModelCatalogState, OPENCODE_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
+    model_variants, open_opencode_docs, opencode_unavailable_copy, provider_label,
     start_model_catalog_load,
 };
 
@@ -35,7 +35,8 @@ pub(super) enum Target {
 pub(super) struct Models {
     state: ModelCatalogState,
     receiver: Option<Receiver<ModelCatalogState>>,
-    retry_at: Instant,
+    /// When to look for OpenCode next; `None` until a pane first wants it.
+    retry_at: Option<Instant>,
     /// The model popover: open, its search, and its highlight.
     pub(super) picker: ComboboxState,
 }
@@ -45,21 +46,15 @@ impl Default for Models {
         Self {
             state: ModelCatalogState::Loading,
             receiver: None,
-            retry_at: Instant::now(),
+            retry_at: None,
             picker: ComboboxState::default(),
         }
     }
 }
 
 impl Models {
-    pub(super) fn load() -> Self {
-        let mut models = Self::default();
-        models.start_load();
-        models
-    }
-
     fn start_load(&mut self) {
-        self.retry_at = Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL;
+        self.retry_at = Some(Instant::now() + OPENCODE_RETRY_INTERVAL);
         self.receiver = Some(start_model_catalog_load());
     }
 
@@ -71,9 +66,10 @@ impl Models {
         self.picker.search.focused = true;
     }
 
-    /// Adopts a finished load; retries a missing or V1-only OpenCode now
-    /// and then.
-    pub(super) fn poll(&mut self, live: bool) -> bool {
+    /// Adopts a finished load. While `wanted` (a pane that uses the catalog
+    /// shows), loads it the first time and looks for a stopped OpenCode
+    /// now and then; otherwise touches nothing.
+    pub(super) fn poll(&mut self, wanted: bool) -> bool {
         if let Some(receiver) = &self.receiver {
             let Ok(state) = receiver.try_recv() else {
                 return false;
@@ -82,13 +78,13 @@ impl Models {
             self.receiver = None;
             return true;
         }
-        if live
-            && matches!(
-                self.state,
-                ModelCatalogState::Missing | ModelCatalogState::NeedsV2
-            )
-            && Instant::now() >= self.retry_at
-        {
+        let due = match self.retry_at {
+            None => true,
+            Some(at) => {
+                matches!(self.state, ModelCatalogState::NotRunning) && Instant::now() >= at
+            }
+        };
+        if wanted && due {
             self.start_load();
         }
         false
@@ -175,17 +171,10 @@ impl Models {
         models
     }
 
-    #[cfg(all(test, target_os = "linux"))]
-    pub(super) fn fixture_missing() -> Self {
+    pub(super) fn fixture_not_running() -> Self {
         Self {
-            state: ModelCatalogState::Missing,
-            ..Self::default()
-        }
-    }
-
-    pub(super) fn fixture_v1() -> Self {
-        Self {
-            state: ModelCatalogState::NeedsV2,
+            state: ModelCatalogState::NotRunning,
+            retry_at: Some(Instant::now() + OPENCODE_RETRY_INTERVAL),
             ..Self::default()
         }
     }
@@ -251,8 +240,7 @@ fn close_menu(ui: &mut Ui) {
 fn status(models: &Models) -> String {
     match &models.state {
         ModelCatalogState::Loading => tr("Loading OpenCode…").into(),
-        ModelCatalogState::Missing => tr("OpenCode beta required").into(),
-        ModelCatalogState::NeedsV2 => tr("Requires OpenCode V2").into(),
+        ModelCatalogState::NotRunning => tr("OpenCode isn't running").into(),
         ModelCatalogState::Failed(error) => tr_fill("OpenCode models unavailable: {}", error),
         ModelCatalogState::Loaded(catalog) => {
             tr_fill("{} available models", &catalog.models.len().to_string())
@@ -450,7 +438,7 @@ pub(super) fn unavailable(ui: &Ui, p: Paint, feature: OpenCodeFeature) -> Option
             "open-opencode-setup",
             tr("Open OpenCode setup"),
             ButtonKind::Secondary,
-            |_: &mut Ui, _| open_opencode_beta_docs(),
+            |_: &mut Ui, _| open_opencode_docs(),
         ));
     }
     let description = copy
