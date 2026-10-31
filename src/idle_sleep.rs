@@ -1,6 +1,6 @@
 //! Keeps the computer from idle sleep while Hex records: an IOKit
-//! no-idle-sleep assertion on macOS, a logind `idle:sleep` inhibitor on
-//! Linux, and a system-required power request on Windows. Each is held
+//! no-idle-sleep assertion on macOS, a logind `idle:sleep` (else `idle`)
+//! inhibitor on Linux, and a system-required power request on Windows. Each is held
 //! until its guard drops. Starting one may wait on the OS, so callers start
 //! it off the capture loop.
 
@@ -95,6 +95,9 @@ mod platform {
     }
 
     impl PreventSleep {
+        /// Blocks idle and sleep, or only idle where polkit refuses to let
+        /// a process outside the active seat session, such as Hex's user
+        /// service, block sleep.
         pub(super) fn start() -> std::io::Result<Self> {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -104,24 +107,33 @@ mod platform {
                     .await
                     .map_err(|_| std::io::Error::other("the system D-Bus did not answer"))?
                     .map_err(std::io::Error::other)?;
-                let call = bus.call_method(
-                    Some("org.freedesktop.login1"),
-                    "/org/freedesktop/login1",
-                    Some("org.freedesktop.login1.Manager"),
-                    "Inhibit",
-                    &("idle:sleep", "Hex", "Recording", "block"),
-                );
-                let reply = tokio::time::timeout(TIMEOUT, call)
-                    .await
-                    .map_err(|_| std::io::Error::other("logind did not answer"))?
-                    .map_err(std::io::Error::other)?;
-                let inhibitor: OwnedFd =
-                    reply.body().deserialize().map_err(std::io::Error::other)?;
-                Ok(Self {
-                    _inhibitor: inhibitor,
-                })
+                match inhibit(&bus, "idle:sleep").await {
+                    Ok(inhibitor) => Ok(inhibitor),
+                    Err(error) => {
+                        tracing::debug!(%error, "logind refused to block sleep; blocking idle only");
+                        inhibit(&bus, "idle").await
+                    }
+                }
             })
         }
+    }
+
+    async fn inhibit(bus: &zbus::Connection, what: &str) -> std::io::Result<PreventSleep> {
+        let call = bus.call_method(
+            Some("org.freedesktop.login1"),
+            "/org/freedesktop/login1",
+            Some("org.freedesktop.login1.Manager"),
+            "Inhibit",
+            &(what, "Hex", "Recording", "block"),
+        );
+        let reply = tokio::time::timeout(TIMEOUT, call)
+            .await
+            .map_err(|_| std::io::Error::other("logind did not answer"))?
+            .map_err(std::io::Error::other)?;
+        let inhibitor: OwnedFd = reply.body().deserialize().map_err(std::io::Error::other)?;
+        Ok(PreventSleep {
+            _inhibitor: inhibitor,
+        })
     }
 }
 
