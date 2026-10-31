@@ -63,6 +63,10 @@ pub(crate) enum Request {
     CaptureUndo,
     /// `hex annotate draw`: the pen on or off, as the capsule's pen.
     CaptureDraw,
+    /// `hex annotate start --area`: records that area (X11).
+    CaptureArea {
+        rect: [f64; 4],
+    },
     /// `hex annotate status`: what the listener's capture host reports.
     CaptureStatus,
     Status,
@@ -407,6 +411,15 @@ pub(crate) fn capture_send(
     }
 }
 
+/// `hex annotate start --area`: the running Hex records that area.
+pub(crate) fn capture_area(rect: [f64; 4]) -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    match request(Request::CaptureArea { rect }) {
+        Ok(_) => ControlReply::done("Sent to Hex"),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
 /// `hex annotate draw`: drawing on or off in the running Hex.
 pub(crate) fn capture_draw() -> crate::control::ControlReply {
     use crate::control::ControlReply;
@@ -626,6 +639,13 @@ fn serve_client(
             }
             Request::CaptureDraw => {
                 crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Draw)
+            }
+            Request::CaptureArea { rect } => {
+                crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Command(
+                    crate::capture_host::CaptureCommand::Start(
+                        crate::capture_host::CaptureTarget::Area { rect },
+                    ),
+                ))
             }
             Request::CaptureUndo => {
                 crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Command(

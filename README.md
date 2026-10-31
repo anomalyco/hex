@@ -155,8 +155,9 @@ until you first use it.
 - **One key:** **Option-Shift-S** on macOS, **F9** on Linux. Tap it to start
   and tap again to stop. While it records, hold it and move the pointer to
   draw, no click needed; let go and the mouse is the app's again. macOS asks
-  for Screen Recording the first time; Linux asks through the desktop's
-  screen-sharing dialog once, then remembers the screen. While it records,
+  for Screen Recording the first time; Linux on Wayland asks through
+  the desktop's screen-sharing dialog once, then remembers the screen; on
+  X11 (i3 and the like) Hex reads the screen itself and asks nothing. While it records,
   the dictation shortcut does nothing.
 - **The bar:** the recording bar at the top shows the timer, a pen (click it,
   then drag to draw like a real pen; click it again or press Esc to stop), stop, and ✕ to
