@@ -452,6 +452,9 @@ pub fn run(
                         recording = true;
                         // A toggle press is deliberate, so it streams at once.
                         recording_feedback_started = toggle_mode;
+                        if toggle_mode {
+                            audio_suppressor.suppress();
+                        }
                         // The tone confirms the press at once; a short tap or a
                         // chord meant for another application retracts it.
                         crate::feedback::play_provisional_start();
@@ -463,7 +466,6 @@ pub fn run(
                         input.request_open();
                         crate::feedback::prepare();
                     }
-                    audio_suppressor.suppress();
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::rune_hud::HudEvent::Started);
                     }
@@ -614,6 +616,7 @@ pub fn run(
                         start_tone_played = recording_feedback_started;
                         if recording_feedback_started {
                             crate::feedback::play(crate::feedback::Tone::DictationStart);
+                            audio_suppressor.suppress();
                         }
                         emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                         continue;
@@ -631,6 +634,9 @@ pub fn run(
                             crate::feedback::play(crate::feedback::Tone::DictationStart);
                         }
                         recording_feedback_started = true;
+                        // Ordinary shortcut chords and short taps never mute,
+                        // lower, or pause audio, or prevent sleep.
+                        audio_suppressor.suppress();
                     }
                     // Short taps and shortcut chords never reach the model;
                     // the stream starts with the backlog once the hold counts.
@@ -649,6 +655,7 @@ pub fn run(
                 }
                 audio_ready = false;
                 if recording {
+                    audio_suppressor.restore();
                     crate::feedback::retract_start();
                     if recording_feedback_started {
                         crate::feedback::play(crate::feedback::Tone::Cancel);
