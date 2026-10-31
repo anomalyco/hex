@@ -149,7 +149,7 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   │   └── Every permission on -> primary "Restart Hex" -> relaunch at setup  // setup.restart
 │   ├── The first unfinished row carries the screen's one accent
 │   └── Last grant -> 0.7 s beat -> Give it a try (Continue also works)
-├── Give it a try                         // setup.practice; macOS only
+├── Give it a try                         // setup.practice; every OS (rune_ui/practice.rs)
 │   ├── Model still downloading -> "Hex starts listening once…" + footer progress
 │   ├── Focused practice field; hold the shortcut, speak, release
 │   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
@@ -165,7 +165,7 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
 │   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
 └── Done -> paste last, Modes tips -> Start using Hex
-    // Windows and Linux: Welcome -> Setup (the model row only) -> Done
+    // Windows and Linux: Welcome -> Setup (the model row only) -> Give it a try -> Done
 
 General > Speech model or Language
   -> Prepare candidate
@@ -1188,10 +1188,12 @@ Linux beta                               // not macOS feature parity
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener warning
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray, rune::Tray)
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux_tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
+├── General > Launch at login -> writes or removes ~/.config/autostart/hex.desktop (X-Hex-Managed; linux_login_item)
+│   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
 │   ├── Startup open fails -> Retry with backoff; the listener keeps running
@@ -1250,6 +1252,12 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch
+├── Tray menu (tray_menu, shared with Linux)    // maintain.tray
+│   ├── Recording / Transcribing… status line and tooltip while the listener works
+│   ├── Show Hex · Paste last dictation (refocuses the app the menu covered)
+│   ├── Speech model: downloaded models, ✓ on the selected one; none while one prepares
+│   └── Update item · Enable / Disable Hex · Quit Hex
+├── Single-modifier shortcut -> Left / Either / Right side picker, as macOS
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
@@ -1448,7 +1456,7 @@ Capture                                  // hex app and hex dictate
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
 │       nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
-├── Dictation pasted -> Done sound; failures stay silent
+├── Dictation pasted -> Done sound; failures play the error sound
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
 ```
 

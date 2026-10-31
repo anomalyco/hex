@@ -10,8 +10,8 @@ use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::AppSettings;
 use crate::transcription_models::{MODELS, TranscriptionModelId};
-use crate::tray_menu::model_menu_entries;
 use crate::transcription_preparation::PreparationStatus;
+use crate::tray_menu::model_menu_entries;
 
 const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
 const RECORDING_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-recording@2x.png");

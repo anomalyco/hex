@@ -68,7 +68,7 @@ an isolated input-module harness; no full Windows app build or physical Windows
 mouse test was run. Xvfb does not establish physical Linux desktop behavior.
 
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
-the macOS side picker and the recorder; with no shortcut the tray reads Off.
+the side picker (macOS and Windows) and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed
 keys (`⌥ ⌘ …`); a key records them at once, and releasing them all records the
 most held. Saved shows for a second, then the recorder returns to Change
@@ -925,7 +925,9 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Dictation pasted >= 2 s after the stop tone -> Done tone      // dictate.done-tone
      -> Pasted sooner (the usual case) -> Stop tone only; `DONE_MIN_AFTER_STOP`
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
-  Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
+  Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
+     -> Classic has none: macOS Basso, Signature's error on Windows and Linux
+     -> Linux/Windows microphone interruption -> Cancel tone only
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
@@ -1005,8 +1007,10 @@ audible sample. Every sound is normalized to one loudness per kind (start
 -25.5 LUFS max momentary, stop and done -27, cancel and error -26.5, success
 -25), so a volume sounds the same in every set. Classic's start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples) and its
-cancel, once 15 dB louder than the rest, comes down. Windows and Linux play
-start, stop, done, and cancel; their failures stay silent as before. Checks:
+cancel, once 15 dB louder than the rest, comes down. Every OS plays the
+error sound for a failed dictation or paste (`fail` in `linux_dictation.rs`
+and `windows_dictation.rs`), including an empty transcript, which macOS
+treats as nothing pasted. Checks:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget; every start, and every synthesized sound, audible within 1 ms),
 `every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`. The

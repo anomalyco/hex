@@ -1227,7 +1227,7 @@ mod tests {
         ];
         let optional = [
             ("done", bundled.done, budget(350, 0)),
-            ("error", bundled.error, budget(300, 0)),
+            ("error", bundled.error, budget(300, 300)),
             ("onboarding success", bundled.success, budget(1_200, 0)),
         ];
         for (name, bytes, budget) in optional {

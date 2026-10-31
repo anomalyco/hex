@@ -269,7 +269,10 @@ mod tests {
             TrayCommand::from_id(&model_id),
             Some(TrayCommand::UseModel(settings.transcription.model))
         );
-        assert_eq!(TrayCommand::from_id("paste-last"), Some(TrayCommand::PasteLast));
+        assert_eq!(
+            TrayCommand::from_id("paste-last"),
+            Some(TrayCommand::PasteLast)
+        );
         assert_eq!(TrayCommand::from_id("status"), None);
         assert_eq!(view.tooltip(), "Hex Dictation: recording");
         let stopped = TrayView::new(

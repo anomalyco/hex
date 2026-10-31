@@ -42,8 +42,8 @@ mod output;
 mod picker;
 mod platform;
 mod platform_settings;
-mod practice;
 pub(crate) mod playground;
+mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;

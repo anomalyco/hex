@@ -50,7 +50,6 @@ struct JobResult {
     result: Result<(), String>,
 }
 
-#[derive(Clone)]
 pub struct WindowsDictationConfig {
     pub device: Option<String>,
     pub hotkey: WindowsHotkey,

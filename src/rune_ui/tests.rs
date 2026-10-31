@@ -1729,6 +1729,8 @@ fn onboarding_downloads_the_model_through_the_service() {
     settle(&mut rt);
     std::thread::sleep(std::time::Duration::from_millis(750));
     settle(&mut rt);
+    // Setup moves on to the practice dictation, which can be skipped.
+    tap(&mut rt, "tour-skip");
     tap(&mut rt, "tour-continue");
     assert!(rt.state.tour.is_none(), "Start using Hex closes setup");
 }

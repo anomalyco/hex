@@ -77,9 +77,9 @@ Terminal paste.
   install still gets the tour as its first run. Checks:
   `labs_run_setup_again_opens_the_first_run` and
   `run_setup_again_opens_the_first_run_on_linux_and_windows` in
-  [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet: words flying into
-  the field; the Linux and Windows practice page cannot see the dictation
-  start, so it shows no listening state.
+  [panes.rs](../../src/rune_ui/tests/panes.rs). Every OS reads the practice
+  dictation from the listener's event log (`rune_ui/practice.rs`). Not yet:
+  words flying into the field.
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
   OS; see [Streaming Finish](dictation.md#streaming-finish)). Its toggle

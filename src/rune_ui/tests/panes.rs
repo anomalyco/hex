@@ -50,7 +50,7 @@ fn settings_rows_follow_each_os() {
     assert!(present(&linux, "terminal-paste"));
     assert!(present(&linux, "toggle-listening"));
     assert!(present(&linux, "enable-on-launch"));
-    assert!(!present(&linux, "launch-at-login"));
+    assert!(present(&linux, "launch-at-login"));
     assert!(!present(&linux, "dock-icon"));
     assert!(!present(&linux, "meetings-enabled"));
 

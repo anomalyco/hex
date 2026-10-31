@@ -68,17 +68,21 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
                 None => Ok(()),
             }
         }
-        TrayCommand::ToggleListening => host.request(HostRequest::Desktop(
-            if snapshot.desktop.listener.running {
+        TrayCommand::ToggleListening => {
+            host.request(HostRequest::Desktop(if snapshot.desktop.listener.running {
                 DesktopAction::StopListening
             } else {
                 DesktopAction::StartListening
-            },
-        )),
+            }))
+        }
         TrayCommand::Show | TrayCommand::Quit => Ok(()),
     };
     if let Err(error) = result {
-        tracing::warn!(error = format!("{error:#}"), ?command, "the tray action failed");
+        tracing::warn!(
+            error = format!("{error:#}"),
+            ?command,
+            "the tray action failed"
+        );
     }
 }
 

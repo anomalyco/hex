@@ -39,7 +39,10 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
     if let Some(entry) = &existing
         && !entry.lines().any(|line| line.trim() == MANAGED_MARK)
     {
-        bail!("{} is not Hex's; edit or remove it yourself", path.display());
+        bail!(
+            "{} is not Hex's; edit or remove it yourself",
+            path.display()
+        );
     }
     if enabled {
         let executable = launcher()?;
@@ -134,6 +137,8 @@ mod tests {
     #[test]
     fn hidden_or_disabled_entries_do_not_start() {
         assert!(!starts("[Desktop Entry]\nHidden=true\n"));
-        assert!(!starts("[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n"));
+        assert!(!starts(
+            "[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n"
+        ));
     }
 }

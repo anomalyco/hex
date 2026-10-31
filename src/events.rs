@@ -481,7 +481,6 @@ impl EventReader {
     }
 
     /// Takes the events read so far, so the next `refresh` yields only newer ones.
-    #[cfg(target_os = "macos")]
     pub fn drain(&mut self) -> impl Iterator<Item = VoiceEvent> + '_ {
         self.events.drain(..)
     }

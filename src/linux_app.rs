@@ -341,13 +341,8 @@ pub(crate) fn run(
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
     let (control, requests) = mpsc::sync_channel(8);
     server.serve(published.clone(), control.clone(), shutdown);
-    let tray = crate::linux_tray::start(
-        host.clone(),
-        published.clone(),
-        control.clone(),
-        shutdown,
-    )
-    .map(Arc::new);
+    let tray = crate::linux_tray::start(host.clone(), published.clone(), control.clone(), shutdown)
+        .map(Arc::new);
     linux_service::notify("READY=1");
     tracing::info!(pid = std::process::id(), "Hex instance ready");
 
