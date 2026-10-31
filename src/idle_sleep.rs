@@ -119,12 +119,13 @@ mod platform {
     }
 
     async fn inhibit(bus: &zbus::Connection, what: &str) -> std::io::Result<PreventSleep> {
+        let body = (what, "Hex", "Recording", "block");
         let call = bus.call_method(
             Some("org.freedesktop.login1"),
             "/org/freedesktop/login1",
             Some("org.freedesktop.login1.Manager"),
             "Inhibit",
-            &(what, "Hex", "Recording", "block"),
+            &body,
         );
         let reply = tokio::time::timeout(TIMEOUT, call)
             .await
