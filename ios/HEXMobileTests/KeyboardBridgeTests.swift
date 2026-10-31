@@ -1,20 +1,45 @@
 import XCTest
+@testable import HEX
 
+@MainActor
 final class KeyboardBridgeTests: XCTestCase {
     func testSnapshotAvailabilityRequiresFreshHeartbeatAndActiveSession() {
         let now = 1_000.0
-        let available = snapshot(heartbeat: now - 2.9, expiresAt: now + 1)
-        let stale = snapshot(heartbeat: now - 3, expiresAt: now + 1)
-        let expired = snapshot(heartbeat: now, expiresAt: now)
+        let available = snapshot(state: .ready, heartbeat: now - 2.9, expiresAt: now + 1)
+        let stale = snapshot(state: .ready, heartbeat: now - 3.0, expiresAt: now + 1)
+        let expired = snapshot(state: .ready, heartbeat: now, expiresAt: now)
+        let transcribingAfterSessionEnd = snapshot(state: .transcribing, heartbeat: now - 0.5, expiresAt: 0)
 
         XCTAssertTrue(available.isAvailable(at: now))
         XCTAssertFalse(stale.isAvailable(at: now))
         XCTAssertFalse(expired.isAvailable(at: now))
+        XCTAssertTrue(transcribingAfterSessionEnd.isAvailable(at: now))
+    }
+
+    func testDeliverableResultSurvivesWarmSessionShutdownUntilTTL() {
+        let now = 5_000.0
+        let closedWithResult = KeyboardSnapshot(
+            state: .offline,
+            heartbeat: 0,
+            expiresAt: 0,
+            resultID: "res-1",
+            resultExpiresAt: now + 25,
+            transcript: "Ship it."
+        )
+        XCTAssertFalse(closedWithResult.isAvailable(at: now))
+        XCTAssertTrue(closedWithResult.hasDeliverableResult(at: now))
+        XCTAssertFalse(closedWithResult.hasDeliverableResult(at: now + 26))
     }
 
     func testKeyboardMessagesRoundTripThroughJSON() throws {
-        let command = KeyboardCommand(id: "command", kind: .stop, jobID: "job")
-        let snapshot = snapshot(heartbeat: 10, expiresAt: 20)
+        let command = KeyboardCommand(
+            id: "command",
+            kind: .stop,
+            jobID: "job",
+            style: .casual,
+            sentAt: 42.5
+        )
+        let snap = snapshot(state: .recording, heartbeat: 10, expiresAt: 20)
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
 
@@ -23,36 +48,107 @@ final class KeyboardBridgeTests: XCTestCase {
             command
         )
         XCTAssertEqual(
-            try decoder.decode(KeyboardSnapshot.self, from: encoder.encode(snapshot)),
-            snapshot
+            try decoder.decode(KeyboardSnapshot.self, from: encoder.encode(snap)),
+            snap
         )
     }
 
-    func testKeyboardRecordingLaunchRoundTripsItsJob() {
-        let request = KeyboardLaunchRequest.startRecording(jobID: "job with spaces")
+    func testKeyboardRecordingLaunchRoundTripsMetadataAndEnforcesTenSecondWindow() {
+        let t0 = 2_000.0
+        let request = KeyboardLaunchRequest.startRecording(
+            jobID: "job with spaces",
+            requestedAt: t0,
+            style: .casual,
+            returnAppID: "claude"
+        )
 
-        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        let decoded = KeyboardLaunchRequest(url: request.url)
+        XCTAssertEqual(decoded, request)
+        XCTAssertFalse(request.isHandoffExpired(at: t0 + 9.9))
+        XCTAssertTrue(request.isHandoffExpired(at: t0 + 10.1))
     }
 
     func testKeyboardSessionLaunchDoesNotRequestRecording() {
-        let request = KeyboardLaunchRequest.startSession
-
+        let request = KeyboardLaunchRequest.startSession(requestedAt: 100, returnAppID: "messages")
         XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
     }
 
     func testKeyboardRecordingLaunchRequiresAJob() {
         let url = URL(string: "hex-dictation://keyboard/record")!
-
         XCTAssertNil(KeyboardLaunchRequest(url: url))
     }
 
-    private func snapshot(heartbeat: TimeInterval, expiresAt: TimeInterval) -> KeyboardSnapshot {
+    func testTranscriptStylesFormatDeterministically() {
+        let raw = "um let's ship the ios build tonight"
+        XCTAssertEqual(
+            TranscriptFormatter.format(raw, style: .polished),
+            "Let's ship the ios build tonight."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("Um, Sounds Good.", style: .casual),
+            "sounds good"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("um keep raw words", style: .verbatim),
+            "um keep raw words"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("First item bullet check signing bullet test keyboard", style: .notes),
+            "First item\n- Check signing\n- Test keyboard"
+        )
+    }
+
+    func testSmartInsertionSpacingRespectsSurroundingContext() {
+        XCTAssertEqual(
+            TranscriptFormatter.insertionText(for: "world.", beforeContext: "Hello", afterContext: nil),
+            " world."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.insertionText(for: "world.", beforeContext: "Hello ", afterContext: nil),
+            "world."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.insertionText(for: "Hello", beforeContext: nil, afterContext: "world"),
+            "Hello "
+        )
+    }
+
+    func testAppIntentMetadataContainsNoApplePlatformNames() {
+        let texts = [
+            String(localized: DictateWithHexIntent.title),
+            String(localized: WarmHexKeyboardIntent.title),
+            String(localized: ToggleHexControlIntent.title),
+            String(localized: StopHexDictationIntent.title),
+            String(localized: CancelHexDictationIntent.title),
+            "Starts recording on first press, then transcribes locally and copies to the clipboard on second press.",
+            "Starts Hex's warm microphone session so the keyboard can dictate without switching apps.",
+            "Starts or finishes on-device dictation and copies the transcript.",
+            "Stops recording, transcribes on device, and copies the text.",
+            "Discards the active Hex recording.",
+        ]
+        let forbidden = ["iphone", "ipad", "apple", "siri", "macos", "ios"]
+        for text in texts {
+            let lower = text.lowercased()
+            for word in forbidden {
+                XCTAssertFalse(lower.contains(word), "Intent string '\(text)' contains forbidden word '\(word)'")
+            }
+        }
+    }
+
+    private func snapshot(
+        state: KeyboardDictationState,
+        heartbeat: TimeInterval,
+        expiresAt: TimeInterval
+    ) -> KeyboardSnapshot {
         KeyboardSnapshot(
-            state: .ready,
+            state: state,
             heartbeat: heartbeat,
             expiresAt: expiresAt,
+            recordingStartedAt: heartbeat - 2,
+            audioLevel: 0.5,
             jobID: "job",
             resultID: "result",
+            resultExpiresAt: heartbeat + 30,
             transcript: "hello",
             message: nil
         )

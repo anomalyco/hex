@@ -3,7 +3,7 @@ options:
   minimumXcodeGenVersion: 2.46.0
   bundleIdPrefix: com.kitlangton.hex
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
   xcodeVersion: "2660"
 packages:
   FluidAudio:
@@ -20,16 +20,19 @@ targets:
     sources:
       - HEXMobile
       - HEXShared
+      - HEXActivity
       - path: ../app/AppIcon.icon
         buildPhase: resources
     dependencies:
       - package: FluidAudio
       - target: HEXKeyboard
         embed: true
+      - target: HEXWidgets
+        embed: true
     info:
       path: HEXMobile/Info.plist
       properties:
-        CFBundleDisplayName: HEX
+        CFBundleDisplayName: Hex
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
@@ -37,8 +40,9 @@ targets:
             CFBundleURLName: com.kitlangton.hex.mobile.keyboard-session
             CFBundleURLSchemes:
               - hex-dictation
-        NSMicrophoneUsageDescription: HEX records only while you dictate and transcribes the recording locally on this iPhone.
-        NSSpeechRecognitionUsageDescription: HEX uses Apple's on-device SpeechTranscriber to turn your temporary recording into text.
+        NSMicrophoneUsageDescription: Hex records only while you dictate and transcribes locally on this iPhone.
+        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device SpeechTranscriber to turn your recording into text.
+        NSSupportsLiveActivities: true
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
           - audio
@@ -61,7 +65,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: HEXMobile/HEXMobile.entitlements
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.2.0
         PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile
         PRODUCT_NAME: HEX
     scheme:
@@ -77,7 +81,7 @@ targets:
     info:
       path: HEXKeyboard/Info.plist
       properties:
-        CFBundleDisplayName: HEX Keyboard
+        CFBundleDisplayName: Hex Keyboard
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -95,18 +99,48 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.2.0
         PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.keyboard
         PRODUCT_NAME: HEXKeyboard
+        SKIP_INSTALL: YES
+  HEXWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - HEXWidgets
+      - HEXActivity
+      - HEXShared/HexTheme.swift
+    info:
+      path: HEXWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Hex
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: 0.2.0
+        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.widgets
+        PRODUCT_NAME: HEXWidgets
         SKIP_INSTALL: YES
   HEXMobileTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - HEXMobileTests
-      - HEXShared
+      - path: ../tests/fixtures/vocabulary/audio/term-hex-1.wav
+        buildPhase: resources
+    dependencies:
+      - target: HEXMobile
     settings:
       base:
+        BUNDLE_LOADER: $(TEST_HOST)
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/HEX.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HEX

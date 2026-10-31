@@ -1,86 +1,29 @@
-import Combine
 import SwiftUI
 import UIKit
 
 @MainActor
-private final class PrimaryActionModel: ObservableObject {
-    @Published var title = "Open HEX"
-    @Published var image = "arrow.up.forward.app.fill"
-    @Published var enabled = true
-    @Published var recording = false
-    @Published var destination: URL?
-    var action: (() -> Void)?
-}
-
-private struct PrimaryActionView: View {
-    @ObservedObject var model: PrimaryActionModel
-
-    var body: some View {
-        Group {
-            if let destination = model.destination {
-                Link(destination: destination) {
-                    label
-                }
-            } else {
-                Button {
-                    model.action?()
-                } label: {
-                    label
-                }
-                .disabled(!model.enabled)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var label: some View {
-        HStack(spacing: 7) {
-            if !model.image.isEmpty {
-                Image(systemName: model.image)
-            }
-            Text(model.title)
-                .fontWeight(.semibold)
-        }
-        .foregroundStyle(model.recording ? Color.white : Color(uiColor: .label))
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .background(
-            model.recording ? Color(uiColor: .systemRed) : Color(uiColor: .secondarySystemFill),
-            in: Capsule()
-        )
-        .opacity(model.enabled ? 1 : 0.5)
-        .contentShape(Capsule())
-    }
-}
-
-@MainActor
 final class KeyboardViewController: UIInputViewController {
     private let bridge = KeyboardBridge()
-    private let statusLabel = UILabel()
-    private let detailLabel = UILabel()
-    private let primaryActionModel = PrimaryActionModel()
-    private let globeButton = UIButton(type: .system)
-    private let spaceButton = UIButton(type: .system)
-    private let deleteButton = UIButton(type: .system)
-    private let returnButton = UIButton(type: .system)
-
+    private let viewModel = KeyboardViewModel()
     private var pollTimer: Timer?
-    private var snapshot = KeyboardSnapshot.offline
-    private var requestedJobID: String?
-
-    private let lastInsertedResultKey = "keyboard.last-inserted-result"
+    private var coldStartJobID = UUID().uuidString
+    private var lastURLRefreshBucket: Int = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
         configureView()
-        poll()
+        syncFromBridge()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        coldStartJobID = UUID().uuidString
+        syncFromBridge()
+
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.poll()
+                self?.syncFromBridge()
             }
         }
     }
@@ -93,209 +36,156 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        updateAppearance()
+        updateKeyboardTraits()
     }
 
     private func configureView() {
-        view.backgroundColor = .clear
-        view.isOpaque = false
-        preferredContentSize.height = 176
+        view.backgroundColor = UIColor(red: 0x0A / 255.0, green: 0x0B / 255.0, blue: 0x0D / 255.0, alpha: 1)
+        preferredContentSize.height = 148
 
-        statusLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        statusLabel.textColor = .label
-        statusLabel.textAlignment = .center
-
-        detailLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        detailLabel.textColor = .secondaryLabel
-        detailLabel.textAlignment = .center
-        detailLabel.adjustsFontSizeToFitWidth = true
-        detailLabel.minimumScaleFactor = 0.82
-
-        primaryActionModel.action = { [weak self] in
-            self?.performPrimaryAction()
+        viewModel.inputViewController = self
+        viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
+        viewModel.onStopTap = { [weak self] in self?.stopWarmDictation() }
+        viewModel.onCancelTap = { [weak self] in self?.cancelWarmDictation() }
+        viewModel.onStyleSelected = { [weak self] style in
+            self?.bridge.style = style
+            self?.viewModel.style = style
+            self?.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
         }
-        let primaryActionController = UIHostingController(
-            rootView: PrimaryActionView(model: primaryActionModel)
-        )
-        primaryActionController.view.backgroundColor = .clear
-        addChild(primaryActionController)
-        primaryActionController.didMove(toParent: self)
-        primaryActionController.view.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        viewModel.onReturnAppSelected = { [weak self] appID in
+            self?.bridge.returnAppID = appID
+            self?.viewModel.returnAppID = appID
+            self?.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
+        }
+        viewModel.onSpace = { [weak self] in self?.textDocumentProxy.insertText(" ") }
+        viewModel.onDelete = { [weak self] in self?.textDocumentProxy.deleteBackward() }
+        viewModel.onReturn = { [weak self] in self?.textDocumentProxy.insertText("\n") }
 
-        configureKey(globeButton, title: "", image: "globe")
-        globeButton.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+        let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        hosting.view.backgroundColor = .clear
+        addChild(hosting)
+        view.addSubview(hosting.view)
+        hosting.didMove(toParent: self)
 
-        configureKey(spaceButton, title: "space", image: nil)
-        spaceButton.addTarget(self, action: #selector(insertSpace), for: .touchUpInside)
-
-        configureKey(deleteButton, title: "", image: "delete.left")
-        deleteButton.addTarget(self, action: #selector(deleteBackward), for: .touchUpInside)
-
-        configureKey(returnButton, title: "", image: "return")
-        returnButton.addTarget(self, action: #selector(insertReturn), for: .touchUpInside)
-
-        let statusStack = UIStackView(arrangedSubviews: [statusLabel, detailLabel])
-        statusStack.axis = .vertical
-        statusStack.spacing = 2
-
-        let utilityStack = UIStackView(arrangedSubviews: [globeButton, spaceButton, deleteButton, returnButton])
-        utilityStack.axis = .horizontal
-        utilityStack.spacing = 6
-        utilityStack.distribution = .fill
-        globeButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        deleteButton.widthAnchor.constraint(equalToConstant: 50).isActive = true
-        returnButton.widthAnchor.constraint(equalToConstant: 50).isActive = true
-
-        let stack = UIStackView(arrangedSubviews: [statusStack, primaryActionController.view, utilityStack])
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.axis = .vertical
-        stack.spacing = 8
-        view.addSubview(stack)
+        let heightConstraint = view.heightAnchor.constraint(equalToConstant: 148)
+        heightConstraint.priority = UILayoutPriority(999)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6),
+            heightConstraint,
+            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
-    private func configureKey(_ button: UIButton, title: String, image: String?) {
-        var configuration = UIButton.Configuration.filled()
-        configuration.title = title
-        if let image {
-            configuration.image = UIImage(systemName: image)
-        }
-        configuration.cornerStyle = .medium
-        configuration.baseBackgroundColor = .secondarySystemFill
-        configuration.baseForegroundColor = .label
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12)
-        button.configuration = configuration
-    }
+    private func syncFromBridge() {
+        let now = Date().timeIntervalSince1970
+        viewModel.now = now
+        viewModel.hasFullAccess = hasFullAccess
+        updateKeyboardTraits()
 
-    private func poll() {
-        snapshot = bridge.snapshot()
+        guard hasFullAccess else { return }
 
-        if let resultID = snapshot.resultID,
-           let transcript = snapshot.transcript,
-           !transcript.isEmpty,
-           UserDefaults.standard.string(forKey: lastInsertedResultKey) != resultID {
-            textDocumentProxy.insertText(transcript)
-            UserDefaults.standard.set(resultID, forKey: lastInsertedResultKey)
-            requestedJobID = nil
-        }
+        let snap = bridge.snapshot()
+        viewModel.snapshot = snap
+        viewModel.isModelInstalled = bridge.isModelInstalled
+        viewModel.style = bridge.style
+        viewModel.returnAppID = bridge.returnAppID
 
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        globeButton.isHidden = !needsInputModeSwitchKey
-
-        guard hasFullAccess else {
-            statusLabel.text = "Full Access required"
-            detailLabel.text = "Open HEX to finish keyboard setup"
-            setPrimaryButton(
-                title: "Open HEX",
-                image: "arrow.up.forward.app.fill",
-                enabled: true,
-                launchRequest: .startSession
+        if snap.hasDeliverableResult(at: now),
+           let resultID = snap.resultID,
+           let rawTranscript = snap.transcript,
+           bridge.lastInsertedResultID != resultID {
+            let insertion = TranscriptFormatter.insertionText(
+                for: rawTranscript,
+                beforeContext: textDocumentProxy.documentContextBeforeInput,
+                afterContext: textDocumentProxy.documentContextAfterInput
             )
-            return
+            textDocumentProxy.insertText(insertion)
+            bridge.lastInsertedResultID = resultID
+            viewModel.pendingCommand = nil
+            coldStartJobID = UUID().uuidString
         }
 
-        guard snapshot.isAvailable else {
-            statusLabel.text = "HEX is offline"
-            if bridge.isModelInstalled {
-                detailLabel.text = "Open HEX to connect"
-            } else {
-                detailLabel.text = "Open HEX to prepare on-device speech"
+        if let pending = viewModel.pendingCommand {
+            let expired = now - pending.sentAt >= KeyboardViewModel.commandAckTimeout
+            let acknowledged = (pending.kind == .start && snap.state == .recording)
+                || (pending.kind == .stop && snap.state != .recording)
+                || (pending.kind == .cancel && snap.state != .recording)
+            if expired || acknowledged {
+                viewModel.pendingCommand = nil
             }
-            let jobID = requestedJobID ?? UUID().uuidString
-            requestedJobID = jobID
-            setPrimaryButton(
-                title: "Open HEX",
-                image: "arrow.up.forward.app.fill",
-                enabled: true,
-                launchRequest: .startRecording(jobID: jobID)
-            )
-            return
         }
 
-        switch snapshot.state {
-        case .offline:
-            statusLabel.text = "Connecting to HEX"
-            detailLabel.text = "The app is preparing your keyboard session"
-            setPrimaryButton(title: "Connecting...", image: nil, enabled: false)
-        case .ready:
-            statusLabel.text = snapshot.message ?? "Ready"
-            detailLabel.text = "Tap to dictate into this field"
-            setPrimaryButton(title: "Record", image: "mic.fill", enabled: true)
-        case .recording:
-            statusLabel.text = "Listening"
-            detailLabel.text = "Tap when you are finished"
-            setPrimaryButton(title: "Stop and insert", image: "stop.fill", enabled: true, recording: true)
-        case .transcribing:
-            statusLabel.text = "Transcribing"
-            detailLabel.text = "Running on-device speech recognition"
-            setPrimaryButton(title: "Working...", image: nil, enabled: false)
-        case .failed:
-            statusLabel.text = "HEX needs attention"
-            detailLabel.text = snapshot.message ?? "Open the app to recover"
-            setPrimaryButton(
-                title: "Open HEX",
-                image: "arrow.up.forward.app.fill",
-                enabled: true,
-                launchRequest: .startSession
+        refreshColdStartURL(now: now, force: false)
+    }
+
+    private func refreshColdStartURL(now: TimeInterval, force: Bool) {
+        let bucket = Int(now / 2.0)
+        guard force || bucket != lastURLRefreshBucket else { return }
+        lastURLRefreshBucket = bucket
+
+        let request: KeyboardLaunchRequest
+        if bridge.isModelInstalled {
+            request = .startRecording(
+                jobID: coldStartJobID,
+                requestedAt: now,
+                style: bridge.style,
+                returnAppID: bridge.returnAppID
+            )
+        } else {
+            request = .startSession(
+                requestedAt: now,
+                returnAppID: bridge.returnAppID
             )
         }
+        viewModel.coldStartURL = request.url
     }
 
-    private func setPrimaryButton(
-        title: String,
-        image: String?,
-        enabled: Bool,
-        recording: Bool = false,
-        launchRequest: KeyboardLaunchRequest? = nil
-    ) {
-        primaryActionModel.title = title
-        primaryActionModel.image = image ?? ""
-        primaryActionModel.enabled = enabled
-        primaryActionModel.recording = recording
-        primaryActionModel.destination = launchRequest?.url
-    }
-
-    @objc private func performPrimaryAction() {
-        guard hasFullAccess, snapshot.isAvailable else {
-            return
-        }
-
-        switch snapshot.state {
-        case .ready:
-            let jobID = UUID().uuidString
-            requestedJobID = jobID
-            bridge.send(.start, jobID: jobID)
-            statusLabel.text = "Starting"
-            setPrimaryButton(title: "Starting...", image: "mic.fill", enabled: false)
-        case .recording:
-            guard let jobID = snapshot.jobID ?? requestedJobID else { return }
-            bridge.send(.stop, jobID: jobID)
-            setPrimaryButton(title: "Finishing...", image: "stop.fill", enabled: false)
-        case .failed:
-            break
-        case .offline, .transcribing:
-            break
+    private func updateKeyboardTraits() {
+        viewModel.needsGlobeKey = needsInputModeSwitchKey
+        switch textDocumentProxy.returnKeyType {
+        case .send: viewModel.returnKeyLabel = "Send"
+        case .search: viewModel.returnKeyLabel = "Search"
+        case .go: viewModel.returnKeyLabel = "Go"
+        case .done: viewModel.returnKeyLabel = "Done"
+        default: viewModel.returnKeyLabel = "Return"
         }
     }
 
-    @objc private func insertSpace() {
-        textDocumentProxy.insertText(" ")
+    private func startWarmDictation() {
+        let now = Date().timeIntervalSince1970
+        guard hasFullAccess, viewModel.snapshot.isAvailable(at: now) else { return }
+        let jobID = UUID().uuidString
+        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
+            kind: .start,
+            jobID: jobID,
+            sentAt: now
+        )
+        bridge.send(.start, jobID: jobID, style: viewModel.style, sentAt: now)
     }
 
-    @objc private func deleteBackward() {
-        textDocumentProxy.deleteBackward()
+    private func stopWarmDictation() {
+        let now = Date().timeIntervalSince1970
+        guard let jobID = viewModel.snapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
+        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
+            kind: .stop,
+            jobID: jobID,
+            sentAt: now
+        )
+        bridge.send(.stop, jobID: jobID, style: viewModel.style, sentAt: now)
     }
 
-    @objc private func insertReturn() {
-        textDocumentProxy.insertText("\n")
+    private func cancelWarmDictation() {
+        let now = Date().timeIntervalSince1970
+        guard let jobID = viewModel.snapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
+        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
+            kind: .cancel,
+            jobID: jobID,
+            sentAt: now
+        )
+        bridge.send(.cancel, jobID: jobID, style: viewModel.style, sentAt: now)
     }
 }

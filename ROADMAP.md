@@ -275,13 +275,6 @@ change.
 
 ## Deliberate Deferrals
 
-The iOS prototype needs explicit accepted-job behavior when its keyboard session
-expires. `DictationController` can clear active-job state while an unretained
-transcription task still owns completion and temporary-file cleanup. Define the
-expiry/restart contract, then give the job its task and generation-scoped
-completion; verify that a stale job cannot reset a newer capture or delete its
-file. This is a source-identified risk, not a reproduced device failure.
-
 Do not generalize the `~/.config/hex` TypeScript transformation config into a
 plugin framework.
 

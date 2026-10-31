@@ -1,0 +1,13 @@
+{
+  "name": "Hex",
+  "project": "HEXMobile.xcodeproj",
+  "scheme": "HEXMobile",
+  "teamId": "QC99C9JE59",
+  "appId": "6792547327",
+  "bundleId": "com.kitlangton.hex.mobile",
+  "internalGroup": "HEX Internal",
+  "configuration": "Release",
+  "destination": "generic/platform=iOS",
+  "buildDirectory": "build/testflight",
+  "buildNumberFiles": []
+}
