@@ -586,11 +586,13 @@ pub(crate) mod tests {
                 &AtomicBool::new(false),
             )
             .unwrap();
-        let workspace = root.canonicalize().unwrap();
+        // The drive form on Windows, without canonicalize's verbatim prefix.
+        let workspace = workspace(&root).unwrap();
+        assert!(!workspace.starts_with(r"\\?\"));
         let headers = server.join().unwrap();
         assert!(headers.contains(&format!(
             "x-opencode-directory: {}\r\n",
-            encode_uri_component(workspace.to_str().unwrap())
+            encode_uri_component(&workspace)
         )));
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hello world");

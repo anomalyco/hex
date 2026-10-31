@@ -697,7 +697,7 @@ fn recorder_holds_lock(directory: &Path) -> bool {
             let _ = fs2::FileExt::unlock(&file);
             false
         }
-        Err(error) => error.kind() == std::io::ErrorKind::WouldBlock,
+        Err(error) => super::lock_contended(&error),
     }
 }
 
