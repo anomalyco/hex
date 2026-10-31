@@ -293,7 +293,7 @@ pub(crate) fn run(
                 if kind == OutputKind::Printed {
                     return output_settings.deliver(
                         text,
-                        false,
+                        job.raw,
                         None,
                         job.audio_ms,
                         inference_ms,

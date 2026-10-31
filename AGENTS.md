@@ -756,8 +756,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   hold, toggle, double-tap lock, Escape, and queueing as dictation does; the
   shortcut that started a capture owns it. It pastes the trimmed transcript
   with no Output step, records History kind Raw, and updates Paste Last.
-  `hex dictation start|toggle --raw` does the same; a printing stop always
-  processes.
+  `hex dictation start|toggle --raw` does the same; a printing stop of a raw
+  dictation prints the transcript as heard.
 - `hex dictation stop --print` (macOS and Linux) stops through the listener's
   own queue with a one-shot reply: recording stops at once and only that
   command waits, at most 60 s, for the text, processed as a paste. It never

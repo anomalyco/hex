@@ -581,9 +581,8 @@ pub fn run(
                     }
                     recording = false;
                     recording_feedback_started = false;
-                    // A printing stop always processes, as on every OS.
                     finishing = Some(Finishing {
-                        raw: recording_raw && print.is_none(),
+                        raw: recording_raw,
                         print: print.take(),
                         ..begin_finishing(&capture, occurred_at)
                     });

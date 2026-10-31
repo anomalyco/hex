@@ -96,6 +96,8 @@ pub enum TranscriptionTarget {
     /// `hex dictation stop --print`: processed as a paste, then handed to
     /// the waiting command instead of pasted.
     Print,
+    /// A printing stop of a raw dictation: the transcript as heard.
+    RawPrint,
 }
 
 struct InferenceJob {
@@ -381,14 +383,21 @@ impl DictationWorker {
         self.submit(clip, target, context, None)
     }
 
-    /// Like a paste, but the processed transcript goes to `print`.
+    /// Like a paste, but the transcript (processed unless `raw`) goes to
+    /// `print`.
     pub fn transcribe_printed(
         &self,
         clip: DictationClip,
         print: crate::control::PrintReply,
+        raw: bool,
         context: ContextSnapshot,
     ) -> Result<DictationJobId, &'static str> {
-        self.submit(clip, TranscriptionTarget::Print, context, Some(print))
+        let target = if raw {
+            TranscriptionTarget::RawPrint
+        } else {
+            TranscriptionTarget::Print
+        };
+        self.submit(clip, target, context, Some(print))
     }
 
     fn submit(
@@ -1010,7 +1019,9 @@ fn finish_output(
                         TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
                             paste(&completed.text, PasteMode::Continue, &commit)
                         }
-                        TranscriptionTarget::Service | TranscriptionTarget::Print => commit()
+                        TranscriptionTarget::Service
+                        | TranscriptionTarget::Print
+                        | TranscriptionTarget::RawPrint => commit()
                             .then_some(())
                             .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
@@ -1036,7 +1047,11 @@ fn finish_output(
                 );
                 Ok(completed.text)
             });
-            if matches!(target, TranscriptionTarget::Print) && !control.is_cancelled() {
+            if matches!(
+                target,
+                TranscriptionTarget::Print | TranscriptionTarget::RawPrint
+            ) && !control.is_cancelled()
+            {
                 control.answer_print(match &result {
                     Ok(text) if text.trim().is_empty() => {
                         crate::control::PrintedTranscript::NoSpeech
@@ -1084,7 +1099,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
     let kind = match target {
         TranscriptionTarget::Paste => HistoryKind::Dictation,
         TranscriptionTarget::RawPaste => HistoryKind::Raw,
-        TranscriptionTarget::Print => HistoryKind::Printed,
+        TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
     };
     let draft = HistoryDraft {

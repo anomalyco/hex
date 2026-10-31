@@ -200,7 +200,7 @@ Output > Without processing > Dictate without processing   // raw.shortcut
 │   └── Paste Last -> pastes it (it is the last dictation)
 ├── Clear (trash) -> unbound again
 └── hex dictation start|toggle --raw -> the same, without a shortcut
-    └── A printing stop (`stop --print`) always processes
+    └── A printing stop (`stop --print`) of it prints the transcript as heard
 ```
 
 Checks: `raw_dictation_owns_the_capture_it_starts` (Linux reducer),
