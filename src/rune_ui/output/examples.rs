@@ -1,13 +1,13 @@
 //! The agent card's copy, cycling through examples of what to ask an agent
-//! for, each written the way it asks: "all lowercase" in lowercase, "all
-//! caps" in caps. Each change runs in two stages. First the request shakes
-//! and scrambles, then locks into the next one letter by letter. Then the
-//! title glitches out word by word and back in, written the new way.
-//! Every frame of it is laid out ahead of time and shown through a
-//! clock-driven opacity cycle, so nothing rebuilds the view. Reduce Motion
-//! holds the first example.
+//! for, each written the way it asks: "all lowercase" in lowercase, "ALL
+//! CAPS" in caps. Each change is a letter-by-letter edit: the request
+//! changes first, then the title, a wave running left to right. Only the
+//! letters that change move, each arriving in the accent colour and
+//! cooling to ink, while its neighbours slide to make room. The window's
+//! poll steps the wave from the clock, and Rune's springs carry each
+//! letter's entrance, exit and slide. Reduce Motion holds the first example.
 
-use rune::{Color, Cycle, El, TextStyle, col, row, text};
+use rune::{Color, Edge, El, Spring, SpringPair, TextStyle, Transition, col, row, text};
 
 use super::super::controls::{DESCRIPTION, Paint};
 use super::super::spark;
@@ -15,41 +15,135 @@ use crate::desktop_i18n::tr;
 use crate::personal_commands::apply_builtin_transformation;
 
 /// Seconds each example shows: one flip of the spark.
-const SLOT: f32 = spark::PERIOD;
+const SLOT: f64 = spark::PERIOD as f64;
 const EXAMPLES: usize = 4;
-const PERIOD: f32 = SLOT * EXAMPLES as f32;
 /// When in its slot an example starts changing into the next, so the
-/// request has locked in just as the spark turns edge-on.
-const CHANGE: f32 = spark::EDGE_ON - 0.4;
-/// Frames of the request's scramble, and how long each shows.
-const SCRAMBLE: usize = 9;
-const SCRAMBLE_FRAME: f32 = 0.05;
-/// How many of the first scramble frames shake.
-const SHAKES: usize = 4;
-/// When the title starts glitching out, after the change starts.
-const TITLE_OUT: f32 = 0.38;
-/// Glitch frames per word on the way out and in, and how long each shows.
-const GLITCHES: usize = 2;
-const GLITCH_FRAME: f32 = 0.06;
-/// Seconds from the first word's glitch to the last's.
-const STAGGER: f32 = 0.24;
-/// When the title starts glitching back in: once the last word is out.
-const TITLE_IN: f32 = TITLE_OUT + STAGGER + GLITCHES as f32 * GLITCH_FRAME;
-/// A hair of overlap so rounding at a frame boundary never shows nothing.
-const OVERLAP: f32 = 0.003;
+/// title's wave crosses its middle as the spark turns edge-on.
+const CHANGE: f64 = spark::EDGE_ON as f64 - 0.62;
+/// Seconds between one request letter changing and the next.
+const REQUEST_STEP: f64 = 0.03;
+/// When the title's wave starts, after the request's.
+const TITLE_DELAY: f64 = 0.28;
+/// Seconds between one title letter changing and the next.
+const TITLE_STEP: f64 = 0.018;
+/// How long a changed letter keeps the accent colour.
+const TINT: f64 = 0.32;
+/// How often the poll steps the wave while it runs.
+const FRAME: f64 = 1.0 / 60.0;
 
-/// Shown from the cycle's phase for `seconds`, hidden for the rest.
-const fn window(seconds: f32) -> [(f32, f32); 4] {
-    let end = (seconds + OVERLAP) / PERIOD;
-    [(0.0, 1.0), (end, 1.0), (end, 0.0), (1.0, 0.0)]
+/// How a changing letter leaves and arrives. One ships; the others are
+/// here to compare.
+#[derive(Clone, Copy, PartialEq)]
+enum Style {
+    /// An odometer: the old letter rolls up and out, the new one rolls in
+    /// from below, inside a soft-edged window.
+    Roll,
+    /// The old letter blurs out in place as the new one sharpens in.
+    Blur,
+    /// The new letter pops in from small with a little overshoot.
+    Pop,
 }
-const SCRAMBLE_SHOWS: [(f32, f32); 4] = window(SCRAMBLE_FRAME);
-const GLITCH_SHOWS: [(f32, f32); 4] = window(GLITCH_FRAME);
-/// A request holds from when it locks in until the next one starts.
-const REQUEST_SHOWS: [(f32, f32); 4] = window(SLOT - SCRAMBLE as f32 * SCRAMBLE_FRAME);
-/// A title word holds from its last glitch in to its first glitch out.
-const WORD_SHOWS: [(f32, f32); 4] =
-    window(SLOT - (TITLE_IN - TITLE_OUT) - GLITCHES as f32 * GLITCH_FRAME);
+
+impl Style {
+    fn current() -> Self {
+        match std::env::var("HEX_OUTPUT_MORPH").as_deref() {
+            Ok("blur") => Self::Blur,
+            Ok("pop") => Self::Pop,
+            _ => Self::Roll,
+        }
+    }
+
+    fn transition(self) -> Transition {
+        match self {
+            Self::Roll => Transition::push(Edge::Bottom)
+                .springs(SpringPair::new(Spring::new(0.34, 0.12), Spring::new(0.26, 0.0))),
+            Self::Blur => Transition::blur(3.0)
+                .combined(Transition::scale(0.92))
+                .springs(SpringPair::new(Spring::new(0.36, 0.0), Spring::new(0.28, 0.0))),
+            Self::Pop => Transition::asymmetric(
+                Transition::scale(0.55).allow_small_scale(),
+                Transition::scale(1.1).combined(Transition::blur(2.0)),
+            )
+            .springs(SpringPair::new(Spring::new(0.32, 0.28), Spring::new(0.2, 0.0))),
+        }
+    }
+}
+
+/// Where the cycle stands: which example shows, and how far its change
+/// into the next has run, counted in letters.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(in super::super) struct Moment {
+    example: usize,
+    request: Wave,
+    title: Wave,
+}
+
+/// How many letters of a line have changed, and how many have cooled from
+/// the accent colour since.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Wave {
+    changed: usize,
+    cooled: usize,
+}
+
+impl Wave {
+    fn at(elapsed: f64, start: f64, step: f64) -> Self {
+        let count = |at: f64| {
+            if at < 0.0 {
+                0
+            } else {
+                (at / step).floor() as usize + 1
+            }
+        };
+        Self {
+            changed: count(elapsed - start),
+            cooled: count(elapsed - start - TINT),
+        }
+    }
+
+    /// A letter's state: whether it has changed yet, and whether it still
+    /// shows the accent colour.
+    fn letter(self, index: usize) -> (bool, bool) {
+        (index < self.changed, index < self.changed && index >= self.cooled)
+    }
+}
+
+impl Moment {
+    /// The moment `clock` seconds into the window's life.
+    fn at(clock: f64) -> Self {
+        let slot = (clock / SLOT).floor().max(0.0);
+        let elapsed = clock - slot * SLOT - CHANGE;
+        let example = slot as usize % EXAMPLES;
+        if elapsed < 0.0 {
+            return Self {
+                example,
+                ..Self::default()
+            };
+        }
+        Self {
+            example,
+            request: Wave::at(elapsed, 0.0, REQUEST_STEP),
+            title: Wave::at(elapsed, TITLE_DELAY, TITLE_STEP),
+        }
+    }
+}
+
+/// Steps the cycle to `clock`, asking for the next frame while a change
+/// runs and for the next change otherwise. True when the copy changed.
+pub(in super::super) fn poll(moment: &mut Moment, clock: f64) -> (bool, f64) {
+    let next = Moment::at(clock);
+    let changed = next != *moment;
+    *moment = next;
+    let into = clock.rem_euclid(SLOT) - CHANGE;
+    let wait = if (0.0..1.6).contains(&into) {
+        FRAME
+    } else if into < 0.0 {
+        -into
+    } else {
+        SLOT - into
+    };
+    (changed, wait)
+}
 
 /// One example: the title and the request, both written the way it asks.
 struct Example {
@@ -64,7 +158,7 @@ fn examples() -> [Example; EXAMPLES] {
         request: style(request),
     };
     [
-        written(tr("no final period in Slack"), str::to_string),
+        written(tr("Title Case"), title_case),
         written(tr("all lowercase"), str::to_lowercase),
         written(tr("all caps"), str::to_uppercase),
         written(tr("SpongeBob case"), |text| {
@@ -73,203 +167,125 @@ fn examples() -> [Example; EXAMPLES] {
     ]
 }
 
-/// The card's title and request.
-pub(super) fn copy(p: Paint) -> El {
+/// Every word starting with a capital, the rest as written.
+fn title_case(text: &str) -> String {
+    let mut start = true;
+    text.chars()
+        .flat_map(|c| {
+            let upper = start && c.is_alphabetic();
+            start = c.is_whitespace();
+            if upper {
+                c.to_uppercase().collect::<Vec<_>>()
+            } else {
+                c.to_lowercase().collect()
+            }
+        })
+        .collect()
+}
+
+/// The card's title and request at `moment`; Reduce Motion holds the first
+/// example.
+pub(super) fn copy(p: Paint, moment: Moment, reduced: bool) -> El {
+    let moment = if reduced { Moment::default() } else { moment };
     let examples = examples();
+    let from = &examples[moment.example];
+    let to = &examples[(moment.example + 1) % EXAMPLES];
+    let style = Style::current();
+    let request_font = TextStyle {
+        size: DESCRIPTION.size,
+        line_height: DESCRIPTION.line_height,
+        ..p.k.ty.mono
+    };
+    let title = line(
+        "example-title",
+        LineStyle {
+            font: p.k.ty.ui_medium,
+            ink: p.text(),
+            accent: p.accent(),
+            space: p.k.ty.ui_medium.size * 0.27,
+            style,
+        },
+        &from.title,
+        &to.title,
+        moment.title,
+    )
+    .flex_wrap();
+    let request = row()
+        .key("example-request")
+        .child(
+            text("› ")
+                .key("example-prompt")
+                .font(request_font)
+                .color(p.muted()),
+        )
+        .child(line(
+            "example-request-line",
+            LineStyle {
+                font: request_font,
+                ink: p.muted(),
+                accent: p.accent(),
+                space: request_font.size * 0.6,
+                style,
+            },
+            &from.request,
+            &to.request,
+            moment.request,
+        ));
     col()
         .key("copy")
         .grow(1.0)
         .shrink()
         .gap(3.0)
-        .child(title(p, &examples))
-        .child(request(p, &examples))
+        .child(title)
+        .child(request)
 }
 
-/// Every example's title stacked in one cell, word by word.
-fn title(p: Paint, examples: &[Example; EXAMPLES]) -> El {
-    let font = p.k.ty.ui_medium;
-    let layers = examples.iter().enumerate().map(|(example, shown)| {
-        let words: Vec<&str> = shown.title.split_whitespace().collect();
-        let last = words.len().saturating_sub(1).max(1) as f32;
-        row()
-            .key(format!("example{example}-title"))
-            .grid_cell(0)
-            .flex_wrap()
-            .gaps(0.0, font.size * 0.27)
-            .children(words.iter().enumerate().map(|(index, word)| {
-                let delay = STAGGER * index as f32 / last;
-                let arrives = slot_start(example) + CHANGE + TITLE_IN + delay;
-                let leaves = slot_start(example + 1) + CHANGE + TITLE_OUT + delay;
-                let key = format!("example{example}-word{index}");
-                let mut cell = col().key(key.clone()).child(
-                    text(word.to_string())
-                        .key(format!("{key}-shown"))
-                        .font(font)
-                        .color(p.text())
-                        .cycle(cycle(
-                            arrives + GLITCHES as f32 * GLITCH_FRAME,
-                            &WORD_SHOWS,
-                            example == 0,
-                        )),
-                );
-                for (stage, start) in [("in", arrives), ("out", leaves)] {
-                    for frame in 0..GLITCHES {
-                        let seed = [example, index, frame, usize::from(stage == "out")];
-                        cell = cell.child(
-                            text(scramble(word, seed))
-                                .key(format!("{key}-{stage}{frame}"))
-                                .font(font)
-                                .color(p.accent())
-                                .absolute(jitter(seed, 1.2), jitter(seed.map(|s| s + 7), 0.8))
-                                .cycle(cycle(
-                                    start + frame as f32 * GLITCH_FRAME,
-                                    &GLITCH_SHOWS,
-                                    false,
-                                )),
-                        );
-                    }
-                }
-                cell
-            }))
-    });
-    col().key("title").equal_columns(1).children(layers)
+#[derive(Clone, Copy)]
+struct LineStyle {
+    font: TextStyle,
+    ink: Color,
+    accent: Color,
+    /// The gap between words.
+    space: f32,
+    style: Style,
 }
 
-/// Every example's request as a prompt line, and the scramble from each to
-/// the next, stacked in one cell.
-fn request(p: Paint, examples: &[Example; EXAMPLES]) -> El {
-    let font = TextStyle {
-        size: DESCRIPTION.size,
-        line_height: DESCRIPTION.line_height,
-        ..p.k.ty.mono
-    };
-    let line = |content: String, color: Color, key: String| {
-        text(format!("› {content}"))
-            .key(key)
-            .font(font)
-            .color(color)
-    };
-    let mut cell = col().key("request").equal_columns(1);
-    for (example, shown) in examples.iter().enumerate() {
-        let locked = slot_start(example) + CHANGE + SCRAMBLE as f32 * SCRAMBLE_FRAME;
-        cell = cell.child(
-            line(
-                shown.request.clone(),
-                p.muted(),
-                format!("example{example}-request"),
-            )
-            .grid_cell(0)
-            .cycle(cycle(locked, &REQUEST_SHOWS, example == 0)),
-        );
-        let next = &examples[(example + 1) % EXAMPLES].request;
-        for frame in 0..SCRAMBLE {
-            let seed = [example, frame, 0, 2];
-            let shake = frame < SHAKES;
-            cell = cell.child(
-                line(
-                    morph(&shown.request, next, frame, seed),
-                    p.accent(),
-                    format!("example{example}-scramble{frame}"),
-                )
-                .absolute(
-                    if shake { jitter(seed, 1.6) } else { 0.0 },
-                    if shake {
-                        jitter(seed.map(|s| s + 3), 0.9)
-                    } else {
-                        0.0
-                    },
-                )
-                .cycle(cycle(
-                    slot_start(example + 1) + CHANGE + frame as f32 * SCRAMBLE_FRAME,
-                    &SCRAMBLE_SHOWS,
-                    false,
-                )),
+/// `from` part way to `to`: the first `wave.changed` letters written as in
+/// `to`, the rest as in `from`, word by word. A letter that changes gets a
+/// new key, so the old one leaves and the new one enters.
+fn line(key: &str, s: LineStyle, from: &str, to: &str, wave: Wave) -> El {
+    let (from, to): (Vec<&str>, Vec<&str>) = (
+        from.split_whitespace().collect(),
+        to.split_whitespace().collect(),
+    );
+    let mut index = 0;
+    let mut words = Vec::new();
+    for w in 0..from.len().max(to.len()) {
+        let old: Vec<char> = from.get(w).map_or_else(Vec::new, |w| w.chars().collect());
+        let new: Vec<char> = to.get(w).map_or_else(Vec::new, |w| w.chars().collect());
+        let mut word = row().key(format!("{key}-{w}"));
+        for c in 0..old.len().max(new.len()) {
+            let (changed, tinted) = wave.letter(index);
+            index += 1;
+            let Some(shown) = (if changed { new.get(c) } else { old.get(c) }) else {
+                continue;
+            };
+            let moved = changed && old.get(c) != new.get(c);
+            word = word.child(
+                text(shown.to_string())
+                    .key(format!("{key}-{w}-{c}-{shown}"))
+                    .font(s.font)
+                    .color(if tinted && moved { s.accent } else { s.ink })
+                    .transition(s.style.transition()),
             );
         }
+        words.push(if s.style == Style::Roll {
+            word.clip_fade(0.0, 3.0, 0.0, 3.0)
+        } else {
+            word
+        });
     }
-    cell
-}
-
-/// When `example`'s slot starts, in seconds of the loop; the first starts a
-/// whole loop late, so its change into the second wraps to the loop's start.
-fn slot_start(example: usize) -> f32 {
-    (example as f32 - 1.0) * SLOT
-}
-
-/// Shown from `start` seconds into the loop through `stops`.
-fn cycle(start: f32, stops: &'static [(f32, f32)], still: bool) -> Cycle {
-    Cycle {
-        period: PERIOD,
-        phase: (start / PERIOD).rem_euclid(1.0),
-        stops,
-        still: if still { 1.0 } else { 0.0 },
-        fps: 60.0,
-    }
-}
-
-/// Frame `frame` of the scramble from `from` to `to`: first every letter
-/// scrambles while the length eases from one to the other, then `to`'s
-/// letters lock in from the left.
-fn morph(from: &str, to: &str, frame: usize, seed: [usize; 4]) -> String {
-    let (from, to): (Vec<char>, Vec<char>) = (from.chars().collect(), to.chars().collect());
-    let t = (frame + 1) as f32 / (SCRAMBLE + 1) as f32;
-    let length = (from.len() as f32 + (to.len() as f32 - from.len() as f32) * (t * 1.6).min(1.0))
-        .round() as usize;
-    let locked = (to.len() as f32 * ((t - 0.35) / 0.65).clamp(0.0, 1.0)).floor() as usize;
-    (0..length)
-        .map(|i| match to.get(i) {
-            Some(c) if i < locked => *c,
-            target => {
-                let like = target.or(from.get(i)).copied().unwrap_or('a');
-                glyph(like, [seed[0], seed[1], i, seed[3]])
-            }
-        })
-        .collect()
-}
-
-/// `word` with every letter swapped for a random one of the same case.
-fn scramble(word: &str, seed: [usize; 4]) -> String {
-    word.chars()
-        .enumerate()
-        .map(|(i, c)| {
-            if c.is_alphanumeric() {
-                glyph(c, [seed[0], seed[1] * 31 + seed[2], i, seed[3]])
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// A random letter or symbol in `like`'s case; spaces stay spaces. No wide
-/// glyphs, so a scrambled word stays about its own width, and no `=` or `>`,
-/// which the font joins into arrows.
-fn glyph(like: char, seed: [usize; 4]) -> char {
-    const LETTERS: &[u8] = b"abcdefghijklnopqrstuvxyz#*+/<?";
-    if like.is_whitespace() {
-        return like;
-    }
-    let c = char::from(LETTERS[hash(seed) as usize % LETTERS.len()]);
-    if like.is_uppercase() {
-        c.to_ascii_uppercase()
-    } else {
-        c
-    }
-}
-
-/// A random offset from -`reach` to `reach` points.
-fn jitter(seed: [usize; 4], reach: f32) -> f32 {
-    (hash(seed) % 1000) as f32 / 999.0 * 2.0 * reach - reach
-}
-
-/// SplitMix64 over the seed, so the scramble looks the same every build.
-fn hash(seed: [usize; 4]) -> u64 {
-    seed.iter().fold(0x9e37_79b9_7f4a_7c15_u64, |state, part| {
-        let mut z = state ^ (*part as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
-    })
+    row().key(key.to_string()).gaps(0.0, s.space).children(words)
 }
 
 /// The copy after Edit with agent: no examples, just what to do next.
@@ -298,14 +314,21 @@ pub(super) fn copied(p: Paint) -> El {
 mod tests {
     use super::*;
 
-    /// The scramble starts as scrambled letters and ends as the next
-    /// request, so the last frame hands over to the request itself.
+    /// A change runs the request's wave, then the title's, and ends
+    /// holding the next example exactly as the next slot starts it.
     #[test]
-    fn the_scramble_lands_on_the_next_request() {
-        let last = morph("no final period", "all caps", SCRAMBLE - 1, [0; 4]);
-        assert_eq!(last.chars().count(), "all caps".len());
-        assert!(last.starts_with("all c"), "{last}");
-        let first = morph("no final period", "all caps", 0, [0; 4]);
-        assert!(!first.starts_with('a') || !first.contains("all"), "{first}");
+    fn a_change_runs_the_request_then_the_title() {
+        let rest = Moment::at(1.0);
+        assert_eq!(rest, Moment::default());
+        let early = Moment::at(CHANGE + 0.1);
+        assert!(early.request.changed > 0 && early.title.changed == 0);
+        let late = Moment::at(CHANGE + 1.5);
+        assert!(late.title.changed >= 34 && late.title.cooled >= 34);
+        assert_eq!(Moment::at(SLOT + 0.1).example, 1);
+    }
+
+    #[test]
+    fn title_case_capitalizes_each_word() {
+        assert_eq!(title_case("ask an AGENT"), "Ask An Agent");
     }
 }

@@ -433,7 +433,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("all lowercase", ["same małe litery", "全部小写", "すべて小文字", "alles kleingeschrieben", "todo en minúsculas", "усе малими літерами"]),
     ("all caps", ["same wielkie litery", "全部大写", "すべて大文字", "alles in Großbuchstaben", "todo en mayúsculas", "усе великими літерами"]),
     ("Ask an agent to change these steps", ["Poproś agenta, żeby zmienił te kroki", "让智能体修改这些步骤", "エージェントにこれらのステップを変えてもらいましょう", "Lass einen Agenten diese Schritte ändern", "Pide a un agente que cambie estos pasos", "Попросіть агента змінити ці кроки"]),
-    ("no final period in Slack", ["bez kropki na końcu w Slacku", "在 Slack 里句末不加句号", "Slack では文末に句点なし", "kein Schlusspunkt in Slack", "sin punto final en Slack", "без крапки в кінці у Slack"]),
+    ("Title Case", ["Każde Słowo Wielką Literą", "首字母大写", "単語の頭を大文字", "Jedes Wort Groß", "Cada Palabra En Mayúscula", "Кожне Слово З Великої"]),
     ("Open file", ["Otwórz plik", "打开文件", "ファイルを開く", "Datei öffnen", "Abrir archivo", "Відкрити файл"]),
     ("Edit with agent", ["Edytuj z agentem", "用智能体编辑", "エージェントで編集", "Mit Agent bearbeiten", "Editar con agente", "Редагувати з агентом"]),
     ("No steps yet. Hex pastes your words as it heard them", ["Brak kroków. Hex wkleja twoje słowa tak, jak je usłyszał", "还没有步骤。Hex 会按听到的内容粘贴", "まだステップはありません。Hex は聞き取ったとおりに貼り付けます", "Noch keine Schritte. Hex fügt deine Worte so ein, wie es sie gehört hat", "Aún no hay pasos. Hex pega tus palabras tal como las oyó", "Кроків ще немає. Hex вставляє ваші слова так, як їх почув"]),

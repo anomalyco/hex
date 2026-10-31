@@ -47,6 +47,17 @@ pub(super) struct OutputPane {
     pub(super) prompt_copied: bool,
     /// The app rule opened to show its steps.
     pub(super) expanded: Option<usize>,
+    /// Where the agent card's examples stand.
+    pub(super) examples: examples::Moment,
+}
+
+/// Steps the agent card's examples to `clock`; true when they changed.
+pub(super) fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
+    let (changed, wait) = examples::poll(&mut ui.output.examples, clock);
+    if ui.window.as_ref().is_none_or(rune::AppHandle::is_visible) {
+        tx.wake_after(std::time::Duration::from_secs_f64(wait.max(0.0)));
+    }
+    changed
 }
 
 /// What runs a step: Hex itself, a script from the person's config, or
@@ -146,10 +157,10 @@ fn preview(mode: &DictationMode, input: &str) -> String {
 // ---------------------------------------------------------------------------
 // View
 
-pub(super) fn pane(ui: &Ui, p: Paint) -> El {
+pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
     let processing = &ui.settings.dictation_processing;
     let mut content = page("output-content")
-        .child(agent_card(ui, p))
+        .child(agent_card(ui, p, reduced))
         .child(every_dictation(ui, p, &processing.default_mode))
         .child(try_card(ui, p, &processing.default_mode));
     if !processing.modes.is_empty() {
@@ -163,12 +174,12 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 
 /// The pane's one action: the agent writes the steps, so this card is how
 /// to change them.
-fn agent_card(ui: &Ui, p: Paint) -> El {
+fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
     let mark = spark(p, "spark", SPARK);
     let copy = if ui.output.prompt_copied {
         examples::copied(p)
     } else {
-        examples::copy(p)
+        examples::copy(p, ui.output.examples, reduced)
     };
     let open = Button::new(tr("Open file"))
         .variant(ButtonVariant::Ghost)
