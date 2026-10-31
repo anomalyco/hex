@@ -333,7 +333,7 @@ impl Library {
         cache.retain(|id, _| seen.contains(id));
         // A meeting past its retention is gone even before expiry moves it.
         let retention = crate::app_settings::meeting_retention();
-        let now_ms = crate::events::now_ms();
+        let now_ms = crate::desktop::events::now_ms();
         meetings.retain(|meeting| {
             !super::expired(&meeting.manifest, meeting.status, retention, now_ms)
         });
