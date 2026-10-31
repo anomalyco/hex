@@ -1,13 +1,10 @@
 //! Input-source changes are model-picker choices, not recording-time routing.
 
-#[cfg(any(target_os = "macos", test))]
 use std::time::{Duration, Instant};
 
-#[cfg(any(target_os = "macos", test))]
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 use crate::transcription_models::ModelDefinition;
 
-#[cfg(any(target_os = "macos", test))]
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// One enabled keyboard input source, as the settings window lists it.
@@ -33,7 +30,6 @@ impl InputSource {
 }
 
 /// No models or workers live here: this only admits the latest picker choice.
-#[cfg(any(target_os = "macos", test))]
 pub(crate) struct Switcher {
     settings: KeyboardModelSwitching,
     /// The observed source; unknown while switching is off, so turning it
@@ -42,7 +38,6 @@ pub(crate) struct Switcher {
     due: Option<Instant>,
 }
 
-#[cfg(any(target_os = "macos", test))]
 impl Switcher {
     pub(crate) fn new(settings: KeyboardModelSwitching, current: Option<String>) -> Self {
         Self {

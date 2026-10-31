@@ -55,7 +55,8 @@ pub(super) struct Capabilities {
     /// Modifier-only shortcuts can require the left or right key (macOS).
     pub(super) modifier_sides: bool,
     pub(super) duck_audio: bool,
-    /// Input-source changes can operate the installed-model picker (macOS).
+    /// Input-source changes can operate the installed-model picker (macOS,
+    /// Windows, and Linux on X11; Wayland has no general layout protocol).
     pub(super) keyboard_model_switching: bool,
     /// Failures play the sound set's error sound (macOS).
     pub(super) error_sound: bool,
@@ -77,7 +78,7 @@ impl Capabilities {
         fun: false,
         modifier_sides: false,
         duck_audio: false,
-        keyboard_model_switching: false,
+        keyboard_model_switching: true,
         error_sound: false,
     };
 
@@ -115,7 +116,7 @@ impl Capabilities {
         fun: false,
         modifier_sides: false,
         duck_audio: false,
-        keyboard_model_switching: false,
+        keyboard_model_switching: true,
         error_sound: false,
     };
 
@@ -130,6 +131,8 @@ impl Capabilities {
         };
         Self {
             terminal_paste: super::host::TERMINAL_PASTE,
+            keyboard_model_switching: os.keyboard_model_switching
+                && crate::keyboard_input_sources::available(),
             ..os
         }
     }

@@ -105,12 +105,12 @@ const KEYS: &[Key] = &[
     key(
         "keyboard_model_switching.enabled",
         Kind::Bool,
-        "Switch the model when the keyboard input source changes (macOS)",
+        "Switch the model when the keyboard input source changes (macOS, Windows, X11)",
     ),
     key(
         "keyboard_model_switching.mappings",
         Kind::Json,
-        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS)",
+        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS, Windows, X11)",
     ),
     key(
         "release_microphone_while_idle",

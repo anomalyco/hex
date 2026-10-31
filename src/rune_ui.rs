@@ -651,6 +651,10 @@ pub(crate) struct Ui {
     microphones_route: Option<u64>,
     /// The poll clock `microphones` was last listed at.
     microphones_listed_at: f64,
+    /// When Windows and Linux last listed keyboard input sources; macOS's
+    /// native host lists them.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    input_sources_listed_at: f64,
     /// A listing in flight. Listing reads CoreAudio or COM endpoint
     /// properties, which can block, so it runs off the UI thread.
     microphones_listing:
@@ -747,6 +751,7 @@ impl Ui {
             microphones: Ok(Default::default()),
             microphones_route: None,
             microphones_listed_at: 0.0,
+            input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             confirm_release: false,
             mic_level: general::MicLevel::default(),
@@ -1157,6 +1162,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         ui.microphones_listed_at = clock;
     }
     changed |= ui.host.poll(&mut ui.platform);
+    #[cfg(not(target_os = "macos"))]
+    {
+        changed |= settings::poll_input_sources(ui, clock);
+    }
     // macOS reports the login item moments after launch; its switch replaces
     // "Checking…" at once instead of fading in and reflowing the row.
     if login_unknown && ui.platform.login_item.is_some() {

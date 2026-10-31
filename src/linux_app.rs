@@ -29,6 +29,8 @@ use crate::linux_input::{LinuxHotkey, ListenerCommand};
 use crate::linux_service::{self, Activation, Control, Published, ShortcutRoute, Status};
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
+/// How often the host asks X11 for the active keyboard group.
+const INPUT_SOURCE_POLL: Duration = Duration::from_millis(250);
 /// Left by "Update" so the restarted process shows the window again; a
 /// crash restart finds none and stays in the background.
 const REOPEN_MARKER: &str = "reopen-window";
@@ -57,6 +59,9 @@ struct TranscriptionPreparation {
     progress: Arc<AtomicU64>,
     stage: Arc<AtomicU8>,
     worker: JoinHandle<PreparationResult>,
+    /// A keyboard switch, which a manual choice or a later layout change
+    /// supersedes.
+    automatic: bool,
 }
 
 struct ShortcutEdit {
@@ -129,6 +134,12 @@ struct LinuxDesktopHost {
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
+    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    /// The XKB connection, only while keyboard model switching is on.
+    input_sources: Option<crate::keyboard_input_sources::Watcher>,
+    input_sources_polled_at: Instant,
+    /// A due keyboard switch waiting for the preparation it superseded to stop.
+    keyboard_switch: Option<crate::transcription_models::TranscriptionSelection>,
 }
 
 /// What the window shows of the host.
@@ -219,6 +230,7 @@ impl HostHandle {
                     host.choose_transcription(model, language)
                 }
                 HostRequest::CancelModel => {
+                    host.manual_choice();
                     host.cancel_transcription_preparation();
                     Ok(())
                 }
@@ -455,6 +467,16 @@ impl LinuxDesktopHost {
                 .ok()
         };
         let output = crate::linux_dictation::DictationOutput::from_settings(&settings, history);
+        // Known before the first poll, so launching keeps the saved model
+        // instead of applying the current layout's mapping.
+        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+            settings.keyboard_model_switching.clone(),
+            settings
+                .keyboard_model_switching
+                .enabled
+                .then(crate::keyboard_input_sources::current)
+                .flatten(),
+        );
         let mut host = Self {
             event_reader,
             event_path,
@@ -475,6 +497,10 @@ impl LinuxDesktopHost {
             output,
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
+            keyboard_switcher,
+            input_sources: None,
+            input_sources_polled_at: Instant::now(),
+            keyboard_switch: None,
         };
         host.refresh_personal_commands();
         host
@@ -589,6 +615,7 @@ impl LinuxDesktopHost {
     }
 
     fn refresh(&mut self) {
+        self.switch_with_keyboard();
         // Restart to update asks systemd to restart Hex after the updater's
         // final check; only a failure needs showing.
         if let Some(Err(error)) = self.updater.take_restart() {
@@ -738,6 +765,12 @@ impl LinuxDesktopHost {
         if self.settings_valid && settings == self.settings {
             return;
         }
+        if self
+            .keyboard_switcher
+            .configure(settings.keyboard_model_switching.clone(), Instant::now())
+        {
+            self.supersede_automatic();
+        }
         let was_valid = self.settings_valid;
         self.settings = settings;
         self.settings_valid = true;
@@ -840,17 +873,7 @@ impl LinuxDesktopHost {
         model: crate::transcription_models::TranscriptionModelId,
         language: String,
     ) -> Result<()> {
-        if self.shortcut_edit.is_some() {
-            let error = "Finish the shortcut change before changing the model".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
-        if self.transcription_preparation.is_some() {
-            self.cancel_transcription_preparation();
-            let error = "The previous model preparation is still stopping".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
+        self.manual_choice();
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -862,7 +885,29 @@ impl LinuxDesktopHost {
                 String::new()
             },
         };
-        crate::transcription_models::validate(&selection)?;
+        self.prepare_transcription(selection, false)
+    }
+
+    /// Downloads (or, for a keyboard switch, only verifies) and loads a
+    /// model off the host thread.
+    fn prepare_transcription(
+        &mut self,
+        selection: crate::transcription_models::TranscriptionSelection,
+        automatic: bool,
+    ) -> Result<()> {
+        if self.shortcut_edit.is_some() {
+            let error = "Finish the shortcut change before changing the model".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
+        if self.transcription_preparation.is_some() {
+            self.cancel_transcription_preparation();
+            let error = "The previous model preparation is still stopping".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
+        let model = selection.model;
+        let definition = crate::transcription_models::validate(&selection)?;
         // A running listener keeps the current model until the new one is ready.
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
@@ -874,12 +919,16 @@ impl LinuxDesktopHost {
         let worker_stage = stage.clone();
         let worker = std::thread::spawn(move || {
             (|| {
-                crate::transcription_models::download_with_stage_progress(
-                    definition,
-                    &worker_canceled,
-                    &worker_progress,
-                    &worker_stage,
-                )?;
+                if automatic {
+                    crate::transcription_models::verify_installed(definition, &worker_canceled)?;
+                } else {
+                    crate::transcription_models::download_with_stage_progress(
+                        definition,
+                        &worker_canceled,
+                        &worker_progress,
+                        &worker_stage,
+                    )?;
+                }
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
@@ -901,9 +950,71 @@ impl LinuxDesktopHost {
             progress,
             stage,
             worker,
+            automatic,
         });
         self.transcription_error = None;
         Ok(())
+    }
+
+    /// A layout change not yet polled counts as before this choice, so it
+    /// cannot later undo it.
+    fn manual_choice(&mut self) {
+        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll()) {
+            self.keyboard_switcher.source_changed(source, Instant::now());
+        }
+        self.keyboard_switcher.manual_choice();
+        self.supersede_automatic();
+    }
+
+    /// Cancels only keyboard-switch work; a manual operation is superseded
+    /// once the debounced choice is due.
+    fn supersede_automatic(&mut self) {
+        self.keyboard_switch = None;
+        if let Some(preparation) = &self.transcription_preparation
+            && preparation.automatic
+        {
+            preparation.canceled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Follows the XKB group while switching is on, and prepares a
+    /// mapping's installed model once it is due.
+    fn switch_with_keyboard(&mut self) {
+        let enabled = self.settings.keyboard_model_switching.enabled;
+        if !enabled {
+            self.input_sources = None;
+        } else if self.input_sources_polled_at.elapsed() >= INPUT_SOURCE_POLL {
+            self.input_sources_polled_at = Instant::now();
+            if self.input_sources.is_none() {
+                self.input_sources = crate::keyboard_input_sources::Watcher::connect();
+            }
+            if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll())
+                && self.keyboard_switcher.source_changed(source, Instant::now())
+            {
+                self.supersede_automatic();
+            }
+        }
+        if let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) {
+            let selection = crate::transcription_models::TranscriptionSelection {
+                language: choice.language,
+                ..self.settings.transcription_for_model(choice.model)
+            };
+            // Whatever runs is superseded; the current model and language
+            // need no preparation.
+            if let Some(preparation) = &self.transcription_preparation {
+                preparation.canceled.store(true, Ordering::Relaxed);
+            }
+            self.keyboard_switch = (selection.model != self.settings.transcription.model
+                || selection.language != self.settings.transcription.language)
+                .then_some(selection);
+        }
+        if self.transcription_preparation.is_none()
+            && self.shortcut_edit.is_none()
+            && let Some(selection) = self.keyboard_switch.take()
+            && let Err(error) = self.prepare_transcription(selection, true)
+        {
+            self.transcription_error = Some(format!("{error:#}"));
+        }
     }
 
     fn cancel_transcription_preparation(&mut self) {
@@ -1230,6 +1341,7 @@ mod tests {
                     assert!(!panics, "fixture preparation panic");
                     Err("model unavailable".into())
                 }),
+                automatic: false,
             });
             if canceled {
                 host.cancel_transcription_preparation();
@@ -1484,6 +1596,7 @@ mod tests {
             progress: Arc::new(AtomicU64::new(0)),
             stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
             worker: std::thread::spawn(|| Err("fixture preparation".into())),
+            automatic: false,
         });
 
         host.dispatch(DesktopAction::StartListening).unwrap();
