@@ -47,10 +47,11 @@ pub enum Feature {
     SubtitleExport,
     SecondDictationShortcut,
     SmartSpacing,
+    SpokenSymbols,
 }
 
 impl Feature {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -71,6 +72,7 @@ impl Feature {
         Self::SubtitleExport,
         Self::SecondDictationShortcut,
         Self::SmartSpacing,
+        Self::SpokenSymbols,
     ];
 
     /// The features this OS has.
@@ -98,6 +100,7 @@ impl Feature {
             | Self::UnloadIdle
             | Self::RestoreShortcutDefault
             | Self::SpokenFormatting
+            | Self::SpokenSymbols
             | Self::FillerWords => true,
         }
     }
@@ -125,6 +128,7 @@ impl Feature {
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::SmartSpacing => "smart-spacing",
+            Self::SpokenSymbols => "spoken-symbols",
         }
     }
 
@@ -151,6 +155,7 @@ impl Feature {
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::SmartSpacing => "labs.smart_spacing",
+            Self::SpokenSymbols => "labs.spoken_symbols",
         }
     }
 
@@ -198,6 +203,9 @@ impl Feature {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
             Self::SmartSpacing => "Add a space before a dictation pasted right after a word",
+            Self::SpokenSymbols => {
+                "Turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words"
+            }
         }
     }
 
@@ -228,6 +236,7 @@ impl Feature {
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
+            Self::SpokenSymbols => settings.labs.spoken_symbols,
         }
     }
 
@@ -253,6 +262,7 @@ impl Feature {
             Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
+            Self::SpokenSymbols => settings.labs.spoken_symbols = on,
         }
     }
 }
@@ -271,8 +281,9 @@ const SPOKEN_FORMATTING: u32 = 1 << 9;
 const FILLER_WORDS: u32 = 1 << 10;
 const SUBTITLE_EXPORT: u32 = 1 << 11;
 const SMART_SPACING: u32 = 1 << 12;
+const SPOKEN_SYMBOLS: u32 = 1 << 13;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 13;
+const MINUTES_SHIFT: u32 = 14;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -339,6 +350,12 @@ pub fn spoken_formatting() -> bool {
     on(SPOKEN_FORMATTING)
 }
 
+/// Spoken punctuation and symbol words become characters joined to their
+/// neighbours (read as each dictation's processing starts).
+pub fn spoken_symbols() -> bool {
+    on(SPOKEN_SYMBOLS)
+}
+
 /// Filler words such as "um" and "uh" leave dictations (read as each
 /// dictation's processing starts).
 pub fn filler_words() -> bool {
@@ -386,6 +403,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.filler_words, FILLER_WORDS),
         (settings.subtitle_export, SUBTITLE_EXPORT),
         (settings.smart_spacing, SMART_SPACING),
+        (settings.spoken_symbols, SPOKEN_SYMBOLS),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -576,6 +594,19 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & SMART_SPACING, 0);
         assert_eq!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn spoken_symbols_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & SPOKEN_SYMBOLS, 0);
+        labs.spoken_symbols = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & SPOKEN_SYMBOLS, 0);
+        assert_eq!(state & SPOKEN_FORMATTING, 0);
+        assert_eq!(state & SMART_SPACING, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

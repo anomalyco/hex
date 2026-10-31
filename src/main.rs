@@ -158,6 +158,7 @@ mod rune_hud;
 mod rune_ui;
 mod speech_detector;
 mod spoken_formatting;
+mod spoken_symbols;
 mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
