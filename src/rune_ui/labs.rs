@@ -194,6 +194,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Keep dictation on clipboard"),
             tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
         ));
+        rows.push(row(
+            Feature::CopyOnly,
+            &HINTS,
+            tr("Copy dictation only"),
+            tr("Put the dictation on the clipboard instead of pasting it"),
+        ));
     }
     rows.push(row(
         Feature::UnloadIdle,
@@ -242,6 +248,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::UnloadIdle => "lab-unload-idle",
         Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
         Feature::KeepOnClipboard => "lab-keep-on-clipboard",
+        Feature::CopyOnly => "lab-copy-only",
     }
 }
 

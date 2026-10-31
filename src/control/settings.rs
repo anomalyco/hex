@@ -301,6 +301,11 @@ const KEYS: &[Key] = &[
         "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS)",
     ),
     key(
+        "labs.copy_only",
+        Kind::Bool,
+        "Labs: put the dictation on the clipboard instead of pasting it (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

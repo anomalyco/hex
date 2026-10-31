@@ -1326,6 +1326,9 @@ pub struct LabsSettings {
     /// A pasted dictation stays on the clipboard instead of the previous
     /// clipboard coming back (macOS, issue 200).
     pub keep_on_clipboard: bool,
+    /// A dictation is put on the clipboard and never pasted (macOS,
+    /// issue 629).
+    pub copy_only: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1343,6 +1346,7 @@ impl Default for LabsSettings {
             unload_idle_minutes: 15,
             restore_shortcut_default: false,
             keep_on_clipboard: false,
+            copy_only: false,
         }
     }
 }
