@@ -1207,13 +1207,13 @@ fn body(p: Paint, r: &Round, flights: &[(Flight, &str, [f32; 2])], t: f64, reduc
         Card::Chat(n) => {
             let lines = CARD.wrap(&r.text).len().max(1);
             let reply = Reply::Lines {
+                sent_bubbles: &[],
                 text: "",
                 caret: None,
                 lines,
                 placeholder: !speaking,
                 focus: targeted && !done,
                 sent: done,
-                mark: None,
             };
             notice(p, &n, reply, false)
         }

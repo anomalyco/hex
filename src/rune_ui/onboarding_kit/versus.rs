@@ -776,6 +776,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
             banner(p, s, t),
             thread,
             Reply::Locked(&locked),
+            None,
             1.0,
         );
     }
@@ -793,14 +794,15 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
         banner(p, s, t),
         thread,
         Reply::Lines {
+            sent_bubbles: &[],
             text: draft,
             caret,
             lines: WITHOUT_LINES,
             placeholder: draft.is_empty() && !just_sent,
             focus: caret.is_some(),
             sent: false,
-            mark: scene.mark(t),
         },
+        scene.mark(t),
         if focus == Focus::Field { 1.0 } else { 0.6 },
     )
 }
@@ -903,6 +905,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             banner(p, s, -1e-3),
             thread,
             Reply::Locked(&locked),
+            None,
             1.0,
         );
     }
@@ -920,14 +923,15 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         banner,
         thread,
         Reply::Lines {
+            sent_bubbles: &[],
             text: "",
             caret: None,
             lines: if sent { 1 } else { lines },
             placeholder: !started || cleared,
             focus: listening,
             sent: false,
-            mark: None,
         },
+        None,
         if composing { 1.0 } else { 0.6 },
     )
 }

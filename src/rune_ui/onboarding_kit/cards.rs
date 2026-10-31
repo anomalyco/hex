@@ -103,21 +103,20 @@ pub(crate) enum Reply<'a> {
     Typing(&'a str),
     Sent(&'a str),
     Lines {
+        sent_bubbles: &'a [String],
         text: &'a str,
         caret: Option<usize>,
         lines: usize,
         placeholder: bool,
         focus: bool,
         sent: bool,
-        /// Autocorrect's underline under this byte range of `text`.
-        mark: Option<(usize, usize)>,
     },
     /// No field any more, only why.
     Locked(&'a str),
 }
 
-/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with
-/// `lines` wrapped lines.
+/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with empty
+/// `sent_bubbles` and `lines` wrapped lines.
 pub(crate) fn lines_card_height(n: &Notice, lines: usize) -> f32 {
     // Measure how many lines `n.body` takes inside the top message column
     // (`CARD_W - 2*CARD_PAD - ICON - 10.0`).
@@ -174,8 +173,13 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .max_lines(2),
         );
 
+    let bubbles: &[String] = match reply {
+        Reply::Lines { sent_bubbles, .. } => sent_bubbles,
+        _ => &[],
+    };
+
     let (fill, rim) = material(p);
-    let card = col()
+    let mut card = col()
         .key(n.key)
         .w(CARD_W)
         .padding(CARD_PAD)
@@ -193,9 +197,53 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .items_start()
                 .child(app_icon(p, n.app))
                 .child(message),
-        )
-        .child(field(p, n, reply, field_text::CARD));
+        );
+
+    if !bubbles.is_empty() {
+        card = card.child(sent_thread(p, bubbles));
+    }
+
+    // Remove the field in the same layout change as the second sent bubble,
+    // not when Return lifts. Otherwise the card first makes room for both,
+    // then shrinks while the departing field is already outside its new edge.
+    let hide_field = bubbles.len() >= 2 && matches!(reply, Reply::Lines { text: "", .. });
+    if !hide_field {
+        card = card.child(field(p, n, reply, field_text::CARD, None));
+    }
+
     k.elevate(card, &k.elevation.floating)
+}
+
+/// Right-aligned sent bubbles for the accidental double-send typos!
+fn sent_thread(p: Paint, bubbles: &[String]) -> El {
+    let k = p.k;
+    let bubble_bg = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 4 } else { 3 });
+    let bubble_rim = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 });
+    let mut list = col().key("sent-thread").w_full().gap(5.0).items_end();
+    for (i, msg) in bubbles.iter().enumerate() {
+        list = list.child(
+            row()
+                .key(format!("sent-bubble-{i}"))
+                .px(10.0)
+                .py(4.0)
+                .gap(6.0)
+                .center_y()
+                .radius(12.0)
+                .fill(bubble_bg)
+                .border(p.hair, bubble_rim)
+                // The travel comes from the launch out of the field
+                // (`stories::poll`); the bubble itself only fades up.
+                .transition(Transition::opacity())
+                .child(
+                    text(msg.clone())
+                        .key("msg")
+                        .font(FIELD_FONT.lh(16.0))
+                        .color(p.text()),
+                )
+                .child(text("Sent").key("tag").font(k.ty.small).color(p.muted())),
+        );
+    }
+    list
 }
 
 /// The conversation's visible thread, between its header and the field.
@@ -222,6 +270,7 @@ pub(crate) fn chat(
     banner: Option<El>,
     thread: Vec<El>,
     reply: Reply<'_>,
+    mark: Option<(usize, usize)>,
     field_opacity: f32,
 ) -> El {
     let k = p.k;
@@ -278,7 +327,7 @@ pub(crate) fn chat(
         .child(head)
         .child(thread)
         .child(
-            field(p, n, reply, field_text::CHAT)
+            field(p, n, reply, field_text::CHAT, mark)
                 .opacity(field_opacity)
                 .opacity_motion(Spring::new(0.32, 0.0)),
         );
@@ -718,7 +767,14 @@ pub(crate) fn floating(card: El, now: Option<f64>, phase: f64) -> El {
     card.offset(0.0, y).offset_motion(Spring::new(0.08, 0.0))
 }
 
-fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El {
+/// `mark` underlines autocorrect's byte range of a [`Reply::Lines`] draft.
+fn field(
+    p: Paint,
+    n: &Notice,
+    reply: Reply<'_>,
+    shape: field_text::Field,
+    mark: Option<(usize, usize)>,
+) -> El {
     let k = p.k;
     let focus = match reply {
         Reply::Hearing { .. } => true,
@@ -752,7 +808,6 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
             caret,
             lines,
             placeholder: empty,
-            mark,
             ..
         } => {
             let body = shape.typed(p, "typed", typed, caret, lines, mark);
