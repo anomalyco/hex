@@ -313,6 +313,11 @@ const KEYS: &[Key] = &[
         "Labs: turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks",
     ),
     key(
+        "labs.spoken_symbols",
+        Kind::Bool,
+        "Labs: turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words",
+    ),
+    key(
         "labs.filler_words",
         Kind::Bool,
         "Labs: remove filler words such as um and uh from dictations, without an AI model",

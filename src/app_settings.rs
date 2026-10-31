@@ -1348,6 +1348,9 @@ pub struct LabsSettings {
     /// A pasted dictation gets one leading space when the character before
     /// the cursor is one a space belongs after (macOS, issue 632).
     pub smart_spacing: bool,
+    /// Spoken punctuation and symbol words ("comma", "hashtag",
+    /// "underscore") become characters joined to their words (issue 678).
+    pub spoken_symbols: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1371,6 +1374,7 @@ impl Default for LabsSettings {
             subtitle_export: false,
             second_dictation_shortcut: false,
             smart_spacing: false,
+            spoken_symbols: false,
         }
     }
 }

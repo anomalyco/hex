@@ -278,6 +278,14 @@ impl Profiles {
         } else {
             transcript
         };
+        // Labs › Spoken symbols, likewise ahead of the corrections.
+        let symbolized;
+        let transcript = if crate::labs::spoken_symbols() {
+            symbolized = crate::spoken_symbols::apply(transcript);
+            symbolized.as_str()
+        } else {
+            transcript
+        };
         // Labs › Remove filler words, likewise ahead of the corrections.
         let unfilled;
         let transcript = if crate::labs::filler_words() {
