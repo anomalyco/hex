@@ -22,6 +22,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
 ├── Unload model when idle no labs.unload_idle + labs.unload_idle_minutes (5/15/30/60, default 15)
 │                                        the engine frees the speech model after that long unused (#442)
+├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -86,6 +87,18 @@ HUD shows its transcribing state while a released clip waits on the reload,
 with no look of its own. A failed reload fails that job and is retried by the
 next. Check: `unload_idle_carries_its_minutes` in [labs.rs](../../src/labs.rs);
 the unload and reload themselves have no automated check.
+
+Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
+General › Advanced › Paste last dictation shows a Restore default shortcut
+button (`restore-paste-last`) whenever the shortcut is not its default
+(Option-Shift-V on macOS, Ctrl+Alt+V elsewhere), and a cleared shortcut's
+row reads "Default shortcut: …". Pressing it saves the default through the
+same checks a recorded shortcut meets; if another Hex shortcut already uses
+it, nothing changes and the recorder opens with "Already in use". Off, the
+row is exactly as before. The gate is the row itself (the feature does no
+other work). Check:
+`restore_default_brings_back_paste_last_only_with_its_lab_on` in
+[tests.rs](../../src/rune_ui/tests.rs).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

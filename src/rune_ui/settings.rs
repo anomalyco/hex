@@ -406,6 +406,28 @@ pub(super) fn set_binding(
     }
 }
 
+/// Labs › Restore shortcut default: puts `default` back as `target`'s
+/// shortcut under the rules a recorded one meets. A default another
+/// shortcut already uses changes nothing and opens the recorder with the
+/// usual conflict, so another can be recorded.
+pub(super) fn restore_default(ui: &mut Ui, target: ShortcutTarget, default: HotkeyBinding) {
+    match validate(&ui.settings, target, &default) {
+        Ok(()) => {
+            cancel_capture(ui);
+            ui.update(|settings| set_binding(settings, target, default.clone()));
+        }
+        Err(message) => {
+            if !matches!(ui.capture, Capture::Listening { target: active, .. } if active == target)
+            {
+                begin_capture(ui, target);
+            }
+            if let Capture::Listening { message: shown, .. } = &mut ui.capture {
+                *shown = Some(message);
+            }
+        }
+    }
+}
+
 pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
     if !settings.sound_effects {
         return 0;

@@ -1320,6 +1320,9 @@ pub struct LabsSettings {
     pub unload_idle: bool,
     /// 5, 15 (the default), 30, or 60.
     pub unload_idle_minutes: u32,
+    /// Paste last dictation's row offers its default shortcut back
+    /// (issue 613).
+    pub restore_shortcut_default: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1335,6 +1338,7 @@ impl Default for LabsSettings {
             mouse_shortcuts: false,
             unload_idle: false,
             unload_idle_minutes: 15,
+            restore_shortcut_default: false,
         }
     }
 }

@@ -157,13 +157,38 @@ pub(super) fn shortcut_rows(
             },
         ));
     }
+    // Labs › Restore shortcut default: Paste last dictation's default,
+    // offered while the shortcut is something else or off.
+    let mut default_note = None;
+    if target == ShortcutTarget::PasteLast
+        && crate::labs::Feature::RestoreShortcutDefault.on(&ui.settings)
+    {
+        let default = crate::app_settings::HotkeyBinding::paste_last_default();
+        let current = s::binding(&ui.settings, target);
+        if current.is_none() {
+            default_note = Some((
+                tr_fill("Default shortcut: {}", &default.keycaps().join("+")),
+                p.muted(),
+            ));
+        }
+        if current != Some(&default) {
+            control = control.child(icon_button(
+                p,
+                &format!("restore-{key}"),
+                &REFRESH,
+                tr("Restore default shortcut"),
+                move |ui: &mut Ui| s::restore_default(ui, target, default.clone()),
+            ));
+        }
+    }
     let mut rows: Vec<CardRow> = vec![
         icon_described_row(
             p,
             key,
             glyph,
             title,
-            s::granted(ui, p, target)
+            default_note
+                .or_else(|| s::granted(ui, p, target))
                 .or_else(|| purpose.map(|purpose| (purpose.to_string(), p.muted()))),
             control,
         )
