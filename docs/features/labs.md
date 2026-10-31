@@ -2,7 +2,16 @@
 
 Labs holds features we're unsure about, **especially features people asked
 for that we built**: they land in Labs, off by default, instead of shipping
-on. There is no master switch. **Labs** is always the last item in the
+on. Each feature also has an **audience** (`labs::Feature::audience`, one
+`match` beside `on_this_os`, so a new feature must choose): `Everyone` ships
+in every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
+debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
+`HEX_BUILD_CHANNEL=dev` builds). A stable build never lists, accepts
+(`hex labs on`, `hex settings set`), or runs a Dev feature: `available()`
+drops it, its gate reads false even when `settings.json` says on, and the
+saved setting is kept untouched. In dev builds a Dev row carries a quiet
+"Dev" tag, and `hex labs` prints each feature's audience. Every feature
+below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -47,7 +56,7 @@ Settings › Labs                          // labs.page
 └── Run setup again -> replays the new onboarding (below)
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
-├── (list) -> every feature: name, on/off, description, its hex settings key
+├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
 ├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build); no Copy link on the rows, 20 of them would only add noise
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver
@@ -78,7 +87,7 @@ Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
 `app_settings::meetings_enabled()`, or `app_settings::hex_microphone_enabled()`.
-Add a new feature to `labs::Feature` (name, settings key, description), give
+Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
 When a feature graduates, remove it from Labs.
 
@@ -461,7 +470,7 @@ Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 [panes.rs](../../src/rune_ui/tests/panes.rs);
 `every_feature_is_off_by_default_and_round_trips` and
 `the_old_master_switch_is_read_and_ignored` in [labs.rs](../../src/labs.rs);
-`labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
+`a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature, since none exists yet); `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
 `status_reads_for_a_person` and
 `status_reports_labs_and_reads_older_replies_without_it` in
 [control/cli.rs](../../src/control/cli.rs);

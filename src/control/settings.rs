@@ -540,6 +540,14 @@ fn needs(key: &str) -> Option<&'static str> {
 
 /// Why `hex settings set` refuses `name` on this OS, if it does.
 pub fn unavailable(name: &str) -> Option<ControlError> {
+    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
+        && !feature.shipped()
+    {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to a Labs feature that only dev builds have"),
+        ));
+    }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
     Some(ControlError::new(
         "unsupported",
