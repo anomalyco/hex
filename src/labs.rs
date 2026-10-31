@@ -272,10 +272,11 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {}\n",
+            "{:<width$}  {:<3}  {} (hex settings {})\n",
             feature.name(),
             if on { "on" } else { "off" },
             feature.description(),
+            feature.settings_key(),
         ));
     }
     out

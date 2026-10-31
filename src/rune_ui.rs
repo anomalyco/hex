@@ -527,6 +527,7 @@ enum Pane {
 }
 
 impl Pane {
+    #[cfg(test)]
     const ALL: &[Pane] = &[
         Pane::General,
         Pane::Output,

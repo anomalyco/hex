@@ -711,7 +711,7 @@ fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
 type NavRow = (Pane, [f32; 4]);
 
 /// Neighbouring sidebar items with nothing but a gap between them: the
-/// Labs row splits the main panes from the Labs panes.
+/// Labs row sits below the panes.
 fn nav_neighbours(rt: &Runtime<Ui>) -> Vec<(NavRow, NavRow)> {
     let labs = rt
         .elements()
@@ -745,16 +745,18 @@ fn hovered_items(rt: &mut Runtime<Ui>, x: f32, y: f32) -> Vec<Pane> {
         .collect()
 }
 
-/// A sidebar with the Experiments group, as a developer sees it.
+/// A sidebar with Labs features turned on, as a developer sees it.
 fn grouped_sidebar() -> Runtime<Ui> {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     rt.state.platform.developer = true;
     rt.state.labs_open = true;
     rt.invalidate();
     settle(&mut rt);
-    let items = nav_items(&rt);
-    assert!(items.iter().any(|(pane, _)| pane.experimental()));
-    assert!(items.iter().any(|(pane, _)| !pane.experimental()));
+    assert!(
+        nav_items(&rt)
+            .iter()
+            .any(|(pane, _)| *pane == Pane::VoiceFilter)
+    );
     rt
 }
 
