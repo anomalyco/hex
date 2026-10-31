@@ -614,11 +614,13 @@ fn granted_trigger<'a>(
 
 /// What the desktop granted, as Settings shows it: each shortcut Hex asked
 /// for, then Cancel dictation once the desktop gave it a key, which Hex
-/// never suggests (#624).
+/// never suggests (#624). With `desktop_assigns` (Hyprland), a shortcut
+/// without a trigger is unconfirmed rather than refused.
 fn project_grants(
     granted: &std::collections::HashMap<String, Option<String>>,
     requested: &[Option<(Shortcut, &LinuxHotkey)>],
     ids: &[Option<String>; Shortcut::ALL.len()],
+    desktop_assigns: bool,
 ) -> Vec<DesktopGrantedShortcut> {
     let cancel = granted
         .get(crate::linux_portal::CANCEL_ID)
@@ -626,14 +628,19 @@ fn project_grants(
         .map(|trigger| DesktopGrantedShortcut {
             name: crate::linux_portal::CANCEL_DESCRIPTION.into(),
             trigger: Some(crate::linux_portal::readable_trigger(trigger)),
+            unconfirmed: false,
         });
     requested
         .iter()
         .flatten()
-        .map(|(shortcut, _)| DesktopGrantedShortcut {
-            name: shortcut.portal_id().1.into(),
-            trigger: granted_trigger(granted, ids, *shortcut)
-                .map(crate::linux_portal::readable_trigger),
+        .map(|(shortcut, _)| {
+            let trigger =
+                granted_trigger(granted, ids, *shortcut).map(crate::linux_portal::readable_trigger);
+            DesktopGrantedShortcut {
+                name: shortcut.portal_id().1.into(),
+                unconfirmed: desktop_assigns && trigger.is_none(),
+                trigger,
+            }
         })
         .chain(cancel)
         .collect()
@@ -1133,8 +1140,9 @@ impl Backend {
             );
         }
         let granted = portal.bind(&shortcuts, &self.stop)?;
+        let desktop_assigns = crate::linux_portal::desktop_assigns_triggers();
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
-            project_grants(granted, &requested, &ids)
+            project_grants(granted, &requested, &ids, desktop_assigns)
         };
         let modifiers = |granted: &std::collections::HashMap<String, Option<String>>| {
             Shortcut::ALL.map(|shortcut| {
@@ -1148,6 +1156,12 @@ impl Backend {
         let granted = project(&granted);
         for shortcut in &granted {
             match &shortcut.trigger {
+                None if shortcut.unconfirmed => {
+                    tracing::info!(
+                        name = %shortcut.name,
+                        "the desktop assigns this Hex shortcut's key itself; Hex cannot confirm it"
+                    );
+                }
                 None => {
                     tracing::warn!(
                         name = %shortcut.name,
@@ -1773,7 +1787,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            names(project_grants(&granted, &requested, &ids)),
+            names(project_grants(&granted, &requested, &ids, false)),
             [("Dictation".to_string(), Some("Alt+Space".to_string()))]
         );
         granted.insert(
@@ -1781,11 +1795,42 @@ mod tests {
             Some("Esc".to_string()),
         );
         assert_eq!(
-            names(project_grants(&granted, &requested, &ids)),
+            names(project_grants(&granted, &requested, &ids, false)),
             [
                 ("Dictation".to_string(), Some("Alt+Space".to_string())),
                 ("Cancel dictation".to_string(), Some("Esc".to_string())),
             ]
+        );
+    }
+
+    /// #635: Hyprland's portal names no trigger for any shortcut, since its
+    /// config assigns the keys, so a missing one there is unconfirmed, not
+    /// refused; elsewhere it stays a refusal.
+    #[test]
+    fn a_missing_trigger_is_unconfirmed_where_the_desktop_assigns_keys() {
+        let binding = LinuxHotkey::default();
+        let requested = [Some((Shortcut::Dictation, &binding)), None, None, None];
+        let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
+        ids[Shortcut::Dictation.index()] = Some("dictation-ALT-space".into());
+        let granted = std::collections::HashMap::from([
+            ("dictation-ALT-space".to_string(), None),
+            (crate::linux_portal::CANCEL_ID.to_string(), None),
+        ]);
+        let unconfirmed = |desktop_assigns| {
+            project_grants(&granted, &requested, &ids, desktop_assigns)
+                .into_iter()
+                .map(|grant| (grant.name, grant.trigger, grant.unconfirmed))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(unconfirmed(true), [("Dictation".to_string(), None, true)]);
+        assert_eq!(unconfirmed(false), [("Dictation".to_string(), None, false)]);
+        let bound = std::collections::HashMap::from([(
+            "dictation-ALT-space".to_string(),
+            Some("Alt+Space".to_string()),
+        )]);
+        assert!(
+            !project_grants(&bound, &requested, &ids, true)[0].unconfirmed,
+            "a named trigger is confirmed"
         );
     }
 

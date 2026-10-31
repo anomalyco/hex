@@ -1193,6 +1193,11 @@ Linux beta                               // not macOS feature parity
 │   │   │       // #575 fix checked by a unit test only, not on a GNOME session
 │   │   ├── Each row: "Your desktop granted <trigger>" (it may assign another);
 │   │   │   an empty trigger (KDE's for one it keeps unbound) counts as refused
+│   │   │   └── Hyprland (XDG_CURRENT_DESKTOP) -> its portal names no trigger, since
+│   │   │       its config binds them: muted "Your desktop assigns this key itself,
+│   │   │       so Hex can't confirm it", no refusal note, info log (#635)
+│   │   │       // check: a_missing_trigger_is_unconfirmed_where_the_desktop_assigns_keys
+│   │   │       // (the row's data only); not run on a Hyprland session
 │   │   ├── Portal version 2 -> Desktop shortcuts > Open -> ConfigureShortcuts,
 │   │   │   the desktop's own dialog; ShortcutsChanged updates each row
 │   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id

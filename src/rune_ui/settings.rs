@@ -656,6 +656,14 @@ pub(super) fn granted(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<(Stri
             trigger: Some(trigger),
             ..
         } => (tr_fill("Your desktop granted {}", trigger), p.muted()),
+        DesktopGrantedShortcut {
+            trigger: None,
+            unconfirmed: true,
+            ..
+        } => (
+            tr("Your desktop assigns this key itself, so Hex can't confirm it").to_string(),
+            p.muted(),
+        ),
         DesktopGrantedShortcut { trigger: None, .. } => (
             tr("Your desktop did not grant this shortcut").to_string(),
             p.danger(),
@@ -693,7 +701,7 @@ pub(super) fn cancel_grant(ui: &Ui) -> Option<&str> {
 /// The desktop kept `target`'s shortcut for itself: the note under its row.
 pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
     portal_grant(ui, target)
-        .is_some_and(|shortcut| shortcut.trigger.is_none())
+        .is_some_and(|shortcut| shortcut.trigger.is_none() && !shortcut.unconfirmed)
         .then(|| {
             note(
                 "refused",
