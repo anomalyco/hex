@@ -3196,7 +3196,6 @@ mod tests {
             stopping,
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
-            failure: Arc::default(),
             sampler_thread: Some(worker),
             _recording: crate::retention::Recording::start(),
         };
