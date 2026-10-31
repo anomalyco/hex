@@ -16,8 +16,10 @@ use super::controls::Paint;
 
 /// Seconds for one rest and one flip: one example of the card's copy.
 pub(super) const PERIOD: f32 = 3.6;
-/// The share of the loop it rests face-on. It turns edge-on 2.88 s in.
+/// The share of the loop it rests face-on.
 const REST: f32 = 0.6;
+/// Seconds into the loop it turns edge-on, halfway through the flip.
+pub(super) const EDGE_ON: f32 = PERIOD * (1.0 + REST) / 2.0;
 /// Frames in the flip, the face-on frame included: 60 a second.
 const FRAMES: usize = 86;
 /// How long each flip frame shows, as a share of the loop.

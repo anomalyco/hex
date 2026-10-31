@@ -1,7 +1,7 @@
 //! The agent card's copy, cycling through examples of what to tell the
 //! agent, each written the way it asks: "all lowercase" in lowercase, "all
-//! caps" in caps. As the spark turns edge-on, the words swap left to right in
-//! a soft wipe, each old word fading out just before its new one fades in.
+//! caps" in caps. The old words fade out left to right, then the new ones fade
+//! in the same way, starting as the spark turns edge-on.
 //! The clock drives every word's opacity, so nothing rebuilds the view.
 //! Reduce Motion holds the first example.
 
@@ -16,15 +16,14 @@ use crate::personal_commands::apply_builtin_transformation;
 const SLOT: f32 = spark::PERIOD;
 const EXAMPLES: usize = 4;
 const PERIOD: f32 = SLOT * EXAMPLES as f32;
-/// When in its slot the wipe starts, so it crosses the middle as the spark
-/// turns edge-on.
-const SWAP: f32 = 2.6;
-/// Seconds from the first word's swap to the last's.
-const STAGGER: f32 = 0.45;
+/// Seconds from the first word's fade to the last's.
+const STAGGER: f32 = 0.3;
 /// Seconds a word takes to fade.
-const FADE: f32 = 0.28;
-/// Seconds a new word waits after its old one starts fading.
-const WAIT: f32 = 0.1;
+const FADE: f32 = 0.18;
+/// Seconds a new word waits after its old one starts fading: long enough
+/// for the whole old line to go first, so a wider word never runs into one
+/// still showing.
+const WAIT: f32 = STAGGER + FADE;
 /// A word fades in, shows for its slot less the wait, and fades out.
 const WORD: [(f32, f32); 5] = [
     (0.0, 0.0),
@@ -59,7 +58,7 @@ pub(super) fn copy(p: Paint) -> El {
                 .gaps(0.0, font.size * 0.27)
                 .children(text.split_whitespace().enumerate().map(|(index, word)| {
                     let delay = STAGGER * (first + index) as f32 / (words - 1) as f32;
-                    let start = (example as f32 - 1.0) * SLOT + SWAP + WAIT + delay;
+                    let start = (example as f32 - 1.0) * SLOT + spark::EDGE_ON + delay;
                     rune::text(word.to_string())
                         .key(format!("example{example}-{key}{index}"))
                         .font(font)
