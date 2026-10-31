@@ -11,7 +11,7 @@ engine service"). Today the running Hex app serves it; later a launchd service
 one more client. Clients written against this document should not need to
 change.
 
-The code is `src/local_api/streams.rs` (routes) and `src/transcription_stream.rs`
+The code is `src/local_api/streams.rs` (routes) and `src/transcription/stream.rs`
 (windows, priority, lease).
 
 ## Availability

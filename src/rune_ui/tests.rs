@@ -1,6 +1,6 @@
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription::models::TranscriptionSelection;
 use rune::render::Gpu;
 use rune::text::TextSystem;
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
@@ -1440,7 +1440,7 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
 
 /// The card index of `model` in the picker over `language`.
 fn picker_card(language: &str, model: TranscriptionModelId) -> String {
-    let index = crate::transcription_models::picker_models(language)
+    let index = crate::transcription::models::picker_models(language)
         .iter()
         .position(|(candidate, _)| candidate.id == model)
         .expect("every available model is listed");
@@ -1529,7 +1529,7 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
     // Whisper lists every language in the catalog's order.
     let japanese =
-        crate::transcription_models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+        crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
             .language_choices()
             .iter()
             .position(|code| *code == "ja")
@@ -2064,6 +2064,7 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "mac-labs-link",
             "output",
             "modes",
             "modes-picker",

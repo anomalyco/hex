@@ -36,6 +36,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 
 Settings › Labs                          // labs.page
 ├── "Try unfinished features. They may change or break." + Send feedback -> https://github.com/anomalyco/hex/issues/new
+├── Opened by a link (macOS) -> hex://labs opens this page; hex://labs/<feature> also scrolls to the
+│   feature's row (centred) and pulses it for ~1.4 s (layer_02 fill, then back); it never turns the
+│   feature on. An unknown or absent name -> the page opens and process.log notes it. hex://settings/<pane>
+│   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
+│   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
 ├── One row per feature this OS has -> press flips it, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
@@ -43,12 +48,16 @@ Settings › Labs                          // labs.page
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature: name, on/off, description, its hex settings key
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build); no Copy link on the rows, 20 of them would only add noise
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver
 └── hex experiments … -> points at hex labs
 
 hex settings set labs.live_text true     // macOS: through the running Hex
 ```
+
+Checks: `rune_ui::deep_link` tests (parser, every feature's link reads back);
+`a_labs_link_*` in tests/panes.rs and the `mac-labs-link` golden (Linux).
 
 Settings saved before this model may carry `labs.enabled`; it is read and
 ignored, and every feature keeps its own toggle. `hex status` lists the
@@ -82,7 +91,7 @@ settings load (macOS), with a one-time note in General
 
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
 on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
-`transcription_engine`'s worker unloads a loaded GGUF model once no command
+`transcription/engine`'s worker unloads a loaded GGUF model once no command
 has reached it for that long and nothing records (`idle_sleep::held()`: a
 dictation past its hold or a meeting; a macOS capture from its press via
 `dictation_busy`), freeing its RAM and VRAM; between commands no request
@@ -146,7 +155,7 @@ dictation on a Mac with the toggle on.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_formatting()` as each dictation's processing starts and runs
 `spoken_formatting::apply` before the mode's corrections, OpenCode
 rewriting, and transformations (on Windows and Linux, after the Global
@@ -167,7 +176,7 @@ Linux with the new row.
 
 Spoken symbols (`spoken-symbols`, issue 678, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_symbols()` as each dictation's processing starts and runs
 `spoken_symbols::apply` right after spoken formatting and before filler
 words, the mode's corrections, OpenCode rewriting, and transformations.
@@ -192,7 +201,7 @@ Linux with the new row.
 
 Remove filler words (`filler-words`, issue 631, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::filler_words()` as each dictation's processing starts and runs
 `filler_words::apply` right after spoken formatting and before the mode's
 corrections, OpenCode rewriting, and transformations. It is rule-based, with
@@ -330,7 +339,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `without_live_text_a_dictation_stream_publishes_nothing`,
   `each_dictation_stream_has_its_own_text`, and
   `a_failed_feed_clears_the_text_and_stops_publishing` in
-  [transcription_engine.rs](../../src/transcription_engine.rs);
+  [transcription/engine.rs](../../src/transcription/engine.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
   [live_text.rs](../../src/live_text.rs) (a recording's end clears only its

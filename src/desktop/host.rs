@@ -1,5 +1,5 @@
-use crate::desktop_activity::DesktopActivity;
-use crate::transcription_models::{
+use crate::desktop::activity::DesktopActivity;
+use crate::transcription::models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
 

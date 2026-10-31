@@ -20,15 +20,15 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
 
 use crate::app_settings::AppSettings;
-use crate::desktop_activity::DesktopActivity;
-use crate::desktop_host::{
+use crate::desktop::activity::DesktopActivity;
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
 };
-use crate::desktop_i18n::tr_fill;
+use crate::desktop::i18n::tr_fill;
 use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
-use crate::transcription_models::{ModelPreparationStage, TranscriptionModelId};
-use crate::transcription_preparation::TranscriptionPreparation;
+use crate::transcription::models::{ModelPreparationStage, TranscriptionModelId};
+use crate::transcription::preparation::TranscriptionPreparation;
 use crate::windows::rune::{Published, Request};
 
 type ListenerResult = std::result::Result<(), String>;
@@ -71,7 +71,7 @@ pub(crate) struct WindowsDesktopHost {
     history: Option<History>,
     last_dictation: Arc<Mutex<Option<String>>>,
     indicator: crate::rune_hud::HudSender,
-    mode_runtime: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
+    mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     transformations: Arc<crate::personal_commands::TransformationClient>,
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
@@ -162,13 +162,13 @@ impl WindowsDesktopHost {
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
     ) -> Self {
-        crate::desktop_i18n::apply(settings.ui_language.as_deref());
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
         let last_completed_at = last_completed_at(event_reader.events().iter());
         let mode_runtime = Arc::new(RwLock::new(
-            crate::dictation_modes::ModeRuntime::from_settings(&settings),
+            crate::dictation::modes::ModeRuntime::from_settings(&settings),
         ));
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
@@ -207,7 +207,7 @@ impl WindowsDesktopHost {
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
         };
-        crate::transcription_models::delete_set_aside();
+        crate::transcription::models::delete_set_aside();
         host.refresh_personal_commands_host();
         // The microphone stays cold until first-run setup finishes.
         if host.settings.enable_on_launch {
@@ -285,7 +285,7 @@ impl WindowsDesktopHost {
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
         self.manual_choice();
-        let selection = crate::transcription_models::TranscriptionSelection { model, language };
+        let selection = crate::transcription::models::TranscriptionSelection { model, language };
         self.preparation.start(selection, false);
     }
 
@@ -336,7 +336,7 @@ impl WindowsDesktopHost {
         let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) else {
             return;
         };
-        let selection = crate::transcription_models::TranscriptionSelection {
+        let selection = crate::transcription::models::TranscriptionSelection {
             language: choice.language,
             ..self.settings.transcription_for_model(choice.model)
         };
@@ -354,9 +354,9 @@ impl WindowsDesktopHost {
     }
 
     fn model_ready(&self) -> bool {
-        let model = crate::transcription_models::definition(self.settings.transcription.model);
-        crate::transcription_models::is_installed(model, &self.settings.transcription.language)
-            && crate::transcription_models::is_verified(model)
+        let model = crate::transcription::models::definition(self.settings.transcription.model);
+        crate::transcription::models::is_installed(model, &self.settings.transcription.language)
+            && crate::transcription::models::is_verified(model)
     }
 
     pub(crate) fn start(&mut self) {
@@ -482,10 +482,10 @@ impl WindowsDesktopHost {
                 .mode_runtime
                 .write()
                 .unwrap_or_else(|error| error.into_inner()) =
-                crate::dictation_modes::ModeRuntime::from_settings(current);
+                crate::dictation::modes::ModeRuntime::from_settings(current);
         }
         if previous.ui_language != current.ui_language {
-            crate::desktop_i18n::apply(current.ui_language.as_deref());
+            crate::desktop::i18n::apply(current.ui_language.as_deref());
         }
         if modes_changed {
             self.refresh_personal_commands_host();
@@ -502,7 +502,7 @@ impl WindowsDesktopHost {
         }
     }
 
-    fn runtime_selection(&self) -> crate::transcription_models::TranscriptionSelection {
+    fn runtime_selection(&self) -> crate::transcription::models::TranscriptionSelection {
         self.settings.transcription.clone()
     }
 
@@ -561,7 +561,7 @@ impl WindowsDesktopHost {
         if let Some(result) = self.preparation.poll() {
             self.automatic_preparation = false;
             let result = result.and_then(|selection| {
-                crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
+                crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut candidate = self.settings.clone();
                 candidate.remember_transcription(selection);
                 candidate.save().map_err(|e| format!("{e:#}"))?;

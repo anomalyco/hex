@@ -32,14 +32,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::app_settings::AppSettings;
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop_i18n::tr_fill;
+use crate::desktop::i18n::tr_fill;
 use crate::history::History;
 use crate::rune_ui::Ui;
-use crate::transcription_models::TranscriptionModelId;
+use crate::transcription::models::TranscriptionModelId;
 use crate::tray_menu::{TrayCommand, TrayView};
 use crate::windows::app::WindowsDesktopHost;
 
@@ -471,7 +471,7 @@ impl crate::control::host::Host for WindowsControl {
 
     fn choose_model(
         &self,
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
     ) -> std::result::Result<(), ControlError> {
         self.send(Request::ChooseModel {
             model: selection.model,
@@ -562,7 +562,7 @@ fn tray_view_for(published: &Published) -> TrayView {
             crate::tray_menu::model_menu_entries(
                 &published.settings,
                 published.transcription.preparing.is_some(),
-                crate::transcription_models::is_installed,
+                crate::transcription::models::is_installed,
             ),
         )
     }

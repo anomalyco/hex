@@ -14,7 +14,7 @@ use crate::dictation::{ClipSource, DictationCapture, DictationClip, Finish};
 use crate::feedback::{self, Tone};
 use crate::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::suppression::PendingInputEvents;
-use crate::transcription_engine::TranscriptionEngine;
+use crate::transcription::engine::TranscriptionEngine;
 
 const RECOGNITION_QUEUE_CAPACITY: usize = 64;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn hotkey_captures_stream_once_intentional_and_others_do_not() {
-        use crate::transcription_engine::Command as EngineCommand;
+        use crate::transcription::engine::Command as EngineCommand;
         for kind in [CaptureKind::Hotkey, CaptureKind::Programmatic] {
             for cancel in [false, true] {
                 let hotkey = matches!(kind, CaptureKind::Hotkey);
@@ -1177,7 +1177,7 @@ mod tests {
 
     #[test]
     fn marked_captures_are_intentional_without_a_hold() {
-        use crate::transcription_engine::Command as EngineCommand;
+        use crate::transcription::engine::Command as EngineCommand;
         // Open microphone: intentional at once, so it streams and a stop
         // shorter than the hold threshold still transcribes.
         let (engine, commands) = TranscriptionEngine::for_test();

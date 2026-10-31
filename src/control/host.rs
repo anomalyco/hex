@@ -13,10 +13,10 @@ use super::{
     ModelReport, Pane, PermissionReport, PrintReply, StatusReport, WindowReport, settings,
 };
 use crate::app_settings::AppSettings;
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopListenerSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription::models::TranscriptionSelection;
 
 /// How long `model use` waits to confirm, inside the transport's deadline.
 const CONFIRM_WAIT: Duration = Duration::from_secs(8);
@@ -180,7 +180,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
                             host.cancel_model();
                             ControlReply::done(format!(
                                 "Stopped preparing {}",
-                                crate::transcription_models::definition(model).name
+                                crate::transcription::models::definition(model).name
                             ))
                         }
                     }),
@@ -403,8 +403,8 @@ fn use_model(
     install: bool,
 ) -> Result<ControlReply, ControlError> {
     let selection = super::model_selection(&load()?, model, language)?;
-    let definition = crate::transcription_models::definition(selection.model);
-    let installed = crate::transcription_models::is_installed(definition, &selection.language);
+    let definition = crate::transcription::models::definition(selection.model);
+    let installed = crate::transcription::models::is_installed(definition, &selection.language);
     let state = host.state()?;
     if same_model(&state.settings.transcription, &selection) && installed {
         return Ok(ControlReply::unchanged(format!(
@@ -443,7 +443,7 @@ fn wait_for_model(
     host: &dyn Host,
     selection: &TranscriptionSelection,
 ) -> Result<ControlReply, ControlError> {
-    let name = crate::transcription_models::definition(selection.model).name;
+    let name = crate::transcription::models::definition(selection.model).name;
     let started = Instant::now();
     let mut seen_preparing = false;
     while started.elapsed() < CONFIRM_WAIT {
@@ -529,8 +529,8 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
     let state = host.state()?;
     let settings = &state.settings;
     let selection = &settings.transcription;
-    let definition = crate::transcription_models::definition(selection.model);
-    let installed = crate::transcription_models::is_installed(definition, &selection.language);
+    let definition = crate::transcription::models::definition(selection.model);
+    let installed = crate::transcription::models::is_installed(definition, &selection.language);
     let capture = if state.listener.running {
         CaptureReport::from(state.capture)
     } else {

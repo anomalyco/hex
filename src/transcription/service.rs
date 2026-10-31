@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::Result;
 use hound::{Sample, SampleFormat, WavReader};
 
-use crate::transcription_engine::{HeldModel, dictation_busy, held, transcribe_clip};
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription::engine::{HeldModel, dictation_busy, held, transcribe_clip};
+use crate::transcription::models::TranscriptionSelection;
 
 /// The service's own model, for a selection the dictation engine does not
 /// hold: macOS's switchable transcriber, or one local GGUF model.
@@ -345,7 +345,7 @@ fn prepare(
     selection: &TranscriptionSelection,
     canceled: &Arc<AtomicBool>,
 ) -> std::result::Result<(), TranscriptionServiceError> {
-    if let Some(engine) = crate::transcription_engine::TranscriptionEngine::shared()
+    if let Some(engine) = crate::transcription::engine::TranscriptionEngine::shared()
         && engine.holds(selection)
     {
         *active = WarmTranscriber::default();
@@ -409,7 +409,7 @@ fn with_shared_model<R: Send + 'static>(
         Other,
         Ran(R),
     }
-    let Some(engine) = crate::transcription_engine::TranscriptionEngine::shared() else {
+    let Some(engine) = crate::transcription::engine::TranscriptionEngine::shared() else {
         return Ok(None);
     };
     let started = Instant::now();

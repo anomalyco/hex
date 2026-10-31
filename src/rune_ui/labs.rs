@@ -8,7 +8,7 @@ use rune::{El, Icon, Tx, row, text};
 use super::controls::{self, CardRow, Paint, card, icon_row, pressable_row, row_switch};
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
 
 pub(super) static LABS_ICON: Icon = Icon {
@@ -89,6 +89,40 @@ pub(super) fn nav(ui: &Ui, p: Paint) -> El {
             }
         },
     )
+}
+
+/// How long a link's row pulses.
+const FLASH: std::time::Duration = std::time::Duration::from_millis(1400);
+
+/// A deep link: the Labs page, scrolled to `name`'s row with a pulse. It
+/// never turns the feature on. An unknown name, or one this OS has no row
+/// for, opens the page and is logged.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+pub(super) fn reveal(ui: &mut Ui, name: Option<&str>, tx: &mut Tx) {
+    super::show(ui, super::Destination::Settings, tx);
+    open(ui, tx);
+    ui.lab_flash = None;
+    let Some(name) = name else { return };
+    match Feature::from_name(name).filter(|feature| rows(ui).iter().any(|r| r.feature == *feature))
+    {
+        Some(feature) => {
+            ui.lab_flash = Some((feature, std::time::Instant::now()));
+            tx.scroll_center(row_key(feature));
+            tx.wake_after(FLASH);
+        }
+        None => tracing::warn!(feature = name, "a Labs link named no feature this Hex has"),
+    }
+}
+
+/// Ends the pulse once it has run; true when the row changes back.
+pub(super) fn poll_flash(ui: &mut Ui, now: std::time::Instant) -> bool {
+    match ui.lab_flash {
+        Some((_, since)) if now.duration_since(since) >= FLASH => {
+            ui.lab_flash = None;
+            true
+        }
+        _ => false,
+    }
 }
 
 fn open(ui: &mut Ui, tx: &mut Tx) {
@@ -346,7 +380,10 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let mut cards: Vec<CardRow> = Vec::new();
     for row in rows(ui) {
         let unload_idle = row.feature == Feature::UnloadIdle && row.on;
-        cards.push(feature_row(p, row));
+        let flashing = ui
+            .lab_flash
+            .is_some_and(|(feature, _)| feature == row.feature);
+        cards.push(feature_row(p, row, flashing));
         if unload_idle {
             cards.push(unload_after_row(ui, p));
         }
@@ -359,7 +396,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
     super::scroll_body("scroll", content)
 }
 
-fn feature_row(p: Paint, row: Row) -> CardRow {
+fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {
     let switch = if row.locked {
         rune_kit::Switch::new(true)
             .disabled(true)
@@ -369,7 +406,7 @@ fn feature_row(p: Paint, row: Row) -> CardRow {
     } else {
         row_switch(p, row.on)
     };
-    let item = icon_row(
+    let mut item = icon_row(
         p,
         row_key(row.feature),
         row.icon,
@@ -377,6 +414,9 @@ fn feature_row(p: Paint, row: Row) -> CardRow {
         Some(row.about),
         switch,
     );
+    if flashing {
+        item = item.fill(p.k.c.layer_02);
+    }
     if row.locked {
         return item.into();
     }

@@ -13,6 +13,8 @@ mod activity;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod controls;
+#[cfg(target_os = "macos")]
+pub(crate) mod deep_link;
 mod explainer;
 mod fun;
 mod general;
@@ -61,12 +63,12 @@ use rune::{
 };
 
 use crate::app_settings::{AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopListenerSnapshot, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
-use crate::transcription_models::TranscriptionModelId;
+use crate::desktop::i18n::{tr, tr_fill};
+use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
@@ -210,7 +212,15 @@ pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
 /// A `hex://` link the system opened with Hex: a story link opens the window
 /// on that playground story; anything else is ignored.
 #[cfg(target_os = "macos")]
-fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
+fn on_open_url(ui: &mut Ui, link: &str, tx: &mut Tx) {
+    if let Some(target) = deep_link::parse(link, story_link::scheme()) {
+        match target {
+            Ok(target) => deep_link::open(ui, target, tx),
+            Err(why) => tracing::warn!(%why, "ignored a link opened with Hex"),
+        }
+        crate::macos_rune::bring_window_forward();
+        return;
+    }
     let link = match story_link::parse(link, story_link::scheme()) {
         Ok(link) => link,
         Err(why) => {
@@ -750,6 +760,8 @@ pub(crate) struct Ui {
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
+    /// The Labs row a link just opened, pulsing until it is cleared.
+    lab_flash: Option<(crate::labs::Feature, Instant)>,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -801,7 +813,7 @@ impl Ui {
             Ok(settings) => (settings, None),
             Err(error) => (AppSettings::default(), Some(format!("{error:#}"))),
         };
-        crate::desktop_i18n::apply(settings.ui_language.as_deref());
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let store = host::history(&connect, settings.history_retention);
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
@@ -847,6 +859,7 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
+            lab_flash: None,
             build_preview: None,
             capture: Capture::Idle,
             vocabulary,
@@ -1264,6 +1277,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
+    changed |= labs::poll_flash(ui, now);
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
         ui.live()
@@ -1882,7 +1896,7 @@ const SCENES: &[Scene] = &[
         };
         if let Some(view) = &mut ui.view {
             view.listener.shortcuts =
-                DesktopShortcuts::Portal(vec![crate::desktop_host::DesktopGrantedShortcut {
+                DesktopShortcuts::Portal(vec![crate::desktop::host::DesktopGrantedShortcut {
                     name: "Dictation".into(),
                     trigger: None,
                     unconfirmed: false,
@@ -1908,7 +1922,7 @@ const SCENES: &[Scene] = &[
     ("chinese", |ui| {
         *ui = portal_fixture();
         ui.settings.ui_language = Some("zh".into());
-        crate::desktop_i18n::apply(Some("zh"));
+        crate::desktop::i18n::apply(Some("zh"));
     }),
     ("menus", |ui| {
         *ui = portal_fixture();
@@ -2039,7 +2053,7 @@ const SCENES: &[Scene] = &[
         shortcut_row(ui, listening(None, HotkeyModifiers::option_command()));
     }),
     ("shortcut-row-rejected", |ui| {
-        let message = crate::desktop_i18n::tr("Add a modifier");
+        let message = crate::desktop::i18n::tr("Add a modifier");
         shortcut_row(ui, listening(Some(message), HotkeyModifiers::default()));
     }),
     ("shortcut-row-saved", |ui| {
@@ -2416,6 +2430,15 @@ const SCENES: &[Scene] = &[
         }
         ui.labs_open = true;
     }),
+    ("mac-labs-link", |ui| {
+        *ui = mac_fixture();
+        ui.labs_open = true;
+        // Far ahead, so the pulse holds for the render.
+        ui.lab_flash = Some((
+            crate::labs::Feature::VocabularyBiasing,
+            Instant::now() + Duration::from_secs(3600),
+        ));
+    }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
         ui.settings.meetings.enabled = false;
@@ -2637,13 +2660,13 @@ fn portal_fixture() -> Ui {
 /// Deterministic settings and service state matching a typical Wayland
 /// desktop with the shortcuts portal.
 fn fixture(shortcuts: DesktopShortcuts) -> Ui {
-    crate::desktop_i18n::apply(Some("en"));
+    crate::desktop::i18n::apply(Some("en"));
     let settings = AppSettings {
         dictation_hotkey: HotkeyBinding {
             modifiers: HotkeyModifiers::default(),
             key: Some(HotkeyKey::named("f12")),
         },
-        transcription: crate::transcription_models::TranscriptionSelection {
+        transcription: crate::transcription::models::TranscriptionSelection {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
         },

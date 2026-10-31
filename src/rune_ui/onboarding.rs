@@ -24,7 +24,7 @@ use super::lists::{PermissionControl, allowed, permission_control};
 use super::platform::{Os, PlatformRequest, PlatformState};
 use super::{Menu, Request};
 use crate::app_settings::AppSettings;
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 use crate::onboarding::{
     Effect, Flow, Input, ItemStatus, ModelProgress, Observation, PermissionState, Practice, Row,
@@ -169,7 +169,7 @@ impl Tour {
 
 pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
     let installed = ui.picker.selected_installed(&ui.settings);
-    let selected = crate::transcription_models::validate(&ui.settings.transcription).ok();
+    let selected = crate::transcription::models::validate(&ui.settings.transcription).ok();
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     let downloading = selected.and_then(|model| {
         (transcription.and_then(|t| t.preparing) == Some(model.id)).then(|| {
@@ -290,7 +290,7 @@ fn focus_practice(tour: &mut Tour, live: bool) -> bool {
 fn apply(ui: &mut Ui, effect: Effect) {
     match effect {
         Effect::DownloadModel => {
-            if crate::transcription_models::validate(&ui.settings.transcription).is_ok() {
+            if crate::transcription::models::validate(&ui.settings.transcription).is_ok() {
                 let selection = ui.settings.transcription.clone();
                 ui.send(Request::ChooseModel {
                     model: selection.model,
@@ -596,7 +596,7 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
 
 fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
     let waiting = row.status == ItemStatus::Waiting;
-    let model = crate::transcription_models::validate(&ui.settings.transcription).ok();
+    let model = crate::transcription::models::validate(&ui.settings.transcription).ok();
     let (key, glyph, title, description): (&str, &'static rune::Icon, &str, String) = match row.item
     {
         SetupItem::Microphone => (
@@ -1100,7 +1100,7 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
 fn set_downloaded(ui: &mut Ui, percent: u64) {
     if let Some(view) = &mut ui.view {
         let model = ui.settings.transcription.model;
-        let bytes = crate::transcription_models::definition(model)
+        let bytes = crate::transcription::models::definition(model)
             .download_bytes()
             .unwrap_or(0);
         view.transcription.preparing = Some(model);

@@ -103,7 +103,7 @@ Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/win
 [macOS release publisher](../../scripts/release-app.sh),
 [Linux installer](../../.github/release/install-linux.sh), and
 [updater](../../src/updater.rs).
-Model transfer failures in [transcription_models.rs](../../src/transcription_models.rs)
+Model transfer failures in [transcription/models.rs](../../src/transcription/models.rs)
 explain the source host, retry, and
 separate prerequisites. These messages do not diagnose a particular firewall
 or establish a successful subsequent model download.
@@ -216,7 +216,7 @@ General > Dictation > Speech model, then Language below it   // setup.language-s
 
 Sources: [shared picker](../../src/rune_ui/picker.rs) (`choose`,
 `choose_language`, `language_row`) and `picker_models`, `language_choices`,
-`language_for` in [transcription_models.rs](../../src/transcription_models.rs).
+`language_for` in [transcription/models.rs](../../src/transcription/models.rs).
 Checks: `the_picker_lists_every_model_with_the_language_s_recommendations_first`,
 `a_model_switch_keeps_a_supported_language_or_falls_back_to_the_model_s_default`,
 `each_model_offers_exactly_the_languages_it_supports`, and the Rune tests
@@ -283,7 +283,7 @@ the Auto picker choices. Multilingual audio support is not language conditioning
 the pinned v3 GGUF has no `stt.parakeet.prompt.num_prompts` metadata, which gates
 language prompting in `transcribe-cpp-sys` 0.1.3.
 
-Sources: [model catalog](../../src/transcription_models.rs),
+Sources: [model catalog](../../src/transcription/models.rs),
 [shared picker](../../src/rune_ui/picker.rs), and the runtime
 options in [parakeet.rs](../../src/parakeet.rs) and
 [local_transcriber.rs](../../src/local_transcriber.rs). The regression
@@ -310,7 +310,7 @@ runs no inference, and Bangla accuracy has not been measured.
 
 Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
-[transcription_models.rs](../../src/transcription_models.rs). Setup/picker previews
+[transcription/models.rs](../../src/transcription/models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
 The tour is the pure `onboarding::Flow` (steps, row states, background
@@ -358,7 +358,7 @@ Reaching the last step in a live tour with dictation ready plays the
 onboarding success sound (Classic: its stop sound); a Done still waiting for
 the model plays it once the model is ready
 (`remember_step`, `poll`; fixtures stay silent), checked by reading the code.
-The default model comes from `desktop_i18n::preferred_language` (macOS:
+The default model comes from `desktop::i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing
 settings keep their saved model.
 Not yet observed: a clean-account run with real grants, a real practice paste
@@ -382,7 +382,7 @@ Older settings start with no remembered alternatives. Select an alternative's
 language in Settings' Language row once to establish it. No additional model is loaded at startup
 just to populate the menu, and the checkmark means selected, not live-worker readiness.
 
-[transcription_preparation.rs](../../src/transcription_preparation.rs) is shared
+[transcription/preparation.rs](../../src/transcription/preparation.rs) is shared
 by Settings and the menu bar: one worker plus one replaceable pending choice.
 Closing Settings does not abandon preparation. A superseded/cancelled completion
 cannot save, and delivered menu controls are drained before accepting completions.
@@ -492,7 +492,7 @@ Settings does not offer deletion: the service owns model files and has no delete
 request yet.
 
 Sources: [shared picker](../../src/rune_ui/picker.rs) and `remove_installed`
-in [transcription_models.rs](../../src/transcription_models.rs). The check is
+in [transcription/models.rs](../../src/transcription/models.rs). The check is
 `removing_a_model_deletes_its_artifacts_unless_a_download_is_active` (real files
 and lock); no Rune test covers the picker's two-step confirmation yet.
 
@@ -519,7 +519,7 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, Escape, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
-Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription_engine
+Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
   -> nothing used the model that long and nothing records -> the model unloads
   -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost
 ```
@@ -580,7 +580,7 @@ latency measurement.
 Sidebar                                  // settings.nav
 ├── General, Output, History, then each feature that is on: Meetings and
 │   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
-└── Labs -> one flat page of toggles, each off by default (labs.md)
+└── Labs -> one flat page of toggles, each off by default; hex://labs/<feature> opens it at a row (labs.md)
     // Command-1…9 follow the panes' order (labs::order)
 
 General                                  // settings
@@ -863,7 +863,7 @@ and `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working` run
 real scripts. None is a live target-app paste.
 
 Selection and stage checks start in
-[dictation_processor.rs](../../src/dictation_processor.rs),
+[dictation/processor.rs](../../src/dictation/processor.rs),
 [text_replacements.rs](../../src/text_replacements.rs), and
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
@@ -1359,6 +1359,9 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │       the data folder, same version; cleared by a window or HUD frame or a
 │       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in
 │       process.log, until Hex updates or the file is deleted
+├── Present cadence -> after any change the window presents every refresh for
+│   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
+│   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
 │   a failed GPU load retries on the CPU
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the
@@ -1655,10 +1658,10 @@ FIN/half-close limitations in [local_api.rs](../../src/local_api.rs) must not be
 generalized to every SDK cancellation path.
 
 Live streams (`/streams`, [contract](../streams.md)) are exercised by fake
-engines only: `transcription_stream` tests cover windows, partials, the
+engines only: `transcription/stream` tests cover windows, partials, the
 backlog during dictation, preemption and offline fallback, the lease, cancel,
 and busy; `local_api::streams` tests cover routes, auth, and bounds; and
-`transcription_engine` tests cover yielding streams closed by dictation. No
+`transcription/engine` tests cover yielding streams closed by dictation. No
 real-model or live-app stream has been run.
 
 Model progress and dictation levels share bounded SSE framing in

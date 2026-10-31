@@ -16,7 +16,9 @@ use super::fixture::{Language, Speech};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, advance_to};
 use crate::onboarding::{Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep};
-use crate::transcription_models::{self, TranscriptionModelId, TranscriptionSelection};
+use crate::transcription::models::{
+    self as transcription_models, TranscriptionModelId, TranscriptionSelection,
+};
 
 /// How long both permission checks show before the page moves on.
 const GRANTED_BEAT: f64 = 0.7;
@@ -70,7 +72,7 @@ fn english(selection: &TranscriptionSelection) -> bool {
 fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
     if english(current) {
         let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
-        let preferred = crate::desktop_i18n::preferred_language();
+        let preferred = crate::desktop::i18n::preferred_language();
         let language = if preferred != "en" && v3.supports_language(&preferred) {
             preferred
         } else {

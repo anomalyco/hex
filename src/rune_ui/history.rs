@@ -9,7 +9,7 @@ use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
 use super::lists::{error_panel, section_label};
 use super::{Menu, Ui};
-use crate::desktop_i18n::{event_age, tr, tr_fill, tr_named};
+use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
 
 #[derive(Default)]

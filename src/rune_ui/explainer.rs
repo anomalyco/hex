@@ -20,7 +20,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, KEY_GAP, KeySize, Paint, TRAY_PADDING, button, folds, key_tray,
     keycap, pressable_row, row_switch,
 };
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::dictation::ShortcutMode;
 
 const MODAL_WIDTH: f32 = 440.0;

@@ -19,8 +19,8 @@ use color_eyre::Result;
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
-use crate::desktop_activity::DesktopActivity;
-use crate::desktop_host::{
+use crate::desktop::activity::DesktopActivity;
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
     DesktopTranscriptionSnapshot,
 };
@@ -53,13 +53,13 @@ pub(crate) enum ShortcutTarget {
 }
 
 struct PreparedTranscription {
-    selection: crate::transcription_models::TranscriptionSelection,
+    selection: crate::transcription::models::TranscriptionSelection,
     transcriber: crate::local_transcriber::LocalTranscriber,
 }
 
 struct TranscriptionPreparation {
     canceled: Arc<AtomicBool>,
-    model: crate::transcription_models::TranscriptionModelId,
+    model: crate::transcription::models::TranscriptionModelId,
     progress: Arc<AtomicU64>,
     stage: Arc<AtomicU8>,
     worker: JoinHandle<PreparationResult>,
@@ -143,7 +143,7 @@ struct LinuxDesktopHost {
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
     input_sources_polled_at: Instant,
     /// A due keyboard switch waiting for the preparation it superseded to stop.
-    keyboard_switch: Option<crate::transcription_models::TranscriptionSelection>,
+    keyboard_switch: Option<crate::transcription::models::TranscriptionSelection>,
 }
 
 /// What the window shows of the host.
@@ -169,7 +169,7 @@ pub(crate) enum HostRequest {
         shortcut: DesktopShortcut,
     },
     ChooseModel {
-        model: crate::transcription_models::TranscriptionModelId,
+        model: crate::transcription::models::TranscriptionModelId,
         language: String,
     },
     CancelModel,
@@ -571,7 +571,7 @@ impl LinuxDesktopHost {
             .modes
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
-            crate::dictation_modes::ModeRuntime::from_settings(&self.settings);
+            crate::dictation::modes::ModeRuntime::from_settings(&self.settings);
         if let Some(history) = &self.output.history
             && let Err(error) = history.set_retention(self.settings.history_retention)
         {
@@ -612,8 +612,8 @@ impl LinuxDesktopHost {
             self.status = "Couldn't enable".into();
             return;
         }
-        let model = crate::transcription_models::definition(self.settings.transcription.model);
-        if !crate::transcription_models::is_installed(model, &self.settings.transcription.language)
+        let model = crate::transcription::models::definition(self.settings.transcription.model);
+        if !crate::transcription::models::is_installed(model, &self.settings.transcription.language)
         {
             self.status = "Model required".into();
             return;
@@ -941,11 +941,11 @@ impl LinuxDesktopHost {
 
     fn choose_transcription(
         &mut self,
-        model: crate::transcription_models::TranscriptionModelId,
+        model: crate::transcription::models::TranscriptionModelId,
         language: String,
     ) -> Result<()> {
         self.manual_choice();
-        let selection = crate::transcription_models::TranscriptionSelection { model, language };
+        let selection = crate::transcription::models::TranscriptionSelection { model, language };
         self.prepare_transcription(selection, false)
     }
 
@@ -953,7 +953,7 @@ impl LinuxDesktopHost {
     /// model off the host thread.
     fn prepare_transcription(
         &mut self,
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
         automatic: bool,
     ) -> Result<()> {
         if self.shortcut_edit.is_some() {
@@ -968,12 +968,12 @@ impl LinuxDesktopHost {
             return Err(color_eyre::eyre::eyre!(error));
         }
         let model = selection.model;
-        let definition = crate::transcription_models::validate(&selection)?;
+        let definition = crate::transcription::models::validate(&selection)?;
         // A running listener keeps the current model until the new one is ready.
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
         let stage = Arc::new(AtomicU8::new(
-            crate::transcription_models::ModelPreparationStage::Downloading as u8,
+            crate::transcription::models::ModelPreparationStage::Downloading as u8,
         ));
         let worker_canceled = canceled.clone();
         let worker_progress = progress.clone();
@@ -981,9 +981,9 @@ impl LinuxDesktopHost {
         let worker = std::thread::spawn(move || {
             (|| {
                 if automatic {
-                    crate::transcription_models::verify_installed(definition, &worker_canceled)?;
+                    crate::transcription::models::verify_installed(definition, &worker_canceled)?;
                 } else {
-                    crate::transcription_models::download_with_stage_progress(
+                    crate::transcription::models::download_with_stage_progress(
                         definition,
                         &worker_canceled,
                         &worker_progress,
@@ -993,7 +993,7 @@ impl LinuxDesktopHost {
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
-                crate::transcription_models::ModelPreparationStage::Loading.store(&worker_stage);
+                crate::transcription::models::ModelPreparationStage::Loading.store(&worker_stage);
                 let transcriber = crate::local_transcriber::LocalTranscriber::load(&selection)?;
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
@@ -1066,7 +1066,7 @@ impl LinuxDesktopHost {
             }
         }
         if let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) {
-            let selection = crate::transcription_models::TranscriptionSelection {
+            let selection = crate::transcription::models::TranscriptionSelection {
                 language: choice.language,
                 ..self.settings.transcription_for_model(choice.model)
             };
@@ -1245,7 +1245,7 @@ impl crate::control::host::Host for LinuxControl {
 
     fn choose_model(
         &self,
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
     ) -> std::result::Result<(), ControlError> {
         self.host
             .request(HostRequest::ChooseModel {
@@ -1360,7 +1360,7 @@ impl LinuxDesktopHost {
                     }),
                 error: self.transcription_error.clone(),
                 preparation_stage: self.transcription_preparation.as_ref().map(|preparation| {
-                    crate::transcription_models::ModelPreparationStage::load(&preparation.stage)
+                    crate::transcription::models::ModelPreparationStage::load(&preparation.stage)
                 }),
                 selection: self.settings.transcription.clone(),
                 preparing: self
@@ -1434,7 +1434,7 @@ impl LinuxDesktopHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_models::{
+    use crate::transcription::models::{
         ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
     };
 

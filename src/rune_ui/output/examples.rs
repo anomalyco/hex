@@ -12,7 +12,7 @@ use rune::{Color, El, Spring, SpringPair, TextStyle, Transition, col, row, text}
 
 use super::super::controls::{DESCRIPTION, Paint};
 use super::super::spark;
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::personal_commands::apply_builtin_transformation;
 
 /// Seconds each example shows: one flip of the spark.

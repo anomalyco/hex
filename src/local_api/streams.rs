@@ -1,7 +1,7 @@
 //! `/streams`: live transcription of an app's own audio on the dictation
 //! engine's model (`docs/streams.md`). The routes are thin; the stream
 //! itself, its windows, and dictation priority live in
-//! `crate::transcription_stream`.
+//! `crate::transcription::stream`.
 
 use std::io::Write;
 use std::net::TcpStream;
@@ -15,7 +15,7 @@ use super::{
     HttpContext, HttpRequest, HttpResponse, RequestAction, body_read_response, generate_token,
     json_post_action, read_body_bounded, write_response, write_sse, write_sse_headers,
 };
-use crate::transcription_stream::{
+use crate::transcription::stream::{
     CreateError, End, LEASE, PushError, SAMPLE_RATE, SampleFormat, Stream,
 };
 
@@ -170,7 +170,7 @@ fn create(
     let model = match request
         .model
         .as_deref()
-        .map(str::parse::<crate::transcription_models::TranscriptionModelId>)
+        .map(str::parse::<crate::transcription::models::TranscriptionModelId>)
     {
         None => None,
         Some(Ok(model)) => Some(model),
@@ -325,7 +325,7 @@ mod tests {
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
-    fn start(stream_engine: Option<crate::transcription_stream::EngineSource>) -> LocalApi {
+    fn start(stream_engine: Option<crate::transcription::stream::EngineSource>) -> LocalApi {
         let directory = std::env::temp_dir().join(format!(
             "hex-streams-{}-{}",
             std::process::id(),
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn create_validates_the_format_and_the_loaded_model_and_admits_one_stream() {
-        let api = start(Some(crate::transcription_stream::tests::fake_source()));
+        let api = start(Some(crate::transcription::stream::tests::fake_source()));
         for (body, status, code) in [
             (
                 r#"{"sampleFormat":"f32le","sampleRate":44100}"#,
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn a_stream_takes_bounded_audio_from_its_owner_and_finishes_with_its_segments() {
-        let api = start(Some(crate::transcription_stream::tests::fake_source()));
+        let api = start(Some(crate::transcription::stream::tests::fake_source()));
         let (id, owner) = created(&api);
         let half_second = [0.0_f32; 8_000]
             .iter()

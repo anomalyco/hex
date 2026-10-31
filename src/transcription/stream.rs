@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::pause_segmenter::{FRAME_SAMPLES, PauseSegmenter};
-use crate::transcription_engine::{Partial, TranscriptionEngine, YieldingStream};
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription::engine::{Partial, TranscriptionEngine, YieldingStream};
+use crate::transcription::models::TranscriptionSelection;
 
 pub(crate) const SAMPLE_RATE: usize = 16_000;
 /// How long a stream lives without audio or a heartbeat.
@@ -210,7 +210,7 @@ impl SharedEngine {
 
 impl Engine for SharedEngine {
     fn dictation_busy(&self) -> bool {
-        crate::transcription_engine::dictation_busy()
+        crate::transcription::engine::dictation_busy()
     }
 
     fn streams(&self) -> bool {
@@ -229,7 +229,7 @@ impl Engine for SharedEngine {
     }
 
     fn transcribe(&self, window: Vec<f32>, stop: &dyn Fn() -> bool) -> Result<String, String> {
-        while crate::transcription_engine::dictation_busy() {
+        while crate::transcription::engine::dictation_busy() {
             if stop() {
                 return Err("the stream ended".into());
             }
@@ -245,9 +245,9 @@ impl Engine for SharedEngine {
                 window,
                 Box::new(move |model, samples| {
                     // Never load or switch a model for a stream.
-                    let transcriber = crate::transcription_engine::held(model, &selection)
+                    let transcriber = crate::transcription::engine::held(model, &selection)
                         .ok_or_else(|| MODEL_CHANGED.to_string())?;
-                    crate::transcription_engine::transcribe_clip(transcriber, samples)
+                    crate::transcription::engine::transcribe_clip(transcriber, samples)
                         .map_err(|error| format!("{error:#}"))
                 }),
             )
@@ -902,5 +902,5 @@ fn samples_ms(samples: usize) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "transcription_stream_tests.rs"]
+#[path = "stream_tests.rs"]
 pub(crate) mod tests;

@@ -110,7 +110,7 @@ missing capability omits the row instead of imitating it.
   repeat field labels per row, put state words next to switches, or warn
   "cannot be undone" beside a two-step confirmation.
 - Every translated string (`tr`, `tr_fill`, `tr_named`) needs all five
-  languages in [`desktop_i18n.rs`](../src/desktop_i18n.rs);
+  languages in [`desktop/i18n.rs`](../src/desktop/i18n.rs);
   `every_translated_string_has_every_language` scans each UI source.
   Developer-only panes (Activity, HUD Lab) stay English.
 - Exception: native macOS menus (`status_item.rs` and the app menu in

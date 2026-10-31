@@ -13,7 +13,7 @@ use crate::control::{
     ControlReply, ControlResponse, FeatureReport, ListenerReport, MeetingReport, ModelReport, Pane,
     PermissionReport, StatusReport, WindowReport, settings,
 };
-use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::onboarding::PermissionState;
@@ -245,8 +245,8 @@ impl Pump {
                     Ok(selection) => selection,
                     Err(error) => return Some(error.into()),
                 };
-                let definition = crate::transcription_models::definition(selection.model);
-                if !crate::transcription_models::is_installed(definition, &selection.language) {
+                let definition = crate::transcription::models::definition(selection.model);
+                if !crate::transcription::models::is_installed(definition, &selection.language) {
                     return Some(ControlReply::error(
                         "not-installed",
                         format!(
@@ -266,8 +266,8 @@ impl Pump {
                     Ok(selection) => selection,
                     Err(error) => return Some(error.into()),
                 };
-                let definition = crate::transcription_models::definition(selection.model);
-                if crate::transcription_models::is_installed(definition, &selection.language) {
+                let definition = crate::transcription::models::definition(selection.model);
+                if crate::transcription::models::is_installed(definition, &selection.language) {
                     return start_model_use(runtime, selection, reply);
                 }
                 Some(reply_with(
@@ -297,7 +297,7 @@ impl Pump {
                         let _ = runtime.send(Request::CancelModel);
                         ControlReply::done(format!(
                             "Stopped preparing {}",
-                            crate::transcription_models::definition(model).name
+                            crate::transcription::models::definition(model).name
                         ))
                     }
                 })
@@ -692,7 +692,7 @@ fn launch_at_login(enabled: Option<bool>) -> Result<ControlReply, ControlError> 
 
 /// What `hex model use` asks the runtime: the installed-only path, which
 /// verifies the model on disk and never downloads or repairs it.
-fn use_request(selection: crate::transcription_models::TranscriptionSelection) -> Request {
+fn use_request(selection: crate::transcription::models::TranscriptionSelection) -> Request {
     Request::UseInstalledSelection(selection)
 }
 
@@ -700,7 +700,7 @@ fn use_request(selection: crate::transcription_models::TranscriptionSelection) -
 /// the waiter. An idempotent manual choice still cancels automatic work.
 fn start_model_use(
     runtime: RuntimeHandle,
-    selection: crate::transcription_models::TranscriptionSelection,
+    selection: crate::transcription::models::TranscriptionSelection,
     reply: &SyncSender<ControlResponse>,
 ) -> Option<ControlReply> {
     if let Err(error) = runtime.send(use_request(selection.clone())) {
@@ -713,9 +713,9 @@ fn start_model_use(
 /// Waits for an already-admitted installed-model choice without blocking AppKit.
 fn wait_for_model(
     runtime: &RuntimeHandle,
-    selection: crate::transcription_models::TranscriptionSelection,
+    selection: crate::transcription::models::TranscriptionSelection,
 ) -> Result<ControlReply, ControlError> {
-    let name = crate::transcription_models::definition(selection.model).name;
+    let name = crate::transcription::models::definition(selection.model).name;
     let matches = |settings: &AppSettings| {
         super::same_model_and_language(&settings.transcription, &selection)
     };
@@ -839,7 +839,7 @@ fn status(
     let open = window.is_visible();
     let settings = &published.settings;
     let selection = &settings.transcription;
-    let definition = crate::transcription_models::definition(selection.model);
+    let definition = crate::transcription::models::definition(selection.model);
     let setup = crate::onboarding::status(selection);
     Ok(ControlReply::Status(Box::new(StatusReport {
         app_version: crate::VERSION.into(),
@@ -859,7 +859,7 @@ fn status(
             id: selection.model.as_str().into(),
             name: definition.name.into(),
             language: selection.language.clone(),
-            installed: crate::transcription_models::is_installed(definition, &selection.language),
+            installed: crate::transcription::models::is_installed(definition, &selection.language),
             preparing: published
                 .preparation
                 .model
@@ -897,8 +897,8 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
-    use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
-    use crate::transcription_preparation::TranscriptionPreparation;
+    use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
+    use crate::transcription::preparation::TranscriptionPreparation;
 
     #[test]
     fn model_use_prepares_the_exact_selection_installed_only() {

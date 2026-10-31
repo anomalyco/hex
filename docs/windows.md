@@ -233,7 +233,7 @@ hex app
   sidebar footer holds Check for updates, and Download update for unmanaged
   installs. Shortcuts are recorded by
   polling the keyboard with the listener's hook suspended, because modifier-only chords never reach the window as key events.
-- Models are prepared in-process through `transcription_preparation`; the
+- Models are prepared in-process through `transcription/preparation`; the
   runtime saves the selection when it is ready and restarts the listener.
 - Enable on launch waits until first-run setup has recorded completion.
 - The dictation HUD is a Rune overlay (`rune_hud.rs`, shared with Linux): a
@@ -326,7 +326,7 @@ Linux use.
 The Windows window uses the shared design system
 ([design-system.md](design-system.md)): the same Rune panes as macOS and
 Linux under the native title bar. Mode processing, OpenCode rewriting, and transformations run
-through the same `dictation_processor` and `personal_commands` modules as
+through the same `dictation/processor` and `personal_commands` modules as
 macOS, and Windows reaches the running OpenCode service the same way: its
 registration file and loopback HTTP, never a CLI. Like macOS,
 an unset OpenCode model tries the ranked recommended models before the

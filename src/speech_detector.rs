@@ -13,7 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 use color_eyre::eyre::Result;
 use transcribe_cpp::{Backend, Model, ModelOptions, VadOptions, VadSession};
 
-use crate::transcription_models;
+use crate::transcription::models as transcription_models;
 
 /// Speech shorter than this is ignored. Silero's default of 250 ms drops a
 /// short "Ok" or "Ciao"; 160 ms keeps those and still rejects clicks, keys

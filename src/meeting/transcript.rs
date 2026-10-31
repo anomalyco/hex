@@ -27,7 +27,7 @@ use crate::pause_segmenter::PauseSegmenter;
 use crate::transcript::{Transcript, TranscriptSegment};
 #[cfg(target_os = "macos")]
 use crate::transcription::Transcriber;
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription::models::TranscriptionSelection;
 
 use super::echo::{EchoEnvelope, Signal};
 use super::{
@@ -678,7 +678,7 @@ fn source_index(source: MeetingSource) -> usize {
 
 fn wait_for_dictation() {
     let started = Instant::now();
-    while crate::transcription_engine::dictation_busy()
+    while crate::transcription::engine::dictation_busy()
         && !crate::process_exit::quitting()
         && started.elapsed() < DICTATION_WAIT
     {
@@ -724,7 +724,7 @@ impl ChunkModel {
         if speechless(samples) {
             return Ok(Chunked::Done(Transcript::default()));
         }
-        let engine = crate::transcription_engine::TranscriptionEngine::shared();
+        let engine = crate::transcription::engine::TranscriptionEngine::shared();
         if let Some(engine) = &engine
             && let Some(result) = Self::transcribe_shared(engine, samples)
         {
@@ -768,7 +768,7 @@ impl ChunkModel {
 
     /// `None` when the engine has no GGUF model loaded.
     fn transcribe_shared(
-        engine: &crate::transcription_engine::TranscriptionEngine,
+        engine: &crate::transcription::engine::TranscriptionEngine,
         samples: &[f32],
     ) -> Option<Result<Chunked>> {
         let samples = samples.to_vec();
@@ -779,7 +779,7 @@ impl ChunkModel {
         }
         let ran = engine.background(move |model| {
             // A capture that began after the meeting checked comes first.
-            if crate::transcription_engine::dictation_busy() {
+            if crate::transcription::engine::dictation_busy() {
                 return Shared::Busy;
             }
             match engine_model(model) {
@@ -815,7 +815,7 @@ impl ChunkModel {
 /// this process, so a meeting keeps its own rather than queue dictation
 /// behind it.
 #[cfg(target_os = "macos")]
-fn engine_model(model: &mut crate::transcription_engine::Model) -> Option<&mut Transcriber> {
+fn engine_model(model: &mut crate::transcription::engine::Model) -> Option<&mut Transcriber> {
     match model.active() {
         Some(transcriber @ Transcriber::Gguf(_)) => Some(transcriber),
         _ => None,
@@ -823,7 +823,7 @@ fn engine_model(model: &mut crate::transcription_engine::Model) -> Option<&mut T
 }
 
 #[cfg(not(target_os = "macos"))]
-fn engine_model(model: &mut crate::transcription_engine::Model) -> Option<&mut Transcriber> {
+fn engine_model(model: &mut crate::transcription::engine::Model) -> Option<&mut Transcriber> {
     Some(model)
 }
 
@@ -1218,7 +1218,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
             if give_up(self.model_failed) {
                 return;
             }
-            if crate::transcription_engine::dictation_busy() {
+            if crate::transcription::engine::dictation_busy() {
                 wait();
             } else if self.transcribe_next() {
                 self.write_snapshot();
@@ -1247,7 +1247,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
                         if give_up(false) {
                             return;
                         }
-                        if crate::transcription_engine::dictation_busy() {
+                        if crate::transcription::engine::dictation_busy() {
                             wait();
                             continue;
                         }
@@ -1340,7 +1340,7 @@ fn run_rolling(
         if !worker.pending.is_empty()
             && !worker.model_failed
             && !crate::process_exit::quitting()
-            && !crate::transcription_engine::dictation_busy()
+            && !crate::transcription::engine::dictation_busy()
             && worker.transcribe_next()
         {
             worker.write_snapshot();

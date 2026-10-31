@@ -20,7 +20,7 @@ use crate::linux::input::{
 use crate::linux::paste::LinuxPaster;
 use crate::linux::rune_hud::LinuxIndicator;
 use crate::local_transcriber::LocalTranscriber;
-use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 /// How long past the tail a release waits for audio that never arrives.
@@ -78,7 +78,7 @@ pub(crate) enum ListenerUpdate {
     Settings(Box<AppSettings>),
     /// A model the host prepared, swapped in once no transcription is pending.
     Transcriber {
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
         transcriber: Box<LocalTranscriber>,
     },
     /// True while the window records a shortcut: global matching stops.
@@ -124,7 +124,7 @@ fn microphone_input(settings: &AppSettings, device: Option<&str>) -> RecoveringA
 #[derive(Clone)]
 pub(crate) struct DictationOutput {
     pub(crate) history: Option<crate::history::History>,
-    pub(crate) modes: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
+    pub(crate) modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     pub(crate) transformations: Arc<crate::personal_commands::TransformationClient>,
 }
 
@@ -136,7 +136,7 @@ impl DictationOutput {
         Self {
             history,
             modes: Arc::new(RwLock::new(
-                crate::dictation_modes::ModeRuntime::from_settings(settings),
+                crate::dictation::modes::ModeRuntime::from_settings(settings),
             )),
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
         }
@@ -156,7 +156,7 @@ impl DictationOutput {
     ) -> Result<String> {
         let context = crate::linux::context::capture();
         let processed = if raw {
-            crate::dictation_processor::Processed::unchanged(raw_text.trim())
+            crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             let modes = self
                 .modes
@@ -173,7 +173,7 @@ impl DictationOutput {
             paster.paste(&processed.text)?;
         }
         if let Some(history) = &self.history {
-            let mut draft = crate::dictation_modes::history_draft(
+            let mut draft = crate::dictation::modes::history_draft(
                 raw_text,
                 &processed,
                 context.application,
@@ -951,7 +951,7 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_engine::Command;
+    use crate::transcription::engine::Command;
 
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)

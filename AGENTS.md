@@ -80,12 +80,12 @@ substitute for source inspection or a second roadmap.
   observation (macOS TIS, Windows foreground-window layout, X11 XKB groups;
   Wayland has no general protocol) and the shared debounced policy that turns a
   mapped source into an installed-only model-picker choice.
-- `dictation`, `dictation_diagnostics`: warm pre-roll, growable capture, 16 kHz
+- `dictation`, `dictation/diagnostics`: warm pre-roll, growable capture, 16 kHz
   local-transcription resampling, and owner-only diagnostic WAV retention when
   `HEX_RETAIN_DICTATION_AUDIO` is set.
 - `pause_segmenter`: pure 16 kHz pause detection that cuts meeting audio into
   rolling transcription chunks.
-- `dictation_audio`: the authoritative microphone timeline, lazy stream
+- `dictation/audio`: the authoritative microphone timeline, lazy stream
   lifecycle, recording owner, exact shortcut boundaries, recovery handoff,
   disposable bounded command audio projection, and the bounded capture sink
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
@@ -105,7 +105,7 @@ substitute for source inspection or a second roadmap.
   assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
   polkit refuses a process outside the seat session) on Linux, and a
   system-required power request on Windows.
-- `dictation_processor`: the one OpenCode client and ordered processing policy
+- `dictation/processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
   model catalog, and the transformation stage, over `opencode_service`.
@@ -123,7 +123,7 @@ substitute for source inspection or a second roadmap.
   requests on the same engine.
 - `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
   checks, asset reservation, and batch transcription.
-- `transcription`, `transcription_benchmark`: runtime selection, transactional
+- `transcription`, `transcription/benchmark`: runtime selection, transactional
   warm-model activation, and the fixed-corpus benchmark runner behind
   `hex benchmark-transcription`.
 - `gguf_session`: the `transcribe.cpp` session owner shared by `parakeet` and
@@ -135,7 +135,7 @@ substitute for source inspection or a second roadmap.
   captures and meeting chunks away from the transcription models.
 - `local_transcriber`: the Linux and Windows GGUF loader, prewarm, whole-clip
   transcription, and stream entry point.
-- `transcription_engine`: the thread that owns the loaded model on every OS and
+- `transcription/engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
   whole-clip runs, and (macOS) model loads and switches. The capture owns its
   `LiveStream` and hands it to the finished clip; finishing returns a
@@ -143,25 +143,25 @@ substitute for source inspection or a second roadmap.
   the whole clip. It also runs background work (meeting chunks, local API
   host audio) that yields to any dictation request sent before it starts. The
   listener shares its engine (`TranscriptionEngine::share`) on every OS;
-  `transcription_engine::dictation_busy` is the press-to-paste capture state
+  `transcription::engine::dictation_busy` is the press-to-paste capture state
   on macOS, and on Linux and Windows only the engine's dictation streams and
   finishes, so a host clip can start during a CPU-only capture's hold. With
   Labs › Unload model when idle on, its worker unloads the GGUF model after
   the chosen idle time when nothing records (`idle_sleep::held`) and reloads
   it before the next command that needs it; the parked model still counts as
   held, so callers never load a second copy.
-- `transcription_preparation`: application-owned model preparation shared by
+- `transcription/preparation`: application-owned model preparation shared by
   Settings and the menu bar on macOS and by the Windows runtime, with one
   worker, latest-choice pending admission, cancellation fences, and an
   installed-only path that never downloads a model.
-- `transcription_models`: the compiled model catalog, language recommendations,
+- `transcription/models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
-- `transcription_service`: bounded host-audio admission, hostile WAV validation,
+- `transcription/service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
   service loads its own (`WarmTranscriber` on macOS, `local_transcriber::WarmLocal`
   on Linux and Windows), released after a long clip when the engine holds it.
-- `transcription_stream`: live `/streams` transcription of another app's
+- `transcription/stream`: live `/streams` transcription of another app's
   pushed audio on the engine's loaded model: pause-cut windows fed through
   yielding engine streams that any dictation request closes, a bounded
   backlog held while dictation is busy, offline fallback windows, the lease,
@@ -292,7 +292,7 @@ substitute for source inspection or a second roadmap.
   the window is open (layer-shell on Wayland, override-redirect on X11, and
   override-redirect on XWayland when Wayland has no layer-shell).
 - `rune_hud`: the dictation HUD on every OS: a click-through Rune overlay
-  whose compositor steps `dictation_indicator`'s model on Rune's frame clock
+  whose compositor steps `dictation/indicator`'s model on Rune's frame clock
   (the display's refresh) and draws Dot scope on the GPU with
   `rune_hud.wgsl`. `rune_hud/macos` places it on the pointer's screen
   through `hud_placement` (below the menu bar, in it, or out of the notch);
@@ -329,10 +329,10 @@ substitute for source inspection or a second roadmap.
   each OS's host installs `rune_ui::live_text`, one click-through line just
   past the HUD, as a watcher, placed where `rune_hud` last showed the HUD
   (`rune_hud::live_text_place`).
-- `dictation_modes`: the mode runtime the Windows and Linux listeners share:
+- `dictation/modes`: the mode runtime the Windows and Linux listeners share:
   mode selection by application and website, then global replacements, mode
   corrections, OpenCode rewriting, and transformations, and the History entry.
-- `desktop_i18n`: interface translations keyed by the English source string,
+- `desktop/i18n`: interface translations keyed by the English source string,
   `tr`, `tr_fill`, and `tr_named`. A test fails if any string the window
   translates lacks a language.
 - `history`: the owner-only bounded retained-dictation store: retention
@@ -346,9 +346,9 @@ substitute for source inspection or a second roadmap.
 - `events`, `dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections.
-- `desktop_activity`: the shared listener, device, session, and latest-failure
+- `desktop/activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
-- `desktop_host`: the in-process listener, transcription, shortcut, and update
+- `desktop/host`: the in-process listener, transcription, shortcut, and update
   snapshot-and-action types shared by the Linux and Windows hosts, the window,
   and `hex status`.
 - `rune_ui`: the one window on macOS, Windows, and Linux, on Rune with
@@ -379,7 +379,7 @@ substitute for source inspection or a second roadmap.
 - `hud_placement`: pure geometry for where a HUD sits on its screen (below
   the menu bar, in it, or as an island grown out of the notch), shared by
   the dictation HUD and, later, the capture capsule.
-- `dictation_indicator`, `dot_scope`, `spring`: the HUD's events, phases,
+- `dictation/indicator`, `dot_scope`, `spring`: the HUD's events, phases,
   jobs, and Dot scope (the one HUD look: a plate of dots lit by a braided,
   auto-levelled oscilloscope trace), the same on every OS and drawn by
   `rune_hud`; `spring` holds the frame-rate-independent springs.

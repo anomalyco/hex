@@ -18,7 +18,7 @@ use x11rb::protocol::xproto::{ButtonIndex, ConnectionExt, EventMask, GrabMode, M
 use x11rb::rust_connection::RustConnection;
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
-use crate::desktop_host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts};
+use crate::desktop::host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts};
 use crate::linux::session::LinuxSession;
 
 /// Temporary pointer grab while Settings records a shortcut. Keyboard input

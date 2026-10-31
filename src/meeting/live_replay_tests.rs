@@ -24,9 +24,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::transcription::engine::{Offline, TranscriptionEngine};
+use crate::transcription::models::TranscriptionSelection;
 use crate::transcription::{Transcriber, WarmTranscriber};
-use crate::transcription_engine::{Offline, TranscriptionEngine};
-use crate::transcription_models::TranscriptionSelection;
 
 const PACKET_MS: u64 = 10;
 const DICTATION_EVERY: Duration = Duration::from_secs(30);

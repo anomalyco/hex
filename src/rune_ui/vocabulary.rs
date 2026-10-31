@@ -12,7 +12,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
 };
 use super::lists::remove_button;
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
@@ -140,7 +140,7 @@ pub(super) fn summary(ui: &Ui) -> String {
 /// none (Parakeet biases toward it; Whisper and Qwen3-ASR read it as a
 /// prompt).
 pub(super) fn unused_note(ui: &Ui) -> Option<String> {
-    let model = crate::transcription_models::definition(ui.settings.transcription.model);
+    let model = crate::transcription::models::definition(ui.settings.transcription.model);
     (!model.uses_vocabulary()).then(|| {
         tr_fill(
             "{} doesn't use these terms; rewriting and search still do",
@@ -321,9 +321,9 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.muted())
                 .wrap(),
         );
-    let biases = crate::transcription_models::definition(ui.settings.transcription.model)
+    let biases = crate::transcription::models::definition(ui.settings.transcription.model)
         .vocabulary_use()
-        == crate::transcription_models::VocabularyUse::Bias;
+        == crate::transcription::models::VocabularyUse::Bias;
     let unused = unused_note(ui).or_else(|| {
         (biases && !ui.settings.labs.vocabulary_biasing).then(|| {
             tr("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do")

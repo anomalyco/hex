@@ -526,8 +526,8 @@ pub struct StatusReport {
 }
 
 /// `StatusReport::update` for an updater status.
-pub fn update_label(status: &crate::desktop_host::DesktopUpdateStatus) -> &'static str {
-    use crate::desktop_host::DesktopUpdateStatus;
+pub fn update_label(status: &crate::desktop::host::DesktopUpdateStatus) -> &'static str {
+    use crate::desktop::host::DesktopUpdateStatus;
     match status {
         DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
         DesktopUpdateStatus::Available
@@ -665,10 +665,10 @@ pub struct ModelInfo {
 
 /// Every model `hex model` can name, with what this Mac has installed.
 pub fn model_infos(
-    selection: &crate::transcription_models::TranscriptionSelection,
+    selection: &crate::transcription::models::TranscriptionSelection,
 ) -> Vec<ModelInfo> {
-    use crate::transcription_models::VocabularyUse;
-    crate::transcription_models::MODELS
+    use crate::transcription::models::VocabularyUse;
+    crate::transcription::models::MODELS
         .iter()
         .filter(|model| model.available())
         .map(|model| ModelInfo {
@@ -676,7 +676,7 @@ pub fn model_infos(
             name: model.name.into(),
             languages: model.languages.iter().map(|&code| code.into()).collect(),
             size: model.size_label(),
-            installed: crate::transcription_models::is_installed(model, &selection.language),
+            installed: crate::transcription::models::is_installed(model, &selection.language),
             selected: model.id == selection.model,
             streams: model.streams,
             vocabulary: match model.vocabulary_use() {
@@ -697,11 +697,11 @@ pub fn model_selection(
     settings: &crate::app_settings::AppSettings,
     model: &str,
     language: Option<&str>,
-) -> Result<crate::transcription_models::TranscriptionSelection, ControlError> {
+) -> Result<crate::transcription::models::TranscriptionSelection, ControlError> {
     let id = model
-        .parse::<crate::transcription_models::TranscriptionModelId>()
+        .parse::<crate::transcription::models::TranscriptionModelId>()
         .ok()
-        .filter(|id| crate::transcription_models::definition(*id).available())
+        .filter(|id| crate::transcription::models::definition(*id).available())
         .ok_or_else(|| {
             ControlError::new(
                 "unknown-model",
@@ -714,8 +714,8 @@ pub fn model_selection(
     if let Some(language) = language {
         selection.language = language.into();
     }
-    let definition = crate::transcription_models::definition(id);
-    crate::transcription_models::validate(&selection).map_err(|error| {
+    let definition = crate::transcription::models::definition(id);
+    crate::transcription::models::validate(&selection).map_err(|error| {
         let supported = if definition.languages.contains(&"*") {
             "any language code Hex knows (en, de, fr, ja, …)".to_owned()
         } else {
@@ -1182,7 +1182,7 @@ mod tests {
 
     #[test]
     fn model_selection_keeps_the_remembered_language_and_validates_it() {
-        use crate::transcription_models::{TranscriptionModelId as Id, TranscriptionSelection};
+        use crate::transcription::models::{TranscriptionModelId as Id, TranscriptionSelection};
         let settings = crate::app_settings::AppSettings {
             transcription: TranscriptionSelection {
                 model: Id::ParakeetV3,

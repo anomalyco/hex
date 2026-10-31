@@ -22,7 +22,7 @@ use rune::compose::{Compositor, Frame};
 use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
-use crate::dictation_indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
+use crate::dictation::indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
 #[cfg(not(target_os = "macos"))]
 use crate::dot_scope::PLATE_HEIGHT;
 use crate::dot_scope::{self, MAX_DOTS};

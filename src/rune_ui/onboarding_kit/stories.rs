@@ -163,8 +163,8 @@ impl Rehearsal {
         (0.0..ANSWER_TRY.release).contains(&t)
     }
 
-    fn partial(&self, now: f64) -> Option<crate::transcription_engine::Partial> {
-        (self.streams && self.held(now)).then(|| crate::transcription_engine::Partial {
+    fn partial(&self, now: f64) -> Option<crate::transcription::engine::Partial> {
+        (self.streams && self.held(now)).then(|| crate::transcription::engine::Partial {
             stable: ANSWER_TRY.partial(self.elapsed(now)).to_owned(),
             tentative: String::new(),
         })

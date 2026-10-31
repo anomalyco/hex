@@ -6,8 +6,8 @@ use std::sync::mpsc::{Receiver, sync_channel};
 use std::thread;
 use std::time::Duration;
 
-use crate::desktop_i18n::tr;
-use crate::dictation_processor::ModelCatalog;
+use crate::desktop::i18n::tr;
+use crate::dictation::processor::ModelCatalog;
 
 /// How often a stopped OpenCode service is looked for again while a pane
 /// that needs it shows.
@@ -92,7 +92,7 @@ fn bounded_opencode_error(error: &str) -> String {
 pub(crate) fn start_model_catalog_load() -> Receiver<ModelCatalogState> {
     let (sender, receiver) = sync_channel(1);
     thread::spawn(move || {
-        let state = match crate::dictation_processor::load_model_catalog() {
+        let state = match crate::dictation::processor::load_model_catalog() {
             Ok(Some(catalog)) => ModelCatalogState::Loaded(catalog),
             Ok(None) => ModelCatalogState::NotRunning,
             Err(error) => {
@@ -206,7 +206,7 @@ pub(crate) fn provider_label(provider: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dictation_processor::ModelChoice;
+    use crate::dictation::processor::ModelChoice;
 
     fn example_choice(variants: Vec<String>) -> ModelChoice {
         ModelChoice {

@@ -757,7 +757,7 @@ pub fn notes_wanted() -> bool {
 /// `stop` was set meanwhile.
 pub(super) fn wait_for_dictation(stop: &AtomicBool) -> bool {
     let started = Instant::now();
-    while crate::transcription_engine::dictation_busy() && started.elapsed() < DICTATION_WAIT {
+    while crate::transcription::engine::dictation_busy() && started.elapsed() < DICTATION_WAIT {
         if stop.load(Ordering::Relaxed) {
             return false;
         }

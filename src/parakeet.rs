@@ -11,16 +11,16 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
 use crate::context::ContextSnapshot;
+use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
-use crate::dictation_processor::ProcessingObservation;
 use crate::gguf_session::OfflineGgufSession;
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
 use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
-use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
-use crate::transcription_models::{
+use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, model_path, validate,
 };
 
@@ -420,7 +420,7 @@ impl DictationWorker {
         let stream = clip.take_stream();
         let _capture = clip.take_capture_marker();
         let samples = clip.into_transcription_samples();
-        crate::dictation_diagnostics::persist(&samples);
+        crate::dictation::diagnostics::persist(&samples);
         let prepare_ms = submitted_at.elapsed().as_millis();
         let offline = {
             let control = control.clone();
@@ -666,9 +666,9 @@ fn run_processor_worker(
 /// Select processing when the worker reaches the job; the stage precedes processing.
 fn process_job_text(
     job: &ProcessorJob,
-    profiles: impl FnOnce() -> crate::dictation_processor::Profiles,
+    profiles: impl FnOnce() -> crate::dictation::processor::Profiles,
     processing: impl FnOnce(),
-) -> crate::dictation_processor::Processed {
+) -> crate::dictation::processor::Processed {
     let profiles = profiles();
     if profiles.processes(&job.context) {
         processing();
@@ -696,7 +696,7 @@ const WORD_DICTATION_WAIT: std::time::Duration = std::time::Duration::from_secs(
 #[cfg(hex_capture)]
 pub fn transcribe_with_words(
     engine: &std::sync::Weak<TranscriptionEngine>,
-    selection: &crate::transcription_models::TranscriptionSelection,
+    selection: &crate::transcription::models::TranscriptionSelection,
     samples: Vec<f32>,
 ) -> Result<crate::transcription::Transcript> {
     if samples.is_empty() {
@@ -706,7 +706,7 @@ pub fn transcribe_with_words(
         wait_for_dictation_idle()?;
         let selection = selection.clone();
         let (send, transcript) = mpsc::sync_channel(1);
-        let offline: crate::transcription_engine::Offline = Box::new(move |model, samples| {
+        let offline: crate::transcription::engine::Offline = Box::new(move |model, samples| {
             let _busy = DictationInference::begin();
             let transcriber = model
                 .activate(&selection)
@@ -1129,8 +1129,8 @@ fn paste_meeting_delta(
 }
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
-    model_path(crate::transcription_models::definition(
-        crate::transcription_models::TranscriptionModelId::default(),
+    model_path(crate::transcription::models::definition(
+        crate::transcription::models::TranscriptionModelId::default(),
     ))
 }
 
@@ -1143,7 +1143,7 @@ impl Parakeet {
 
     pub fn load_selection(selection: &TranscriptionSelection) -> Result<Self> {
         let definition = validate(selection)?;
-        if !crate::transcription_models::is_installed(definition, &selection.language) {
+        if !crate::transcription::models::is_installed(definition, &selection.language) {
             return Err(eyre!("{} is not installed", definition.name));
         }
         let path = model_path(definition)?;
@@ -1151,8 +1151,8 @@ impl Parakeet {
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
         let architecture = match definition.runtime {
-            crate::transcription_models::ModelRuntime::Gguf(artifact) => artifact.architecture,
-            crate::transcription_models::ModelRuntime::AppleSpeech => "",
+            crate::transcription::models::ModelRuntime::Gguf(artifact) => artifact.architecture,
+            crate::transcription::models::ModelRuntime::AppleSpeech => "",
         };
         parakeet.stream = parakeet.session.probe_stream(&stream_run, architecture);
         Ok(parakeet)
@@ -1258,7 +1258,7 @@ impl Parakeet {
                 return Err(eyre!(
                     "{} does not advertise support for {}",
                     definition.name,
-                    crate::transcription_models::language_name(&selection.language)
+                    crate::transcription::models::language_name(&selection.language)
                 ));
             }
             options.language = runtime_language;
@@ -1270,7 +1270,7 @@ impl Parakeet {
             options,
             name,
             selection: selection.cloned(),
-            max_audio_samples: crate::transcription_models::max_audio_chunk_samples(
+            max_audio_samples: crate::transcription::models::max_audio_chunk_samples(
                 &architecture,
                 capabilities.max_audio_ms,
             ),
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations() {
-        use crate::dictation_processor::{Profile, Profiles};
+        use crate::dictation::processor::{Profile, Profiles};
         use std::cell::Cell;
 
         for transformations in [vec![], vec!["fixture-transform".to_string()]] {
@@ -1694,8 +1694,8 @@ mod tests {
     #[test]
     #[ignore = "requires HEX_STREAM_MODEL (Unified English GGUF) and HEX_STREAM_WAVS (comma-separated)"]
     fn metal_stream_tracks_offline_transcription() {
+        use crate::transcription::engine::{Offline, Source, TranscriptionEngine};
         use crate::transcription::{Transcriber, WarmTranscriber};
-        use crate::transcription_engine::{Offline, Source, TranscriptionEngine};
 
         let selection = TranscriptionSelection::default();
         let mut model = Parakeet::load_from(
@@ -1892,7 +1892,7 @@ mod tests {
     #[cfg(hex_capture)]
     #[test]
     fn word_transcription_is_a_foreground_request_on_the_shared_engine() {
-        use crate::transcription_engine::Command as EngineCommand;
+        use crate::transcription::engine::Command as EngineCommand;
         let (engine, commands) = TranscriptionEngine::for_test();
         let engine = Arc::new(engine);
         let weak = Arc::downgrade(&engine);
@@ -2031,11 +2031,11 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "dictation_tail_tests.rs"]
+#[path = "dictation/tail_tests.rs"]
 mod dictation_tail_tests;
 
 #[cfg(test)]
-#[path = "dictation_corpus_tests.rs"]
+#[path = "dictation/corpus_tests.rs"]
 mod dictation_corpus_tests;
 
 /// Loads a GGUF model file directly, for opt-in harnesses that replay

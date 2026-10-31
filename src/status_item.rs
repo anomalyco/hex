@@ -9,8 +9,8 @@ use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::AppSettings;
-use crate::transcription_models::{MODELS, TranscriptionModelId};
-use crate::transcription_preparation::PreparationStatus;
+use crate::transcription::models::{MODELS, TranscriptionModelId};
+use crate::transcription::preparation::PreparationStatus;
 use crate::tray_menu::model_menu_entries;
 
 const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
@@ -292,7 +292,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         Some(add_item(
             &menu,
             &target,
-            &update_title(&crate::desktop_host::DesktopUpdateStatus::Checking),
+            &update_title(&crate::desktop::host::DesktopUpdateStatus::Checking),
             sel!(checkForUpdates:),
             mtm,
         ))
@@ -407,7 +407,7 @@ pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) 
         let entries = model_menu_entries(
             settings,
             status.model.is_some(),
-            crate::transcription_models::is_installed,
+            crate::transcription::models::is_installed,
         );
         for (model, item) in &controller.model_items {
             let entry = entries.iter().find(|entry| entry.model == *model);
@@ -426,7 +426,7 @@ pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) 
                 .model_preparing
                 .setTitle(&NSString::from_str(&format!(
                     "Preparing {}…",
-                    crate::transcription_models::definition(model).name,
+                    crate::transcription::models::definition(model).name,
                 )));
         }
         controller.model_error.setHidden(status.error.is_none());
@@ -510,8 +510,8 @@ fn menu_title(title: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
-fn update_title(status: &crate::desktop_host::DesktopUpdateStatus) -> String {
-    use crate::desktop_host::DesktopUpdateStatus;
+fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
+    use crate::desktop::host::DesktopUpdateStatus;
     match status {
         DesktopUpdateStatus::ReadyToRestart => "Restart to Update".into(),
         DesktopUpdateStatus::Available => "Download Update…".into(),
@@ -536,7 +536,7 @@ pub fn update_overlays_in_recordings(shown: bool) {
 
 /// Retitles the update item after the updater's status, so an update ready
 /// or available stays reachable from the menu bar.
-pub fn update_software(status: &crate::desktop_host::DesktopUpdateStatus) {
+pub fn update_software(status: &crate::desktop::host::DesktopUpdateStatus) {
     let title = update_title(status);
     STATUS_ITEM.with(|controller| {
         let controller = controller.borrow();

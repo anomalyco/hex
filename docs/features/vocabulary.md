@@ -121,7 +121,7 @@ Provisional defaults, each changed in one place:
 
 ```ts
 hex vocabulary listed in --help          // control/cli.rs: add #[command(hide = true)] to hide it
-Prompt wording                           // dictation_processor.rs: vocabulary_lines
+Prompt wording                           // dictation/processor.rs: vocabulary_lines
 Chapter prompt wording                   // meeting/chapters.rs: vocabulary_line
 Short-name rule                          // meeting/query.rs: SOUND_ALIKE_MIN_CONSONANTS
 Suggested terms                          // vocabulary.rs: SUGGESTED
@@ -131,7 +131,7 @@ Boost strengths (nats per term piece)    // vocabulary.rs: VocabularyBoost::nats
 Sources: [vocabulary.rs](../../src/vocabulary.rs),
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
 [meeting/query.rs](../../src/meeting/query.rs) (`vocabulary_aliases`,
-`sounds_alike`), [dictation_processor.rs](../../src/dictation_processor.rs)
+`sounds_alike`), [dictation/processor.rs](../../src/dictation/processor.rs)
 (`vocabulary_lines`), and [control.rs](../../src/control.rs)
 (`edit_vocabulary`).
 
@@ -144,7 +144,7 @@ folding hints, boost names);
 `recognition_hints_alias_the_vocabulary` in
 [control/settings.rs](../../src/control/settings.rs);
 `whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases` in
-[transcription_models.rs](../../src/transcription_models.rs);
+[transcription/models.rs](../../src/transcription/models.rs);
 `vocabulary_round_trips_and_stays_out_of_files_without_one` in
 [app_settings.rs](../../src/app_settings.rs);
 `a_vocabulary_term_finds_its_mis_transcriptions_below_exact_hits`,
@@ -168,7 +168,7 @@ trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 `add_term_scrolls_the_new_row_into_view`, and
 `the_vocabulary_row_says_when_the_model_ignores_the_list` in [rune_ui/tests.rs](../../src/rune_ui/tests.rs);
 `only_parakeet_based_models_use_the_vocabulary` in
-[transcription_models.rs](../../src/transcription_models.rs). Scenes:
+[transcription/models.rs](../../src/transcription/models.rs). Scenes:
 `mac-settings-vocabulary`, `mac-settings-vocabulary-empty`,
 `vocabulary-unused` (Whisper, no golden). Passed on macOS on
 2026-10-23; the unused-model note's checks have not been observed running. Not yet observed: the sheet edited in a running Hex, a CLI edit

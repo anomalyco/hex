@@ -5,7 +5,7 @@
 //! onto its own runtime.
 
 use crate::app_settings::AppSettings;
-use crate::transcription_models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
+use crate::transcription::models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
 
 /// One downloaded model in a menu's model picker.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,10 +45,10 @@ pub(crate) use tray::*;
 #[cfg(not(target_os = "macos"))]
 mod tray {
     use super::ModelMenuEntry;
-    use crate::desktop_host::DesktopUpdateStatus;
-    use crate::desktop_i18n::tr;
+    use crate::desktop::host::DesktopUpdateStatus;
+    use crate::desktop::i18n::tr;
     use crate::events::VoiceState;
-    use crate::transcription_models::TranscriptionModelId;
+    use crate::transcription::models::TranscriptionModelId;
 
     /// What a tray menu item asks for.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -217,8 +217,8 @@ mod tray {
     /// What the update item does for `status`, if it shows.
     pub(crate) fn update_action(
         status: &DesktopUpdateStatus,
-    ) -> Option<crate::desktop_host::DesktopAction> {
-        use crate::desktop_host::DesktopAction;
+    ) -> Option<crate::desktop::host::DesktopAction> {
+        use crate::desktop::host::DesktopAction;
         match status {
             DesktopUpdateStatus::ReadyToRestart => Some(DesktopAction::RestartIntoUpdate),
             DesktopUpdateStatus::Available => Some(DesktopAction::OpenUpdate),
@@ -231,7 +231,7 @@ mod tray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_models::TranscriptionSelection;
+    use crate::transcription::models::TranscriptionSelection;
 
     #[test]
     fn model_menu_only_lists_downloaded_models_with_their_remembered_language() {
@@ -268,7 +268,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn tray_menu_ids_round_trip_and_show_the_state() {
-        use crate::desktop_host::DesktopUpdateStatus;
+        use crate::desktop::host::DesktopUpdateStatus;
         use crate::events::VoiceState;
         let settings = AppSettings::default();
         let models = model_menu_entries(&settings, false, |model, _| {

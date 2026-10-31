@@ -25,7 +25,7 @@ use super::controls::{
 use super::lists::{list_row, source_list};
 use super::platform::Os;
 use crate::app_settings::IndicatorPosition;
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::feedback::{self, Audition, Cue, SoundSet};
 use crate::rune_hud::{BOTTOM_OFFSET, TOP_OFFSET};
 

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 
-use crate::desktop_host::DesktopAction;
+use crate::desktop::host::DesktopAction;
 use crate::linux::app::{HostHandle, HostRequest, HostSnapshot};
 use crate::linux::input::ShortcutCommand;
 use crate::linux::service::{Activation, Control, Published};
@@ -108,7 +108,7 @@ pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
             crate::tray_menu::model_menu_entries(
                 &snapshot.settings,
                 desktop.transcription.preparing.is_some(),
-                crate::transcription_models::is_installed,
+                crate::transcription::models::is_installed,
             ),
         )
     }
