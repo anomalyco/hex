@@ -43,6 +43,10 @@ const CARD_TOP: f32 = 0.0;
 const HUD_CENTRE: [f32; 2] = [CENTRE_X, 416.0];
 /// The keys behind the HUD go dark around it, this far out from its centre.
 const POCKET: [f32; 2] = [136.0, 58.0];
+/// The HUD has collapsed away this long after the answer's release.
+const HUD_GONE: f64 = 0.74;
+/// How long the pocket takes to fill back in once the HUD has gone.
+const REFILL: f64 = 0.3;
 const HUD_SCALE: f32 = 1.05;
 const CALM: f32 = 0.20;
 const BURST: f64 = 0.04;
@@ -430,6 +434,12 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         Some(_) => FROZEN + (MELTED - FROZEN) * melt_u,
         None => keyboard_level(s),
     };
+    // Once the HUD has gone, the keys behind it fill back in.
+    let pocket_u = melt_u
+        * (1.0
+            - take_time(s).map_or(0.0, |take| {
+                smoothstep(((take - ANSWER_JAY.release - HUD_GONE) / REFILL) as f32)
+            }));
     let deck = [(STAGE_W - kw) * 0.5, STAGE_H - kh];
     let pocket = [HUD_CENTRE[0] - deck[0], HUD_CENTRE[1] - deck[1]];
     let kb_el = keyboard_lit(
@@ -444,7 +454,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             hollow: &|[x, y, w, h]| {
                 let dx = (x + w * 0.5 - pocket[0]) / POCKET[0];
                 let dy = (y + h * 0.5 - pocket[1]) / POCKET[1];
-                melt_u * (1.0 - smoothstep(((dx * dx + dy * dy).sqrt() - 1.0) / 0.35))
+                pocket_u * (1.0 - smoothstep(((dx * dx + dy * dy).sqrt() - 1.0) / 0.35))
             },
         },
     );
