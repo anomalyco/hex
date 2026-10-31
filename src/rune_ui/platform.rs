@@ -266,7 +266,7 @@ pub(super) enum ScrawlRequest {
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
-    pub(super) input_sources: Vec<crate::keyboard_model_switching::InputSource>,
+    pub(super) input_sources: Vec<crate::transcription::keyboard_model_switching::InputSource>,
     /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
     /// none.

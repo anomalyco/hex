@@ -11,8 +11,8 @@ use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEve
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
-use crate::local_transcriber::LocalTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::TranscriptionSelection;
 use crate::windows::input::WindowsHotkey;
 use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
@@ -83,7 +83,7 @@ pub struct WindowsDictationConfig {
     /// Terminal paste: Ctrl+Shift+V instead of Ctrl+V.
     pub paste_with_shift: bool,
     /// Where the listener reports a model change that failed to load.
-    pub swap_failures: Option<mpsc::Sender<crate::local_transcriber::SwapFailed>>,
+    pub swap_failures: Option<mpsc::Sender<crate::transcription::local_transcriber::SwapFailed>>,
     /// What the tray asks of the listener.
     pub commands: Option<mpsc::Receiver<ListenerCommand>>,
 }
@@ -237,7 +237,7 @@ pub fn run(
     let mut while_dictating = while_dictating;
     let mut audio_suppressor =
         crate::windows::audio_control::AudioSuppressor::start(while_dictating);
-    let mut model = crate::local_transcriber::ModelSwap::new(selection);
+    let mut model = crate::transcription::local_transcriber::ModelSwap::new(selection);
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
     // The local API transcribes host audio on this engine's model.
     engine.share();

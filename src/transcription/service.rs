@@ -16,7 +16,7 @@ use crate::transcription::models::TranscriptionSelection;
 #[cfg(target_os = "macos")]
 type WarmTranscriber = crate::transcription::WarmTranscriber;
 #[cfg(not(target_os = "macos"))]
-type WarmTranscriber = crate::local_transcriber::WarmLocal;
+type WarmTranscriber = crate::transcription::local_transcriber::WarmLocal;
 
 const COMMAND_CAPACITY: usize = 1;
 const MIN_SAMPLE_RATE: u32 = 8_000;

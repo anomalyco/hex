@@ -14,7 +14,6 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
-mod background_priority;
 mod background_process;
 #[cfg(target_os = "macos")]
 mod browser_media;
@@ -28,11 +27,6 @@ mod config;
 mod context;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
-#[cfg(all(
-    target_arch = "x86_64",
-    any(target_os = "linux", target_os = "windows")
-))]
-mod cpu_floor;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 mod dashboard;
 mod desktop;
@@ -50,8 +44,6 @@ mod events;
 mod feedback;
 mod file_dialog;
 mod filler_words;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod gguf_session;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod hex_microphone;
 mod history;
@@ -66,14 +58,11 @@ mod keyboard;
 #[cfg_attr(target_os = "windows", path = "keyboard_input_sources/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "keyboard_input_sources/x11.rs")]
 mod keyboard_input_sources;
-mod keyboard_model_switching;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
 mod live_text;
 mod local_api;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-mod local_transcriber;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod login_item;
 #[cfg(target_os = "macos")]
@@ -91,7 +80,6 @@ mod output_ducking;
 mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
-mod pause_segmenter;
 #[cfg(target_os = "macos")]
 mod permission_guide;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -104,7 +92,6 @@ mod recognition;
 mod recording_environment;
 mod rune_hud;
 mod rune_ui;
-mod speech_detector;
 mod spoken_formatting;
 mod spoken_symbols;
 mod spring;
@@ -113,7 +100,6 @@ mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
 mod text_replacements;
-mod transcript;
 mod transcript_cli;
 mod transcription;
 mod tray_menu;
@@ -909,7 +895,7 @@ mod tests {
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
-    cpu_floor::require();
+    transcription::cpu_floor::require();
     linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
@@ -920,6 +906,6 @@ fn main() -> Result<()> {
     windows::restrict_dll_search();
     windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
-    cpu_floor::require();
+    transcription::cpu_floor::require();
     windows::run(&SHUTDOWN)
 }

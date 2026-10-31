@@ -24,7 +24,7 @@ use windows_sys::Win32::System::Console::{
 
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
-use crate::local_transcriber::LocalTranscriber;
+use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
 const DEFAULT_MODEL: &str = "parakeet_unified_en";
@@ -260,7 +260,7 @@ fn detach_from_console() {
 /// Feeds the clip to a live stream as capture would, holding back the last
 /// 200 ms as the release tail, then measures each path's release latency.
 fn stream_bench(wav: &Path, speed: f64, selection: &TranscriptionSelection) -> Result<()> {
-    let samples = crate::local_transcriber::read_wav_for_parakeet(wav)?;
+    let samples = crate::transcription::local_transcriber::read_wav_for_parakeet(wav)?;
     let audio_ms = samples.len() / 16;
     let mut transcriber = LocalTranscriber::load(selection)?;
     // A warm app has already run inputs of this size; exclude first-run setup.

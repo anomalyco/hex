@@ -19,8 +19,8 @@ use crate::linux::input::{
 };
 use crate::linux::paste::LinuxPaster;
 use crate::linux::rune_hud::LinuxIndicator;
-use crate::local_transcriber::LocalTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 /// How long past the tail a release waits for audio that never arrives.
@@ -212,7 +212,7 @@ pub(crate) fn run(
     let mut settings = settings.clone();
     let transcriber =
         transcriber.map_or_else(|| LocalTranscriber::load(&settings.transcription), Ok)?;
-    crate::speech_detector::prewarm();
+    crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
@@ -368,7 +368,8 @@ pub(crate) fn run(
     };
     // Updates wait for a moment without a recording.
     let mut next_settings: Option<AppSettings> = None;
-    let mut model = crate::local_transcriber::ModelSwap::new(&settings.transcription);
+    let mut model =
+        crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription);
     let mut next_suspended: Option<bool> = None;
     // A press that arrived while the released microphone was opening;
     // recording starts at its first chunk.

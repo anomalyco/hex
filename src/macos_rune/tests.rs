@@ -33,7 +33,7 @@ impl Fixture {
         ));
         Self {
             runtime: Runtime {
-                keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+                keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
                     settings.keyboard_model_switching.clone(),
                     Some("ABC".into()),
                 ),

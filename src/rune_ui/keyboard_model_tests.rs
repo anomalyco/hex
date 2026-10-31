@@ -60,11 +60,13 @@ fn keyboard_model_switching_is_a_labs_toggle_wherever_layouts_are_observable() {
 fn keyboard_model_switching_maps_enabled_sources_to_an_installed_model_and_language() {
     use crate::app_settings::KeyboardModelChoice;
     let mut rt = runtime("mac-settings");
-    rt.state.platform.input_sources = vec![crate::keyboard_model_switching::InputSource {
-        id: "com.apple.keylayout.Spanish".into(),
-        name: "Spanish".into(),
-        languages: vec!["es".into()],
-    }];
+    rt.state.platform.input_sources = vec![
+        crate::transcription::keyboard_model_switching::InputSource {
+            id: "com.apple.keylayout.Spanish".into(),
+            name: "Spanish".into(),
+            languages: vec!["es".into()],
+        },
+    ];
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
     rt.state.advanced = vec![Pane::General];
     rt.state.settings.keyboard_model_switching.enabled = true;

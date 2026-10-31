@@ -567,7 +567,7 @@ fn run_runtime(
     listener_failure: Arc<Mutex<Option<String>>>,
 ) {
     let mut runtime = Runtime {
-        keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+        keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
             initial_input_source,
         ),
@@ -617,7 +617,7 @@ fn same_model_and_language(left: &TranscriptionSelection, right: &TranscriptionS
 struct Runtime {
     settings: AppSettings,
     preparation: TranscriptionPreparation,
-    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     automatic_preparation: bool,
     /// Starts the listener once setup is ready; `None` once started.
     recognition_start: Option<SyncSender<()>>,

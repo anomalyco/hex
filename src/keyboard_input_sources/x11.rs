@@ -6,7 +6,7 @@ use x11rb::protocol::xkb::{self, ConnectionExt as _, NameDetail};
 use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
-use crate::keyboard_model_switching::InputSource;
+use crate::transcription::keyboard_model_switching::InputSource;
 
 /// The core keyboard (`XkbUseCoreKbd`).
 const CORE_KEYBOARD: xkb::DeviceSpec = 0x0100;

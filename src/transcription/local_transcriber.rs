@@ -5,7 +5,7 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
-use crate::gguf_session::OfflineGgufSession;
+use crate::transcription::gguf_session::OfflineGgufSession;
 use crate::transcription::models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
@@ -231,7 +231,7 @@ impl LocalTranscriber {
         let variant = model.variant();
         let architecture = model.arch();
         let capabilities = model.capabilities()?;
-        let language = crate::gguf_session::validate_gguf_artifact(
+        let language = crate::transcription::gguf_session::validate_gguf_artifact(
             &path,
             definition,
             &architecture,
@@ -350,14 +350,14 @@ impl LocalTranscriber {
     pub(crate) fn transcribe_segments(
         &mut self,
         mut samples: Vec<f32>,
-    ) -> Result<crate::transcript::Transcript> {
+    ) -> Result<crate::transcription::transcript::Transcript> {
         crate::dictation::pad_for_parakeet(&mut samples);
         self.timed(&samples)
     }
 
     /// Text, segments, and words, in chunks the model takes whole.
-    fn timed(&mut self, samples: &[f32]) -> Result<crate::transcript::Transcript> {
-        use crate::transcript::TranscriptSegment;
+    fn timed(&mut self, samples: &[f32]) -> Result<crate::transcription::transcript::Transcript> {
+        use crate::transcription::transcript::TranscriptSegment;
         const CHUNK: usize = 30 * 16_000;
         let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
         let options = RunOptions {
@@ -372,7 +372,7 @@ impl LocalTranscriber {
                 text,
             })
         };
-        let mut timed = crate::transcript::Transcript::default();
+        let mut timed = crate::transcription::transcript::Transcript::default();
         let mut texts = Vec::new();
         for (index, part) in samples.chunks(chunk.max(1)).enumerate() {
             let offset = (index * chunk / 16) as i64;

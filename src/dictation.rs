@@ -224,7 +224,7 @@ impl DictationClip {
         }
         let released = self.samples.len().saturating_sub(self.tail_samples);
         let started = std::time::Instant::now();
-        match crate::speech_detector::contains_speech(&self.samples[..released]) {
+        match crate::transcription::speech_detector::contains_speech(&self.samples[..released]) {
             Some(false) => {
                 tracing::info!(
                     level_dbfs,
@@ -1009,10 +1009,10 @@ mod tests {
     fn speech_detector_discards_loud_captures_without_speech() {
         let clip = |samples: Vec<f32>| DictationClip::for_test(samples);
         {
-            let _detector = crate::speech_detector::override_for_test(Some(false));
+            let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
             assert!(clip(tone(0.1, 16_000).collect()).is_near_silent());
         }
-        let _detector = crate::speech_detector::override_for_test(Some(true));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(true));
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
         // The level gate runs first: a silent capture never reaches the
         // detector.
@@ -1311,7 +1311,7 @@ mod tests {
 
     /// Speech with pauses ending near 4.3 s and 9.3 s, at `sample_rate`.
     fn paused_speech(sample_rate: u32) -> Vec<f32> {
-        let speech = crate::pause_segmenter::tests::utterance(
+        let speech = crate::transcription::pause_segmenter::tests::utterance(
             &[(4_000, 1_000), (4_000, 1_000), (2_000, 0)],
             -70.0,
         );
