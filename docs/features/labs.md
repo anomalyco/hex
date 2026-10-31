@@ -11,7 +11,7 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
+below is `Everyone` except Words to cursor, which is `Dev`. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -45,6 +45,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
+├── Words to cursor no    labs.words_to_caret          (macOS, Dev) a pasted dictation's words fly from the HUD to where they landed
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -394,6 +395,46 @@ Checks: `benchmark_details_show_raw_rates_and_mark_unknowns`,
 rendered with the toggle on; there is no `--snap` scene for it, and the Labs
 page goldens need regenerating on Linux with the new row.
 
+Words to cursor (`words-to-caret`, macOS, Dev builds only): while on, a pasted dictation's
+first 14 words fly from the HUD's plate to where they landed in the focused
+app, one after another, and glow over the real text as they fade.
+
+```ts
+Dictation pastes (Paste or Raw paste, not Copy dictation only; Paste last dictation too)
+├── paste returns Ok -> words_to_caret::pasted(text)   // never waits; a busy thread drops the flight
+└── words-to-caret thread                            // each AX call bounded by 50 ms
+    ├── secure input on, or a password field -> no flight
+    ├── the text before the cursor reads as the dictation within wait_ms (250)
+    │   -> each word flies to its own AXBoundsForRange rect; a word without a believable rect stays put
+    ├── never reads that way -> every word flies into the caret
+    │   (AXBoundsForRange at the cursor, else Chromium's AXBoundsForTextMarkerRange)
+    ├── no believable caret, focus is a text field -> into the field near its leading edge
+    └── nothing -> no flight; never an AXWindow, never a rect outside the focused window
+Dictation starts -> AXManualAccessibility on the frontmost app (Chromium and Electron wake their tree)
+Reduce Motion -> the overlay draws nothing
+```
+
+The gate, `labs::words_to_caret()`, is read where the work starts (the
+paste's hand-off and the dictation-start wake); off, no thread starts and no
+Accessibility call is made. The flight is a click-through Rune overlay above
+the status bar (`rune_ui::words_to_caret`), placed over just the HUD, the
+landing rects, and room for the arcs, and hidden once every word is gone; it
+never takes focus or a click and never touches the clipboard. A caret is
+believable when it's 4-200 points tall, at most 40 wide, and inside the
+focused window (Chromium's unanswered `(0, screen height, 0, 0)` is not).
+The timings are knobs in `~/.config/hex/words-to-caret.json`, read as each
+flight launches: `duration_ms` (300), `stagger_ms` (28), `bend` (0.16),
+`overshoot` (0.9), `launch_size` (15), `land_push` (10), `land_hz` (8.5),
+`land_damping` (0.55), `fade_ms` (260), `glow` (0.6), `max_words` (14),
+`wait_ms` (250).
+Checks: `only_a_believable_caret_inside_the_window_counts` and
+`words_are_counted_in_utf16_units` in
+[accessibility.rs](../../src/accessibility.rs); the fallbacks and tuning in
+[words_to_caret.rs](../../src/words_to_caret.rs); layout and motion in
+[rune_ui/words_to_caret.rs](../../src/rune_ui/words_to_caret.rs);
+`words_to_caret_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). The overlay has no golden scene.
+
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
 restore (Labs › Keep dictation on clipboard skips it on macOS), the
@@ -565,7 +606,7 @@ Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 [panes.rs](../../src/rune_ui/tests/panes.rs);
 `every_feature_is_off_by_default_and_round_trips` and
 `the_old_master_switch_is_read_and_ignored` in [labs.rs](../../src/labs.rs);
-`a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature, since none exists yet); `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
+`a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature) and `words_to_caret_runs_only_in_dev_builds`; `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
 `status_reads_for_a_person` and
 `status_reports_labs_and_reads_older_replies_without_it` in
 [control/cli.rs](../../src/control/cli.rs);

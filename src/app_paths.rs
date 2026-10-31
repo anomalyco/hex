@@ -98,6 +98,12 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
     user_config_dir()
 }
 
+/// Labs › Words to cursor's timings, read as each flight launches.
+#[cfg(target_os = "macos")]
+pub fn words_to_caret_tuning_file() -> Result<PathBuf> {
+    Ok(user_config_dir()?.join("words-to-caret.json"))
+}
+
 /// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
 fn user_config_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;

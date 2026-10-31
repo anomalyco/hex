@@ -1390,6 +1390,9 @@ pub struct LabsSettings {
     /// The Local transcription picker shows each model's raw error rate
     /// (WER or CER), its benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
+    /// A pasted dictation's words fly from the HUD to the text cursor
+    /// (macOS).
+    pub words_to_caret: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1418,6 +1421,7 @@ impl Default for LabsSettings {
             sided_modifier_chords: false,
             tap_or_hold: false,
             benchmark_details: false,
+            words_to_caret: false,
         }
     }
 }

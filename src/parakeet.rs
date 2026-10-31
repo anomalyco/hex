@@ -575,11 +575,18 @@ fn run_output_worker(
     events: &mpsc::Sender<WorkerEvent>,
 ) {
     let mut paster = Paster::new(activity);
-    let mut last_transcript = None;
+    // Debug builds: a last dictation to paste again and again (Option-Shift-V,
+    // `hex paste-last`) without a microphone, as for tuning Labs › Words to
+    // cursor.
+    let mut last_transcript = cfg!(debug_assertions)
+        .then(|| std::env::var("HEX_DEV_LAST_DICTATION").ok())
+        .flatten()
+        .filter(|text| !text.trim().is_empty());
     let mut ordered = OrderedOutputs::default();
     while let Ok(job) = jobs.recv() {
         if matches!(job, OutputJob::PreparePaste) {
             paster.prepare();
+            crate::words_to_caret::wake();
             continue;
         }
         for job in ordered.push(job) {
@@ -1023,7 +1030,11 @@ fn finish_output(
                             } else {
                                 PasteMode::Continue
                             };
-                            paste(&completed.text, mode, &commit)
+                            paste(&completed.text, mode, &commit).inspect(|()| {
+                                if !matches!(mode, PasteMode::CopyOnly) {
+                                    crate::words_to_caret::pasted(&completed.text);
+                                }
+                            })
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
@@ -1088,6 +1099,7 @@ fn finish_output(
                     .and_then(|text| {
                         paste(text, PasteMode::Continue, &|| true)
                             .map_err(|error| error.to_string())?;
+                        crate::words_to_caret::pasted(text);
                         Ok(text.to_string())
                     }),
                 PasteKind::MeetingDelta => {

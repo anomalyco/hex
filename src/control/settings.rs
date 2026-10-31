@@ -358,6 +358,11 @@ const KEYS: &[Key] = &[
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
     ),
     key(
+        "labs.words_to_caret",
+        Kind::Bool,
+        "Labs: pasted words fly from the HUD to the text cursor (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

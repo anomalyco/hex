@@ -275,6 +275,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Tap or hold"),
                 tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
             ));
+            // Reads the cursor's position through macOS Accessibility.
+            rows.push(row(
+                Feature::WordsToCaret,
+                &HINTS,
+                tr("Words to cursor"),
+                tr("Pasted words fly from the HUD to the text cursor"),
+            ));
         }
     }
     rows.push(row(
@@ -365,6 +372,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
+        Feature::WordsToCaret => "lab-words-to-caret",
     }
 }
 
