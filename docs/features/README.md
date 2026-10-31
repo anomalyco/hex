@@ -574,8 +574,13 @@ General                                  // settings
 │   │   ├── Stand-ins never include virtual or aggregate inputs (macOS: e.g. Microsoft Teams Audio)
 │   │   │   ├── Nothing real left -> "lid is closed" / "no microphone" error, not silence
 │   │   │   └── A virtual default, saved device, or `--device` is still used as named
-│   │   └── Default is Bluetooth (macOS, Advanced switch on) -> Built-in mic, else first wired/USB input
+│   │   └── Default is Bluetooth (Advanced switch on) -> Built-in mic, else first wired/USB input
 │   │       ├── Row says "KIT PODS is Bluetooth, so Hex listens to MacBook Pro Microphone"
+│   │       ├── Windows: WASAPI `BTHENUM`, or a headset/handset endpoint of unknown bus (`BTHHFENUM`)
+│   │       ├── Linux: a `bluez5` default source; Hex opens ALSA's default, then moves its own
+│   │       │   stream to the PCI input, else the first other hardware source (pactl, PipeWire);
+│   │       │   the stream is marked so WirePlumber never remembers the move. A Bluetooth
+│   │       │   default chosen while Hex's stream is open is followed until the next open
 │   │       ├── No other usable input (or lid closed, Bluetooth only) -> the Bluetooth default
 │   │       └── A saved Bluetooth mic or `--device` is always used as named
 │   ├── Saved device missing -> System default stands in, value names it
@@ -588,12 +593,13 @@ General                                  // settings
 │   ├── Collapse -> drops a pending release confirmation
 │   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
 │   │   Double-tap only, Microphone mode, keyboard-language model switching (macOS),
-│   │   Use the Mac's microphone instead of Bluetooth (macOS),
+│   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
+│   │   microphone instead of Bluetooth"),
 │   │   Share dictation shortcut with other apps (Windows), Recognition hints
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux, Windows)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
-├── Use the Mac's microphone instead of Bluetooth (Advanced, macOS, on)
+├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Share dictation shortcut with other apps (Advanced, Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
@@ -602,7 +608,7 @@ General                                  // settings
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
-├── While dictating -> Mute / Pause media / Lower audio (macOS) / Do nothing
+├── While dictating -> Mute / Pause media / Lower audio / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
@@ -638,10 +644,14 @@ Pause media + Also pause the browser     // browser_media
         ├── Never a level and a browser opened its output -> stop listening
         └── Silent throughout (tab closed or reloaded: the play reached another app) -> send pause once
 
-Intentional recording                    // recording.environment
-├── Acquire native macOS no-idle-sleep assertion
+Intentional recording                    // recording.environment, idle_sleep
+├── Prevent idle sleep
+│   ├── macOS -> IOKit no-idle-sleep assertion
+│   ├── Linux -> logind `idle:sleep` inhibitor; `idle` only where polkit refuses a
+│   │   process outside the seat session (Hex's user service) to block sleep
+│   ├── Windows -> system-required power request (from the press, as its While dictating does)
 │   └── Failure -> Warn and continue recording
-└── Finish/cancel -> Release the assertion
+└── Finish/cancel -> Release it
     // no caffeinate child process or executable-policy dialog
 ```
 
@@ -655,8 +665,8 @@ or Bluetooth output no longer silences tones until Hex restarts
 [feedback.rs](../../src/feedback.rs), with injected opens; a real unplug has not
 been observed by a test.
 
-On macOS, **Lower audio** (`recording.environment.duck`) is an explicit fourth
-choice, off by default. The slider appears only while selected and saves on
+**Lower audio** (`recording.environment.duck`) is an explicit fourth
+choice, off by default, on every OS. The slider appears only while selected and saves on
 release. It remembers its value across behavior changes. Intentional captures
 ramp the original output channels to that fraction over
 one second, preserving balance and silent channels, then restore on finish,
@@ -664,11 +674,17 @@ cancel, or orderly shutdown. Changes apply to the next capture. The stop tone
 waits for restoration. A manually changed volume after settling is left alone;
 a newly selected output device is not lowered. Fixed-volume devices and outputs
 whose channel balance cannot be safely restored are left unchanged. Meetings do
-not acquire this dictation environment. Linux and Windows do not offer ducking.
+not acquire this dictation environment. Linux lowers the default sink's
+channels through `pactl` (one volume through `wpctl` without it), so Hex's own
+tones are lowered too and the stop tone waits, as on macOS. Windows lowers
+every other app's audio session instead, leaving Hex's tones at full volume;
+sessions that start while recording are left alone.
 
-HEX snapshots the output channels and applies a smooth volume ramp in
-[ducking.rs](../../src/recording_environment/ducking.rs), managed by the recording
-environment. The worker runs inside the app and cannot restore volume after a
+HEX snapshots the volumes and applies a smooth ramp in
+[output_ducking.rs](../../src/output_ducking.rs) over the CoreAudio adapter in
+[ducking.rs](../../src/recording_environment/ducking.rs), the sink adapter in
+[linux_audio_control.rs](../../src/linux_audio_control.rs), and the session
+adapter in [windows_audio_control.rs](../../src/windows_audio_control.rs). The worker runs inside the app and cannot restore volume after a
 hard process crash or SIGKILL. Changes during the ramp itself cannot be
 distinguished from delayed Bluetooth acknowledgements.
 Fake-device tests cover relative volume, balance, silence, interrupted ramps,
@@ -687,6 +703,17 @@ were visually inspected. The earlier macOS-generated references were replaced
 because these fixtures retain build-OS-dependent layout and defaults. This
 verifies headless Linux rendering, not audible playback, physical devices,
 crash recovery, or native Windows execution.
+
+The Linux and Windows ports (2026-10-30) were checked by unit tests (pactl and
+wpctl volume parsing, the Linux Bluetooth stand-in choice), the Settings test
+that Lower audio and its slider appear on every OS, Linux Clippy, and Windows
+x86_64 cross-Clippy. On apollo (niri, PipeWire), the ignored
+`native_idle_sleep_prevention_acquires_and_releases` took a logind `idle`
+inhibitor (polkit refused `idle:sleep` over SSH), and a marked `arecord`
+stream moved with `pactl move-source-output` without WirePlumber storing the
+target. Not verified: audible Linux or Windows ducking, Windows idle-sleep
+and Bluetooth detection on hardware, a real Bluetooth headset on Linux, and
+Windows ARM64 (its cross-build stops in `rquickjs-sys` on this host).
 
 Successful settings saves persist and project changes at safe runtime boundaries.
 Immediate settings controls commit a candidate before changing the saved UI

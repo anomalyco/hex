@@ -339,10 +339,11 @@ observe input-source changes or show these controls.
 - Optional settings take `none` to clear them.
 - `microphone` takes a device name exactly as Settings lists it, or
   `system-default` (or `none`) to follow the OS default input.
-- `avoid_bluetooth_microphone` (macOS, default on) makes System default record
-  from the Mac's built-in microphone, else another wired or USB input, when
-  the OS default is a Bluetooth headset, so its audio stays out of call
-  quality. A saved microphone and `--device` are always used as named.
+- `avoid_bluetooth_microphone` (default on) makes System default record from
+  the built-in microphone, else another wired or USB input, when the OS
+  default is a Bluetooth headset, so its audio stays out of call quality (on
+  Linux, Hex moves its PipeWire stream off a Bluetooth default source). A
+  saved microphone and `--device` are always used as named.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, `f5`, or `left-option+right-option` (both Options
   held together). `left-` and `right-` apply to shortcuts without a key. On macOS, Windows and X11, `mouse4` and `option+mouse4`
@@ -372,7 +373,8 @@ observe input-source changes or show these controls.
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
 
-`recording_audio_behavior` also accepts `duck` on macOS.
+`recording_audio_behavior` also accepts `duck` (Lower audio): macOS and Linux
+lower the default output, Windows lowers other apps' audio sessions.
 `recording_duck_volume` sets the fraction of the original output volume (0–1,
 default 0.2), applied on the next intentional capture when ducking is selected.
 
