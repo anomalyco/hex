@@ -351,21 +351,6 @@ pub struct ModelCatalog {
     pub default_variant: Option<String>,
 }
 
-impl ModelChoice {
-    /// The request-shaped model this catalog entry selects.
-    pub fn model(&self) -> Model {
-        let (provider, id) = self
-            .key
-            .split_once('/')
-            .unwrap_or((self.provider.as_str(), self.key.as_str()));
-        Model {
-            provider: provider.into(),
-            id: id.into(),
-            variant: None,
-        }
-    }
-}
-
 impl ModelCatalog {
     pub fn recommended_variant_for(&self, key: &str) -> Option<&str> {
         let choice = self.models.iter().find(|choice| choice.key == key)?;
