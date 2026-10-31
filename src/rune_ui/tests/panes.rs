@@ -367,7 +367,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 1600.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     tap(&mut rt, "nav-labs");
     for row in [
         "lab-mouse-shortcuts",
@@ -1567,7 +1567,7 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 
 #[test]
 fn labs_is_one_flat_list_of_toggles_off_by_default() {
-    let mut rt = runtime("mac-production", true, (980.0, 1400.0));
+    let mut rt = runtime("mac-production", true, (980.0, 2000.0));
     rt.state.settings.experimental.hex_microphone = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
@@ -1625,7 +1625,7 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
 
 #[test]
 fn labs_run_setup_again_opens_the_first_run() {
-    let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
     assert!(rt.state.first_run.is_none());
     tap(&mut rt, "restart-onboarding");
     assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
@@ -1635,7 +1635,7 @@ fn labs_run_setup_again_opens_the_first_run() {
 #[test]
 fn run_setup_again_opens_the_first_run_on_linux_and_windows() {
     for scene in ["portal", "windows-settings"] {
-        let mut rt = runtime(scene, true, (980.0, 1400.0));
+        let mut rt = runtime(scene, true, (980.0, 2000.0));
         tap(&mut rt, "nav-labs");
         tap(&mut rt, "restart-onboarding");
         assert!(rt.state.error.is_none(), "{scene}: {:?}", rt.state.error);
