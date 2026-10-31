@@ -223,11 +223,22 @@ Choose a supported language              // setup.language-conditioning; macOS +
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
 │   └── Recognition hints -> initial prompt; output that only repeats them is dropped
+├── Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Recognition hints -> context prompt in the
+│   system message; output that only repeats them is dropped
 └── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 
-Whisper reads the recognition hints as its initial prompt and, on silence or
-noise, often returns them verbatim. A segment whose text equals the hints after
+Whisper reads the recognition hints as its initial prompt and Qwen3-ASR
+(including QwenCleo) as the context prompt in its system message
+([#129](https://github.com/anomalyco/hex/issues/129)); `apply_recognition_hints`
+in [gguf_session.rs](../../src/gguf_session.rs) picks the slot on every OS, so
+dictation, meetings, and the local API on the listener's model all get them.
+Live streams run without them. Observed on apollo (Vulkan, 2026-10-31,
+LibriSpeech test-clean): with Qwen3-ASR 0.6B, hints "Kaffar, Rodolfo,
+Bragelonne, …" fixed Caffer, Rudolpho, Redolfo, Rudolph, and Bragolon in 10
+clips without changing the others checked. Both families, on silence or noise,
+often return the hints verbatim (Qwen3-ASR 0.6B did on 3 s of silence and of
+noise). A segment whose text equals the hints after
 normalization (case, ASCII punctuation, spelled-out digits; commas, semicolons
 and line breaks separate words) is removed, in dictation, meetings, and the
 local API alike. The filter needs at least two hints, so dictating the one
@@ -238,7 +249,8 @@ kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
 `hints_without_spaces_after_commas_are_matched` in
 [gguf_session.rs](../../src/gguf_session.rs).
 
-Only Whisper takes recognition hints. Saved hints for a model that can't use
+Whisper, Qwen3-ASR 0.6B, and QwenCleo-ASR 1.7B take recognition hints, and
+Settings shows the field only for them. Saved hints for a model that can't use
 them (for example Parakeet Unified English, set by hand in `settings.json`) are
 cleared with a logged warning when settings load, rather than failing the whole
 load and leaving the listener off
@@ -1602,7 +1614,7 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── Otherwise the service's own copy of the requested model
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
-│   │                                     // only Whisper hint echoes are dropped
+│   │                                     // only recognition-hint echoes are dropped
 │   └── Linux, Windows -> serviceCapture false, 404 service-capture-unavailable
 └── Distribution
     ├── SDK 0.3.0 -> Published
