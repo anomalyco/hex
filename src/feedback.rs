@@ -18,8 +18,11 @@ mod imessage;
 /// Auditionable key-sound styles for the onboarding typing demo.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum KeySoundStyle {
-    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse (default).
+    /// A real mechanical keyboard, presses cut from a CC0 recording of an IBM
+    /// Model M, each at one of three pitches (default).
     #[default]
+    Clack,
+    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse.
     Taptic,
     /// Whisper-quiet 28 ms felt-damped Magic Keyboard tap.
     Felt,
@@ -30,10 +33,17 @@ pub enum KeySoundStyle {
 }
 
 impl KeySoundStyle {
-    pub const ALL: [Self; 4] = [Self::Taptic, Self::Felt, Self::Soft, Self::Silent];
+    pub const ALL: [Self; 5] = [
+        Self::Clack,
+        Self::Taptic,
+        Self::Felt,
+        Self::Soft,
+        Self::Silent,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Clack => "Mechanical clack",
             Self::Taptic => "Taptic tick",
             Self::Felt => "Muted felt",
             Self::Soft => "Soft warm",
@@ -43,10 +53,11 @@ impl KeySoundStyle {
 
     pub fn next(self) -> Self {
         match self {
+            Self::Clack => Self::Taptic,
             Self::Taptic => Self::Felt,
             Self::Felt => Self::Soft,
             Self::Soft => Self::Silent,
-            Self::Silent => Self::Taptic,
+            Self::Silent => Self::Clack,
         }
     }
 }
@@ -76,7 +87,9 @@ impl Tapback {
 /// Soft, varied tactile and motion cues for first-run onboarding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OnboardingTone {
-    /// One of six distinct key taps (`0..6`) in `style`.
+    /// One of `style`'s distinct key taps: six for most styles, and for
+    /// [`KeySoundStyle::Clack`] eight presses at three pitches
+    /// ([`CLACK_KEYS`]` * pitch + press`).
     Key(KeySoundStyle, u8),
     /// Deeper stabilized space / return bar tap in `style`.
     KeySpace(KeySoundStyle),
@@ -116,9 +129,18 @@ pub enum OnboardingTone {
     Confetti,
     /// Fireworks over `"With Hex"`: a whistle, a boom, and crackle.
     Fireworks,
-    /// The triumphant sting as `"With Hex"` peaks.
-    Triumph,
+    /// The triumphant sting as `"With Hex"` peaks: one of the candidates
+    /// (`0..TRIUMPHS`) still being chosen between.
+    Triumph(u8),
 }
+
+/// [`KeySoundStyle::Clack`]'s distinct presses, each also played a little
+/// higher and lower.
+pub const CLACK_KEYS: u8 = 8;
+/// The pitches each clack plays at, in cents.
+const CLACK_CENTS: [f64; 3] = [0.0, 45.0, -45.0];
+/// The triumph candidates, `triumph_1.wav` onwards.
+pub const TRIUMPHS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
@@ -734,6 +756,9 @@ impl SetSounds {
 
 /// Decoded onboarding cues (`resources/audio/sounds/onboarding/`).
 struct OnboardingSounds {
+    clack_keys: Vec<SamplesBuffer>,
+    clack_space: SamplesBuffer,
+    clack_backspace: SamplesBuffer,
     felt_keys: [SamplesBuffer; 6],
     felt_space: SamplesBuffer,
     felt_backspace: SamplesBuffer,
@@ -758,13 +783,29 @@ struct OnboardingSounds {
     slam: SamplesBuffer,
     confetti: SamplesBuffer,
     fireworks: SamplesBuffer,
-    triumph: SamplesBuffer,
+    triumphs: [SamplesBuffer; TRIUMPHS as usize],
 }
 
 impl OnboardingSounds {
     fn load() -> Result<Self> {
         let tapback = decode_wav(bundled_sound!("onboarding", "chat_tapback"))?;
+        let presses = [
+            decode_wav(bundled_sound!("onboarding", "clack_1"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_2"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_3"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_4"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_5"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_6"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_7"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_8"))?,
+        ];
         Ok(Self {
+            clack_keys: CLACK_CENTS
+                .iter()
+                .flat_map(|&cents| presses.iter().map(move |press| detune(press, cents)))
+                .collect(),
+            clack_space: decode_wav(bundled_sound!("onboarding", "clack_space"))?,
+            clack_backspace: decode_wav(bundled_sound!("onboarding", "clack_backspace"))?,
             felt_keys: [
                 decode_wav(bundled_sound!("onboarding", "key_1"))?,
                 decode_wav(bundled_sound!("onboarding", "key_2"))?,
@@ -817,7 +858,11 @@ impl OnboardingSounds {
             slam: decode_wav(bundled_sound!("onboarding", "slam"))?,
             confetti: decode_wav(bundled_sound!("onboarding", "confetti"))?,
             fireworks: decode_wav(bundled_sound!("onboarding", "fireworks"))?,
-            triumph: decode_wav(bundled_sound!("onboarding", "triumph"))?,
+            triumphs: [
+                decode_wav(bundled_sound!("onboarding", "triumph_1"))?,
+                decode_wav(bundled_sound!("onboarding", "triumph_2"))?,
+                decode_wav(bundled_sound!("onboarding", "triumph_3"))?,
+            ],
         })
     }
 
@@ -826,6 +871,11 @@ impl OnboardingSounds {
             OnboardingTone::Key(KeySoundStyle::Silent, _)
             | OnboardingTone::KeySpace(KeySoundStyle::Silent)
             | OnboardingTone::KeyBackspace(KeySoundStyle::Silent) => return None,
+            OnboardingTone::Key(KeySoundStyle::Clack, i) => {
+                &self.clack_keys[usize::from(i) % self.clack_keys.len()]
+            }
+            OnboardingTone::KeySpace(KeySoundStyle::Clack) => &self.clack_space,
+            OnboardingTone::KeyBackspace(KeySoundStyle::Clack) => &self.clack_backspace,
             OnboardingTone::Key(KeySoundStyle::Felt, i) => {
                 &self.felt_keys[usize::from(i) % self.felt_keys.len()]
             }
@@ -858,7 +908,7 @@ impl OnboardingSounds {
             OnboardingTone::Slam => &self.slam,
             OnboardingTone::Confetti => &self.confetti,
             OnboardingTone::Fireworks => &self.fireworks,
-            OnboardingTone::Triumph => &self.triumph,
+            OnboardingTone::Triumph(i) => &self.triumphs[usize::from(i) % self.triumphs.len()],
         })
     }
 }
@@ -1280,6 +1330,13 @@ pub(crate) fn mix_offline_wav(
 }
 
 /// Decodes one of Hex's bundled 16-bit PCM sounds.
+/// `sound` played `cents` higher: the same samples at a faster rate.
+fn detune(sound: &SamplesBuffer, cents: f64) -> SamplesBuffer {
+    let rate = f64::from(sound.sample_rate().get()) * 2f64.powf(cents / 1200.0);
+    let rate = std::num::NonZero::new(rate.round() as u32).unwrap_or(sound.sample_rate());
+    SamplesBuffer::new(sound.channels(), rate, sound.clone().collect::<Vec<_>>())
+}
+
 fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let reader =
         hound::WavReader::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
@@ -1394,19 +1451,20 @@ mod tests {
     #[test]
     fn onboarding_cues_decode_stay_compact_and_respect_zero_volume_mix() {
         let sounds = Sounds::load().unwrap();
-        for style in [
-            KeySoundStyle::Taptic,
-            KeySoundStyle::Felt,
-            KeySoundStyle::Soft,
+        for (style, keys, longest) in [
+            (KeySoundStyle::Clack, CLACK_KEYS * 3, 100),
+            (KeySoundStyle::Taptic, 6, 60),
+            (KeySoundStyle::Felt, 6, 60),
+            (KeySoundStyle::Soft, 6, 60),
         ] {
-            for i in 0..6 {
+            for i in 0..keys {
                 let buf = sounds
                     .get(
                         SoundSet::Signature,
                         Tone::Onboarding(OnboardingTone::Key(style, i)),
                     )
                     .expect("key cue present");
-                assert!(buf.total_duration().unwrap() <= Duration::from_millis(60));
+                assert!(buf.total_duration().unwrap() <= Duration::from_millis(longest));
             }
             assert!(
                 sounds
@@ -1461,11 +1519,11 @@ mod tests {
             assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
         }
         // The celebration rings longest of all.
-        for cue in [
-            OnboardingTone::Confetti,
-            OnboardingTone::Fireworks,
-            OnboardingTone::Triumph,
-        ] {
+        let triumphs = (0..TRIUMPHS).map(OnboardingTone::Triumph);
+        for cue in [OnboardingTone::Confetti, OnboardingTone::Fireworks]
+            .into_iter()
+            .chain(triumphs)
+        {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");

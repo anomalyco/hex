@@ -1,8 +1,9 @@
 //! Sound schedule for `"Prototypes/Onboarding/First run"`:
 //!
-//! - Auditionable typing key-sound candidates ([`KeySoundStyle`]: `Taptic tick`
-//!   default, `Muted felt`, `Soft warm`, and `Silent typing`), never repeating
-//!   an adjacent sample.
+//! - Auditionable typing key-sound candidates ([`KeySoundStyle`]: `Mechanical
+//!   clack` default, `Taptic tick`, `Muted felt`, `Soft warm`, and `Silent
+//!   typing`), never repeating an adjacent sample, each press at its own
+//!   pitch and level.
 //! - Tactile shortcut keycap press and release (`⌥` down / up).
 //! - Hex's real `#292` `DictationStart`, `DictationStop`, `DictationDone`, and
 //!   `OnboardingSuccess` tones played through [`crate::feedback`], respecting
@@ -20,11 +21,38 @@ use std::path::Path;
 use super::fixture::Take;
 use super::hud_stage::DONE_DELAY;
 use super::{permissions, scene_script, triumph, typing};
-use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tapback, Tone};
+use crate::feedback::{
+    self, CLACK_KEYS, KeySoundStyle, OnboardingTone, SoundSet, TRIUMPHS, Tapback, Tone,
+};
 
 /// The heartbeat's level, in percent, calm and in full panic.
 const HEART_QUIET: f32 = 30.0;
 const HEART_LOUD: f32 = 75.0;
+
+/// The triumph candidate a render plays, `HEX_ONBOARDING_TRIUMPH=1..3`
+/// (the first by default) until one is chosen.
+fn triumph_take() -> u8 {
+    std::env::var("HEX_ONBOARDING_TRIUMPH")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .filter(|n| (1..=TRIUMPHS).contains(n))
+        .map_or(0, |n| n - 1)
+}
+
+/// Whether the heartbeat plays under the panic; `HEX_ONBOARDING_HEARTBEAT=off`
+/// renders the comedy without it to compare.
+fn heartbeat_on() -> bool {
+    std::env::var("HEX_ONBOARDING_HEARTBEAT").map_or(true, |v| v != "off")
+}
+
+/// A fixed scramble of `seed`, so each press's pitch and level vary the same
+/// way on every run.
+fn scramble(seed: usize) -> usize {
+    let mut x = seed.wrapping_mul(0x9E37_79B9).wrapping_add(0x7F4A_7C15);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^ (x >> 12)
+}
 
 /// The sound of the tapback drawn as `glyph`.
 fn tapback(glyph: typing::Glyph) -> Tone {
@@ -123,8 +151,10 @@ impl SfxTrack {
     /// `"Without Hex"` from `from`: every keystroke, harder as panic builds
     /// (a space-bar thud under the tap), a soft send, Jay's messages, a
     /// deadpan tick on `"Read"`, and the selected set's error on removal.
+    /// The keys are always the mechanical clack, whatever the reader picked
+    /// for their own typing: this is someone else's keyboard.
     pub(crate) fn on_without_hex(&mut self, from: f64, scene: &typing::Scene) {
-        let style = self.style;
+        let style = KeySoundStyle::Clack;
         let mut prev_variant: Option<u8> = None;
         let mut prev_at = None;
         for (i, stroke) in scene.strokes().iter().enumerate() {
@@ -135,8 +165,12 @@ impl SfxTrack {
                 continue;
             }
             prev_at = Some(stroke.at);
-            // Calm typing sits under the chat sounds; panic brings it up.
-            let level = (62.0 + 28.0 * stroke.panic).round() as u8;
+            // Calm typing sits under the chat sounds; panic brings it up,
+            // and no two presses land quite alike.
+            let wobble = (scramble(i) % 17) as f64 - 8.0;
+            let level = (62.0 + 28.0 * stroke.panic + wobble)
+                .round()
+                .clamp(0.0, 100.0) as u8;
             let tone = match stroke.key {
                 "space" | "return" => OnboardingTone::KeySpace(style),
                 "delete" => OnboardingTone::KeyBackspace(style),
@@ -144,11 +178,19 @@ impl SfxTrack {
                     let hash = key
                         .bytes()
                         .fold(0usize, |acc, b| acc.wrapping_mul(31) + usize::from(b));
-                    let mut v = ((i * 5 + hash) % 6) as u8;
+                    let presses = if style == KeySoundStyle::Clack {
+                        CLACK_KEYS
+                    } else {
+                        6
+                    };
+                    let mut v = ((i * 5 + hash) % usize::from(presses)) as u8;
                     if prev_variant == Some(v) {
-                        v = (v + 1) % 6;
+                        v = (v + 1) % presses;
                     }
                     prev_variant = Some(v);
+                    if style == KeySoundStyle::Clack {
+                        v += CLACK_KEYS * (scramble(i + hash) % 3) as u8;
+                    }
                     OnboardingTone::Key(style, v)
                 }
             };
@@ -186,7 +228,12 @@ impl SfxTrack {
             self.push(from + tap.at, tapback(tap.glyph));
         }
         // The heartbeat rises under the clicks and stops dead at the removal.
-        for beat in scene.heartbeats() {
+        let beats = if heartbeat_on() {
+            scene.heartbeats()
+        } else {
+            Vec::new()
+        };
+        for beat in beats {
             let tone = if beat.slow {
                 OnboardingTone::HeartbeatSlow
             } else {
@@ -224,7 +271,10 @@ impl SfxTrack {
             self.push(from + at, Tone::Onboarding(tone));
         }
         if let Some(&(at, _)) = beats.effects.first() {
-            self.push(from + at, Tone::Onboarding(OnboardingTone::Triumph));
+            self.push(
+                from + at,
+                Tone::Onboarding(OnboardingTone::Triumph(triumph_take())),
+            );
         }
         for &(at, effect) in &beats.effects {
             let tone = match effect {
@@ -397,6 +447,31 @@ mod tests {
         assert_eq!(sent, scene.sent(scene.duration()));
         assert_eq!(read, scene.reads().count());
         assert!(track.fired_cues().iter().any(|&(_, t, _)| t == Tone::Error));
+    }
+
+    #[test]
+    fn without_hex_clacks_whatever_key_sound_was_picked() {
+        let scene = typing::Scene::default();
+        let mut track = SfxTrack {
+            style: KeySoundStyle::Silent,
+            ..SfxTrack::default()
+        };
+        track.on_without_hex(0.0, &scene);
+        track.advance_to(60.0);
+        let styles: Vec<KeySoundStyle> = track
+            .fired_cues()
+            .iter()
+            .filter_map(|&(_, tone, _)| match tone {
+                Tone::Onboarding(
+                    OnboardingTone::Key(style, _)
+                    | OnboardingTone::KeySpace(style)
+                    | OnboardingTone::KeyBackspace(style),
+                ) => Some(style),
+                _ => None,
+            })
+            .collect();
+        assert!(!styles.is_empty());
+        assert!(styles.iter().all(|&s| s == KeySoundStyle::Clack));
     }
 
     #[test]
