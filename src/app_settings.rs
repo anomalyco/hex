@@ -2049,10 +2049,6 @@ impl AppSettings {
         Ok(())
     }
 
-    pub(crate) fn refresh_runtime(&self) {
-        self.apply_runtime();
-    }
-
     fn validate_recording_duck_volume(&self) -> Result<()> {
         if !self.recording_duck_volume.is_finite()
             || !(0.0..=1.0).contains(&self.recording_duck_volume)
