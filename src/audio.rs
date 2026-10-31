@@ -4,15 +4,15 @@ pub(crate) mod browser_media;
 pub(crate) mod hex_microphone;
 pub(crate) mod idle_sleep;
 pub(crate) mod input_level;
+pub(crate) mod instant;
+#[cfg(target_os = "macos")]
+mod lid;
 pub(crate) mod output_ducking;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
 
-use std::ops::Add;
-#[cfg(target_os = "macos")]
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -190,126 +190,9 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, SizedSample, Stream, StreamConfig};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct CaptureInstant(u64);
-
-impl CaptureInstant {
-    pub const ZERO: Self = Self(0);
-
-    pub const fn from_nanos(nanos: u64) -> Self {
-        Self(nanos)
-    }
-
-    pub const fn as_nanos(self) -> u64 {
-        self.0
-    }
-
-    #[cfg(target_os = "macos")]
-    pub fn now() -> Self {
-        unsafe extern "C" {
-            fn mach_absolute_time() -> u64;
-        }
-        Self::from_mach_ticks(unsafe { mach_absolute_time() })
-    }
-
-    /// The monotonic clock. Linux's microphone streams count from when they
-    /// opened, so the capture timeline anchors them to this.
-    #[cfg(target_os = "linux")]
-    pub fn now() -> Self {
-        let mut now = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        // SAFETY: `now` is a valid timespec to fill.
-        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
-        Self(now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64)
-    }
-
-    /// The monotonic clock, counted from its first read (one second in, so
-    /// it is never [`Self::ZERO`]). Windows' microphone streams keep their
-    /// own clock, so the capture timeline anchors them to this.
-    #[cfg(target_os = "windows")]
-    pub fn now() -> Self {
-        static ANCHOR: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
-        let since = u64::try_from(ANCHOR.elapsed().as_nanos()).unwrap_or(u64::MAX);
-        Self(since.saturating_add(1_000_000_000))
-    }
-
-    #[cfg(target_os = "macos")]
-    pub fn from_mach_ticks(ticks: u64) -> Self {
-        let Some((numerator, denominator)) = mach_timebase() else {
-            return Self::ZERO;
-        };
-        Self(scale_mach_ticks(ticks, numerator, denominator))
-    }
-
-    pub fn from_stream(instant: cpal::StreamInstant) -> Self {
-        Self(u64::try_from(instant.as_nanos()).unwrap_or(u64::MAX))
-    }
-
-    pub fn checked_add(self, duration: Duration) -> Option<Self> {
-        let nanos = u64::try_from(duration.as_nanos()).ok()?;
-        self.0.checked_add(nanos).map(Self)
-    }
-
-    pub fn checked_sub(self, duration: Duration) -> Option<Self> {
-        let nanos = u64::try_from(duration.as_nanos()).ok()?;
-        self.0.checked_sub(nanos).map(Self)
-    }
-
-    pub fn checked_duration_since(self, earlier: Self) -> Option<Duration> {
-        self.0.checked_sub(earlier.0).map(Duration::from_nanos)
-    }
-
-    pub fn duration_since(self, earlier: Self) -> Duration {
-        Duration::from_nanos(self.0.saturating_sub(earlier.0))
-    }
-
-    pub fn sub_frames(self, frames: usize, sample_rate: u32) -> Self {
-        self.checked_sub(duration_for_frames(frames, sample_rate))
-            .unwrap_or(self)
-    }
-}
-
-pub fn duration_for_frames(frames: usize, sample_rate: u32) -> Duration {
-    let nanos = frames as u128 * 1_000_000_000 / u128::from(sample_rate);
-    Duration::from_nanos(nanos as u64)
-}
-
-#[cfg(target_os = "macos")]
-fn scale_mach_ticks(ticks: u64, numerator: u32, denominator: u32) -> u64 {
-    let nanos = u128::from(ticks) * u128::from(numerator) / u128::from(denominator);
-    u64::try_from(nanos).unwrap_or(u64::MAX)
-}
-
-#[cfg(target_os = "macos")]
-fn mach_timebase() -> Option<(u32, u32)> {
-    #[repr(C)]
-    struct MachTimebaseInfo {
-        numer: u32,
-        denom: u32,
-    }
-
-    unsafe extern "C" {
-        fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
-    }
-
-    static TIMEBASE: OnceLock<Option<(u32, u32)>> = OnceLock::new();
-    *TIMEBASE.get_or_init(|| {
-        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
-        let status = unsafe { mach_timebase_info(&mut info) };
-        (status == 0 && info.denom != 0).then_some((info.numer, info.denom))
-    })
-}
-
-impl Add<Duration> for CaptureInstant {
-    type Output = Self;
-
-    fn add(self, duration: Duration) -> Self::Output {
-        self.checked_add(duration)
-            .expect("capture instant overflowed")
-    }
-}
+#[cfg(all(test, target_os = "macos"))]
+use instant::scale_mach_ticks;
+pub use instant::{CaptureInstant, duration_for_frames};
 
 pub struct AudioInput {
     // Tests can deliver PCM through channels without opening a native microphone.
@@ -1153,133 +1036,6 @@ fn lid_closed() -> bool {
 
 #[cfg(target_os = "macos")]
 use lid::closed as lid_closed;
-
-#[cfg(target_os = "macos")]
-mod lid {
-    use std::ffi::{c_char, c_void};
-    use std::sync::OnceLock;
-
-    use objc2_core_foundation::CFString;
-
-    const MAIN_PORT_DEFAULT: u32 = 0;
-    /// `kIOPMMessageClamshellStateChange`:
-    /// `iokit_family_msg(sub_iokit_powermanagement, 0x100)`.
-    const CLAMSHELL_STATE_CHANGE: u32 = 0xE003_4100;
-
-    type InterestCallback = unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void);
-
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {
-        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
-        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> u32;
-        fn IORegistryEntryCreateCFProperty(
-            entry: u32,
-            key: *const c_void,
-            allocator: *const c_void,
-            options: u32,
-        ) -> *const c_void;
-        fn IONotificationPortCreate(main_port: u32) -> *mut c_void;
-        fn IONotificationPortSetDispatchQueue(port: *mut c_void, queue: *mut c_void);
-        fn IOServiceAddInterestNotification(
-            port: *mut c_void,
-            service: u32,
-            interest_type: *const c_char,
-            callback: InterestCallback,
-            refcon: *mut c_void,
-            notification: *mut u32,
-        ) -> i32;
-    }
-
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        static kCFBooleanTrue: *const c_void;
-        fn CFRelease(value: *const c_void);
-    }
-
-    unsafe extern "C" {
-        fn dispatch_get_global_queue(identifier: isize, flags: usize) -> *mut c_void;
-    }
-
-    fn root_domain() -> Option<u32> {
-        static ROOT: OnceLock<Option<u32>> = OnceLock::new();
-        *ROOT.get_or_init(|| {
-            // SAFETY: the matching dictionary is consumed by the lookup, and
-            // the returned service is kept for the life of the process.
-            let service = unsafe {
-                let matching = IOServiceMatching(c"IOPMrootDomain".as_ptr());
-                if matching.is_null() {
-                    return None;
-                }
-                IOServiceGetMatchingService(MAIN_PORT_DEFAULT, matching)
-            };
-            (service != 0).then_some(service)
-        })
-    }
-
-    pub fn closed() -> bool {
-        let Some(root) = root_domain() else {
-            return false;
-        };
-        let key = CFString::from_str("AppleClamshellState");
-        let key: *const CFString = &*key;
-        // SAFETY: `root` is a live service and `key` a live CFString; the
-        // copied property is released after the comparison.
-        unsafe {
-            let value = IORegistryEntryCreateCFProperty(root, key.cast(), std::ptr::null(), 0);
-            if value.is_null() {
-                return false;
-            }
-            let closed = value == kCFBooleanTrue;
-            CFRelease(value);
-            closed
-        }
-    }
-
-    /// Calls `changed` on a dispatch queue whenever the lid opens or closes.
-    pub fn watch(changed: fn()) {
-        static CHANGED: OnceLock<fn()> = OnceLock::new();
-        unsafe extern "C" fn on_message(
-            _refcon: *mut c_void,
-            _service: u32,
-            message: u32,
-            _argument: *mut c_void,
-        ) {
-            if message == CLAMSHELL_STATE_CHANGE
-                && let Some(changed) = CHANGED.get()
-            {
-                changed();
-            }
-        }
-        let Some(root) = root_domain() else {
-            return;
-        };
-        if CHANGED.set(changed).is_err() {
-            return;
-        }
-        // SAFETY: the port and notification live for the process, and the
-        // callback only reads a static.
-        let status = unsafe {
-            let port = IONotificationPortCreate(MAIN_PORT_DEFAULT);
-            if port.is_null() {
-                -1
-            } else {
-                IONotificationPortSetDispatchQueue(port, dispatch_get_global_queue(0, 0));
-                let mut notification = 0;
-                IOServiceAddInterestNotification(
-                    port,
-                    root,
-                    c"IOGeneralInterest".as_ptr(),
-                    on_message,
-                    std::ptr::null_mut(),
-                    &mut notification,
-                )
-            }
-        };
-        if status != 0 {
-            tracing::warn!(status, "could not watch the lid for microphone changes");
-        }
-    }
-}
 
 /// The input devices whose names can be read, with those names. A device
 /// without a readable name, such as CoreAudio's placeholder when no input
