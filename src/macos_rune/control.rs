@@ -13,7 +13,7 @@ use crate::control::{
     ControlReply, ControlResponse, FeatureReport, ListenerReport, MeetingReport, ModelReport, Pane,
     PermissionReport, StatusReport, WindowReport, settings,
 };
-use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::onboarding::PermissionState;

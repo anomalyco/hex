@@ -20,11 +20,11 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
 
 use crate::app_settings::AppSettings;
-use crate::desktop_activity::DesktopActivity;
-use crate::desktop_host::{
+use crate::desktop::activity::DesktopActivity;
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
 };
-use crate::desktop_i18n::tr_fill;
+use crate::desktop::i18n::tr_fill;
 use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
 use crate::transcription::models::{ModelPreparationStage, TranscriptionModelId};
@@ -162,7 +162,7 @@ impl WindowsDesktopHost {
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
     ) -> Self {
-        crate::desktop_i18n::apply(settings.ui_language.as_deref());
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
@@ -485,7 +485,7 @@ impl WindowsDesktopHost {
                 crate::dictation::modes::ModeRuntime::from_settings(current);
         }
         if previous.ui_language != current.ui_language {
-            crate::desktop_i18n::apply(current.ui_language.as_deref());
+            crate::desktop::i18n::apply(current.ui_language.as_deref());
         }
         if modes_changed {
             self.refresh_personal_commands_host();

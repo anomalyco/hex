@@ -40,7 +40,7 @@ use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
@@ -219,7 +219,7 @@ pub(crate) fn runtime() -> Option<RuntimeHandle> {
 
 /// Carries out an update control from the window, a menu, or `hex`. Restart
 /// to update finishes on the updater's worker; the pump then quits.
-pub(crate) fn update_action(action: &crate::desktop_host::DesktopAction) -> Result<()> {
+pub(crate) fn update_action(action: &crate::desktop::host::DesktopAction) -> Result<()> {
     UPDATER
         .get()
         .ok_or_else(|| eyre!("the updater is not running"))?
@@ -1258,7 +1258,7 @@ objc2::define_class!(
 
         #[unsafe(method(checkForUpdates:))]
         fn check_for_updates(&self, _sender: Option<&AnyObject>) {
-            let _ = update_action(&crate::desktop_host::DesktopAction::CheckForUpdates);
+            let _ = update_action(&crate::desktop::host::DesktopAction::CheckForUpdates);
         }
 
         #[unsafe(method(hideHex:))]

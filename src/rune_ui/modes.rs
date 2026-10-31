@@ -26,7 +26,7 @@ use super::models::{self, Target};
 use super::{Menu, Ui};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
 use crate::opencode_catalog::OpenCodeFeature;
 use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};

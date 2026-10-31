@@ -10,7 +10,7 @@ use super::meetings::{Chapter, Meeting, Status, Transcript, Turn};
 #[cfg(not(target_os = "macos"))]
 use super::platform::MeetingRequest;
 #[cfg(not(target_os = "macos"))]
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 
 const RESCAN: Duration = Duration::from_secs(1);
 

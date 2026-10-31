@@ -13,7 +13,7 @@ use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, METRICS, Paint, PushSize, button, pulsing_dot, status_dot,
 };
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 
 const LIST_WIDTH: f32 = 320.0;
 /// A [`list_row`]'s text inset.

@@ -526,8 +526,8 @@ pub struct StatusReport {
 }
 
 /// `StatusReport::update` for an updater status.
-pub fn update_label(status: &crate::desktop_host::DesktopUpdateStatus) -> &'static str {
-    use crate::desktop_host::DesktopUpdateStatus;
+pub fn update_label(status: &crate::desktop::host::DesktopUpdateStatus) -> &'static str {
+    use crate::desktop::host::DesktopUpdateStatus;
     match status {
         DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
         DesktopUpdateStatus::Available

@@ -35,9 +35,7 @@ mod control;
 mod cpu_floor;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 mod dashboard;
-mod desktop_activity;
-mod desktop_host;
-mod desktop_i18n;
+mod desktop;
 mod dev_build;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod developer_control;

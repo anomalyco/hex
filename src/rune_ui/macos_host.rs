@@ -35,8 +35,8 @@ use crate::app_settings::{
     CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, modifiers_from_flags,
 };
 use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
-use crate::desktop_host::DesktopAction;
-use crate::desktop_i18n::tr;
+use crate::desktop::host::DesktopAction;
+use crate::desktop::i18n::tr;
 use crate::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};

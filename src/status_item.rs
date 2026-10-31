@@ -292,7 +292,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         Some(add_item(
             &menu,
             &target,
-            &update_title(&crate::desktop_host::DesktopUpdateStatus::Checking),
+            &update_title(&crate::desktop::host::DesktopUpdateStatus::Checking),
             sel!(checkForUpdates:),
             mtm,
         ))
@@ -510,8 +510,8 @@ fn menu_title(title: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
-fn update_title(status: &crate::desktop_host::DesktopUpdateStatus) -> String {
-    use crate::desktop_host::DesktopUpdateStatus;
+fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
+    use crate::desktop::host::DesktopUpdateStatus;
     match status {
         DesktopUpdateStatus::ReadyToRestart => "Restart to Update".into(),
         DesktopUpdateStatus::Available => "Download Update…".into(),
@@ -536,7 +536,7 @@ pub fn update_overlays_in_recordings(shown: bool) {
 
 /// Retitles the update item after the updater's status, so an update ready
 /// or available stays reachable from the menu bar.
-pub fn update_software(status: &crate::desktop_host::DesktopUpdateStatus) {
+pub fn update_software(status: &crate::desktop::host::DesktopUpdateStatus) {
     let title = update_title(status);
     STATUS_ITEM.with(|controller| {
         let controller = controller.borrow();

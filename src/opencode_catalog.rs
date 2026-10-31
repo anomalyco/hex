@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, sync_channel};
 use std::thread;
 use std::time::Duration;
 
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::dictation::processor::ModelCatalog;
 
 /// How often a stopped OpenCode service is looked for again while a pane

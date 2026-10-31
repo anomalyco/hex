@@ -18,7 +18,7 @@ use super::modes::{application_icon, monogram};
 use super::spark::{Spark, spark};
 use super::{ShortcutTarget, Ui};
 use crate::app_settings::DictationMode;
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::text_replacements::ReplacementSet;
 
 mod examples;

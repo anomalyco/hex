@@ -13,7 +13,7 @@ use super::{
     ModelReport, Pane, PermissionReport, PrintReply, StatusReport, WindowReport, settings,
 };
 use crate::app_settings::AppSettings;
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopListenerSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::transcription::models::TranscriptionSelection;

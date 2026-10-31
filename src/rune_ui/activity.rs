@@ -12,8 +12,8 @@ use super::lists::{
     detail_header, detail_title, fact, message, placeholder, section_label, source_item,
     source_list, split,
 };
-use crate::desktop_activity::DesktopActivity;
-use crate::desktop_i18n::{event_age, tr};
+use crate::desktop::activity::DesktopActivity;
+use crate::desktop::i18n::{event_age, tr};
 use crate::events::{EventReader, VoiceEvent, VoiceState};
 
 const LIMIT: usize = 100;
@@ -182,7 +182,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
     for (index, event) in pane.events.iter().enumerate() {
         let selected = pane.selected == Some(index);
         let boundary = matches!(event, VoiceEvent::SessionStarted { .. });
-        let summary = crate::desktop_activity::event_summary(event);
+        let summary = crate::desktop::activity::event_summary(event);
         let mut item = row()
             .key(format!("activity-event{index}"))
             .role("button")
@@ -229,7 +229,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 .shrink()
                 .px(METRICS.gutter)
                 .child(detail_header(
-                    detail_title(p, &crate::desktop_activity::event_summary(event)),
+                    detail_title(p, &crate::desktop::activity::event_summary(event)),
                     Vec::new(),
                     Vec::new(),
                 ))

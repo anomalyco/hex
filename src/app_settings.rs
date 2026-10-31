@@ -1953,7 +1953,7 @@ fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
 /// A new install starts with the model recommended for the person's
 /// language, so first-run setup can download it without asking.
 fn default_transcription() -> TranscriptionSelection {
-    crate::transcription::models::recommended_selection(&crate::desktop_i18n::preferred_language())
+    crate::transcription::models::recommended_selection(&crate::desktop::i18n::preferred_language())
 }
 
 impl AppSettings {
@@ -2239,7 +2239,7 @@ impl AppSettings {
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         crate::feedback::set_sound_set(self.sound_theme);
-        crate::desktop_i18n::apply(self.ui_language.as_deref());
+        crate::desktop::i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);

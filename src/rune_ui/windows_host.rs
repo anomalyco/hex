@@ -15,7 +15,7 @@ use color_eyre::Result;
 use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::HotkeyBinding;
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::windows::input::{ChordCapture, ChordPoll, WindowsHotkey};
 use crate::windows::rune::RuntimeHandle;
 pub(super) use crate::windows::rune::{Request, ShortcutTarget};
