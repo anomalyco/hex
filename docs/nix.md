@@ -122,7 +122,7 @@ journalctl --user -u hex.service
 Hex reads no input devices, so neither module adds users to the `input`
 group, installs udev rules, or grants capabilities. With a GlobalShortcuts
 portal, the desktop grants the shortcuts Settings records; the portal
-identifies Hex by the package's `hex.desktop` entry, so keep the package's
+identifies Hex by the package's `anomaly.hex.desktop` entry, so keep the package's
 `share/applications` on `XDG_DATA_DIRS` (NixOS and Home Manager profiles do).
 Without the portal, bind the commands in your compositor, for example in Sway:
 

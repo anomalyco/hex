@@ -152,7 +152,10 @@ SHA-256 before installing. It uses no root access. It creates the managed
 version layout, `~/.local/bin/hex`, a desktop launcher, and an XDG autostart
 entry and a `hex.service` user unit. It does not start recording during installation.
 General › **Launch at login** turns that autostart entry on or off
-(`~/.config/autostart/hex.desktop`); Hex leaves an entry it did not write alone.
+(`~/.config/autostart/anomaly.hex.desktop`); Hex leaves an entry it did not write alone.
+The launcher entry is `~/.local/share/applications/anomaly.hex.desktop`, named
+for Hex's app id `anomaly.hex`, which its windows also report. Earlier installs
+named both entries `hex.desktop`; Hex and the installer rename Hex's own.
 
 Remove the application while preserving logs and settings with:
 
@@ -302,11 +305,11 @@ dictation rules:
   any it refused. A desktop may keep an older binding when you record a new
   shortcut (KDE does); where its portal supports it, **Desktop shortcuts >
   Open** shows the desktop's own dialog for Hex's shortcuts, and Settings
-  follows what you choose there. The portal identifies Hex by its installed
-  `hex.desktop` entry and by inspecting the Hex process. A downloaded
-  executable has no entry, so Hex writes a minimal
-  `~/.local/share/applications/hex.desktop` that runs it (a managed install
-  replaces it); if the portal still can't find it, restart the portal with
+  follows what you choose there. The portal identifies Hex by its app id
+  `anomaly.hex`, its installed `anomaly.hex.desktop` entry, and by inspecting
+  the Hex process. A downloaded executable has no entry, so Hex writes a minimal
+  `~/.local/share/applications/anomaly.hex.desktop` that runs it (a managed
+  install replaces it); if the portal still can't find it, restart the portal with
   `systemctl --user restart xdg-desktop-portal`. Run `hex service` directly:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the

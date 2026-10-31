@@ -132,8 +132,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
   '';
 
   postInstall = ''
-    install -Dm644 ${../packaging/hex.desktop} $out/share/applications/hex.desktop
-    substituteInPlace $out/share/applications/hex.desktop \
+    install -Dm644 ${../packaging/anomaly.hex.desktop} $out/share/applications/anomaly.hex.desktop
+    substituteInPlace $out/share/applications/anomaly.hex.desktop \
       --replace-fail '@HEX_BIN@' "$out/bin/hex"
   '';
 

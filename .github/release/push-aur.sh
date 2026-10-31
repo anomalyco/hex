@@ -6,7 +6,7 @@
 . "$(dirname "$0")/lib.sh"
 
 package=hex-bin
-files=(PKGBUILD .SRCINFO hex.desktop hex.service LICENSE "$package.install")
+files=(PKGBUILD .SRCINFO anomaly.hex.desktop hex.service LICENSE "$package.install")
 : "${AUR_SSH_PRIVATE_KEY:?Set AUR_SSH_PRIVATE_KEY to the AUR SSH private key}"
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
@@ -27,6 +27,8 @@ version=$(sed -n 's/^pkgver=//p' "$dir/PKGBUILD")
 git clone -q "ssh://aur@aur.archlinux.org/$package.git" "$temporary/aur"
 for file in "${files[@]}"; do cp "$dir/$file" "$temporary/aur/$file"; done
 cd "$temporary/aur"
+# Releases before the app id shipped the launcher entry as hex.desktop.
+git rm -q --ignore-unmatch hex.desktop
 git add "${files[@]}"
 if git diff --cached --quiet; then
   echo "The AUR already has $package $version." >&2

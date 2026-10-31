@@ -1,5 +1,5 @@
 # The hex .deb and .rpm, built by scripts/package-linux.sh with nfpm from a
-# release executable, in a directory it stages with hex, hex.desktop,
+# release executable, in a directory it stages with hex, anomaly.hex.desktop,
 # hex.service, and LICENSE. They install what the AUR package hex-bin does:
 # /usr/bin/hex, the desktop entry, and the systemd user unit. Hex never
 # replaces a package-managed executable; it shows the update command the
@@ -24,8 +24,8 @@ contents:
     dst: /usr/bin/hex
     file_info:
       mode: 0755
-  - src: hex.desktop
-    dst: /usr/share/applications/hex.desktop
+  - src: anomaly.hex.desktop
+    dst: /usr/share/applications/anomaly.hex.desktop
     file_info:
       mode: 0644
   - src: hex.service

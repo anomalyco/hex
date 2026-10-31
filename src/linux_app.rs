@@ -314,6 +314,13 @@ pub(crate) fn run(
     activation: Option<Activation>,
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
+    // Installs before #579 named the entries hex.desktop.
+    if let Err(error) = crate::linux_portal::tidy_desktop_entries() {
+        tracing::warn!(%error, "could not move Hex's desktop entry");
+    }
+    if let Err(error) = crate::linux_login_item::move_legacy_entry() {
+        tracing::warn!(%error, "could not move Hex's autostart entry");
+    }
     crate::labs::log_launch();
     crate::hex_microphone::host_service();
     let (settings, error) = match AppSettings::load() {

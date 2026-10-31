@@ -1,6 +1,6 @@
 //! Launch at login on Linux: the XDG autostart entry
-//! `~/.config/autostart/hex.desktop`, the same managed file the installer
-//! writes. Hex only replaces or removes an entry that carries its
+//! `~/.config/autostart/anomaly.hex.desktop`, named for Hex's app id, the
+//! same managed file the installer writes. Hex only replaces or removes an entry that carries its
 //! `X-Hex-Managed=true` mark; the file on disk is the only state.
 
 use std::fs;
@@ -11,9 +11,44 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 
 const MANAGED_MARK: &str = "X-Hex-Managed=true";
 
-fn entry_path() -> Result<PathBuf> {
+fn autostart_dir() -> Result<PathBuf> {
     let config = dirs::config_dir().ok_or_else(|| eyre!("the config directory is unavailable"))?;
-    Ok(config.join("autostart").join("hex.desktop"))
+    Ok(config.join("autostart"))
+}
+
+fn entry_path() -> Result<PathBuf> {
+    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux_portal::APP_ID)))
+}
+
+/// Renames Hex's managed `hex.desktop` autostart entry, the name before
+/// #579, to the app id's, unless an entry already has the new name. A
+/// symlink is the user's, whatever it points to.
+pub fn move_legacy_entry() -> Result<()> {
+    move_legacy_entry_in(&autostart_dir()?)
+}
+
+fn move_legacy_entry_in(directory: &Path) -> Result<()> {
+    let legacy = directory.join("hex.desktop");
+    match fs::symlink_metadata(&legacy) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).wrap_err_with(|| format!("could not read {}", legacy.display()));
+        }
+    }
+    let old = fs::read_to_string(&legacy)
+        .wrap_err_with(|| format!("could not read {}", legacy.display()))?;
+    if !old.lines().any(|line| line.trim() == MANAGED_MARK) {
+        return Ok(());
+    }
+    let entry = directory.join(format!("{}.desktop", crate::linux_portal::APP_ID));
+    if fs::symlink_metadata(&entry).is_ok() {
+        fs::remove_file(&legacy)
+    } else {
+        fs::rename(&legacy, &entry)
+    }
+    .wrap_err_with(|| format!("could not move {}", legacy.display()))
 }
 
 /// Whether the desktop starts Hex at login.
@@ -114,7 +149,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<()> {
         .ok_or_else(|| eyre!("{} has no parent directory", path.display()))?;
     fs::create_dir_all(directory)
         .wrap_err_with(|| format!("could not create {}", directory.display()))?;
-    let staged = directory.join(".hex.desktop.next");
+    let staged = directory.join(format!(".{}.desktop.next", crate::linux_portal::APP_ID));
     let mut file = fs::File::create(&staged)
         .wrap_err_with(|| format!("could not write {}", staged.display()))?;
     file.write_all(contents.as_bytes())?;
@@ -132,6 +167,34 @@ mod tests {
         assert!(entry.contains("Exec=\"/home/a b/100%%/hex\\$\" start\n"));
         assert!(entry.contains("X-Hex-Managed=true\n"));
         assert!(starts(&entry));
+    }
+
+    #[test]
+    fn only_hexs_old_regular_entry_moves() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("hex-autostart-{unique}"));
+        fs::create_dir_all(&directory).unwrap();
+        let legacy = directory.join("hex.desktop");
+        let entry = directory.join("anomaly.hex.desktop");
+        fs::write(
+            &legacy,
+            "[Desktop Entry]\nExec=hex start\nX-Hex-Managed=true\n",
+        )
+        .unwrap();
+        move_legacy_entry_in(&directory).unwrap();
+        assert!(!legacy.exists());
+        assert!(starts(&fs::read_to_string(&entry).unwrap()));
+        fs::write(&legacy, "[Desktop Entry]\nExec=mine\n").unwrap();
+        move_legacy_entry_in(&directory).unwrap();
+        assert!(legacy.exists());
+        fs::remove_file(&legacy).unwrap();
+        std::os::unix::fs::symlink(&entry, &legacy).unwrap();
+        move_legacy_entry_in(&directory).unwrap();
+        assert!(legacy.is_symlink());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

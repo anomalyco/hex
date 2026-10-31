@@ -66,6 +66,7 @@ if [[ "${1:-}" == --inside ]]; then
     done
     swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null
     swaymsg -t get_tree -r | grep "\"pid\": $service," >/dev/null
+    swaymsg -t get_tree -r | grep '"app_id": "anomaly.hex"' >/dev/null
   }
   open_window
   # Keep the window connected while the paste helper creates a virtual keyboard.
@@ -92,11 +93,15 @@ if [[ "${1:-}" == --inside ]]; then
   target=
 
   # Closing the window keeps Hex; a later launch opens it again.
-  swaymsg '[app_id="hex"] kill' >/dev/null
+  swaymsg '[app_id="anomaly.hex"] kill' >/dev/null
   for ((attempt = 0; attempt < 100; attempt++)); do
     if ! swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then break; fi
     sleep 0.05
   done
+  if swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then
+    echo "The Hex window did not close." >&2
+    exit 1
+  fi
   sleep 0.5
   kill -0 "$service"
   "$HEX_WAYLAND_APP_BINARY" status >/dev/null
@@ -130,6 +135,7 @@ export HEX_WAYLAND_TEST_RESULT="$work/result"
 export HEX_WAYLAND_APP_LOG="$work/hex.log"
 export XDG_RUNTIME_DIR="$work/runtime"
 export XDG_DATA_HOME="$work/data"
+export XDG_CONFIG_HOME="$work/config"
 export HEX_APPLICATION_SUPPORT_DIR="$work/support"
 export ALSA_CONFIG_PATH="$work/alsa.conf"
 printf '# No physical audio devices in this fixture.\n' > "$ALSA_CONFIG_PATH"

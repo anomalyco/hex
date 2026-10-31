@@ -99,10 +99,12 @@ uninstall() {
     rm -f "$binary"
   fi
   for desktop in \
+    "$applications/anomaly.hex.desktop" \
+    "$autostart/anomaly.hex.desktop" \
     "$applications/hex.desktop" \
     "$autostart/hex.desktop"
   do
-    if [ -f "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+    if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
       rm -f "$desktop"
     fi
   done
@@ -353,8 +355,9 @@ fi
 if [ -e "$support_dir/current" ] && [ ! -L "$support_dir/current" ]; then
   fail "Refusing to replace an unmanaged file: $support_dir/current"
 fi
-application_entry="$applications/hex.desktop"
-autostart_entry="$autostart/hex.desktop"
+# Named for Hex's app id, which its windows and the desktop portal use.
+application_entry="$applications/anomaly.hex.desktop"
+autostart_entry="$autostart/anomaly.hex.desktop"
 for desktop in "$application_entry" "$autostart_entry"; do
   if [ -L "$desktop" ]; then
     fail "Refusing to replace a desktop-entry symlink: $desktop"
@@ -364,8 +367,8 @@ for desktop in "$application_entry" "$autostart_entry"; do
   fi
 done
 
-application_staged=$(mktemp "$applications/.hex.desktop.XXXXXX")
-autostart_staged=$(mktemp "$autostart/.hex.desktop.XXXXXX")
+application_staged=$(mktemp "$applications/.anomaly.hex.desktop.XXXXXX")
+autostart_staged=$(mktemp "$autostart/.anomaly.hex.desktop.XXXXXX")
 unit_staged=$(mktemp "$units/.hex.service.XXXXXX")
 umask 077
 cat > "$application_staged" <<EOF
@@ -378,6 +381,7 @@ Icon=audio-input-microphone
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
+StartupWMClass=anomaly.hex
 Actions=quit;
 X-Hex-Managed=true
 
@@ -463,6 +467,12 @@ mv -Tf "$application_staged" "$application_entry"
 application_staged=
 mv -Tf "$autostart_staged" "$autostart_entry"
 autostart_staged=
+# Earlier installs named both entries hex.desktop.
+for desktop in "$applications/hex.desktop" "$autostart/hex.desktop"; do
+  if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+    rm -f "$desktop"
+  fi
+done
 mv -Tf "$unit_staged" "$unit"
 unit_staged=
 sync -f "$applications"
