@@ -318,6 +318,9 @@ pub(crate) fn run(
     if let Err(error) = crate::linux_portal::tidy_desktop_entries() {
         tracing::warn!(%error, "could not move Hex's desktop entry");
     }
+    if let Err(error) = crate::linux_portal::forget_legacy_gnome_shortcuts() {
+        tracing::warn!(%error, "could not remove Hex's old GNOME shortcuts");
+    }
     if let Err(error) = crate::linux_login_item::move_legacy_entry() {
         tracing::warn!(%error, "could not move Hex's autostart entry");
     }

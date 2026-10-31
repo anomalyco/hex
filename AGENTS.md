@@ -1087,7 +1087,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   after a restart (#575). On GNOME only, Disable then binds an empty set in a
   fresh session: GNOME Settings stores exactly the set an app binds, so Hex's
   entries leave its list without a dialog, and Enable asks for approval again.
-  Never on KDE, where an empty set would drop the user's chosen keys (#482). A portal shortcut
+  Never on KDE, where an empty set would drop the user's chosen keys (#482).
+  At startup on GNOME, Hex also removes its pre-#579 `hex` set from GNOME's
+  `org.gnome.settings-daemon.global-shortcuts` settings through `gsettings`,
+  since the portal can no longer reach that id; it touches no other app. A portal shortcut
   is held for as long as it is bound and consumed before the focused app
   sees it, so the portal never binds Escape: Cancel dictation has no
   suggested trigger, the user assigns one in the desktop, and it acts only

@@ -1264,6 +1264,8 @@ Enable / Disable (General, tray)         // linux.listener-persist
     fresh session binds no shortcuts: GNOME Settings stores that empty set, so
     Hex's entries leave its list; Enable shows GNOME's approval dialog again
     // never on KDE: an empty bind drops the user's keys (#482)
+GNOME startup -> pre-#579 `hex` set listed in GNOME Settings -> removed through
+    gsettings (reset its shortcuts, drop it from `applications`); other apps untouched
     // observed on apollo with gnome-control-center 51.1's provider, portal-gnome 50,
     // a stand-in org.gnome.Shell, not a full GNOME session
 ```

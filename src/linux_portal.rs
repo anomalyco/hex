@@ -37,7 +37,8 @@ const SESSION: &str = "org.freedesktop.portal.Session";
 /// that are not reverse-DNS (#579), so this matches the macOS bundle
 /// identifier.
 pub(crate) const APP_ID: &str = "anomaly.hex";
-/// The entry name installs used before #579.
+/// The app id and entry name before #579.
+const LEGACY_APP_ID: &str = "hex";
 const LEGACY_ENTRY: &str = "hex.desktop";
 const MANAGED_MARK: &str = "X-Hex-Managed=true";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -717,6 +718,89 @@ impl Portal {
     }
 }
 
+const GNOME_SHORTCUTS: &str = "org.gnome.settings-daemon.global-shortcuts";
+
+/// Before #579 Hex registered with the portal as `hex`. GNOME Settings keeps
+/// that set listed beside `anomaly.hex`, and nothing can bind or clear it
+/// through the portal again (GNOME 49 and later refuse the id), so Hex removes
+/// it from GNOME's own settings once (#575). Only on GNOME, only that entry.
+pub(crate) fn forget_legacy_gnome_shortcuts() -> Result<()> {
+    if !gnome() {
+        return Ok(());
+    }
+    // No gsettings or no GNOME schema: nothing to clear.
+    let Ok(listed) = gsettings(&["get", GNOME_SHORTCUTS, "applications"]) else {
+        return Ok(());
+    };
+    let applications = string_list(&listed);
+    if !applications.iter().any(|app| app == LEGACY_APP_ID) {
+        return Ok(());
+    }
+    gsettings(&[
+        "reset",
+        &format!(
+            "{GNOME_SHORTCUTS}.application:/org/gnome/settings-daemon/global-shortcuts/{LEGACY_APP_ID}/"
+        ),
+        "shortcuts",
+    ])?;
+    let kept = applications
+        .iter()
+        .filter(|app| *app != LEGACY_APP_ID)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    gsettings(&[
+        "set",
+        GNOME_SHORTCUTS,
+        "applications",
+        &string_list_text(&kept),
+    ])?;
+    tracing::info!("removed Hex's pre-#579 shortcuts from GNOME Settings");
+    Ok(())
+}
+
+fn gsettings(arguments: &[&str]) -> Result<String> {
+    let output = std::process::Command::new("gsettings")
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .wrap_err("could not run gsettings")?;
+    if !output.status.success() {
+        return Err(eyre!(
+            "gsettings {} failed: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// A GVariant `as` as gsettings prints it: `['a', 'b']` or `@as []`.
+fn string_list(text: &str) -> Vec<String> {
+    let text = text.trim().trim_start_matches("@as").trim();
+    text.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|item| {
+            item.trim()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .to_owned()
+        })
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// App ids never contain quotes or backslashes, so they need no escaping.
+fn string_list_text(items: &[&str]) -> String {
+    if items.is_empty() {
+        return "@as []".into();
+    }
+    let quoted = items
+        .iter()
+        .map(|item| format!("'{item}'"))
+        .collect::<Vec<_>>();
+    format!("[{}]", quoted.join(", "))
+}
+
 fn gnome() -> bool {
     std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
         desktops
@@ -860,6 +944,17 @@ mod tests {
         entries.tidy().unwrap();
         assert!(!entries.entry().exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gsettings_string_lists_round_trip() {
+        assert_eq!(
+            string_list("['hex', 'anomaly.hex']"),
+            ["hex", "anomaly.hex"]
+        );
+        assert!(string_list("@as []").is_empty());
+        assert_eq!(string_list_text(&["anomaly.hex"]), "['anomaly.hex']");
+        assert_eq!(string_list_text(&[]), "@as []");
     }
 
     /// GNOME before 51 refuses a portal app id that is not reverse-DNS (#579).
