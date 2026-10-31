@@ -4,7 +4,7 @@
 //!
 //! [`parse`] reports every mistake with its line number. Renders pick a
 //! scene with `HEX_ONBOARDING_SCENE` (a path) or `HEX_ONBOARDING_VARIANT`
-//! (`A`, `B`, `C`); everyone else gets `default.scene`.
+//! (`A`, `B`, `C`, `C+`); everyone else gets `default.scene`.
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -13,7 +13,7 @@ use super::fixture::{ANSWER_JAY, Take};
 use super::typing::Glyph;
 
 /// Every bundled scene, by file name.
-pub(crate) const SCENES: [(&str, &str); 4] = [
+pub(crate) const SCENES: [(&str, &str); 5] = [
     ("default.scene", include_str!("scenes/default.scene")),
     (
         "A-incontinence.scene",
@@ -21,6 +21,7 @@ pub(crate) const SCENES: [(&str, &str); 4] = [
     ),
     ("B-dirty.scene", include_str!("scenes/B-dirty.scene")),
     ("C-v3.scene", include_str!("scenes/C-v3.scene")),
+    ("C-plus.scene", include_str!("scenes/C-plus.scene")),
 ];
 
 /// The colours a person can have: OpenCode theme scales.
@@ -279,6 +280,7 @@ impl Script<'static> {
                 Ok("A" | "a" | "incontinence") => "A-incontinence.scene",
                 Ok("B" | "b" | "dirty") => "B-dirty.scene",
                 Ok("C" | "c" | "v3") => "C-v3.scene",
+                Ok("C+" | "c+" | "C-plus" | "plus") => "C-plus.scene",
                 _ => "default.scene",
             };
             bundled(name)

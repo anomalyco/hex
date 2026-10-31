@@ -1104,10 +1104,12 @@ mod tests {
         let t = Timing::default();
         for (name, src) in scene_script::SCENES {
             let problems = validate(src);
-            // C is the v3 control, kept at v3's approved 22 seconds.
+            // C and C-plus keep v3's approved 22-second "Without Hex".
             let problems: Vec<_> = problems
                 .into_iter()
-                .filter(|p| !(name == "C-v3.scene" && p.contains("runs") && p.contains("Without")))
+                .filter(|p| {
+                    !(name.starts_with("C-") && p.contains("runs") && p.contains("Without"))
+                })
                 .collect();
             assert!(problems.is_empty(), "{name}: {problems:#?}");
             let script: &'static Script = Box::leak(Box::new(scene_script::bundled(name)));
