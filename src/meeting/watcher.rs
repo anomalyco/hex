@@ -14,11 +14,11 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::context::ContextSnapshot;
-use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart};
-use crate::meeting_detection::{
+use crate::meeting::detection::{
     BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
     candidate_from_microphone,
 };
+use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
 pub(crate) enum ControllerCommand {
@@ -546,7 +546,7 @@ impl Reminders {
             start.meeting.calendar = Some(calendar_context(meeting));
             // A title the user gave (`hex meetings record --title`) wins.
             if !(candidate.named
-                && candidate.source == crate::meeting_detection::MeetingSource::Manual)
+                && candidate.source == crate::meeting::detection::MeetingSource::Manual)
             {
                 start.meeting.title = Some(meeting.display_title());
                 start.meeting.title_source = meeting::TitleSource::Calendar;

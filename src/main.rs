@@ -92,13 +92,6 @@ mod macos_rune;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod meeting_detection;
-mod meeting_mcp;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-mod meeting_runtime;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod meeting_watcher;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod onboarding;
@@ -581,7 +574,7 @@ fn main() -> Result<()> {
         #[cfg(debug_assertions)]
         Command::Meeting {
             command: MeetingCommand::Probe,
-        } => meeting_watcher::probe(),
+        } => meeting::watcher::probe(),
         #[cfg(debug_assertions)]
         Command::Meeting {
             command: MeetingCommand::Transcribe { id },
@@ -682,7 +675,7 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
     hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
-        meeting_watcher::ListenerConfig { event_path, device },
+        meeting::watcher::ListenerConfig { event_path, device },
     )
 }
 

@@ -12,7 +12,7 @@ use std::time::Instant;
 use color_eyre::Result;
 
 use crate::meeting::MeetingRequest;
-use crate::meeting_watcher::{ControllerEvent, MeetingMenuState};
+use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::rune_ui::{Destination, Ui};
 use crate::tray_menu::MeetingTray;
 
@@ -38,7 +38,7 @@ impl Meetings {
         let controller = thread::Builder::new()
             .name("hex-meetings".into())
             .spawn(move || {
-                if let Err(error) = crate::meeting_watcher::controller_loop(
+                if let Err(error) = crate::meeting::watcher::controller_loop(
                     shutdown,
                     event_sender.clone(),
                     command_receiver,

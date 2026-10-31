@@ -436,7 +436,7 @@ fn run_host(
         };
         *published.shortcuts.lock().unwrap() = route;
         *published.status.lock().unwrap() = Some(host.status(snapshot.clone(), session.clone()));
-        let meetings = crate::meeting_runtime::tray_state();
+        let meetings = crate::meeting::runtime::tray_state();
         if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
             tray_meetings = meetings;
             if let Some(tray) = tray {

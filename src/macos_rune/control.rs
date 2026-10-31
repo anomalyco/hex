@@ -15,7 +15,7 @@ use crate::control::{
 };
 use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
 use crate::meeting::MeetingRequest;
-use crate::meeting_watcher::{ControllerEvent, MeetingMenuState};
+use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::onboarding::PermissionState;
 use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};

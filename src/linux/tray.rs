@@ -76,14 +76,14 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
             }))
         }
         TrayCommand::RecordMeeting => {
-            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Start { title: None })
+            crate::meeting::runtime::request(crate::meeting::MeetingRequest::Start { title: None })
                 .map_err(|error| color_eyre::eyre::eyre!(error))
         }
         TrayCommand::StopMeeting => {
-            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Stop)
+            crate::meeting::runtime::request(crate::meeting::MeetingRequest::Stop)
                 .map_err(|error| color_eyre::eyre::eyre!(error))
         }
-        TrayCommand::CopyLastMeeting => crate::meeting_runtime::copy_last_transcript()
+        TrayCommand::CopyLastMeeting => crate::meeting::runtime::copy_last_transcript()
             .map_err(|error| color_eyre::eyre::eyre!(error)),
         TrayCommand::Show | TrayCommand::Quit => Ok(()),
     };
@@ -100,7 +100,7 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
 pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
     let desktop = &snapshot.desktop;
     TrayView {
-        meetings: crate::meeting_runtime::tray_state(),
+        meetings: crate::meeting::runtime::tray_state(),
         ..TrayView::new(
             desktop.listener.running,
             desktop.activity.state,

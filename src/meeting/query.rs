@@ -2396,5 +2396,5 @@ pub fn parse_offset(input: &str) -> Result<u64> {
 }
 
 #[cfg(test)]
-#[path = "meeting_query_tests.rs"]
+#[path = "query_tests.rs"]
 mod tests;

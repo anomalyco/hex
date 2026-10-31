@@ -444,8 +444,8 @@ struct MeetingMenu {
     sections: Vec<String>,
 }
 
-fn meeting_menu(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool) -> MeetingMenu {
-    use crate::meeting_watcher::MeetingMenuState;
+fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool) -> MeetingMenu {
+    use crate::meeting::watcher::MeetingMenuState;
     match state {
         MeetingMenuState::Idle => MeetingMenu {
             status: None,
@@ -554,7 +554,7 @@ pub fn update_software(status: &crate::desktop_host::DesktopUpdateStatus) {
 
 /// Mirrors the meeting recorder into the menu bar so an active recording
 /// stays visible and stoppable after the Settings window closes.
-pub fn update_meeting(state: &crate::meeting_watcher::MeetingMenuState, enabled: bool) {
+pub fn update_meeting(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn meeting_menu_offers_one_action_per_state() {
-        use crate::meeting_watcher::MeetingMenuState;
+        use crate::meeting::watcher::MeetingMenuState;
         let idle = meeting_menu(&MeetingMenuState::Idle, true);
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
