@@ -6,7 +6,7 @@ the Windows tray app and HUD, the macOS menu-bar app with its meeting capsules,
 every pane (General, Modes, Voice Action, History, Commands, Meetings, Voice
 Filter, Activity, HUD Lab), the onboarding tour, and the transcription picker. The
 macOS dictation HUD stays a native Metal `NSPanel` (`dictation_indicator.rs`,
-with `spring.rs` for its springs). Rune, `rune-kit`, and
+with `rune_hud/spring.rs` for its springs). Rune, `rune-kit`, and
 `rune-theme-opencode` are pinned to a commit on Rune's public MIT `main`
 (`https://github.com/anomalyco/rune.git`; see
 [`rune-dependency.md`](rune-dependency.md) and
@@ -72,7 +72,7 @@ src/rune_ui/tests/panes.rs       macOS and Windows surface tests and goldens
 | History | Search, retention select, two-step Clear all, detail with Copy and Delete, latency and processing facts | `rune-history-{light,dark}`, `rune-history-empty-light` |
 | Modes | Global + custom modes, searchable application picker, native file dialog ("Choose a file…": FileChooser portal, `NSOpenPanel`, `IFileOpenDialog`), website rules, corrections, OpenCode rewriting, drag-reordered transformations, two-step delete | `rune-modes-{light,dark}`, `rune-modes-global-light`, `rune-modes-picker-{light,dark}` |
 | Transcription picker | Modal over scrim: languages, model cards with recommendation and `Streams` tags, Use/Download/Cancel/Delete (two-step), live progress | `rune-picker-{light,dark}`, `rune-picker-downloading-{light,dark}` |
-| Onboarding tour | `onboarding::Flow`: Linux/Windows Welcome → Model setup → Done; macOS adds Microphone/Accessibility rows, System Settings guides, Give it a try practice field, and relaunch recovery | `rune-onboarding-dark`, `rune-onboarding-setup-{light,dark}`, `rune-mac-onboarding*` (10 states) |
+| Onboarding tour | `desktop::onboarding::Flow`: Linux/Windows Welcome → Model setup → Done; macOS adds Microphone/Accessibility rows, System Settings guides, Give it a try practice field, and relaunch recovery | `rune-onboarding-dark`, `rune-onboarding-setup-{light,dark}`, `rune-mac-onboarding*` (10 states) |
 | General (macOS & Windows) | Dictation, Output, and Application cards with a collapsed Advanced disclosure (fits 980×760 on macOS), macOS permissions, Launch at login, Show Dock icon, shortcut sides; Windows listener card, Launch at login, Enable on launch; Check for updates under the sidebar version | `rune-mac-settings-{light,dark}`, `rune-mac-settings-advanced-light`, `rune-mac-settings-permissions-dark`, `rune-mac-settings-sides-dark`, `rune-windows-settings-light` |
 | Commands (macOS) | Task-grouped catalog, search, detail, Create/Edit config, Copy agent prompt, enable card with microphone-policy confirmation, command model retry/disable notice | `rune-mac-commands-{light,dark}`, `rune-mac-commands-confirm-light`, `rune-mac-commands-unavailable-dark` |
 | Meetings (macOS) | Day-grouped list, search, detail with summary and `You`/`Them` turns, Copy transcript, inline Rename, overflow menu (Copy summary, Reveal, Summarize/Regenerate, Delete…), two-step trash, Start/Stop recording; Recordings | Settings switch (Call recording, Calendar, Detected calls); opt-in card while off | `rune-meetings-{light,dark}`, `rune-meetings-settings-{light,dark}`, `rune-meetings-off-{light,dark}`, `rune-meetings-calendar-{light,dark}`, `rune-meetings-calendar-denied-dark`, `rune-meetings-recording-{light,dark}`, `rune-meetings-actions-dark`, `rune-meetings-delete-light`, `rune-meetings-rename-dark`, `rune-meetings-failed-dark`, `rune-meetings-empty-light` |

@@ -26,7 +26,7 @@ Transcription quality plan (ordered by value / effort)
 
 - **Dictation is never delayed by meetings:** meeting chunks run on `TranscriptionEngine` at utility QoS only while `!parakeet::dictation_busy()`, never interrupt a live stream, and finish within the 300 ms hold threshold + 200 ms release tail.
 - **One loaded dictation model, one active stream per `Model`:** `transcribe-cpp` 0.4.1 still enforces a single active compute/stream lease per `Model` (`Session::stream` returns `Error::Busy` on concurrent use). No second Parakeet `Model` (+0.74 GB RAM) is ever loaded for meetings or commands.
-- **Local-only by default, strict GPU where required:** Metal on macOS (`src/parakeet.rs`) and Vulkan on Linux / Windows x64 (`src/local_transcriber.rs`).
+- **Local-only by default, strict GPU where required:** Metal on macOS (`src/parakeet.rs`) and Vulkan on Linux / Windows x64 (`src/transcription/local_transcriber.rs`).
 
 ---
 
@@ -52,13 +52,13 @@ Transcription quality plan (ordered by value / effort)
 
 - **Goal:** Give users one place to define names, jargon, and known misrecognitions that works across every model, mode, dictation, and meeting transcript.
 - **Changes:**
-  - **Fix `src/text_replacements.rs` bugs (#139, #177):**
+  - **Fix `src/dictation/text_replacements.rs` bugs (#139, #177):**
     - `#177` (CJK never matches): `phrase_boundary` currently requires `!word_character` (`^\w$`) on both sides, which rejects CJK matches inside unspaced sentences. Require word-character boundaries only on edges where the matched phrase itself starts or ends with a space-delimited script (Latin/Cyrillic/Greek/digits); CJK characters self-delimit.
     - `#139` (overlapping matches skipped): `matcher.find_iter(text)` skips overlapping occurrences of the same rule if an earlier match failed `phrase_boundary`. Scan from the next UTF-8 character boundary after any rejected match.
   - **Data model (`src/app_settings.rs`):**
     - Add `pub vocabulary: Vec<VocabularyEntry>` (`{ term: String, aliases: Vec<String> }`) to `AppSettings` in `settings.json`.
     - Add a one-time migration in `MIGRATIONS` that imports any non-empty `transcription.recognition_hints` and `transcription_recents[*].recognition_hints` (comma/newline-split) into `vocabulary`, and removes the `!model.supports_recognition_hints` error from `transcription_models::validate` so switching models never fails when hints are present.
-  - **Pipeline wiring (`src/parakeet.rs`, `src/local_transcriber.rs`, `src/dictation_processor.rs`, `src/meeting_transcript.rs`):**
+  - **Pipeline wiring (`src/parakeet.rs`, `src/transcription/local_transcriber.rs`, `src/dictation_processor.rs`, `src/meeting_transcript.rs`):**
     - **Model hints:** Pass `vocabulary` terms (capped at 64 terms to prevent Whisper silence hallucinations, #108/#193) to models with `supports_recognition_hints`.
     - **Global alias replacements:** Compile unambiguous `aliases -> term` pairs ( plus multi-word compound joins like `"open code" -> "OpenCode"`) into a shared `ReplacementSet` that runs before mode-specific `replacements` in `dictation_processor.rs`, `dictation_modes.rs`, and on rolling/final chunks in `meeting_transcript.rs`.
     - **OpenCode rewrite prompt (`src/dictation_processor.rs`):** When a mode enables OpenCode rewriting, append a compact `Vocabulary` block (`"Prefer these exact spellings when a word sounds like one: Hex (heard as: Hanks), Abattoir (heard as: Avatar), OpenCode, Rune, Scrawl, Effect…"`). Because the LLM sees sentence context, it resolves real-word collisions (`"Hanks"`, `"Avatar"`) without corrupting ordinary prose.
@@ -68,7 +68,7 @@ Transcription quality plan (ordered by value / effort)
     - In `src/rune_ui/history.rs`, add a Secondary `"Add to vocabulary…"` action in `detail_header` when `raw_text` differs from `final_text` or is selected, prefilling the misheard phrase.
     - Add all five language translations in `src/desktop_i18n.rs` and update `--snap` scenes (`mac-settings`, `history`) in light and dark.
 - **Measurement & gate:**
-  - Unit tests in `src/text_replacements.rs` covering CJK phrases (`#177`) and overlapping candidates (`#139`).
+  - Unit tests in `src/dictation/text_replacements.rs` covering CJK phrases (`#177`) and overlapping candidates (`#139`).
   - Phase 1 benchmark: 100% recall on unambiguous aliases (`"open code" -> "OpenCode"`, `"scrawl"`, `"rune"`) and LLM-rewritten `"Hanks"` / `"Avatar"` sentences; `cargo test --bin hex rune_ui` green with updated light/dark goldens.
 - **Effort:** 4 days.
 - **Risk:** Low. Users could enter a common word as an unconditional alias (e.g. `"Hanks" -> "Hex"`); mitigate in Phase 4 by routing single-word real-word collisions through acoustic margin gating when Parakeet is active, or warning inline when an alias is a common dictionary word.
@@ -81,9 +81,9 @@ Transcription quality plan (ordered by value / effort)
 - **Status (2026-10-26):** The dependency bump is done with behavior unchanged: same transcripts on the vocabulary corpus, weights now mmap'd (peak footprint about 0.9 GB to 0.15 GB on Metal). Hints, the catalog refresh, and Vulkan prewarm verification remain.
 - **Goal:** Upgrade `transcribe-cpp` to `0.4.1` to unlock generic `RunOptions::vocabulary` / `prompt`, enable Qwen3-ASR recognition hints (`#129`), and replace `ParakeetV3` with `parakeet-ultra`.
 - **Changes:**
-  - **Dependency bump (`Cargo.toml`, `src/gguf_session.rs`, `src/parakeet.rs`, `src/local_transcriber.rs`):**
+  - **Dependency bump (`Cargo.toml`, `src/transcription/gguf_session.rs`, `src/parakeet.rs`, `src/transcription/local_transcriber.rs`):**
     - Bump `transcribe-cpp` from `=0.2.4` to `=0.4.1` at all three target entries in `Cargo.toml` (default, Linux `vulkan`, Windows x64 `vulkan`).
-    - Update `model.capabilities()` call sites (`src/gguf_session.rs:110`, `src/parakeet.rs:1073`, `src/local_transcriber.rs:154`) to handle `Result<Capabilities>`.
+    - Update `model.capabilities()` call sites (`src/transcription/gguf_session.rs:110`, `src/parakeet.rs:1073`, `src/transcription/local_transcriber.rs:154`) to handle `Result<Capabilities>`.
     - Replace the Whisper-only `RunExtension::Whisper` hint wiring with `0.4.1`'s generic `RunOptions::vocabulary` / `prompt` capability bits (`docs/prompting.md`), and set `supports_recognition_hints: true` on `Qwen3Asr06B` in `src/transcription_models.rs` (`#129`).
   - **Model catalog (`src/transcription_models.rs`):**
     - Add **`ParakeetUltra`** (`handy-computer/parakeet-ultra-gguf`, `parakeet-ultra-Q8_0.gguf`, ~740 MB, CC-BY-4.0, 25 languages): Moondream's post-trained v3 that drops LibriSpeech clean WER from 1.94% to 1.80% (8-set leaderboard 5.32% vs v3's 6.32%) and cuts long audio at natural pauses (30 s segments).
@@ -102,14 +102,14 @@ Transcription quality plan (ordered by value / effort)
 
 - **Goal:** Bias Parakeet's acoustic decoder toward the user's vocabulary during inference so `"Hex"`, `"Abattoir"`, `"OpenCode"`, `"Rune"`, `"Scrawl"`, `"Effect"`, and people's names win over phonetically similar common words (`"Hanks"`, `"Avatar"`) without an LLM call or a second model.
 - **Why this works in Parakeet:**
-  - In `transcribe.cpp` (`src/arch/parakeet/decoder.cpp`), `decode_rnnt_greedy` (Unified English), `decode_tdt_greedy` (v2/v3/ultra), and streaming RNN-T all run on the host CPU (`n_threads = 1` on GPU devices in `src/gguf_session.rs`).
+  - In `transcribe.cpp` (`src/arch/parakeet/decoder.cpp`), `decode_rnnt_greedy` (Unified English), `decode_tdt_greedy` (v2/v3/ultra), and streaming RNN-T all run on the host CPU (`n_threads = 1` on GPU devices in `src/transcription/gguf_session.rs`).
   - At every step, `joint_step` copies the joint network output into a host `std::vector<float> logits`, applies `log_softmax`, and selects `argmax_range(token_logits, n_token_cls)` with `blank_id = vocab`.
 - **Changes:**
   - **Step 4a: 5-day spike in a local `transcribe.cpp` 0.4.1 checkout:**
     1. **SentencePiece encoder:** Implement tokenization for Parakeet's 1,024-piece SentencePiece vocabulary stored in the GGUF metadata (replacing the `INT_MIN` stub in `transcribe_tokenize`), generating casing variants (`"Hex"`, `" hex"`, `"Abattoir"`, `" abattoir"`).
     2. **Aho-Corasick / prefix trie shallow fusion (GPU-PB style, arXiv 2508.07014):** Build a token-level prefix trie with failure links from `RunOptions::vocabulary`.
     3. **Acoustic margin gate + prefix rollback:** At each `joint_step`, only apply `boost` (e.g. +1.5 to +3.0 nats) to a trie-advancing token `t` when `logits[best_non_blank] - logits[t] <= margin` (the acoustics already support `t`). To prevent a multi-token term (`"Abattoir"`, `"OpenCode"`) from stranding a broken first subword if a later subword fails the acoustic margin gate, keep a single shadow predictor state while inside an active multi-token trie prefix and commit it only when the full term completes (zero extra compute outside active prefixes).
-  - **Step 4b: Ship upstream + fork bridge (`Cargo.toml`, `src/parakeet.rs`, `src/local_transcriber.rs`):**
+  - **Step 4b: Ship upstream + fork bridge (`Cargo.toml`, `src/parakeet.rs`, `src/transcription/local_transcriber.rs`):**
     - Wire `Parakeet` and `LocalTranscriber` to pass `settings.vocabulary` terms into `RunOptions::vocabulary` (both offline `run` and `with_stream`).
     - **Upstream vs. fork strategy:** Open an upstream PR to `handy-computer/transcribe.cpp` filling Parakeet's currently empty `vocabulary` slot in `docs/prompting.md` and `transcribe_tokenize`. While upstream reviews, carry a narrow `[patch.crates-io]` git patch pointing to `anomalyco/transcribe.cpp` (pinned rev, updating `nix/package.nix` hashes if needed) so Hex ships immediately, then return to the crates.io pin once upstream releases.
     - **Fallback if greedy spike misses the gate:** Confidence-gated phonetic snap in Rust using `Transcript::tokens` (`Token::p`) and word timestamps already returned by `transcribe_segments` (`src/parakeet.rs:1190`), with FluidAudio-style guards (>=80% similarity for <=4-char words, >=85% with stop words).

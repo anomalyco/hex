@@ -22,7 +22,7 @@ Agent or terminal                                // transcripts.cli; macOS relea
 ```
 
 Commands work beside the running app and independently of feature opt-ins.
-`transcript_cli` dispatches before logging, instance locking, local
+`control/transcript_cli` dispatches before logging, instance locking, local
 API, GUI, permissions, and Hex Microphone. Nothing is created or repaired.
 Debug `meeting list/show` shares this path; recording remains debug-only.
 
@@ -34,12 +34,12 @@ holds at most 10,000 entries and 16 MiB of raw + final text, without an archive.
 Already-evicted entries remain unavailable. UI search still returns at most 200;
 CLI limits apply after filtering and allow up to 10,000.
 
-Sources: [transcript_cli.rs](../../src/transcript_cli.rs),
+Sources: [control/transcript_cli.rs](../../src/control/transcript_cli.rs),
 [history.rs](../../src/history.rs), [meeting/query.rs](../../src/meeting/query.rs),
 and early dispatch in [main.rs](../../src/main.rs).
 [Command and JSON contracts](../transcript-cli.md) document flags and schema.
 
-Checks in [transcript_cli_tests.rs](../../src/transcript_cli_tests.rs) cover
+Checks in [control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs) cover
 filters/order, ranked `--search` within retention, one document per entry
 (`history_search_counts_raw_and_final_text_as_one_document`), retention and malformed settings, JSON snapshots, atomic-replace
 reads, parsing, and `show --from/--to` JSON, Markdown,

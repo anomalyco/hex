@@ -159,7 +159,7 @@ Graphics and Media`), and FaceTime uses `com.apple.avconferenced`.
 process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
 microphone and is not snoozed, `ContextSnapshot::capture_for_meeting` in
-[context.rs](../../src/context.rs) reads the active tab of Brave's front window,
+[dictation/context.rs](../../src/dictation/context.rs) reads the active tab of Brave's front window,
 even if Brave is behind another window. Background tabs are not searched: a
 call open in one says nothing about which tab holds the microphone, and a
 voice note elsewhere would otherwise get a known service's 2 s threshold or
@@ -207,7 +207,7 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `an_answer_is_dated_by_when_its_query_finished`,
 `a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
-`the_meeting_tab_query_reads_only_the_active_tab` (context.rs),
+`the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
 `offer_titles_name_the_service_site_or_browser_without_repeating_call`,
 `choices_apply_to_the_site_when_known_and_the_app_otherwise`,
@@ -228,7 +228,7 @@ automated test; it shares the manual Record path.
 
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
-[context.rs](../../src/context.rs), the controller in
+[dictation/context.rs](../../src/dictation/context.rs), the controller in
 [meeting/watcher.rs](../../src/meeting/watcher.rs) (which logs `INFO` when an
 offer is triggered), and the offer capsule in
 [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs).
@@ -439,7 +439,7 @@ Checks: `call_end_is_reported_once_per_sustained_absence`,
 [parakeet.rs](../../src/parakeet.rs),
 `paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten`, and
 `meeting_menu_offers_one_action_per_state` in
-[status_item.rs](../../src/status_item.rs), and
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), and
 `mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
 `writer_fills_a_capture_gap_with_silence_and_records_it`, and
 `a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline` in
