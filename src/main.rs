@@ -60,6 +60,7 @@ mod hex_microphone;
 mod history;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod hud_placement;
+mod idle_sleep;
 mod input_level;
 mod instance;
 #[cfg(target_os = "macos")]
@@ -84,6 +85,8 @@ mod linux_context;
 mod linux_dictation;
 #[cfg(target_os = "linux")]
 mod linux_input;
+#[cfg(target_os = "linux")]
+mod linux_input_route;
 #[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
@@ -119,6 +122,7 @@ mod microphone_activity;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod onboarding;
 mod opencode_catalog;
+mod output_ducking;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
@@ -1075,6 +1079,7 @@ mod tests {
 
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
+    linux_input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 

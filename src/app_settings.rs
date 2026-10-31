@@ -1595,10 +1595,10 @@ pub struct AppSettings {
     pub sound_theme: crate::feedback::SoundSet,
     pub microphone: Option<String>,
     /// System default records from the built-in microphone, else another
-    /// real input, rather than a Bluetooth default (macOS).
+    /// real input, rather than a Bluetooth default.
     pub avoid_bluetooth_microphone: bool,
     pub recording_audio_behavior: RecordingAudioBehavior,
-    /// Fraction of the original output volume while ducking (macOS).
+    /// Fraction of the original output volume while ducking.
     pub recording_duck_volume: f32,
     /// With Pause media on macOS, also pause a browser that is audibly playing.
     pub pause_browser_media: bool,

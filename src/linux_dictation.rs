@@ -223,7 +223,7 @@ pub(crate) fn run(
     let mut shortcuts_suspended = false;
     let mut indicator = LinuxIndicator::new(settings.indicator_position);
     let mut suppressor =
-        crate::linux_audio_control::AudioSuppressor::new(settings.recording_audio_behavior);
+        crate::linux_audio_control::AudioSuppressor::dictation(settings.recording_audio_behavior);
     let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
@@ -388,7 +388,7 @@ pub(crate) fn run(
                     indicator = LinuxIndicator::new(next.indicator_position);
                 }
                 if next.recording_audio_behavior != settings.recording_audio_behavior {
-                    suppressor = crate::linux_audio_control::AudioSuppressor::new(
+                    suppressor = crate::linux_audio_control::AudioSuppressor::dictation(
                         next.recording_audio_behavior,
                     );
                 }

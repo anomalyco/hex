@@ -1,8 +1,10 @@
-//! Mutes or pauses other audio while a Linux dictation records. Muting
-//! uses PipeWire's `wpctl`, or PulseAudio's `pactl`; pausing asks every
-//! playing MPRIS player over the session D-Bus. Both restore only what
-//! they changed. A worker thread does the work so the dictation loop never
-//! waits on a slow player.
+//! Mutes, lowers, or pauses other audio while a Linux dictation records,
+//! and keeps the computer from idle sleep. Muting uses PipeWire's `wpctl`,
+//! or PulseAudio's `pactl`; lowering ramps the default sink's channels with
+//! `pactl` (or its one volume with `wpctl`); pausing asks every playing
+//! MPRIS player over the session D-Bus. All restore only what they changed.
+//! A worker thread does the work so the dictation loop never waits on a
+//! slow player or logind.
 
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -11,6 +13,8 @@ use std::time::Duration;
 use zbus::{Connection, OwnedVariant};
 
 use crate::app_settings::RecordingAudioBehavior;
+use crate::idle_sleep::PreventSleep;
+use crate::output_ducking;
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
@@ -30,14 +34,30 @@ pub(crate) struct AudioSuppressor {
 }
 
 impl AudioSuppressor {
+    /// "While dictating" for a capture, which does not prevent sleep.
     pub(crate) fn new(behavior: RecordingAudioBehavior) -> Self {
-        if behavior == RecordingAudioBehavior::DoNothing {
+        Self::start(behavior, false)
+    }
+
+    /// "While dictating" for a dictation, which also prevents idle sleep.
+    pub(crate) fn dictation(behavior: RecordingAudioBehavior) -> Self {
+        Self::start(behavior, true)
+    }
+
+    fn start(behavior: RecordingAudioBehavior, prevent_sleep: bool) -> Self {
+        if behavior == RecordingAudioBehavior::DoNothing && !prevent_sleep {
             return Self { requests: None };
         }
         let (requests, receiver) = mpsc::channel();
+        let hold = move || Held {
+            audio: suppress(behavior),
+            _sleep: prevent_sleep
+                .then(crate::idle_sleep::prevent_sleep)
+                .flatten(),
+        };
         let spawned = std::thread::Builder::new()
             .name("linux-audio-control".into())
-            .spawn(move || serve(receiver, || suppress(behavior), restore, restore_then));
+            .spawn(move || serve(receiver, hold, restore, restore_then));
         if let Err(error) = &spawned {
             tracing::warn!(%error, "could not start Linux audio control");
         }
@@ -114,8 +134,16 @@ fn serve<S>(
     }
 }
 
+/// What one recording changed. Dropping it releases idle sleep after
+/// `restore` puts the audio back.
+struct Held {
+    audio: Suppressed,
+    _sleep: Option<PreventSleep>,
+}
+
 enum Suppressed {
     Muted(Mixer),
+    Ducked(output_ducking::Guard),
     Paused(Vec<String>),
     Nothing,
 }
@@ -130,25 +158,36 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
                 Suppressed::Nothing
             }
         },
+        RecordingAudioBehavior::Duck => output_ducking::Guard::start(
+            crate::app_settings::recording_duck_volume(),
+            SinkVolume::find,
+        )
+        .map_or(Suppressed::Nothing, Suppressed::Ducked),
         RecordingAudioBehavior::PauseMedia => Suppressed::Paused(pause_players()),
-        RecordingAudioBehavior::DoNothing | RecordingAudioBehavior::Duck => Suppressed::Nothing,
+        RecordingAudioBehavior::DoNothing => Suppressed::Nothing,
     }
 }
 
-fn restore(suppressed: Suppressed) {
-    match suppressed {
+fn restore(held: Held) {
+    match held.audio {
         Suppressed::Muted(mixer) => {
             mixer.mute(false);
         }
+        Suppressed::Ducked(mut guard) => guard.restore(),
         Suppressed::Paused(players) => resume_players(&players),
         Suppressed::Nothing => {}
     }
 }
 
-fn restore_then(suppressed: Option<Suppressed>, then: Box<dyn FnOnce() + Send>) {
-    match suppressed {
-        Some(muted @ Suppressed::Muted(_)) => {
-            restore(muted);
+/// A muted or lowered output is audible again before `then`, as on macOS;
+/// resuming players never delays it.
+fn restore_then(held: Option<Held>, then: Box<dyn FnOnce() + Send>) {
+    match held {
+        Some(held @ Held {
+            audio: Suppressed::Muted(_) | Suppressed::Ducked(_),
+            ..
+        }) => {
+            restore(held);
             then();
         }
         other => {
@@ -158,6 +197,84 @@ fn restore_then(suppressed: Option<Suppressed>, then: Box<dyn FnOnce() + Send>) 
             }
         }
     }
+}
+
+/// The default sink's volume for lowering: each channel through `pactl`,
+/// which keeps the balance, else the one volume `wpctl` reports.
+enum SinkVolume {
+    Pactl,
+    Wpctl,
+}
+
+impl SinkVolume {
+    fn find() -> Option<Self> {
+        [Self::Pactl, Self::Wpctl]
+            .into_iter()
+            .find(|volume| output_ducking::Volume::read(volume).is_some())
+    }
+}
+
+/// pactl's raw volume for 100%.
+const PA_VOLUME_NORM: f32 = 65536.0;
+
+impl output_ducking::Volume for SinkVolume {
+    fn read(&self) -> Option<Vec<f32>> {
+        match self {
+            Self::Pactl => parse_pactl_volume(&run("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])?),
+            Self::Wpctl => parse_wpctl_volume(&run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])?)
+                .map(|volume| vec![volume]),
+        }
+    }
+
+    fn write(&mut self, values: &[f32]) -> bool {
+        match self {
+            Self::Pactl => {
+                let raw = values
+                    .iter()
+                    .map(|value| ((value * PA_VOLUME_NORM).round() as u32).to_string())
+                    .collect::<Vec<_>>();
+                let mut args = vec!["set-sink-volume", "@DEFAULT_SINK@"];
+                args.extend(raw.iter().map(String::as_str));
+                run("pactl", &args).is_some()
+            }
+            Self::Wpctl => values.first().is_some_and(|value| {
+                run(
+                    "wpctl",
+                    &["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{value:.4}")],
+                )
+                .is_some()
+            }),
+        }
+    }
+}
+
+/// Each channel's raw volume from `pactl get-sink-volume`, such as
+/// `Volume: front-left: 32768 /  50% / -18.06 dB,   front-right: ...`.
+fn parse_pactl_volume(output: &str) -> Option<Vec<f32>> {
+    let line = output.lines().find(|line| line.trim_start().starts_with("Volume:"))?;
+    let values = line
+        .trim_start()
+        .trim_start_matches("Volume:")
+        .split(',')
+        .map(|channel| {
+            let (_, rest) = channel.split_once(':')?;
+            let raw: u32 = rest.split('/').next()?.trim().parse().ok()?;
+            Some(raw as f32 / PA_VOLUME_NORM)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!values.is_empty()).then_some(values)
+}
+
+/// The volume from `wpctl get-volume`, such as `Volume: 0.47 [MUTED]`.
+fn parse_wpctl_volume(output: &str) -> Option<f32> {
+    output
+        .trim()
+        .strip_prefix("Volume:")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+        .filter(|volume: &f32| volume.is_finite() && *volume >= 0.0)
 }
 
 /// The command-line mixer for the default output.
@@ -311,6 +428,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sink_volumes_parse_per_channel() {
+        assert_eq!(
+            parse_pactl_volume(
+                "Volume: front-left: 32768 /  50% / -18.06 dB,   front-right: 65536 / 100% / 0.00 dB\n        balance 0.00\n"
+            ),
+            Some(vec![0.5, 1.0])
+        );
+        assert_eq!(parse_pactl_volume("Connection failure"), None);
+        assert_eq!(parse_wpctl_volume("Volume: 0.47\n"), Some(0.47));
+        assert_eq!(parse_wpctl_volume("Volume: 0.25 [MUTED]\n"), Some(0.25));
+    }
+
+    #[test]
     fn doing_nothing_starts_no_worker() {
         let suppressor = AudioSuppressor::new(RecordingAudioBehavior::DoNothing);
         assert!(suppressor.requests.is_none());
@@ -326,7 +456,10 @@ mod tests {
         let (order, events) = mpsc::channel();
         let ran = order.clone();
         restore_then(
-            Some(Suppressed::Paused(Vec::new())),
+            Some(Held {
+                audio: Suppressed::Paused(Vec::new()),
+                _sleep: None,
+            }),
             Box::new(move || ran.send("then").unwrap()),
         );
         restore_then(None, Box::new(move || order.send("idle").unwrap()));

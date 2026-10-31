@@ -480,7 +480,7 @@ pub fn record(
                 }
             };
         let capture_clock = Instant::now();
-        let sleep_prevention = crate::recording_environment::prevent_sleep();
+        let sleep_prevention = crate::idle_sleep::prevent_sleep();
         let sink = |source, drops: &Arc<AtomicU64>| capture::PacketSink {
             source,
             sender: sender.clone(),
