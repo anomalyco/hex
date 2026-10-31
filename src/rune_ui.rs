@@ -2183,11 +2183,11 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::fixture(ui, false);
     }),
-    // Whisper ignores the list: the row and the sheet say so.
+    // Cohere ignores the list: the row and the sheet say so.
     ("vocabulary-unused", |ui| {
         *ui = portal_fixture();
-        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
-        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        ui.settings.transcription.model = TranscriptionModelId::CohereTranscribe;
+        ui.picker.installed = Some(vec![TranscriptionModelId::CohereTranscribe]);
         vocabulary::fixture(ui, true);
     }),
     ("mac-settings-recording", |ui| {

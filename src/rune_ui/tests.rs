@@ -1588,11 +1588,11 @@ fn add_term_scrolls_the_new_row_into_view() {
     );
 }
 
-/// A model transcription doesn't bias says so on the Vocabulary row and in
-/// its sheet; a Parakeet-based model shows no note.
+/// A model whose transcription takes no vocabulary says so on the Vocabulary
+/// row and in its sheet; Parakeet-based and prompt-reading models show none.
 #[test]
 fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
-    let note = "Whisper large-v3-turbo doesn't use these terms; rewriting and search still do";
+    let note = "Cohere Transcribe doesn't use these terms; rewriting and search still do";
     let shows_note = |rt: &Runtime<Ui>| texts(rt).iter().any(|text| text == note);
     let sheet_note = |rt: &Runtime<Ui>| {
         rt.elements()
@@ -1601,7 +1601,7 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
     };
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert!(!shows_note(&rt));
-    rt.state.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    rt.state.settings.transcription.model = TranscriptionModelId::CohereTranscribe;
     rt.invalidate();
     settle(&mut rt);
     assert!(shows_note(&rt), "{:?}", texts(&rt));
@@ -1610,14 +1610,20 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
     assert!(sheet_note(&rt));
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    rt.state.settings.transcription.model = TranscriptionModelId::UnderdogBark3Pro;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(
-        !texts(&rt)
-            .iter()
-            .any(|text| text.contains("doesn't use these terms"))
-    );
+    for model in [
+        TranscriptionModelId::UnderdogBark3Pro,
+        TranscriptionModelId::WhisperLargeV3Turbo,
+        TranscriptionModelId::QwenCleoAsr17B,
+    ] {
+        rt.state.settings.transcription.model = model;
+        rt.invalidate();
+        settle(&mut rt);
+        assert!(
+            !texts(&rt)
+                .iter()
+                .any(|text| text.contains("doesn't use these terms"))
+        );
+    }
 
     let rt = runtime("vocabulary-unused", true, PANE_SIZE);
     assert!(rt.state.vocabulary.open);
