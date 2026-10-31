@@ -388,88 +388,153 @@ impl Drop for PortalBus {
     }
 }
 
-/// Moves Hex's own managed `hex.desktop` launcher entry (the name before
-/// #579) in the user's data dir to `anomaly.hex.desktop`, keeping its Exec
-/// lines, unless an entry of the user's own already has the new name. Returns
-/// the entry it wrote.
-pub(crate) fn move_legacy_desktop_entry() -> Result<Option<PathBuf>> {
-    let Some(home) = dirs::data_dir() else {
-        return Ok(None);
-    };
-    let applications = home.join("applications");
-    let legacy = applications.join(LEGACY_ENTRY);
-    let Some(old) = read_entry(&legacy)?.filter(|old| managed(old)) else {
-        return Ok(None);
-    };
-    let entry = applications.join(format!("{APP_ID}.desktop"));
-    let replace = read_entry(&entry)?.as_deref().is_none_or(managed);
-    if replace {
-        write_entry(&applications, &entry, &moved_entry(&old))
-            .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+/// Tidies Hex's launcher entry at startup: see [`DesktopEntries::tidy`].
+pub(crate) fn tidy_desktop_entries() -> Result<()> {
+    if let Some(entries) = DesktopEntries::current() {
+        entries.tidy()?;
     }
-    std::fs::remove_file(&legacy)
-        .wrap_err_with(|| format!("could not remove {}", legacy.display()))?;
-    tracing::info!(entry = %entry.display(), "moved Hex's desktop entry to its app id");
-    Ok(replace.then_some(entry))
+    Ok(())
 }
 
 /// The portal identifies a host app by a desktop entry named for its id,
-/// `anomaly.hex.desktop`, which installs ship. After moving an old entry,
-/// Hex drops a hidden fallback once a package ships the entry. Without any
-/// entry, Hex writes a minimal one that runs it, marked managed so an install
-/// may replace it, and hidden from launchers when an older package's
-/// `hex.desktop` already shows Hex. Returns the entry it wrote.
+/// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
-    if let Some(moved) = move_legacy_desktop_entry()? {
-        return Ok(Some(moved));
-    }
-    let Some(home) = dirs::data_dir() else {
-        return Ok(None);
-    };
-    let applications = home.join("applications");
-    let name = format!("{APP_ID}.desktop");
-    let entry = applications.join(&name);
-    let user_entry = read_entry(&entry)?;
-    let system = std::env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|dirs| !dirs.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    let system_dirs = system
-        .split(':')
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| Path::new(dir).join("applications"))
-        .collect::<Vec<_>>();
-    let shipped = |name: &str| system_dirs.iter().any(|dir| dir.join(name).exists());
-    match user_entry {
-        Some(user) if managed(&user) && no_display(&user) && shipped(&name) => {
-            // A fallback would shadow the package's entry of the same id.
-            std::fs::remove_file(&entry)
-                .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
-            return Ok(None);
+    match DesktopEntries::current() {
+        Some(entries) => {
+            let executable =
+                std::env::current_exe().wrap_err("could not find Hex's executable")?;
+            let executable = executable
+                .to_str()
+                .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
+            entries.ensure(executable)
         }
-        Some(_) => return Ok(None),
-        None if shipped(&name) => return Ok(None),
-        None => {}
+        None => Ok(None),
     }
-    let hidden = shipped(LEGACY_ENTRY);
-    let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
-    let executable = executable
-        .to_str()
-        .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
-    write_entry(&applications, &entry, &desktop_entry(executable, hidden))
-        .wrap_err_with(|| format!("could not write {}", entry.display()))?;
-    tracing::info!(entry = %entry.display(), "wrote a desktop entry for the portal");
-    Ok(Some(entry))
 }
 
-/// A regular file's contents; `None` when it is missing or not a file.
-fn read_entry(path: &Path) -> Result<Option<String>> {
+/// Hex's launcher entry: the user's `applications` directory, which Hex may
+/// write, and the system ones from `XDG_DATA_DIRS`, which packages own.
+struct DesktopEntries {
+    applications: PathBuf,
+    system: Vec<PathBuf>,
+}
+
+/// A desktop entry on disk. Hex reads and replaces only regular files.
+enum Entry {
+    Missing,
+    File(String),
+    /// A symlink or anything else the user put there.
+    Other,
+}
+
+impl DesktopEntries {
+    fn current() -> Option<Self> {
+        let applications = dirs::data_dir()?.join("applications");
+        let system = std::env::var("XDG_DATA_DIRS")
+            .ok()
+            .filter(|dirs| !dirs.is_empty())
+            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+        let system = system
+            .split(':')
+            .filter(|dir| !dir.is_empty())
+            .map(|dir| Path::new(dir).join("applications"))
+            .collect();
+        Some(Self::new(applications, system))
+    }
+
+    /// Leaves the user's own directory out of the system ones, as some
+    /// profiles list it in `XDG_DATA_DIRS` too.
+    fn new(applications: PathBuf, system: Vec<PathBuf>) -> Self {
+        let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.into());
+        let own = canonical(&applications);
+        let system = system
+            .into_iter()
+            .filter(|dir| canonical(dir) != own)
+            .collect();
+        Self {
+            applications,
+            system,
+        }
+    }
+
+    fn entry(&self) -> PathBuf {
+        self.applications.join(format!("{APP_ID}.desktop"))
+    }
+
+    fn shipped(&self, name: &str) -> bool {
+        self.system.iter().any(|dir| dir.join(name).exists())
+    }
+
+    /// Moves Hex's own managed `hex.desktop` (the name before #579) to
+    /// `anomaly.hex.desktop`, keeping its Exec lines, unless the user put an
+    /// entry of their own there; then removes a hidden fallback that would
+    /// shadow a package's entry of the same id. Returns the entry it wrote.
+    fn tidy(&self) -> Result<Option<PathBuf>> {
+        let entry = self.entry();
+        let current = read_entry(&entry)?;
+        let legacy = self.applications.join(LEGACY_ENTRY);
+        if let Entry::File(old) = read_entry(&legacy)?
+            && managed(&old)
+        {
+            let replace = match &current {
+                Entry::Missing => true,
+                Entry::File(current) => managed(current),
+                Entry::Other => false,
+            };
+            if replace {
+                write_entry(&self.applications, &entry, &moved_entry(&old))
+                    .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+            }
+            std::fs::remove_file(&legacy)
+                .wrap_err_with(|| format!("could not remove {}", legacy.display()))?;
+            tracing::info!(entry = %entry.display(), "moved Hex's desktop entry to its app id");
+            return Ok(replace.then_some(entry));
+        }
+        if let Entry::File(current) = &current
+            && managed(current)
+            && no_display(current)
+            && self.shipped(&format!("{APP_ID}.desktop"))
+        {
+            std::fs::remove_file(&entry)
+                .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
+            tracing::info!(entry = %entry.display(), "removed Hex's fallback desktop entry");
+        }
+        Ok(None)
+    }
+
+    /// After [`Self::tidy`], with no entry anywhere, writes a minimal one
+    /// that runs `executable`, marked managed so an install may replace it,
+    /// and hidden from launchers when an older package's or the user's own
+    /// `hex.desktop` already shows Hex. Returns the entry it wrote.
+    fn ensure(&self, executable: &str) -> Result<Option<PathBuf>> {
+        if let Some(moved) = self.tidy()? {
+            return Ok(Some(moved));
+        }
+        let entry = self.entry();
+        if !matches!(read_entry(&entry)?, Entry::Missing)
+            || self.shipped(&format!("{APP_ID}.desktop"))
+        {
+            return Ok(None);
+        }
+        let hidden = self.shipped(LEGACY_ENTRY)
+            || !matches!(
+                read_entry(&self.applications.join(LEGACY_ENTRY))?,
+                Entry::Missing
+            );
+        write_entry(&self.applications, &entry, &desktop_entry(executable, hidden))
+            .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+        tracing::info!(entry = %entry.display(), "wrote a desktop entry for the portal");
+        Ok(Some(entry))
+    }
+}
+
+fn read_entry(path: &Path) -> Result<Entry> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => std::fs::read_to_string(path)
-            .map(Some)
+            .map(Entry::File)
             .wrap_err_with(|| format!("could not read {}", path.display())),
-        Ok(_) => Ok(None),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Ok(_) => Ok(Entry::Other),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Entry::Missing),
         Err(error) => Err(error).wrap_err_with(|| format!("could not read {}", path.display())),
     }
 }
@@ -687,6 +752,70 @@ mod tests {
             moved_entry(old),
             "[Desktop Entry]\nStartupWMClass=anomaly.hex\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n\n[Desktop Action quit]\nExec=\"/home/a/.local/bin/hex\" quit\n"
         );
+    }
+
+    fn entries(name: &str) -> (PathBuf, DesktopEntries) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hex-desktop-{name}-{unique}"));
+        let applications = root.join("home/applications");
+        let system = root.join("system/applications");
+        std::fs::create_dir_all(&applications).unwrap();
+        std::fs::create_dir_all(&system).unwrap();
+        let entries = DesktopEntries::new(applications.clone(), vec![applications, system]);
+        (root, entries)
+    }
+
+    const OLD: &str = "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
+
+    #[test]
+    fn an_old_managed_entry_moves_to_the_app_id() {
+        let (root, entries) = entries("move");
+        std::fs::write(entries.applications.join("hex.desktop"), OLD).unwrap();
+        assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
+        assert!(!entries.applications.join("hex.desktop").exists());
+        let moved = std::fs::read_to_string(entries.entry()).unwrap();
+        assert!(moved.contains("Exec=\"/home/a/.local/bin/hex\"\n"));
+        assert!(moved.contains("StartupWMClass=anomaly.hex\n"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn entries_hex_did_not_write_stay() {
+        let (root, entries) = entries("unmanaged");
+        let user = entries.applications.join("hex.desktop");
+        std::fs::write(&user, "[Desktop Entry]\nName=Mine\n").unwrap();
+        std::os::unix::fs::symlink(&user, entries.entry()).unwrap();
+        entries.ensure("/opt/hex").unwrap();
+        assert!(user.exists());
+        assert!(entries.entry().is_symlink());
+        // A symlinked old entry is the user's too, even with Hex's mark.
+        std::fs::remove_file(entries.entry()).unwrap();
+        let target = root.join("managed.desktop");
+        std::fs::write(&target, OLD).unwrap();
+        std::fs::remove_file(&user).unwrap();
+        std::os::unix::fs::symlink(&target, &user).unwrap();
+        entries.tidy().unwrap();
+        assert!(user.is_symlink());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_fallback_hides_beside_the_users_old_entry_and_yields_to_a_package() {
+        let (root, entries) = entries("fallback");
+        // The user's own directory listed in XDG_DATA_DIRS is not a package.
+        assert_eq!(entries.system.len(), 1);
+        std::fs::write(entries.applications.join("hex.desktop"), "[Desktop Entry]\n").unwrap();
+        assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
+        assert!(std::fs::read_to_string(entries.entry()).unwrap().contains("NoDisplay=true"));
+        assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
+        assert!(entries.entry().exists());
+        std::fs::write(entries.system[0].join("anomaly.hex.desktop"), "[Desktop Entry]\n").unwrap();
+        entries.tidy().unwrap();
+        assert!(!entries.entry().exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// GNOME before 51 refuses a portal app id that is not reverse-DNS (#579).

@@ -45,6 +45,9 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
     fake.chmod(0o755)
     env = os.environ | {
         "HEX_APPLICATION_SUPPORT_DIR": str(support),
+        # Hex tidies its launcher and autostart entries at startup.
+        "XDG_DATA_HOME": str(root / "xdg-data"),
+        "XDG_CONFIG_HOME": str(root / "xdg-config"),
         "ALSA_CONFIG_PATH": str(alsa),
         "PATH": f'{fakebin}:{os.environ["PATH"]}',
     }

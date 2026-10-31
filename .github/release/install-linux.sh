@@ -104,7 +104,7 @@ uninstall() {
     "$applications/hex.desktop" \
     "$autostart/hex.desktop"
   do
-    if [ -f "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+    if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
       rm -f "$desktop"
     fi
   done
