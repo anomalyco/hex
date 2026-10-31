@@ -286,6 +286,7 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
 enum PlaygroundMode {
     None,
     /// With Rune's own ⇧⌘D (headless `--playground` renders).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Attached,
     /// Opened only while Labs › Playground is on (the window).
     Gated,
