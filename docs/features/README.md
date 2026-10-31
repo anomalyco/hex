@@ -395,7 +395,7 @@ interaction, installed-app switching, and Linux runtime behavior were not exerci
 ### Switch models with keyboard language
 
 ```ts
-General > Switch model with keyboard language   // setup.input-source-model; macOS only, off by default
+General > Switch model with keyboard language   // setup.input-source-model; macOS, Windows, Linux X11; off by default
 ├── Each enabled keyboard input source -> Don't switch, or a downloaded model and language
 │   ├── New mapping -> The source's own language when the model has it
 │   ├── One-language model -> Its language shown fixed
@@ -412,7 +412,8 @@ General > Switch model with keyboard language   // setup.input-source-model; mac
 └── Relaunch -> Observe current source without applying it; preserve the manual choice
 ```
 
-Mappings are keyed by macOS input-source IDs, not inferred speech languages or
+Mappings are keyed by native input-source IDs (macOS input-source IDs, Windows
+keyboard layout handles, X11 XKB layouts such as `de(neo)`), not inferred speech languages or
 physical keyboard keys, and store a model with a language it supports. Only
 downloaded models from the picker are offered (Apple Speech is never mapped);
 downloads stay in the picker. A mapped model that is no longer downloaded is
@@ -420,24 +421,40 @@ labeled Not installed and can be cleared; a mapping to a model or language Hex n
 longer offers is dropped when settings load. Removing a source hides its row
 without erasing its saved mapping.
 
-Hex reads input sources only while the setting is on: the main-thread TIS
-distributed-notification observer exists only then, works without a Settings
-window, and the window lists enabled sources only then. Source changes cancel
+Hex reads input sources only while the setting is on: the macOS main-thread TIS
+distributed-notification observer, the Windows runtime's poll of the foreground
+window's layout, and the Linux host's XKB connection (polled every 250 ms) exist
+only then and work without a Settings window; the window lists enabled sources
+only then. Windows lists the language bar's layouts, named by language and
+keyboard. On Linux the row appears only in X11 sessions: Wayland compositors keep
+the active layout to themselves, with no general protocol (IBus and Fcitx report
+input-method engines, not the compositor's layout), so Wayland is unavailable. Source changes cancel
 obsolete automatic work but keep manual preparation until a mapped choice is
 due. An unmapped source cancels only automatic work. This reuses the shared model
 selection, recording/stream fallback, and meeting-engine behavior; it adds no
 recording-time routing, model cache, or notifications.
 
-Sources: [observer](../../src/keyboard_input_sources.rs),
+Sources: observers for [macOS](../../src/keyboard_input_sources/macos.rs),
+[Windows](../../src/keyboard_input_sources/windows.rs), and
+[X11](../../src/keyboard_input_sources/x11.rs),
 [switch policy](../../src/keyboard_model_switching.rs),
-[runtime](../../src/macos_rune.rs), and
+runtimes ([macOS](../../src/macos_rune.rs),
+[Windows](../../src/windows_app.rs), [Linux](../../src/linux_app.rs)), and
 [settings UI](../../src/rune_ui/settings.rs).
 Checks: the switch policy and settings/CLI validation tests, the runtime
 scheduling tests in [macos_rune/tests.rs](../../src/macos_rune/tests.rs) (macOS),
 the settings interaction tests in
 [keyboard_model_tests.rs](../../src/rune_ui/keyboard_model_tests.rs), and the
-`mac-input-source-models` golden. No check delivers native input-source
-notifications or switches sources through the Input menu or a shortcut.
+`mac-input-source-models` golden, and the XKB symbols-name tests in the X11
+observer. No check delivers native input-source notifications or switches
+sources through the Input menu or a shortcut.
+
+**Observed October 30, 2026, X11 observer:** on a headless Xvnc with
+`setxkbmap -layout us,ru,de -variant ,,neo`, Hex listed English (US), Russian,
+and German (Neo 2) as `us`, `ru`, `de(neo)` with languages en, ru, de, and
+reported `us`, then `ru` after an XKB group lock. The Windows observer and both
+new runtime paths compile (x64 clippy) but were not run on Windows or a live X11
+desktop.
 
 ### Delete downloaded models
 
