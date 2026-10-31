@@ -417,6 +417,9 @@ A source fails (display sleep ends SCStream, device unplugged, tap stalls 3 s)
 ``````
 
 Starting a recording no longer opens the Settings window; failures still do.
+A failure shows "Meeting could not be recorded." above the recordings until
+its close button dismisses it ([#562](https://github.com/anomalyco/hex/issues/562);
+check `a_meeting_recording_error_can_be_dismissed`).
 Checks: `call_end_is_reported_once_per_sustained_absence`,
 `paste_cursor_counts_coalesced_turns_and_advances_only_on_success` in
 [meeting_tests.rs](../../src/meeting_tests.rs),

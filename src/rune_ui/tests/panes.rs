@@ -940,6 +940,17 @@ fn meetings_switch_between_recordings_and_settings() {
 }
 
 #[test]
+fn a_meeting_recording_error_can_be_dismissed() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    rt.state.meetings.runtime_error = Some("Browser call: Access is denied.".into());
+    refresh(&mut rt);
+    assert!(rt.find("meeting-runtime-error").is_some());
+    tap(&mut rt, "meeting-runtime-error/dismiss");
+    assert_eq!(rt.state.meetings.runtime_error, None);
+    assert!(rt.find("meeting-runtime-error").is_none());
+}
+
+#[test]
 fn the_meetings_switch_stays_put_and_a_swap_drops_pending_edits() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
     let switch = |rt: &Runtime<Ui>| {
