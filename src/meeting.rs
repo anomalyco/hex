@@ -1477,8 +1477,16 @@ fn write_manifest(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     sync_directory(directory)
 }
 
+#[cfg(unix)]
 fn sync_directory(directory: &Path) -> Result<()> {
     File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
+/// Windows refuses to open a directory as a file (os error 5), and its
+/// renames need no directory sync to persist.
+#[cfg(windows)]
+fn sync_directory(_directory: &Path) -> Result<()> {
     Ok(())
 }
 
