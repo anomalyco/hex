@@ -374,6 +374,24 @@ impl HistoryStore {
             .collect()
     }
 
+    /// The newest pasted dictations (`Dictation` and `Raw`), bounded to `limit`
+    /// and filtered by the active retention window.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn recent_pasted_dictations(&self, limit: usize, now_ms: u64) -> Vec<&HistoryEntry> {
+        let cutoff = self
+            .retention
+            .max_age_ms()
+            .map(|max_age| now_ms.saturating_sub(max_age));
+        self.entries()
+            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
+            .filter(|entry| {
+                matches!(entry.kind, HistoryKind::Dictation | HistoryKind::Raw)
+                    && !entry.final_text.trim().is_empty()
+            })
+            .take(limit)
+            .collect()
+    }
+
     fn expire(&mut self, now_ms: u64) {
         self.prune(now_ms);
         if self.prune_pending
@@ -510,6 +528,16 @@ impl History {
     pub fn search(&self, query: &str) -> Vec<HistoryEntry> {
         self.synced()
             .search(query, now_ms())
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Newest pasted dictations (`Dictation` and `Raw`), bounded to `limit`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn recent_pasted_dictations(&self, limit: usize) -> Vec<HistoryEntry> {
+        self.synced()
+            .recent_pasted_dictations(limit, now_ms())
             .into_iter()
             .cloned()
             .collect()
@@ -866,6 +894,29 @@ mod tests {
             2,
             "blank queries list everything"
         );
+    }
+
+    #[test]
+    fn recent_pasted_dictations_keeps_only_pasted_entries_newest_first() {
+        let path = temp_path("recent-pasted");
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        store.record(draft("expired"), 1_000).unwrap();
+        let now = 25 * 60 * 60 * 1_000;
+        store.record(draft("first pasted"), now - 4_000).unwrap();
+        let mut printed = draft("printed only");
+        printed.kind = HistoryKind::Printed;
+        store.record(printed, now - 3_000).unwrap();
+        let mut raw = draft("raw pasted");
+        raw.kind = HistoryKind::Raw;
+        store.record(raw, now - 2_000).unwrap();
+        store.record(draft("latest pasted"), now - 1_000).unwrap();
+
+        let recent: Vec<&str> = store
+            .recent_pasted_dictations(2, now)
+            .into_iter()
+            .map(|entry| entry.final_text.as_str())
+            .collect();
+        assert_eq!(recent, ["latest pasted", "raw pasted"]);
     }
 
     #[test]

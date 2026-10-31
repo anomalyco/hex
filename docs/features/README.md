@@ -545,7 +545,8 @@ Completed output                         // output
 │   ├── Labs > Keep dictation on clipboard (macOS, off) -> the dictation stays on the clipboard (labs.md)
 │   └── Labs > Copy dictation only (macOS, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
-│   └── Last completed dictation
+│   ├── Last completed dictation
+│   └── Labs > Paste picker (macOS, Dev builds, off) -> hold to pick one or more recent dictations at the caret (labs.md)
 └── History
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
