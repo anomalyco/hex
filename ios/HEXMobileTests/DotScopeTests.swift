@@ -159,4 +159,58 @@ final class DotScopeTests: XCTestCase {
         }
         XCTAssertTrue(sim.isIdleSettled)
     }
+
+    func testBarInsetUpdatesGlideSmoothlyInsteadOfJumping() {
+        let idleBar = DotScopeTuning.bar(leadingInset: 0, trailingInset: 105)
+            .fitted(pixelWidth: 373 * 3, pixelHeight: 44 * 3, scale: 3.0)
+        let sim = DotScopeSimulation(tuning: idleBar)
+        sim.restart(reduceMotion: false)
+
+        for _ in 0..<42 {
+            sim.advance(dt: 1.0 / 60.0, stage: .idle, visible: true, loudness: -120.0, reduceMotion: false)
+        }
+        XCTAssertEqual(sim.pose.leadingInset, 0.0, accuracy: 0.25)
+        XCTAssertEqual(sim.pose.trailingInset, 105.0, accuracy: 0.25)
+
+        // Transitioning to recording retargets both insets on the 0.28s critical spring:
+        // after one 60 Hz frame, neither inset may jump all the way to its target.
+        let recBar = DotScopeTuning.bar(leadingInset: 45, trailingInset: 77)
+            .fitted(pixelWidth: 373 * 3, pixelHeight: 44 * 3, scale: 3.0)
+        sim.tune(recBar, jumpLayout: false)
+        sim.advance(dt: 1.0 / 60.0, stage: .recording, visible: true, loudness: -30.0, reduceMotion: false)
+
+        XCTAssertGreaterThan(sim.pose.leadingInset, 0.2)
+        XCTAssertLessThan(sim.pose.leadingInset, 15.0)
+        XCTAssertLessThan(sim.pose.trailingInset, 104.8)
+        XCTAssertGreaterThan(sim.pose.trailingInset, 90.0)
+
+        for _ in 0..<48 {
+            sim.advance(dt: 1.0 / 60.0, stage: .recording, visible: true, loudness: -30.0, reduceMotion: false)
+        }
+        XCTAssertEqual(sim.pose.leadingInset, 45.0, accuracy: 0.35)
+        XCTAssertEqual(sim.pose.trailingInset, 77.0, accuracy: 0.35)
+    }
+
+    func testHostViewLoudnessUpdatesNeverResetSimulationClock() {
+        var liveDB: Float = -34.0
+        let host = DotScopeHostView(tuning: .bar(leadingInset: 45, trailingInset: 77))
+        host.frame = CGRect(x: 0, y: 0, width: 373, height: 44)
+        host.useDemoVoice = true
+        host.loudnessProvider = { liveDB }
+        host.phase = .recording
+
+        host.stepAndRender(timestamp: 10.0, targetTimestamp: 10.0 + 1.0 / 60.0)
+        host.stepAndRender(timestamp: 10.0 + 1.0 / 60.0, targetTimestamp: 10.0 + 2.0 / 60.0)
+        let tBefore = host.debugElapsedTime
+        XCTAssertGreaterThan(tBefore, 0.01)
+
+        // Updating live loudness 10 times during `.recording` must never reset `elapsedTime`.
+        for step in 1...10 {
+            liveDB = -34.0 + Float(step) * 0.8
+            host.phase = .recording
+            let ts = 10.0 + Double(step + 1) / 60.0
+            host.stepAndRender(timestamp: ts, targetTimestamp: ts + 1.0 / 60.0)
+        }
+        XCTAssertGreaterThan(host.debugElapsedTime, tBefore + 0.14)
+    }
 }

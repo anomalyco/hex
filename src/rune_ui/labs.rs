@@ -293,6 +293,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Remove filler words"),
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
+    rows.push(row(
+        Feature::PickerSortFilter,
+        &HINTS,
+        tr("Sort and filter models"),
+        tr("Sort the Local transcription picker by size or name and show only models for the saved language"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -335,6 +341,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::SmartSpacing => "lab-smart-spacing",
         Feature::SpokenSymbols => "lab-spoken-symbols",
+        Feature::PickerSortFilter => "lab-picker-sort-filter",
     }
 }
 

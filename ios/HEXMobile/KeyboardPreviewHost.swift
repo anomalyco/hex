@@ -31,10 +31,6 @@ struct KeyboardSnapshotStage: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(HexTheme.borderWeak, lineWidth: 1)
-                    )
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 14)
@@ -43,7 +39,7 @@ struct KeyboardSnapshotStage: View {
                 .overlay(HexTheme.borderWeak)
 
             KeyboardSurfaceView(model: viewModel)
-                .frame(height: 148)
+                .frame(height: 140)
         }
         .background(Color(red: 0x07 / 255.0, green: 0x08 / 255.0, blue: 0x09 / 255.0).ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -69,57 +65,71 @@ struct KeyboardSnapshotStage: View {
 
     private func configureScene() {
         let now: TimeInterval = 10_000
-        viewModel.now = now
-        viewModel.hasFullAccess = true
         viewModel.needsGlobeKey = true
-        viewModel.isModelInstalled = true
-        viewModel.returnAppID = "messages"
 
         switch scene {
         case "keyboard-cold":
-            viewModel.snapshot = .offline
-            viewModel.style = .polished
+            viewModel.configureFixture(
+                snapshot: .offline,
+                now: now,
+                style: .polished
+            )
 
         case "keyboard-no-access":
-            viewModel.hasFullAccess = false
-            viewModel.snapshot = .offline
+            viewModel.configureFixture(
+                snapshot: .offline,
+                now: now,
+                hasFullAccess: false
+            )
 
         case "keyboard-warm":
-            viewModel.style = .casual
-            viewModel.snapshot = KeyboardSnapshot(
-                state: .ready,
-                heartbeat: now - 0.1,
-                expiresAt: now + 14 * 60 + 20
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .ready,
+                    heartbeat: now - 0.1,
+                    expiresAt: now + 14 * 60 + 20
+                ),
+                now: now,
+                style: .casual
             )
 
         case "keyboard-recording":
-            viewModel.style = .polished
-            viewModel.snapshot = KeyboardSnapshot(
-                state: .recording,
-                heartbeat: now - 0.05,
-                expiresAt: now + 15 * 60,
-                recordingStartedAt: now - 5,
-                audioLevel: 0.78,
-                loudnessDB: -31.0,
-                jobID: "snap-job"
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .recording,
+                    heartbeat: now - 0.05,
+                    expiresAt: now + 15 * 60,
+                    recordingStartedAt: now - 5,
+                    audioLevel: 0.78,
+                    loudnessDB: -31.0,
+                    jobID: "snap-job"
+                ),
+                now: now,
+                style: .polished
             )
 
         case "keyboard-transcribing":
-            viewModel.style = .polished
-            viewModel.snapshot = KeyboardSnapshot(
-                state: .transcribing,
-                heartbeat: now - 0.05,
-                expiresAt: now + 15 * 60,
-                jobID: "snap-job"
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .transcribing,
+                    heartbeat: now - 0.05,
+                    expiresAt: now + 15 * 60,
+                    jobID: "snap-job"
+                ),
+                now: now,
+                style: .polished
             )
 
         case "keyboard-style":
-            viewModel.style = .casual
-            viewModel.activeTray = .style
-            viewModel.snapshot = KeyboardSnapshot(
-                state: .ready,
-                heartbeat: now - 0.1,
-                expiresAt: now + 14 * 60
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .ready,
+                    heartbeat: now - 0.1,
+                    expiresAt: now + 14 * 60
+                ),
+                now: now,
+                style: .casual,
+                activeTray: .style
             )
 
         default:
@@ -168,8 +178,8 @@ struct HostedKeyboardConversationStage: View {
             ? Color.white
             : Color(red: 0x13 / 255.0, green: 0x15 / 255.0, blue: 0x19 / 255.0)
         let fieldStroke = isLight
-            ? Color.black.opacity(0.10)
-            : Color.white.opacity(0.11)
+            ? Color.black.opacity(0.08)
+            : Color.white.opacity(0.08)
 
         VStack(spacing: 0) {
             // Conversation header
@@ -188,7 +198,7 @@ struct HostedKeyboardConversationStage: View {
                                 .foregroundStyle(primaryInk)
                         )
                     Text("Alex")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(primaryInk)
                 }
                 Spacer()
@@ -256,7 +266,7 @@ struct HostedKeyboardConversationStage: View {
                 .frame(height: 36)
                 .padding(.horizontal, 13)
                 .background(fieldFill, in: Capsule())
-                .overlay(Capsule().stroke(fieldStroke, lineWidth: 1))
+                .overlay(Capsule().stroke(fieldStroke, lineWidth: 0.75))
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 10)

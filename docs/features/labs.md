@@ -41,6 +41,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
+├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -298,6 +299,29 @@ letter is not done. Off, pasting is exactly as before. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: which apps (Chrome, Safari,
 Slack, VS Code, Notes) expose the cursor, or a real paste with the toggle
 on; the row renders only in macOS builds, so no golden changes.
+
+Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
+on, the Local transcription picker shows one row between its header and the
+cards: a sort (By recommendation, the default and the catalog's order; By
+size, smallest model file first with unknown sizes last; By name) and a
+switch, "Only models that support <saved language>" ("Only models that
+detect the language automatically" when the language is Auto), which keeps
+the models whose `supports_language` accepts it. Both are view state in
+`rune_ui/picker.rs`, reset each time the picker opens; they never save
+settings, send a request, or change the language or the active model. When
+the switch hides the model being prepared, or the active one, a line outside
+the results names it and its state (its preparation label or Active), with
+the preparation's Cancel. The gate is the picker itself
+(`sort_filter_on`); the feature does no other work. Off, the picker is
+exactly as before. Speed and accuracy sorts, and filters for English-only,
+multilingual, specific languages, size, streaming, and recognition hints,
+are not built yet. Checks: `recommended_keeps_the_catalogs_order_and_the_others_reorder_it`,
+`the_language_toggle_keeps_only_models_for_the_saved_language`,
+`a_hidden_preparing_or_active_model_is_named`, and
+`browsing_never_saves_or_asks_for_a_model` in
+[picker.rs](../../src/rune_ui/picker.rs). Not yet observed: the row rendered
+in a real window; there is no `--snap` scene for the picker with the Lab on,
+and the Labs page goldens need regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

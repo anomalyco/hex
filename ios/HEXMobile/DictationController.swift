@@ -1,6 +1,7 @@
 import AVFAudio
 import Foundation
 import Observation
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -87,8 +88,8 @@ final class DictationController {
     private(set) var phase = Phase.modelRequired
     private(set) var isModelReady = false
     private(set) var transcript = ""
-    private(set) var audioLevel: Float = 0
-    private(set) var loudnessDB: Float = -120
+    @ObservationIgnored private(set) var audioLevel: Float = 0
+    @ObservationIgnored private(set) var loudnessDB: Float = -120
     private(set) var recordingDuration: TimeInterval = 0
     private(set) var copied = false
     private(set) var keyboardSessionEnabled = false
@@ -1199,7 +1200,7 @@ final class DictationController {
             controller.keyboardSessionEnabled = true
             controller.keyboardSessionRemaining = 14 * 60 + 52
 
-        case "handoff-listening":
+        case "handoff-listening", "handoff-no-home-bar":
             controller.phase = .recording
             controller.audioLevel = 0.68
             controller.loudnessDB = -32.5
@@ -1207,6 +1208,56 @@ final class DictationController {
             controller.keyboardSessionEnabled = true
             controller.keyboardSessionRemaining = 14 * 60 + 57
             controller.autoReturnState = .swipeFallback
+            Task { @MainActor in
+                let start = Date().timeIntervalSince1970 - 3.0
+                var simTime: Float = 0.0
+                while !Task.isCancelled {
+                    controller.loudnessDB = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
+                    controller.recordingDuration = Date().timeIntervalSince1970 - start
+                    simTime += 0.033
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+
+        case "handoff-tour":
+            controller.phase = .recording
+            controller.audioLevel = 0.68
+            controller.loudnessDB = -32.0
+            controller.recordingDuration = 0.0
+            controller.keyboardSessionEnabled = true
+            controller.keyboardSessionRemaining = 14 * 60 + 58
+            controller.autoReturnState = .swipeFallback
+            Task { @MainActor in
+                let boot = Date().timeIntervalSince1970
+                var simTime: Float = 0.0
+                while !Task.isCancelled {
+                    let elapsed = Date().timeIntervalSince1970 - boot
+                    if elapsed < 3.4 {
+                        if controller.phase != .recording {
+                            withAnimation(HexMotion.stage) {
+                                controller.phase = .recording
+                            }
+                        }
+                        controller.loudnessDB = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
+                        controller.recordingDuration = elapsed
+                        simTime += 0.033
+                    } else if elapsed < 4.7 {
+                        if controller.phase != .transcribing {
+                            withAnimation(HexMotion.stage) {
+                                controller.phase = .transcribing
+                            }
+                        }
+                        controller.loudnessDB = -120.0
+                    } else {
+                        if controller.phase != .ready {
+                            withAnimation(HexMotion.stage) {
+                                controller.phase = .ready
+                            }
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
 
         case "handoff-returning":
             controller.phase = .recording
@@ -1277,7 +1328,7 @@ final class DictationController {
                 while !Task.isCancelled {
                     let t = Date().timeIntervalSince1970
                     let elapsed = t - boot
-                    if elapsed < 1.8 {
+                    if elapsed < 2.5 {
                         controller.keyboardBridge.publish(
                             KeyboardSnapshot(
                                 state: .ready,
@@ -1285,21 +1336,21 @@ final class DictationController {
                                 expiresAt: t + 15 * 60
                             )
                         )
-                    } else if elapsed < 4.5 {
+                    } else if elapsed < 5.2 {
                         let db = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
                         controller.keyboardBridge.publish(
                             KeyboardSnapshot(
                                 state: .recording,
                                 heartbeat: t,
                                 expiresAt: t + 15 * 60,
-                                recordingStartedAt: boot + 1.8,
+                                recordingStartedAt: boot + 2.5,
                                 audioLevel: 0.78,
                                 loudnessDB: db,
                                 jobID: "hosted-tour-job"
                             )
                         )
                         simTime += 0.033
-                    } else if elapsed < 5.5 {
+                    } else if elapsed < 6.4 {
                         controller.keyboardBridge.publish(
                             KeyboardSnapshot(
                                 state: .transcribing,
@@ -1316,7 +1367,7 @@ final class DictationController {
                                 expiresAt: t + 14 * 60 + 54,
                                 resultID: freshResultID,
                                 resultExpiresAt: boot + 30,
-                                transcript: "Meet at ten on Thursday and bring the updated design notes."
+                                transcript: "See you at ten."
                             )
                         )
                     }

@@ -1368,6 +1368,9 @@ pub struct LabsSettings {
     /// Spoken punctuation and symbol words ("comma", "hashtag",
     /// "underscore") become characters joined to their words (issue 678).
     pub spoken_symbols: bool,
+    /// The Local transcription picker offers a sort (Recommended, Size,
+    /// Name) and a "Supports the saved language" toggle (issue 645).
+    pub picker_sort_filter: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1392,6 +1395,7 @@ impl Default for LabsSettings {
             second_dictation_shortcut: false,
             smart_spacing: false,
             spoken_symbols: false,
+            picker_sort_filter: false,
         }
     }
 }
