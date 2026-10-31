@@ -24,8 +24,8 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
 use super::meetings::{Meeting, Status, Transcript, Turn};
 use super::platform::{
-    CalendarRequest, CalendarView, DemoRequest, HudDemo, HudLab, MeetingRequest, NativeHost,
-    NotesAvailability, PlatformRequest, PlatformState, UpcomingMeeting,
+    CalendarRequest, CalendarView, HudDemo, HudLab, MeetingRequest, NativeHost, NotesAvailability,
+    PlatformRequest, PlatformState, UpcomingMeeting, poll_voice_filter, voice_filter_request,
 };
 use super::practice::PracticeFeed;
 use super::settings::Chord;
@@ -607,10 +607,10 @@ impl NativeHost for MacHost {
             PlatformRequest::OpenLoginItemSettings => {
                 let _ = self.request_login(LoginItemRequest::OpenSettings);
             }
-            PlatformRequest::InstallHexMicrophone => crate::hex_microphone::install_driver_async(),
-            PlatformRequest::UninstallHexMicrophone => {
-                crate::hex_microphone::uninstall_driver_async()
-            }
+            PlatformRequest::InstallHexMicrophone
+            | PlatformRequest::UninstallHexMicrophone
+            | PlatformRequest::SetTuning(_)
+            | PlatformRequest::HexMicrophoneDemo(_) => voice_filter_request(request),
             PlatformRequest::Meeting(request) => self.meeting(request)?,
             PlatformRequest::Calendar(CalendarRequest::Connect) => self.calendar.connect(),
             PlatformRequest::Calendar(CalendarRequest::OpenPrivacySettings) => {
@@ -627,18 +627,6 @@ impl NativeHost for MacHost {
                 }
                 crate::macos_rune::quit();
             }
-            PlatformRequest::SetTuning(tuning) => {
-                crate::hex_microphone::update_tuned_config(|current| *current = tuning);
-            }
-            PlatformRequest::HexMicrophoneDemo(request) => match request {
-                DemoRequest::Record => crate::hex_microphone::start_demo_recording(),
-                DemoRequest::StopRecording => crate::hex_microphone::stop_demo_recording(),
-                DemoRequest::SelectSource(source) => {
-                    crate::hex_microphone::select_demo_source(source)
-                }
-                DemoRequest::Play(track) => crate::hex_microphone::play_demo_track(track),
-                DemoRequest::StopPlayback => crate::hex_microphone::stop_demo_playback(),
-            },
             PlatformRequest::ConfigureHud(lab) => configure_hud(&self.runtime()?, lab),
             PlatformRequest::TuneHud(lab) => tune_hud(&self.runtime()?, lab),
             PlatformRequest::EndHudDemo => self
@@ -694,21 +682,8 @@ impl NativeHost for MacHost {
             }
             changed = true;
         }
-        // The Voice Filter pane's demo moves every frame while it records or
-        // plays; nothing decodes or renders while the Voice Filter is off.
-        let voice_filter = crate::app_settings::hex_microphone_enabled();
-        if voice_filter
-            && (state.demo.is_none()
-                || crate::hex_microphone::demo_is_busy()
-                || crate::hex_microphone::demo_recompute_is_running()
-                || state
-                    .demo
-                    .as_ref()
-                    .is_some_and(|demo| demo.is_recording || demo.playing.is_some()))
-        {
-            state.demo = Some(crate::hex_microphone::demo_snapshot());
-            changed = true;
-        }
+        let refresh = Instant::now() >= self.refresh_at;
+        changed |= poll_voice_filter(state, refresh);
         #[cfg(hex_capture)]
         if state.dev_build {
             changed |= self.scrawl.poll(state, Instant::now() >= self.refresh_at);
@@ -732,10 +707,6 @@ impl NativeHost for MacHost {
             );
         }
         changed |= self.calendar.poll(&mut state.calendar);
-        changed |= update(
-            &mut state.tuning,
-            crate::hex_microphone::current_tuned_config(),
-        );
         changed |= update(
             &mut state.accessibility_renamed,
             crate::permission_guide::list_name(PermissionKind::Accessibility) != "Accessibility",
@@ -763,10 +734,6 @@ impl NativeHost for MacHost {
         });
         changed |= state.permissions_asked.len() != asked_len;
         changed |= update(&mut state.login_item_checking, self.login_checking);
-        changed |= update(
-            &mut state.hex_microphone,
-            voice_filter.then(crate::hex_microphone::status),
-        );
         changed |= update(
             &mut state.notes,
             *self.notes.get_or_insert_with(notes_availability),

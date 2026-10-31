@@ -2240,6 +2240,26 @@ const SCENES: &[Scene] = &[
         ui.platform.demo = Some(fun::preview_demo(true, None));
         ui.pane = Pane::VoiceFilter;
     }),
+    ("voice-filter", |ui| {
+        *ui = fixture(DesktopShortcuts::Commands);
+        ui.platform = platform::PlatformState::preview(platform::Capabilities::LINUX);
+        ui.host = platform::PlatformHost::Fixture(Vec::new());
+        ui.settings.experimental.hex_microphone = true;
+        ui.pane = Pane::VoiceFilter;
+    }),
+    ("voice-filter-unavailable", |ui| {
+        *ui = fixture(DesktopShortcuts::Commands);
+        ui.platform = platform::PlatformState::preview(platform::Capabilities::LINUX);
+        ui.host = platform::PlatformHost::Fixture(Vec::new());
+        if let Some(source) = &mut ui.platform.hex_microphone {
+            source.driver_loaded = false;
+            source.action_state = crate::hex_microphone::DriverActionState::Failed(
+                "pw-cat was not found; Hex Microphone needs PipeWire".into(),
+            );
+        }
+        ui.settings.experimental.hex_microphone = true;
+        ui.pane = Pane::VoiceFilter;
+    }),
     ("mac-hud-lab", |ui| {
         *ui = mac_fixture();
         ui.platform.developer = true;

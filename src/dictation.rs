@@ -392,6 +392,10 @@ struct Recording {
     environment: RecordingEnvironmentState,
     #[cfg(target_os = "macos")]
     capture: Option<crate::recording_environment::CaptureMarker>,
+    /// Filters Hex Microphone from the hold threshold until the recording
+    /// ends (macOS follows its recording environment instead).
+    #[cfg(target_os = "linux")]
+    voice_filter: Option<crate::hex_microphone::Dictation>,
 }
 
 #[cfg(target_os = "macos")]
@@ -457,6 +461,8 @@ impl Recording {
             environment: RecordingEnvironmentState::Disabled,
             #[cfg(target_os = "macos")]
             capture: None,
+            #[cfg(target_os = "linux")]
+            voice_filter: None,
         })
     }
 
@@ -635,6 +641,10 @@ impl DictationCapture {
         let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
         let mut recording = Recording::new(now, self.sample_rate);
         recording.intentional = intentional;
+        #[cfg(target_os = "linux")]
+        {
+            recording.voice_filter = intentional.then(crate::hex_microphone::Dictation::begin);
+        }
         #[cfg(target_os = "macos")]
         {
             recording.environment = match &self.recording_environment {
@@ -707,6 +717,10 @@ impl DictationCapture {
         #[cfg(target_os = "macos")]
         if became_intentional {
             recording.environment.activate();
+        }
+        #[cfg(target_os = "linux")]
+        if became_intentional {
+            recording.voice_filter = Some(crate::hex_microphone::Dictation::begin());
         }
         became_intentional
     }

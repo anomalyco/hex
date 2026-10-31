@@ -50,7 +50,8 @@ impl Feature {
 
     const fn on_this_os(self) -> bool {
         match self {
-            Self::Meetings | Self::VoiceFilter | Self::LiveChapters => cfg!(target_os = "macos"),
+            Self::Meetings | Self::LiveChapters => cfg!(target_os = "macos"),
+            Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste => cfg!(target_os = "windows"),
             Self::Playground | Self::LiveText | Self::VocabularyBiasing => true,
         }

@@ -158,7 +158,7 @@ impl HexMicRingBuffer {
         self.producer_burst.load(Ordering::Relaxed)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, target_os = "linux"))]
     fn queued_frames(&self) -> usize {
         let write = self.write_pos.load(Ordering::Acquire);
         let read = self.read_pos.load(Ordering::Acquire);
@@ -326,6 +326,59 @@ pub fn sync_from_settings(mode: VoiceFilterMode, comfort_noise: bool, strength: 
     if crate::app_settings::hex_microphone_enabled() {
         ensure_service_started();
     }
+}
+
+/// Whether a dictation is past its hold threshold, so the filter applies.
+#[cfg(target_os = "macos")]
+fn dictating() -> bool {
+    crate::recording_environment::intentional_recording_active()
+}
+
+#[cfg(target_os = "linux")]
+fn dictating() -> bool {
+    DICTATIONS.load(Ordering::Acquire) > 0
+}
+
+#[cfg(target_os = "linux")]
+static DICTATIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// An intentional dictation the Voice Filter applies to until dropped, where
+/// no recording environment session marks one (Linux).
+#[cfg(target_os = "linux")]
+pub struct Dictation(());
+
+#[cfg(target_os = "linux")]
+impl Dictation {
+    pub fn begin() -> Self {
+        DICTATIONS.fetch_add(1, Ordering::AcqRel);
+        Self(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Dictation {
+    fn drop(&mut self) {
+        DICTATIONS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Fills `out` with the next Hex Microphone audio, from the sink's
+/// real-time callback: adopts a retuned engine, follows the dictation, and
+/// filters the microphone audio queued in the ring.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn render(engine: &mut HexMicEngine, out: &mut [f32]) {
+    if PENDING_ENGINE_SWAP.load(Ordering::Acquire)
+        && let Ok(mut guard) = pending_engine_lock().try_lock()
+    {
+        if let Some(mut next_engine) = guard.take() {
+            next_engine.set_dictating(engine.is_dictating());
+            *engine = next_engine;
+        }
+        PENDING_ENGINE_SWAP.store(false, Ordering::Release);
+    }
+    engine.set_dictating(dictating());
+    CAPTURE_RING.pop_slice(out);
+    engine.process_in_place(out);
 }
 
 /// One microphone stream's connection to Hex Microphone. Every capture stream
@@ -780,7 +833,24 @@ pub fn status() -> HexMicrophoneStatus {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Linux has no driver: Hex Microphone exists while the Voice Filter runs
+/// (`pipewire_source`).
+#[cfg(target_os = "linux")]
+pub fn status() -> HexMicrophoneStatus {
+    let streaming = SINK_STREAMING.load(Ordering::Acquire);
+    HexMicrophoneStatus {
+        driver_bundle_installed: false,
+        driver_loaded: streaming,
+        installed_version: None,
+        bundled_version: env!("CARGO_PKG_VERSION").to_string(),
+        sink_streaming: streaming,
+        mic_in_use: false,
+        active_apps: Vec::new(),
+        action_state: current_driver_action_state(),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn status() -> HexMicrophoneStatus {
     HexMicrophoneStatus {
         driver_bundle_installed: false,
@@ -803,7 +873,7 @@ pub fn host_service() {
 }
 
 fn ensure_service_started() {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         if !SERVICE_HOSTED.load(Ordering::Acquire) || !crate::app_settings::hex_microphone_enabled()
         {
@@ -812,9 +882,13 @@ fn ensure_service_started() {
         if SUPERVISOR_STARTED.swap(true, Ordering::AcqRel) {
             return;
         }
+        #[cfg(target_os = "macos")]
+        let supervisor = macos_hal::run_sink_supervisor;
+        #[cfg(target_os = "linux")]
+        let supervisor = pipewire_source::run_supervisor;
         let _ = thread::Builder::new()
             .name("hex-mic-sink".to_string())
-            .spawn(macos_hal::run_sink_supervisor);
+            .spawn(supervisor);
     }
 }
 
@@ -1459,16 +1533,6 @@ mod macos_hal {
             return 0;
         }
         let ctx = unsafe { &mut *(in_client_data.cast::<IoContext>()) };
-        if PENDING_ENGINE_SWAP.load(Ordering::Acquire)
-            && let Ok(mut guard) = pending_engine_lock().try_lock()
-        {
-            if let Some(mut next_engine) = guard.take() {
-                next_engine.set_dictating(ctx.engine.is_dictating());
-                ctx.engine = next_engine;
-            }
-            PENDING_ENGINE_SWAP.store(false, Ordering::Release);
-        }
-
         let abl = unsafe { &mut *out_output_data };
         if abl.m_number_buffers == 0 {
             return 0;
@@ -1487,17 +1551,12 @@ mod macos_hal {
         let out_slice =
             unsafe { std::slice::from_raw_parts_mut(buf.m_data.cast::<f32>(), total_samples) };
 
-        let dictating = crate::recording_environment::intentional_recording_active();
-        ctx.engine.set_dictating(dictating);
-
         if channels == 1 {
-            CAPTURE_RING.pop_slice(out_slice);
-            ctx.engine.process_in_place(out_slice);
+            render(&mut ctx.engine, out_slice);
         } else {
             let mut mono_buf = [0.0_f32; 2048];
             let count = frames.min(mono_buf.len());
-            CAPTURE_RING.pop_slice(&mut mono_buf[..count]);
-            ctx.engine.process_in_place(&mut mono_buf[..count]);
+            render(&mut ctx.engine, &mut mono_buf[..count]);
             for f in 0..count {
                 let s = mono_buf[f];
                 for c in 0..channels {
@@ -1613,6 +1672,173 @@ mod macos_hal {
                 overflows = stopped.1 - started.1,
                 "Hex Microphone virtual sink stopped"
             );
+        }
+    }
+}
+
+/// Hex Microphone on Linux: a PipeWire virtual source that `pw-cat`
+/// (shipped with PipeWire) plays the filtered microphone into. Apps list it
+/// as an input like any microphone. Nothing is installed and no root is
+/// needed: it exists while the Voice Filter is on and Hex runs, since `pw-cat`
+/// ends when Hex closes its input.
+#[cfg(target_os = "linux")]
+mod pipewire_source {
+    use super::*;
+    use std::io::{ErrorKind, Read, Write};
+    use std::os::fd::AsRawFd;
+    use std::process::{Child, ChildStdin, Command, Stdio};
+
+    /// A low session priority keeps WirePlumber from choosing Hex
+    /// Microphone as the default input, which Hex itself would record.
+    const PROPERTIES: &str = "{ media.class = Audio/Source node.name = hex_microphone \
+        node.description = \"Hex Microphone\" application.name = Hex \
+        priority.session = 1 priority.driver = 1 }";
+    /// Frames per write (11 ms): half the pipe, so one block waits in the
+    /// pipe while the next gathers, and large enough that the ring's
+    /// latency cap never trims audio between a graph cycle's reads.
+    const BLOCK_FRAMES: usize = 512;
+    /// How long a write waits for the microphone to queue a whole block
+    /// before it pads with silence: one block, so a released microphone
+    /// still delivers silence in real time.
+    const BLOCK_WAIT: Duration = Duration::from_millis(11);
+    /// The smallest pipe Linux allows (one page, 21 ms of audio), so
+    /// `pw-cat` never reads far behind the microphone.
+    const PIPE_BYTES: libc::c_int = 4096;
+    /// A source that ran this long started; an earlier failure stays shown.
+    const STARTED_AFTER: Duration = Duration::from_secs(1);
+    const RETRY: Duration = Duration::from_secs(2);
+
+    fn spawn() -> std::io::Result<Child> {
+        Command::new("pw-cat")
+            .args([
+                "--playback",
+                "--raw",
+                "--format",
+                "f32",
+                "--rate",
+                "48000",
+                "--channels",
+                "1",
+                "--latency",
+                "10ms",
+                "--properties",
+                PROPERTIES,
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
+
+    /// Plays the ring through the filter until `pw-cat` goes away. Writes
+    /// block while no app records Hex Microphone; the ring then drops the
+    /// oldest audio, and its latency cap skips ahead when an app starts.
+    fn feed(mut input: ChildStdin) {
+        let mut engine = current_tuned_config().build_engine();
+        let mut block = [0.0_f32; BLOCK_FRAMES];
+        let mut bytes = [[0_u8; 4]; BLOCK_FRAMES];
+        loop {
+            let deadline = Instant::now() + BLOCK_WAIT;
+            while CAPTURE_RING.queued_frames() < BLOCK_FRAMES && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            render(&mut engine, &mut block);
+            for (out, sample) in bytes.iter_mut().zip(block) {
+                *out = sample.to_le_bytes();
+            }
+            if input.write_all(bytes.as_flattened()).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The last line `pw-cat` wrote before it exited, as a failure reason.
+    fn reason(stderr: &str, status: std::process::ExitStatus) -> String {
+        stderr
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .map(|line| line.chars().take(140).collect())
+            .unwrap_or_else(|| format!("pw-cat exited ({status})"))
+    }
+
+    pub(super) fn run_supervisor() {
+        loop {
+            if !crate::app_settings::hex_microphone_enabled() {
+                set_driver_action_state(DriverActionState::Idle);
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+            let mut child = match spawn() {
+                Ok(child) => child,
+                Err(error) => {
+                    let reason = if error.kind() == ErrorKind::NotFound {
+                        "pw-cat was not found; Hex Microphone needs PipeWire".to_string()
+                    } else {
+                        error.to_string()
+                    };
+                    tracing::warn!(%reason, "could not start the Hex Microphone source");
+                    set_driver_action_state(DriverActionState::Failed(reason));
+                    thread::sleep(RETRY);
+                    continue;
+                }
+            };
+            let (Some(input), Some(mut stderr)) = (child.stdin.take(), child.stderr.take()) else {
+                let _ = child.kill();
+                let _ = child.wait();
+                thread::sleep(RETRY);
+                continue;
+            };
+            // SAFETY: `input` is this process's open write end of the pipe.
+            unsafe { libc::fcntl(input.as_raw_fd(), libc::F_SETPIPE_SZ, PIPE_BYTES) };
+            let errors = thread::spawn(move || {
+                let mut text = String::new();
+                let _ = stderr.read_to_string(&mut text);
+                text
+            });
+            CAPTURE_RING.clear();
+            SINK_STREAMING.store(true, Ordering::Release);
+            let writer = thread::Builder::new()
+                .name("hex-mic-feed".into())
+                .spawn(move || feed(input));
+            tracing::info!("Hex Microphone virtual source started");
+            let started = Instant::now();
+            let mut confirmed = false;
+            let exited = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Some(status),
+                    Ok(None) => {}
+                    Err(_) => break None,
+                }
+                if !crate::app_settings::hex_microphone_enabled() {
+                    break None;
+                }
+                if !confirmed && started.elapsed() >= STARTED_AFTER {
+                    confirmed = true;
+                    set_driver_action_state(DriverActionState::Idle);
+                }
+                thread::sleep(Duration::from_millis(250));
+            };
+            SINK_STREAMING.store(false, Ordering::Release);
+            if exited.is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+            if let Ok(writer) = writer {
+                let _ = writer.join();
+            }
+            let stderr = errors.join().unwrap_or_default();
+            CAPTURE_RING.clear();
+            match exited {
+                Some(status) => {
+                    let reason = reason(&stderr, status);
+                    tracing::warn!(%reason, "Hex Microphone virtual source stopped; restarting");
+                    set_driver_action_state(DriverActionState::Failed(reason));
+                    thread::sleep(RETRY);
+                }
+                None => tracing::info!("Hex Microphone virtual source stopped"),
+            }
         }
     }
 }

@@ -895,10 +895,16 @@ suppression, and the Markdown copy in the user's transcript folder.
 
 ```ts
 Labs › Voice Filter (experimental.hex_microphone = true), HEX_EXPERIMENTAL_MIC=1,
-or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS
+or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, Linux
 ├── Sidebar > Voice Filter  // the only home of these controls
 ├── Hex Microphone card
-│   ├── Driver status -> Installed v<ver> / In use by <app> + Uninstall
+│   ├── Linux -> no driver: a PipeWire virtual source (Audio/Source "Hex Microphone",
+│   │   node hex_microphone) that Hex plays into through `pw-cat` while the Voice Filter is on
+│   │   ├── Status -> Starting… / Available ("Choose Hex Microphone as your input…") / Unavailable + reason
+│   │   ├── pw-cat missing or exits -> Unavailable with its last error line; retries every 2 s
+│   │   ├── Off or Hex quits -> the source disappears (pw-cat ends with its input); no root, nothing installed
+│   │   └── Session priority 1 -> WirePlumber never picks it as the default input Hex records
+│   ├── macOS driver status -> Installed v<ver> / In use by <app> + Uninstall
 │   │   ├── Version mismatch -> v<old> installed + Update + Uninstall
 │   │   ├── Pre-Anomaly com.kitlangton driver at the same path -> Update replaces it in place
 │   │   ├── Not installed -> Install -> macOS admin prompt -> copies bundled HexMicrophone.driver + restarts coreaudiod
@@ -910,7 +916,7 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS
 │       └── Explicit playback -> Play what call hears | Play your voice
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
-│   ├── Lock-free ring -> 48 kHz virtual sink -> Raised-cosine fade on intentional hold
+│   ├── Lock-free ring -> 48 kHz virtual sink (macOS IOProc; Linux 11 ms blocks into a one-page pipe) -> Raised-cosine fade on intentional hold
 │   │   └── Not dictating -> bit-exact pass-through; non-48 kHz inputs resample continuously
 │   └── Ring underflows/overflows -> process.log each minute while an app reads it, and on sink stop
 └── Offline CLI -> hex dev voice-filter render <in.wav> --mode <m> --dictation <start>-<end> -o <out.wav>
@@ -937,7 +943,11 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `try_it_records_and_plays_through_the_host`, and
 `voice_filter_needs_labs_or_hex_microphone`.
 Scenes: `mac-voice-filter`, `mac-voice-filter-muted`,
-`mac-voice-filter-driver-missing`.
+`mac-voice-filter-driver-missing`, `voice-filter`, `voice-filter-unavailable`
+(Linux).
+Linux observed (apollo, PipeWire 1.6): the source lists in `pactl list sources`
+and `pw-record --target hex_microphone` records the fed audio at 48 kHz; no
+automated check covers it, and no call app was tried.
 Proof limit: in-process `dlopen` loopback proves the compiled driver's 48 kHz
 `WriteMix`/`ReadInput` path at 5.33 ms (256 frames), not an interactive macOS
 admin authorization prompt or an active Slack/Zoom call. The pass-through

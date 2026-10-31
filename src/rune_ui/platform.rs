@@ -44,13 +44,15 @@ pub(super) struct Capabilities {
     pub(super) terminal_paste: bool,
     /// The dictation shortcut can pass through to other apps (Windows).
     pub(super) share_shortcut: bool,
-    /// The experimental Hex Microphone virtual driver (macOS).
+    /// Hex Microphone is a driver to install (macOS). Elsewhere with the
+    /// Voice Filter, Hex creates it while the filter is on (a PipeWire
+    /// virtual source on Linux).
     pub(super) hex_microphone: bool,
     /// The window sees dictation events, so the tour can end with a
     /// practice dictation into its own field.
     pub(super) practice_dictation: bool,
-    /// The Voice Filter pane: the Hex Microphone's driver, tuning, and
-    /// try-it demo (macOS, under Experiments).
+    /// The Voice Filter pane: Hex Microphone, its tuning, and the try-it
+    /// demo (macOS and Linux, in Labs).
     pub(super) fun: bool,
     /// Modifier-only shortcuts can require the left or right key (macOS,
     /// Windows; X11 grabs and the Wayland portal see no sides).
@@ -73,7 +75,7 @@ impl Capabilities {
         share_shortcut: false,
         hex_microphone: false,
         practice_dictation: true,
-        fun: false,
+        fun: true,
         modifier_sides: false,
         keyboard_model_switching: true,
     };
@@ -473,21 +475,24 @@ impl PlatformState {
         };
         state.system_audio = true;
         state.login_item = caps.launch_at_login.then_some(LoginItemStatus::Disabled);
-        if caps.hex_microphone {
+        if caps.fun {
             // Fixed, so the scenes' goldens don't change with the crate version.
             let version = "0.0.0".to_string();
+            let driver = caps.hex_microphone;
             state.hex_microphone = Some(HexMicrophoneStatus {
-                driver_bundle_installed: true,
+                driver_bundle_installed: driver,
                 driver_loaded: true,
-                installed_version: Some(version.clone()),
+                installed_version: driver.then(|| version.clone()),
                 bundled_version: version,
                 sink_streaming: true,
-                mic_in_use: true,
-                active_apps: vec!["Slack".into()],
+                mic_in_use: driver,
+                active_apps: if driver {
+                    vec!["Slack".into()]
+                } else {
+                    Vec::new()
+                },
                 action_state: crate::hex_microphone::DriverActionState::Idle,
             });
-        }
-        if caps.fun {
             state.demo = Some(super::fun::preview_demo(false, None));
         }
         state
@@ -542,6 +547,61 @@ pub(super) enum PlatformRequest {
     Scrawl(ScrawlRequest),
 }
 
+/// Performs a Voice Filter request on the Hex Microphone in this process.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(super) fn voice_filter_request(request: PlatformRequest) {
+    use crate::hex_microphone as mic;
+    match request {
+        PlatformRequest::InstallHexMicrophone => mic::install_driver_async(),
+        PlatformRequest::UninstallHexMicrophone => mic::uninstall_driver_async(),
+        PlatformRequest::SetTuning(tuning) => mic::update_tuned_config(|current| *current = tuning),
+        PlatformRequest::HexMicrophoneDemo(request) => match request {
+            DemoRequest::Record => mic::start_demo_recording(),
+            DemoRequest::StopRecording => mic::stop_demo_recording(),
+            DemoRequest::SelectSource(source) => mic::select_demo_source(source),
+            DemoRequest::Play(track) => mic::play_demo_track(track),
+            DemoRequest::StopPlayback => mic::stop_demo_playback(),
+        },
+        _ => {}
+    }
+}
+
+/// The Voice Filter pane's state from the Hex Microphone in this process:
+/// the demo every frame while it records or plays, and, when `refresh`, the
+/// tuning and Hex Microphone's status. Nothing decodes or renders while the
+/// Voice Filter is off.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(super) fn poll_voice_filter(state: &mut PlatformState, refresh: bool) -> bool {
+    use crate::hex_microphone as mic;
+    let mut changed = false;
+    let on = crate::app_settings::hex_microphone_enabled();
+    if on
+        && (state.demo.is_none()
+            || mic::demo_is_busy()
+            || mic::demo_recompute_is_running()
+            || state
+                .demo
+                .as_ref()
+                .is_some_and(|demo| demo.is_recording || demo.playing.is_some()))
+    {
+        state.demo = Some(mic::demo_snapshot());
+        changed = true;
+    }
+    if refresh {
+        let tuning = mic::current_tuned_config();
+        if state.tuning != tuning {
+            state.tuning = tuning;
+            changed = true;
+        }
+        let status = on.then(mic::status);
+        if state.hex_microphone != status {
+            state.hex_microphone = status;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// The host that performs [`PlatformRequest`]s and refreshes
 /// [`PlatformState`] on its own OS.
 // Only macOS has a native host.
@@ -565,7 +625,9 @@ pub(super) trait NativeHost {
 
 pub(super) enum PlatformHost {
     /// Linux and Windows: their runtimes own everything but the practice
-    /// dictation, which the window reads from the listener's event log.
+    /// dictation, which the window reads from the listener's event log. On
+    /// Linux the dictation host runs in this process, so Scrawl and the
+    /// Voice Filter are asked of it directly.
     Local(super::practice::LocalPractice),
     /// Scenes and tests: requests are recorded, never performed.
     Fixture(Vec<PlatformRequest>),
@@ -578,8 +640,9 @@ impl PlatformHost {
         match self {
             #[cfg(target_os = "linux")]
             Self::Local(_) => {
-                if let PlatformRequest::Scrawl(request) = request {
-                    scrawl_request(request);
+                match request {
+                    PlatformRequest::Scrawl(request) => scrawl_request(request),
+                    request => voice_filter_request(request),
                 }
                 Ok(())
             }
@@ -614,7 +677,11 @@ impl PlatformHost {
     pub(super) fn poll(&mut self, state: &mut PlatformState) -> bool {
         match self {
             Self::Native(host) => host.poll(state),
-            #[cfg(not(target_os = "macos"))]
+            // Hex Microphone's status is a few atomics on Linux, so it
+            // refreshes every frame.
+            #[cfg(target_os = "linux")]
+            Self::Local(_) => scrawl_poll(state) | poll_voice_filter(state, true),
+            #[cfg(target_os = "windows")]
             Self::Local(_) => scrawl_poll(state),
             _ => false,
         }
