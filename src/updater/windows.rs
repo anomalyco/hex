@@ -254,21 +254,16 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
 }
 
 /// Hand off to the staged executable once this process exits. The watcher
-/// only starts the new version when the old process is actually gone, so a
-/// slow shutdown can never produce two running instances.
+/// only starts the new version when the old process has actually exited, so
+/// a slow shutdown can never produce two running instances.
 pub fn restart_into(staged: &Staged) -> Result<()> {
-    let pid = std::process::id();
     background_process::command("powershell.exe")
         .args([
             "-NoProfile",
             "-WindowStyle",
             "Hidden",
             "-Command",
-            &format!(
-                "Wait-Process -Id {pid} -Timeout 300 -ErrorAction SilentlyContinue; \
-                 if (-not (Get-Process -Id {pid} -ErrorAction SilentlyContinue)) {{ \
-                 Start-Process -FilePath $env:HEX_EXECUTABLE -ArgumentList 'app' }}"
-            ),
+            &restart_script(std::process::id()),
         ])
         .env("HEX_EXECUTABLE", &staged.0)
         .env_remove("PSModulePath")
@@ -278,6 +273,18 @@ pub fn restart_into(staged: &Staged) -> Result<()> {
         .spawn()
         .wrap_err("could not schedule the updated Hex version")?;
     Ok(())
+}
+
+/// The watcher waits on its own handle to the old process and asks that
+/// handle whether it exited. It never looks the pid up again after waiting:
+/// the watcher's handle keeps the exited process listed, so `Get-Process`
+/// still found it and the new version never started.
+fn restart_script(pid: u32) -> String {
+    format!(
+        "$old = Get-Process -Id {pid} -ErrorAction SilentlyContinue; \
+         if ($old -and -not $old.WaitForExit(300000)) {{ exit 1 }}; \
+         Start-Process -FilePath $env:HEX_EXECUTABLE -ArgumentList 'app'"
+    )
 }
 
 #[cfg(test)]
