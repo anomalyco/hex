@@ -456,7 +456,7 @@ Sources: observers for [macOS](../../src/keyboard_input_sources/macos.rs),
 [X11](../../src/keyboard_input_sources/x11.rs),
 [switch policy](../../src/keyboard_model_switching.rs),
 runtimes ([macOS](../../src/macos_rune.rs),
-[Windows](../../src/windows_app.rs), [Linux](../../src/linux_app.rs)), and
+[Windows](../../src/windows/app.rs), [Linux](../../src/linux/app.rs)), and
 [settings UI](../../src/rune_ui/settings.rs).
 Checks: the switch policy and settings/CLI validation tests, the runtime
 scheduling tests in [macos_rune/tests.rs](../../src/macos_rune/tests.rs) (macOS),
@@ -715,8 +715,8 @@ sessions that start while recording are left alone.
 HEX snapshots the volumes and applies a smooth ramp in
 [output_ducking.rs](../../src/output_ducking.rs) over the CoreAudio adapter in
 [ducking.rs](../../src/recording_environment/ducking.rs), the sink adapter in
-[linux_audio_control.rs](../../src/linux_audio_control.rs), and the session
-adapter in [windows_audio_control.rs](../../src/windows_audio_control.rs). The worker runs inside the app and cannot restore volume after a
+[linux/audio_control.rs](../../src/linux/audio_control.rs), and the session
+adapter in [windows/audio_control.rs](../../src/windows/audio_control.rs). The worker runs inside the app and cannot restore volume after a
 hard process crash or SIGKILL. Changes during the ramp itself cannot be
 distinguished from delayed Bluetooth acknowledgements.
 Fake-device tests cover relative volume, balance, silence, interrupted ramps,
@@ -1081,7 +1081,7 @@ deactivates an app asynchronously when it becomes menu-bar only, which dropped
 the window behind other applications ([#103](https://github.com/anomalyco/hex/issues/103)).
 Turning the preference off therefore takes effect when Settings closes.
 
-Checks in [meeting_watcher.rs](../../src/meeting_watcher.rs):
+Checks in [meeting/watcher.rs](../../src/meeting/watcher.rs):
 `dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready` and
 `dock_visible_startup_always_opens_the_app` cover the startup decision. The
 Dock/Finder reopen Apple event and the status item's `OpenSettings` bypass it.
@@ -1263,11 +1263,11 @@ Linux beta                               // not macOS feature parity
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener warning
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux_tray, rune::Tray)
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, rune::Tray)
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
-├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux_login_item)
+├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux/login_item)
 │   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
@@ -1322,22 +1322,22 @@ GNOME startup -> pre-#579 `hex` set listed in GNOME Settings -> removed through
     // a stand-in org.gnome.Shell, not a full GNOME session
 ```
 
-Clipboard restoration lives in [linux_paste.rs](../../src/linux_paste.rs)
-(generation and timing) and [linux_clipboard.rs](../../src/linux_clipboard.rs)
+Clipboard restoration lives in [linux/paste.rs](../../src/linux/paste.rs)
+(generation and timing) and [linux/clipboard.rs](../../src/linux/clipboard.rs)
 (snapshot and serving). Observed on apollo (2026-10-29), in nested headless Sway:
 `native_wayland_clipboard_shortcut` restores a two-format clipboard and keeps an
 empty one empty; a full dictation from a file-fed ALSA microphone pasted into a
 GTK target, then Ctrl+V pasted the original text; an X11 round trip on Xwayland
 restored a 3 MB image through INCR. Not observed on X11 dictation, KDE, or
 Hyprland.
-The Wayland paste choice lives in [linux_paste.rs](../../src/linux_paste.rs) and
-[linux_remote_desktop.rs](../../src/linux_remote_desktop.rs). Observed: the
+The Wayland paste choice lives in [linux/paste.rs](../../src/linux/paste.rs) and
+[linux/remote_desktop.rs](../../src/linux/remote_desktop.rs). Observed: the
 wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri
 (apollo). niri's portal frontend advertises RemoteDesktop but its GNOME
 backend fails CreateSession, so wtype stays first there. The RemoteDesktop
 paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
 yet observed on a real desktop. The modifier wait (`ShortcutKeys` in
-[linux_input.rs](../../src/linux_input.rs)) has unit tests for its timing only;
+[linux/input.rs](../../src/linux/input.rs)) has unit tests for its timing only;
 it is not yet observed on Hyprland, and a modifier held past the wait still
 changes the paste. wtype numbers its keymap from evdev code 1 in order of first
 use, and Hyprland matches binds through its configured layout, so a bare
@@ -1395,7 +1395,7 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 
 Windows updates follow `maintain.updates` ([updater.rs](../../src/updater.rs),
 `updater/windows.rs`). CI test builds never check. The tray item and tooltip
-([windows_rune.rs](../../src/windows_rune.rs)) follow the published update
+([windows/rune.rs](../../src/windows/rune.rs)) follow the published update
 state. They pass the cross-compiled Clippy check, but no one has clicked them
 on a real Windows PC. The white tray mark vanished on a light taskbar
 ([#460](https://github.com/anomalyco/hex/issues/460)); a light taskbar now gets
@@ -1438,7 +1438,7 @@ Ctrl and Alt, opens the window through a second launch, and checks that
 closing it leaves the same process answering.
 
 Shortcut rules are pure and tested once for every source in
-[linux_input.rs](../../src/linux_input.rs): hold, double-tap lock, toggle,
+[linux/input.rs](../../src/linux/input.rs): hold, double-tap lock, toggle,
 double-tap only, Escape, Paste Last, and command idempotence,
 plus X11 auto-repeat filtering and a portal release that never arrives
 (Hyprland's Lua binds drop it when the modifier comes up first; see
@@ -1451,7 +1451,7 @@ using synthetic uinput keys against an isolated service: granted triggers,
 hold and Escape while held (since replaced by Cancel dictation), double-tap lock, Paste Last, and commands. A
 physical keyboard press has not been recorded.
 
-`linux.hud`: [linux_rune_hud.rs](../../src/linux_rune_hud.rs) keeps the
+`linux.hud`: [linux/rune_hud.rs](../../src/linux/rune_hud.rs) keeps the
 listener's generation slot (an old listener cannot hide a restarted HUD) and
 turns its reports into [rune_hud.rs](../../src/rune_hud.rs)'s events;
 reports before the window's app exists are dropped. The shaders render
@@ -1466,8 +1466,8 @@ was also observed passing a virtual-pointer click through to the window below
 and leaving keyboard focus where it was (Rune `examples/background`). Not
 observed: X11 with Hex, niri, KWin, Mutter.
 
-See the [Linux guide](../linux.md), [linux_app.rs](../../src/linux_app.rs),
-[linux_portal.rs](../../src/linux_portal.rs), and
+See the [Linux guide](../linux.md), [linux/app.rs](../../src/linux/app.rs),
+[linux/portal.rs](../../src/linux/portal.rs), and
 [Linux CI](../../.github/workflows/check-linux.yml) for existing checks.
 The [direct installer/updater](../../src/updater/linux.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
@@ -1499,9 +1499,9 @@ Linux process                            // maintain.linux-service
     └── then the model load and the window's wgpu instance never create one at once
 ```
 
-Sources: the process, host, and window seam in [linux_app.rs](../../src/linux_app.rs),
+Sources: the process, host, and window seam in [linux/app.rs](../../src/linux/app.rs),
 the single-instance socket and systemd lifecycle in
-[linux_service.rs](../../src/linux_service.rs), the CLI in
+[linux/service.rs](../../src/linux/service.rs), the CLI in
 [linux.rs](../../src/linux.rs), and the managed installer/Nix user units.
 `hex status` queries the running Hex; `--lines` explicitly reads historical
 observations. `hex app --hidden` and `hex start` start Hex without the window;
@@ -1548,7 +1548,7 @@ These checks do not establish a physical desktop logout, cross-version signed
 update, or microphone/target-app success on the user's devices.
 
 `malformed_settings_cannot_start_even_after_dismissing_the_error` in
-[linux_app.rs](../../src/linux_app.rs) checks the failure gate and recovery after a
+[linux/app.rs](../../src/linux/app.rs) checks the failure gate and recovery after a
 simulated successful settings commit. It selects a model never installed on
 Linux, so the resumed start stops at `Model required` instead of opening the
 microphone on a machine with the real model; it passed on apollo on 2026-10-22
@@ -1602,7 +1602,7 @@ ordering is checked by reading the loop, not by a test or a muted device.
 Checks: `bundled_sounds_decode_without_an_audio_device` and
 `feedback_admission_never_waits_for_playback` in the player.
 `start_sound_precedes_audio_and_does_not_change_short_tap_discard` in
-[linux_dictation.rs](../../src/linux_dictation.rs) exercises the production start
+[linux/dictation.rs](../../src/linux/dictation.rs) exercises the production start
 path with a sound spy: immediate feedback without any audio, while a 100 ms tap
 still discards. Existing timing checks in [dictation.rs](../../src/dictation.rs)
 cover the unchanged intentional-hold boundary. These are not proof of audible
@@ -1635,7 +1635,7 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ```
 
 Linux and Windows serve the same local API from the running app
-([linux_app.rs](../../src/linux_app.rs), [windows_rune.rs](../../src/windows_rune.rs))
+([linux/app.rs](../../src/linux/app.rs), [windows/rune.rs](../../src/windows/rune.rs))
 and from `hex service [--embedded]`; a failed start only logs, and Hex runs on
 without it. On Linux, the embedded service answered `/health`,
 `/capabilities`, `/models`, and transcribed a WAV with Parakeet Unified
@@ -1725,7 +1725,7 @@ Unmerged Windows / deferred features -> Not part of this map
 ```
 
 Sources: [meeting.rs](../../src/meeting.rs),
-[meeting_watcher.rs](../../src/meeting_watcher.rs),
+[meeting/watcher.rs](../../src/meeting/watcher.rs),
 [developer_control.rs](../../src/developer_control.rs),
 `SCENES` in [rune_ui.rs](../../src/rune_ui.rs), [iOS guide](../../ios/README.md).
 iOS physical-device proof and temporary-WAV failure cleanup remain gaps;
@@ -1773,7 +1773,7 @@ Meetings list and the practice step), dragging the window, the folder
 panel, the status item, reopen, shortcut capture, and Sparkle have not been
 seen or exercised, and no screenshot could be taken over SSH.
 
-`dev.rune-ui-windows` lives in [windows_rune.rs](../../src/windows_rune.rs) and
+`dev.rune-ui-windows` lives in [windows/rune.rs](../../src/windows/rune.rs) and
 [rune_ui/windows_host.rs](../../src/rune_ui/windows_host.rs). It has only
 been cross-compiled (`cargo xwin clippy -D warnings` for
 `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`, with the

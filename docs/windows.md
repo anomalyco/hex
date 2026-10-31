@@ -216,7 +216,7 @@ fixtures without starting anything: `hex app -- --snap out.png --scene modes`.
 ```ts
 hex app
 ├── named event already held -> signal it (the running app shows its window) -> exit
-└── becomes the app                                   // windows_rune::open
+└── becomes the app                                   // windows::rune::open
     ├── the local API's POST /control -> control::host::answer
     ├── runtime thread: WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater), publishes every 250 ms
     ├── main thread: rune::App's winit loop and the window; rune::Tray runs on its own thread

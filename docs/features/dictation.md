@@ -151,7 +151,7 @@ On layouts where Right Alt is AltGr, Windows adds a Left Ctrl press, so Right
 Alt alone never matches there; bind Right Ctrl instead. Checks:
 `one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
-[windows_input.rs](../../src/windows_input.rs), cross-compiled only; the menu
+[windows/input.rs](../../src/windows/input.rs), cross-compiled only; the menu
 mask and AltGr behavior have not run on a Windows PC. Linux
 binds what the portal and X11 grabs take, a key with modifiers and no side:
 releasing modifiers pressed alone in the recorder says Linux needs a key (or
@@ -163,7 +163,7 @@ Checks: the `both_options_*` tests and
 `both_sides_conflict_only_with_either_side_and_match_only_together` in
 `app_settings.rs`, `both_options_record_as_one_chord_of_two_keys` in
 `rune_ui/macos_host.rs`, `both_sides_must_go_down_together` in
-`windows_input.rs`, and
+`windows/input.rs`, and
 `a_modifier_alone_says_linux_needs_a_key_and_suggests_one` in
 `rune_ui/tests.rs`. Constructed events only; no physical keyboard run on any OS.
 
@@ -279,7 +279,7 @@ press's own repeats and release start nothing. Hex never infers a release from
 silence or a timeout. Checks:
 `a_hold_whose_release_never_arrives_finishes_on_the_next_new_press` and
 `a_balanced_release_finishes_a_repeating_hold` in
-[linux_input.rs](../../src/linux_input.rs) (constructed inputs; not run on
+[linux/input.rs](../../src/linux/input.rs) (constructed inputs; not run on
 GNOME).
 
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
@@ -369,11 +369,11 @@ each platform's settings; files without it load as Hold. Checks:
 `toggle_mode_starts_on_a_press_and_finishes_on_the_next` and
 `toggle_mode_escape_cancels_a_locked_capture` in
 [suppression.rs](../../src/suppression.rs) (macOS reducer), the same names in
-[windows_input.rs](../../src/windows_input.rs), and
+[windows/input.rs](../../src/windows/input.rs), and
 `toggle_mode_starts_on_a_tap_and_finishes_on_the_next`,
 `a_capture_that_would_lock_finishes_when_the_desktop_drops_its_release`, and
 `a_repeating_held_press_never_finishes_the_capture` in
-[linux_input.rs](../../src/linux_input.rs), whose one state machine serves X11
+[linux/input.rs](../../src/linux/input.rs), whose one state machine serves X11
 grabs, Wayland portal shortcuts, and the `hex dictation` commands alike. The
 dropped release was observed on 2026-10-28 on Hyprland 0.56.2 with
 xdg-desktop-portal-hyprland 1.4.1: uinput Alt+Z sent no `Deactivated` when Alt
@@ -621,8 +621,8 @@ macOS streams hotkey captures from the audio owner in
 [dictation_audio.rs](../../src/dictation_audio.rs); `DictationWorker::transcribe`
 hands the clip to the engine when it is submitted, so its stream finishes before
 a later capture opens one, and the job then waits for its text in order. Linux
-([linux_dictation.rs](../../src/linux_dictation.rs)) and Windows
-([windows_dictation.rs](../../src/windows_dictation.rs)) drive the same engine
+([linux/dictation.rs](../../src/linux/dictation.rs)) and Windows
+([windows/dictation.rs](../../src/windows/dictation.rs)) drive the same engine
 from their capture loops. Parakeet buffers with its largest context menu
 (Unified English: 5.6 s left, 1.04 s chunk, 1.04 s right), its most accurate and
 least compute-intensive setting; `HEX_STREAM_CHUNK_MS` overrides the chunk for
@@ -641,7 +641,7 @@ and not), `a_stream_starts_with_the_backlog_and_feeds_in_blocks`,
 `a_release_finishes_its_stream_with_the_complete_clip`,
 `escape_and_short_taps_cancel_the_stream_and_submit_nothing`, and
 `a_model_that_cannot_stream_transcribes_the_whole_clip_after_release` in
-linux_dictation.rs; `source_labels_distinguish_fallbacks`,
+linux/dictation.rs; `source_labels_distinguish_fallbacks`,
 `streams_send_their_audio_in_order_and_cancel_when_dropped`, and (macOS, a real
 engine thread without a model) `a_finish_without_a_stream_transcribes_the_clip_offline`,
 `an_unusable_stream_falls_back_to_the_complete_clip`,
@@ -932,7 +932,7 @@ General › Advanced row) sends Ctrl+Shift+V instead, for apps that ignore
 a synthetic Ctrl+V (the herdr desktop app). Shift goes down after Ctrl and up
 before it; a Ctrl the user still holds is never pressed or released by Hex. A
 saved change applies to the next paste without restarting the listener.
-Source: `control_chord` in [windows_paste.rs](../../src/windows_paste.rs).
+Source: `control_chord` in [windows/paste.rs](../../src/windows/paste.rs).
 Check: `paste_chords_press_shift_inside_control_and_leave_a_held_control_alone`
 (the synthesized key sequence only; no paste into a real Windows app).
 
@@ -1057,8 +1057,8 @@ audible sample. Every sound is normalized to one loudness per kind (start
 -25), so a volume sounds the same in every set. Classic's start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples) and its
 cancel, once 15 dB louder than the rest, comes down. Every OS plays the
-error sound for a failed dictation or paste (`fail` in `linux_dictation.rs`
-and `windows_dictation.rs`), including an empty transcript, which macOS
+error sound for a failed dictation or paste (`fail` in `linux/dictation.rs`
+and `windows/dictation.rs`), including an empty transcript, which macOS
 treats as nothing pasted. Checks:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget; every start, and every synthesized sound, audible within 1 ms),

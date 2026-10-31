@@ -11,7 +11,7 @@ local API: the owner-only discovery file (`local-api.json`) and the
 bearer-authenticated `POST /control` (`local_api`).
 
 On Linux and Windows one shared host (`control::host`) carries out the
-commands through each OS's thin adapter (`linux_app`, `windows_rune`); macOS's
+commands through each OS's thin adapter (`linux/app`, `windows/rune`); macOS's
 host is `macos_rune::control`. A command the running Hex can't do on its OS
 answers `unsupported` at runtime (exit 1) instead of being missing from the
 CLI; `hex status --json` lists the OS's `capabilities`. Today that is

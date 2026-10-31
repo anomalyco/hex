@@ -396,7 +396,7 @@ Hex crashes -> systemd restart-on-failure (no window) OR explicit hex start
 
 hex quit / Quit Hex -> drain accepted work -> release microphone and hotkeys -> exit 0
 ```
-Sources/checks: [linux_app.rs](../../src/linux_app.rs),
+Sources/checks: [linux/app.rs](../../src/linux/app.rs),
 [Linux CI](../../.github/workflows/check-linux.yml),
 [test-wayland-paste.sh](../../scripts/test-wayland-paste.sh), and
 [test-linux-service.py](../../scripts/test-linux-service.py).
@@ -456,12 +456,12 @@ restoring it. Verified against xdg-desktop-portal-kde's `BindShortcuts` and
 Plasma session.
 
 
-Checks in [linux_input.rs](../../src/linux_input.rs):
+Checks in [linux/input.rs](../../src/linux/input.rs):
 `escape_is_wanted_only_while_something_records`,
 `escape_grab_conflict_is_not_fatal`, `non_conflict_grab_errors_stay_fatal`,
 and `escape_warning_is_logged_once_per_episode_and_clears_on_recovery`.
 `listener_warning_is_nonfatal_and_round_trips_in_status` in
-[linux_app.rs](../../src/linux_app.rs) checks status publication, warning
+[linux/app.rs](../../src/linux/app.rs) checks status publication, warning
 recovery, and listener shutdown. The ignored X11 checks
 `conflicted_escape_still_dictates_without_cancel`,
 `modified_escape_conflict_keeps_plain_escape_cancel`, and

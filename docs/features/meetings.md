@@ -54,11 +54,11 @@ refuses to start without either grant and asks macOS for System Audio Recording.
 
 The same controller, recorder, transcript pipeline, store, pane, capsules,
 and notes run on Linux and Windows (beta, in Labs, off by default). Only these
-adapters differ ([meeting_linux.rs](../../src/meeting_linux.rs),
-[meeting_windows.rs](../../src/meeting_windows.rs),
+adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
+[meeting/windows.rs](../../src/meeting/windows.rs),
 [microphone_activity_linux.rs](../../src/microphone_activity_linux.rs),
 [microphone_activity_windows.rs](../../src/microphone_activity_windows.rs),
-[meeting_runtime.rs](../../src/meeting_runtime.rs)):
+[meeting/runtime.rs](../../src/meeting/runtime.rs)):
 
 ```ts
 System audio                                      // meetings.system-audio
@@ -206,14 +206,14 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_reset_drops_the_answer_in_flight_without_starting_a_second_query`,
 `an_answer_is_dated_by_when_its_query_finished`,
 `a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer` and
-`a_snoozed_or_non_browser_application_is_not_queried` (meeting_watcher.rs),
+`a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (context.rs),
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
 `offer_titles_name_the_service_site_or_browser_without_repeating_call`,
 `choices_apply_to_the_site_when_known_and_the_app_otherwise`,
 `always_record_starts_after_the_same_stability_time_as_an_offer`, and
 `never_offer_and_snoozed_calls_never_start` in
-[meeting_detection.rs](../../src/meeting_detection.rs);
+[meeting/detection.rs](../../src/meeting/detection.rs);
 `meeting_providers_ask_by_default_and_legacy_never_offer_entries_stay_never` in
 [app_settings.rs](../../src/app_settings.rs); the capsule checks in
 [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)
@@ -226,10 +226,10 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 controller loop that turns `Detection::Record` into a recording has no
 automated test; it shares the manual Record path.
 
-Sources: [meeting_detection.rs](../../src/meeting_detection.rs),
+Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
 [context.rs](../../src/context.rs), the controller in
-[meeting_watcher.rs](../../src/meeting_watcher.rs) (which logs `INFO` when an
+[meeting/watcher.rs](../../src/meeting/watcher.rs) (which logs `INFO` when an
 offer is triggered), and the offer capsule in
 [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs).
 Checks: `resolves_unregistered_chromium_and_electron_audio_helpers_to_their_host_apps`,
@@ -331,10 +331,10 @@ Checks: `meetings_need_other_people_or_a_call_link`,
 [calendar.rs](../../src/calendar.rs);
 `a_call_answered_from_its_calendar_reminder_is_not_offered_again` and
 `a_reminder_without_a_call_link_covers_only_the_next_call` in
-[meeting_detection.rs](../../src/meeting_detection.rs);
+[meeting/detection.rs](../../src/meeting/detection.rs);
 `no_reminder_shows_over_a_recording` and
 `a_dismissed_reminder_without_a_link_snoozes_only_around_its_start` in
-[meeting_watcher.rs](../../src/meeting_watcher.rs);
+[meeting/watcher.rs](../../src/meeting/watcher.rs);
 `calendar_reminders_stay_off_until_connected_and_survive_older_files` in
 [app_settings.rs](../../src/app_settings.rs);
 `a_calendar_meeting_gives_its_title_and_attendees_as_context` and
@@ -364,7 +364,7 @@ permission prompt, and a reminder on screen. The controller loop that turns a
 reminder click into a recording has no automated test; it shares the manual
 Record path. Sources: [calendar.rs](../../src/calendar.rs),
 [calendar.swift](../../src/calendar.swift), `Reminders` in
-[meeting_watcher.rs](../../src/meeting_watcher.rs), `CalendarFeed` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs), `CalendarFeed` in
 [macos_host.rs](../../src/rune_ui/macos_host.rs), and
 [platform_settings.rs](../../src/rune_ui/platform_settings.rs).
 
@@ -407,7 +407,7 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
   -> No timeout; nothing stops automatically
 
-Capture sources (meeting_capture.rs)                // meetings.capture
+Capture sources (meeting/capture.rs)                // meetings.capture
 ├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
 │   ├── System default changes, the Settings microphone changes, or a missing
 │   │   saved device returns, mid-meeting
@@ -434,7 +434,7 @@ its close button dismisses it ([#562](https://github.com/anomalyco/hex/issues/56
 check `a_meeting_recording_error_can_be_dismissed`).
 Checks: `call_end_is_reported_once_per_sustained_absence`,
 `paste_cursor_counts_coalesced_turns_and_advances_only_on_success` in
-[meeting_tests.rs](../../src/meeting_tests.rs),
+[meeting/tests.rs](../../src/meeting/tests.rs),
 `meeting_delta_coalesces_turns_in_time_order` in
 [parakeet.rs](../../src/parakeet.rs),
 `paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten`, and
@@ -443,7 +443,7 @@ Checks: `call_end_is_reported_once_per_sustained_absence`,
 `mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
 `writer_fills_a_capture_gap_with_silence_and_records_it`, and
 `a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline` in
-[meeting_tests.rs](../../src/meeting_tests.rs). Menu-bar Record Meeting and
+[meeting/tests.rs](../../src/meeting/tests.rs). Menu-bar Record Meeting and
 Stop & Transcribe, and the recording and ready capsule buttons, were clicked
 on a real Mac on 2026-10-22; no automated test covers them.
 
@@ -538,7 +538,7 @@ Hex quits while recording                           // meetings.quit
 Quitting gives its workers 5 s before `_exit`, and the final pass of a long
 meeting can take longer, or load a model once the dictation engine is gone.
 Sources: `record`, `finish_pending` in [meeting.rs](../../src/meeting.rs),
-`PendingFinals` in [meeting_watcher.rs](../../src/meeting_watcher.rs). Check:
+`PendingFinals` in [meeting/watcher.rs](../../src/meeting/watcher.rs). Check:
 `quitting_mid_meeting_loads_no_model_and_finishes_in_time`. No repeatable
 driver quits a real recording and relaunches.
 
@@ -627,7 +627,7 @@ measured p50 87-92 ms, p95 103-104 ms).
 ```ts
 Call on speakers -> the microphone hears the remote side tens of ms later
 Each microphone segment                              // meetings.echo
-├── Signal (meeting_echo): 20 ms energy of both tracks on one timeline
+├── Signal (meeting/echo): 20 ms energy of both tracks on one timeline
 │   ├── Lag (-300..+600 ms) and coupling from envelope correlation over ±60 s,
 │   │   cached per 10 s block once its audio is complete
 │   │   └── Correlation < 0.2 (headphones) -> every sound is local
@@ -681,8 +681,8 @@ ducks other audio, moves Bluetooth headsets to the call profile, adds gain and
 noise processing to the transcribed track, runs beside the call app's own voice
 processor, and loses ScreenCaptureKit's shared clock. See ROADMAP.md.
 
-Sources: [meeting_transcript.rs](../../src/meeting_transcript.rs),
-[meeting_echo.rs](../../src/meeting_echo.rs),
+Sources: [meeting/transcript.rs](../../src/meeting/transcript.rs),
+[meeting/echo.rs](../../src/meeting/echo.rs),
 `StreamingResampler` in [dictation.rs](../../src/dictation.rs). Echo checks:
 `speaker_bleed_is_classified_as_bleed`, `talking_over_the_remote_side_is_local`,
 `speech_during_remote_silence_is_local`, `headphones_make_every_microphone_sound_local`,
@@ -726,9 +726,9 @@ and transcripts, not model inference or real speaker echo.
 Opt-in measurements (ignored tests; they need a private recording and are never
 part of CI): `meeting_echo_replay` (every layer, cached transcripts, hand
 labels), `moonshine_command_update_latency`, and `dictation_latency` in
-[meeting_echo_replay_tests.rs](../../src/meeting_echo_replay_tests.rs), and
+[meeting/echo_replay_tests.rs](../../src/meeting/echo_replay_tests.rs), and
 `meeting_live_replay` in
-[meeting_live_replay_tests.rs](../../src/meeting_live_replay_tests.rs): the
+[meeting/live_replay_tests.rs](../../src/meeting/live_replay_tests.rs): the
 production recorder fed a recording at real time beside the warm dictation
 engine, with a dictation every 30 s, reporting CPU, footprint, dictation
 latency, speech-to-copyable lag, mid-call Copy all and Option-Control-V text
@@ -829,7 +829,7 @@ Meeting controller, while Meetings is on        // meetings.retention
 ```
 
 Sources: `expire` / `expired_meetings` in [meeting.rs](../../src/meeting.rs),
-`MeetingExpiry` in [meeting_watcher.rs](../../src/meeting_watcher.rs), the row
+`MeetingExpiry` in [meeting/watcher.rs](../../src/meeting/watcher.rs), the row
 in [rune_ui/platform_settings.rs](../../src/rune_ui/platform_settings.rs).
 Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`
 and `forever_retention_moves_nothing_and_is_the_default`. No live run of an
@@ -887,7 +887,7 @@ paragraph, and action items, decisions, and chunk counts are ignored (and
 dropped when that manifest is next written). Their Markdown copies keep their
 old notes block until regenerated.
 
-Sources: [meeting_notes.rs](../../src/meeting_notes.rs),
+Sources: [meeting/notes.rs](../../src/meeting/notes.rs),
 [apple_intelligence.rs](../../src/apple_intelligence.rs), and the
 FoundationModels bridge [apple_intelligence.swift](../../src/apple_intelligence.swift)
 (`GeneratedNotes` title + summary, `GeneratedTitle` title only), weak-linked from
@@ -978,7 +978,7 @@ Read surfaces: `hex meetings chapters <id> [--json]`, `hex meetings show <id>
 --chapter N`, a `## Chapters` list in `show`, `chapters` in `show --json`
 (JSON stays version 1), and MCP `get_chapters`.
 
-Sources: [meeting_chapters.rs](../../src/meeting_chapters.rs) (worker, decisions,
+Sources: [meeting/chapters.rs](../../src/meeting/chapters.rs) (worker, decisions,
 boundary pass, title), `GeneratedChapter` / `GeneratedChapterLines` in
 [apple_intelligence.swift](../../src/apple_intelligence.swift), the record loop
 and `TitleSource` in [meeting.rs](../../src/meeting.rs). Checks in
@@ -1090,8 +1090,8 @@ cache under `~/Library/Caches/hex/meeting-index` keyed by meeting
 fingerprints. Full-text with stemming and fuzzy matching answered the real
 queries below; embeddings wait until a query fails for lack of paraphrase.
 
-Sources: [meeting_query.rs](../../src/meeting_query.rs) (`meeting::query`,
-queries and rendering) and [meeting_mcp.rs](../../src/meeting_mcp.rs) (`rmcp`
+Sources: [meeting/query.rs](../../src/meeting/query.rs) (`meeting::query`,
+queries and rendering) and [meeting/mcp.rs](../../src/meeting/mcp.rs) (`rmcp`
 3.5 adapter); `run_mcp` in [main.rs](../../src/main.rs). Checks (synthetic
 fixtures in `tests/fixtures/meetings` and `tests/fixtures/meetings-ranking`):
 `meeting::query::tests::*` (listing and skipped folders, filters, misspelling

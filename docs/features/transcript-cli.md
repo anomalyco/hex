@@ -35,7 +35,7 @@ Already-evicted entries remain unavailable. UI search still returns at most 200;
 CLI limits apply after filtering and allow up to 10,000.
 
 Sources: [transcript_cli.rs](../../src/transcript_cli.rs),
-[history.rs](../../src/history.rs), [meeting_query.rs](../../src/meeting_query.rs),
+[history.rs](../../src/history.rs), [meeting/query.rs](../../src/meeting/query.rs),
 and early dispatch in [main.rs](../../src/main.rs).
 [Command and JSON contracts](../transcript-cli.md) document flags and schema.
 
