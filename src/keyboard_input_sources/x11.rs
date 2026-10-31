@@ -2,7 +2,6 @@
 //! the active layout (each compositor keeps its own), so it has none. Hex
 //! reads them only while keyboard model switching is on.
 
-use x11rb::connection::Connection;
 use x11rb::protocol::xkb::{self, ConnectionExt as _, NameDetail};
 use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;

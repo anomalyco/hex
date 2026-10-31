@@ -780,7 +780,6 @@ pub fn is_verified(model: &ModelDefinition) -> bool {
     verification_receipt_matches(&path, model)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Result<PathBuf> {
     check_canceled(canceled)?;
     let path = model_path(model)?;
@@ -788,7 +787,6 @@ pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Resul
     Ok(path)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBool) -> Result<()> {
     check_canceled(canceled)?;
     if !path.is_file() {
