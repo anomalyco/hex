@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
@@ -34,6 +36,8 @@ static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Distinct names for the tests' settings folders.
+#[cfg(test)]
 static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
@@ -2069,9 +2073,7 @@ impl AppSettings {
             // Saving new preferences does not imply onboarding completion.
             crate::onboarding::record_pending_at(parent)?;
         }
-        let temporary = settings_temporary_path(path);
-        fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
-        fs::rename(temporary, path)?;
+        crate::durable::write(path, &serde_json::to_vec_pretty(self)?)?;
         Ok(())
     }
 
@@ -2382,11 +2384,6 @@ impl AppSettings {
             self.capture.hotkey = HotkeyBinding::capture_default();
         }
     }
-}
-
-fn settings_temporary_path(path: &std::path::Path) -> PathBuf {
-    let sequence = SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    path.with_extension(format!("json.{}.{}.tmp", std::process::id(), sequence))
 }
 
 pub fn hotkey_conflicts(
@@ -3113,16 +3110,6 @@ mod tests {
         assert_eq!(
             settings.meetings.recording_indicator_corner,
             MeetingIndicatorCorner::TopRight
-        );
-    }
-
-    #[test]
-    fn concurrent_settings_writers_use_distinct_temporary_paths() {
-        let path = PathBuf::from("/tmp/settings.json");
-
-        assert_ne!(
-            settings_temporary_path(&path),
-            settings_temporary_path(&path)
         );
     }
 

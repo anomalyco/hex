@@ -1,3 +1,4 @@
+use crate::durable::{sync_directory, sync_file};
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
@@ -1182,30 +1183,8 @@ pub(crate) fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
 
 /// Publish `value` as JSON at `path` so a crash leaves either the previous
 /// file or the complete new one, never a partial write.
-/// Flushes a file's data to disk. Windows only flushes through a writable handle.
-fn sync_file(path: &Path) -> std::io::Result<()> {
-    fs::OpenOptions::new().write(true).open(path)?.sync_all()
-}
-
-/// Persists a rename or removal in `directory`. Windows cannot open a
-/// directory as a file, and NTFS journals the entry change itself.
-pub(crate) fn sync_directory(directory: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    File::open(directory)?.sync_all()?;
-    #[cfg(windows)]
-    let _ = directory;
-    Ok(())
-}
-
 pub(crate) fn write_json_atomically(path: &Path, value: &impl Serialize) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| color_eyre::eyre::eyre!("{} has no parent", path.display()))?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec(value)?)?;
-    sync_file(&temporary)?;
-    fs::rename(temporary, path)?;
-    sync_directory(parent)?;
+    crate::durable::write(path, &serde_json::to_vec(value)?)?;
     Ok(())
 }
 

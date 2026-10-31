@@ -779,7 +779,7 @@ pub(crate) fn recheck_after_identity_change_at(
                 _ => {}
             }
         }
-        crate::transcription_models::sync_directory(directory)?;
+        crate::durable::sync_directory(directory)?;
     }
     settings.record_anomaly_identity(&directory.join("settings.json"))?;
     Ok(reopen)
@@ -805,14 +805,14 @@ pub(crate) fn reset_at(directory: &Path) -> color_eyre::Result<()> {
             _ => {}
         }
     }
-    crate::transcription_models::sync_directory(directory)?;
+    crate::durable::sync_directory(directory)?;
     Ok(())
 }
 
 pub(crate) fn record_pending_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
     write_owner_only_marker(&directory.join("onboarding-pending"), false)?;
-    crate::transcription_models::sync_directory(directory)?;
+    crate::durable::sync_directory(directory)?;
     Ok(())
 }
 
@@ -822,7 +822,7 @@ pub(crate) fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
     let temporary = directory.join(".onboarding-complete.tmp");
     write_owner_only_marker(&temporary, true)?;
     fs::rename(temporary, destination)?;
-    crate::transcription_models::sync_directory(directory)?;
+    crate::durable::sync_directory(directory)?;
     Ok(())
 }
 

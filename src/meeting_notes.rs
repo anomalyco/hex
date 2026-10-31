@@ -5,7 +5,7 @@
 //! summary of at most two sentences. Agents read the transcript for detail.
 
 use std::collections::BTreeSet;
-use std::fs::{self, File};
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -709,13 +709,13 @@ fn rewrite_markdown_file(path: &Path, rewrite: impl FnOnce(&str) -> String) -> R
     if let Ok(metadata) = fs::metadata(path) {
         let _ = fs::set_permissions(&temporary, metadata.permissions());
     }
-    File::open(&temporary)?.sync_all()?;
+    crate::durable::sync_file(&temporary)?;
     if fs::read_to_string(path).ok().as_deref() != Some(original.as_str()) {
         let _ = fs::remove_file(&temporary);
         return Err(eyre!("the Markdown changed while it was being updated"));
     }
     fs::rename(&temporary, path)?;
-    sync_directory(folder)
+    Ok(sync_directory(folder)?)
 }
 
 static IN_PROGRESS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());

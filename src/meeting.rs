@@ -11,6 +11,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
+use crate::durable::{sync_directory, sync_file};
 use crate::events::now_ms;
 
 const SAMPLE_RATE: u32 = 16_000;
@@ -787,17 +788,10 @@ fn write_tracks(
 fn finalize_track(path: PathBuf, writer: Option<WavWriter<BufWriter<File>>>) -> Result<()> {
     if let Some(writer) = writer {
         writer.finalize()?;
-        sync_file(&path)
+        Ok(sync_file(&path)?)
     } else {
         create_empty_track(path)
     }
-}
-
-/// Flushes a finished file to disk. Windows refuses to flush a read-only
-/// handle (os error 5), so the file is opened for writing.
-fn sync_file(path: &Path) -> Result<()> {
-    OpenOptions::new().write(true).open(path)?.sync_all()?;
-    Ok(())
 }
 
 fn create_empty_track(path: PathBuf) -> Result<()> {
@@ -812,7 +806,7 @@ fn create_empty_track(path: PathBuf) -> Result<()> {
     )?
     .finalize()?;
     set_owner_only(&path, false)?;
-    sync_file(&path)
+    Ok(sync_file(&path)?)
 }
 
 fn transcribe(
@@ -1479,20 +1473,7 @@ fn write_manifest(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     file.flush()?;
     file.get_ref().sync_all()?;
     fs::rename(&temporary, &final_path)?;
-    sync_directory(directory)
-}
-
-#[cfg(unix)]
-fn sync_directory(directory: &Path) -> Result<()> {
-    File::open(directory)?.sync_all()?;
-    Ok(())
-}
-
-/// Windows refuses to open a directory as a file (os error 5), and its
-/// renames need no directory sync to persist.
-#[cfg(windows)]
-fn sync_directory(_directory: &Path) -> Result<()> {
-    Ok(())
+    Ok(sync_directory(directory)?)
 }
 
 pub fn format_duration(milliseconds: u64) -> String {
