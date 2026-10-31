@@ -22,6 +22,14 @@ pub struct SettingValue {
     pub choices: Vec<String>,
     pub writable: bool,
     pub about: String,
+    /// False where this OS's Hex lacks what the setting needs ([`needs`]):
+    /// it is kept, but does nothing here and `set` refuses it.
+    #[serde(default = "available")]
+    pub available: bool,
+}
+
+fn available() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -431,6 +439,39 @@ const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 #[cfg(not(hex_capture))]
 const CAPTURE_KEYS: &[Key] = &[];
 
+/// Settings that act only where Hex has a capability (by its
+/// `rune_ui::capabilities` name), the same one that shows their row in the
+/// window. The first matching prefix decides.
+const NEEDS: &[(&str, &str)] = &[
+    ("meetings.calendar.", "calendar"),
+    ("meetings.", "meetings"),
+    ("labs.live_chapters", "meetings"),
+    ("experimental.hex_microphone", "fun"),
+    ("show_dock_icon", "dock_icon"),
+    ("keyboard_model_switching.", "keyboard_model_switching"),
+    ("enable_on_launch", "listener_control"),
+    ("share_dictation_shortcut", "share_shortcut"),
+];
+
+/// The capability `key` needs, if any.
+fn needs(key: &str) -> Option<&'static str> {
+    NEEDS
+        .iter()
+        .find(|(prefix, _)| key == *prefix || key.starts_with(prefix))
+        .map(|(_, capability)| *capability)
+}
+
+/// Why `hex settings set` refuses `name` on this OS, if it does.
+pub fn unavailable(name: &str) -> Option<ControlError> {
+    let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
+    Some(ControlError::new(
+        "unsupported",
+        format!(
+            "`{name}` does nothing on this OS: it needs {capability}, which Hex has only elsewhere"
+        ),
+    ))
+}
+
 /// Every key, in registry order.
 fn keys() -> impl Iterator<Item = &'static Key> {
     KEYS.iter().chain(CAPTURE_KEYS)
@@ -535,6 +576,7 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
         },
         writable: key.read_only.is_none(),
         about: key.about.into(),
+        available: needs(key.key).is_none_or(crate::rune_ui::capability),
     }
 }
 
@@ -942,6 +984,21 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
+    }
+
+    #[test]
+    fn settings_name_real_capabilities_and_keys() {
+        let capabilities = crate::rune_ui::capabilities();
+        for (prefix, capability) in NEEDS {
+            assert!(
+                capabilities.contains_key(*capability),
+                "`{prefix}` needs `{capability}`, which is no capability"
+            );
+            assert!(
+                keys().any(|key| key.key == *prefix || key.key.starts_with(prefix)),
+                "`{prefix}` names no setting"
+            );
+        }
     }
 
     #[cfg(hex_capture)]

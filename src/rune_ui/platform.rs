@@ -744,3 +744,155 @@ fn scrawl_request(request: ScrawlRequest) {
         }
     }
 }
+
+/// Why a capability is on for some OSes and off for others. Every
+/// difference between [`Capabilities::LINUX`], [`Capabilities::MACOS`], and
+/// [`Capabilities::WINDOWS`] names one in [`DIFFERENCES`], so a Mac-only
+/// feature is a recorded, reviewed choice rather than drift.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+enum Difference {
+    /// Belongs to one OS's own pattern (the Dock, TCC, EventKit).
+    OsPattern(&'static str),
+    /// Can't be done there as policy stands.
+    Impossible(&'static str),
+    /// Can be done there; nobody has built the adapter yet.
+    Pending(&'static str),
+}
+
+#[cfg(test)]
+impl Difference {
+    fn why(self) -> &'static str {
+        match self {
+            Self::OsPattern(why) | Self::Impossible(why) | Self::Pending(why) => why,
+        }
+    }
+}
+
+#[cfg(test)]
+const DIFFERENCES: &[(&str, Difference)] = &[
+    (
+        "meetings",
+        Difference::Pending(
+            "system audio (WASAPI loopback, a PipeWire monitor) and call detection",
+        ),
+    ),
+    (
+        "calendar",
+        Difference::OsPattern("EventKit; there is no cross-platform calendar source"),
+    ),
+    (
+        "permissions",
+        Difference::OsPattern("only macOS gates dictation on privacy permissions (TCC)"),
+    ),
+    (
+        "dock_icon",
+        Difference::OsPattern("the Dock; Windows and Linux have no dock policy"),
+    ),
+    (
+        "listener_control",
+        Difference::OsPattern("macOS listens once setup is ready; its menu bar is the control"),
+    ),
+    (
+        "terminal_paste",
+        Difference::OsPattern("macOS terminals take ⌘V; Windows keeps the row in Labs"),
+    ),
+    (
+        "share_shortcut",
+        Difference::Pending("a macOS event tap could pass the shortcut through too"),
+    ),
+    (
+        "hex_microphone",
+        Difference::OsPattern(
+            "only macOS installs a driver; Linux creates a PipeWire source while the filter is on",
+        ),
+    ),
+    (
+        "fun",
+        Difference::Impossible("a Windows virtual microphone needs a signed kernel driver"),
+    ),
+    (
+        "modifier_sides",
+        Difference::Impossible("X11 grabs and the Wayland portal see no sides"),
+    ),
+];
+
+impl Capabilities {
+    /// Every capability by name. Destructuring makes a new capability a
+    /// compile error here until it is named.
+    pub(super) fn fields(self) -> [(&'static str, bool); 13] {
+        let Self {
+            os: _,
+            meetings,
+            calendar,
+            permissions,
+            launch_at_login,
+            dock_icon,
+            listener_control,
+            terminal_paste,
+            share_shortcut,
+            hex_microphone,
+            practice_dictation,
+            fun,
+            modifier_sides,
+            keyboard_model_switching,
+        } = self;
+        [
+            ("meetings", meetings),
+            ("calendar", calendar),
+            ("permissions", permissions),
+            ("launch_at_login", launch_at_login),
+            ("dock_icon", dock_icon),
+            ("listener_control", listener_control),
+            ("terminal_paste", terminal_paste),
+            ("share_shortcut", share_shortcut),
+            ("hex_microphone", hex_microphone),
+            ("practice_dictation", practice_dictation),
+            ("fun", fun),
+            ("modifier_sides", modifier_sides),
+            ("keyboard_model_switching", keyboard_model_switching),
+        ]
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_differ_across_oses_only_for_a_recorded_reason() {
+        let [linux, macos, windows] = [
+            Capabilities::LINUX,
+            Capabilities::MACOS,
+            Capabilities::WINDOWS,
+        ]
+        .map(Capabilities::fields);
+        let reason = |name: &str| {
+            DIFFERENCES
+                .iter()
+                .find(|(field, _)| *field == name)
+                .map(|(_, why)| why.why())
+        };
+        for index in 0..linux.len() {
+            let (name, on_linux) = linux[index];
+            let (on_macos, on_windows) = (macos[index].1, windows[index].1);
+            let differs = !(on_linux == on_macos && on_macos == on_windows);
+            match (differs, reason(name)) {
+                (true, None) => panic!(
+                    "`{name}` is linux {on_linux}, macOS {on_macos}, windows {on_windows}; \
+                     port it or record why in DIFFERENCES"
+                ),
+                (false, Some(why)) => panic!(
+                    "`{name}` is the same on every OS now; drop its DIFFERENCES entry ({why})"
+                ),
+                _ => {}
+            }
+        }
+        for (name, _) in DIFFERENCES {
+            assert!(
+                linux.iter().any(|(field, _)| field == name),
+                "DIFFERENCES names `{name}`, which is no capability"
+            );
+        }
+    }
+}

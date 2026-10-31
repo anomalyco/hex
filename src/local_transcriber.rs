@@ -6,8 +6,6 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::gguf_session::OfflineGgufSession;
-#[cfg(target_os = "linux")]
-use crate::transcription_models::{ModelDefinition, TranscriptionModelId, definition};
 use crate::transcription_models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
@@ -25,16 +23,6 @@ pub struct LocalTranscriber {
     /// The finest timestamps the model gives, for a capture's or a
     /// meeting's word times.
     finest_timestamps: TimestampKind,
-}
-
-#[cfg(target_os = "linux")]
-pub fn default_model() -> &'static ModelDefinition {
-    definition(TranscriptionModelId::default())
-}
-
-#[cfg(target_os = "linux")]
-pub fn install_default(canceled: &AtomicBool) -> Result<()> {
-    install(&TranscriptionSelection::default(), canceled)
 }
 
 pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Result<()> {
@@ -89,11 +77,6 @@ pub fn initialize_backends() {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub fn transcribe_wav(path: &Path) -> Result<String> {
-    transcribe_wav_with_selection(path, &TranscriptionSelection::default())
-}
-
 pub fn transcribe_wav_with_selection(
     path: &Path,
     selection: &TranscriptionSelection,
@@ -130,11 +113,6 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
 }
 
 impl LocalTranscriber {
-    #[cfg(target_os = "linux")]
-    pub fn load_default() -> Result<Self> {
-        Self::load(&TranscriptionSelection::default())
-    }
-
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
         transcribe_cpp::init_logging();
         transcribe_cpp::init_backends_default()

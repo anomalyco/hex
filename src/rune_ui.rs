@@ -169,6 +169,11 @@ pub(crate) fn run_app(
             while let Ok(request) = requests.recv() {
                 match request {
                     Control::Activate(activation) => show(activation),
+                    Control::Show(pane) => {
+                        show(Activation::default());
+                        window.update(move |ui, tx| self::show(ui, destination(pane), tx));
+                    }
+                    Control::Hide => window.close(),
                     Control::OnboardingReset(answer) => {
                         show(Activation::default());
                         window.update(move |ui, tx| {
@@ -324,8 +329,7 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     crate::macos_rune::window_closed();
 }
 
-/// Where the menu bar, a meeting, or the local API sends the window.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// Where the menu bar, a meeting, or a `hex window show` sends the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Destination {
     Settings,
@@ -335,6 +339,20 @@ pub(crate) enum Destination {
     Meetings(Option<String>),
     Modes,
     History,
+}
+
+/// Where `hex window show` opens the window. While Meetings is off, its
+/// pane shows the opt-in.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn destination(pane: Option<crate::control::Pane>) -> Destination {
+    use crate::control::Pane as Named;
+    match pane {
+        None | Some(Named::Settings) => Destination::Settings,
+        Some(Named::Models) => Destination::Models,
+        Some(Named::Modes) => Destination::Modes,
+        Some(Named::History) => Destination::History,
+        Some(Named::Meetings) => Destination::Meetings(None),
+    }
 }
 
 /// Shows `destination` in the window (the caller opens it).
@@ -362,6 +380,24 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
+/// What this OS's Hex can do, by capability name, for `hex status` and the
+/// settings `hex settings` can change here.
+pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
+    platform::Capabilities::current()
+        .fields()
+        .into_iter()
+        .map(|(name, on)| (name.to_owned(), on))
+        .collect()
+}
+
+/// Whether this OS's Hex has the capability `name` ([`capabilities`]).
+pub(crate) fn capability(name: &str) -> bool {
+    platform::Capabilities::current()
+        .fields()
+        .into_iter()
+        .any(|(field, on)| field == name && on)
+}
+
 /// `hex onboarding reset`: replays the first run in the window now; the
 /// window also shows why it couldn't.
 pub(crate) fn restart_onboarding(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
@@ -370,7 +406,7 @@ pub(crate) fn restart_onboarding(ui: &mut Ui, tx: &mut Tx) -> Result<(), String>
 
 /// The pane the window shows, by its `hex window show` name: General is
 /// still `settings` there.
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn current_pane(ui: &Ui) -> &'static str {
     match ui.pane {
         Pane::General => "settings",
@@ -380,7 +416,6 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
 
 /// The OS's rules for a shortcut, the ones Settings applies when recording
 /// one; shared with `hex settings set`.
-#[cfg(target_os = "macos")]
 pub(crate) fn shortcut_rule(
     slot: crate::app_settings::HotkeySlot,
     binding: &HotkeyBinding,
@@ -399,6 +434,21 @@ pub(crate) fn shortcut_rule(
 #[cfg(target_os = "macos")]
 pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
     host::hotkey_key_named(name)
+}
+
+/// The key `name` names: Linux and Windows bind keys by name, and the
+/// shortcut's rule ([`shortcut_rule`]) checks it can register.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
+    Ok(HotkeyKey::named(name))
+}
+
+/// The OS's shortcut rules for `hex settings set`.
+pub(crate) fn shortcut_rules() -> crate::control::settings::ShortcutRules {
+    crate::control::settings::ShortcutRules {
+        key_named: |name| hotkey_key_named(name).map_err(str::to_owned),
+        rule: |slot, binding| shortcut_rule(slot, binding).map_err(str::to_owned),
+    }
 }
 
 /// A capsule's "Never offer" or "Always record" choice, kept in the window's

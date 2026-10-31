@@ -118,7 +118,6 @@ mod macos_rune;
 mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting_detection;
-#[cfg(target_os = "macos")]
 mod meeting_mcp;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod meeting_runtime;
@@ -155,7 +154,6 @@ mod status_item;
 mod suppression;
 mod text_replacements;
 mod transcript;
-#[cfg(target_os = "macos")]
 mod transcript_cli;
 #[cfg(target_os = "macos")]
 mod transcription;
@@ -181,6 +179,8 @@ mod windows_app;
 mod windows_audio_control;
 #[cfg(target_os = "windows")]
 mod windows_context;
+#[cfg(target_os = "windows")]
+mod windows_control;
 #[cfg(target_os = "windows")]
 mod windows_dictation;
 #[cfg(target_os = "windows")]
@@ -233,27 +233,6 @@ pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
 enum Command {
     #[command(flatten)]
     Control(control::cli::ControlCli),
-    /// Read retained dictation history without starting the app, or clear
-    /// it in the running Hex (`hex history clear --yes`).
-    #[command(args_conflicts_with_subcommands = true)]
-    History(transcript_cli::HistoryArgs),
-    /// Read and search recorded meetings without starting the app; record
-    /// and stop them in the running Hex.
-    Meetings {
-        #[command(subcommand)]
-        command: transcript_cli::MeetingsCommand,
-    },
-    /// List the Labs features, or turn one on or off.
-    Labs {
-        #[command(subcommand)]
-        command: Option<labs::LabsCommand>,
-    },
-    /// Replaced by `hex labs`.
-    #[command(hide = true)]
-    Experiments {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
     /// Run the desktop app with local dictation.
     App {
         /// Capture from this microphone instead of the saved one or the system default.
@@ -269,18 +248,6 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// Serve recorded meetings to agents over MCP (stdio). Read-only.
-    Mcp {
-        /// Read meetings from this folder instead of Application Support, such
-        /// as a mirrored copy on another Mac.
-        #[arg(long)]
-        meetings_dir: Option<PathBuf>,
-    },
-    /// Manage the ~/.config/hex personal transformations workspace.
-    Commands {
-        #[command(subcommand)]
-        command: CommandsCommand,
-    },
     /// Run the headless local API service.
     #[command(hide = true)]
     Service {
@@ -292,14 +259,6 @@ enum Command {
     Dev {
         #[command(subcommand)]
         command: DevCommand,
-    },
-    /// Annotate: record your screen with drawing and narration in the
-    /// running Hex, then list and send what you recorded (`hex capture`
-    /// still works).
-    #[command(name = "annotate", alias = "capture")]
-    Capture {
-        #[command(subcommand)]
-        command: control::cli::CaptureCommand,
     },
     /// The Scrawl capture capsule in a window of its own, driven by a fake
     /// host, with live tuning. Records and sends nothing.
@@ -341,16 +300,6 @@ enum Command {
 enum TranscriptionBenchmarkBackend {
     Onnx,
     TranscribeCpp,
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Subcommand)]
-enum CommandsCommand {
-    /// Create ~/.config/hex with a starter config, or refresh its typings.
-    Init,
-    /// Load ~/.config/hex's config as Hex would and report what it registers
-    /// or why it fails.
-    Check,
 }
 
 #[cfg(target_os = "macos")]
@@ -472,11 +421,6 @@ fn main() -> Result<()> {
     if opens_app(cli.command.as_ref(), bundled_watcher) {
         rune::prewarm_gpu();
     }
-    // Before process logging, the instance lock, or any GUI or permission
-    // setup: an agent may start this over SSH while the app is running.
-    if let Some(Command::Mcp { meetings_dir }) = &cli.command {
-        return run_mcp(meetings_dir.clone());
-    }
     // A window of its own: no data folder, log, lock, or settings, so it
     // runs beside the installed Hex.
     #[cfg(hex_capture)]
@@ -485,44 +429,16 @@ fn main() -> Result<()> {
         rune_ui::capture_capsule::playground::run(rune_args.clone());
         return Ok(());
     }
-    // Control commands talk to the running Hex; like the read commands, they
-    // touch no data folder, log, or lock of their own.
+    // Control and read commands (status, settings, history, meetings, mcp,
+    // labs, …) talk to the running Hex or read files: no data folder, log,
+    // lock, GUI, or permission setup of their own, so an agent may run them
+    // over SSH while the app is running.
     let cli = match cli.command {
         Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
-        Some(Command::History(transcript_cli::HistoryArgs {
-            action: Some(transcript_cli::HistoryAction::Clear { yes, output }),
-            ..
-        })) => control::cli::finish(control::cli::clear_history(yes, output)),
-        Some(Command::Capture { command }) => control::cli::finish(control::cli::capture(command)),
         command => Cli { command },
     };
+    #[cfg(debug_assertions)]
     match &cli.command {
-        Some(Command::History(args)) => return transcript_cli::history(args),
-        Some(Command::Meetings { command }) => {
-            use transcript_cli::MeetingsCommand;
-            let control = match command {
-                MeetingsCommand::Record { title, output } => Some((
-                    control::ControlCommand::MeetingRecord {
-                        title: title.clone(),
-                    },
-                    *output,
-                )),
-                MeetingsCommand::Stop { output } => {
-                    Some((control::ControlCommand::MeetingStop, *output))
-                }
-                MeetingsCommand::CopyLast { output } => {
-                    Some((control::ControlCommand::MeetingCopyLast, *output))
-                }
-                _ => None,
-            };
-            if let Some((command, output)) = control {
-                control::cli::finish(control::cli::send(command, output));
-            }
-            return transcript_cli::meetings(command);
-        }
-        Some(Command::Labs { command }) => return labs::run(command),
-        Some(Command::Experiments { .. }) => return labs::run_retired_experiments(),
-        #[cfg(debug_assertions)]
         Some(Command::Meeting {
             command: MeetingCommand::List,
         }) => {
@@ -530,7 +446,6 @@ fn main() -> Result<()> {
                 Default::default(),
             ));
         }
-        #[cfg(debug_assertions)]
         Some(Command::Meeting {
             command: MeetingCommand::Show { id },
         }) => {
@@ -608,31 +523,9 @@ fn main() -> Result<()> {
             }
             local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
         }
-        Command::Mcp { .. }
-        | Command::History(_)
-        | Command::Meetings { .. }
-        | Command::Labs { .. }
-        | Command::Experiments { .. }
-        | Command::Control(_) => {
-            unreachable!("handled before startup")
-        }
-        #[cfg(any(debug_assertions, hex_capture))]
-        Command::Capture { .. } => unreachable!("handled before startup"),
+        Command::Control(_) => unreachable!("handled before startup"),
         #[cfg(hex_capture)]
         Command::CapsulePlayground { .. } => unreachable!("handled before startup"),
-        Command::Commands {
-            command: CommandsCommand::Init,
-        } => {
-            let workspace = personal_commands::initialize_workspace()?;
-            println!("{}", workspace.display());
-            Ok(())
-        }
-        Command::Commands {
-            command: CommandsCommand::Check,
-        } => {
-            println!("{}", personal_commands::check_workspace()?);
-            Ok(())
-        }
         Command::Dev { command } => {
             #[cfg(debug_assertions)]
             {
@@ -813,24 +706,6 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
     )
 }
 
-/// Logs to stderr only (stdout carries MCP messages) and touches no app state.
-#[cfg(target_os = "macos")]
-fn run_mcp(meetings_dir: Option<PathBuf>) -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("HEX_MCP_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
-    let root = match meetings_dir {
-        Some(directory) => directory,
-        None => meeting::root()?,
-    };
-    meeting_mcp::run(root)
-}
-
 /// A copy installed as `hex-meetings-mcp` only serves meetings: its
 /// arguments are those of `hex mcp`, and it never falls back to listening.
 #[cfg(target_os = "macos")]
@@ -867,6 +742,7 @@ fn opens_app(command: Option<&Command>, bundled_watcher: bool) -> bool {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{Cli, Command, is_bundled_app_executable, mcp_alias_arguments, opens_app};
+    use crate::control::cli::ControlCli;
     use clap::Parser;
 
     #[test]
@@ -879,15 +755,15 @@ mod tests {
         };
         assert!(matches!(
             parse(&["/Users/kit/.local/bin/hex-meetings-mcp"]),
-            Some(Command::Mcp { meetings_dir: None })
+            Some(Command::Control(ControlCli::Mcp { meetings_dir: None }))
         ));
         assert!(matches!(
             parse(&["hex-meetings-mcp", "--meetings-dir", "/tmp/mirror"]),
-            Some(Command::Mcp { meetings_dir: Some(directory) }) if directory.ends_with("mirror")
+            Some(Command::Control(ControlCli::Mcp { meetings_dir: Some(directory) })) if directory.ends_with("mirror")
         ));
         assert!(matches!(
             parse(&["hex-meetings-mcp", "mcp"]),
-            Some(Command::Mcp { .. })
+            Some(Command::Control(ControlCli::Mcp { .. }))
         ));
         assert!(parse(&["hex"]).is_none());
     }
@@ -916,32 +792,33 @@ mod tests {
 
     #[test]
     fn control_commands_parse_beside_the_read_commands() {
-        use super::{CommandsCommand, control::cli::ControlCli, transcript_cli};
+        use super::transcript_cli;
+        use crate::control::cli::CommandsCommand;
         use clap::CommandFactory;
 
         Cli::command().debug_assert();
         let parse = |arguments: &[&str]| Cli::try_parse_from(arguments).map(|cli| cli.command);
-        #[cfg(any(debug_assertions, hex_capture))]
+        #[cfg(hex_capture)]
         {
             assert!(matches!(
                 parse(&["hex", "capture", "stop", "--json"]),
-                Ok(Some(Command::Capture { command: crate::control::cli::CaptureCommand::Stop { output } })) if output.json
+                Ok(Some(Command::Control(ControlCli::Annotate { command: crate::control::cli::CaptureCommand::Stop { output } }))) if output.json
             ));
             assert!(matches!(
                 parse(&["hex", "capture", "send", "latest", "--to", "ses_1"]),
-                Ok(Some(Command::Capture {
+                Ok(Some(Command::Control(ControlCli::Annotate {
                     command: crate::control::cli::CaptureCommand::Send { capture, to: Some(to), .. }
-                })) if capture == "latest" && to == "ses_1"
+                }))) if capture == "latest" && to == "ses_1"
             ));
             assert!(matches!(
                 parse(&["hex", "capture", "send", "latest", "--always"]),
-                Ok(Some(Command::Capture {
+                Ok(Some(Command::Control(ControlCli::Annotate {
                     command: crate::control::cli::CaptureCommand::Send {
                         to: None,
                         always: true,
                         ..
                     }
-                }))
+                })))
             ));
             assert!(parse(&["hex", "capture", "route", "latest", "--explain"]).is_ok());
         }
@@ -975,30 +852,31 @@ mod tests {
         }
         assert!(matches!(
             parse(&["hex", "history", "clear", "--yes"]),
-            Ok(Some(Command::History(transcript_cli::HistoryArgs {
-                action: Some(transcript_cli::HistoryAction::Clear { yes: true, .. }),
-                ..
-            })))
+            Ok(Some(Command::Control(ControlCli::History(
+                transcript_cli::HistoryArgs {
+                    action: Some(transcript_cli::HistoryAction::Clear { yes: true, .. }),
+                    ..
+                }
+            ))))
         ));
         assert!(matches!(
             parse(&["hex", "history", "--json"]),
-            Ok(Some(Command::History(transcript_cli::HistoryArgs {
-                action: None,
-                ..
-            })))
+            Ok(Some(Command::Control(ControlCli::History(
+                transcript_cli::HistoryArgs { action: None, .. }
+            ))))
         ));
         assert!(parse(&["hex", "history", "--limit", "5", "clear", "--yes"]).is_err());
         assert!(matches!(
             parse(&["hex", "meetings", "record", "--title", "Design sync"]),
-            Ok(Some(Command::Meetings {
+            Ok(Some(Command::Control(ControlCli::Meetings {
                 command: transcript_cli::MeetingsCommand::Record { title: Some(_), .. }
-            }))
+            })))
         ));
         assert!(matches!(
             parse(&["hex", "commands", "check"]),
-            Ok(Some(Command::Commands {
+            Ok(Some(Command::Control(ControlCli::Commands {
                 command: CommandsCommand::Check
-            }))
+            })))
         ));
         assert!(parse(&["hex", "meetings", "cancel"]).is_err());
         assert!(matches!(
@@ -1032,19 +910,19 @@ mod tests {
 
         assert!(matches!(
             Cli::try_parse_from(["hex", "labs", "on", "live-text"]).map(|cli| cli.command),
-            Ok(Some(Command::Labs {
+            Ok(Some(Command::Control(ControlCli::Labs {
                 command: Some(LabsCommand::On { feature })
-            })) if feature == "live-text"
+            }))) if feature == "live-text"
         ));
         assert!(matches!(
             Cli::try_parse_from(["hex", "labs"]).map(|cli| cli.command),
-            Ok(Some(Command::Labs { command: None }))
+            Ok(Some(Command::Control(ControlCli::Labs { command: None })))
         ));
         assert!(Cli::try_parse_from(["hex", "labs", "off"]).is_err());
         assert!(matches!(
             Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
                 .map(|cli| cli.command),
-            Ok(Some(Command::Experiments { .. }))
+            Ok(Some(Command::Control(ControlCli::Experiments { .. })))
         ));
     }
 

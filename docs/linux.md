@@ -44,16 +44,23 @@ and Windows use.
 ```sh
 hex                             # open the window, starting Hex if needed
 hex start                       # start Hex in the background; no window
-hex status                      # query the running Hex, not an old log entry
-hex quit                        # finish accepted work, release the microphone, exit
-hex restart                     # restart the systemd unit in this desktop's environment
+hex status [--json]             # query the running Hex, not an old log entry
+hex quit [--force]              # finish accepted work, release the microphone, exit
+hex restart [--force]           # restart the systemd unit in this desktop's environment
                                 # (over SSH: the one it last ran in)
+hex settings set sound_effects off   # every control command (docs/cli.md)
 journalctl --user -u hex.service # diagnostics of the supervised process
 ```
 
-`hex app` is the same as `hex`, `hex app --hidden` the same as `hex start`, and
-`hex stop` the same as `hex quit`; older desktop and autostart entries keep
-working after an update replaces only the executable.
+`hex app` is the same as `hex`, `hex start` runs `hex app --hidden` in the
+background and waits until Hex answers, and `hex stop` is the same as
+`hex quit`; older desktop and autostart entries keep working after an update
+replaces only the executable. `hex quit` and `hex restart` refuse while a
+dictation records or transcribes unless `--force`. Linux runs the same
+control commands as macOS ([docs/cli.md](cli.md)): `settings`, `model`,
+`window`, `vocabulary`, `history clear`, `check-for-updates`, `onboarding
+reset`, `annotate status`, `launch-at-login` (the XDG autostart entry),
+`logs`, `commands init|check`, `history`, `meetings`, and `mcp`.
 
 A launch first asks the running Hex over its socket. If one answers, it
 forwards `Activate` with the launcher's `XDG_ACTIVATION_TOKEN` or
@@ -85,8 +92,9 @@ one (quit it first).
 The socket is owner-only in Hex's data directory, with same-user peer
 credentials, versioned bounded frames, bounded queues, and I/O deadlines. It is
 not a network API or the macOS embedded transcription SDK service. It carries
-only `Activate`, the shortcut commands, `Status`, and `Quit`; shortcut commands
-go straight from the socket to the listener, never through the window.
+`Activate`, `Status`, Annotate's commands, and every `hex` control command as
+one versioned `ControlRequest`; dictation commands go straight from the
+socket to the listener, never through the window.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
@@ -94,7 +102,7 @@ with Hex's listener. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
 installed user unit; they forward to the Hex using that data directory or
 become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
-`hex status --lines 40` retains the explicit diagnostic-log view.
+`hex logs -n 40` is the diagnostic-log view (`hex status --lines` is gone).
 
 The window runs on Rune's app lifetime (`rune::App`): Hex starts it without a
 window, each `Activate` opens or focuses it with the forwarded token (on
