@@ -18,7 +18,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
-use super::lists::{Tone, error_panel, section_label, tone_tag};
+use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
 use super::platform::{MeetingRequest, PlatformRequest};
 use super::{Menu, Ui};
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
@@ -693,11 +693,12 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
         ));
     }
     if let Some(error) = &pane.runtime_error {
-        notices.push(error_panel(
+        notices.push(dismissible_error_panel(
             p,
             "meeting-runtime-error",
             tr("Meeting could not be recorded."),
             error,
+            |ui: &mut Ui| ui.meetings.runtime_error = None,
         ));
     }
     let body = if pane.meetings.is_empty() {
