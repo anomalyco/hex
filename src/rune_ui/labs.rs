@@ -6,9 +6,9 @@
 use rune::{El, Icon, Tx, row, text};
 
 use super::controls::{self, CardRow, Paint, card, icon_row, pressable_row, row_switch};
-use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, WAVE};
+use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
-use crate::desktop_i18n::tr;
+use crate::desktop_i18n::{tr, tr_fill};
 use crate::labs::Feature;
 
 pub(super) static LABS_ICON: Icon = Icon {
@@ -189,6 +189,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
         ));
     }
+    rows.push(row(
+        Feature::UnloadIdle,
+        &TIMER,
+        tr("Unload model when idle"),
+        tr("Frees the speech model's memory after a while unused; the next dictation reloads it"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -221,6 +227,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::MouseShortcuts => "lab-mouse-shortcuts",
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",
+        Feature::UnloadIdle => "lab-unload-idle",
     }
 }
 
@@ -269,10 +276,15 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
                 .grow(1.0),
         )
         .child(feedback);
-    let rows: Vec<CardRow> = rows(ui)
-        .into_iter()
-        .map(|row| feature_row(p, row))
-        .collect();
+    let mut cards: Vec<CardRow> = Vec::new();
+    for row in rows(ui) {
+        let unload_idle = row.feature == Feature::UnloadIdle && row.on;
+        cards.push(feature_row(p, row));
+        if unload_idle {
+            cards.push(unload_after_row(ui, p));
+        }
+    }
+    let rows = cards;
     let content = controls::page("content")
         .child(lede)
         .child(card(p, "labs", rows))
@@ -306,6 +318,31 @@ fn feature_row(p: Paint, row: Row) -> CardRow {
         .hover(p.k.c.hover)
         .on_press(move |ui: &mut Ui| flip(ui, feature))
         .into()
+}
+
+/// How long the model sits unused before it unloads, under its row while on.
+fn unload_after_row(ui: &Ui, p: Paint) -> CardRow {
+    use crate::app_settings::UNLOAD_IDLE_MINUTES;
+    let labels: Vec<String> = UNLOAD_IDLE_MINUTES
+        .iter()
+        .map(|minutes| tr_fill("{} min", &minutes.to_string()))
+        .collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let selected = UNLOAD_IDLE_MINUTES
+        .iter()
+        .position(|minutes| *minutes == ui.settings.labs.unload_idle_minutes)
+        .unwrap_or(1);
+    controls::setting_row(
+        p,
+        "lab-unload-idle-minutes",
+        tr("Unload after"),
+        None,
+        controls::segmented(p, "unload-idle-minutes", &labels, selected, |ui, index| {
+            let minutes = UNLOAD_IDLE_MINUTES[index];
+            ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
+        }),
+    )
+    .into()
 }
 
 /// Runs the first run again (`onboarding_kit::live::restart`).

@@ -109,6 +109,9 @@ const fn read_only(key: &'static str, kind: Kind, about: &'static str, why: &'st
 const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
 const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
 
+/// Choice keys whose values are numbers in settings.json.
+const NUMERIC_CHOICES: [&str; 2] = ["meetings.calendar.lead_minutes", "labs.unload_idle_minutes"];
+
 const KEYS: &[Key] = &[
     key(
         "keyboard_model_switching.enabled",
@@ -270,6 +273,16 @@ const KEYS: &[Key] = &[
         "labs.mouse_shortcuts",
         Kind::Bool,
         "Labs: record mouse buttons as shortcuts (macOS)",
+    ),
+    key(
+        "labs.unload_idle",
+        Kind::Bool,
+        "Labs: unload the speech model when idle, freeing its memory",
+    ),
+    key(
+        "labs.unload_idle_minutes",
+        Kind::Choice(&["5", "15", "30", "60"]),
+        "Minutes unused before Labs › Unload model when idle unloads the model",
     ),
     key(
         "meetings.enabled",
@@ -566,9 +579,7 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             Ok(Some(binding)) => Value::String(format_hotkey(&binding)),
             _ => Value::Null,
         },
-        Kind::Choice(_) if key.key == "meetings.calendar.lead_minutes" => {
-            Value::String(raw.to_string())
-        }
+        Kind::Choice(_) if NUMERIC_CHOICES.contains(&key.key) => Value::String(raw.to_string()),
         _ => raw,
     };
     SettingValue {
@@ -849,6 +860,10 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
             Ok(if name == "meetings.calendar.lead_minutes" {
                 let minutes: u8 = choice.parse().expect("lead choices are numbers");
                 debug_assert!(CALENDAR_LEAD_MINUTES.contains(&minutes));
+                Value::from(minutes)
+            } else if name == "labs.unload_idle_minutes" {
+                let minutes: u32 = choice.parse().expect("idle choices are numbers");
+                debug_assert!(crate::app_settings::UNLOAD_IDLE_MINUTES.contains(&minutes));
                 Value::from(minutes)
             } else {
                 Value::String((*choice).into())

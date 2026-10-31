@@ -49,6 +49,8 @@ const JOB_SECONDS_PER_AUDIO_SECOND: u32 = 8;
 /// How often a waiter whose job has not started checks whether the job ahead
 /// of it timed out, leaving the engine wedged.
 const QUEUE_POLL: Duration = Duration::from_millis(250);
+/// How often an idle engine looks again at Labs › Unload model when idle.
+const IDLE_RECHECK: Duration = Duration::from_secs(30);
 /// How long dropping the engine waits for its thread. A native run that cannot
 /// be aborted is left to finish on its own.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -526,7 +528,9 @@ impl TranscriptionEngine {
         let held = Held::new(Mutex::new(model.gguf_selection().cloned()));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
-            model,
+            model: Some(model),
+            parked: None,
+            idle_since: Instant::now(),
             running: running.clone(),
             stalled: stalled.clone(),
             streams: streams.clone(),
@@ -808,6 +812,26 @@ impl TranscriptionEngine {
     }
 }
 
+/// Whether a dictation or a meeting records, so an idle model stays loaded:
+/// both hold idle-sleep prevention while they record, and a macOS capture
+/// counts from its press.
+fn recording() -> bool {
+    crate::idle_sleep::held() || dictation_busy()
+}
+
+/// The model `selection` loads into, prewarmed, as the engine held it.
+#[cfg(target_os = "macos")]
+fn reload(selection: &crate::transcription_models::TranscriptionSelection) -> Result<Model> {
+    let mut model = Model::default();
+    model.activate(selection)?.prewarm()?;
+    Ok(model)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reload(selection: &crate::transcription_models::TranscriptionSelection) -> Result<Model> {
+    Model::load(selection)
+}
+
 static SHARED: std::sync::Mutex<std::sync::Weak<TranscriptionEngine>> =
     std::sync::Mutex::new(std::sync::Weak::new());
 
@@ -874,7 +898,13 @@ impl Drop for TranscriptionEngine {
 }
 
 struct Worker {
-    model: Model,
+    /// `None` while unloaded for idleness (Labs › Unload model when idle) or
+    /// after its reload failed.
+    model: Option<Model>,
+    /// What an unloaded model reloads, before the next command that needs it.
+    parked: Option<crate::transcription_models::TranscriptionSelection>,
+    /// When the last command ended.
+    idle_since: Instant,
     running: Running,
     stalled: Arc<AtomicBool>,
     streams: Arc<AtomicBool>,
@@ -904,7 +934,7 @@ impl Worker {
         // Commands received while a stream was open, handled before new ones.
         let mut next = VecDeque::new();
         loop {
-            let Some(command) = next.pop_front().or_else(|| commands.recv().ok()) else {
+            let Some(command) = next.pop_front().or_else(|| self.wait(&commands)) else {
                 return;
             };
             match command {
@@ -951,26 +981,109 @@ impl Worker {
                     self.run_offline(clip, offline, Source::Offline, job);
                 }
                 Command::Run(work) => {
-                    work(&mut self.model);
-                    self.streams
-                        .store(self.model.stream_options().is_some(), Ordering::Release);
+                    if let Some(model) = self.model() {
+                        work(model);
+                    }
+                    self.publish_streams();
                 }
                 Command::Background { generation, work } => {
                     let current = self.requests.load(Ordering::Acquire) == generation;
-                    work(current.then_some(&mut self.model));
+                    work(if current { self.model() } else { None });
                 }
                 Command::Shutdown => return,
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
             self.publish_selection();
+            self.idle_since = Instant::now();
+        }
+    }
+
+    /// The next command. With Labs › Unload model when idle on, it unloads
+    /// the model once nothing has used it for the chosen time and nothing
+    /// records (a dictation or a meeting); between commands no request runs.
+    fn wait(&mut self, commands: &Receiver<Command>) -> Option<Command> {
+        loop {
+            let Some(after) = crate::labs::unload_idle() else {
+                // Settings may turn it on meanwhile.
+                match commands.recv_timeout(IDLE_RECHECK) {
+                    Ok(command) => return Some(command),
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return None,
+                }
+            };
+            let idle = self.idle_since.elapsed();
+            let wait = after
+                .saturating_sub(idle)
+                .clamp(Duration::from_millis(1), IDLE_RECHECK);
+            match commands.recv_timeout(wait) {
+                Ok(command) => return Some(command),
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.idle_since.elapsed() >= after && !recording() {
+                        self.park();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Unloads a loaded GGUF model, freeing its memory, and keeps its
+    /// selection to reload. Apple Speech stays: it holds no model of Hex's.
+    fn park(&mut self) {
+        let Some(selection) = self
+            .model
+            .as_ref()
+            .and_then(|model| model.gguf_selection())
+            .cloned()
+        else {
+            return;
+        };
+        self.model = None;
+        tracing::info!(model = ?selection.model, "unloaded the idle speech model");
+        self.parked = Some(selection);
+    }
+
+    /// The model, reloading an unloaded one first. Audio sent meanwhile waits
+    /// in the queue, so nothing recorded is lost.
+    fn model(&mut self) -> Option<&mut Model> {
+        if self.model.is_none()
+            && let Some(selection) = self.parked.clone()
+        {
+            let started = Instant::now();
+            match reload(&selection) {
+                Ok(model) => {
+                    tracing::info!(
+                        model = ?selection.model,
+                        load_ms = started.elapsed().as_millis(),
+                        "reloaded the speech model"
+                    );
+                    self.model = Some(model);
+                    self.parked = None;
+                }
+                Err(error) => tracing::warn!(%error, "could not reload the speech model"),
+            }
+        }
+        self.model.as_mut()
+    }
+
+    /// Whether the model can stream, kept as it was while it is unloaded so
+    /// the next capture still opens a stream (which reloads it).
+    fn publish_streams(&self) {
+        if let Some(model) = &self.model {
+            self.streams
+                .store(model.stream_options().is_some(), Ordering::Release);
         }
     }
 
     /// Any command may load or switch the model (a dictation job activates
-    /// its selection), so the held selection is refreshed after each.
+    /// its selection), so the held selection is refreshed after each. An
+    /// unloaded model still counts as held: work sent to it reloads it.
     fn publish_selection(&self) {
-        let current = self.model.gguf_selection();
+        let current = match &self.model {
+            Some(model) => model.gguf_selection(),
+            None => self.parked.as_ref(),
+        };
         let mut held = self.held.lock().unwrap_or_else(|error| error.into_inner());
         if held.as_ref() != current {
             *held = current.cloned();
@@ -1005,14 +1118,20 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let Some(options) = self.model.stream_options().cloned() else {
+        let Some(options) = self
+            .model()
+            .and_then(|model| model.stream_options().cloned())
+        else {
             return;
         };
         self.running.enter(cancel);
         let begun = Instant::now();
         let mut stats = FeedStats::default();
         let stalled = &self.stalled;
-        let ended = self.model.with_stream(&options, cancel, |stream| {
+        let Some(model) = self.model.as_mut() else {
+            return;
+        };
+        let ended = model.with_stream(&options, cancel, |stream| {
             let mut capped = PauseCap::new(stream);
             let ended = drive_stream(
                 id,
@@ -1089,14 +1208,20 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let Some(options) = self.model.stream_options().cloned() else {
+        let Some(options) = self
+            .model()
+            .and_then(|model| model.stream_options().cloned())
+        else {
             return;
         };
         if cancel.is_cancelled() {
             return;
         }
         self.running.enter(cancel);
-        let ended = self.model.with_stream(&options, cancel, |stream| {
+        let Some(model) = self.model.as_mut() else {
+            return;
+        };
+        let ended = model.with_stream(&options, cancel, |stream| {
             drive_yielding(id, stream, commands, yielding, next)
         });
         match ended {
@@ -1115,7 +1240,10 @@ impl Worker {
         job: Job,
     ) {
         self.running.enter(&job.cancel);
-        let model = &mut self.model;
+        let Some(model) = self.model() else {
+            job.finish(Err("the speech model could not be reloaded".into()));
+            return;
+        };
         let result = crate::gguf_session::with_job_cancel(&job.cancel, || offline(model, clip))
             .map(|text| Transcribed {
                 text: text.trim().to_string(),
@@ -1123,8 +1251,7 @@ impl Worker {
                 finish_ms: started.elapsed().as_millis() as u64,
             });
         // An offline run may switch the model (macOS activates a selection).
-        self.streams
-            .store(self.model.stream_options().is_some(), Ordering::Release);
+        self.publish_streams();
         job.finish(result);
     }
 }

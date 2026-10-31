@@ -496,6 +496,10 @@ Saved shortcut                           // dictation; Option by default; Window
 General > Advanced > Double-tap only     // optional for key bindings
   -> Disable single-hold activation
   -> Keep the double-tap hands-free path
+
+Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription_engine
+  -> nothing used the model that long and nothing records -> the model unloads
+  -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost
 ```
 
 The [detailed map](dictation.md) covers timing, successive captures, output

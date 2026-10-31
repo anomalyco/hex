@@ -39,7 +39,7 @@ Meetings (beta), Voice Filter (locked on while its macOS driver is
 installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-and Terminal paste (Windows). Externally contributed features land there too.
+Unload model when idle (#442), and Terminal paste (Windows). Externally contributed features land there too.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
@@ -145,7 +145,11 @@ substitute for source inspection or a second roadmap.
   listener shares its engine (`TranscriptionEngine::share`) on every OS;
   `transcription_engine::dictation_busy` is the press-to-paste capture state
   on macOS, and on Linux and Windows only the engine's dictation streams and
-  finishes, so a host clip can start during a CPU-only capture's hold.
+  finishes, so a host clip can start during a CPU-only capture's hold. With
+  Labs › Unload model when idle on, its worker unloads the GGUF model after
+  the chosen idle time when nothing records (`idle_sleep::held`) and reloads
+  it before the next command that needs it; the parked model still counts as
+  held, so callers never load a second copy.
 - `transcription_preparation`: application-owned model preparation shared by
   Settings and the menu bar on macOS and by the Windows runtime, with one
   worker, latest-choice pending admission, cancellation fences, and an
