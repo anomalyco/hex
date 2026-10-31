@@ -134,6 +134,9 @@ fn start_download_once() {
 /// Loads the detector on the CPU: it loads in tens of milliseconds there,
 /// while a first Metal start can take seconds and would hold up dictation.
 fn load(path: &Path) -> Result<VadSession> {
+    // Its load would otherwise register every backend unguarded (#662).
+    #[cfg(target_os = "windows")]
+    crate::local_transcriber::init_backends()?;
     let model = Model::load_with(
         path,
         &ModelOptions {

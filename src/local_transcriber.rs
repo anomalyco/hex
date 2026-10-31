@@ -38,10 +38,88 @@ pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Res
     Ok(())
 }
 
-pub fn devices() -> Result<Vec<String>> {
+/// Registers transcribe.cpp's backends once per process and returns the
+/// backend models load on: every GPU (`Auto`), or on Windows only the CPU
+/// after a launch of this build crashed while ggml started a GPU (#662). A
+/// GPU driver crash can't be caught, so a marker file spans that work.
+pub fn init_backends() -> Result<Backend> {
+    static BACKEND: std::sync::OnceLock<Backend> = std::sync::OnceLock::new();
+    if let Some(backend) = BACKEND.get() {
+        return Ok(*backend);
+    }
     transcribe_cpp::init_logging();
-    transcribe_cpp::init_backends_default()
-        .wrap_err("could not initialize transcription backends")?;
+    #[cfg(target_os = "windows")]
+    if gpu_guard::crashed_before() {
+        tracing::warn!(
+            marker = %gpu_guard::marker().map(|path| path.display().to_string()).unwrap_or_default(),
+            "a previous launch of this Hex crashed while starting the GPU for transcription; transcribing on the CPU until Hex updates or the marker is deleted"
+        );
+        transcribe_cpp::init_backends_with(
+            None::<&Path>,
+            transcribe_cpp::BackendMask::for_backend(Backend::Cpu),
+        )
+        .wrap_err("could not initialize the CPU transcription backend")?;
+        return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
+    }
+    let init = || {
+        transcribe_cpp::init_backends_default()?;
+        // Enumerating the devices makes sure every backend started now.
+        drop(transcribe_cpp::devices());
+        Ok::<_, transcribe_cpp::Error>(())
+    };
+    #[cfg(target_os = "windows")]
+    let init = || gpu_guard::guarded(init);
+    init().wrap_err("could not initialize transcription backends")?;
+    Ok(*BACKEND.get_or_init(|| Backend::Auto))
+}
+
+/// The marker a Windows launch keeps while ggml starts a GPU (`init_backends`,
+/// a model's load and prewarm). Left behind, that launch crashed in a GPU
+/// driver; it holds the build's version, so an update tries the GPU again.
+#[cfg(target_os = "windows")]
+mod gpu_guard {
+    use std::path::PathBuf;
+
+    pub(super) fn marker() -> Option<PathBuf> {
+        crate::app_paths::support_dir()
+            .ok()
+            .map(|dir| dir.join("gpu-start.pending"))
+    }
+
+    pub(super) fn crashed_before() -> bool {
+        let Some(path) = marker() else {
+            return false;
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(version) if version == crate::VERSION => true,
+            Ok(_) => {
+                let _ = std::fs::remove_file(&path);
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub(super) fn guarded<T>(work: impl FnOnce() -> T) -> T {
+        let path = marker();
+        if let Some(path) = &path {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(error) = std::fs::write(path, crate::VERSION) {
+                tracing::warn!(%error, "could not write the GPU start marker");
+            }
+        }
+        let out = work();
+        if let Some(path) = &path {
+            let _ = std::fs::remove_file(path);
+        }
+        out
+    }
+}
+
+pub fn devices() -> Result<Vec<String>> {
+    init_backends()?;
     Ok(transcribe_cpp::devices()
         .into_iter()
         .map(|device| {
@@ -69,11 +147,8 @@ pub fn devices() -> Result<Vec<String>> {
 /// Later model loads reuse the instance.
 #[cfg(target_os = "linux")]
 pub fn initialize_backends() {
-    transcribe_cpp::init_logging();
-    match transcribe_cpp::init_backends_default() {
-        // Enumerating the devices makes sure the Vulkan backend exists now.
-        Ok(()) => drop(transcribe_cpp::devices()),
-        Err(error) => tracing::warn!(%error, "could not initialize transcription backends"),
+    if let Err(error) = init_backends() {
+        tracing::warn!(%error, "could not initialize transcription backends");
     }
 }
 
@@ -113,10 +188,29 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
 }
 
 impl LocalTranscriber {
+    /// Loads and prewarms `selection` on the GPU when one starts, else on the
+    /// CPU: a GPU load or prewarm that fails retries on the CPU.
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
-        transcribe_cpp::init_logging();
-        transcribe_cpp::init_backends_default()
-            .wrap_err("could not initialize transcription backends")?;
+        let backend = init_backends()?;
+        let on_gpu = || Self::load_on(selection, backend);
+        #[cfg(target_os = "windows")]
+        let on_gpu = || {
+            if backend == Backend::Auto {
+                gpu_guard::guarded(on_gpu)
+            } else {
+                on_gpu()
+            }
+        };
+        match on_gpu() {
+            Err(error) if backend != Backend::Cpu => {
+                tracing::warn!(%error, "could not load the transcription model on the GPU; loading it on the CPU");
+                Self::load_on(selection, Backend::Cpu)
+            }
+            loaded => loaded,
+        }
+    }
+
+    fn load_on(selection: &TranscriptionSelection, backend: Backend) -> Result<Self> {
         let definition = validate(selection)?;
         if !crate::transcription_models::is_installed(definition, &selection.language) {
             return Err(eyre!(
@@ -128,7 +222,7 @@ impl LocalTranscriber {
         let model = Model::load_with(
             &path,
             &ModelOptions {
-                backend: Backend::Auto,
+                backend,
                 ..Default::default()
             },
         )
