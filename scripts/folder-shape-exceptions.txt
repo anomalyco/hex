@@ -1,0 +1,2 @@
+# <key> <ceiling>: existing folder-shape violations (see scripts/code-shape.py). Ceilings only go down.
+# Refresh with python3 scripts/code-shape.py --update-exceptions.
