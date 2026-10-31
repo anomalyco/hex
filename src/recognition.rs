@@ -213,11 +213,10 @@ impl Hotkeys {
                 .is_some_and(DictationHotkey::suppresses_recognition)
     }
 
-    /// Suspends the machines and reports whether one was recording.
+    /// Suspends every machine (never stopping at the first, as `any`
+    /// would) and reports whether one was recording.
     fn suspend_all(&mut self) -> bool {
-        self.machines().fold(false, |recording, machine| {
-            machine.suspend().is_some() || recording
-        })
+        self.machines().filter_map(DictationHotkey::suspend).count() > 0
     }
 
     fn disarm_pending_gestures(&mut self) {
