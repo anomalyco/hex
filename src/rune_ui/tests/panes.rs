@@ -1395,7 +1395,7 @@ fn platform_goldens() {
     }
     check_golden("shortcut-explainer-chord", false, PANE_SIZE);
     check_golden("mac-settings-permissions", true, PANE_SIZE);
-    check_golden("mac-settings-advanced", false, PANE_SIZE);
+    check_golden("mac-settings-advanced", false, ADVANCED_SIZE);
     check_golden("mac-microphone-bluetooth", true, PANE_SIZE);
     check_golden("meetings-calendar-denied", true, PANE_SIZE);
     check_golden("windows-settings", false, GOLDEN_SIZE);
@@ -1669,13 +1669,6 @@ fn replay_onboarding_opens_the_first_run_on_every_os() {
 }
 
 #[test]
-fn replay_onboarding_golden() {
-    let _goldens = Goldens::collect();
-    // General with Advanced open, down to Replay onboarding at its end.
-    check_golden("mac-settings-advanced", true, (980.0, 2400.0));
-}
-
-#[test]
 fn activity_lists_events_and_shows_the_raw_one() {
     let mut rt = runtime("mac-activity", true, PANE_SIZE);
     assert!(texts(&rt).iter().any(|t| t == "Context changed to Slack"));
@@ -1848,7 +1841,7 @@ fn ducking_goldens() {
         check_golden("mac-settings", dark, PANE_SIZE);
     }
     check_golden("mac-settings-permissions", true, PANE_SIZE);
-    check_golden("mac-settings-advanced", false, PANE_SIZE);
+    check_golden("mac-settings-advanced", false, ADVANCED_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
 }
 

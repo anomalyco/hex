@@ -9,6 +9,8 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 const GOLDEN_SIZE: (f32, f32) = (980.0, 1720.0);
 /// The window's own size, for the other panes.
 const PANE_SIZE: (f32, f32) = (980.0, 760.0);
+/// General with Advanced open, down to Replay onboarding at its end.
+const ADVANCED_SIZE: (f32, f32) = (980.0, 1240.0);
 const GOLDEN_SCALE: f32 = 2.0;
 
 fn runtime(scene: &str, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
