@@ -162,7 +162,7 @@ pub(crate) fn controller_loop(
         poll_recording(&mut recording, &mut detector, &events)?;
         reminders.poll(enabled, recording.is_some(), &events);
         pending_finals.poll(enabled, recording.is_some(), &events);
-        expiry.poll(enabled);
+        expiry.poll();
 
         if recording.is_none() && enabled {
             let choices = crate::app_settings::meeting_provider_choices();
@@ -211,18 +211,16 @@ pub(crate) fn controller_loop(
 /// How often meetings past their retention move to the Trash while Hex runs.
 const EXPIRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// Moves meetings past the retention setting to the Trash: at launch, then
-/// hourly, and soon after the setting changes. Only while Meetings is on.
+/// Moves meetings past their retention to the Trash: at launch, then
+/// hourly, and soon after the setting changes. Meetings off still expires
+/// what was recorded, since kept meetings are a liability.
 #[derive(Default)]
 struct MeetingExpiry {
-    last: Option<(Instant, crate::app_settings::MeetingRetention)>,
+    last: Option<(Instant, Option<crate::app_settings::MeetingRetention>)>,
 }
 
 impl MeetingExpiry {
-    fn poll(&mut self, enabled: bool) {
-        if !enabled {
-            return;
-        }
+    fn poll(&mut self) {
         let retention = crate::app_settings::meeting_retention();
         if self
             .last

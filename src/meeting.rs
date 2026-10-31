@@ -11,6 +11,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
+use crate::app_settings::MeetingRetention;
 use crate::durable::{sync_directory, sync_file};
 use crate::events::now_ms;
 
@@ -176,6 +177,15 @@ pub struct MeetingManifest {
     /// The chapter boundaries were corrected over the whole transcript.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub chapters_refined: bool,
+    /// Recorded since retention began: until the user chooses one, it is
+    /// kept [`MeetingRetention::DEFAULT`]. Older meetings stay until then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retention_applies: bool,
+    /// SHA-256 of the exported Markdown as Hex last wrote it. Expiry moves
+    /// that file to the Trash only while it still matches, so a copy the
+    /// user edited stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_sha256: Option<String>,
 }
 
 impl MeetingManifest {
@@ -419,6 +429,8 @@ pub fn record(
         title_source: None,
         chapters: Vec::new(),
         chapters_refined: false,
+        retention_applies: true,
+        export_sha256: None,
     };
     set_title_source(&mut manifest, title_source);
     write_manifest(&meeting_dir, &manifest)?;
@@ -849,6 +861,7 @@ fn transcribe(
     ) {
         Ok(path) => {
             tracing::info!(path = %path.display(), "published meeting transcript");
+            manifest.export_sha256 = file_sha256(&path);
             manifest.export_path = Some(path);
         }
         Err(error) => {
@@ -1083,18 +1096,49 @@ fn trash_meeting(
     move_to_trash(directory)
 }
 
-/// Moves every meeting older than `retention` to the Trash through [`trash`].
-/// One that is recording, transcribing, writing notes, or waiting for its
-/// final transcript stays for a later pass. Returns how many moved.
-pub fn expire(retention: crate::app_settings::MeetingRetention) -> Result<usize> {
-    let Some(max_age_ms) = retention.max_age_ms() else {
-        return Ok(0);
-    };
+/// How long `manifest` is kept: the retention the user chose, else
+/// [`MeetingRetention::DEFAULT`] for meetings recorded since it began, and
+/// older meetings for good.
+pub fn retention_for(
+    manifest: &MeetingManifest,
+    chosen: Option<MeetingRetention>,
+) -> MeetingRetention {
+    chosen.unwrap_or(if manifest.retention_applies {
+        MeetingRetention::DEFAULT
+    } else {
+        MeetingRetention::Forever
+    })
+}
+
+/// Whether a finished meeting outlived its retention, counted from when it
+/// ended (or, with no end, started). A meeting that records or transcribes
+/// never has.
+pub fn expired(
+    manifest: &MeetingManifest,
+    status: MeetingStatus,
+    chosen: Option<MeetingRetention>,
+    now_ms: u64,
+) -> bool {
+    !status.is_active()
+        && retention_for(manifest, chosen)
+            .max_age_ms()
+            .is_some_and(|max_age_ms| {
+                let ended = manifest.ended_at_ms.unwrap_or(manifest.created_at_ms);
+                now_ms.saturating_sub(ended) > max_age_ms
+            })
+}
+
+/// Moves every expired meeting to the Trash: its folder, and its exported
+/// Markdown while that is still the copy Hex wrote. One that is recording,
+/// transcribing, writing notes, or waiting for its final transcript stays
+/// for a later pass. Returns how many moved.
+pub fn expire(chosen: Option<MeetingRetention>) -> Result<usize> {
     let meetings = list()?;
     let pending = pending_final_transcripts();
+    let root = root()?;
     let mut moved = 0;
-    for id in expired_meetings(&meetings, max_age_ms, &pending, now_ms()) {
-        match trash(id) {
+    for id in expired_meetings(&meetings, chosen, &pending, now_ms()) {
+        match trash_expired(&root.join(id), os::move_to_trash) {
             Ok(()) => {
                 moved += 1;
                 tracing::info!(meeting = id, "moved an expired meeting to the Trash");
@@ -1107,23 +1151,57 @@ pub fn expire(retention: crate::app_settings::MeetingRetention) -> Result<usize>
     Ok(moved)
 }
 
-/// The meetings that ended (or, with no end, started) more than
-/// `max_age_ms` before `now_ms`, leaving out active and `pending` ones.
+/// The expired meetings in `meetings`, leaving out `pending` ones.
 fn expired_meetings<'a>(
     meetings: &'a [MeetingManifest],
-    max_age_ms: u64,
+    chosen: Option<MeetingRetention>,
     pending: &[String],
     now_ms: u64,
 ) -> Vec<&'a str> {
     meetings
         .iter()
-        .filter(|meeting| !meeting.status.is_active())
         .filter(|meeting| !pending.contains(&meeting.id))
-        .filter(|meeting| {
-            let ended = meeting.ended_at_ms.unwrap_or(meeting.created_at_ms);
-            now_ms.saturating_sub(ended) > max_age_ms
-        })
+        .filter(|meeting| expired(meeting, meeting.status, chosen, now_ms))
         .map(|meeting| meeting.id.as_str())
+        .collect()
+}
+
+/// [`trash_meeting`] for expiry: an exported Markdown the user changed is
+/// left where it is.
+fn trash_expired(
+    directory: &Path,
+    mut move_to_trash: impl FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let manifest = read_manifest(directory)?;
+    if meeting_is_active(directory) != Some(false) {
+        return Err(eyre!("the meeting is recording"));
+    }
+    if notes_in_progress(&manifest.id) {
+        return Err(eyre!("its notes are being written"));
+    }
+    if let Some(path) = manifest.export_path.filter(|path| path.exists()) {
+        if manifest.export_sha256.is_some() && file_sha256(&path) == manifest.export_sha256 {
+            move_to_trash(&path)?;
+        } else {
+            tracing::info!(
+                meeting = manifest.id,
+                "kept the meeting's Markdown, which changed since Hex wrote it"
+            );
+        }
+    }
+    move_to_trash(directory)
+}
+
+/// The lowercase hex SHA-256 of a file, `None` when it can't be read.
+fn file_sha256(path: &Path) -> Option<String> {
+    fs::read(path).ok().map(|bytes| text_sha256(&bytes))
+}
+
+fn text_sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
@@ -1150,7 +1228,8 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
     let mut markdown_error = None;
     if previous != next
         && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
-        && let Err(error) = notes::retitle_markdown_file(&path, &previous, &next)
+        && let Err(error) =
+            notes::retitle_markdown_file(&path, &mut manifest.export_sha256, &previous, &next)
     {
         tracing::warn!(%error, meeting = id, "could not retitle meeting Markdown");
         markdown_error = Some(error);

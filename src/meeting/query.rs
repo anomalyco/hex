@@ -331,6 +331,12 @@ impl Library {
             }
         }
         cache.retain(|id, _| seen.contains(id));
+        // A meeting past its retention is gone even before expiry moves it.
+        let retention = crate::app_settings::meeting_retention();
+        let now_ms = crate::events::now_ms();
+        meetings.retain(|meeting| {
+            !super::expired(&meeting.manifest, meeting.status, retention, now_ms)
+        });
         meetings.sort_by_key(|meeting| std::cmp::Reverse(meeting.start_ms()));
         skipped.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(Scan { meetings, skipped })

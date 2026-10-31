@@ -167,6 +167,8 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         title_source: None,
         chapters: Vec::new(),
         chapters_refined: false,
+        retention_applies: false,
+        export_sha256: None,
     };
     write_manifest(&directory, &manifest).unwrap();
 
@@ -211,6 +213,8 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         title_source: None,
         chapters: Vec::new(),
         chapters_refined: false,
+        retention_applies: false,
+        export_sha256: None,
     };
     let (sender, receiver) = mpsc::sync_channel(4);
 
@@ -500,6 +504,8 @@ fn retention_manifest(
         title_source: None,
         chapters: Vec::new(),
         chapters_refined: false,
+        retention_applies: false,
+        export_sha256: None,
     }
 }
 
@@ -548,23 +554,108 @@ fn retention_expires_meetings_by_when_they_ended_and_skips_active_ones() {
     ];
     let pending = vec!["pending".to_string()];
 
+    let chosen = Some(MeetingRetention::Day);
     assert_eq!(
-        expired_meetings(&meetings, day, &pending, now),
+        expired_meetings(&meetings, chosen, &pending, now),
         ["old", "no-end"]
     );
-    let week = MeetingRetention::Week.max_age_ms().unwrap();
+    let week = Some(MeetingRetention::Week);
     assert!(expired_meetings(&meetings, week, &pending, now).is_empty());
+    assert!(expired_meetings(&meetings, Some(MeetingRetention::Forever), &pending, now).is_empty());
 }
 
 #[test]
-fn forever_retention_moves_nothing_and_is_the_default() {
+fn until_one_is_chosen_only_meetings_recorded_since_the_default_expire() {
     use crate::app_settings::{MeetingRetention, MeetingSettings};
-    assert_eq!(
-        MeetingSettings::default().retention,
-        MeetingRetention::Forever
-    );
+    assert_eq!(MeetingSettings::default().retention, None);
     assert_eq!(MeetingRetention::Forever.max_age_ms(), None);
-    assert_eq!(expire(MeetingRetention::Forever).unwrap(), 0);
+    let day = MeetingRetention::Day.max_age_ms().unwrap();
+    let now = 100 * day;
+    let older = retention_manifest(
+        "older",
+        MeetingStatus::Complete,
+        now - 3 * day,
+        Some(now - 2 * day),
+    );
+    let newer = MeetingManifest {
+        retention_applies: true,
+        ..retention_manifest(
+            "newer",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - 2 * day),
+        )
+    };
+    let meetings = [older, newer];
+    assert_eq!(expired_meetings(&meetings, None, &[], now), ["newer"]);
+    assert_eq!(retention_for(&meetings[0], None), MeetingRetention::Forever);
+    assert_eq!(retention_for(&meetings[1], None), MeetingRetention::Day);
+    // Choosing a retention covers older meetings too.
+    assert_eq!(
+        expired_meetings(&meetings, Some(MeetingRetention::Day), &[], now),
+        ["older", "newer"]
+    );
+}
+
+#[test]
+fn expiry_leaves_a_markdown_copy_the_user_edited() {
+    let (base, directory) = finished_meeting("expire", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    manifest.export_sha256 = file_sha256(&export);
+    write_manifest(&directory, &manifest).unwrap();
+    let mut trashed = Vec::new();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed, [export.clone(), directory.clone()]);
+
+    fs::write(&export, "# Design sync\n\nMy own notes.\n").unwrap();
+    trashed.clear();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        trashed,
+        std::slice::from_ref(&directory),
+        "the edited Markdown stays"
+    );
+
+    // A Markdown written before Hex recorded its digest is not Hex's to move.
+    manifest.export_sha256 = None;
+    write_manifest(&directory, &manifest).unwrap();
+    trashed.clear();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed.len(), 1);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not() {
+    let (base, directory) = finished_meeting("digest", "Meeting — 2:18 PM");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    manifest.export_sha256 = file_sha256(&export);
+    write_manifest(&directory, &manifest).unwrap();
+    rename_meeting(&directory, "Arcade planning").unwrap();
+    let renamed = read_manifest(&directory).unwrap();
+    assert_eq!(renamed.export_sha256, file_sha256(&export));
+
+    fs::write(&export, "# Arcade planning\n\nMine now.\n\n## Transcript\n").unwrap();
+    rename_meeting(&directory, "Arcade review").unwrap();
+    assert_ne!(
+        read_manifest(&directory).unwrap().export_sha256,
+        file_sha256(&export)
+    );
+    fs::remove_dir_all(base).unwrap();
 }
 
 #[test]

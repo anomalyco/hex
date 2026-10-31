@@ -256,6 +256,8 @@ fn meeting_live_replay() {
         title_source: None,
         chapters: Vec::new(),
         chapters_refined: false,
+        retention_applies: false,
+        export_sha256: None,
     };
     write_manifest(&directory, &manifest).unwrap();
 
