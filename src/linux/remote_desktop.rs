@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use zbus::{OwnedObjectPath, Variant};
 
-use crate::linux_portal::{Event, PortalBus};
+use crate::linux::portal::{Event, PortalBus};
 
 pub(crate) const INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 const KEYBOARD: u32 = 1;

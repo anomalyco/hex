@@ -81,40 +81,6 @@ mod keyboard_model_switching;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
-mod linux_app;
-#[cfg(target_os = "linux")]
-mod linux_atspi;
-#[cfg(target_os = "linux")]
-mod linux_audio_control;
-#[cfg(target_os = "linux")]
-mod linux_clipboard;
-#[cfg(target_os = "linux")]
-mod linux_context;
-#[cfg(target_os = "linux")]
-mod linux_dictation;
-#[cfg(target_os = "linux")]
-mod linux_icons;
-#[cfg(target_os = "linux")]
-mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_input_route;
-#[cfg(target_os = "linux")]
-mod linux_login_item;
-#[cfg(target_os = "linux")]
-mod linux_paste;
-#[cfg(target_os = "linux")]
-mod linux_portal;
-#[cfg(target_os = "linux")]
-mod linux_remote_desktop;
-#[cfg(target_os = "linux")]
-mod linux_rune_hud;
-#[cfg(target_os = "linux")]
-mod linux_service;
-#[cfg(target_os = "linux")]
-mod linux_session;
-#[cfg(target_os = "linux")]
-mod linux_tray;
 mod live_text;
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -982,7 +948,7 @@ mod tests {
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
-    linux_input_route::mark_streams();
+    linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 

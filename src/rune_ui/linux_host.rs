@@ -11,9 +11,9 @@ use color_eyre::eyre::eyre;
 use super::{HostState, ServiceView};
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::desktop_i18n::tr;
-use crate::linux_app::HostHandle;
-pub(super) use crate::linux_app::{HostRequest as Request, ShortcutTarget};
-use crate::linux_input::LinuxHotkey;
+use crate::linux::app::HostHandle;
+pub(super) use crate::linux::app::{HostRequest as Request, ShortcutTarget};
+use crate::linux::input::LinuxHotkey;
 
 /// The host registers recorded shortcuts (`SetShortcut`) and saves them.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = true;
@@ -29,9 +29,9 @@ pub(super) const QUIT_IN_WINDOW: bool = true;
 pub(crate) type Connect = Option<HostHandle>;
 
 pub(super) enum Backend {
-    Host(HostHandle, Option<Box<crate::linux_input::MouseCapture>>),
+    Host(HostHandle, Option<Box<crate::linux::input::MouseCapture>>),
     /// `--snap --scene live` from a separate process.
-    Status(Option<Box<crate::linux_service::Status>>, Option<String>),
+    Status(Option<Box<crate::linux::service::Status>>, Option<String>),
 }
 
 impl Backend {
@@ -50,9 +50,9 @@ impl Backend {
             Self::Host(host, capture) => {
                 match &request {
                     Request::CaptureShortcutFor(_)
-                        if !crate::linux_session::LinuxSession::detect().is_wayland() =>
+                        if !crate::linux::session::LinuxSession::detect().is_wayland() =>
                     {
-                        *capture = crate::linux_input::MouseCapture::start()
+                        *capture = crate::linux::input::MouseCapture::start()
                             .map(Box::new)
                             .inspect_err(|error| tracing::warn!(%error, "mouse shortcut capture unavailable"))
                             .ok();
@@ -97,7 +97,7 @@ impl Backend {
         match self {
             Self::Host(..) => {}
             Self::Status(status, error) => {
-                match crate::linux_service::request(crate::linux_service::Request::Status) {
+                match crate::linux::service::request(crate::linux::service::Request::Status) {
                     Ok(state) => (*status, *error) = (Some(Box::new(state)), None),
                     Err(failure) => (*status, *error) = (None, Some(failure.to_string())),
                 }
@@ -170,7 +170,7 @@ pub(super) fn validate_hotkey(
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
     if binding.key.as_ref().is_some_and(|key| key.is_mouse())
-        && crate::linux_session::LinuxSession::detect().is_wayland()
+        && crate::linux::session::LinuxSession::detect().is_wayland()
     {
         return Err(tr(
             "Configure mouse shortcuts in your Wayland desktop using the hex commands",
@@ -183,15 +183,15 @@ pub(super) fn validate_hotkey(
 
 /// Wayland never says which application is focused.
 pub(super) fn focused_application_known() -> bool {
-    !crate::linux_session::LinuxSession::detect().is_wayland()
+    !crate::linux::session::LinuxSession::detect().is_wayland()
 }
 
 /// The XDG autostart entry is the source of truth, never `settings.json`.
 pub(super) fn launch_at_login() -> Option<Result<bool, String>> {
-    Some(crate::linux_login_item::is_enabled().map_err(|error| format!("{error:#}")))
+    Some(crate::linux::login_item::is_enabled().map_err(|error| format!("{error:#}")))
 }
 
 pub(super) fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
-    crate::linux_login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
-    crate::linux_login_item::is_enabled().map_err(|error| format!("{error:#}"))
+    crate::linux::login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
+    crate::linux::login_item::is_enabled().map_err(|error| format!("{error:#}"))
 }

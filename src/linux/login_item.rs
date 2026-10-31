@@ -17,7 +17,7 @@ fn autostart_dir() -> Result<PathBuf> {
 }
 
 fn entry_path() -> Result<PathBuf> {
-    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux_portal::APP_ID)))
+    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux::portal::APP_ID)))
 }
 
 /// Renames Hex's managed `hex.desktop` autostart entry, the name before
@@ -31,7 +31,7 @@ pub fn tidy() -> Result<()> {
 }
 
 fn name_icon_in(directory: &Path) -> Result<()> {
-    let entry = directory.join(format!("{}.desktop", crate::linux_portal::APP_ID));
+    let entry = directory.join(format!("{}.desktop", crate::linux::portal::APP_ID));
     match fs::symlink_metadata(&entry) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_) => return Ok(()),
@@ -45,7 +45,7 @@ fn name_icon_in(directory: &Path) -> Result<()> {
     if !current.lines().any(|line| line.trim() == MANAGED_MARK) {
         return Ok(());
     }
-    let named = crate::linux_portal::with_icon(&current);
+    let named = crate::linux::portal::with_icon(&current);
     if named == current {
         return Ok(());
     }
@@ -67,7 +67,7 @@ fn move_legacy_entry_in(directory: &Path) -> Result<()> {
     if !old.lines().any(|line| line.trim() == MANAGED_MARK) {
         return Ok(());
     }
-    let entry = directory.join(format!("{}.desktop", crate::linux_portal::APP_ID));
+    let entry = directory.join(format!("{}.desktop", crate::linux::portal::APP_ID));
     if fs::symlink_metadata(&entry).is_ok() {
         fs::remove_file(&legacy)
     } else {
@@ -148,7 +148,7 @@ fn entry(executable: &Path) -> String {
          X-GNOME-Autostart-enabled=true\n\
          {MANAGED_MARK}\n",
         exec_argument(&executable.to_string_lossy()),
-        crate::linux_portal::APP_ID,
+        crate::linux::portal::APP_ID,
     )
 }
 
@@ -175,7 +175,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<()> {
         .ok_or_else(|| eyre!("{} has no parent directory", path.display()))?;
     fs::create_dir_all(directory)
         .wrap_err_with(|| format!("could not create {}", directory.display()))?;
-    let staged = directory.join(format!(".{}.desktop.next", crate::linux_portal::APP_ID));
+    let staged = directory.join(format!(".{}.desktop.next", crate::linux::portal::APP_ID));
     let mut file = fs::File::create(&staged)
         .wrap_err_with(|| format!("could not write {}", staged.display()))?;
     file.write_all(contents.as_bytes())?;

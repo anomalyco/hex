@@ -26,7 +26,7 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::desktop_host::DesktopSnapshot;
-use crate::linux_input::{ListenerCommand, ShortcutCommand};
+use crate::linux::input::{ListenerCommand, ShortcutCommand};
 
 /// Version 1 was the service/Settings-client protocol; its clients get a
 /// version error and exit.
@@ -160,7 +160,7 @@ pub(crate) struct Session {
 
 impl Session {
     pub(crate) fn current() -> Self {
-        let session = crate::linux_session::LinuxSession::detect();
+        let session = crate::linux::session::LinuxSession::detect();
         Self {
             backend: session.as_str().into(),
             display: std::env::var(if session.is_wayland() {

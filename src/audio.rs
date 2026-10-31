@@ -1372,7 +1372,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         // moves the opened stream off a Bluetooth default instead.
         #[cfg(target_os = "linux")]
         if follows_default && route.avoid_bluetooth {
-            crate::linux_input_route::move_streams_off_bluetooth();
+            crate::linux::input_route::move_streams_off_bluetooth();
         }
         Ok(Opened::Input(Box::new(input)))
     };
@@ -1500,7 +1500,7 @@ pub fn input_devices() -> Result<InputDevices> {
     #[cfg(target_os = "linux")]
     let (system_default, bluetooth_default_passed_over) = match route
         .avoid_bluetooth
-        .then(crate::linux_input_route::bluetooth_stand_in)
+        .then(crate::linux::input_route::bluetooth_stand_in)
         .flatten()
     {
         Some(stand_in) => (Some(stand_in.input), Some(stand_in.bluetooth)),

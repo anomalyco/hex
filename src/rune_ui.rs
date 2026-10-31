@@ -130,18 +130,18 @@ static SCRAWL_ICON: Icon = Icon {
 /// closing it keeps the app, its state, and the host running.
 #[cfg(target_os = "linux")]
 pub(crate) fn run_app(
-    host: crate::linux_app::HostHandle,
-    requests: std::sync::mpsc::Receiver<crate::linux_service::Control>,
-    first: Option<crate::linux_service::Activation>,
+    host: crate::linux::app::HostHandle,
+    requests: std::sync::mpsc::Receiver<crate::linux::service::Control>,
+    first: Option<crate::linux::service::Activation>,
     shutdown: &'static std::sync::atomic::AtomicBool,
 ) {
-    use crate::linux_service::{Activation, Control};
-    rune::set_app_id(crate::linux_portal::APP_ID);
+    use crate::linux::service::{Activation, Control};
+    rune::set_app_id(crate::linux::portal::APP_ID);
     let mut app = self::app(Some(host.clone()))
         .args(Vec::new())
         .windowless()
         .float_on_open();
-    crate::linux_rune_hud::install(&mut app);
+    crate::linux::rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
     let _capture_overlays =
