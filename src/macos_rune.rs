@@ -45,18 +45,19 @@ use crate::desktop::host::{
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::dictation::indicator::DictationIndicatorEvent;
+use crate::macos_rune::status_item::StatusItemAction;
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
-use crate::status_item::StatusItemAction;
 use crate::transcription::models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
 use crate::transcription::preparation::TranscriptionPreparation;
 
 mod control;
+pub(crate) mod status_item;
 
 #[cfg(test)]
 mod tests;
@@ -247,7 +248,7 @@ pub(crate) fn window_closed() {
         .unwrap_or(false);
     crate::app_settings::set_dock_icon_visible(crate::app_settings::dock_icon_visible(
         show_dock_icon,
-        crate::status_item::installed(),
+        crate::macos_rune::status_item::installed(),
     ));
 }
 
@@ -860,7 +861,7 @@ fn start_main_thread() {
     let Some(Launch { mut pump, target }) = LAUNCH.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
-    pump.status_actions = match crate::status_item::install() {
+    pump.status_actions = match crate::macos_rune::status_item::install() {
         Ok(actions) => Some(actions),
         Err(error) => {
             tracing::error!(%error, "could not install Hex status item; opening the window");
@@ -1023,7 +1024,7 @@ impl Pump {
         if let Some(overlays) = &mut self.capture_overlays
             && let Some(shown) = overlays.follow_recordings()
         {
-            crate::status_item::update_overlays_in_recordings(shown);
+            crate::macos_rune::status_item::update_overlays_in_recordings(shown);
         }
         if self.status_actions.is_none() {
             return;
@@ -1031,7 +1032,7 @@ impl Pump {
         let now = Instant::now();
         if now >= self.model_menu_at {
             if let Some(published) = self.runtime.published() {
-                crate::status_item::update_transcription(
+                crate::macos_rune::status_item::update_transcription(
                     &published.settings,
                     &published.preparation,
                 );
@@ -1039,11 +1040,11 @@ impl Pump {
             self.model_menu_at = now + MODEL_MENU_REFRESH;
         }
         if now >= self.meeting_menu_at {
-            crate::status_item::update_meeting(
+            crate::macos_rune::status_item::update_meeting(
                 &self.meeting_state,
                 crate::app_settings::meetings_enabled(),
             );
-            crate::status_item::update_software(&update_status());
+            crate::macos_rune::status_item::update_software(&update_status());
             self.meeting_menu_at = now + MEETING_MENU_REFRESH;
         }
     }

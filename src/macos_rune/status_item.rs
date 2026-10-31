@@ -13,8 +13,8 @@ use crate::desktop::tray_menu::model_menu_entries;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
 use crate::transcription::preparation::PreparationStatus;
 
-const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
-const RECORDING_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-recording@2x.png");
+const IDLE_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-idle@2x.png");
+const RECORDING_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-recording@2x.png");
 const STATUS_ICON_POINTS: f64 = 18.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -55,8 +55,6 @@ mod recognition;
 mod rune_hud;
 mod rune_ui;
 #[cfg(target_os = "macos")]
-mod status_item;
-#[cfg(target_os = "macos")]
 mod suppression;
 mod transcription;
 mod updater;
