@@ -84,6 +84,14 @@ Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
     freedesktop Trash or the Recycle Bin
 ```
 
+The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
+Summarize run in the window's own process there. Until
+[#566](https://github.com/anomalyco/hex/issues/566) they went to the OS host,
+which ignored meeting requests, so a deleted recording stayed listed and no
+error showed. Check: `pane_requests_reach_the_window_s_own_meetings` in
+[rune_ui/meetings.rs](../../src/rune_ui/meetings.rs); a Recycle Bin delete on
+a real Windows PC has not been observed.
+
 Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
 Copy section from the tray, dragging the recording capsule to another corner,
 the `hex meetings` and `hex mcp` commands (shared-control), and website names
