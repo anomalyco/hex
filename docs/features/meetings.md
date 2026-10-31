@@ -18,9 +18,12 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   menu-bar items, call detection, Option-Control-V
 │   Settings view: Call recording, Calendar, Detected calls, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
+│   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
 │   │   ├── Decided before -> Privacy pane + drag guide ("System Audio Recording Only")
 │   │   ├── Asked -> pulse; TCC preflight re-read on each poll, no reopen needed
+│   │   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
+│   │   │   (`AudioCapture` reset on running bundle + retired IDs, re-prompt / guide)
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping capsule),
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens

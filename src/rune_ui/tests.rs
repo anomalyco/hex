@@ -1990,11 +1990,21 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
     if !path.exists() {
         let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
         rune::render::write_png(&actual, width, height, &pixels).unwrap();
-        panic!(
+        let miss = format!(
             "{} is missing; run with HEX_UPDATE_GOLDENS=1 (render at {})",
             path.display(),
             actual.display()
         );
+        if !GOLDEN_MISSES.with(|misses| {
+            misses
+                .borrow_mut()
+                .as_mut()
+                .map(|misses| misses.push(miss.clone()))
+                .is_some()
+        }) {
+            panic!("{miss}");
+        }
+        return;
     }
     let (golden_width, golden_height, golden) = read_png(&path);
     assert_eq!(

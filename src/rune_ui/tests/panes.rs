@@ -1370,6 +1370,104 @@ fn a_refused_microphone_points_to_system_settings() {
     );
 }
 
+#[test]
+fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
+    // 1. Onboarding setup step.
+    let mut rt = runtime("mac-onboarding-stale", true, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Still grey? Fix it"));
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "An older Hex entry can keep this off")
+    );
+    tap(
+        &mut rt,
+        "setup-accessibility/setup-grant-control/setup-grant",
+    );
+    assert_eq!(
+        asked(&rt).last(),
+        Some(&PlatformRequest::Permission(
+            PermissionAction::ResetAndPrompt(PermissionKind::Accessibility)
+        ))
+    );
+    assert!(!rt.state.platform.stale(PermissionKind::Accessibility));
+
+    // 2. General › Permissions needed.
+    let mut rt = runtime("mac-settings-permissions-stale", true, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Still grey? Fix it"));
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "An older Hex entry can keep this off")
+    );
+    tap(&mut rt, "permission-accessibility-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(
+            PermissionAction::ResetAndPrompt(PermissionKind::Accessibility)
+        )]
+    );
+    assert!(!rt.state.platform.stale(PermissionKind::Accessibility));
+
+    // 3. Meetings › Settings › Screen & System Audio Recording.
+    let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));
+    rt.state.platform.system_audio = false;
+    rt.state.platform.note_stale(PermissionKind::SystemAudio);
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Still grey? Fix it"));
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "An older Hex entry can keep this off")
+    );
+    tap(&mut rt, "meeting-system-audio-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(
+            PermissionAction::ResetAndPrompt(PermissionKind::SystemAudio)
+        )]
+    );
+    assert!(!rt.state.platform.stale(PermissionKind::SystemAudio));
+}
+
+#[test]
+fn visible_untrusted_permission_rows_are_reported_for_legacy_cleanup() {
+    let mut rt = runtime("mac-onboarding-setup", true, PANE_SIZE);
+    refresh(&mut rt);
+    assert_eq!(
+        rt.state.platform.permissions_shown,
+        [PermissionKind::Accessibility]
+    );
+
+    let mut rt = runtime("mac-settings-permissions", true, PANE_SIZE);
+    refresh(&mut rt);
+    assert_eq!(
+        rt.state.platform.permissions_shown,
+        [PermissionKind::Accessibility]
+    );
+
+    let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));
+    rt.state.platform.system_audio = false;
+    refresh(&mut rt);
+    assert_eq!(
+        rt.state.platform.permissions_shown,
+        [PermissionKind::SystemAudio]
+    );
+
+    #[cfg(hex_capture)]
+    {
+        let mut rt = runtime("mac-scrawl-permission", true, PANE_SIZE);
+        refresh(&mut rt);
+        assert_eq!(
+            rt.state.platform.permissions_shown,
+            [PermissionKind::ScreenRecording]
+        );
+    }
+}
+
 /// The macOS and Windows surfaces in both appearances.
 #[test]
 fn platform_goldens() {
@@ -1384,7 +1482,9 @@ fn platform_goldens() {
             "meetings-off",
             "meetings-recording",
             "mac-onboarding-setup",
+            "mac-onboarding-stale",
             "mac-onboarding-landed",
+            "mac-settings-permissions-stale",
             "shortcut-explainer",
             "shortcut-explainer-toggle",
             "sound-sets",

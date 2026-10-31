@@ -178,10 +178,12 @@ Settings › Annotate                      // capture.pane
 │   ├── granted in System Settings but unusable until Hex relaunches ->
 │   │   "Turns on when Hex restarts" and Restart Hex, never Allow over a switch
 │   │   already on
-│   └── Allow -> rechecks, then the onboarding permission guide over System
-│       Settings' list (PermissionKind::ScreenRecording), as for Input
-│       Monitoring; flips on the next read. Never part of onboarding
-│       (macOS also asks at the first capture). Check: rune_ui::scrawl tests
+│   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
+│   │   (`ScreenCapture` reset on running bundle + retired IDs, re-prompt + guide)
+│   └── Allow -> clears retired Hex IDs, rechecks, then opens the permission
+│       guide over System Settings' list (PermissionKind::ScreenRecording); flips
+│       on the next read. Never part of onboarding (macOS also asks at the first
+│       capture). Check: rune_ui::scrawl tests
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
 │   off; also the menu bar's Show Hex in Screen Recordings checkmark) -> see
 │   capture.own-windows; applies at once, to open windows and a recording capture

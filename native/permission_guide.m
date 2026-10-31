@@ -70,6 +70,36 @@ const char *hex_permission_list_name(int permission) {
     return "Privacy & Security";
 }
 
+/// Asks macOS to register this running binary in Accessibility and show its
+/// prompt when untrusted.
+bool hex_prompt_accessibility_trust(void) {
+    NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
+    return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+}
+
+/// Writes the running `.app` bundle's identifier as UTF-8 into `buf`,
+/// returning its byte length, or 0 outside a `.app` bundle.
+size_t hex_running_app_bundle_id(char *buf, size_t cap) {
+    if (buf == NULL || cap == 0) {
+        return 0;
+    }
+    NSURL *bundleURL = NSBundle.mainBundle.bundleURL.standardizedURL;
+    if (![bundleURL.pathExtension.lowercaseString isEqualToString:@"app"]) {
+        return 0;
+    }
+    NSString *identifier = NSBundle.mainBundle.bundleIdentifier;
+    const char *utf8 = identifier.UTF8String;
+    if (utf8 == NULL) {
+        return 0;
+    }
+    size_t len = strlen(utf8);
+    if (len == 0 || len > cap) {
+        return 0;
+    }
+    memcpy(buf, utf8, len);
+    return len;
+}
+
 static BOOL isDark(NSAppearance *appearance) {
     NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
         NSAppearanceNameAqua,
@@ -211,6 +241,18 @@ static BOOL settingsHasWindow(void) {
         }
     }
     return NO;
+}
+
+/// Bit 0: System Settings has an open window.
+/// Bit 1: System Settings is the frontmost application.
+/// Bit 2: Hex is the active application.
+int hex_permission_settings_state(void) {
+    NSCAssert(NSThread.isMainThread, @"settings state must run on the main thread");
+    BOOL open = settingsHasWindow();
+    NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    BOOL frontmost = [front.bundleIdentifier isEqualToString:settingsBundleID];
+    BOOL active = NSApp.isActive;
+    return (open ? 1 : 0) | (frontmost ? 2 : 0) | (active ? 4 : 0);
 }
 
 /// Opens System Settings at `url`. A System Settings that isn't running yet

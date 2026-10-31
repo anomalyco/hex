@@ -1063,6 +1063,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("The Apple Intelligence model is still downloading", ["Model Apple Intelligence wciąż się pobiera", "Apple 智能模型仍在下载", "Apple Intelligence のモデルをダウンロード中です", "Das Apple-Intelligence-Modell wird noch geladen", "El modelo de Apple Intelligence aún se está descargando", "Модель Apple Intelligence ще завантажується"]),
     ("Requires macOS 26 or later", ["Wymaga macOS 26 lub nowszego", "需要 macOS 26 或更高版本", "macOS 26 以降が必要です", "Erfordert macOS 26 oder neuer", "Requiere macOS 26 o posterior", "Потрібна macOS 26 або новіша"]),
     ("Apple Intelligence is unavailable", ["Apple Intelligence jest niedostępne", "Apple 智能不可用", "Apple Intelligence は利用できません", "Apple Intelligence ist nicht verfügbar", "Apple Intelligence no está disponible", "Немає доступу до Apple Intelligence"]),
+    ("Still grey? Fix it", ["Nadal szare? Napraw", "还是灰色的？修复", "まだグレーのまま？修復", "Noch grau? Beheben", "¿Sigue gris? Reparar", "Ще сіре? Виправити"]),
+    ("An older Hex entry can keep this off", ["Starszy wpis Hex może to blokować", "旧版 Hex 条目可能会导致此项无法开启", "古い Hex の項目が妨げになっている場合があります", "Ein älterer Hex-Eintrag kann dies blockieren", "Una entrada anterior de Hex puede impedirlo", "Старий запис Hex може блокувати це"]),
 ];
 
 #[cfg(test)]

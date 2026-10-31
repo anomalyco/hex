@@ -656,12 +656,19 @@ pub fn system_audio_authorization() -> SystemAudioAuthorization {
     }
 }
 
+static SYSTEM_AUDIO_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Allows [`request_system_audio_access`] to prompt again after a TCC reset
+/// returned System Audio Recording to `NotDetermined`.
+pub(crate) fn reset_system_audio_request() {
+    SYSTEM_AUDIO_REQUESTED.store(false, Ordering::Relaxed);
+}
+
 /// Shows the macOS System Audio Recording prompt when consent is undecided.
 /// Returns whether a prompt was requested.
 pub fn request_system_audio_access() -> bool {
-    static REQUESTED: AtomicBool = AtomicBool::new(false);
     if system_audio_authorization() != SystemAudioAuthorization::NotDetermined
-        || REQUESTED.swap(true, Ordering::Relaxed)
+        || SYSTEM_AUDIO_REQUESTED.swap(true, Ordering::Relaxed)
     {
         return false;
     }

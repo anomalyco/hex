@@ -11,7 +11,7 @@ use super::controls::{
     ButtonKind, Choice, DESCRIPTION, Paint, button, card, icon_row, icon_toggle_row, note, section,
     select, setting_row,
 };
-use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
+use super::lists::{Tone, permission_control, tone_tag};
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
@@ -94,16 +94,24 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
                     ),
                 );
             }
+            let stale =
+                warning.kind == PermissionKind::Accessibility && ui.platform.stale(warning.kind);
+            let description = if stale {
+                tr("An older Hex entry can keep this off")
+            } else {
+                description
+            };
+            let action = if stale {
+                PermissionAction::ResetAndPrompt(warning.kind)
+            } else {
+                warning.action
+            };
             let control = permission_control(
                 p,
                 &format!("{key}-allow"),
-                if ui.platform.asked(warning.kind) {
-                    PermissionControl::Waiting
-                } else {
-                    PermissionControl::Allow
-                },
+                ui.platform.control_for(warning.kind, false),
                 ButtonKind::Secondary,
-                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(warning.action)),
+                move |ui: &mut Ui| ui.ask(PlatformRequest::Permission(action)),
             );
             setting_row(p, key, name, Some(description), control)
         })
@@ -181,6 +189,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
     // Only macOS asks before Hex may hear the other participants.
     if meetings.enabled && ui.platform.caps.permissions {
         let permitted = ui.platform.system_audio;
+        let stale = !permitted && ui.platform.stale(PermissionKind::SystemAudio);
         let system_audio = icon_row(
             p,
             "meeting-system-audio",
@@ -188,24 +197,27 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             tr("Screen & System Audio Recording"),
             Some(if permitted {
                 tr("Captures the other participants' audio")
+            } else if stale {
+                tr("An older Hex entry can keep this off")
             } else {
                 tr("Required to hear the other participants.")
             }),
             permission_control(
                 p,
                 "meeting-system-audio-allow",
-                if permitted {
-                    PermissionControl::Allowed
-                } else if ui.platform.asked(PermissionKind::SystemAudio) {
-                    PermissionControl::Waiting
-                } else {
-                    PermissionControl::Allow
-                },
+                ui.platform
+                    .control_for(PermissionKind::SystemAudio, permitted),
                 ButtonKind::Secondary,
-                |ui: &mut Ui| {
-                    // macOS prompts once; after that the switch is in
-                    // System Settings, with the guide beside it.
-                    ui.ask(PlatformRequest::SystemAudio);
+                move |ui: &mut Ui| {
+                    if stale {
+                        ui.ask(PlatformRequest::Permission(
+                            PermissionAction::ResetAndPrompt(PermissionKind::SystemAudio),
+                        ));
+                    } else {
+                        // macOS prompts once; after that the switch is in
+                        // System Settings, with the guide beside it.
+                        ui.ask(PlatformRequest::SystemAudio);
+                    }
                 },
             ),
         );

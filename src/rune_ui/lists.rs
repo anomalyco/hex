@@ -345,6 +345,9 @@ pub(super) enum PermissionControl {
     Allow,
     /// Asked: macOS's prompt or System Settings is up; Allow opens it again.
     Waiting,
+    /// Returned from System Settings still untrusted: resets stale TCC
+    /// entries and reopens the prompt and guide.
+    Stale,
     Allowed,
 }
 
@@ -404,7 +407,7 @@ pub(super) fn permission_control(
             12.0,
             button(p, key, tr("Allow"), kind, move |ui: &mut Ui, _| allow(ui)),
         ),
-        PermissionControl::Waiting => (
+        PermissionControl::Waiting | PermissionControl::Stale => (
             Some(
                 el().key("mark")
                     .size(8.0, 8.0)
@@ -414,7 +417,11 @@ pub(super) fn permission_control(
             button(
                 p,
                 key,
-                tr("Allow"),
+                if control == PermissionControl::Stale {
+                    tr("Still grey? Fix it")
+                } else {
+                    tr("Allow")
+                },
                 ButtonKind::Secondary,
                 move |ui: &mut Ui, _| allow(ui),
             ),
