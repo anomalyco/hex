@@ -747,7 +747,7 @@ Final publication                                   // meetings.output
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy transcript icon, Reveal Markdown (or Reveal Files when none)
 Menu bar (idle) -> Copy Last Meeting Transcript
-Option-Control-V -> `MeetingPasteCursor` in `meeting.rs` over the transcript
+Option-Control-V -> `MeetingPasteCursor` in `meeting/delta.rs` over the transcript
 │   through the press (meetings.copy-through-now)
 ├── Pastes turns added since the last successful paste
 ├── Runs in order with dictation output: a dictation finished during its

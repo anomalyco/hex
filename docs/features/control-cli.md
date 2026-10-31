@@ -88,7 +88,8 @@ command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
 [control/host.rs](../../src/control/host.rs) (the Linux and Windows host),
 [control/settings.rs](../../src/control/settings.rs) (settings registry),
-[control/cli.rs](../../src/control/cli.rs) (clap, output, exit codes, start,
+[control/cli.rs](../../src/control/cli.rs) and
+[control/cli/human.rs](../../src/control/cli/human.rs) (clap, output, exit codes, start,
 logs), [macos_rune/control.rs](../../src/macos_rune/control.rs) (the macOS host),
 the `/control` route in [local_api.rs](../../src/local_api.rs), and early
 dispatch in [main.rs](../../src/main.rs).
