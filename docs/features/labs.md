@@ -35,6 +35,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 
 Settings › Labs                          // labs.page
 ├── "Try unfinished features. They may change or break." + Send feedback -> https://github.com/anomalyco/hex/issues/new
+├── Opened by a link (macOS) -> hex://labs opens this page; hex://labs/<feature> also scrolls to the
+│   feature's row (centred) and pulses it for ~1.4 s (layer_02 fill, then back); it never turns the
+│   feature on. An unknown or absent name -> the page opens and process.log notes it. hex://settings/<pane>
+│   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
+│   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
 ├── One row per feature this OS has -> press flips it, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
@@ -42,12 +47,16 @@ Settings › Labs                          // labs.page
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature: name, on/off, description, its hex settings key
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build); no Copy link on the rows, 20 of them would only add noise
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver
 └── hex experiments … -> points at hex labs
 
 hex settings set labs.live_text true     // macOS: through the running Hex
 ```
+
+Checks: `rune_ui::deep_link` tests (parser, every feature's link reads back);
+`a_labs_link_*` in tests/panes.rs and the `mac-labs-link` golden (Linux).
 
 Settings saved before this model may carry `labs.enabled`; it is read and
 ignored, and every feature keeps its own toggle. `hex status` lists the

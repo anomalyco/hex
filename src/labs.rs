@@ -419,31 +419,37 @@ pub enum LabsCommand {
     On { feature: String },
     /// Turn a Labs feature off.
     Off { feature: String },
+    /// Print the link that opens Hex's Labs page at a feature's row (macOS).
+    #[cfg(target_os = "macos")]
+    Link { feature: String },
 }
 
 /// `hex labs`: edits `settings.json`; a running Hex applies most changes
 /// when it next starts.
 pub fn run(command: Option<&LabsCommand>) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(LabsCommand::Link { feature }) = command {
+        println!(
+            "{}",
+            crate::rune_ui::deep_link::labs_link(
+                crate::rune_ui::story_link::scheme(),
+                available_feature(feature)?
+            )
+        );
+        return Ok(());
+    }
     let mut settings = AppSettings::load()?;
     let (name, on) = match command {
         None | Some(LabsCommand::List) => {
             print!("{}", list(&settings));
             return Ok(());
         }
+        #[cfg(target_os = "macos")]
+        Some(LabsCommand::Link { .. }) => unreachable!("handled above"),
         Some(LabsCommand::On { feature }) => (feature, true),
         Some(LabsCommand::Off { feature }) => (feature, false),
     };
-    let feature = Feature::from_name(name)
-        .filter(|feature| feature.on_this_os())
-        .ok_or_else(|| {
-            eyre!(
-                "unknown Labs feature {name:?}; this Hex has: {}",
-                Feature::available()
-                    .map(Feature::name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })?;
+    let feature = available_feature(name)?;
     if feature == Feature::VoiceFilter && !on && crate::hex_microphone::driver_bundle_installed() {
         return Err(eyre!(
             "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
@@ -471,6 +477,20 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
     settings.save()?;
     println!("Turned {} {state}.", feature.name());
     Ok(())
+}
+
+fn available_feature(name: &str) -> Result<Feature> {
+    Feature::from_name(name)
+        .filter(|feature| feature.on_this_os())
+        .ok_or_else(|| {
+            eyre!(
+                "unknown Labs feature {name:?}; this Hex has: {}",
+                Feature::available()
+                    .map(Feature::name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 fn list(settings: &AppSettings) -> String {

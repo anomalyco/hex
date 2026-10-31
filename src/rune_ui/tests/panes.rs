@@ -1624,6 +1624,32 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
 }
 
 #[test]
+fn a_labs_link_opens_labs_pulses_its_row_and_leaves_it_off() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let feature = Feature::VocabularyBiasing;
+    assert!(!feature.on(&rt.state.settings));
+    rt.update(|ui, tx| super::super::labs::reveal(ui, Some(feature.name()), tx));
+    settle(&mut rt);
+    assert!(rt.state.labs_open);
+    assert_eq!(rt.state.lab_flash.map(|(f, _)| f), Some(feature));
+    assert!(rt.find("lab-vocabulary-biasing").is_some());
+    assert!(!feature.on(&rt.state.settings), "a link never flips it");
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    assert!(super::super::labs::poll_flash(&mut rt.state, later));
+    assert!(rt.state.lab_flash.is_none());
+}
+
+#[test]
+fn a_labs_link_to_an_unknown_name_opens_labs_without_a_pulse() {
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    rt.update(|ui, tx| super::super::labs::reveal(ui, Some("no-such-lab"), tx));
+    settle(&mut rt);
+    assert!(rt.state.labs_open);
+    assert!(rt.state.lab_flash.is_none());
+}
+
+#[test]
 fn labs_run_setup_again_opens_the_first_run() {
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
     assert!(rt.state.first_run.is_none());

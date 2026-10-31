@@ -932,6 +932,13 @@ mod tests {
             Ok(Some(Command::Control(ControlCli::Labs { command: None })))
         ));
         assert!(Cli::try_parse_from(["hex", "labs", "off"]).is_err());
+        #[cfg(target_os = "macos")]
+        assert!(matches!(
+            Cli::try_parse_from(["hex", "labs", "link", "live-text"]).map(|cli| cli.command),
+            Ok(Some(Command::Control(ControlCli::Labs {
+                command: Some(LabsCommand::Link { feature })
+            }))) if feature == "live-text"
+        ));
         assert!(matches!(
             Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
                 .map(|cli| cli.command),

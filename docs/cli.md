@@ -68,6 +68,7 @@ hex
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
+│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page at that row
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
