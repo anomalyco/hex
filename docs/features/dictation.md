@@ -128,7 +128,11 @@ two thumbs on two modifiers do not roll during typing, so the window is 80 ms
 (`BOTH_SIDES_WINDOW`). The recorder keeps a lone modifier's side (the Left ·
 Either · Right picker widens it, and shows only for one-modifier chords),
 keeps both sides of a modifier, and records every other modifier as either
-side, so ⌥⌘ works from either hand. While recording, every held key shows with
+side, so ⌥⌘ works from either hand. On macOS, Labs › Sided modifier chords
+(`labs.sided_modifier_chords`, off by default, issue 710; see
+[labs.md](labs.md)) makes the recorder keep each modifier's side in a
+modifier-only chord instead, so Right ⌘ + Right ⌥ records as `R⌥ R⌘` and the
+left keys don't press it; matching was already sided. While recording, every held key shows with
 its side (`L⌥ R⌥ ⌘` on the Mac, `Left Alt` elsewhere), so an accidental extra
 key is visible before release. `hex settings` takes
 `left-option+right-option`. Settings store `{"keys": [...]}`; files with the

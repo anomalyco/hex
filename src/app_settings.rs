@@ -1371,6 +1371,9 @@ pub struct LabsSettings {
     /// The Local transcription picker offers a sort (Recommended, Size,
     /// Name) and a "Supports the saved language" toggle (issue 645).
     pub picker_sort_filter: bool,
+    /// The shortcut recorder keeps the side of each modifier in a
+    /// modifier-only chord, such as Right ⌘ + Right ⌥ (macOS, issue 710).
+    pub sided_modifier_chords: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1396,6 +1399,7 @@ impl Default for LabsSettings {
             smart_spacing: false,
             spoken_symbols: false,
             picker_sort_filter: false,
+            sided_modifier_chords: false,
         }
     }
 }

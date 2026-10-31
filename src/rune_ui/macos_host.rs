@@ -165,7 +165,10 @@ impl ChordWatch {
     fn start(wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self> {
         crate::app_settings::set_hotkey_capture_active(true);
         let (sender, results) = mpsc::channel();
-        let capture = RefCell::new(ChordCapture::default());
+        // Labs › Sided modifier chords is read once, as recording starts.
+        let capture = RefCell::new(ChordCapture::with_sides(
+            crate::labs::sided_modifier_chords(),
+        ));
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit passes a live event for the handler's duration.
             let event_ref = unsafe { event.as_ref() };
@@ -237,15 +240,26 @@ impl Drop for ChordWatch {
 
 /// Turns key and modifier events into a chord: a key with its held
 /// modifiers, or the most modifier keys held at once when they are all
-/// released without a key, with the sides `recorded_sides` keeps.
+/// released without a key, with the sides `recorded_sides` keeps (or,
+/// with Labs › Sided modifier chords on, the side each was pressed on).
 #[derive(Default)]
 struct ChordCapture {
     peak: HotkeyModifiers,
     /// A key went down with these modifiers; their release records nothing.
     keyed: bool,
+    /// A modifier-only chord keeps every modifier's side, such as
+    /// Right ⌘ + Right ⌥, instead of widening each to either side.
+    sided: bool,
 }
 
 impl ChordCapture {
+    fn with_sides(sided: bool) -> Self {
+        Self {
+            sided,
+            ..Self::default()
+        }
+    }
+
     fn mouse_down(&mut self, button: isize, flags: u64) -> Option<Chord> {
         let key = u16::try_from(button).ok().and_then(HotkeyKey::mouse)?;
         let mut modifiers = modifiers_from_flags(flags).without_side_constraints();
@@ -292,7 +306,12 @@ impl ChordCapture {
 
     /// While modifiers are down, reports the ones their release would record.
     fn flags_changed(&mut self, flags: u64) -> Option<Chord> {
-        let current = modifiers_from_flags(flags).recorded_sides();
+        let held = modifiers_from_flags(flags);
+        let current = if self.sided {
+            held
+        } else {
+            held.recorded_sides()
+        };
         if !current.is_empty() {
             if self.keyed {
                 return None;
@@ -1360,6 +1379,63 @@ mod tests {
                 .unwrap()
                 .modifiers
                 .function
+        );
+    }
+
+    const RIGHT_COMMAND: u64 = 0x0010_0010;
+
+    #[test]
+    fn with_sided_chords_each_modifier_keeps_its_side() {
+        let mut capture = ChordCapture::with_sides(true);
+        assert_eq!(held(capture.flags_changed(RIGHT_COMMAND)), ["R⌘"]);
+        assert_eq!(
+            held(capture.flags_changed(RIGHT_COMMAND | RIGHT_OPTION)),
+            ["R⌥", "R⌘"]
+        );
+        let binding = captured(capture.flags_changed(0)).unwrap();
+        assert_eq!(binding.key, None);
+        assert_eq!(binding.modifiers.option, Some(ModifierSide::Right));
+        assert_eq!(binding.modifiers.command, Some(ModifierSide::Right));
+        assert_eq!(binding.modifiers.count(), 2);
+        assert_eq!(binding.standalone_side(), None, "no side picker");
+        assert_eq!(binding.keycaps(), ["R⌥", "R⌘"]);
+        let runtime = binding.runtime();
+        assert!(runtime.exact_modifiers(RIGHT_COMMAND | RIGHT_OPTION));
+        assert!(!runtime.exact_modifiers(LEFT_COMMAND | LEFT_OPTION));
+        assert!(!runtime.exact_modifiers(LEFT_COMMAND | RIGHT_OPTION));
+        let restored: HotkeyBinding =
+            serde_json::from_str(&serde_json::to_string(&binding).unwrap()).unwrap();
+        assert_eq!(restored, binding);
+        // It still conflicts with ⌥⌘ from either side, not with the left keys.
+        let either = HotkeyBinding {
+            modifiers: HotkeyModifiers::option_command(),
+            key: None,
+        };
+        assert!(binding.overlaps(&either));
+        assert!(!binding.overlaps(&HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                command: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: None,
+        }));
+    }
+
+    #[test]
+    fn without_sided_chords_two_modifiers_record_from_either_side() {
+        let mut capture = ChordCapture::with_sides(false);
+        capture.flags_changed(RIGHT_COMMAND);
+        assert_eq!(
+            held(capture.flags_changed(RIGHT_COMMAND | RIGHT_OPTION)),
+            ["⌥", "⌘"]
+        );
+        let binding = captured(capture.flags_changed(0)).unwrap();
+        assert_eq!(binding.modifiers, HotkeyModifiers::option_command());
+        assert!(
+            binding
+                .runtime()
+                .exact_modifiers(LEFT_COMMAND | LEFT_OPTION)
         );
     }
 
