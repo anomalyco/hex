@@ -55,3 +55,15 @@ effect confetti
 score  {hex}, no typos, one wedding.
 typed  Typing: {secs}, {typos}, and one date.
 ```
+
+## Limits and checking
+
+A scene holds at most 18 lines in "Without Hex" (counting yours and the
+ending) and 8 in "With Hex", one `autocorrect`, one `elbow`, and 4
+tapbacks per line. "Without Hex" runs 26–36 s and "With Hex" finishes
+within 8 s of the shortcut. Check a folder of scenes, with every mistake
+reported by line:
+
+```sh
+HEX_VALIDATE_SCENES=/path/to/scenes cargo test --bin hex validate_scene_folder -- --nocapture
+```
