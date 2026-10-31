@@ -74,7 +74,9 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         Step::Waiting => download_page(p, s, true),
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => demo_page(p, s),
         Step::Permissions => permissions::page(p, s),
-        Step::Try | Step::TryHearing | Step::TryHeard => try_page(p, s),
+        Step::Try | Step::TryHearing | Step::TryHeard => {
+            super::game::page(p, s).unwrap_or_else(|| try_page(p, s))
+        }
         Step::Ready => ready_page(p, s),
     };
     vec![
