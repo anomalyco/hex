@@ -126,6 +126,20 @@ private struct RepeatDeleteKey: View {
     }
 }
 
+extension View {
+    /// iOS 26's soft scroll-edge effect blurs the whole content of a short
+    /// scroll view (the 30 pt return-app tray), so turn it off there.
+    /// Earlier versions have no edge effect and are left unchanged.
+    @ViewBuilder
+    func hexScrollEdgeEffectHidden() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .all)
+        } else {
+            self
+        }
+    }
+}
+
 enum KeyboardSetupCopy {
     static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
 }
@@ -182,6 +196,7 @@ struct KeyboardSurfaceView: View {
                         }
                     }
                 }
+                .hexScrollEdgeEffectHidden()
                 closeTrayButton
             }
             .frame(height: 30)
