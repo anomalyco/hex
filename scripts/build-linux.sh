@@ -41,9 +41,15 @@ fi
 mkdir -p "$dist"
 # Portable native code: ggml otherwise tunes its CPU kernels to the build
 # machine (for example AVX-512 or SVE), and the release would crash on older
-# CPUs. No system BLAS either, so the executable and packages need no
-# OpenBLAS runtime.
-(cd "$root" && TRANSCRIBE_CMAKE_ARGS="-DGGML_NATIVE=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF${TRANSCRIBE_CMAKE_ARGS:+ $TRANSCRIBE_CMAKE_ARGS}" \
+# CPUs. GGML_NATIVE=OFF alone still turns AVX2, BMI2, FMA and F16C on for
+# x86_64; x86_64 builds pin the Ivy Bridge floor instead (issue #592).
+# No system BLAS either, so the executable and packages need no OpenBLAS
+# runtime.
+cmake_args="-DGGML_NATIVE=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF"
+if [ "$(uname -m)" = x86_64 ]; then
+  cmake_args="$cmake_args $(cat "$script_root/scripts/ggml-x86-baseline.txt")"
+fi
+(cd "$root" && TRANSCRIBE_CMAKE_ARGS="$cmake_args${TRANSCRIBE_CMAKE_ARGS:+ $TRANSCRIBE_CMAKE_ARGS}" \
   cargo build --locked --release) >&2
 executable="$dist/hex-$version-linux-$label"
 install -m755 "$target_dir/release/hex" "$executable"
