@@ -220,7 +220,7 @@ jobs:
         run: |
           OBJDUMP="$(cygpath -u "$PROGRAMFILES")/LLVM/bin/llvm-objdump.exe" \
             bash source/.github/release/check-x86-baseline.sh \
-            "$(cygpath -u "$RUNNER_TEMP")/dist/Hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
+            "$(cygpath -u "$RUNNER_TEMP")/dist/hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
             source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
       - name: Check the executable needs no Visual C++ Redistributable
         shell: pwsh
