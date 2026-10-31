@@ -239,6 +239,7 @@ const PATHS: &[(&str, &str)] = &[
     ("capturing", "Linux & Windows/Recording a shortcut"),
     ("menus", "Linux & Windows/Microphone menu"),
     ("chinese", "Linux & Windows/Chinese"),
+    ("voice-filter", "Linux & Windows/Voice Filter"),
     ("onboarding", "Linux & Windows/Onboarding"),
     ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
 ];

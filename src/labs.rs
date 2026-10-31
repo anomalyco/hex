@@ -211,6 +211,7 @@ pub fn vocabulary_biasing() -> bool {
 }
 
 /// Mouse buttons may be recorded as shortcuts (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }

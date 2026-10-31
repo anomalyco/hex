@@ -351,6 +351,7 @@ fn the_browser_permission_shows_with_pause_media_and_its_labs_toggle() {
 #[test]
 fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
     let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    rt.state.platform.system_audio = false;
     tap(&mut rt, "nav-labs");
     tap(&mut rt, "lab-pause-browser");
     assert!(rt.state.settings.pause_browser_media);
