@@ -240,32 +240,65 @@ fn tunable(ui: &Ui, p: Paint, which: Tunable, label: &str) -> El {
 /// Whether the Voice Filter runs (`app_settings::voice_filter_enabled`): its
 /// switch is on, or the host found its driver installed.
 pub(super) fn running(ui: &Ui) -> bool {
-    ui.settings.experimental.hex_microphone
-        || ui
-            .platform
-            .hex_microphone
-            .as_ref()
-            .is_some_and(|status| status.driver_bundle_installed)
+    ui.settings.experimental.hex_microphone || driver_installed(ui)
+}
+
+/// The Hex Microphone driver is installed: apps may use it, so the Voice
+/// Filter stays on until it is uninstalled.
+pub(super) fn driver_installed(ui: &Ui) -> bool {
+    ui.platform
+        .hex_microphone
+        .as_ref()
+        .is_some_and(|status| status.driver_bundle_installed)
 }
 
 /// Turns the Voice Filter on or off. Off, Hex doesn't watch the driver or
-/// feed the Hex Microphone (unless the driver is installed).
+/// feed the Hex Microphone. While the driver is installed it shows on and
+/// can't be turned off: uninstalling the driver is the way.
 fn switch(ui: &Ui, p: Paint) -> El {
-    card(
-        p,
-        "fun-switch",
-        vec![toggle_row(
+    let title = tr("Turn on Voice Filter");
+    let row = if driver_installed(ui) {
+        let uninstall = button(
+            p,
+            "switch-uninstall",
+            tr("Uninstall"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.ask(PlatformRequest::UninstallHexMicrophone),
+        );
+        setting_row(
             p,
             "fun-enabled",
-            tr("Turn on Voice Filter"),
+            title,
+            Some(tr(
+                "On while the Hex Microphone driver is installed. Uninstall the driver to turn it off.",
+            )),
+            row()
+                .key("trailing")
+                .gap(8.0)
+                .center_y()
+                .child(uninstall)
+                .child(
+                    rune_kit::Switch::new(true)
+                        .disabled(true)
+                        .build(p.k)
+                        .key("switch")
+                        .focusable(false),
+                ),
+        )
+    } else {
+        toggle_row(
+            p,
+            "fun-enabled",
+            title,
             tr("Feeds the Hex Microphone virtual input through a voice filter while you dictate"),
             ui.settings.experimental.hex_microphone,
             |ui: &mut Ui| {
                 let on = !ui.settings.experimental.hex_microphone;
                 ui.update(|settings| settings.experimental.hex_microphone = on);
             },
-        )],
-    )
+        )
+    };
+    card(p, "fun-switch", vec![row])
 }
 
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {

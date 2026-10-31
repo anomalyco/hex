@@ -1820,3 +1820,50 @@ fn ducking_goldens() {
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
 }
+
+#[test]
+fn an_installed_driver_keeps_the_voice_filter_on() {
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1400.0));
+    assert!(fun_driver_installed(&rt));
+    rt.state.settings.experimental.hex_microphone = false;
+    refresh(&mut rt);
+    assert!(rt.find("switch-uninstall").is_some());
+    assert!(
+        rt.find("fun-hex-microphone").is_some(),
+        "the driver keeps it running"
+    );
+    tap(&mut rt, "fun-enabled");
+    assert!(
+        !rt.state.settings.experimental.hex_microphone,
+        "the switch is locked"
+    );
+    tap(&mut rt, "switch-uninstall");
+    assert!(matches!(
+        asked(&rt).last(),
+        Some(PlatformRequest::UninstallHexMicrophone)
+    ));
+
+    rt.state.settings.experimental.hex_microphone = true;
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "labs-enabled");
+    assert!(!rt.state.settings.labs.enabled);
+    assert!(
+        rt.state.settings.experimental.hex_microphone,
+        "Labs off leaves an installed driver's Voice Filter on"
+    );
+    assert!(rt.find("nav-voice-filter").is_some());
+
+    if let Some(driver) = &mut rt.state.platform.hex_microphone {
+        driver.driver_bundle_installed = false;
+    }
+    refresh(&mut rt);
+    assert!(rt.find("switch-uninstall").is_none());
+}
+
+fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
+    rt.state
+        .platform
+        .hex_microphone
+        .as_ref()
+        .is_some_and(|status| status.driver_bundle_installed)
+}
