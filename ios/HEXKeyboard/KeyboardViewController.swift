@@ -8,6 +8,7 @@ final class KeyboardViewController: UIInputViewController {
     private var pollTimer: Timer?
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
+    private var lastFullAccessNote: TimeInterval = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -60,6 +61,10 @@ final class KeyboardViewController: UIInputViewController {
         viewModel.onSpace = { [weak self] in self?.textDocumentProxy.insertText(" ") }
         viewModel.onDelete = { [weak self] in self?.textDocumentProxy.deleteBackward() }
         viewModel.onReturn = { [weak self] in self?.textDocumentProxy.insertText("\n") }
+        viewModel.onOpenURL = { [weak self] url in
+            guard let self else { return }
+            ContainingAppOpener.open(url, from: self)
+        }
 
         let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
@@ -87,6 +92,11 @@ final class KeyboardViewController: UIInputViewController {
         updateKeyboardTraits()
 
         guard hasFullAccess else { return }
+
+        if now - lastFullAccessNote >= 5 {
+            lastFullAccessNote = now
+            bridge.fullAccessSeenAt = now
+        }
 
         let snap = bridge.snapshot()
         viewModel.snapshot = snap

@@ -85,6 +85,7 @@ final class DictationController {
     private var suspendedWarmSessionOnInterruption = false
 
     private(set) var phase = Phase.modelRequired
+    private(set) var isModelReady = false
     private(set) var transcript = ""
     private(set) var audioLevel: Float = 0
     private(set) var recordingDuration: TimeInterval = 0
@@ -334,6 +335,9 @@ final class DictationController {
         _ request: KeyboardLaunchRequest,
         urlOpener: (@MainActor (URL) async -> Bool)? = nil
     ) {
+        if case .setup = request {
+            return
+        }
         if let customOpener = urlOpener {
             defaultURLOpener = customOpener
         }
@@ -359,6 +363,9 @@ final class DictationController {
         }
 
         switch request {
+        case .setup:
+            break
+
         case .startSession:
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
@@ -591,6 +598,7 @@ final class DictationController {
                 self.transcriber = candidate
                 self.transcriptionLanguage = await candidate.languageName
                 self.keyboardBridge.setModelInstalled(true)
+                self.isModelReady = true
                 self.phase = .ready
                 self.publishKeyboardSnapshot()
                 if self.pendingHandoff != nil {
@@ -1134,6 +1142,7 @@ final class DictationController {
         controller.engineName = "Apple Speech"
         controller.transcriptionLanguage = "English"
         controller.keyboardBridge.setModelInstalled(true)
+        controller.isModelReady = true
 
         switch scene {
         case "ready":

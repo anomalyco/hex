@@ -5,6 +5,7 @@ struct HEXMobileApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var dictation = DictationController.shared
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
+    @State private var showSetup = false
 
     private static var initialOpenedFromKeyboard: Bool {
         let args = ProcessInfo.processInfo.arguments
@@ -23,11 +24,17 @@ struct HEXMobileApp: App {
             } else {
                 ContentView(
                     dictation: dictation,
-                    openedFromKeyboard: $openedFromKeyboard
+                    openedFromKeyboard: $openedFromKeyboard,
+                    showSetup: $showSetup
                 )
                 .onOpenURL { url in
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
-                    openedFromKeyboard = true
+                    if case .setup = request {
+                        openedFromKeyboard = false
+                        showSetup = true
+                    } else {
+                        openedFromKeyboard = true
+                    }
                     dictation.handleKeyboardLaunch(request)
                 }
                 .onChange(of: scenePhase) { _, phase in
