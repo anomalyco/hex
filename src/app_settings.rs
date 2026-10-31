@@ -1335,6 +1335,9 @@ pub struct LabsSettings {
     /// Filler words such as "um" and "uh" are removed from dictations
     /// (issue 631).
     pub filler_words: bool,
+    /// `hex meetings show --srt|--vtt` exports a meeting transcript as
+    /// timed subtitles (macOS, issue 633).
+    pub subtitle_export: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1355,6 +1358,7 @@ impl Default for LabsSettings {
             copy_only: false,
             spoken_formatting: false,
             filler_words: false,
+            subtitle_export: false,
         }
     }
 }

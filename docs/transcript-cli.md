@@ -14,6 +14,7 @@ hex meetings show 1790000500000-1002 --json
 hex meetings show 1790000500000-1002 --from 113:03 --to 120:43 --md
 hex meetings chapters latest --json
 hex meetings show 1790003000000-1005 --chapter 2
+hex meetings show latest --srt > call.srt   # Labs › Subtitle export
 hex meetings search 'release schedule'
 ```
 
@@ -83,6 +84,20 @@ chapter N's entries (counting from 1), with a `## <name>` section in Markdown
 and `chapter` in JSON; it cannot be combined with `--from`/`--to`, and a number
 outside the list is an error. Plain `show` Markdown adds a `## Chapters` list
 when there are any.
+
+`show --srt` and `show --vtt` (Labs › Subtitle export, `hex labs on
+subtitle-export`, off by default) write timed subtitles to stdout instead,
+for example `hex meetings show latest --vtt > call.vtt`. With the toggle off
+they fail, naming the command that turns it on, before any meeting is read.
+They take the same IDs, `--from`/`--to`, and `--chapter` as the other outputs
+and conflict with `--md`, `--json`, and each other. Each transcript entry (a
+speaker turn) becomes one cue timed by its offsets from the meeting's start,
+not by word timings: SRT numbers its cues, uses `HH:MM:SS,mmm` times, and
+prefixes the text `You:` or `Them:`; VTT starts with `WEBVTT`, uses
+`HH:MM:SS.mmm` times and `<v You>`/`<v Them>` voice tags, and escapes `&`, `<`,
+and `>`. An end before its start is clamped to the start, entries with no text
+are skipped, and blank lines and `-->` are removed from the text so a cue
+can't break.
 
 `meetings search QUERY` uses the MCP query's stemmed, fuzzy BM25 ranking over
 transcripts and stored notes. Quoted phrases constrain the search. `--since`,

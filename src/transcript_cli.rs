@@ -94,6 +94,12 @@ pub enum MeetingsCommand {
         md: bool,
         #[arg(long)]
         json: bool,
+        /// SubRip subtitles, one cue per speaker turn (Labs › Subtitle export).
+        #[arg(long, conflicts_with_all = ["md", "json", "vtt"])]
+        srt: bool,
+        /// WebVTT subtitles, one cue per speaker turn (Labs › Subtitle export).
+        #[arg(long, conflicts_with_all = ["md", "json"])]
+        vtt: bool,
         /// Only entries overlapping this offset or later: mm:ss, h:mm:ss, or seconds.
         #[arg(long)]
         from: Option<String>,
@@ -469,10 +475,27 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
             from,
             to,
             chapter,
+            srt,
+            vtt,
             ..
         } => {
+            let subtitles = SubtitleFormat::from_flags(*srt, *vtt);
+            if subtitles.is_some() {
+                require_subtitle_export(crate::labs::subtitle_export())?;
+            }
             let range = OffsetRange::parse(from.as_deref(), to.as_deref())?;
             let meeting = resolve(&library, id)?;
+            if let Some(format) = subtitles {
+                let text = match chapter {
+                    Some(number) => {
+                        let view = meeting.chapter(*number, now)?;
+                        render_subtitles(view.entries.iter(), format)
+                    }
+                    None => render_subtitles(meeting.entries_in(range, now)?, format),
+                };
+                write!(out, "{text}")?;
+                return Ok(());
+            }
             match (chapter, *json) {
                 (Some(number), true) => {
                     write_json(&mut out, &meeting_chapter_json(&meeting, *number, now)?)
@@ -531,6 +554,99 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
         | MeetingsCommand::Stop { .. }
         | MeetingsCommand::CopyLast { .. } => Err(eyre!("this command needs the running Hex")),
     }
+}
+
+/// A timed subtitle format for `hex meetings show --srt|--vtt`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SubtitleFormat {
+    Srt,
+    Vtt,
+}
+
+impl SubtitleFormat {
+    fn from_flags(srt: bool, vtt: bool) -> Option<Self> {
+        match (srt, vtt) {
+            (true, _) => Some(Self::Srt),
+            (false, true) => Some(Self::Vtt),
+            (false, false) => None,
+        }
+    }
+}
+
+/// Subtitle export is a Labs feature, refused before any meeting is read
+/// while its toggle is off.
+fn require_subtitle_export(on: bool) -> Result<()> {
+    if on {
+        Ok(())
+    } else {
+        Err(eyre!(
+            "Subtitle export is a Labs feature and is off. Turn it on with `hex labs on subtitle-export` or in Settings › Labs."
+        ))
+    }
+}
+
+/// One cue per transcript entry (a speaker turn), timed by the entry's
+/// offsets from the meeting's start and labelled You or Them.
+fn render_subtitles<'a>(
+    entries: impl IntoIterator<Item = &'a crate::meeting::TranscriptEntry>,
+    format: SubtitleFormat,
+) -> String {
+    let mut out = String::new();
+    if format == SubtitleFormat::Vtt {
+        out.push_str("WEBVTT\n\n");
+    }
+    let mut number = 0_usize;
+    for entry in entries {
+        let text = cue_text(&entry.text);
+        if text.is_empty() {
+            continue;
+        }
+        number += 1;
+        let start = entry.start_ms;
+        let end = entry.end_ms.max(start);
+        let speaker = entry.source.label();
+        match format {
+            SubtitleFormat::Srt => {
+                out.push_str(&format!(
+                    "{number}\n{} --> {}\n{speaker}: {text}\n\n",
+                    subtitle_time(start, ','),
+                    subtitle_time(end, ',')
+                ));
+            }
+            SubtitleFormat::Vtt => {
+                let text = text
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;");
+                out.push_str(&format!(
+                    "{} --> {}\n<v {speaker}>{text}\n\n",
+                    subtitle_time(start, '.'),
+                    subtitle_time(end, '.')
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The entry's text with blank lines and `-->` removed, so it can't end
+/// or break its cue.
+fn cue_text(text: &str) -> String {
+    text.replace("-->", "->")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `HH:MM:SS,mmm` (SRT) or `HH:MM:SS.mmm` (VTT); hours grow past 99.
+fn subtitle_time(ms: u64, separator: char) -> String {
+    let hours = ms / 3_600_000;
+    let minutes = ms / 60_000 % 60;
+    let seconds = ms / 1_000 % 60;
+    let millis = ms % 1_000;
+    format!("{hours:02}:{minutes:02}:{seconds:02}{separator}{millis:03}")
 }
 
 fn write_json(out: &mut impl Write, value: &impl Serialize) -> Result<()> {

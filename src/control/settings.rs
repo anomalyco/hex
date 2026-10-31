@@ -316,6 +316,11 @@ const KEYS: &[Key] = &[
         "Labs: remove filler words such as um and uh from dictations, without an AI model",
     ),
     key(
+        "labs.subtitle_export",
+        Kind::Bool,
+        "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -500,6 +505,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("meetings.calendar.", "calendar"),
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
+    ("labs.subtitle_export", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("keyboard_model_switching.", "keyboard_model_switching"),
