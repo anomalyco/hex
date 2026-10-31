@@ -15,8 +15,6 @@ mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
 mod background_process;
-#[cfg(target_os = "macos")]
-mod browser_media;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]
@@ -39,13 +37,9 @@ mod events;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
 mod file_dialog;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod hex_microphone;
 mod history;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod hud_placement;
-mod idle_sleep;
-mod input_level;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -69,7 +63,6 @@ mod microphone_activity;
 mod onboarding;
 mod opencode_catalog;
 mod opencode_service;
-mod output_ducking;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
@@ -82,8 +75,6 @@ mod personal_commands;
 mod process_exit;
 #[cfg(target_os = "macos")]
 mod recognition;
-#[cfg(target_os = "macos")]
-mod recording_environment;
 mod rune_hud;
 mod rune_ui;
 mod spring;
@@ -95,8 +86,6 @@ mod transcript_cli;
 mod transcription;
 mod tray_menu;
 mod updater;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod voice_filter;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -385,7 +374,7 @@ fn main() -> Result<()> {
             },
     }) = &cli.command
     {
-        return voice_filter::render_wav_command(
+        return audio::voice_filter::render_wav_command(
             input,
             mode,
             params.as_deref(),
@@ -416,7 +405,7 @@ fn main() -> Result<()> {
             let _instance = instance::acquire("listener")?;
             labs::log_launch();
             let settings = app_settings::AppSettings::load()?;
-            hex_microphone::host_service();
+            audio::hex_microphone::host_service();
             let events = events::EventLog::create(&event_path)?;
             let history = match history::History::open_default(settings.history_retention) {
                 Ok(history) => Some(history),
@@ -609,7 +598,7 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
     }
     let _instance = instance::acquire("listener")?;
     labs::log_launch();
-    hex_microphone::host_service();
+    audio::hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
         meeting::watcher::ListenerConfig { event_path, device },

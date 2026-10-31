@@ -785,7 +785,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     let meter = match &session.script {
         Some(script) => script.meter,
         None => s.live_hold_from.is_some().then(|| {
-            let level = crate::input_level::recent().unwrap_or(0.0);
+            let level = crate::audio::input_level::recent().unwrap_or(0.0);
             (level * 0.6, level)
         }),
     };

@@ -13,8 +13,8 @@ use std::time::Duration;
 use zbus::{Connection, OwnedVariant};
 
 use crate::app_settings::RecordingAudioBehavior;
-use crate::idle_sleep::PreventSleep;
-use crate::output_ducking;
+use crate::audio::idle_sleep::PreventSleep;
+use crate::audio::output_ducking;
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
@@ -52,7 +52,7 @@ impl AudioSuppressor {
         let hold = move || Held {
             audio: suppress(behavior),
             _sleep: prevent_sleep
-                .then(crate::idle_sleep::prevent_sleep)
+                .then(crate::audio::idle_sleep::prevent_sleep)
                 .flatten(),
         };
         let spawned = std::thread::Builder::new()

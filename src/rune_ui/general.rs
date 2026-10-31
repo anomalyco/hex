@@ -579,7 +579,7 @@ impl MicLevel {
     /// Plays the mono WAV at `path` from virtual time zero.
     pub(super) fn playing(path: &Path) -> Self {
         Self {
-            recording: crate::voice_filter::read_wav_mono_f32(path).ok(),
+            recording: crate::audio::voice_filter::read_wav_mono_f32(path).ok(),
             ..Self::default()
         }
     }
@@ -645,7 +645,7 @@ pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     let (peak, playing) = match ui.mic_level.recording_peak(clock) {
         Some(peak) => (peak.or(Some(0.0)), peak.is_some()),
-        None if ui.live() && visible => (crate::input_level::recent(), true),
+        None if ui.live() && visible => (crate::audio::input_level::recent(), true),
         // Other fixtures keep the level they set.
         _ => return false,
     };

@@ -471,7 +471,7 @@ impl Onboard {
 
     pub(crate) fn listening_peak(&self) -> Option<f32> {
         if self.live_hold_from.is_some() {
-            return Some(crate::input_level::recent().unwrap_or(0.0));
+            return Some(crate::audio::input_level::recent().unwrap_or(0.0));
         }
         matches!(self.step, Step::Hearing | Step::TryHearing).then_some(self.meter.1)
     }
@@ -924,7 +924,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         s.hud.step(
             now,
             s.live_hold_from.is_some(),
-            crate::input_level::recent(),
+            crate::audio::input_level::recent(),
             landed,
             s.reduced.get(),
         );

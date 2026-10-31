@@ -580,7 +580,10 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         Some(LabsCommand::Off { feature }) => (feature, false),
     };
     let feature = resolve(name, Feature::shipped)?;
-    if feature == Feature::VoiceFilter && !on && crate::hex_microphone::driver_bundle_installed() {
+    if feature == Feature::VoiceFilter
+        && !on
+        && crate::audio::hex_microphone::driver_bundle_installed()
+    {
         return Err(eyre!(
             "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
         ));
@@ -633,7 +636,7 @@ fn list(settings: &AppSettings) -> String {
     for feature in Feature::available() {
         let on = feature.on(settings)
             || (feature == Feature::VoiceFilter
-                && crate::hex_microphone::driver_bundle_installed());
+                && crate::audio::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
             "{:<width$}  {:<3}  {:<8}  {} (hex settings {})\n",
             feature.name(),

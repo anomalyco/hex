@@ -16,7 +16,7 @@ use objc2_core_audio::{
 };
 
 use crate::app_settings::{self, RecordingAudioBehavior};
-use crate::browser_media::{self, NativeBrowserAudio, PausedBrowser};
+use crate::audio::browser_media::{self, NativeBrowserAudio, PausedBrowser};
 
 mod ducking;
 
@@ -122,7 +122,7 @@ impl Hold {
 /// What the native environment holds for one effect until it is dropped.
 enum Held {
     Sleep {
-        _guard: Option<crate::idle_sleep::PreventSleep>,
+        _guard: Option<crate::audio::idle_sleep::PreventSleep>,
     },
     Audio {
         _guard: AudioBehaviorGuard,
@@ -135,7 +135,7 @@ fn hold_native(effect: Effect) -> Held {
     };
     match effect {
         Effect::Sleep => Held::Sleep {
-            _guard: crate::idle_sleep::prevent_sleep(),
+            _guard: crate::audio::idle_sleep::prevent_sleep(),
         },
         Effect::Mute => audio(RecordingAudioBehavior::Mute),
         Effect::Duck => audio(RecordingAudioBehavior::Duck),
@@ -347,7 +347,7 @@ pub fn capture_active() -> bool {
 }
 
 enum AudioBehaviorGuard {
-    Ducked(crate::output_ducking::Guard),
+    Ducked(crate::audio::output_ducking::Guard),
     Muted {
         device: u32,
         previous: f32,

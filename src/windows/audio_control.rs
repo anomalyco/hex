@@ -37,8 +37,8 @@ fn wait<T: windows::core::RuntimeType>(
 }
 
 use crate::app_settings::RecordingAudioBehavior as WhileDictating;
-use crate::idle_sleep::PreventSleep;
-use crate::output_ducking;
+use crate::audio::idle_sleep::PreventSleep;
+use crate::audio::output_ducking;
 
 enum Command {
     Suppress,
@@ -88,7 +88,7 @@ impl AudioSuppressor {
                                     WhileDictating::PauseMedia => pause_playing_media(),
                                     WhileDictating::DoNothing => None,
                                 },
-                                _sleep: crate::idle_sleep::prevent_sleep(),
+                                _sleep: crate::audio::idle_sleep::prevent_sleep(),
                             });
                         }
                         Command::Suppress => {}

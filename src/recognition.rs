@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 
 use crate::audio::CaptureInstant;
+use crate::audio::recording_environment::RecordingEnvironmentController;
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
 use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
 use crate::dictation::context::{ContextMonitor, ContextSnapshot};
@@ -17,7 +18,6 @@ use crate::feedback::{self, Tone};
 use crate::parakeet::{
     DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
-use crate::recording_environment::RecordingEnvironmentController;
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputEvent, InputMonitor};
 
 const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);

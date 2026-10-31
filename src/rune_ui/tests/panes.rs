@@ -1414,7 +1414,7 @@ fn platform_goldens() {
 
 #[test]
 fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
-    use crate::voice_filter::VoiceFilterMode;
+    use crate::audio::voice_filter::VoiceFilterMode;
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
     tap(&mut rt, "fun-mode/segment1");
     assert_eq!(
@@ -1466,10 +1466,10 @@ fn try_it_records_and_plays_through_the_host() {
         [
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Record),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Play(
-                crate::hex_microphone::DemoPlaybackTrack::CallHears
+                crate::audio::hex_microphone::DemoPlaybackTrack::CallHears
             )),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::SelectSource(
-                crate::hex_microphone::DemoSourceKind::Recording
+                crate::audio::hex_microphone::DemoSourceKind::Recording
             )),
         ]
     );

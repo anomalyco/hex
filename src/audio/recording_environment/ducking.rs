@@ -9,7 +9,7 @@ use objc2_core_audio::{
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 
-use crate::output_ducking::{Guard, Volume};
+use crate::audio::output_ducking::{Guard, Volume};
 
 pub(super) fn start(factor: f32) -> Option<Guard> {
     Guard::start(factor, Output::current)
