@@ -333,6 +333,11 @@ const KEYS: &[Key] = &[
         "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
     ),
     key(
+        "labs.smart_spacing",
+        Kind::Bool,
+        "Labs: add a space before a dictation pasted right after a word (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
