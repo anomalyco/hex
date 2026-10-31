@@ -1170,12 +1170,16 @@ Linux beta                               // not macOS feature parity
 │   ├── Wayland + GlobalShortcuts portal -> Desktop grants the triggers
 │   │   ├── General > Change shortcut -> Press chord (Esc cancels)
 │   │   │   └── Saved -> New portal session asks for it as preferred_trigger
+│   │   │       under an id named for it (`dictation-CTRL-ALT-space`), so a desktop
+│   │   │       that keeps an id's stored trigger (GNOME, KDE) binds the new one (#575);
+│   │   │       an unchanged shortcut keeps its id and any trigger set in the desktop
 │   │   │       // observed on the niri fork: a new session gets it, a rebind in the same one fails
+│   │   │       // #575 fix checked by a unit test only, not on a GNOME session
 │   │   ├── Each row: "Your desktop granted <trigger>" (it may assign another);
 │   │   │   an empty trigger (KDE's for one it keeps unbound) counts as refused
 │   │   ├── Portal version 2 -> Desktop shortcuts > Open -> ConfigureShortcuts,
 │   │   │   the desktop's own dialog; ShortcutsChanged updates each row
-│   │   │   // a desktop may keep an older binding over a new preferred_trigger (KDE)
+│   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id
 │   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
 │   │       under that shortcut's own row (Dictation, Output);
 │   │       the rest keep working

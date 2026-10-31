@@ -6,7 +6,9 @@
 //! `Portal` binds all of Hex's shortcuts in one session, once, and reports
 //! their presses and releases. Desktops keep one shortcut set per app (KDE
 //! replaces it with each BindShortcuts call), so Hex never binds a second
-//! set or changes this one while running. Dropping a bus closes its
+//! set or changes this one while running. Desktops also keep the trigger
+//! they stored for an id over a later `preferred_trigger` (GNOME, KDE), so
+//! `linux_input` names each shortcut by the trigger it asks for. Dropping a bus closes its
 //! sessions, and the desktop releases the keys. Each bus runs on its own one-thread tokio runtime, so
 //! the portal's signals queue while the caller sleeps.
 
@@ -42,7 +44,7 @@ pub(crate) const CANCEL_ID: &str = "cancel-dictation";
 
 /// One shortcut Hex asks the desktop for.
 pub(crate) struct Shortcut {
-    pub(crate) id: &'static str,
+    pub(crate) id: String,
     pub(crate) description: &'static str,
     /// XDG shortcuts format, such as `CTRL+ALT+space`; `None` leaves the
     /// shortcut for the user to assign.
@@ -55,7 +57,7 @@ impl Shortcut {
     /// every other application.
     pub(crate) fn cancel() -> Self {
         Self {
-            id: CANCEL_ID,
+            id: CANCEL_ID.into(),
             description: "Cancel dictation",
             trigger: None,
         }
@@ -516,7 +518,7 @@ impl Portal {
                 if let Some(trigger) = &shortcut.trigger {
                     options.insert("preferred_trigger", Variant::from(trigger.as_str()));
                 }
-                (shortcut.id, options)
+                (shortcut.id.as_str(), options)
             })
             .collect::<Vec<_>>();
         let handle = session.into_inner();
