@@ -1,6 +1,6 @@
 //! Launch at login on Linux: the XDG autostart entry
-//! `~/.config/autostart/hex.desktop`, the same managed file the installer
-//! writes. Hex only replaces or removes an entry that carries its
+//! `~/.config/autostart/anomaly.hex.desktop`, named for Hex's app id, the
+//! same managed file the installer writes. Hex only replaces or removes an entry that carries its
 //! `X-Hex-Managed=true` mark; the file on disk is the only state.
 
 use std::fs;
@@ -11,9 +11,34 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 
 const MANAGED_MARK: &str = "X-Hex-Managed=true";
 
-fn entry_path() -> Result<PathBuf> {
+fn autostart_dir() -> Result<PathBuf> {
     let config = dirs::config_dir().ok_or_else(|| eyre!("the config directory is unavailable"))?;
-    Ok(config.join("autostart").join("hex.desktop"))
+    Ok(config.join("autostart"))
+}
+
+fn entry_path() -> Result<PathBuf> {
+    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux_portal::APP_ID)))
+}
+
+/// Renames Hex's managed `hex.desktop` autostart entry, the name before
+/// #579, to the app id's, unless an entry already has the new name.
+pub fn move_legacy_entry() -> Result<()> {
+    let legacy = autostart_dir()?.join("hex.desktop");
+    let entry = entry_path()?;
+    match fs::read_to_string(&legacy) {
+        Ok(old) if old.lines().any(|line| line.trim() == MANAGED_MARK) => {}
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).wrap_err_with(|| format!("could not read {}", legacy.display()));
+        }
+    }
+    if entry.exists() {
+        fs::remove_file(&legacy)
+    } else {
+        fs::rename(&legacy, &entry)
+    }
+    .wrap_err_with(|| format!("could not move {}", legacy.display()))
 }
 
 /// Whether the desktop starts Hex at login.
@@ -114,7 +139,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<()> {
         .ok_or_else(|| eyre!("{} has no parent directory", path.display()))?;
     fs::create_dir_all(directory)
         .wrap_err_with(|| format!("could not create {}", directory.display()))?;
-    let staged = directory.join(".hex.desktop.next");
+    let staged = directory.join(format!(".{}.desktop.next", crate::linux_portal::APP_ID));
     let mut file = fs::File::create(&staged)
         .wrap_err_with(|| format!("could not write {}", staged.display()))?;
     file.write_all(contents.as_bytes())?;

@@ -20,8 +20,8 @@ const SCREEN_CAST: &str = "org.freedesktop.portal.ScreenCast";
 const REQUEST: &str = "org.freedesktop.portal.Request";
 const SESSION: &str = "org.freedesktop.portal.Session";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
-/// The desktop entry the host installs (`hex.desktop`).
-const APP_ID: &str = "hex";
+/// Hex's app id, named by the desktop entry the host installs (`anomaly.hex.desktop`).
+const APP_ID: &str = "anomaly.hex";
 /// How long the desktop's picker may wait for a choice.
 const PICK_TIMEOUT: Duration = Duration::from_secs(120);
 const SOURCE_MONITOR: u32 = 1;

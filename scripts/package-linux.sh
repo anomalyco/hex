@@ -33,7 +33,7 @@ test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 install -m755 "$executable" "$temporary/hex"
-sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/hex.desktop" > "$temporary/hex.desktop"
+sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/anomaly.hex.desktop" > "$temporary/anomaly.hex.desktop"
 cp "$root/packaging/hex.service" "$root/LICENSE" "$temporary/"
 
 # Debian and RPM order a tilde before a release, and neither allows a hyphen

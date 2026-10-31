@@ -1218,7 +1218,7 @@ Linux beta                               // not macOS feature parity
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
-├── General > Launch at login -> writes or removes ~/.config/autostart/hex.desktop (X-Hex-Managed; linux_login_item)
+├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux_login_item)
 │   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
@@ -1248,9 +1248,14 @@ Linux beta                               // not macOS feature parity
 │           the RemoteDesktop portal; the clipboard keeps the transcript
 └── Portal identity -> Register as `anomaly.hex` (reverse-DNS: GNOME 49/50's
     shortcuts provider refused the bare `hex`, so binding failed, #579)
+    ├── Installs ship anomaly.hex.desktop (StartupWMClass=anomaly.hex); windows
+    │   report app_id / WM_CLASS anomaly.hex -> one launcher entry
+    ├── Startup -> Hex's own managed hex.desktop (launcher, autostart) renamed
+    │   to anomaly.hex.desktop; the installer does the same; unmanaged ones kept
     └── No anomaly.hex.desktop in XDG data dirs -> Hex writes
         ~/.local/share/applications/anomaly.hex.desktop (X-Hex-Managed),
-        NoDisplay when an installed hex.desktop launcher already shows Hex
+        NoDisplay when an older package's hex.desktop already shows Hex,
+        removed once a package ships anomaly.hex.desktop
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
 ```

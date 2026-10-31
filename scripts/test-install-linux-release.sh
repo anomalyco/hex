@@ -115,18 +115,26 @@ refuses() {
   cp "$temporary/manifest.json" "$server/release/hex/desktop/stable.json"
 }
 
+# Earlier installs named Hex's entries hex.desktop; installing replaces them.
+mkdir -p "$home/.local/share/applications" "$home/.config/autostart"
+printf '[Desktop Entry]\nX-Hex-Managed=true\n' > "$home/.local/share/applications/hex.desktop"
+printf '[Desktop Entry]\nX-Hex-Managed=true\n' > "$home/.config/autostart/hex.desktop"
+
 install
 test -L "$install_dir/hex"
+test ! -e "$home/.local/share/applications/hex.desktop"
+test ! -e "$home/.config/autostart/hex.desktop"
+grep -Fxq 'StartupWMClass=anomaly.hex' "$home/.local/share/applications/anomaly.hex.desktop"
 test "$("$install_dir/hex" --version)" = "hex $version"
-grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/hex.desktop"
-grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/hex.desktop"
-grep -Fq '" start' "$home/.config/autostart/hex.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/anomaly.hex.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/anomaly.hex.desktop"
+grep -Fq '" start' "$home/.config/autostart/anomaly.hex.desktop"
 grep -Fq '# X-Hex-Managed=true' "$home/.config/systemd/user/hex.service"
 grep -Fq '" service' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'Type=notify' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'NotifyAccess=main' "$home/.config/systemd/user/hex.service"
-grep -Fxq "Exec=\"$install_dir/hex\"" "$home/.local/share/applications/hex.desktop"
-grep -Fxq "Exec=\"$install_dir/hex\" quit" "$home/.local/share/applications/hex.desktop"
+grep -Fxq "Exec=\"$install_dir/hex\"" "$home/.local/share/applications/anomaly.hex.desktop"
+grep -Fxq "Exec=\"$install_dir/hex\" quit" "$home/.local/share/applications/anomaly.hex.desktop"
 grep -Fxq "EnvironmentFile=-$support_dir/session.env" "$home/.config/systemd/user/hex.service"
 test ! -e "$support_dir/versions/$version/source-build"
 test "$(jq -c . "$support_dir/install.json")" = \
@@ -137,6 +145,8 @@ test ! -e "$install_dir/hex"
 test ! -e "$support_dir/versions"
 test ! -e "$support_dir/install.json"
 test ! -e "$home/.config/systemd/user/hex.service"
+test ! -e "$home/.local/share/applications/anomaly.hex.desktop"
+test ! -e "$home/.config/autostart/anomaly.hex.desktop"
 test -f "$support_dir/settings.json"
 
 # The dev channel: its manifest, its receipt.

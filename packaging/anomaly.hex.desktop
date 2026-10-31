@@ -7,6 +7,7 @@ Icon=audio-input-microphone
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
+StartupWMClass=anomaly.hex
 Actions=quit;
 
 [Desktop Action quit]

@@ -6,7 +6,7 @@
 . "$(dirname "$0")/lib.sh"
 
 package=hex-bin
-files=(PKGBUILD .SRCINFO hex.desktop hex.service LICENSE "$package.install")
+files=(PKGBUILD .SRCINFO anomaly.hex.desktop hex.service LICENSE "$package.install")
 : "${AUR_SSH_PRIVATE_KEY:?Set AUR_SSH_PRIVATE_KEY to the AUR SSH private key}"
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT

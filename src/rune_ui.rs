@@ -136,7 +136,7 @@ pub(crate) fn run_app(
     shutdown: &'static std::sync::atomic::AtomicBool,
 ) {
     use crate::linux_service::{Activation, Control};
-    rune::set_app_id("hex");
+    rune::set_app_id(crate::linux_portal::APP_ID);
     let mut app = self::app(Some(host.clone()))
         .args(Vec::new())
         .windowless()

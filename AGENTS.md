@@ -252,8 +252,11 @@ substitute for source inspection or a second roadmap.
   double-tap only, Escape, Paste Last, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
   or, without the portal, the `hex` commands alone.
-- `linux_portal`: the portal bus (a private zbus connection, `Register("hex")`
-  after writing a managed `hex.desktop` for a loose binary, requests and
+- `linux_portal`: Hex's Linux app id `anomaly.hex` (reverse-DNS, #579; the
+  windows' Wayland app_id and X11 WM_CLASS, and the `anomaly.hex.desktop`
+  entry installs ship), the move of a managed pre-#579 `hex.desktop` to that
+  name, the portal bus (a private zbus connection, `Register("anomaly.hex")`
+  after writing a managed fallback entry for a loose binary, requests and
   sessions) and the GlobalShortcuts client on it: one session binding all of
   Hex's shortcuts once, Cancel dictation included, granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
   session-closed reporting.
@@ -1068,8 +1071,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   XWayland Settings reports the HUD unavailable. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
-  A loose binary writes its own managed `hex.desktop` so the portal can
-  identify it. Every portal shortcut, Cancel dictation included, is bound
+  Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)
+  ships `anomaly.hex.desktop` with `StartupWMClass=anomaly.hex`, and the
+  windows report that id, so there is one launcher entry. Launch at login is
+  `~/.config/autostart/anomaly.hex.desktop`. At startup Hex renames its own
+  managed `hex.desktop` entries (the names before #579) and never touches
+  unmanaged ones. Only a loose binary without any entry writes its own
+  managed one so the portal can identify it, NoDisplay beside an older
+  package's `hex.desktop`, and removed once a package ships the entry. Every portal shortcut, Cancel dictation included, is bound
   in one session with one BindShortcuts call, and that set never changes
   while Hex runs: desktops keep one set per app, and KDE replaces it with
   each call (a second session once wiped Hex's shortcuts,
