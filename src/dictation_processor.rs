@@ -604,7 +604,9 @@ pub struct Processed {
 pub type ProcessingObservation = crate::events::DictationProcessing;
 
 impl Processed {
-    /// `text` as heard, with no step run (Dictate without processing).
+    /// `text` as heard, with no step run (Dictate without processing on the
+    /// Linux and Windows listeners; macOS skips processing in `parakeet`).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn unchanged(text: &str) -> Self {
         Self {
             text: text.to_string(),
