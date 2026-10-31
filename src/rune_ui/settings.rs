@@ -362,6 +362,8 @@ pub(super) fn conflicts(
         ShortcutTarget::RawDictation => HotkeySlot::RawDictation,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -389,6 +391,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::RawDictation => settings.raw_dictation_hotkey.as_ref(),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
     }
 }
 
@@ -403,6 +407,8 @@ pub(super) fn set_binding(
         ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = Some(binding),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
     }
 }
 
@@ -681,6 +687,9 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::RawDictation => "Dictate without processing",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "Capture",
+        // macOS has no shortcuts portal.
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::SecondDictation => return None,
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -1009,6 +1018,8 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::RawDictation => "raw-dictation-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::SecondDictation => "second-dictation-hotkey",
     }
 }
 

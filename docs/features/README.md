@@ -503,6 +503,11 @@ General > Advanced > Double-tap only     // optional for key bindings
   -> Disable single-hold activation
   -> Keep the double-tap hands-free path
 
+Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
+  -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
+  -> it dictates like the shortcut: Hold/Toggle, double-tap lock, Escape, release
+  -> the shortcut that starts a capture finishes it; the other stands down meanwhile
+
 Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription_engine
   -> nothing used the model that long and nothing records -> the model unloads
   -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost

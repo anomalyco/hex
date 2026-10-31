@@ -6,7 +6,8 @@
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
-//! clipboard or only copying it (macOS), and Terminal paste
+//! clipboard or only copying it (macOS), a second dictation shortcut
+//! (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Gate a feature where its work starts (the worker, thread, or capture
@@ -44,10 +45,11 @@ pub enum Feature {
     SpokenFormatting,
     FillerWords,
     SubtitleExport,
+    SecondDictationShortcut,
 }
 
 impl Feature {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -66,6 +68,7 @@ impl Feature {
         Self::SpokenFormatting,
         Self::FillerWords,
         Self::SubtitleExport,
+        Self::SecondDictationShortcut,
     ];
 
     /// The features this OS has.
@@ -80,9 +83,11 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::MouseShortcuts | Self::PauseBrowser | Self::KeepOnClipboard | Self::CopyOnly => {
-                cfg!(target_os = "macos")
-            }
+            Self::MouseShortcuts
+            | Self::PauseBrowser
+            | Self::KeepOnClipboard
+            | Self::CopyOnly
+            | Self::SecondDictationShortcut => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -115,6 +120,7 @@ impl Feature {
             Self::SpokenFormatting => "spoken-formatting",
             Self::FillerWords => "filler-words",
             Self::SubtitleExport => "subtitle-export",
+            Self::SecondDictationShortcut => "second-dictation-shortcut",
         }
     }
 
@@ -139,6 +145,7 @@ impl Feature {
             Self::SpokenFormatting => "labs.spoken_formatting",
             Self::FillerWords => "labs.filler_words",
             Self::SubtitleExport => "labs.subtitle_export",
+            Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
         }
     }
 
@@ -182,6 +189,9 @@ impl Feature {
             Self::SubtitleExport => {
                 "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
             }
+            Self::SecondDictationShortcut => {
+                "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
+            }
         }
     }
 
@@ -210,6 +220,7 @@ impl Feature {
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
             Self::SubtitleExport => settings.labs.subtitle_export,
+            Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
         }
     }
 
@@ -233,6 +244,7 @@ impl Feature {
             Self::SpokenFormatting => settings.labs.spoken_formatting = on,
             Self::FillerWords => settings.labs.filler_words = on,
             Self::SubtitleExport => settings.labs.subtitle_export = on,
+            Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
         }
     }
 }

@@ -207,6 +207,13 @@ const KEYS: &[Key] = &[
         "Dictate without processing: dictates and pastes the words as heard, skipping \
          the Output steps; none (the default) turns it off",
     ),
+    optional(
+        "second_dictation_hotkey",
+        Kind::Shortcut(HotkeySlot::SecondDictation),
+        "Labs: another shortcut that dictates like dictation_hotkey, such as a key on an \
+         external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
+         turns it off",
+    ),
     key(
         "show_dock_icon",
         Kind::Bool,
@@ -319,6 +326,11 @@ const KEYS: &[Key] = &[
         "labs.subtitle_export",
         Kind::Bool,
         "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",
+    ),
+    key(
+        "labs.second_dictation_shortcut",
+        Kind::Bool,
+        "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
     ),
     key(
         "meetings.enabled",
@@ -688,7 +700,11 @@ pub fn apply(
                 ));
             }
         }
-        "dictation_hotkey" | "paste_last_hotkey" | "raw_dictation_hotkey" | "capture.hotkey" => {
+        "dictation_hotkey"
+        | "paste_last_hotkey"
+        | "raw_dictation_hotkey"
+        | "second_dictation_hotkey"
+        | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
@@ -696,6 +712,7 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };

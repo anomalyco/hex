@@ -206,6 +206,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Copy dictation only"),
             tr("Put the dictation on the clipboard instead of pasting it"),
         ));
+        // macOS's listener only, so Linux renders of macOS scenes leave it out.
+        if cfg!(target_os = "macos") {
+            rows.push(row(
+                Feature::SecondDictationShortcut,
+                &KEYBOARD,
+                tr("Second dictation shortcut"),
+                tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
+            ));
+        }
     }
     rows.push(row(
         Feature::UnloadIdle,
@@ -270,6 +279,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
         Feature::SubtitleExport => "lab-subtitle-export",
+        Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
     }
 }
 

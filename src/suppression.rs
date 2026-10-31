@@ -464,6 +464,7 @@ fn mouse_input(button: u16, down: bool, flags: u64, hotkeys: RuntimeHotkeys) -> 
     let bound = [
         Some(hotkeys.dictation),
         hotkeys.raw_dictation,
+        hotkeys.second_dictation,
         hotkeys.paste_last,
         hotkeys.paste_meeting,
     ]
@@ -886,6 +887,9 @@ unsafe extern "C" fn physical_event_callback(
 fn is_chord_evidence(code: u16, flags: u64, hotkeys: RuntimeHotkeys) -> bool {
     code != ESCAPE_KEY_CODE
         && !is_own_globe_key(code, hotkeys.dictation)
+        && !hotkeys
+            .second_dictation
+            .is_some_and(|second| is_own_globe_key(code, second))
         && !hotkeys
             .all()
             .iter()
@@ -1404,6 +1408,7 @@ impl ShortcutSuppression {
                 paste_meeting: Some(paste_meeting),
                 capture: None,
                 raw_dictation: None,
+                second_dictation: None,
             },
             delivered,
             false,
@@ -2874,6 +2879,7 @@ mod tests {
             paste_meeting: None,
             capture: None,
             raw_dictation: None,
+            second_dictation: None,
         }
     }
 

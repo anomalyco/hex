@@ -115,6 +115,8 @@ pub(crate) enum ShortcutTarget {
     #[cfg(hex_capture)]
     Capture,
     RawDictation,
+    /// Labs › Second dictation shortcut.
+    SecondDictation,
 }
 
 /// What the runtime last published for the window and the menu bar.
