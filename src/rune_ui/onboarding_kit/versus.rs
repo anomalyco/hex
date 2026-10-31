@@ -15,12 +15,12 @@
 //! One thing has the eye at a time; the rest dims, deeply only when the
 //! story freezes.
 
-use rune::{Anim, El, Spring, SpringPair, Transition, col, el, row, text};
+use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{
     CHAT_W, Caption, FIELD_FONT, LAUNCH_ROOM, Reply, Side, bubble, chat, chat_height,
-    field_text_origin, system_line, typing_dots,
+    field_text_origin, presenting, system_line, typing_dots,
 };
 use super::field_text::{self, CHAT};
 use super::fixture::ANSWER_JAY;
@@ -32,7 +32,7 @@ use super::landing::{LEAD, UI_SPRING, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
 use super::pill::{pill, slot};
 use super::stories::{Flow, Onboard, Step};
-use super::typing::{Focus, Line, TYPOS, Timing, Who};
+use super::typing::{Focus, Glyph, Line, PRESENTING, Timing, Who};
 
 const STAGE_W: f32 = 500.0;
 const STAGE_H: f32 = 540.0;
@@ -62,6 +62,12 @@ const OLDER: f32 = 0.65;
 const FROZEN: f32 = 0.28;
 /// The message being answered while you type.
 const CONTEXT: f32 = 0.9;
+/// How many of the newest lines read as one stack, at [`RECENT`].
+const STACK: usize = 5;
+/// The thread behind the draft in slow motion.
+const SLOW_THREAD: f32 = 0.42;
+/// How long a line that cuts in while you type stays at full brightness.
+const CUT_IN: f64 = 0.8;
 /// `"Without Hex"`'s field holds one line.
 const WITHOUT_LINES: usize = 1;
 /// From the stage settling to the button's clock: Jay's question arrives
@@ -352,8 +358,9 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             line(
                 "lead-score",
                 format!(
-                    "Typing: {} seconds, {TYPOS} typos, and one job.",
-                    s.scene.score_secs().round()
+                    "Typing: {} seconds, {} typos, and one job.",
+                    s.scene.score_secs().round(),
+                    s.scene.typos()
                 ),
             ),
         ),
@@ -459,6 +466,10 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         },
     );
     let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0;
+    let shudder = match t {
+        Some(t) if !reduced && !voice_phase => s.scene.shudder(t),
+        _ => [0.0, 0.0],
+    };
     let keys_el = el()
         .key("keys")
         .transition(
@@ -466,7 +477,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 .springs(SpringPair::new(UI_SPRING, Spring::new(s.motion.exit, 0.0))),
         )
         .absolute(deck[0], deck[1])
-        .offset(0.0, kb_shift)
+        .offset(shudder[0], kb_shift + shudder[1])
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
         .child(kb_el);
@@ -520,6 +531,109 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .children(hud_el)
         .child(card)
         .child(words(p, s, nudge))
+        .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
+}
+
+/// Caps Lock's light once it's on.
+const CAPS_LIGHT: f32 = 0.9;
+/// The autocorrect title: how long it takes to land, and how far it shakes.
+const SLAM_IN: f64 = 0.09;
+const SLAM_SHAKE: f32 = 9.0;
+const SLAM_COPY: &str = "AUTOCORRECT";
+
+/// The autocorrect title slamming onto the stage like a fighting game's
+/// round call: it drops in oversized, punches past its size, shakes the
+/// stage with a flash, holds, then snaps away as time comes back. Reduce
+/// Motion fades it in and out where it lands.
+fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
+    let since = s.scene.slam(t)?;
+    let reduced = s.reduced.get();
+    let k = p.k;
+    let u = (since / SLAM_IN).min(1.0) as f32;
+    let (scale, shake) = if reduced {
+        (1.0, [0.0, 0.0])
+    } else {
+        // In from 2.4x, overshooting to 0.9x, then a damped punch to rest.
+        let settle = (since - SLAM_IN).max(0.0);
+        let punch = if since < SLAM_IN {
+            2.4 - 1.5 * smoothstep(u)
+        } else {
+            1.0 - 0.1
+                * (std::f64::consts::TAU * settle / 0.16).cos() as f32
+                * (-settle / 0.09).exp() as f32
+        };
+        let decay = (-settle / 0.12).exp() as f32 * (since >= SLAM_IN) as u8 as f32;
+        let wobble =
+            |f: f64, phase: f64| (std::f64::consts::TAU * (f * settle + phase)).sin() as f32;
+        (
+            punch,
+            [
+                SLAM_SHAKE * decay * wobble(23.0, 0.0),
+                0.6 * SLAM_SHAKE * decay * wobble(17.0, 0.3),
+            ],
+        )
+    };
+    let opacity = if reduced {
+        smoothstep(u)
+    } else {
+        u.min(1.0).sqrt()
+    };
+    let flash = if reduced {
+        0.0
+    } else {
+        0.55 * (-(since - SLAM_IN).max(0.0) / 0.07).exp() as f32
+            * (since >= SLAM_IN * 0.6) as u8 as f32
+    };
+    let title = text(SLAM_COPY.to_string())
+        .key("slam-copy")
+        .font(TextStyle::new(52.0, 900.0).lh(56.0).tracking(-1.0))
+        .color(k.c.submit_fg);
+    let plate = row()
+        .key("slam-plate")
+        .px(26.0)
+        .py(10.0)
+        .radius(14.0)
+        .continuous_corners()
+        .fill(k.c.bg_accent)
+        .shadow(8.0, 24.0, k.c.black.alpha(0.55))
+        .rotate(-0.07)
+        .child(title);
+    Some(
+        el().key("slam")
+            .absolute(0.0, 0.0)
+            .size(STAGE_W, STAGE_H)
+            .instant_changes()
+            // It snaps away as time comes back, not fades.
+            .transition(Transition::opacity().springs(SpringPair::new(
+                Spring::new(0.05, 0.0),
+                Spring::new(0.04, 0.0),
+            )))
+            .child(
+                el().key("slam-flash")
+                    .absolute(0.0, 0.0)
+                    .size(STAGE_W, STAGE_H)
+                    .fill(k.c.white)
+                    .opacity(flash),
+            )
+            .child(
+                row()
+                    .key("slam-stage")
+                    .absolute(0.0, 0.0)
+                    .size(STAGE_W, STAGE_H * 0.62)
+                    .center()
+                    .child(
+                        plate
+                            .scale(scale)
+                            .offset(shake[0], shake[1])
+                            .opacity(opacity),
+                    ),
+            ),
+    )
+}
+
+/// The red pill under the header, from the first frame.
+fn banner(p: Paint, s: &Onboard) -> Option<El> {
+    PRESENTING.map(|copy| presenting(p, copy, s.now))
 }
 
 /// Why the field is gone once Jay removes you.
@@ -537,20 +651,25 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
     let mut sent = 0;
     for (i, line) in lines.iter().enumerate() {
         let o = opacity(i, line);
+        let taps: Vec<Glyph> = scene
+            .taps(t)
+            .filter(|tap| tap.line == i)
+            .map(|tap| tap.glyph)
+            .collect();
         thread.push(match line.who {
-            Who::Jay => {
+            Who::Jay | Who::Investor(_) => {
                 // The sender's name over the first of a run, as in a group.
-                let named = i == 0 || lines[i - 1].who != Who::Jay;
+                let named = i == 0 || lines[i - 1].who != line.who;
                 bubble(
                     p,
                     format!("l{i}"),
                     Side::Them,
-                    if named {
-                        Caption::From("Jay")
-                    } else {
-                        Caption::None
+                    match line.who.name() {
+                        Some(name) if named => Caption::From(name),
+                        _ => Caption::None,
                     },
                     &line.text,
+                    &taps,
                     o,
                     reduced,
                 )
@@ -567,6 +686,7 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
                         Caption::None
                     },
                     &line.text,
+                    &taps,
                     o,
                     reduced,
                 )
@@ -588,23 +708,35 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
     let shown = scene.shown(t);
     let answering = scene.lines()[..shown]
         .iter()
-        .rposition(|l| l.who == Who::Jay);
+        .rposition(|l| matches!(l.who, Who::Jay | Who::Investor(_)));
     let removed = scene.removed(t);
-    let opacity = |i: usize, _: &Line| match focus {
+    let slow = scene.slow(t) > 0.0;
+    let opacity = |i: usize, line: &Line| match focus {
         Focus::Waiting => 1.0,
         Focus::Line(j) | Focus::Read(j) if i == j => 1.0,
         // Jay's last two lines stay readable over the removal: the firing
         // reads as one stack.
         _ if removed && i + 2 == shown => 0.82,
         _ if removed && i + 3 == shown => 0.55,
+        // In slow motion the draft has the eye, but the stack stays legible.
+        _ if slow => SLOW_THREAD,
         _ if frozen => FROZEN,
+        // Someone cutting in while you type lands bright, then settles.
+        Focus::Field if t - line.at < CUT_IN => 1.0,
         Focus::Field if Some(i) == answering => CONTEXT,
-        _ if shown - i <= 3 => RECENT,
+        _ if shown - i <= STACK => RECENT,
         _ => OLDER,
     };
     let thread = thread_at(p, s, t, opacity);
     if removed {
-        return chat(p, &LAUNCH_ROOM, thread, Reply::Locked(NO_LONGER), 1.0);
+        return chat(
+            p,
+            &LAUNCH_ROOM,
+            banner(p, s),
+            thread,
+            Reply::Locked(NO_LONGER),
+            1.0,
+        );
     }
     let (draft, caret) = scene.draft(t);
     // The field stays empty a moment after a send, so the bubble lifts out
@@ -617,6 +749,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
     chat(
         p,
         &LAUNCH_ROOM,
+        banner(p, s),
         thread,
         Reply::Lines {
             text: draft,
@@ -625,6 +758,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
             placeholder: draft.is_empty() && !just_sent,
             focus: caret.is_some(),
             sent: false,
+            mark: scene.mark(t),
         },
         if focus == Focus::Field { 1.0 } else { 0.6 },
     )
@@ -660,6 +794,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             Side::You,
             Caption::None,
             ANSWER_JAY.text(),
+            &[],
             if replied { RECENT } else { 1.0 },
             reduced,
         ));
@@ -674,6 +809,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             Side::Them,
             Caption::From("Jay"),
             HEX_REPLY,
+            &[],
             1.0,
             reduced,
         ));
@@ -688,7 +824,14 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         .max()
         .unwrap_or(1);
     if rewinding && since < UNLOCK {
-        return chat(p, &LAUNCH_ROOM, thread, Reply::Locked(NO_LONGER), 1.0);
+        return chat(
+            p,
+            &LAUNCH_ROOM,
+            banner(p, s),
+            thread,
+            Reply::Locked(NO_LONGER),
+            1.0,
+        );
     }
     // The field waits, unfocused, until the shortcut goes down.
     let listening = s.step >= Step::Hearing && !sent;
@@ -696,6 +839,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     chat(
         p,
         &LAUNCH_ROOM,
+        banner(p, s),
         thread,
         Reply::Lines {
             text: "",
@@ -704,6 +848,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             placeholder: !started || cleared,
             focus: listening,
             sent: false,
+            mark: None,
         },
         if composing { 1.0 } else { 0.6 },
     )
@@ -763,6 +908,13 @@ fn key_depth(s: &Onboard, id: &str) -> f32 {
 }
 
 fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
+    // Caps Lock's light, once an elbow knocks it on.
+    if id == "caps" && s.step == Step::Parked {
+        return match scene_time(s) {
+            Some(t) if s.scene.caps(t) => CAPS_LIGHT,
+            _ => 0.0,
+        };
+    }
     if !shortcut_keys(s).any(|k| k == id) {
         return 0.0;
     }

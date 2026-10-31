@@ -1213,6 +1213,7 @@ fn body(p: Paint, r: &Round, flights: &[(Flight, &str, [f32; 2])], t: f64, reduc
                 placeholder: !speaking,
                 focus: targeted && !done,
                 sent: done,
+                mark: None,
             };
             notice(p, &n, reply, false)
         }

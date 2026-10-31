@@ -10,6 +10,14 @@ library only, so it runs anywhere:
 - `chat_read`: the deadpan `"Read"`, one dry low pip (about 360 Hz).
 - `chat_rewind`: the story winding back, a soft downward swish that swells
   and stops short, like tape pulled back (2.6 kHz -> 420 Hz).
+- `chat_tapback`: a tapback landing, one tiny bright tick (about 1.9 kHz).
+- `heartbeat`: one low lub-dub under panicked typing, falling thumps
+  (78 -> 46 Hz) with a quiet second harmonic so small speakers carry it.
+- `heartbeat_slow`: the same lub-dub stretched and lowered for slow motion.
+- `slow_down`: time slowing, the clicks smearing down like a tape stop
+  (a band of noise 1.8 kHz -> 160 Hz over a falling tone).
+- `slam`: a comic title hitting the stage, a short crack over a saturated
+  bass drop (120 -> 36 Hz).
 
 Peaks are set to sit with the other onboarding cues (about -14 dBFS)."""
 
@@ -65,6 +73,38 @@ def swish(secs, lo, hi, backwards=False):
     return out
 
 
+def thump(secs, hi, lo, tau, h2=0.25, attack=0.004):
+    """A falling sine thump, `hi` -> `lo` Hz, decaying over `tau`."""
+    out = []
+    phase = 0.0
+    for i in range(int(secs * SR)):
+        t = i / SR
+        f = lo + (hi - lo) * math.exp(-t / (tau * 0.6))
+        phase += 2 * math.pi * f / SR
+        env = min(1.0, t / attack) * math.exp(-t / tau)
+        out.append(env * (math.sin(phase) + h2 * math.sin(2 * phase)))
+    return out
+
+
+def lub_dub(stretch, pitch):
+    x = silence(0.36 * stretch)
+    add(x, 0.0, thump(0.2 * stretch, 78.0 * pitch, 46.0 * pitch, 0.055 * stretch))
+    add(x, 0.15 * stretch, [0.7 * v for v in thump(0.2 * stretch, 70.0 * pitch, 44.0 * pitch, 0.05 * stretch)])
+    return x
+
+
+def noise_burst(secs, tau, hp=0.85):
+    """A short crack: white noise, high-passed by a one-pole difference."""
+    out = []
+    prev = 0.0
+    for i in range(int(secs * SR)):
+        t = i / SR
+        x = rng.uniform(-1.0, 1.0)
+        out.append((x - hp * prev) * math.exp(-t / tau))
+        prev = x
+    return out
+
+
 def finish(x, peak_dbfs, fade=0.005):
     n = int(fade * SR)
     for i in range(min(n, len(x))):
@@ -99,6 +139,24 @@ def main():
     rewind = silence(0.18)
     add(rewind, 0.0, swish(0.18, 2600.0, 420.0, backwards=True))
     write("chat_rewind", finish(rewind, -16.5, fade=0.008))
+
+    tapback = silence(0.04)
+    add(tapback, 0.0, pip(1900.0, 0.04, 0.007, attack=0.0006, h2=0.15))
+    write("chat_tapback", finish(tapback, -19.0, fade=0.004))
+
+    write("heartbeat", finish(lub_dub(1.0, 1.0), -13.0, fade=0.02))
+    write("heartbeat_slow", finish(lub_dub(2.5, 0.62), -13.0, fade=0.05))
+
+    slow = silence(0.7)
+    add(slow, 0.0, swish(0.7, 1800.0, 160.0, backwards=False))
+    add(slow, 0.0, [0.35 * v for v in thump(0.7, 220.0, 60.0, 0.3, h2=0.4, attack=0.03)])
+    write("slow_down", finish(slow, -18.0, fade=0.06))
+
+    slam = silence(1.0)
+    add(slam, 0.0, [0.5 * v for v in noise_burst(0.06, 0.012)])
+    add(slam, 0.0, thump(1.0, 120.0, 36.0, 0.32, h2=0.5, attack=0.002))
+    slam = [math.tanh(2.2 * v) for v in slam]
+    write("slam", finish(slam, -11.0, fade=0.08))
 
 
 if __name__ == "__main__":

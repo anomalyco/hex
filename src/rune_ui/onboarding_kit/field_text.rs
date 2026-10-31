@@ -131,8 +131,9 @@ pub(crate) struct Slot<'a> {
 
 impl Field {
     /// `reply` as typed so far, with the caret after byte `caret` while it's
-    /// being typed, on `lines` lines kept however much there is. In an
-    /// empty field the caret sits just before the placeholder's first glyph.
+    /// being typed, on `lines` lines kept however much there is, and
+    /// autocorrect's underline under the `mark` byte range. In an empty
+    /// field the caret sits just before the placeholder's first glyph.
     pub(crate) fn typed(
         self,
         p: Paint,
@@ -140,6 +141,7 @@ impl Field {
         reply: &str,
         caret_at: Option<usize>,
         lines: usize,
+        mark: Option<(usize, usize)>,
     ) -> El {
         let font = self.font.lh(self.line);
         let mut out = el()
@@ -154,6 +156,17 @@ impl Field {
                     .font(font)
                     .color(p.text())
                     .absolute(0.0, i as f32 * self.line),
+            );
+        }
+        if let Some((start, end)) = mark.filter(|&(s, e)| s < e && e <= reply.len()) {
+            let (left, line) = self.caret_point(reply, start);
+            let (right, _) = self.caret_point(reply, end);
+            out = out.child(
+                el().key("autocorrect")
+                    .absolute(left - 1.0, line as f32 * self.line + self.line - 2.0)
+                    .size((right - left + 2.0).max(4.0), 2.0)
+                    .radius(1.0)
+                    .fill(p.k.c.text_accent),
             );
         }
         if let Some(at) = caret_at {

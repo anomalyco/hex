@@ -10,6 +10,7 @@ use super::super::controls::{KeySize, Paint, key_tray, keycap};
 use super::super::lists::allowed;
 use super::field_text;
 use super::mic::mic_level;
+use super::typing::Glyph;
 use super::words::live_words;
 
 pub(crate) const CARD_W: f32 = 404.0;
@@ -117,6 +118,8 @@ pub(crate) enum Reply<'a> {
         placeholder: bool,
         focus: bool,
         sent: bool,
+        /// Autocorrect's underline under this byte range of `text`.
+        mark: Option<(usize, usize)>,
     },
     /// No field any more, only why.
     Locked(&'a str),
@@ -220,9 +223,12 @@ pub(crate) fn chat_height(lines: usize) -> f32 {
 /// A Messages conversation with `n.from` (a group when `n.place` names its
 /// members): header, the newest of `thread`'s lines (older ones scroll up
 /// under a soft edge), and the reply field.
+/// `banner`, such as [`presenting`], sits centred at the thread's top, over
+/// the soft edge older lines scroll under.
 pub(crate) fn chat(
     p: Paint,
     n: &Notice,
+    banner: Option<El>,
     thread: Vec<El>,
     reply: Reply<'_>,
     field_opacity: f32,
@@ -262,6 +268,21 @@ pub(crate) fn chat(
         .gap(6.0)
         .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
         .children(thread);
+    let thread = match banner {
+        Some(banner) => el()
+            .key("thread-wrap")
+            .w_full()
+            .h(THREAD_H)
+            .child(thread)
+            .child(
+                row()
+                    .key("banner")
+                    .pin(Some(0.0), Some(0.0), Some(0.0), None)
+                    .justify_center()
+                    .child(banner),
+            ),
+        None => thread,
+    };
     let (fill, rim) = material(p);
     let card = col()
         .key(n.key)
@@ -301,14 +322,16 @@ pub(crate) enum Caption<'a> {
 }
 
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
-/// in cobalt, with its [`Caption`]. It glides up as newer lines arrive and
-/// fades to `opacity`.
+/// in cobalt, with its [`Caption`] and any `taps` on its corner. It glides
+/// up as newer lines arrive and fades to `opacity`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn bubble(
     p: Paint,
     key: String,
     side: Side,
     caption: Caption<'_>,
     copy: &str,
+    taps: &[Glyph],
     opacity: f32,
     reduced: bool,
 ) -> El {
@@ -339,8 +362,14 @@ pub(crate) fn bubble(
                 .color(p.text())
                 .wrap()
                 .shrink(),
-        );
+        )
+        .children(tapbacks(p, side, taps, reduced));
     let line = line(key, side, opacity, reduced);
+    let line = if taps.is_empty() {
+        line
+    } else {
+        line.mt(TAP_ROOM)
+    };
     match caption {
         Caption::None => line.child(bubble.shrink()),
         Caption::From(from) => line.child(
@@ -431,6 +460,141 @@ pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced
             .child(dot(1))
             .child(dot(2)),
     )
+}
+
+/// A small red pill saying who is sharing their screen, its dot pulsing
+/// like a recording light at `now`.
+pub(crate) fn presenting(p: Paint, copy: &str, now: f64) -> El {
+    let danger = &p.k.c.danger;
+    let pulse = 0.5 + 0.5 * (now * std::f64::consts::TAU / 1.6).cos();
+    row()
+        .key("presenting")
+        .h(20.0)
+        .px(8.0)
+        .gap(5.0)
+        .center_y()
+        .radius(10.0)
+        .continuous_corners()
+        .fill(danger.bg)
+        .border(p.hair, danger.border)
+        .child(
+            el().key("dot")
+                .size(6.0, 6.0)
+                .radius(3.0)
+                .fill(danger.fg)
+                .opacity(0.45 + 0.55 * pulse as f32)
+                .opacity_motion(rune::Anim::INSTANT),
+        )
+        .child(
+            text(copy.to_string())
+                .key("copy")
+                .font(p.k.ty.small_medium)
+                .color(danger.fg),
+        )
+}
+
+/// Tapback badges: how far one sits out past the bubble's corner, its size,
+/// and how far each newer one steps out over the last.
+const TAP: f32 = 24.0;
+const TAP_OUT: f32 = 13.0;
+const TAP_STEP: f32 = 14.0;
+/// The room a line keeps above its bubble once a tapback lands on it.
+pub(crate) const TAP_ROOM: f32 = 11.0;
+
+/// iMessage tapbacks on a bubble's top corner (left on yours, right on
+/// theirs), each a round badge cut out of the card that pops in on a spring,
+/// newer ones stacked over and past the last.
+fn tapbacks(p: Paint, side: Side, taps: &[Glyph], reduced: bool) -> Vec<El> {
+    let k = p.k;
+    let (card, _) = material(p);
+    taps.iter()
+        .enumerate()
+        .map(|(i, &glyph)| {
+            let out = -TAP_OUT - TAP_STEP * i as f32;
+            let badge = row()
+                .key(format!("tap{i}"))
+                .size(TAP, TAP)
+                .center()
+                .radius(TAP * 0.5)
+                .fill(if k.dark { k.c.layer_04 } else { k.c.layer_03 })
+                .border(2.0, card)
+                .child(tap_glyph(p, glyph));
+            let badge = match side {
+                Side::You => badge.pin(Some(out), Some(-TAP_OUT), None, None),
+                Side::Them => badge.pin(None, Some(-TAP_OUT), Some(out), None),
+            };
+            let pop = if reduced {
+                Transition::opacity()
+            } else {
+                Transition::opacity()
+                    .combined(Transition::scale(0.2))
+                    .springs(SpringPair::new(
+                        Spring::new(0.36, 0.42),
+                        Spring::new(0.12, 0.0),
+                    ))
+            };
+            badge.transition(pop)
+        })
+        .collect()
+}
+
+/// A tapback's mark: plain text or a vector, never an emoji font.
+fn tap_glyph(p: Paint, glyph: Glyph) -> El {
+    let k = p.k;
+    let red = k.c.danger.fg;
+    let word = |copy: &str, size: f32, color: Color| {
+        text(copy.to_string())
+            .key("glyph")
+            .font(TextStyle::new(size, 800.0).lh(size + 1.0))
+            .color(color)
+    };
+    let drawn = |shape: Shape| canvas(shape).key("glyph").size(13.0, 13.0);
+    match glyph {
+        Glyph::Haha => word("Haha", 7.5, p.text()),
+        Glyph::Bang => word("!!", 12.0, red),
+        Glyph::Question => word("?", 13.0, p.text()),
+        Glyph::ThumbsUp => drawn(thumb(p.text(), false)),
+        Glyph::ThumbsDown => drawn(thumb(p.text(), true)),
+        Glyph::Heart => drawn(heart(red)),
+    }
+}
+
+/// A thumbs-up on a 16-point grid, or turned over for a thumbs-down.
+fn thumb(color: Color, down: bool) -> Shape {
+    let f = |[x, y]: [f32; 2]| if down { [16.0 - x, 16.0 - y] } else { [x, y] };
+    let cuff = Path::new()
+        .move_to(f([1.8, 7.4]))
+        .line_to(f([4.4, 7.4]))
+        .line_to(f([4.4, 15.0]))
+        .line_to(f([1.8, 15.0]))
+        .close();
+    let hand = Path::new()
+        .move_to(f([5.5, 7.6]))
+        .line_to(f([8.0, 2.5]))
+        .quad_to(f([8.6, 1.3]), f([9.7, 1.8]))
+        .quad_to(f([10.8, 2.4]), f([10.4, 4.1]))
+        .line_to(f([9.9, 6.5]))
+        .line_to(f([13.1, 6.5]))
+        .quad_to(f([14.7, 6.6]), f([14.4, 8.3]))
+        .line_to(f([13.5, 13.6]))
+        .quad_to(f([13.2, 15.0]), f([11.8, 15.0]))
+        .line_to(f([5.5, 15.0]))
+        .close();
+    Shape::new()
+        .view_box(16.0, 16.0)
+        .fill_path(&cuff, color)
+        .fill_path(&hand, color)
+}
+
+fn heart(color: Color) -> Shape {
+    let path = Path::new()
+        .move_to([8.0, 14.2])
+        .cubic_to([1.0, 9.6], [1.4, 2.6], [5.2, 2.6])
+        .cubic_to([6.8, 2.6], [7.6, 3.7], [8.0, 4.8])
+        .cubic_to([8.4, 3.7], [9.2, 2.6], [10.8, 2.6])
+        .cubic_to([14.6, 2.6], [15.0, 9.6], [8.0, 14.2])
+        .close();
+    Shape::new().view_box(16.0, 16.0).fill_path(&path, color)
 }
 
 /// A centred system notice, such as someone removing you, in a tinted
@@ -583,9 +747,10 @@ fn field(p: Paint, n: &Notice, reply: Reply<'_>, shape: field_text::Field) -> El
             caret,
             lines,
             placeholder: empty,
+            mark,
             ..
         } => {
-            let body = shape.typed(p, "typed", typed, caret, lines);
+            let body = shape.typed(p, "typed", typed, caret, lines, mark);
             if empty {
                 body.child(placeholder(p, n.field).absolute(PLACEHOLDER_X, 0.0))
             } else {

@@ -22,6 +22,10 @@ use super::hud_stage::DONE_DELAY;
 use super::{permissions, typing};
 use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tone};
 
+/// The heartbeat's level, in percent, calm and in full panic.
+const HEART_QUIET: f32 = 30.0;
+const HEART_LOUD: f32 = 75.0;
+
 #[derive(Default)]
 pub(crate) struct SfxTrack {
     pub(crate) style: KeySoundStyle,
@@ -109,8 +113,15 @@ impl SfxTrack {
     pub(crate) fn on_without_hex(&mut self, from: f64, scene: &typing::Scene) {
         let style = self.style;
         let mut prev_variant: Option<u8> = None;
+        let mut prev_at = None;
         for (i, stroke) in scene.strokes().iter().enumerate() {
             let at = from + stroke.at;
+            // Autocorrect changes the draft without a key, and keys mashed
+            // together (an elbow) land as one.
+            if stroke.key.is_empty() || prev_at == Some(stroke.at) {
+                continue;
+            }
+            prev_at = Some(stroke.at);
             // Calm typing sits under the chat sounds; panic brings it up.
             let level = (62.0 + 28.0 * stroke.panic).round() as u8;
             let tone = match stroke.key {
@@ -148,13 +159,34 @@ impl SfxTrack {
         for line in scene.lines().iter().filter(|l| l.at >= 0.0) {
             let at = from + line.at;
             match line.who {
-                typing::Who::Jay => self.push(at, Tone::Onboarding(OnboardingTone::Incoming)),
+                typing::Who::Jay | typing::Who::Investor(_) => {
+                    self.push(at, Tone::Onboarding(OnboardingTone::Incoming))
+                }
                 typing::Who::You => self.push(at + 0.03, Tone::Onboarding(OnboardingTone::Sent)),
                 typing::Who::System => self.push(at, Tone::Error),
             }
         }
         if let Some(at) = scene.read_at() {
             self.push(from + at, Tone::Onboarding(OnboardingTone::Read));
+        }
+        for tap in scene.all_taps() {
+            self.push(from + tap.at, Tone::Onboarding(OnboardingTone::Tapback));
+        }
+        // The heartbeat rises under the clicks and stops dead at the removal.
+        for beat in scene.heartbeats() {
+            let tone = if beat.slow {
+                OnboardingTone::HeartbeatSlow
+            } else {
+                OnboardingTone::Heartbeat
+            };
+            let level = (HEART_QUIET + (HEART_LOUD - HEART_QUIET) * beat.level).round() as u8;
+            self.push_at(from + beat.at, Tone::Onboarding(tone), level);
+        }
+        for &(start, _) in scene.slows() {
+            self.push(from + start, Tone::Onboarding(OnboardingTone::SlowDown));
+        }
+        for at in scene.slams() {
+            self.push(from + at, Tone::Onboarding(OnboardingTone::Slam));
         }
     }
 
@@ -320,11 +352,50 @@ mod tests {
             }
         }
         assert!(key_count >= 18, "{key_count}");
-        // The one delete, and the clunk under the slip onto Return.
-        assert_eq!(back_count, 2);
-        assert_eq!(sent, 3);
+        // Every delete, and the clunk under each slip onto Return.
+        let deletes = scene.strokes().iter().filter(|s| s.key == "delete").count();
+        let slips = scene
+            .strokes()
+            .iter()
+            .filter(|s| s.key == "return" && scene.flash(s.at + 1e-3, "return") > 0.0)
+            .count();
+        assert_eq!(back_count, deletes + slips);
+        assert_eq!(sent, scene.sent(scene.duration()));
         assert_eq!(read, 1);
         assert!(track.fired_cues().iter().any(|&(_, t, _)| t == Tone::Error));
+    }
+
+    #[test]
+    fn tapbacks_tick_and_the_heartbeat_stops_dead_at_the_removal() {
+        let scene = typing::Scene::default();
+        let mut track = SfxTrack::default();
+        track.on_without_hex(0.0, &scene);
+        track.advance_to(60.0);
+        let count = |cue: OnboardingTone| {
+            track
+                .fired_cues()
+                .iter()
+                .filter(|&&(_, t, _)| t == Tone::Onboarding(cue))
+                .count()
+        };
+        assert_eq!(count(OnboardingTone::Tapback), scene.all_taps().len());
+        assert_eq!(count(OnboardingTone::Slam), scene.slams().count());
+        let removal = scene.removal().unwrap();
+        let hearts: Vec<&(f64, Tone, u8)> = track
+            .fired_cues()
+            .iter()
+            .filter(|&&(_, t, _)| t == Tone::Onboarding(OnboardingTone::Heartbeat))
+            .collect();
+        assert!(hearts.len() >= 20);
+        assert!(
+            hearts
+                .iter()
+                .all(|&&(at, ..)| at + typing::BEAT_LEN <= removal)
+        );
+        assert!(
+            hearts.first().unwrap().2 < hearts.last().unwrap().2,
+            "it rises"
+        );
     }
 
     #[test]

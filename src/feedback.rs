@@ -78,6 +78,16 @@ pub enum OnboardingTone {
     Read,
     /// The comedy winding back to before it went wrong.
     Rewind,
+    /// A tapback landing on a message: one tiny tick.
+    Tapback,
+    /// One low heartbeat under panicked typing.
+    Heartbeat,
+    /// The heartbeat stretched lower in slow motion.
+    HeartbeatSlow,
+    /// Time slowing hard: the clicks smear down.
+    SlowDown,
+    /// A comic title slamming onto the stage: a heavy bass hit.
+    Slam,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -711,6 +721,11 @@ struct OnboardingSounds {
     chat_sent: SamplesBuffer,
     chat_read: SamplesBuffer,
     chat_rewind: SamplesBuffer,
+    chat_tapback: SamplesBuffer,
+    heartbeat: SamplesBuffer,
+    heartbeat_slow: SamplesBuffer,
+    slow_down: SamplesBuffer,
+    slam: SamplesBuffer,
 }
 
 impl OnboardingSounds {
@@ -754,6 +769,11 @@ impl OnboardingSounds {
             chat_sent: decode_wav(bundled_sound!("onboarding", "chat_sent"))?,
             chat_read: decode_wav(bundled_sound!("onboarding", "chat_read"))?,
             chat_rewind: decode_wav(bundled_sound!("onboarding", "chat_rewind"))?,
+            chat_tapback: decode_wav(bundled_sound!("onboarding", "chat_tapback"))?,
+            heartbeat: decode_wav(bundled_sound!("onboarding", "heartbeat"))?,
+            heartbeat_slow: decode_wav(bundled_sound!("onboarding", "heartbeat_slow"))?,
+            slow_down: decode_wav(bundled_sound!("onboarding", "slow_down"))?,
+            slam: decode_wav(bundled_sound!("onboarding", "slam"))?,
         })
     }
 
@@ -787,6 +807,11 @@ impl OnboardingSounds {
             OnboardingTone::Sent => &self.chat_sent,
             OnboardingTone::Read => &self.chat_read,
             OnboardingTone::Rewind => &self.chat_rewind,
+            OnboardingTone::Tapback => &self.chat_tapback,
+            OnboardingTone::Heartbeat => &self.heartbeat,
+            OnboardingTone::HeartbeatSlow => &self.heartbeat_slow,
+            OnboardingTone::SlowDown => &self.slow_down,
+            OnboardingTone::Slam => &self.slam,
         })
     }
 }
@@ -1365,11 +1390,24 @@ mod tests {
             OnboardingTone::Sent,
             OnboardingTone::Read,
             OnboardingTone::Rewind,
+            OnboardingTone::Tapback,
+            OnboardingTone::Heartbeat,
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");
-            assert!(buf.total_duration().unwrap() <= Duration::from_millis(250));
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(400));
+        }
+        // The slow-motion and comic-hit cues ring longer, but not for long.
+        for cue in [
+            OnboardingTone::HeartbeatSlow,
+            OnboardingTone::SlowDown,
+            OnboardingTone::Slam,
+        ] {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
         }
 
         let k0: Vec<f32> = sounds.onboarding.felt_keys[0].clone().collect();
