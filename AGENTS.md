@@ -1086,7 +1086,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)
   ships `anomaly.hex.desktop` with `StartupWMClass=anomaly.hex`, and the
-  windows report that id, so there is one launcher entry. Launch at login is
+  windows report that id, so there is one launcher entry. Every entry says
+  `Icon=anomaly.hex`: packages install the hicolor PNGs in
+  `packaging/linux/icons` (16–512 px; deb/rpm refresh the icon cache in
+  postinst/postrm), and without a packaged icon Hex writes the same embedded
+  PNGs into `~/.local/share/icons/hicolor` at startup and names that icon in
+  the managed entries it or the installer wrote (#652). Launch at login is
   `~/.config/autostart/anomaly.hex.desktop`. At startup Hex renames its own
   managed `hex.desktop` entries (the names before #579) and never touches
   unmanaged ones. Only a loose binary without any entry writes its own

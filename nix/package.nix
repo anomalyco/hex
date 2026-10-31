@@ -133,6 +133,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
   postInstall = ''
     install -Dm644 ${../packaging/anomaly.hex.desktop} $out/share/applications/anomaly.hex.desktop
+    mkdir -p $out/share/icons
+    cp -R ${../packaging/linux/icons/hicolor} $out/share/icons/hicolor
     substituteInPlace $out/share/applications/anomaly.hex.desktop \
       --replace-fail '@HEX_BIN@' "$out/bin/hex"
   '';

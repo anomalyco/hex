@@ -118,11 +118,12 @@ fn entry(executable: &Path) -> String {
          Name=Hex\n\
          Comment=Local voice dictation\n\
          Exec={} start\n\
-         Icon=audio-input-microphone\n\
+         Icon={}\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\
          {MANAGED_MARK}\n",
-        exec_argument(&executable.to_string_lossy())
+        exec_argument(&executable.to_string_lossy()),
+        crate::linux_portal::APP_ID,
     )
 }
 

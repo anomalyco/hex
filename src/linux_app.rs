@@ -316,6 +316,9 @@ pub(crate) fn run(
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
     // Installs before #579 named the entries hex.desktop.
+    if let Err(error) = crate::linux_icons::install() {
+        tracing::warn!(%error, "could not install Hex's icon");
+    }
     if let Err(error) = crate::linux_portal::tidy_desktop_entries() {
         tracing::warn!(%error, "could not move Hex's desktop entry");
     }

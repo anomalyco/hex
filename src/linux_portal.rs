@@ -436,6 +436,18 @@ fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
     }
 }
 
+/// The system data directories from `XDG_DATA_DIRS`, which packages own.
+pub(crate) fn system_data_dirs() -> Vec<PathBuf> {
+    std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|dirs| !dirs.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into())
+        .split(':')
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// Hex's launcher entry: the user's `applications` directory, which Hex may
 /// write, and the system ones from `XDG_DATA_DIRS`, which packages own.
 struct DesktopEntries {
@@ -454,14 +466,9 @@ enum Entry {
 impl DesktopEntries {
     fn current() -> Option<Self> {
         let applications = dirs::data_dir()?.join("applications");
-        let system = std::env::var("XDG_DATA_DIRS")
-            .ok()
-            .filter(|dirs| !dirs.is_empty())
-            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-        let system = system
-            .split(':')
-            .filter(|dir| !dir.is_empty())
-            .map(|dir| Path::new(dir).join("applications"))
+        let system = system_data_dirs()
+            .into_iter()
+            .map(|dir| dir.join("applications"))
             .collect();
         Some(Self::new(applications, system))
     }
@@ -492,7 +499,8 @@ impl DesktopEntries {
     /// Moves Hex's own managed `hex.desktop` (the name before #579) to
     /// `anomaly.hex.desktop`, keeping its Exec lines, unless the user put an
     /// entry of their own there; then removes a hidden fallback that would
-    /// shadow a package's entry of the same id. Returns the entry it wrote.
+    /// shadow a package's entry of the same id, or names Hex's icon in an
+    /// entry Hex wrote with the generic one (#652). Returns the entry it wrote.
     fn tidy(&self) -> Result<Option<PathBuf>> {
         let entry = self.entry();
         let current = read_entry(&entry)?;
@@ -522,6 +530,13 @@ impl DesktopEntries {
             std::fs::remove_file(&entry)
                 .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
             tracing::info!(entry = %entry.display(), "removed Hex's fallback desktop entry");
+        } else if let Entry::File(current) = &current
+            && managed(current)
+            && with_icon(current) != *current
+        {
+            write_entry(&self.applications, &entry, &with_icon(current))
+                .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+            tracing::info!(entry = %entry.display(), "named Hex's icon in its desktop entry");
         }
         Ok(None)
     }
@@ -585,8 +600,22 @@ fn write_entry(applications: &Path, entry: &Path, contents: &str) -> Result<()> 
     Ok(())
 }
 
-/// An old managed entry under the new name, keeping its Exec lines and
-/// naming Hex's windows for X11 launchers.
+/// `entry` with every `Icon=` naming Hex's icon (`anomaly.hex` in hicolor).
+fn with_icon(entry: &str) -> String {
+    let mut named = String::with_capacity(entry.len());
+    for line in entry.lines() {
+        if line.trim_start().starts_with("Icon=") {
+            named.push_str(&format!("Icon={APP_ID}"));
+        } else {
+            named.push_str(line);
+        }
+        named.push('\n');
+    }
+    named
+}
+
+/// An old managed entry under the new name, keeping its Exec lines, naming
+/// Hex's windows for X11 launchers, and showing Hex's icon.
 fn moved_entry(old: &str) -> String {
     let mut entry = String::with_capacity(old.len() + 32);
     for line in old
@@ -599,13 +628,13 @@ fn moved_entry(old: &str) -> String {
             entry.push_str(&format!("StartupWMClass={APP_ID}\n"));
         }
     }
-    entry
+    with_icon(&entry)
 }
 
 /// `NoDisplay`, not `Hidden`: the portal refuses an app whose entry is Hidden.
 fn desktop_entry(executable: &str, hidden: bool) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Hex\nComment=Local voice dictation\nExec={}\nIcon=audio-input-microphone\nTerminal=false\nCategories=Utility;Accessibility;\nStartupWMClass={APP_ID}\n{}{MANAGED_MARK}\n",
+        "[Desktop Entry]\nType=Application\nName=Hex\nComment=Local voice dictation\nExec={}\nIcon={APP_ID}\nTerminal=false\nCategories=Utility;Accessibility;\nStartupWMClass={APP_ID}\n{}{MANAGED_MARK}\n",
         exec_argument(executable),
         if hidden { "NoDisplay=true\n" } else { "" }
     )
@@ -967,6 +996,29 @@ mod tests {
 
     const OLD: &str =
         "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
+
+    #[test]
+    fn entries_hex_wrote_name_its_icon() {
+        let (root, entries) = entries("icon");
+        std::fs::write(
+            entries.entry(),
+            "[Desktop Entry]\nIcon=audio-input-microphone\nX-Hex-Managed=true\n",
+        )
+        .unwrap();
+        entries.tidy().unwrap();
+        let named = std::fs::read_to_string(entries.entry()).unwrap();
+        assert!(named.contains("\nIcon=anomaly.hex\n"), "{named}");
+        assert!(desktop_entry("/opt/hex", false).contains("\nIcon=anomaly.hex\n"));
+        // Someone else's entry keeps its icon.
+        std::fs::write(entries.entry(), "[Desktop Entry]\nIcon=mine\n").unwrap();
+        entries.tidy().unwrap();
+        assert!(
+            std::fs::read_to_string(entries.entry())
+                .unwrap()
+                .contains("Icon=mine")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn an_old_managed_entry_moves_to_the_app_id() {

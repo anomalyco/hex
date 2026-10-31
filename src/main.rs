@@ -94,6 +94,8 @@ mod linux_context;
 #[cfg(target_os = "linux")]
 mod linux_dictation;
 #[cfg(target_os = "linux")]
+mod linux_icons;
+#[cfg(target_os = "linux")]
 mod linux_input;
 #[cfg(target_os = "linux")]
 mod linux_input_route;

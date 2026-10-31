@@ -13,6 +13,7 @@ set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 package=hex-bin
+icon_sizes='16 24 32 48 64 128 256 512'
 usage() {
   echo "Usage: $0 stage <version> <x64 executable> <x64 url> <arm64 executable> <arm64 url> <dir> | test <dir>" >&2
   exit 1
@@ -42,6 +43,11 @@ case "$mode" in
     sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/anomaly.hex.desktop" > "$dir/anomaly.hex.desktop"
     cp "$root/packaging/hex.service" "$root/packaging/aur/$package.install" "$dir/"
     cp "$root/LICENSE" "$dir/LICENSE"
+    icon_sums=
+    for size in $icon_sizes; do
+      cp "$root/packaging/linux/icons/hicolor/${size}x${size}/apps/anomaly.hex.png" "$dir/anomaly.hex-$size.png"
+      icon_sums="$icon_sums '$(sha256_of "$dir/anomaly.hex-$size.png")'"
+    done
     # makepkg uses a source already present under its file name, so `test`
     # downloads nothing.
     cp "$x64" "$dir/hex-$pkgver-linux-x64"
@@ -54,6 +60,7 @@ case "$mode" in
       -e "s/@DESKTOP_SHA256@/$(sha256_of "$dir/anomaly.hex.desktop")/" \
       -e "s/@SERVICE_SHA256@/$(sha256_of "$dir/hex.service")/" \
       -e "s/@LICENSE_SHA256@/$(sha256_of "$dir/LICENSE")/" \
+      -e "s/@ICON_SHA256S@/${icon_sums# }/" \
       "$root/packaging/aur/PKGBUILD" > "$dir/PKGBUILD"
     if grep -q '@[A-Z0-9_]*@' "$dir/PKGBUILD"; then
       echo "PKGBUILD has an unfilled placeholder." >&2
@@ -70,6 +77,9 @@ case "$mode" in
     bsdtar -tf "$built" | grep -qx usr/bin/hex
     bsdtar -tf "$built" | grep -qx usr/lib/systemd/user/hex.service
     bsdtar -tf "$built" | grep -qx usr/share/applications/anomaly.hex.desktop
+    for size in $icon_sizes; do
+      bsdtar -tf "$built" | grep -qx "usr/share/icons/hicolor/${size}x${size}/apps/anomaly.hex.png"
+    done
     echo "$built"
     ;;
   *) usage ;;
