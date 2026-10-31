@@ -7,15 +7,17 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, col, el, row, text};
+use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, canvas, col, el, row, text};
 
 use super::super::controls::Paint;
+use super::cards::{self, Caption, Side, TAP_BOX, bubble};
 use super::dictated::Dictated;
 use super::fixture::{ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded};
 use super::hud_stage::{FlowHud, LiveHud};
 use super::live::Live;
 use super::scene_script::Script;
 use super::sfx::SfxTrack;
+use super::typing::Glyph;
 use super::{flows, permissions, typing, versus};
 use crate::desktop::onboarding::Practice;
 use crate::feedback::KeySoundStyle;
@@ -569,6 +571,83 @@ pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
             || Onboard::new(Flow::Versus),
         ))
         .story(first_run())
+        .story(Story::new(
+            "Prototypes/Onboarding/Tapbacks",
+            || Onboard::new(Flow::Versus),
+            tapback_sheet,
+        ))
+}
+
+/// Every tapback glyph, other people's then the reader's own, over stacks
+/// on both sides of a thread, to hold against Messages.
+fn tapback_sheet(_: &Onboard, cx: &mut Cx<Onboard>) -> El {
+    let p = Paint::new(cx.system_dark(), cx.env().scale);
+    let glyphs = [
+        Glyph::Heart,
+        Glyph::ThumbsUp,
+        Glyph::ThumbsDown,
+        Glyph::Haha,
+        Glyph::Bang,
+        Glyph::Question,
+    ];
+    let set = |key: &str, own: bool| {
+        row()
+            .key(key.to_string())
+            .gap(8.0)
+            .children(glyphs.iter().enumerate().map(|(i, &glyph)| {
+                canvas(cards::tapback(p, glyph, Side::Them, own, true))
+                    .key(format!("g{i}"))
+                    .size(TAP_BOX, TAP_BOX)
+            }))
+    };
+    let line = |key: &str, side: Side, copy: &str, taps: &[Glyph]| {
+        bubble(
+            p,
+            key.to_string(),
+            side,
+            Caption::None,
+            copy,
+            taps,
+            1.0,
+            true,
+        )
+    };
+    let (fill, rim) = cards::material(p);
+    col()
+        .key("tapback-sheet")
+        .w(380.0)
+        .padding(20.0)
+        .gap(10.0)
+        .radius(18.0)
+        .continuous_corners()
+        .fill(fill)
+        .border(p.hair, rim)
+        .child(set("theirs", false))
+        .child(set("own", true))
+        .child(line(
+            "they",
+            Side::Them,
+            "they can see my screen",
+            &[Glyph::Haha],
+        ))
+        .child(line(
+            "sorry",
+            Side::You,
+            "sorry fart fingers",
+            &[Glyph::Haha, Glyph::Haha],
+        ))
+        .child(line(
+            "incontinence",
+            Side::You,
+            "So sorry for the incontinence",
+            &[Glyph::Haha, Glyph::Haha, Glyph::Bang],
+        ))
+        .child(line(
+            "desk",
+            Side::Them,
+            "Clear your desk.",
+            &[Glyph::ThumbsUp, Glyph::ThumbsUp, Glyph::Heart],
+        ))
 }
 
 fn first_run() -> Story<Onboard> {

@@ -3,7 +3,8 @@
 //! theme tokens.
 
 use rune::{
-    Color, El, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col, el, row, text,
+    Color, El, LineCap, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col, el,
+    row, text,
 };
 
 use super::super::controls::{KeySize, Paint, key_tray, keycap};
@@ -526,108 +527,236 @@ pub(crate) fn presenting(p: Paint, copy: &str, now: f64, flare: f32) -> El {
         )
 }
 
-/// Tapback badges: how far one sits out past the bubble's corner, its size,
-/// and how far each newer one steps out over the last.
+/// Tapback badges, after Messages: the badge's width and the ring of card
+/// cut around it; how far its middle sits out past the bubble's side and up
+/// over its top; and how far each older one peeks out behind the newest.
 const TAP: f32 = 24.0;
-const TAP_OUT: f32 = 13.0;
-const TAP_STEP: f32 = 14.0;
+const TAP_RING: f32 = 2.0;
+const TAP_OUT: f32 = 1.0;
+const TAP_UP: f32 = 6.0;
+const TAP_STEP: f32 = 11.0;
+/// One tapback's canvas, square, and where the badge's middle sits in it,
+/// leaving room for the tail dots trailing out and down.
+pub(crate) const TAP_BOX: f32 = 36.0;
+const TAP_MID: f32 = 16.0;
 /// The room a line keeps above its bubble once a tapback lands on it.
-pub(crate) const TAP_ROOM: f32 = 11.0;
+pub(crate) const TAP_ROOM: f32 = TAP_UP + TAP / 2.0 + TAP_RING - 6.0;
 
-/// iMessage tapbacks on a bubble's top corner (left on yours, right on
-/// theirs), each a round badge cut out of the card that pops in on a spring,
-/// newer ones stacked over and past the last.
+/// Tapbacks on a bubble's top corner, as Messages puts them: left on yours,
+/// right on theirs. The newest sits on the corner with the tail; older ones
+/// slide out behind it. Each pops in on a spring; under Reduce Motion it
+/// only fades.
 fn tapbacks(p: Paint, side: Side, taps: &[Glyph], reduced: bool) -> Vec<El> {
-    let k = p.k;
-    let (card, _) = material(p);
+    let newest = taps.len().saturating_sub(1);
     taps.iter()
         .enumerate()
         .map(|(i, &glyph)| {
-            let out = -TAP_OUT - TAP_STEP * i as f32;
-            let badge = row()
+            let behind = (newest - i) as f32;
+            let out = TAP_MID - TAP_BOX - TAP_OUT - TAP_STEP * behind;
+            let top = -TAP_UP - TAP_MID;
+            let badge = canvas(tapback(p, glyph, side, false, i == newest))
                 .key(format!("tap{i}"))
-                .size(TAP, TAP)
-                .center()
-                .radius(TAP * 0.5)
-                .fill(if k.dark { k.c.layer_04 } else { k.c.layer_03 })
-                .border(2.0, card)
-                .child(tap_glyph(p, glyph));
+                .size(TAP_BOX, TAP_BOX);
             let badge = match side {
-                Side::You => badge.pin(Some(out), Some(-TAP_OUT), None, None),
-                Side::Them => badge.pin(None, Some(-TAP_OUT), Some(out), None),
+                Side::You => badge.pin(Some(out), Some(top), None, None),
+                Side::Them => badge.pin(None, Some(top), Some(out), None),
             };
-            let pop = if reduced {
-                Transition::opacity()
-            } else {
+            if reduced {
+                return badge.transition(Transition::opacity());
+            }
+            badge.motion(Spring::new(0.3, 0.0)).transition(
                 Transition::opacity()
                     .combined(Transition::scale(0.2))
                     .springs(SpringPair::new(
                         Spring::new(0.36, 0.42),
                         Spring::new(0.12, 0.0),
-                    ))
-            };
-            badge.transition(pop)
+                    )),
+            )
         })
         .collect()
 }
 
-/// A tapback's mark: plain text or a vector, never an emoji font.
-fn tap_glyph(p: Paint, glyph: Glyph) -> El {
+/// One tapback on a [`TAP_BOX`] canvas: a round badge ringed in the card's
+/// colour with `glyph` on it, and with `tail`, two dots trailing out and
+/// down, away from `side`'s bubble. Other people's are grey; the reader's
+/// `own` are blue. Every glyph is drawn, never set in a font.
+pub(crate) fn tapback(p: Paint, glyph: Glyph, side: Side, own: bool, tail: bool) -> Shape {
     let k = p.k;
-    let red = k.c.danger.fg;
-    let word = |copy: &str, size: f32, color: Color| {
-        text(copy.to_string())
-            .key("glyph")
-            .font(TextStyle::new(size, 800.0).lh(size + 1.0))
-            .color(color)
+    let (card, _) = material(p);
+    let (fill, ink) = if own {
+        (rune_theme_opencode::scale("cobalt", k.dark, 9), k.c.white)
+    } else {
+        (k.c.layer_04, p.muted())
     };
-    let drawn = |shape: Shape| canvas(shape).key("glyph").size(13.0, 13.0);
-    match glyph {
-        Glyph::Haha => word("Haha", 7.5, p.text()),
-        Glyph::Bang => word("!!", 12.0, red),
-        Glyph::Question => word("?", 13.0, p.text()),
-        Glyph::ThumbsUp => drawn(thumb(p.text(), false)),
-        Glyph::ThumbsDown => drawn(thumb(p.text(), true)),
-        Glyph::Heart => drawn(heart(red)),
+    let heart = if own { ink } else { k.c.danger.fg };
+    // The tail points out, away from the bubble: left of yours.
+    let mid = match side {
+        Side::Them => [TAP_MID, TAP_MID],
+        Side::You => [TAP_BOX - TAP_MID, TAP_MID],
+    };
+    let out = if side == Side::You { -1.0 } else { 1.0 };
+    let r = TAP / 2.0;
+    let mut discs = vec![(mid, r)];
+    if tail {
+        discs.push(([mid[0] + out * 0.67 * r, mid[1] + 0.67 * r], 0.2 * r));
+        discs.push(([mid[0] + out * 1.06 * r, mid[1] + 1.06 * r], 0.12 * r));
     }
+    let mut shape = Shape::new();
+    for &(at, radius) in &discs {
+        shape = shape.fill(disc(at, radius + TAP_RING), card);
+    }
+    for &(at, radius) in &discs {
+        shape = shape.fill(disc(at, radius), fill);
+    }
+    glyph_on(shape, glyph, mid, ink, heart, fill)
 }
 
-/// A thumbs-up on a 16-point grid, or turned over for a thumbs-down.
-fn thumb(color: Color, down: bool) -> Shape {
-    let f = |[x, y]: [f32; 2]| if down { [16.0 - x, 16.0 - y] } else { [x, y] };
-    let cuff = Path::new()
-        .move_to(f([1.8, 7.4]))
-        .line_to(f([4.4, 7.4]))
-        .line_to(f([4.4, 15.0]))
-        .line_to(f([1.8, 15.0]))
-        .close();
-    let hand = Path::new()
-        .move_to(f([5.5, 7.6]))
-        .line_to(f([8.0, 2.5]))
-        .quad_to(f([8.6, 1.3]), f([9.7, 1.8]))
-        .quad_to(f([10.8, 2.4]), f([10.4, 4.1]))
-        .line_to(f([9.9, 6.5]))
-        .line_to(f([13.1, 6.5]))
-        .quad_to(f([14.7, 6.6]), f([14.4, 8.3]))
-        .line_to(f([13.5, 13.6]))
-        .quad_to(f([13.2, 15.0]), f([11.8, 15.0]))
-        .line_to(f([5.5, 15.0]))
-        .close();
-    Shape::new()
-        .view_box(16.0, 16.0)
-        .fill_path(&cuff, color)
-        .fill_path(&hand, color)
+/// A circle of `radius` around `at`, as a polygon.
+fn disc(at: [f32; 2], radius: f32) -> Vec<[f32; 2]> {
+    (0..40)
+        .map(|i| {
+            let a = i as f32 / 40.0 * std::f32::consts::TAU;
+            [at[0] + radius * a.cos(), at[1] + radius * a.sin()]
+        })
+        .collect()
 }
 
-fn heart(color: Color) -> Shape {
-    let path = Path::new()
-        .move_to([8.0, 14.2])
-        .cubic_to([1.0, 9.6], [1.4, 2.6], [5.2, 2.6])
-        .cubic_to([6.8, 2.6], [7.6, 3.7], [8.0, 4.8])
-        .cubic_to([8.4, 3.7], [9.2, 2.6], [10.8, 2.6])
-        .cubic_to([14.6, 2.6], [15.0, 9.6], [8.0, 14.2])
-        .close();
-    Shape::new().view_box(16.0, 16.0).fill_path(&path, color)
+/// `glyph` drawn over `shape` on a 16-point grid centred on `mid` and 14
+/// points across, in `ink` (a heart in `heart`); `cut` is the badge's own
+/// colour, for the gaps between a hand's fingers.
+fn glyph_on(
+    shape: Shape,
+    glyph: Glyph,
+    mid: [f32; 2],
+    ink: Color,
+    heart: Color,
+    cut: Color,
+) -> Shape {
+    const SCALE: f32 = 14.0 / 16.0;
+    let at = |[x, y]: [f32; 2]| [mid[0] + (x - 8.0) * SCALE, mid[1] + (y - 8.0) * SCALE];
+    let path = |points: &[[f32; 2]]| {
+        let mut path = Path::new().move_to(at(points[0]));
+        for chunk in points[1..].chunks(3) {
+            path = path.cubic_to(at(chunk[0]), at(chunk[1]), at(chunk[2]));
+        }
+        path
+    };
+    match glyph {
+        Glyph::Heart => shape.fill_path(
+            &path(&[
+                [8.0, 14.4],
+                [0.6, 9.7],
+                [1.0, 2.0],
+                [5.0, 2.0],
+                [6.6, 2.0],
+                [7.5, 3.0],
+                [8.0, 4.3],
+                [8.5, 3.0],
+                [9.4, 2.0],
+                [11.0, 2.0],
+                [15.0, 2.0],
+                [15.4, 9.7],
+                [8.0, 14.4],
+            ])
+            .close(),
+            heart,
+        ),
+        Glyph::ThumbsUp | Glyph::ThumbsDown => {
+            let down = glyph == Glyph::ThumbsDown;
+            let f = |[x, y]: [f32; 2]| {
+                if down {
+                    at([16.0 - x, 16.0 - y])
+                } else {
+                    at([x, y])
+                }
+            };
+            let cuff = vec![f([1.4, 7.2]), f([4.4, 7.2]), f([4.4, 14.8]), f([1.4, 14.8])];
+            let hand = Path::new()
+                .move_to(f([5.4, 7.4]))
+                .line_to(f([7.8, 2.4]))
+                .quad_to(f([8.5, 0.9]), f([9.9, 1.5]))
+                .quad_to(f([11.2, 2.2]), f([10.7, 4.1]))
+                .line_to(f([10.2, 6.2]))
+                .line_to(f([13.4, 6.2]))
+                .quad_to(f([15.3, 6.3]), f([14.9, 8.3]))
+                .line_to(f([14.0, 13.5]))
+                .quad_to(f([13.6, 15.0]), f([12.0, 15.0]))
+                .line_to(f([5.4, 15.0]))
+                .close();
+            // Fingers: three short cuts in from the hand's far edge.
+            let knuckles = [8.9, 10.9, 12.8].map(|y| (f([12.0, y]), f([15.6, y])));
+            let mut shape = shape.fill(cuff, ink).fill_path(&hand, ink);
+            for (a, b) in knuckles {
+                shape = shape.line(a, b, 0.8, LineCap::Round, cut);
+            }
+            shape
+        }
+        Glyph::Haha => {
+            // Two lines of bold, rounded capitals, the second a little
+            // smaller and stepped right, as Messages draws it.
+            let mut shape = shape;
+            for (x0, top, size) in [(2.9, 2.3, 1.0), (4.5, 9.2, 0.84)] {
+                let p = |x: f32, y: f32| at([x0 + x * size, top + y * 5.0 * size]);
+                let strokes = [
+                    // H
+                    [p(0.0, 0.0), p(0.0, 1.0)],
+                    [p(3.8, 0.0), p(3.8, 1.0)],
+                    [p(0.0, 0.5), p(3.8, 0.5)],
+                    // A
+                    [p(6.1, 1.0), p(8.25, 0.0)],
+                    [p(8.25, 0.0), p(10.4, 1.0)],
+                    [p(6.9, 0.66), p(9.6, 0.66)],
+                ];
+                for [a, b] in strokes {
+                    shape = shape.line(a, b, 2.0 * size, LineCap::Round, ink);
+                }
+            }
+            shape
+        }
+        Glyph::Bang => {
+            // Two leaning teardrops over their dots.
+            let mut shape = shape;
+            for x in [5.6, 10.9] {
+                let (r, top) = (1.95, 3.6);
+                let tip = [x - 0.9, 10.0];
+                let drop = Path::new()
+                    .move_to(at(tip))
+                    .cubic_to(at([tip[0] - 0.6, 8.2]), at([x - r, 6.0]), at([x - r, top]))
+                    .cubic_to(
+                        at([x - r, top - 1.1]),
+                        at([x - 1.1, top - r]),
+                        at([x, top - r]),
+                    )
+                    .cubic_to(
+                        at([x + 1.1, top - r]),
+                        at([x + r, top - 1.1]),
+                        at([x + r, top]),
+                    )
+                    .cubic_to(at([x + r, 6.2]), at([tip[0] + 0.7, 8.2]), at(tip))
+                    .close();
+                shape = shape
+                    .fill_path(&drop, ink)
+                    .fill(disc(at([x - 1.3, 13.2]), 1.55 * SCALE), ink);
+            }
+            shape
+        }
+        Glyph::Question => shape
+            .stroke_path(
+                &path(&[
+                    [4.6, 5.4],
+                    [4.6, 1.6],
+                    [11.6, 1.4],
+                    [11.4, 5.2],
+                    [11.3, 7.5],
+                    [8.2, 7.6],
+                    [8.1, 10.0],
+                ]),
+                2.3,
+                LineCap::Round,
+                ink,
+            )
+            .fill(disc(at([8.1, 13.4]), 1.6 * SCALE), ink),
+    }
 }
 
 /// What a [`system_line`] is: someone cutting you off, a neutral notice,
@@ -675,7 +804,7 @@ pub(crate) fn system_line(
         )
 }
 
-fn material(p: Paint) -> (Color, Color) {
+pub(crate) fn material(p: Paint) -> (Color, Color) {
     let k = p.k;
     if k.dark {
         (k.c.surface_raised, k.c.border_weak)
