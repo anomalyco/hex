@@ -518,6 +518,8 @@ Do not start it beside an existing listener.
 ```ts
 Completed output                         // output
 ├── Paste -> Current focus, in submission order
+│   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
+│   └── Labs > Keep dictation on clipboard (macOS, off) -> the dictation stays on the clipboard (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   └── Last completed dictation
 └── History

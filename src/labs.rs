@@ -5,7 +5,8 @@
 //! as a normal item while on and is hidden while off; a behaviour-only
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
-//! last dictation's default shortcut, and Terminal paste
+//! last dictation's default shortcut, keeping the dictation on the
+//! clipboard (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Gate a feature where its work starts (the worker, thread, or capture
@@ -38,10 +39,11 @@ pub enum Feature {
     ShareShortcut,
     UnloadIdle,
     RestoreShortcutDefault,
+    KeepOnClipboard,
 }
 
 impl Feature {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -55,6 +57,7 @@ impl Feature {
         Self::ShareShortcut,
         Self::UnloadIdle,
         Self::RestoreShortcutDefault,
+        Self::KeepOnClipboard,
     ];
 
     /// The features this OS has.
@@ -67,7 +70,9 @@ impl Feature {
             Self::Meetings | Self::LiveChapters => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::MouseShortcuts | Self::PauseBrowser => cfg!(target_os = "macos"),
+            Self::MouseShortcuts | Self::PauseBrowser | Self::KeepOnClipboard => {
+                cfg!(target_os = "macos")
+            }
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -93,6 +98,7 @@ impl Feature {
             Self::ShareShortcut => "share-shortcut",
             Self::UnloadIdle => "unload-idle",
             Self::RestoreShortcutDefault => "restore-shortcut-default",
+            Self::KeepOnClipboard => "keep-on-clipboard",
         }
     }
 
@@ -112,6 +118,7 @@ impl Feature {
             Self::ShareShortcut => "share_dictation_shortcut",
             Self::UnloadIdle => "labs.unload_idle",
             Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
+            Self::KeepOnClipboard => "labs.keep_on_clipboard",
         }
     }
 
@@ -142,6 +149,9 @@ impl Feature {
             Self::RestoreShortcutDefault => {
                 "Offer Restore default next to Paste last dictation's shortcut"
             }
+            Self::KeepOnClipboard => {
+                "Leave the dictation on the clipboard after pasting instead of restoring what was there"
+            }
         }
     }
 
@@ -165,6 +175,7 @@ impl Feature {
             Self::ShareShortcut => settings.share_dictation_shortcut,
             Self::UnloadIdle => settings.labs.unload_idle,
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
+            Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
         }
     }
 
@@ -183,6 +194,7 @@ impl Feature {
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
             Self::UnloadIdle => settings.labs.unload_idle = on,
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
+            Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
         }
     }
 }
@@ -195,6 +207,7 @@ const PLAYGROUND: u32 = 1 << 3;
 const VOCABULARY_BIASING: u32 = 1 << 4;
 const MOUSE_SHORTCUTS: u32 = 1 << 5;
 const UNLOAD_IDLE: u32 = 1 << 6;
+const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
 /// Unload-idle minutes sit above the switches.
 const MINUTES_SHIFT: u32 = 8;
 
@@ -243,6 +256,13 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// A pasted dictation stays on the clipboard rather than the previous
+/// clipboard being restored (macOS; read as each paste commits).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn keep_on_clipboard() -> bool {
+    on(KEEP_ON_CLIPBOARD)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -265,6 +285,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.vocabulary_biasing, VOCABULARY_BIASING),
         (settings.mouse_shortcuts, MOUSE_SHORTCUTS),
         (settings.unload_idle, UNLOAD_IDLE),
+        (settings.keep_on_clipboard, KEEP_ON_CLIPBOARD),
     ]
     .into_iter()
     .filter(|(on, _)| *on)

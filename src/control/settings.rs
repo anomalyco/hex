@@ -296,6 +296,11 @@ const KEYS: &[Key] = &[
         "Labs: offer Restore default beside the Paste last dictation shortcut",
     ),
     key(
+        "labs.keep_on_clipboard",
+        Kind::Bool,
+        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

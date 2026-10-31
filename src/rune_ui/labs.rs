@@ -188,6 +188,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Also pause the browser"),
             tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
         ));
+        rows.push(row(
+            Feature::KeepOnClipboard,
+            &HINTS,
+            tr("Keep dictation on clipboard"),
+            tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
+        ));
     }
     rows.push(row(
         Feature::UnloadIdle,
@@ -235,6 +241,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::ShareShortcut => "lab-share-shortcut",
         Feature::UnloadIdle => "lab-unload-idle",
         Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
+        Feature::KeepOnClipboard => "lab-keep-on-clipboard",
     }
 }
 
