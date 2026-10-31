@@ -28,6 +28,11 @@ mod config;
 mod context;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
+#[cfg(all(
+    target_arch = "x86_64",
+    any(target_os = "linux", target_os = "windows")
+))]
+mod cpu_floor;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 mod dashboard;
 mod desktop_activity;
@@ -966,12 +971,16 @@ mod tests {
 
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    cpu_floor::require();
     linux_input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    cpu_floor::require();
     windows::restrict_dll_search();
     windows::run(&SHUTDOWN)
 }

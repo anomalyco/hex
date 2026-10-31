@@ -7,6 +7,8 @@ to the CPU. The window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
 or a software Vulkan driver. See the Wayland requirements below.
 
+x86_64 machines need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor Hex shows a message and quits instead of starting.
+
 Linux opens the same window as macOS and Windows: Settings, Modes,
 and History. Meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard

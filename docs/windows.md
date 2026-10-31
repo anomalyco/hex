@@ -29,6 +29,8 @@ app and **Disabled** when it does nothing.
 
 ## Install
 
+x86_64 PCs need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor Hex shows a message and quits instead of starting.
+
 Download and run the installer for your PC:
 
 - x64: [`HexSetup.exe`](https://anoma.ly/hex/download/windows-x64-setup)

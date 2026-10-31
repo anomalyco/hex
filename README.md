@@ -256,7 +256,8 @@ Diagnostics are stored at:
 
 ## Windows Beta
 
-The Windows beta runs on Windows 10 and 11, x64 and ARM64. It covers hotkey
+The Windows beta runs on Windows 10 and 11, x64 and ARM64. x64 PCs need a 2013 or
+newer processor with AVX2 (Intel Haswell / AMD Excavator or later). It covers hotkey
 dictation (Hold or Toggle, `Ctrl+Space` by default), Modes,
 History, a tray icon, and signed self-updates. On x64 with a Vulkan graphics
 driver, Parakeet Unified English streams while you speak, so text arrives within
@@ -272,7 +273,8 @@ source.
 
 ## Linux Beta
 
-The Linux beta targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
+The Linux beta (x86_64 needs a 2013 or newer processor with AVX2: Intel
+Haswell / AMD Excavator or later) targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
 compositors. It supports local hotkey dictation, Modes, History,
 the Hex window, and signed updates for direct installs. With a Vulkan graphics driver, dictation
 streams while you speak, as on macOS and Windows. Native Wayland requires
