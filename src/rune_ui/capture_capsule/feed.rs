@@ -500,11 +500,17 @@ fn show_helper(capsule: &CaptureCapsule, need: CaptureNeed) {
     watch_grant(capsule.clone(), need);
 }
 
-/// The pointer, in global top-left points. Wayland tells Hex nothing of it:
-/// the portal picks the screen.
-#[cfg(not(target_os = "macos"))]
+/// The pointer. Wayland tells Hex nothing of it: the portal picks the
+/// screen.
+#[cfg(target_os = "linux")]
 fn pointer() -> [f64; 2] {
     [0.0, 0.0]
+}
+
+/// The pointer, in global physical pixels, as the engine's targets are.
+#[cfg(target_os = "windows")]
+fn pointer() -> [f64; 2] {
+    scrawl_capture::screens::pointer().unwrap_or_default()
 }
 
 /// The pointer, in global top-left points.

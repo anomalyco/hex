@@ -1,6 +1,7 @@
 //! The capture's copy of the microphone timeline: a bounded sink that never
 //! blocks the timeline. The macOS audio owner (`dictation_audio`) and the
-//! Linux listener (`linux_dictation`) feed it the same way.
+//! Linux and Windows listeners (`linux_dictation`, `windows_dictation`) feed
+//! it the same way.
 
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::Duration;
@@ -130,16 +131,16 @@ impl CaptureSink {
     }
 }
 
-/// The Linux listener's timeline: it reads the microphone in its own loop
+/// The Linux or Windows listener's timeline: it reads the microphone in its own loop
 /// and feeds each chunk here, so the sink sits behind a short lock. The
 /// stream's timestamps count from when it opened; each stream is anchored to
 /// the monotonic clock at its first chunk after a sink opens, which puts its
 /// audio on the same clock as [`CaptureInstant::now`].
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 pub struct ListenerTimeline(std::sync::Mutex<ListenerState>);
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 struct ListenerState {
     sink: Option<CaptureSink>,
@@ -147,7 +148,7 @@ struct ListenerState {
     offset: Option<i128>,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 impl ListenerTimeline {
     fn state(&self) -> std::sync::MutexGuard<'_, ListenerState> {
         self.0.lock().unwrap_or_else(|error| error.into_inner())
@@ -184,7 +185,7 @@ impl ListenerTimeline {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 impl super::AudioTimeline for ListenerTimeline {
     fn open_sink(
         &self,

@@ -1,13 +1,14 @@
-# Annotate (macOS and Linux)
+# Annotate (macOS, Linux, and Windows)
 
 Annotate is Scrawl's capture engine hosted inside Hex (code and settings keep
 the name `capture`), steps 3 to 5 of
 [the plan](../plans/capture-in-hex.md). It runs the real
 `scrawl-capture` crate, imported into `crates/capture`: it records the active
-display with ScreenCaptureKit, or on Linux the screen-cast portal and
-PipeWire (`capture.linux`), (or a cabled iPhone through `scrawl-helper`'s
+display with ScreenCaptureKit, on Linux the screen-cast portal and
+PipeWire (`capture.linux`), on Windows Windows.Graphics.Capture
+(`capture.windows`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
-macOS, or the Annotate key held or the pen), transcribes the narration with word timestamps on
+macOS and Windows, or the Annotate key held or the pen), transcribes the narration with word timestamps on
 Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
 copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
 router (`crates/router`), run in Hex's process. Settings › Annotate (under
@@ -17,12 +18,13 @@ Rune overlays.
 
 ```ts
 Turn it on                               // capture.gate
-├── On by default in every macOS and Linux build (capture.enabled); the
-│   `annotate-on-by-default` migration turns it on once for older settings
+├── On by default in every macOS, Linux, and Windows dev build
+│   (capture.enabled); the `annotate-on-by-default` migration turns it on
+│   once for older settings
 │   └── macOS bundles sign scrawl-helper beside `hex`; validate-app.sh requires it
-├── Windows -> not compiled; no pane, no `hex annotate`
 ├── Nothing is asked at launch: Screen Recording (macOS) at the first capture,
-│   the portal's dialog (Linux) at the first Screen capture
+│   the portal's dialog (Linux) at the first Screen capture; Windows asks
+│   nothing
 ├── A start without a permission it needs (macOS: Screen Recording unless
 │   iPhone, then Microphone, then Accessibility; capture_host::permissions)
 │   -> refused with code `permission`, no error tone, and the capsule's
@@ -34,23 +36,25 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   while it records, the pointer draws with no click until it comes up
 │   (macOS: CaptureShortcut tells the tap from the hold at release; Linux:
 │   the portal's Activated/Deactivated or the X11 grab's press and release,
-│   linux_input Capture/CaptureUp -> CaptureHost::annotate_down/up)
+│   linux_input Capture/CaptureUp; Windows: the keyboard hook's
+│   HotkeyAction::Capture/CaptureUp -> CaptureHost::annotate_down/up)
 ├── The capsule's pen -> on until clicked again, or the key is tapped, or
 │   held and let go (Action::Pen -> capture_host::toggle_pen). Like a real
 │   pen it inks only between mouse-down and mouse-up (capture_host::
 │   pen_button; Linux: the overlay's drag, macOS: the tap's buttons); moving
 │   with the button up draws nothing, and clicks still never reach the app
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
-│   on macOS; Escape bound through the portal or grab on Linux, and the
-│   overlay's own key handler where it gets the keyboard)
-├── macOS -> Shift held alone still draws, as in Scrawl
+│   on macOS; Escape bound through the portal or grab on Linux; the keyboard
+│   hook on Windows, when no dictation takes it; and the overlay's own key
+│   handler where it gets the keyboard)
+├── macOS and Windows -> Shift held alone still draws, as in Scrawl
 ├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
 │   clicks never reach the app; the capsule stays clickable above it (macOS:
 │   its level; Linux: the overlay leaves a hole over the capsule's pill).
 │   Every move draws ink; there are no pins and no undo
 ├── `hex annotate draw` (Linux) -> the pen on or off, for desktops without
 │   the portal (it starts a recording drawing)
-├── Default key: ⌥⇧S on macOS; F9 on Linux, a single key one hand holds
+├── Default key: ⌥⇧S on macOS; F9 on Linux and Windows, a single key one hand holds
 │   while the other moves the mouse (F10 is GTK's menu key, F11 full screen,
 │   F12 often a dropdown terminal). Saved bindings stay.
 │   Check: capture_host the_shortcut_records_once_its_keys_come_up; none
@@ -103,11 +107,37 @@ On Linux                                 // capture.linux
     laser or click log outside draw mode, no window log, `hex capture status`
     unsupported, choosing another folder only through settings.json
 
+On Windows                               // capture.windows
+├── Source -> the engine's Windows.Graphics.Capture recorder (win/media.rs):
+│   Screen, Window (the picker lists windows), and Area; no permission asked
+├── Units -> the engine's targets, windows, and pointer are physical pixels;
+│   the picker and ink overlays sit on the primary display and lay out in its
+│   points, converted with capture_host::pixels_per_point (mixed-DPI displays:
+│   the primary's scale applies everywhere)
+├── Narration -> the listener's microphone through ListenerTimeline, fed by
+│   windows_dictation; released-while-idle microphones open for the capture
+├── Words -> one foreground job on the listener's engine (its loaded model)
+├── Input -> windows_input's low-level hooks: the Annotate key (F9; tap to
+│   start and stop, hold to draw), Escape while drawing, and while a capture
+│   records every pointer move, click, wheel turn, and modifier change
+│   (capture_host::report_input, as the macOS tap): Shift alone inks, the
+│   laser follows the pointer, clicks are logged. Injected events are skipped
+├── While it records, dictation starts nothing
+├── While dictating -> General's setting through windows_audio_control, one
+│   suppressor per capture, restored when it ends
+├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
+│   contact sheet, then the summary
+├── Pane -> no Screen Recording row, no transcriber choice
+└── Gaps: no `hex annotate` (Windows has no control transport yet), no
+    iPhone, keys pressed in the app are not logged. Checked only by
+    cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
+    a Windows machine
+
 Settings › Annotate                      // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
 │   input, retention, or folder
 │   └── On while the shortcut collides -> refused, the shortcut row says why
-├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux) -> same keycap and recorder as dictation;
+├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux and Windows) -> same keycap and recorder as dictation;
 │   a key is required; refused when it overlaps dictation or paste
 ├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
 │   macOS), the capsule's pen with Esc, stop (tap again), and send, each

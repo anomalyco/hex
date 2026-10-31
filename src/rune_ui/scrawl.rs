@@ -112,7 +112,8 @@ fn folder_label(ui: &Ui) -> String {
 fn how_it_works(ui: &Ui, p: Paint) -> Vec<El> {
     let shortcut = ui.settings.capture.hotkey.keycaps();
     let keys = |key: &str, parts: &[String]| super::controls::keycaps(p, key, parts);
-    let draw_how = if cfg!(target_os = "macos") {
+    // Wayland tells Hex nothing of Shift outside its own windows.
+    let draw_how = if cfg!(not(target_os = "linux")) {
         tr(
             "While it records, hold the shortcut and move the pointer; no click needed. Shift draws too",
         )

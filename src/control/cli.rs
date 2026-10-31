@@ -362,8 +362,9 @@ pub fn run(command: ControlCli) -> u8 {
     }
 }
 
-/// `hex capture` (the `capture` experiment).
-#[cfg(hex_capture)]
+/// `hex capture` (the `capture` experiment). Windows has no control
+/// transport for it yet.
+#[cfg(all(hex_capture, not(target_os = "windows")))]
 #[derive(Subcommand)]
 pub enum CaptureCommand {
     /// Start recording a capture.
@@ -449,7 +450,7 @@ pub enum CaptureCommand {
 /// Runs `hex capture`: on macOS through the running Hex; on Linux the
 /// folder reads (`list`, `show`, `route`, `send`) run here, and the
 /// recording commands go to the running Hex's listener.
-#[cfg(hex_capture)]
+#[cfg(all(hex_capture, not(target_os = "windows")))]
 pub fn capture(command: CaptureCommand) -> u8 {
     use crate::control::{ControlCommand as C, ScrawlCaptureAction as A};
     let (command, output) = match command {

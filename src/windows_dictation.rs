@@ -55,6 +55,8 @@ pub struct WindowsDictationConfig {
     pub device: Option<String>,
     pub hotkey: WindowsHotkey,
     pub paste_last_hotkey: Option<WindowsHotkey>,
+    /// The Annotate key, while Annotate is on.
+    pub annotate_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
@@ -83,6 +85,9 @@ impl WindowsDictationConfig {
             device: settings.microphone.clone(),
             hotkey: WindowsHotkey::from(&settings.dictation_hotkey),
             paste_last_hotkey: settings.paste_last_hotkey.as_ref().map(WindowsHotkey::from),
+            annotate_hotkey: settings
+                .capture_on()
+                .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
             double_tap_lock: settings.double_tap_lock,
             double_tap_only: settings.double_tap_only,
             shortcut_mode: settings.shortcut_mode,
@@ -123,6 +128,7 @@ pub fn run(
         device,
         hotkey,
         paste_last_hotkey,
+        annotate_hotkey,
         double_tap_lock,
         double_tap_only,
         shortcut_mode,
@@ -188,6 +194,7 @@ pub fn run(
     let mut shortcuts = Shortcuts {
         hotkey,
         paste_last_hotkey,
+        annotate_hotkey,
         double_tap_lock,
         double_tap_only,
         shortcut_mode,
@@ -201,6 +208,15 @@ pub fn run(
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
     // The local API transcribes host audio on this engine's model.
     engine.share();
+    // The `capture` experiment: its host, the audio it copies from this
+    // listener's microphone, and the capsule's commands.
+    let timeline = crate::capture_host::ListenerTimeline::default();
+    let environment = crate::capture_host::Environment;
+    let mut capture_host =
+        crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
+    let capture_controls = crate::capture_host::listen_for_controls();
+    // The microphone stays open for a capture even while released when idle.
+    let mut capture_holds_microphone = false;
     let mut finishing: Option<Finishing> = None;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
@@ -265,6 +281,7 @@ pub fn run(
             let next_shortcuts = Shortcuts {
                 hotkey: next_config.hotkey,
                 paste_last_hotkey: next_config.paste_last_hotkey,
+                annotate_hotkey: next_config.annotate_hotkey,
                 double_tap_lock: next_config.double_tap_lock,
                 double_tap_only: next_config.double_tap_only,
                 shortcut_mode: next_config.shortcut_mode,
@@ -319,9 +336,50 @@ pub fn run(
         {
             let old = std::mem::replace(&mut engine, Arc::new(TranscriptionEngine::start(next)?));
             engine.share();
-            // A request on the local API holds the old engine a moment.
+            crate::capture_host::use_engine(&engine);
+            // A request on the local API or a capture still transcribing
+            // holds the old engine a moment.
             if let Ok(old) = Arc::try_unwrap(old) {
                 old.retire();
+            }
+        }
+        crate::capture_host::CaptureHost::reconcile(
+            &mut capture_host,
+            Some(&engine),
+            &environment,
+            &timeline,
+        );
+        while let Ok(control) = capture_controls.try_recv() {
+            let reply = match (&mut capture_host, control) {
+                (Some(host), crate::capture_host::CaptureControl::Scrawl(action)) => {
+                    host.control(action, &timeline)
+                }
+                (Some(host), crate::capture_host::CaptureControl::Command(command)) => {
+                    host.command(command, &timeline)
+                }
+                (None, _) => crate::control::ControlReply::error("feature-off", "captures are off"),
+            };
+            if let crate::control::ControlReply::Error { message, .. } = reply {
+                tracing::warn!(message, "a capture command did nothing");
+            }
+        }
+        // A capture copies this microphone: a released one opens for it,
+        // and closes again once nothing records.
+        if release_while_idle {
+            let wants = timeline.wants_audio();
+            if wants && !input.is_active() {
+                input.request_open();
+            }
+            if wants {
+                capture_holds_microphone = true;
+            } else if capture_holds_microphone
+                && !recording
+                && !start_pending
+                && finishing.is_none()
+            {
+                capture_holds_microphone = false;
+                input.close();
+                audio_ready = false;
             }
         }
         if let Ok(error) = hotkey.errors.try_recv() {
@@ -358,7 +416,7 @@ pub fn run(
                 });
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
-            if release_while_idle {
+            if release_while_idle && !timeline.wants_audio() {
                 input.close();
                 audio_ready = false;
             }
@@ -368,6 +426,24 @@ pub fn run(
         {
             let occurred_at = event.occurred_at(captured_through);
             match event.action {
+                // Annotate records the narration itself: while it records,
+                // dictation starts nothing.
+                HotkeyAction::Start
+                    if capture_host
+                        .as_mut()
+                        .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
+                // One key: a tap starts and stops; held while recording, it
+                // draws until it comes up.
+                HotkeyAction::Capture => {
+                    if let Some(host) = &mut capture_host {
+                        host.annotate_down(&timeline);
+                    }
+                }
+                HotkeyAction::CaptureUp => {
+                    if let Some(host) = &mut capture_host {
+                        host.annotate_up(&timeline);
+                    }
+                }
                 HotkeyAction::Start
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
@@ -399,8 +475,10 @@ pub fn run(
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
                     audio_suppressor.restore();
-                    input.close();
-                    audio_ready = false;
+                    if !timeline.wants_audio() {
+                        input.close();
+                        audio_ready = false;
+                    }
                     let cancelled = matches!(event.action, HotkeyAction::Cancel);
                     events.dictation(
                         if cancelled {
@@ -450,7 +528,7 @@ pub fn run(
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_current_state(&mut events, recording, pending, &device_label)?;
-                    if release_while_idle {
+                    if release_while_idle && !timeline.wants_audio() {
                         input.close();
                         audio_ready = false;
                     }
@@ -506,7 +584,11 @@ pub fn run(
 
         match input.recv_timeout(
             UPDATE_INTERVAL,
-            crate::audio::capture_idle(recording, start_pending, finishing.is_some()),
+            crate::audio::capture_idle(
+                recording || timeline.wants_audio(),
+                start_pending,
+                finishing.is_some(),
+            ),
         ) {
             RecoveringAudioInputEvent::Chunk {
                 samples,
@@ -514,6 +596,7 @@ pub fn run(
             } => {
                 captured_through = chunk_captured_through;
                 crate::input_level::record(&samples);
+                timeline.feed(&samples, input.sample_rate(), captured_through);
                 if !audio_ready {
                     capture = DictationCapture::new(input.sample_rate());
                     capture.ingest_with_pending(&samples, captured_through, None);
@@ -559,6 +642,7 @@ pub fn run(
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
+                timeline.restart();
                 // A release still in its tail finishes with the audio it has.
                 if let Some(release) = &mut finishing {
                     release.deadline = Instant::now();
@@ -584,6 +668,7 @@ pub fn run(
                 emit_current_state(&mut events, recording, pending, &device_label)?;
             }
             RecoveringAudioInputEvent::Reopened => {
+                timeline.restart();
                 capture = DictationCapture::new(input.sample_rate());
                 audio_ready = false;
                 device_label = input.device_name().to_string();
@@ -615,6 +700,9 @@ pub fn run(
         }
         capture.cancel();
         events.dictation(DictationPhase::Cancelled, "")?;
+    }
+    if let Some(mut host) = capture_host.take() {
+        host.shutdown(&timeline);
     }
     emit_state(&mut events, VoiceState::Stopping, &device_label)?;
     drop(hotkey);
@@ -745,6 +833,7 @@ fn job_result(kind: OutputKind, result: Result<String, String>, latency_ms: u32)
 struct Shortcuts {
     hotkey: WindowsHotkey,
     paste_last_hotkey: Option<WindowsHotkey>,
+    annotate_hotkey: Option<WindowsHotkey>,
     double_tap_lock: bool,
     double_tap_only: bool,
     shortcut_mode: crate::dictation::ShortcutMode,
@@ -758,6 +847,7 @@ impl Shortcuts {
         WindowsHotkeyMonitor::start(
             self.hotkey.clone(),
             self.paste_last_hotkey.clone(),
+            self.annotate_hotkey.clone(),
             self.double_tap_lock,
             self.double_tap_lock && self.double_tap_only,
             self.shortcut_mode,

@@ -213,6 +213,16 @@ impl CaptureInstant {
         Self(now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64)
     }
 
+    /// The monotonic clock, counted from its first read (one second in, so
+    /// it is never [`Self::ZERO`]). Windows' microphone streams keep their
+    /// own clock, so the capture timeline anchors them to this.
+    #[cfg(target_os = "windows")]
+    pub fn now() -> Self {
+        static ANCHOR: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+        let since = u64::try_from(ANCHOR.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        Self(since.saturating_add(1_000_000_000))
+    }
+
     #[cfg(target_os = "macos")]
     pub fn from_mach_ticks(ticks: u64) -> Self {
         let Some((numerator, denominator)) = mach_timebase() else {

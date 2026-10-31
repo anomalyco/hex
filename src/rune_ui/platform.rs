@@ -582,7 +582,7 @@ impl PlatformHost {
             #[cfg(target_os = "linux")]
             Self::None => {
                 if let PlatformRequest::Scrawl(request) = request {
-                    linux_scrawl_request(request);
+                    scrawl_request(request);
                 }
                 Ok(())
             }
@@ -599,9 +599,12 @@ impl PlatformHost {
                     )
                     .map_err(|error| format!("{error:#}"))?;
                 }
+                if let PlatformRequest::Scrawl(request) = request {
+                    scrawl_request(request);
+                }
                 Ok(())
             }
-            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            #[cfg(target_os = "macos")]
             Self::None => Ok(()),
             Self::Fixture(sent) => {
                 sent.push(request);
@@ -614,8 +617,8 @@ impl PlatformHost {
     pub(super) fn poll(&mut self, state: &mut PlatformState) -> bool {
         match self {
             Self::Native(host) => host.poll(state),
-            #[cfg(target_os = "linux")]
-            Self::None => linux_scrawl_poll(state),
+            #[cfg(not(target_os = "macos"))]
+            Self::None => scrawl_poll(state),
             _ => false,
         }
     }
@@ -646,11 +649,12 @@ impl PlatformHost {
     }
 }
 
-/// The Scrawl pane on Linux: it shows while the `capture` experiment is on.
-/// The desktop's portal asks for the screen at each capture, so nothing is
-/// granted ahead of time, and Scrawl's own app is macOS's.
-#[cfg(target_os = "linux")]
-fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
+/// The Scrawl pane on Linux and Windows: it shows while the `capture`
+/// experiment is on. Linux's portal asks for the screen at each capture and
+/// Windows asks nothing, so nothing is granted ahead of time, and Scrawl's
+/// own app is macOS's.
+#[cfg(not(target_os = "macos"))]
+fn scrawl_poll(state: &mut PlatformState) -> bool {
     if !state.dev_build || state.scrawl.is_some() {
         return false;
     }
@@ -660,8 +664,8 @@ fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
 
 /// Reveals the captures folder; choosing another is set in `settings.json`
 /// (`capture.folder`) for now.
-#[cfg(target_os = "linux")]
-fn linux_scrawl_request(request: ScrawlRequest) {
+#[cfg(not(target_os = "macos"))]
+fn scrawl_request(request: ScrawlRequest) {
     if request == ScrawlRequest::RevealFolder {
         let folder = crate::app_settings::capture_settings().captures_dir();
         if std::fs::create_dir_all(&folder).is_ok()

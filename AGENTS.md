@@ -408,10 +408,10 @@ substitute for source inspection or a second roadmap.
   kept out of the workspace; `scripts/check` names it on macOS) hosted in
   Hex as Annotate (its user-facing name; code keeps `capture`;
   `docs/plans/capture-in-hex.md`),
-  compiled as `cfg(hex_capture)` into every macOS and Linux build
+  compiled as `cfg(hex_capture)` into every macOS, Linux, and Windows build
   (`scripts/build-app.sh` bundles and signs `scrawl-helper` beside `hex`).
-  Everything here is shared by both OSes; the engine's own platform
-  adapter (`crates/capture/src/capture/{macos,linux}.rs`) is the seam for
+  Everything here is shared by every OS; the engine's own platform
+  adapter (`crates/capture/src/capture/{macos,linux,windows}.rs`) is the seam for
   the screen, window and area source, cursor, permission flow, and encoder.
   The Linux adapter (`crates/capture/src/linux/`) asks the ScreenCast
   portal over `zbus` (a screen keeps the portal's restore token at
@@ -426,7 +426,18 @@ substitute for source inspection or a second roadmap.
   microphone), "While dictating" (`Environment`: an `AudioSuppressor` per
   capture), words (`LocalTranscriber::transcribe_words` as one foreground
   job on the listener's engine), the clipboard and paste (`linux_paste`),
-  and the shortcut (`linux_input`'s `Shortcut::Capture`). Hex's `Host`,
+  and the shortcut (`linux_input`'s `Shortcut::Capture`). Windows records
+  with Windows.Graphics.Capture (`crates/capture/src/win/media.rs`) and
+  shares Linux's host side (`ListenerTimeline` fed by `windows_dictation`,
+  the same words path) except "While dictating" (`Environment`: a
+  `windows_audio_control::AudioSuppressor` per capture), paste and copy
+  (the engine's own Ctrl+V and clipboard), and input: `windows_input`'s
+  hooks give the Annotate key (`HotkeyAction::Capture`/`CaptureUp`), Escape
+  while drawing, and, while a capture records, every pointer move, click,
+  wheel turn, and modifier change in physical pixels
+  (`capture_host::report_input`, as the macOS tap does). The overlays lay
+  out in the primary display's points, so the picker and ink convert with
+  `capture_host::pixels_per_point`. Hex's `Host`,
   `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
   listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
   its 16 kHz gap-padded timeline handed to the engine as `AudioIn::External`,
@@ -445,7 +456,8 @@ substitute for source inspection or a second roadmap.
   (Labs › Scrawl) and `CaptureSettings` its `capture.*` settings;
   `hex capture` is `control::cli::capture` (macOS through the running app;
   Linux reads the folder itself and hands start/stop/cancel to the
-  listener over `linux_service`).
+  listener over `linux_service`; Windows has no `hex annotate` until the
+  shared control transport reaches it).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -777,13 +789,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   untouched. Notes never rename the file and rewrite only the heading Hex wrote
   and the `<!-- hex:notes -->` block.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
-  every macOS and Linux build and on by default (`capture.enabled`, the
-  pane's switch; the `annotate-on-by-default` migration turns it on once
-  for older settings). It is not an experiment; Windows never compiles `scrawl-capture`
-  and shows no pane. Nothing asks for a screen permission until the first
+  every macOS, Linux, and Windows build and on by default in dev builds
+  (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
+  migration turns it on once for older settings). It is not an experiment.
+  Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
-  dialog at its first Screen capture. Default shortcuts share no key with
-  the other defaults: ⌥⇧S on macOS, F9 on Linux. One key does everything:
+  dialog at its first Screen capture; Windows asks nothing. Default shortcuts
+  share no key with the other defaults: ⌥⇧S on macOS, F9 on Linux and
+  Windows. One key does everything:
   a tap (under `DRAW_HOLD`) starts and stops; held while recording, the
   pointer draws with no click until it comes up (Linux: portal
   Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
