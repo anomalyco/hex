@@ -42,10 +42,11 @@ pub enum Feature {
     KeepOnClipboard,
     CopyOnly,
     SpokenFormatting,
+    FillerWords,
 }
 
 impl Feature {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -62,6 +63,7 @@ impl Feature {
         Self::KeepOnClipboard,
         Self::CopyOnly,
         Self::SpokenFormatting,
+        Self::FillerWords,
     ];
 
     /// The features this OS has.
@@ -83,7 +85,8 @@ impl Feature {
             | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::RestoreShortcutDefault
-            | Self::SpokenFormatting => true,
+            | Self::SpokenFormatting
+            | Self::FillerWords => true,
         }
     }
 
@@ -106,6 +109,7 @@ impl Feature {
             Self::KeepOnClipboard => "keep-on-clipboard",
             Self::CopyOnly => "copy-only",
             Self::SpokenFormatting => "spoken-formatting",
+            Self::FillerWords => "filler-words",
         }
     }
 
@@ -128,6 +132,7 @@ impl Feature {
             Self::KeepOnClipboard => "labs.keep_on_clipboard",
             Self::CopyOnly => "labs.copy_only",
             Self::SpokenFormatting => "labs.spoken_formatting",
+            Self::FillerWords => "labs.filler_words",
         }
     }
 
@@ -165,6 +170,9 @@ impl Feature {
             Self::SpokenFormatting => {
                 "Turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks"
             }
+            Self::FillerWords => {
+                "Remove filler words such as um and uh from dictations, without an AI model"
+            }
         }
     }
 
@@ -191,6 +199,7 @@ impl Feature {
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
             Self::CopyOnly => settings.labs.copy_only,
             Self::SpokenFormatting => settings.labs.spoken_formatting,
+            Self::FillerWords => settings.labs.filler_words,
         }
     }
 
@@ -212,6 +221,7 @@ impl Feature {
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
             Self::CopyOnly => settings.labs.copy_only = on,
             Self::SpokenFormatting => settings.labs.spoken_formatting = on,
+            Self::FillerWords => settings.labs.filler_words = on,
         }
     }
 }
@@ -227,8 +237,9 @@ const UNLOAD_IDLE: u32 = 1 << 6;
 const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
 const COPY_ONLY: u32 = 1 << 8;
 const SPOKEN_FORMATTING: u32 = 1 << 9;
+const FILLER_WORDS: u32 = 1 << 10;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 10;
+const MINUTES_SHIFT: u32 = 11;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -295,6 +306,12 @@ pub fn spoken_formatting() -> bool {
     on(SPOKEN_FORMATTING)
 }
 
+/// Filler words such as "um" and "uh" leave dictations (read as each
+/// dictation's processing starts).
+pub fn filler_words() -> bool {
+    on(FILLER_WORDS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -320,6 +337,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.keep_on_clipboard, KEEP_ON_CLIPBOARD),
         (settings.copy_only, COPY_ONLY),
         (settings.spoken_formatting, SPOKEN_FORMATTING),
+        (settings.filler_words, FILLER_WORDS),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -475,6 +493,18 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & SPOKEN_FORMATTING, 0);
         assert_eq!(state >> MINUTES_SHIFT, 60);
+    }
+
+    #[test]
+    fn filler_words_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & FILLER_WORDS, 0);
+        labs.filler_words = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & FILLER_WORDS, 0);
+        assert_eq!(state & SPOKEN_FORMATTING, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
     #[test]

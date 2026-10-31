@@ -375,12 +375,16 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-keep-on-clipboard",
         "lab-copy-only",
         "lab-spoken-formatting",
+        "lab-filler-words",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
     assert!(!rt.state.settings.labs.spoken_formatting);
     tap(&mut rt, "lab-spoken-formatting");
     assert!(rt.state.settings.labs.spoken_formatting);
+    assert!(!rt.state.settings.labs.filler_words);
+    tap(&mut rt, "lab-filler-words");
+    assert!(rt.state.settings.labs.filler_words);
     assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
     assert!(!rt.state.settings.labs.mouse_shortcuts);
     tap(&mut rt, "lab-mouse-shortcuts");
@@ -400,6 +404,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
     assert!(rt.find("lab-copy-only").is_none(), "macOS only");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
+    assert!(rt.find("lab-filler-words").is_some(), "every OS");
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
 }
