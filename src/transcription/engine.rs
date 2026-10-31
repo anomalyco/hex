@@ -396,7 +396,7 @@ pub struct TranscriptionEngine {
 }
 
 /// The GGUF selection the engine's model held after its last command.
-type Held = Arc<Mutex<Option<crate::transcription_models::TranscriptionSelection>>>;
+type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelection>>>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -790,7 +790,7 @@ impl TranscriptionEngine {
     /// command. Readable while dictation runs, unlike the model itself.
     pub(crate) fn holds(
         &self,
-        selection: &crate::transcription_models::TranscriptionSelection,
+        selection: &crate::transcription::models::TranscriptionSelection,
     ) -> bool {
         self.held
             .lock()
@@ -804,7 +804,7 @@ impl TranscriptionEngine {
     /// The GGUF selection the model held after its last finished command.
     pub(crate) fn held_selection(
         &self,
-    ) -> Option<crate::transcription_models::TranscriptionSelection> {
+    ) -> Option<crate::transcription::models::TranscriptionSelection> {
         self.held
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -821,14 +821,14 @@ fn recording() -> bool {
 
 /// The model `selection` loads into, prewarmed, as the engine held it.
 #[cfg(target_os = "macos")]
-fn reload(selection: &crate::transcription_models::TranscriptionSelection) -> Result<Model> {
+fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> Result<Model> {
     let mut model = Model::default();
     model.activate(selection)?.prewarm()?;
     Ok(model)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn reload(selection: &crate::transcription_models::TranscriptionSelection) -> Result<Model> {
+fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> Result<Model> {
     Model::load(selection)
 }
 
@@ -859,7 +859,7 @@ pub(crate) type HeldModel = crate::local_transcriber::LocalTranscriber;
 /// switching one.
 pub(crate) fn held<'a>(
     model: &'a mut Model,
-    selection: &crate::transcription_models::TranscriptionSelection,
+    selection: &crate::transcription::models::TranscriptionSelection,
 ) -> Option<&'a mut HeldModel> {
     #[cfg(target_os = "macos")]
     let model = model
@@ -902,7 +902,7 @@ struct Worker {
     /// after its reload failed.
     model: Option<Model>,
     /// What an unloaded model reloads, before the next command that needs it.
-    parked: Option<crate::transcription_models::TranscriptionSelection>,
+    parked: Option<crate::transcription::models::TranscriptionSelection>,
     /// When the last command ended.
     idle_since: Instant,
     running: Running,

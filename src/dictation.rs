@@ -5,7 +5,7 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 
 use crate::audio::CaptureInstant;
-use crate::transcription_engine::{LiveStream, Partial, TranscriptionEngine};
+use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
 
 #[cfg(target_os = "macos")]
 use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
@@ -1320,9 +1320,9 @@ mod tests {
 
     /// Audio handed to streams, in order, and the streams cancelled.
     fn stream_traffic(
-        commands: &std::sync::mpsc::Receiver<crate::transcription_engine::Command>,
+        commands: &std::sync::mpsc::Receiver<crate::transcription::engine::Command>,
     ) -> (Vec<f32>, usize, usize) {
-        use crate::transcription_engine::Command;
+        use crate::transcription::engine::Command;
         let (mut fed, mut begun, mut cancelled) = (Vec::new(), 0, 0);
         for command in commands.try_iter() {
             match command {
@@ -1423,7 +1423,7 @@ mod tests {
 
     #[test]
     fn live_text_follows_the_recording_and_never_outlives_it() {
-        use crate::transcription_engine::Command;
+        use crate::transcription::engine::Command;
         let said = |stable: &str| Partial {
             stable: stable.into(),
             tentative: String::new(),

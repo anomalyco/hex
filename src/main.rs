@@ -126,16 +126,7 @@ mod suppression;
 mod text_replacements;
 mod transcript;
 mod transcript_cli;
-#[cfg(target_os = "macos")]
 mod transcription;
-#[cfg(target_os = "macos")]
-mod transcription_benchmark;
-mod transcription_engine;
-mod transcription_models;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-mod transcription_preparation;
-mod transcription_service;
-mod transcription_stream;
 mod tray_menu;
 mod updater;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -629,9 +620,9 @@ fn main() -> Result<()> {
             runs,
         } => {
             let backend = match backend {
-                TranscriptionBenchmarkBackend::Onnx => transcription_benchmark::Backend::Onnx,
+                TranscriptionBenchmarkBackend::Onnx => transcription::benchmark::Backend::Onnx,
                 TranscriptionBenchmarkBackend::TranscribeCpp => {
-                    transcription_benchmark::Backend::TranscribeCpp {
+                    transcription::benchmark::Backend::TranscribeCpp {
                         model: match model {
                             Some(model) => model,
                             None => parakeet::default_model_path()?,
@@ -639,7 +630,7 @@ fn main() -> Result<()> {
                     }
                 }
             };
-            transcription_benchmark::run(&manifest, warmups, runs, backend)
+            transcription::benchmark::run(&manifest, warmups, runs, backend)
         }
     }
 }

@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
-use crate::transcription_models::ModelDefinition;
+use crate::transcription::models::ModelDefinition;
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
@@ -95,7 +95,7 @@ impl Switcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_models::{TranscriptionModelId, definition};
+    use crate::transcription::models::{TranscriptionModelId, definition};
 
     fn choice(model: TranscriptionModelId, language: &str) -> KeyboardModelChoice {
         KeyboardModelChoice {

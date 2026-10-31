@@ -108,7 +108,7 @@ pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
             crate::tray_menu::model_menu_entries(
                 &snapshot.settings,
                 desktop.transcription.preparing.is_some(),
-                crate::transcription_models::is_installed,
+                crate::transcription::models::is_installed,
             ),
         )
     }

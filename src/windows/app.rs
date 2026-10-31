@@ -27,8 +27,8 @@ use crate::desktop_host::{
 use crate::desktop_i18n::tr_fill;
 use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
-use crate::transcription_models::{ModelPreparationStage, TranscriptionModelId};
-use crate::transcription_preparation::TranscriptionPreparation;
+use crate::transcription::models::{ModelPreparationStage, TranscriptionModelId};
+use crate::transcription::preparation::TranscriptionPreparation;
 use crate::windows::rune::{Published, Request};
 
 type ListenerResult = std::result::Result<(), String>;
@@ -207,7 +207,7 @@ impl WindowsDesktopHost {
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
         };
-        crate::transcription_models::delete_set_aside();
+        crate::transcription::models::delete_set_aside();
         host.refresh_personal_commands_host();
         // The microphone stays cold until first-run setup finishes.
         if host.settings.enable_on_launch {
@@ -285,7 +285,7 @@ impl WindowsDesktopHost {
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
         self.manual_choice();
-        let selection = crate::transcription_models::TranscriptionSelection { model, language };
+        let selection = crate::transcription::models::TranscriptionSelection { model, language };
         self.preparation.start(selection, false);
     }
 
@@ -336,7 +336,7 @@ impl WindowsDesktopHost {
         let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) else {
             return;
         };
-        let selection = crate::transcription_models::TranscriptionSelection {
+        let selection = crate::transcription::models::TranscriptionSelection {
             language: choice.language,
             ..self.settings.transcription_for_model(choice.model)
         };
@@ -354,9 +354,9 @@ impl WindowsDesktopHost {
     }
 
     fn model_ready(&self) -> bool {
-        let model = crate::transcription_models::definition(self.settings.transcription.model);
-        crate::transcription_models::is_installed(model, &self.settings.transcription.language)
-            && crate::transcription_models::is_verified(model)
+        let model = crate::transcription::models::definition(self.settings.transcription.model);
+        crate::transcription::models::is_installed(model, &self.settings.transcription.language)
+            && crate::transcription::models::is_verified(model)
     }
 
     pub(crate) fn start(&mut self) {
@@ -502,7 +502,7 @@ impl WindowsDesktopHost {
         }
     }
 
-    fn runtime_selection(&self) -> crate::transcription_models::TranscriptionSelection {
+    fn runtime_selection(&self) -> crate::transcription::models::TranscriptionSelection {
         self.settings.transcription.clone()
     }
 
@@ -561,7 +561,7 @@ impl WindowsDesktopHost {
         if let Some(result) = self.preparation.poll() {
             self.automatic_preparation = false;
             let result = result.and_then(|selection| {
-                crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
+                crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut candidate = self.settings.clone();
                 candidate.remember_transcription(selection);
                 candidate.save().map_err(|e| format!("{e:#}"))?;

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
-use crate::transcription_models::{
+use crate::transcription::models::{
     AUTO_LANGUAGE, ModelDefinition, ModelRuntime, TranscriptionSelection,
 };
 

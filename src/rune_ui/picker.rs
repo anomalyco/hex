@@ -16,9 +16,9 @@ use super::lists::error_panel;
 use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
-use crate::transcription_models::{
-    self, ModelDefinition, ModelPreparationStage, ModelRuntime, TranscriptionModelId,
-    TranscriptionSelection, language_name,
+use crate::transcription::models::{
+    self as transcription_models, ModelDefinition, ModelPreparationStage, ModelRuntime,
+    TranscriptionModelId, TranscriptionSelection, language_name,
 };
 
 const MODAL_WIDTH: f32 = 620.0;

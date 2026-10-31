@@ -1257,7 +1257,7 @@ mod tests {
                 .mappings
                 .get("com.apple.keylayout.Spanish"),
             Some(&crate::app_settings::KeyboardModelChoice {
-                model: crate::transcription_models::TranscriptionModelId::ParakeetV3,
+                model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
                 language: "es".into(),
             })
         );

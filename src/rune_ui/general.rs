@@ -26,7 +26,7 @@ use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
 use crate::login_item::LoginItemStatus;
 use crate::onboarding::PermissionKind;
-use crate::transcription_models;
+use crate::transcription::models as transcription_models;
 
 /// The missing permissions, the listener (Windows and Linux), the basics,
 /// names and terms where they exist, then Advanced.

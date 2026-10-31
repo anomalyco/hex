@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::transcription_engine::Partial;
+use crate::transcription::engine::Partial;
 
 type Watcher = Arc<dyn Fn(Option<&Partial>) + Send + Sync>;
 

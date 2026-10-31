@@ -68,7 +68,7 @@ use crate::desktop_host::{
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
-use crate::transcription_models::TranscriptionModelId;
+use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
@@ -2666,7 +2666,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             modifiers: HotkeyModifiers::default(),
             key: Some(HotkeyKey::named("f12")),
         },
-        transcription: crate::transcription_models::TranscriptionSelection {
+        transcription: crate::transcription::models::TranscriptionSelection {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
         },

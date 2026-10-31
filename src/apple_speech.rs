@@ -24,7 +24,7 @@ unsafe extern "C" {
 
 pub struct AppleSpeech {
     session: *mut c_void,
-    selection: crate::transcription_models::TranscriptionSelection,
+    selection: crate::transcription::models::TranscriptionSelection,
 }
 
 #[derive(Default)]
@@ -70,7 +70,7 @@ impl AppleSpeech {
         Self::readiness_status(language).unwrap_or(false)
     }
 
-    pub fn load(selection: &crate::transcription_models::TranscriptionSelection) -> Result<Self> {
+    pub fn load(selection: &crate::transcription::models::TranscriptionSelection) -> Result<Self> {
         let mut error = ptr::null_mut();
         let session = with_locale(&selection.language, |locale| unsafe {
             hex_apple_speech_prepare(locale, &mut error)
@@ -90,7 +90,7 @@ impl AppleSpeech {
 
     pub fn matches_selection(
         &self,
-        selection: &crate::transcription_models::TranscriptionSelection,
+        selection: &crate::transcription::models::TranscriptionSelection,
     ) -> bool {
         &self.selection == selection
     }

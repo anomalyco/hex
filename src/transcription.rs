@@ -1,27 +1,45 @@
+#[cfg(target_os = "macos")]
+pub(crate) mod benchmark;
+pub(crate) mod engine;
+pub(crate) mod models;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub(crate) mod preparation;
+pub(crate) mod service;
+pub(crate) mod stream;
+
+#[cfg(target_os = "macos")]
 use color_eyre::eyre::Result;
 
+#[cfg(target_os = "macos")]
 use crate::apple_speech::AppleSpeech;
+#[cfg(target_os = "macos")]
 use crate::parakeet::Parakeet;
+#[cfg(target_os = "macos")]
 pub use crate::transcript::{Transcript, TranscriptSegment};
-use crate::transcription_models::{
+#[cfg(target_os = "macos")]
+use crate::transcription::models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
 };
 
 /// Silence after a Unified English clip (400 ms at 16 kHz), so the model
 /// has the context to emit the final word and its closing punctuation
 /// (issue 657: sentences lost their full stop or question mark).
+#[cfg(target_os = "macos")]
 pub(crate) const UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES: usize = 6_400;
 
+#[cfg(target_os = "macos")]
 pub enum Transcriber {
     Gguf(Box<Parakeet>),
     AppleSpeech(AppleSpeech),
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Default)]
 pub struct WarmTranscriber {
     active: Option<Transcriber>,
 }
 
+#[cfg(target_os = "macos")]
 impl Transcriber {
     pub fn load() -> Result<Self> {
         let (_, selection) = crate::app_settings::transcription_selection();
@@ -100,12 +118,14 @@ impl Transcriber {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn prepare_gguf_samples(samples: &mut Vec<f32>, model: Option<TranscriptionModelId>) {
     crate::dictation::pad_for_parakeet(samples);
     samples.resize(samples.len() + trailing_silence_samples(model), 0.0);
 }
 
 /// Silence a clip of `model` gets after its audio, whole clip or stream.
+#[cfg(target_os = "macos")]
 fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> usize {
     if model == Some(TranscriptionModelId::ParakeetUnifiedEnglish) {
         UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
@@ -114,6 +134,7 @@ fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> usize {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl WarmTranscriber {
     /// A warm transcriber already serving `model`, for opt-in harnesses.
     #[cfg(test)]
@@ -189,10 +210,10 @@ impl WarmTranscriber {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{Transcript, UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES, prepare_gguf_samples};
-    use crate::transcription_models::TranscriptionModelId;
+    use crate::transcription::models::TranscriptionModelId;
 
     #[test]
     fn apple_bridge_transcript_uses_the_canonical_wire_shape() {

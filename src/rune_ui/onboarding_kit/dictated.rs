@@ -14,7 +14,7 @@ use super::super::controls::Paint;
 use super::field_text::{Field, Slot};
 use super::flight::{Flight, HANDOFF, flicker, flying, ink, typeset};
 use super::sparks::impacts;
-use crate::transcription_engine::Partial;
+use crate::transcription::engine::Partial;
 
 /// `"With Hex"`'s calm flight.
 const CALM: f32 = 0.20;

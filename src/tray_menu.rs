@@ -5,7 +5,7 @@
 //! onto its own runtime.
 
 use crate::app_settings::AppSettings;
-use crate::transcription_models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
+use crate::transcription::models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
 
 /// One downloaded model in a menu's model picker.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,7 +48,7 @@ mod tray {
     use crate::desktop_host::DesktopUpdateStatus;
     use crate::desktop_i18n::tr;
     use crate::events::VoiceState;
-    use crate::transcription_models::TranscriptionModelId;
+    use crate::transcription::models::TranscriptionModelId;
 
     /// What a tray menu item asks for.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -231,7 +231,7 @@ mod tray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_models::TranscriptionSelection;
+    use crate::transcription::models::TranscriptionSelection;
 
     #[test]
     fn model_menu_only_lists_downloaded_models_with_their_remembered_language() {
