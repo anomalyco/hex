@@ -2,18 +2,21 @@
 //! and the meeting requests the Linux and Windows windows perform in their
 //! own process (macOS's go through `macos_host`).
 
+#[cfg(not(target_os = "macos"))]
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use super::meetings::{Chapter, Meeting, Status, Transcript, Turn};
+#[cfg(not(target_os = "macos"))]
 use super::platform::MeetingRequest;
+#[cfg(not(target_os = "macos"))]
 use crate::desktop_i18n::tr;
 
 const RESCAN: Duration = Duration::from_secs(1);
 
 /// Linux and Windows: the window and the meeting controller share one
 /// process, so the window performs meeting requests itself.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 pub(super) struct LocalMeetings {
     feed: MeetingFeed,
@@ -21,7 +24,7 @@ pub(super) struct LocalMeetings {
     folder_choice: Option<crate::file_dialog::Pending>,
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 impl LocalMeetings {
     /// `wake` redraws the window once the folder panel answers.
     pub(super) fn send(
