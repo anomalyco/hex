@@ -320,16 +320,13 @@ fn bubble(color: Color) -> Shape {
         .fill_path(&tail, color)
 }
 
-/// Bobs `card` on whole device pixels (`hair` is one), so its fill and its
-/// words step together: Rune draws glyphs on whole pixels, and a fill
-/// gliding between them leaves the words ticking against their own card.
-pub(crate) fn floating(card: El, now: Option<f64>, phase: f64, hair: f32) -> El {
+pub(crate) fn floating(card: El, now: Option<f64>, phase: f64) -> El {
     let Some(now) = now else {
         return card;
     };
     let turn = std::f64::consts::TAU * (now / DRIFT_SECS + phase);
     let y = -DRIFT * (0.5 - 0.5 * turn.cos()) as f32;
-    card.offset(0.0, (y / hair).round() * hair)
+    card.offset(0.0, y).offset_motion(Spring::new(0.08, 0.0))
 }
 
 fn field(p: Paint, n: &Notice, reply: Reply<'_>) -> El {

@@ -144,13 +144,11 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 notice(p, &FRANK, example(s, 0), true),
                 drift(s),
                 0.0,
-                p.hair,
             ))
             .child(floating(
                 notice(p, &ADAM, example(s, 1), true),
                 drift(s),
                 0.4,
-                p.hair,
             ))
             .children(parked.then(|| {
                 notice(p, &JAY, jay_reply(s, "to answer Jay"), false).transition(arrives())
@@ -234,12 +232,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     let card = |n: &Notice, index: usize, reply: Reply<'_>| {
         let dim = hearing && n.key != JAY.key;
         arriving(
-            floating(
-                notice(p, n, reply, false),
-                drift(s),
-                index as f64 * 0.5,
-                p.hair,
-            ),
+            floating(notice(p, n, reply, false), drift(s), index as f64 * 0.5),
             index,
         )
         .opacity(if dim { 0.45 } else { 1.0 })

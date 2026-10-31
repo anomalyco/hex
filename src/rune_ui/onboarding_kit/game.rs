@@ -1395,12 +1395,7 @@ fn card(p: Paint, r: &Round, t: f64, reduced: bool, clear: f32) -> Option<El> {
     };
     let done = r.answered && flights.iter().all(|(f, _, _)| t >= f.arrives());
     let body = body(p, r, &flights, t, reduced);
-    let body = floating(
-        body,
-        (!reduced && !targeted).then_some(t),
-        i as f64 * 0.37,
-        p.hair,
-    );
+    let body = floating(body, (!reduced && !targeted).then_some(t), i as f64 * 0.37);
     // The lit card breathes while it waits for an answer, and burns steady once answered.
     let breathe = if reduced || done {
         1.0
