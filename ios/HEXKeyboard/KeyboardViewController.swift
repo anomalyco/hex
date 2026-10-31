@@ -13,18 +13,18 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureView()
-        syncFromBridge()
+        syncFromBridge(animated: false)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         coldStartJobID = UUID().uuidString
-        syncFromBridge()
+        syncFromBridge(animated: false)
 
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.syncFromBridge()
+                self?.syncFromBridge(animated: true)
             }
         }
     }
@@ -49,14 +49,20 @@ final class KeyboardViewController: UIInputViewController {
         viewModel.onStopTap = { [weak self] in self?.stopWarmDictation() }
         viewModel.onCancelTap = { [weak self] in self?.cancelWarmDictation() }
         viewModel.onStyleSelected = { [weak self] style in
-            self?.bridge.style = style
-            self?.viewModel.style = style
-            self?.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
+            guard let self else { return }
+            self.bridge.style = style
+            if self.viewModel.style != style {
+                self.viewModel.style = style
+            }
+            self.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
         }
         viewModel.onReturnAppSelected = { [weak self] appID in
-            self?.bridge.returnAppID = appID
-            self?.viewModel.returnAppID = appID
-            self?.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
+            guard let self else { return }
+            self.bridge.returnAppID = appID
+            if self.viewModel.returnAppID != appID {
+                self.viewModel.returnAppID = appID
+            }
+            self.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
         }
         viewModel.onSpace = { [weak self] in self?.textDocumentProxy.insertText(" ") }
         viewModel.onDelete = { [weak self] in self?.textDocumentProxy.deleteBackward() }
@@ -85,9 +91,8 @@ final class KeyboardViewController: UIInputViewController {
         ])
     }
 
-    private func syncFromBridge() {
+    private func syncFromBridge(animated: Bool) {
         let now = Date().timeIntervalSince1970
-        viewModel.now = now
         updateKeyboardTraits()
 
         #if targetEnvironment(simulator)
@@ -97,8 +102,19 @@ final class KeyboardViewController: UIInputViewController {
         let effectiveFullAccess = hasFullAccess
         #endif
 
-        viewModel.hasFullAccess = effectiveFullAccess
-        guard effectiveFullAccess else { return }
+        guard effectiveFullAccess else {
+            viewModel.applyBridgeState(
+                hasFullAccess: false,
+                snapshot: .offline,
+                isModelInstalled: false,
+                style: viewModel.style,
+                returnAppID: viewModel.returnAppID,
+                now: now,
+                clearPending: true,
+                animated: animated
+            )
+            return
+        }
 
         if now - lastFullAccessNote >= 5 {
             lastFullAccessNote = now
@@ -106,10 +122,7 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         let snap = bridge.snapshot()
-        viewModel.snapshot = snap
-        viewModel.isModelInstalled = bridge.isModelInstalled
-        viewModel.style = bridge.style
-        viewModel.returnAppID = bridge.returnAppID
+        var insertedResult = false
 
         if snap.hasDeliverableResult(at: now),
            let resultID = snap.resultID,
@@ -122,19 +135,20 @@ final class KeyboardViewController: UIInputViewController {
             )
             textDocumentProxy.insertText(insertion)
             bridge.lastInsertedResultID = resultID
-            viewModel.pendingCommand = nil
+            insertedResult = true
             coldStartJobID = UUID().uuidString
         }
 
-        if let pending = viewModel.pendingCommand {
-            let expired = now - pending.sentAt >= KeyboardViewModel.commandAckTimeout
-            let acknowledged = (pending.kind == .start && snap.state == .recording)
-                || (pending.kind == .stop && snap.state != .recording)
-                || (pending.kind == .cancel && snap.state != .recording)
-            if expired || acknowledged {
-                viewModel.pendingCommand = nil
-            }
-        }
+        viewModel.applyBridgeState(
+            hasFullAccess: true,
+            snapshot: snap,
+            isModelInstalled: bridge.isModelInstalled,
+            style: bridge.style,
+            returnAppID: bridge.returnAppID,
+            now: now,
+            clearPending: insertedResult,
+            animated: animated
+        )
 
         refreshColdStartURL(now: now, force: false)
     }
@@ -162,46 +176,52 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateKeyboardTraits() {
-        viewModel.needsGlobeKey = needsInputModeSwitchKey
-        switch textDocumentProxy.returnKeyType {
-        case .send: viewModel.returnKeyLabel = "Send"
-        case .search: viewModel.returnKeyLabel = "Search"
-        case .go: viewModel.returnKeyLabel = "Go"
-        case .done: viewModel.returnKeyLabel = "Done"
-        default: viewModel.returnKeyLabel = "Return"
+        let globe = needsInputModeSwitchKey
+        if viewModel.needsGlobeKey != globe {
+            viewModel.needsGlobeKey = globe
+        }
+        let nextReturn: String = switch textDocumentProxy.returnKeyType {
+        case .send: "Send"
+        case .search: "Search"
+        case .go: "Go"
+        case .done: "Done"
+        default: "Return"
+        }
+        if viewModel.returnKeyLabel != nextReturn {
+            viewModel.returnKeyLabel = nextReturn
         }
     }
 
     private func startWarmDictation() {
         let now = Date().timeIntervalSince1970
-        guard viewModel.hasFullAccess, viewModel.snapshot.isAvailable(at: now) else { return }
+        guard viewModel.hasFullAccess, viewModel.currentSnapshot.isAvailable(at: now) else { return }
         let jobID = UUID().uuidString
-        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
-            kind: .start,
-            jobID: jobID,
-            sentAt: now
+        viewModel.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .start, jobID: jobID, sentAt: now),
+            now: now,
+            animated: true
         )
         bridge.send(.start, jobID: jobID, style: viewModel.style, sentAt: now)
     }
 
     private func stopWarmDictation() {
         let now = Date().timeIntervalSince1970
-        guard let jobID = viewModel.snapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
-        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
-            kind: .stop,
-            jobID: jobID,
-            sentAt: now
+        guard let jobID = viewModel.currentSnapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
+        viewModel.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .stop, jobID: jobID, sentAt: now),
+            now: now,
+            animated: true
         )
         bridge.send(.stop, jobID: jobID, style: viewModel.style, sentAt: now)
     }
 
     private func cancelWarmDictation() {
         let now = Date().timeIntervalSince1970
-        guard let jobID = viewModel.snapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
-        viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
-            kind: .cancel,
-            jobID: jobID,
-            sentAt: now
+        guard let jobID = viewModel.currentSnapshot.jobID ?? viewModel.pendingCommand?.jobID else { return }
+        viewModel.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .cancel, jobID: jobID, sentAt: now),
+            now: now,
+            animated: true
         )
         bridge.send(.cancel, jobID: jobID, style: viewModel.style, sentAt: now)
     }

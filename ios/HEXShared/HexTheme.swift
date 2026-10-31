@@ -25,8 +25,8 @@ enum HexTheme {
     static let warmPearl = Color(red: 0.96, green: 0.94, blue: 0.89)
     static let agentBlue = Color(red: 0.78, green: 0.86, blue: 0.97)
 
-    static let cardRadius: CGFloat = 16
-    static let controlRadius: CGFloat = 10
+    static let cardRadius: CGFloat = 18
+    static let controlRadius: CGFloat = 8.5
 
     static func formatClock(_ seconds: TimeInterval) -> String {
         let clamped = max(0, Int(seconds))
@@ -43,6 +43,139 @@ enum HexTheme {
             return "\((clamped + 59) / 60)m"
         }
         return formatClock(TimeInterval(clamped))
+    }
+}
+
+/// Critically damped `(duration, bounce: 0)` springs shared across Hex iPhone surfaces.
+enum HexMotion {
+    static let stageDuration: Double = 0.28
+    static let settleDuration: Double = 0.30
+    static let trayDuration: Double = 0.25
+    static let reducedDuration: Double = 0.18
+
+    static let stage = Animation.spring(duration: stageDuration, bounce: 0.0)
+    static let settle = Animation.spring(duration: settleDuration, bounce: 0.0)
+    static let tray = Animation.spring(duration: trayDuration, bounce: 0.0)
+    static let reducedFade = Animation.easeInOut(duration: reducedDuration)
+
+    static func stageAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? reducedFade : stage
+    }
+
+    static func settleAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? reducedFade : settle
+    }
+
+    static func trayAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? reducedFade : tray
+    }
+}
+
+/// Keeps a control permanently mounted and drives its visibility continuously via
+/// opacity, subtle scale (`>= 0.90`), and soft blur (`<= 4 pt`), so interrupted
+/// transitions retarget velocity smoothly and never flash in or out in one frame.
+struct HexControlReveal: ViewModifier {
+    var shown: Bool
+    var reduceMotion: Bool
+    var scale: CGFloat = 0.92
+    var blur: CGFloat = 2.5
+    var anchor: UnitPoint = .center
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1.0 : 0.0)
+            .scaleEffect(shown || reduceMotion ? 1.0 : scale, anchor: anchor)
+            .blur(radius: (shown || reduceMotion) ? 0.0 : blur)
+            .allowsHitTesting(shown)
+            .accessibilityHidden(!shown)
+    }
+}
+
+/// Keeps a top-bar tray or status item permanently mounted in a `ZStack` and
+/// reveals it smoothly without layout jumps.
+struct HexTrayReveal: ViewModifier {
+    var shown: Bool
+    var reduceMotion: Bool
+    var offsetY: CGFloat = 3.5
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1.0 : 0.0)
+            .offset(y: (shown || reduceMotion) ? 0.0 : offsetY)
+            .blur(radius: (shown || reduceMotion) ? 0.0 : 2.5)
+            .allowsHitTesting(shown)
+            .accessibilityHidden(!shown)
+    }
+}
+
+/// Soft recessed capsule well for `DotScopeView` that adapts naturally to both
+/// dark and light host platters without opaque black holes or heavy box strokes.
+struct HexRecessedWell: View {
+    var isDark: Bool
+
+    var body: some View {
+        Capsule()
+            .fill(isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.055))
+            .overlay(alignment: .top) {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(isDark ? 0.30 : 0.09),
+                                Color.clear,
+                                Color.white.opacity(isDark ? 0.065 : 0.50),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
+            }
+    }
+}
+
+extension View {
+    func hexControlReveal(
+        _ shown: Bool,
+        reduceMotion: Bool,
+        scale: CGFloat = 0.92,
+        blur: CGFloat = 2.5,
+        anchor: UnitPoint = .center
+    ) -> some View {
+        modifier(
+            HexControlReveal(
+                shown: shown,
+                reduceMotion: reduceMotion,
+                scale: scale,
+                blur: blur,
+                anchor: anchor
+            )
+        )
+    }
+
+    func hexTrayReveal(_ shown: Bool, reduceMotion: Bool, offsetY: CGFloat = 3.5) -> some View {
+        modifier(HexTrayReveal(shown: shown, reduceMotion: reduceMotion, offsetY: offsetY))
+    }
+
+    /// Soft horizontal fade mask on scroll strips so chips never crop hard at edges.
+    func hexHorizontalEdgeFade(leading: CGFloat = 14, trailing: CGFloat = 18) -> some View {
+        mask {
+            GeometryReader { geo in
+                let w = max(1, geo.size.width)
+                let l = min(0.25, max(0, leading / w))
+                let r = max(0.75, min(1, 1 - trailing / w))
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: l),
+                        .init(color: .black, location: r),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+        }
     }
 }
 

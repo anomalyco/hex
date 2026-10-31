@@ -9,7 +9,7 @@ nonisolated struct DotSpringSpec: Equatable, Sendable {
     var duration: Float
     var bounce: Float
 
-    static let reducedFade = DotSpringSpec(duration: 0.16, bounce: 0.0)
+    static let reducedFade = DotSpringSpec(duration: 0.18, bounce: 0.0)
 
     var omega: Float {
         (2.0 * .pi) / max(duration, 0.01)
@@ -193,8 +193,8 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
     static func bar(
         leadingInset: Float = 0,
         trailingInset: Float = 0,
-        fade: Float = 16.0,
-        spacing: Float = 3.2
+        fade: Float = 28.0,
+        spacing: Float = 3.5
     ) -> DotScopeTuning {
         var t = DotScopeTuning()
         t.fitsBounds = true
@@ -202,15 +202,16 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
         t.width = 340.0
         t.idleWidth = 340.0
         t.processingWidth = 340.0
-        t.height = 52.0
-        t.columns = 104
-        t.rows = 13
+        t.height = 44.0
+        t.columns = 96
+        t.rows = 11
         t.leadingInset = max(0, leadingInset)
         t.trailingInset = max(0, trailingInset)
         t.windowFade = fade
-        t.helixCycles = 2.2
-        t.gain = 1.24
-        t.historySpeed = 215.0
+        t.helixCycles = 2.1
+        t.gain = 1.18
+        t.historySpeed = 210.0
+        t.transition = 0.28
         t.bounce = 0.0
         return t
     }
@@ -224,7 +225,7 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
         let w = Float(pixelWidth) / scale
         let h = Float(pixelHeight) / scale
 
-        let rawRows = min(15, min(Self.maxRows, max(5, Int(floor(Float(pixelHeight) / pxPitch)) - 2)))
+        let rawRows = min(13, min(Self.maxRows, max(5, Int(floor(Float(pixelHeight) / pxPitch)) - 1)))
         let oddRows = rawRows.isMultiple(of: 2) ? max(5, rawRows - 1) : rawRows
         let maxCols = min(Self.maxColumns, Self.maxDots / max(oddRows, 1))
         let cols = max(11, min(maxCols, Int(floor(Float(pixelWidth) / pxPitch)) - 1))
@@ -241,7 +242,7 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
     }
 
     static let keyboard = DotScopeTuning.sized(width: 152, idleWidth: 122, processingWidth: 96, height: 30, rows: 9, spacing: 2.75)
-    static let handoff = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 18.0, spacing: 3.3)
+    static let handoff = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 30.0, spacing: 3.5)
 }
 
 nonisolated struct DotScopePose: Equatable, Sendable {
@@ -269,12 +270,33 @@ nonisolated struct DotScopePalette: Equatable, Sendable {
     var shadow: SIMD4<Float>
 
     static func dark(pose: DotScopePose, saturation: Float = 1.0) -> DotScopePalette {
-        let you = SIMD3<Float>(0.86, 0.83, 0.77)
-        let youCore = SIMD3<Float>(0.98, 0.96, 0.92)
-        let agent = SIMD3<Float>(0.70, 0.78, 0.90)
-        let agentCore = SIMD3<Float>(0.92, 0.95, 1.00)
-        let coral = SIMD3<Float>(1.00, 0.38, 0.31)
-        let coralCore = SIMD3<Float>(1.00, 0.66, 0.60)
+        palette(isDark: true, pose: pose, saturation: saturation)
+    }
+
+    static func light(pose: DotScopePose, saturation: Float = 1.0) -> DotScopePalette {
+        palette(isDark: false, pose: pose, saturation: saturation)
+    }
+
+    /// Matches OpenCode iOS `pearlPalette(dark:)` (`DotScopeView.swift:363-372`).
+    static func palette(isDark: Bool, pose: DotScopePose, saturation: Float = 1.0) -> DotScopePalette {
+        let you = isDark
+            ? SIMD3<Float>(0.86, 0.83, 0.77)
+            : SIMD3<Float>(0.62, 0.53, 0.40)
+        let youCore = isDark
+            ? SIMD3<Float>(0.98, 0.96, 0.92)
+            : SIMD3<Float>(0.47, 0.38, 0.26)
+        let agent = isDark
+            ? SIMD3<Float>(0.70, 0.75, 0.84)
+            : SIMD3<Float>(0.40, 0.47, 0.58)
+        let agentCore = isDark
+            ? SIMD3<Float>(0.92, 0.95, 1.00)
+            : SIMD3<Float>(0.24, 0.31, 0.43)
+        let coral = isDark
+            ? SIMD3<Float>(1.00, 0.38, 0.31)
+            : SIMD3<Float>(0.82, 0.24, 0.20)
+        let coralCore = isDark
+            ? SIMD3<Float>(1.00, 0.66, 0.60)
+            : SIMD3<Float>(0.64, 0.14, 0.12)
 
         func mix3(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ t: Float) -> SIMD3<Float> {
             a + (b - a) * t
@@ -296,9 +318,13 @@ nonisolated struct DotScopePalette: Equatable, Sendable {
         return DotScopePalette(
             base: sat(base, saturation),
             core: sat(core, saturation),
-            plate: SIMD4<Float>(17.0 / 255.0, 17.0 / 255.0, 20.0 / 255.0, 0.95),
-            rim: SIMD4<Float>(1.0, 1.0, 1.0, 0.09),
-            shadow: SIMD4<Float>(0.0, 0.0, 0.0, 0.42)
+            plate: isDark
+                ? SIMD4<Float>(17.0 / 255.0, 18.0 / 255.0, 22.0 / 255.0, 0.92)
+                : SIMD4<Float>(0.94, 0.95, 0.97, 0.92),
+            rim: isDark
+                ? SIMD4<Float>(1.0, 1.0, 1.0, 0.04)
+                : SIMD4<Float>(0.0, 0.0, 0.0, 0.04),
+            shadow: SIMD4<Float>(0.0, 0.0, 0.0, isDark ? 0.22 : 0.10)
         )
     }
 }
@@ -322,6 +348,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     private static let workHelix: Float = 2.6
     private static let flowSpacingFactor: Float = 0.70
     private static let carrierRest: Float = 0.14
+    private static let idleLiveTarget: Float = 0.18
     private static let tau: Float = 2.0 * .pi
 
     private struct Voice {
@@ -550,17 +577,24 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         }
     }
 
+    /// Updates tuning. Jumps layout springs ONLY on initial fit (`jumpLayout`) or Reduce Motion;
+    /// subsequent inset and width changes glide smoothly on the 240 Hz spring solver.
     func tune(_ newTuning: DotScopeTuning, jumpLayout: Bool = false) {
         guard tuning != newTuning else { return }
-        let resized = (newTuning.columns != tuning.columns || newTuning.rows != tuning.rows || abs(newTuning.width - tuning.width) > 0.5)
+        let widthChanged = abs(newTuning.width - tuning.width) > 0.5
         tuning = newTuning
         resizeIfNeeded()
-        if jumpLayout || resized || reduceMotion {
+        if jumpLayout || reduceMotion {
             leadingInsetSpring.jump(newTuning.leadingInset)
             trailingInsetSpring.jump(newTuning.trailingInset)
             if newTuning.fitsBounds {
                 widthSpring.jump(expectedTargetWidth(for: stage))
             }
+            if steps > 0 {
+                beam(hb: Self.stepDt * 2.0)
+            }
+        } else if widthChanged && newTuning.fitsBounds {
+            widthSpring.jump(max(newTuning.height, newTuning.width - leadingInsetSpring.x - trailingInsetSpring.x))
             if steps > 0 {
                 beam(hb: Self.stepDt * 2.0)
             }
@@ -586,11 +620,16 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     var isIdleSettled: Bool {
         let targetSpan = expectedTargetWidth(for: .idle)
         return stage == .idle
-            && elapsed >= 0.45
+            && elapsed >= 0.55
             && abs(widthSpring.x - targetSpan) < 0.35
             && abs(opacitySpring.x - 1.0) < 0.01
+            && abs(coolSpring.x) < 0.01
+            && abs(failSpring.x) < 0.01
+            && abs(live - Self.idleLiveTarget) < 0.06
             && abs(leadingInsetSpring.x - tuning.leadingInset) < 0.35
             && abs(trailingInsetSpring.x - tuning.trailingInset) < 0.35
+            && abs(leadingInsetSpring.v) < 1.0
+            && abs(trailingInsetSpring.v) < 1.0
     }
 
     var elapsedTime: Float {
@@ -720,11 +759,12 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let liveTarget: Float = if isRecording {
             1.0
         } else if stage == .idle && visible {
-            0.28
+            Self.idleLiveTarget
         } else {
             0.0
         }
-        live += (liveTarget - live) * (1.0 - exp(-h / 0.55))
+        let liveTau: Float = liveTarget > live ? 0.22 : 0.36
+        live += (liveTarget - live) * (1.0 - exp(-h / liveTau))
 
         let speed: Float = reduceMotion ? 0.0 : tuning.braidSpeed
         traces.0.tick(voice: voices.0, live: live, speed: speed, tuning: tuning, h: h)
@@ -844,13 +884,13 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let mode: Mode
 
         if stage == .failed || stage == .idle || reduceMotion {
-            scanHelix = stage == .idle ? 0.85 : 1.0
+            scanHelix = stage == .idle ? 0.55 : 1.0
             scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
             mode = .still
         } else {
             switch stage {
             case .idle:
-                scanHelix = 0.85; scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
+                scanHelix = 0.55; scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
                 mode = .still
 
             case .recording:
@@ -896,7 +936,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let mid = Float(rws - 1) * 0.5
         let half = mid - 0.55
         let breath: Float = reduceMotion ? 0.5 : (0.5 + 0.5 * sin(time * Self.tau / Self.breathPeriod))
-        let rest = (0.55 + 0.35 * breath) * (0.4 + 0.6 * live) * scanHelix
+        let idleScale: Float = stage == .idle ? 0.48 : 1.0
+        let rest = (0.55 + 0.35 * breath) * (0.35 + 0.65 * live) * scanHelix * idleScale
         let sf = Self.spatialFreqs
         let reachAttenuation: Float = tuning.fitsBounds ? 0.48 : 0.80
         let reachInner: Float = tuning.fitsBounds ? 26.0 : 14.0
@@ -957,7 +998,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
                     * sin(Self.tau * tuning.helixCycles * xn - carrier)
                 let y = half * tanh((helix + half * 0.72 * spread * reach) / max(half, 0.01)) * ends * amp
                 ys[s] = mid - sign * y
-                let spatial = (0.3 + 0.7 * min(1.0, a * 1.8)) * (0.45 + 0.55 * ends)
+                let idleDim: Float = stage == .idle ? 0.58 : 1.0
+                let spatial = (0.3 + 0.7 * min(1.0, a * 1.8)) * (0.45 + 0.55 * ends) * idleDim
                 brightness[s] = spatial * amp + 0.36 * max(0.0, bright - amp)
             }
             for s in 0..<sampleCount {
@@ -1040,7 +1082,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
 enum DotScopePhase: Equatable, Sendable {
     case hidden
     case idle
-    case recording(loudnessDB: Float)
+    case recording
     case processing
     case failed
 }
@@ -1116,7 +1158,6 @@ private final class DotScopeMetalPipeline {
 }
 
 private final class DisplayLinkProxy: NSObject {
-    weak var onTickOwner: AnyObject?
     var tickHandler: ((CADisplayLink) -> Void)?
 
     @MainActor
@@ -1140,11 +1181,21 @@ final class DotScopeHostView: UIView {
     private var lastTimestamp: CFTimeInterval?
     private var ringIndex = 0
     private var hasSeededSnapshot = false
+    private var visibilityObservations: [NSKeyValueObservation] = []
+    private var visibilityRefreshScheduled = false
 
     var phase: DotScopePhase = .hidden {
         didSet {
             guard phase != oldValue else { return }
             handlePhaseChange(from: oldValue, to: phase)
+        }
+    }
+
+    var isDark = true {
+        didSet {
+            if isDark != oldValue {
+                renderCurrentFrame()
+            }
         }
     }
 
@@ -1158,6 +1209,11 @@ final class DotScopeHostView: UIView {
 
     var reduceMotion = false
     var useDemoVoice = false
+    var loudnessProvider: (() -> Float)?
+
+    /// Exposed for unit tests to verify simulation continuity across live meter updates.
+    var debugElapsedTime: Float { simulation.elapsedTime }
+    var debugIsPaused: Bool { displayLink?.isPaused ?? true }
 
     private var metalLayer: CAMetalLayer {
         // swiftlint:disable:next force_cast
@@ -1199,12 +1255,61 @@ final class DotScopeHostView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// True while inside a window and every ancestor layer has opacity > 0 and isn't hidden.
+    /// Keeps rendering live pixels while fading out, and pauses cleanly once opacity reaches 0.
+    var isEffectivelyVisible: Bool {
+        guard window != nil else { return false }
+        var current: UIView? = self
+        while let view = current {
+            if view.isHidden || view.layer.opacity <= 0.001 {
+                return false
+            }
+            current = view.superview
+        }
+        return true
+    }
+
+    private func observeVisibility() {
+        visibilityObservations.removeAll()
+        var ancestor: UIView? = self
+        while let view = ancestor {
+            visibilityObservations.append(
+                view.observe(\.isHidden, options: [.new]) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in
+                        self?.updateAnimatingState()
+                    }
+                }
+            )
+            visibilityObservations.append(
+                view.layer.observe(\.opacity, options: [.new]) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in
+                        self?.updateAnimatingState()
+                    }
+                }
+            )
+            ancestor = view.superview
+        }
+    }
+
+    func scheduleVisibilityRefresh() {
+        guard !visibilityRefreshScheduled else { return }
+        visibilityRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.visibilityRefreshScheduled = false
+            self.observeVisibility()
+            self.updateAnimatingState()
+        }
+    }
+
     func updateTuning(_ tuning: DotScopeTuning) {
         guard requestedTuning != tuning else { return }
         requestedTuning = tuning
         applyEffectiveTuning(jumpLayout: !hasFittedInitialLayout)
         updateAnimatingState()
-        renderCurrentFrame()
+        if displayLink?.isPaused != false {
+            renderCurrentFrame()
+        }
     }
 
     private func applyEffectiveTuning(jumpLayout: Bool) {
@@ -1215,13 +1320,20 @@ final class DotScopeHostView: UIView {
         simulation.tune(effective, jumpLayout: jumpLayout)
     }
 
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        observeVisibility()
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
+            observeVisibility()
             ensureDisplayLink()
             updateAnimatingState()
             renderCurrentFrame()
         } else {
+            visibilityObservations.removeAll()
             displayLink?.invalidate()
             displayLink = nil
             lastTimestamp = nil
@@ -1240,24 +1352,24 @@ final class DotScopeHostView: UIView {
         if pixelSize.width > 8 && pixelSize.height > 8 {
             let isFirstFit = !hasFittedInitialLayout
             hasFittedInitialLayout = true
-            applyEffectiveTuning(jumpLayout: isFirstFit || sizeChanged)
-            if isFirstFit, case .idle = phase {
+            // Jump inset springs ONLY on the very first fit from zero; subsequent layout passes glide smoothly.
+            applyEffectiveTuning(jumpLayout: isFirstFit)
+            if isFirstFit, phase == .idle {
                 settleIdleImmediately()
-            }
-            if sizeChanged {
-                hasSeededSnapshot = false
             }
         }
         seedForSnapshotIfNeeded()
         updateAnimatingState()
-        renderCurrentFrame()
+        renderCurrentFrame(withTransaction: sizeChanged && UIView.inheritedAnimationDuration > 0)
     }
 
     private func ensureDisplayLink() {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        } else {
+            link.preferredFramesPerSecond = 60
         }
         link.isPaused = true
         link.add(to: .main, forMode: .common)
@@ -1265,7 +1377,7 @@ final class DotScopeHostView: UIView {
     }
 
     private func settleIdleImmediately() {
-        for _ in 0..<36 {
+        for _ in 0..<42 {
             simulation.advance(
                 dt: 1.0 / 60.0,
                 stage: .idle,
@@ -1277,17 +1389,17 @@ final class DotScopeHostView: UIView {
     }
 
     private func handlePhaseChange(from old: DotScopePhase, to next: DotScopePhase) {
-        if case .hidden = old, next != .hidden {
+        if old == .hidden, next != .hidden, simulation.settled {
             simulation.restart(reduceMotion: reduceMotion)
-            if case .idle = next {
+            if next == .idle {
                 settleIdleImmediately()
             }
         }
-        lastTimestamp = nil
-        hasSeededSnapshot = false
         seedForSnapshotIfNeeded()
         updateAnimatingState()
-        renderCurrentFrame()
+        if displayLink?.isPaused != false {
+            renderCurrentFrame()
+        }
     }
 
     private func seedForSnapshotIfNeeded() {
@@ -1299,9 +1411,8 @@ final class DotScopeHostView: UIView {
             break
         }
         hasSeededSnapshot = true
-        simulation.restart(reduceMotion: false)
         let dt: Float = 1.0 / 60.0
-        for _ in 0..<52 {
+        for _ in 0..<48 {
             simulation.advance(
                 dt: dt,
                 stage: .recording,
@@ -1310,8 +1421,8 @@ final class DotScopeHostView: UIView {
                 reduceMotion: false
             )
         }
-        if case .processing = phase {
-            for _ in 0..<30 {
+        if phase == .processing {
+            for _ in 0..<28 {
                 simulation.advance(
                     dt: dt,
                     stage: .processing,
@@ -1324,15 +1435,27 @@ final class DotScopeHostView: UIView {
     }
 
     private func updateAnimatingState() {
-        let wantsFrames: Bool = switch phase {
-        case .hidden:
-            !simulation.settled
-        case .idle:
-            !simulation.isIdleSettled
-        case .recording, .processing, .failed:
-            true
+        let visible = isEffectivelyVisible
+        let wantsFrames: Bool
+        if !visible {
+            wantsFrames = false
+        } else {
+            wantsFrames = switch phase {
+            case .hidden:
+                !simulation.settled
+            case .idle:
+                !simulation.isIdleSettled
+            case .recording, .processing, .failed:
+                true
+            }
         }
-        displayLink?.isPaused = !wantsFrames
+        let targetPaused = !wantsFrames
+        if displayLink?.isPaused != targetPaused {
+            if !targetPaused {
+                lastTimestamp = nil
+            }
+            displayLink?.isPaused = targetPaused
+        }
     }
 
     func stepAndRender(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval) {
@@ -1362,10 +1485,14 @@ final class DotScopeHostView: UIView {
             return (.done, false, -120.0)
         case .idle:
             return (.idle, true, -120.0)
-        case .recording(let db):
-            let effectiveDB = useDemoVoice
-                ? (-28.5 + 5.2 * sin(simulation.elapsedTime * 21.0))
-                : db
+        case .recording:
+            let liveDB = loudnessProvider?() ?? -62.0
+            let effectiveDB: Float
+            if useDemoVoice && liveDB <= -80.0 {
+                effectiveDB = DotScopeSimulation.demoLoudness(at: simulation.elapsedTime) + 4.5
+            } else {
+                effectiveDB = liveDB
+            }
             return (.recording, true, effectiveDB)
         case .processing:
             return (.processing, true, -120.0)
@@ -1374,20 +1501,30 @@ final class DotScopeHostView: UIView {
         }
     }
 
-    private func renderCurrentFrame() {
+    private func renderCurrentFrame(withTransaction: Bool = false) {
         guard bounds.width > 1, bounds.height > 1,
               let gpu = DotScopeMetalPipeline.shared,
-              let dotBuffer,
-              let drawable = metalLayer.nextDrawable(),
+              let dotBuffer else {
+            return
+        }
+        if metalLayer.presentsWithTransaction != withTransaction {
+            metalLayer.presentsWithTransaction = withTransaction
+        }
+        guard let drawable = metalLayer.nextDrawable(),
               let commandBuffer = gpu.queue.makeCommandBuffer() else {
             return
         }
 
         let pose = simulation.pose
-        let palette = DotScopePalette.dark(pose: pose, saturation: simulation.tuning.saturation)
+        let palette = DotScopePalette.palette(
+            isDark: isDark,
+            pose: pose,
+            saturation: simulation.tuning.saturation
+        )
         let scale = Float(max(1.0, metalLayer.contentsScale))
         let resX = Float(metalLayer.drawableSize.width)
         let resY = Float(metalLayer.drawableSize.height)
+        let curveFlag: Float = simulation.tuning.fitsBounds ? 1.0 : 0.0
 
         var uniforms = DotScopeMetalUniforms(
             metrics0: SIMD4<Float>(resX, resY, scale, simulation.tuning.spacing),
@@ -1398,15 +1535,15 @@ final class DotScopeHostView: UIView {
                 Float(simulation.rows),
                 pose.height * 0.5
             ),
-            state: SIMD4<Float>(pose.glow, pose.grid, pose.live, pose.cool),
+            state: SIMD4<Float>(pose.glow, pose.grid, pose.live, isDark ? 1.0 : 0.0),
             window: SIMD4<Float>(
                 pose.leadingInset,
                 pose.trailingInset,
                 simulation.tuning.windowFade,
-                pose.activeCenter
+                curveFlag
             ),
             base: SIMD4<Float>(palette.base.x, palette.base.y, palette.base.z, drawPlate ? 1.0 : 0.0),
-            core: SIMD4<Float>(palette.core.x, palette.core.y, palette.core.z, pose.activeSpan * 0.5),
+            core: SIMD4<Float>(palette.core.x, palette.core.y, palette.core.z, pose.cool),
             plate: palette.plate,
             rim: palette.rim,
             shadow: palette.shadow
@@ -1444,8 +1581,14 @@ final class DotScopeHostView: UIView {
             encoder.endEncoding()
         }
 
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+        if withTransaction {
+            commandBuffer.commit()
+            commandBuffer.waitUntilScheduled()
+            drawable.present()
+        } else {
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+        }
     }
 }
 
@@ -1454,13 +1597,17 @@ struct DotScopeView: UIViewRepresentable {
     var tuning: DotScopeTuning = .hud
     var drawPlate: Bool = true
     var demoVoice: Bool = ProcessInfo.processInfo.arguments.contains("--snap-state")
+    var loudnessProvider: (() -> Float)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeUIView(context: Context) -> DotScopeHostView {
         let view = DotScopeHostView(tuning: tuning)
         view.reduceMotion = reduceMotion
+        view.isDark = colorScheme == .dark
         view.useDemoVoice = demoVoice
+        view.loudnessProvider = loudnessProvider
         view.drawPlate = drawPlate
         view.phase = phase
         return view
@@ -1468,10 +1615,13 @@ struct DotScopeView: UIViewRepresentable {
 
     func updateUIView(_ uiView: DotScopeHostView, context: Context) {
         uiView.reduceMotion = reduceMotion
+        uiView.isDark = colorScheme == .dark
         uiView.useDemoVoice = demoVoice
+        uiView.loudnessProvider = loudnessProvider
         uiView.updateTuning(tuning)
         uiView.drawPlate = drawPlate
         uiView.phase = phase
+        uiView.scheduleVisibilityRefresh()
     }
 }
 
@@ -1485,7 +1635,7 @@ final class DotSwipeCueHostView: UIView {
     private var displayLink: CADisplayLink?
     private var lastTimestamp: CFTimeInterval?
     /// Starts mid-glide so initial paint and snapshot stills immediately read as a rightward swipe.
-    private var elapsed: Float = 0.76
+    private var elapsed: Float = 0.72
 
     var reduceMotion = false {
         didSet {
@@ -1562,7 +1712,9 @@ final class DotSwipeCueHostView: UIView {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 60)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        } else {
+            link.preferredFramesPerSecond = 60
         }
         link.isPaused = true
         link.add(to: .main, forMode: .common)
