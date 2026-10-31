@@ -240,6 +240,10 @@ const PATHS: &[(&str, &str)] = &[
     ("menus", "Linux & Windows/Microphone menu"),
     ("chinese", "Linux & Windows/Chinese"),
     ("voice-filter", "Linux & Windows/Voice Filter"),
+    (
+        "voice-filter-unavailable",
+        "Linux & Windows/Voice Filter unavailable",
+    ),
     ("onboarding", "Linux & Windows/Onboarding"),
     ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
 ];

@@ -35,11 +35,14 @@ Labs has no master switch; Settings › Labs is one flat list of rows (name,
 description, toggle), each off by default, plus Send feedback and Run setup
 again. A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
-Meetings (beta), Voice Filter (macOS; locked on while its driver is
-installed), Playground, Live text, Live chapters, Vocabulary biasing,
-and Terminal paste (Windows). Dev, local, and test builds
-(`dev_build::is_dev_build()`) add Annotate to the main sidebar; production
-builds keep it dormant.
+Meetings (beta), Voice Filter (locked on while its macOS driver is
+installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
+model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
+pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
+and Terminal paste (Windows). Externally contributed features land there too.
+Annotate is a normal feature in every build, stable included, on macOS,
+Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
+`DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
 
 ## Feature Map
 
@@ -433,7 +436,8 @@ substitute for source inspection or a second roadmap.
   read as nothing chosen.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
   description), the runtime gates (`labs::live_text`, `live_chapters`,
-  `playground`, `vocabulary_biasing`), and `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
+  `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
+  `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
   `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
@@ -824,8 +828,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   untouched. Notes never rename the file and rewrite only the heading Hex wrote
   and the `<!-- hex:notes -->` block.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
-  every macOS, Linux, and Windows build and on by default in dev builds
-  (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
+  every macOS, Linux, and Windows build and on by default in every build,
+  stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
   migration turns it on once for older settings). It is not an experiment.
   Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
@@ -1175,8 +1179,8 @@ git diff --check
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
-New, unproven, and user-requested features (including ones the issue
-pipeline builds) land in Labs, off by default
+New, unproven, user-requested, and externally contributed features
+(including ones the issue pipeline builds) land in Labs, off by default
 ([docs/features/labs.md](docs/features/labs.md)): add a `labs::Feature` with
 its settings key and description, a row on the Labs page, and a
 `hex settings` key; gate where the feature's work starts (worker, thread,

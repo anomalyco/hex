@@ -18,7 +18,7 @@ Rune overlays.
 
 ```ts
 Turn it on                               // capture.gate
-├── On by default in every macOS, Linux, and Windows dev build
+├── On by default in every macOS, Linux, and Windows build, stable included
 │   (capture.enabled); the `annotate-on-by-default` migration turns it on
 │   once for older settings
 │   └── macOS bundles sign scrawl-helper beside `hex`; validate-app.sh requires it
