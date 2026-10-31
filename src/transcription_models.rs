@@ -914,7 +914,6 @@ fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         return false;
@@ -1237,7 +1236,6 @@ pub(crate) fn sha256_hex(path: &Path, canceled: Option<&AtomicBool>) -> Result<S
         .collect())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact verification receipt", model.name);
@@ -1268,7 +1266,6 @@ fn verify_file(path: &Path, model: &ModelDefinition) -> Result<()> {
     verify_file_with_cancel(path, model, &AtomicBool::new(false))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verify_file_with_cancel(
     path: &Path,
     model: &ModelDefinition,
