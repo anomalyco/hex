@@ -1301,6 +1301,9 @@ Linux beta                               // not macOS feature parity
     shortcuts provider refused the bare `hex`, so binding failed, #579)
     ├── Installs ship anomaly.hex.desktop (StartupWMClass=anomaly.hex); windows
     │   report app_id / WM_CLASS anomaly.hex -> one launcher entry
+    ├── Icon=anomaly.hex -> packages install hicolor 16–512 px PNGs (deb/rpm refresh
+    │   the icon cache); otherwise Hex writes them to ~/.local/share/icons/hicolor
+    │   at startup and fixes Icon= in managed entries it wrote (#652)
     ├── Startup -> Hex's own managed hex.desktop (launcher, autostart) renamed
     │   to anomaly.hex.desktop; the installer does the same; unmanaged ones kept
     └── No anomaly.hex.desktop in XDG data dirs -> Hex writes

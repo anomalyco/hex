@@ -21,10 +21,35 @@ fn entry_path() -> Result<PathBuf> {
 }
 
 /// Renames Hex's managed `hex.desktop` autostart entry, the name before
-/// #579, to the app id's, unless an entry already has the new name. A
-/// symlink is the user's, whatever it points to.
-pub fn move_legacy_entry() -> Result<()> {
-    move_legacy_entry_in(&autostart_dir()?)
+/// #579, to the app id's, unless an entry already has the new name, then
+/// names Hex's icon in its managed entry (#652). A symlink is the user's,
+/// whatever it points to.
+pub fn tidy() -> Result<()> {
+    let directory = autostart_dir()?;
+    move_legacy_entry_in(&directory)?;
+    name_icon_in(&directory)
+}
+
+fn name_icon_in(directory: &Path) -> Result<()> {
+    let entry = directory.join(format!("{}.desktop", crate::linux_portal::APP_ID));
+    match fs::symlink_metadata(&entry) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).wrap_err_with(|| format!("could not read {}", entry.display()));
+        }
+    }
+    let current = fs::read_to_string(&entry)
+        .wrap_err_with(|| format!("could not read {}", entry.display()))?;
+    if !current.lines().any(|line| line.trim() == MANAGED_MARK) {
+        return Ok(());
+    }
+    let named = crate::linux_portal::with_icon(&current);
+    if named == current {
+        return Ok(());
+    }
+    write_atomically(&entry, &named)
 }
 
 fn move_legacy_entry_in(directory: &Path) -> Result<()> {
@@ -118,11 +143,12 @@ fn entry(executable: &Path) -> String {
          Name=Hex\n\
          Comment=Local voice dictation\n\
          Exec={} start\n\
-         Icon=audio-input-microphone\n\
+         Icon={}\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\
          {MANAGED_MARK}\n",
-        exec_argument(&executable.to_string_lossy())
+        exec_argument(&executable.to_string_lossy()),
+        crate::linux_portal::APP_ID,
     )
 }
 
@@ -194,6 +220,18 @@ mod tests {
         std::os::unix::fs::symlink(&entry, &legacy).unwrap();
         move_legacy_entry_in(&directory).unwrap();
         assert!(legacy.is_symlink());
+        fs::remove_file(&legacy).unwrap();
+        fs::write(
+            &entry,
+            "[Desktop Entry]\nIcon=audio-input-microphone\nX-Hex-Managed=true\n",
+        )
+        .unwrap();
+        name_icon_in(&directory).unwrap();
+        assert!(
+            fs::read_to_string(&entry)
+                .unwrap()
+                .contains("\nIcon=anomaly.hex\n")
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

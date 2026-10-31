@@ -34,7 +34,8 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 install -m755 "$executable" "$temporary/hex"
 sed 's#@HEX_BIN@#/usr/bin/hex#g' "$root/packaging/anomaly.hex.desktop" > "$temporary/anomaly.hex.desktop"
-cp "$root/packaging/hex.service" "$root/LICENSE" "$temporary/"
+cp "$root/packaging/hex.service" "$root/LICENSE" "$root/packaging/linux/refresh-desktop.sh" "$temporary/"
+cp -R "$root/packaging/linux/icons" "$temporary/icons"
 
 # Debian and RPM order a tilde before a release, and neither allows a hyphen
 # in the upstream version: 0.0.0-dev-42 is 0.0.0~dev.42, 2.5.0-beta.1 is

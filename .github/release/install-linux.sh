@@ -108,6 +108,16 @@ uninstall() {
       rm -f "$desktop"
     fi
   done
+  # The icons Hex writes into the user's theme when no package ships them,
+  # marked by a PNG text chunk.
+  for icon in "$data_home"/icons/hicolor/*/apps/anomaly.hex.png; do
+    if [ -f "$icon" ] && [ ! -L "$icon" ] && LC_ALL=C grep -Faq 'X-Hex-Managed=true' "$icon"; then
+      rm -f "$icon"
+    fi
+  done
+  if [ -d "$data_home/icons/hicolor" ] && [ ! -L "$data_home/icons/hicolor" ]; then
+    touch "$data_home/icons/hicolor" 2>/dev/null || true
+  fi
   rm -f "$support_dir/current" "$support_dir/.current.next" "$support_dir/install.json"
   rm -rf "$support_dir/versions"
   echo "Removed Hex. Logs and settings remain in $support_dir."
@@ -377,7 +387,7 @@ Type=Application
 Name=Hex
 Comment=Local voice dictation
 Exec="$binary"
-Icon=audio-input-microphone
+Icon=anomaly.hex
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
@@ -395,7 +405,7 @@ Type=Application
 Name=Hex
 Comment=Local voice dictation
 Exec="$binary" start
-Icon=audio-input-microphone
+Icon=anomaly.hex
 Terminal=false
 X-GNOME-Autostart-enabled=true
 X-Hex-Managed=true

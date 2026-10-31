@@ -34,12 +34,15 @@ source=(
   'anomaly.hex.desktop'
   'hex.service'
   'LICENSE'
+  'anomaly.hex-16.png' 'anomaly.hex-24.png' 'anomaly.hex-32.png' 'anomaly.hex-48.png'
+  'anomaly.hex-64.png' 'anomaly.hex-128.png' 'anomaly.hex-256.png' 'anomaly.hex-512.png'
 )
 source_x86_64=("hex-${pkgver}-linux-x64::@URL_X64@")
 source_aarch64=("hex-${pkgver}-linux-arm64::@URL_ARM64@")
 sha256sums=('@DESKTOP_SHA256@'
             '@SERVICE_SHA256@'
-            '@LICENSE_SHA256@')
+            '@LICENSE_SHA256@'
+            @ICON_SHA256S@)
 sha256sums_x86_64=('@SHA256_X64@')
 sha256sums_aarch64=('@SHA256_ARM64@')
 
@@ -48,6 +51,11 @@ package() {
   [ "$CARCH" = aarch64 ] && target=arm64
   install -Dm755 "hex-${pkgver}-linux-${target}" "$pkgdir/usr/bin/hex"
   install -Dm644 anomaly.hex.desktop "$pkgdir/usr/share/applications/anomaly.hex.desktop"
+  local size
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "anomaly.hex-$size.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/anomaly.hex.png"
+  done
   install -Dm644 hex.service "$pkgdir/usr/lib/systemd/user/hex.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

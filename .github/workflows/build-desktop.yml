@@ -111,12 +111,12 @@ jobs:
           dpkg-deb --info "$base.deb"
           sudo apt-get install -y "$base.deb"
           test "$(/usr/bin/hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
-          dpkg-query -S /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop
+          dpkg-query -S /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop /usr/share/icons/hicolor/256x256/apps/anomaly.hex.png
           sudo apt-get remove -y hex
           docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" -e HEX_VERSION -e HEX_LINUX_LABEL fedora:42 sh -euc '
             dnf install -y -q "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.rpm"
             test "$(hex --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
-            rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop'
+            rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop /usr/share/icons/hicolor/256x256/apps/anomaly.hex.png'
       - name: Check the x86_64 CPU floor
         if: env.HEX_LINUX_ARCH == 'x86_64'
         run: |

@@ -1,6 +1,6 @@
 # The hex .deb and .rpm, built by scripts/package-linux.sh with nfpm from a
 # release executable, in a directory it stages with hex, anomaly.hex.desktop,
-# hex.service, and LICENSE. They install what the AUR package hex-bin does:
+# the hicolor icons, hex.service, LICENSE, and the postinst/postrm scripts. They install what the AUR package hex-bin does:
 # /usr/bin/hex, the desktop entry, and the systemd user unit. Hex never
 # replaces a package-managed executable; it shows the update command the
 # release service lists for the deb-<arch> or rpm-<arch> distribution.
@@ -28,6 +28,38 @@ contents:
     dst: /usr/share/applications/anomaly.hex.desktop
     file_info:
       mode: 0644
+  - src: icons/hicolor/16x16/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/16x16/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/24x24/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/24x24/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/32x32/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/32x32/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/48x48/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/48x48/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/64x64/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/64x64/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/128x128/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/128x128/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/256x256/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/256x256/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
+  - src: icons/hicolor/512x512/apps/anomaly.hex.png
+    dst: /usr/share/icons/hicolor/512x512/apps/anomaly.hex.png
+    file_info:
+      mode: 0644
   - src: hex.service
     dst: /usr/lib/systemd/user/hex.service
     file_info:
@@ -36,6 +68,9 @@ contents:
     dst: /usr/share/licenses/hex/LICENSE
     file_info:
       mode: 0644
+scripts:
+  postinstall: refresh-desktop.sh
+  postremove: refresh-desktop.sh
 overrides:
   # Linked, then loaded at runtime: the X11, Wayland, and xkbcommon client
   # libraries. Ubuntu 24.04 renamed alsa for its 64-bit time_t

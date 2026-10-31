@@ -158,6 +158,8 @@ General › **Launch at login** turns that autostart entry on or off
 The launcher entry is `~/.local/share/applications/anomaly.hex.desktop`, named
 for Hex's app id `anomaly.hex`, which its windows also report. Earlier installs
 named both entries `hex.desktop`; Hex and the installer rename Hex's own.
+Its icon is `anomaly.hex`: packages install it in the hicolor theme, and a
+direct install gets it in `~/.local/share/icons/hicolor` when Hex first starts.
 
 Remove the application while preserving logs and settings with:
 

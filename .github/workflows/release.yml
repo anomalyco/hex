@@ -588,7 +588,7 @@ jobs:
           curl -fsS "$LINUX_X64_URL" | cmp - "$x64"
           curl -fsS "$LINUX_ARM64_URL" | cmp - "$arm64"
           mkdir -p "$RUNNER_TEMP/aur-out"
-          (cd "$stage" && cp PKGBUILD .SRCINFO anomaly.hex.desktop hex.service LICENSE hex-bin.install "$RUNNER_TEMP/aur-out/")
+          (cd "$stage" && cp PKGBUILD .SRCINFO anomaly.hex.desktop hex.service LICENSE hex-bin.install anomaly.hex-*.png "$RUNNER_TEMP/aur-out/")
           { echo '### AUR PKGBUILD'; echo '```'; cat "$stage/PKGBUILD"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - id: upload
         uses: ./.github/release/upload
