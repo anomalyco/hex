@@ -345,6 +345,7 @@ hex dictation stop      # bind to the same key's release: stop and transcribe
 hex dictation toggle    # one key: start, then stop and transcribe
 hex dictation cancel    # discard the recording
 hex paste-last          # paste the last dictation again
+hex dictation toggle --raw  # dictate without processing: paste the words as heard
 ```
 
 For example, hold-to-dictate on F9 in Sway, and a toggle in any desktop that

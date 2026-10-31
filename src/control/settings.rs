@@ -201,6 +201,12 @@ const KEYS: &[Key] = &[
         Kind::Shortcut(HotkeySlot::PasteLast),
         "The paste-last-dictation shortcut; none turns it off",
     ),
+    optional(
+        "raw_dictation_hotkey",
+        Kind::Shortcut(HotkeySlot::RawDictation),
+        "Dictate without processing: dictates and pastes the words as heard, skipping \
+         the Output steps; none (the default) turns it off",
+    ),
     key(
         "show_dock_icon",
         Kind::Bool,
@@ -646,13 +652,14 @@ pub fn apply(
                 ));
             }
         }
-        "dictation_hotkey" | "paste_last_hotkey" | "capture.hotkey" => {
+        "dictation_hotkey" | "paste_last_hotkey" | "raw_dictation_hotkey" | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
             let binding = match slot {
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
+                HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };

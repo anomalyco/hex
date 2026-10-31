@@ -47,6 +47,7 @@ pub(crate) enum ShortcutTarget {
     Dictation,
     PasteLast,
     Capture,
+    RawDictation,
 }
 
 struct PreparedTranscription {
@@ -916,6 +917,9 @@ impl LinuxDesktopHost {
                         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
                         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
                         ShortcutTarget::Capture => settings.capture.hotkey = binding,
+                        ShortcutTarget::RawDictation => {
+                            settings.raw_dictation_hotkey = Some(binding)
+                        }
                     }
                 })
             }));
@@ -1190,6 +1194,7 @@ impl crate::control::host::Host for LinuxControl {
         &self,
         action: CaptureAction,
         print: Option<crate::control::PrintReply>,
+        raw: bool,
     ) -> std::result::Result<(), ControlError> {
         if let Some(print) = print {
             return self
@@ -1198,11 +1203,13 @@ impl crate::control::host::Host for LinuxControl {
                 .try_send(ListenerCommand::StopAndPrint(print))
                 .map_err(|_| ControlError::new("busy", "Hex is busy; try again"));
         }
-        self.shortcut(match action {
-            CaptureAction::Start => ShortcutCommand::DictationStart,
-            CaptureAction::Stop => ShortcutCommand::DictationStop,
-            CaptureAction::Cancel => ShortcutCommand::DictationCancel,
-            CaptureAction::Toggle => ShortcutCommand::DictationToggle,
+        self.shortcut(match (action, raw) {
+            (CaptureAction::Start, false) => ShortcutCommand::DictationStart,
+            (CaptureAction::Start, true) => ShortcutCommand::DictationStartRaw,
+            (CaptureAction::Toggle, false) => ShortcutCommand::DictationToggle,
+            (CaptureAction::Toggle, true) => ShortcutCommand::DictationToggleRaw,
+            (CaptureAction::Stop, _) => ShortcutCommand::DictationStop,
+            (CaptureAction::Cancel, _) => ShortcutCommand::DictationCancel,
         })
     }
 

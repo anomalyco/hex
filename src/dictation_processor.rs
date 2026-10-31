@@ -604,6 +604,15 @@ pub struct Processed {
 pub type ProcessingObservation = crate::events::DictationProcessing;
 
 impl Processed {
+    /// `text` as heard, with no step run (Dictate without processing).
+    pub fn unchanged(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            observation: None,
+            transformations: Vec::new(),
+        }
+    }
+
     /// Runs the selected transformations, the last processing stage. The chain
     /// is one stage: a failure keeps the previous text and records the error.
     pub fn apply_transformations(

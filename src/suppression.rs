@@ -440,6 +440,7 @@ fn mouse_input(button: u16, down: bool, flags: u64, hotkeys: RuntimeHotkeys) -> 
     let code = crate::app_settings::HotkeyKey::mouse_code(button)?;
     let bound = [
         Some(hotkeys.dictation),
+        hotkeys.raw_dictation,
         hotkeys.paste_last,
         hotkeys.paste_meeting,
     ]
@@ -1155,6 +1156,7 @@ impl ShortcutSuppression {
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
                 capture: None,
+                raw_dictation: None,
             },
             delivered,
             false,
@@ -2624,6 +2626,7 @@ mod tests {
             paste_last: None,
             paste_meeting: None,
             capture: None,
+            raw_dictation: None,
         }
     }
 

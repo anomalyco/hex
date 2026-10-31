@@ -1016,16 +1016,19 @@ pub struct RuntimeHotkeys {
     pub paste_meeting: Option<RuntimeHotkey>,
     /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
     pub capture: Option<RuntimeHotkey>,
+    /// Dictate without processing, while it is bound.
+    pub raw_dictation: Option<RuntimeHotkey>,
 }
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 4] {
+    pub fn all(self) -> [Option<RuntimeHotkey>; 5] {
         [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
             self.capture,
+            self.raw_dictation,
         ]
     }
 }
@@ -1038,6 +1041,7 @@ impl Default for RuntimeHotkeys {
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
             capture: None,
+            raw_dictation: None,
         }
     }
 }
@@ -1651,6 +1655,9 @@ pub struct AppSettings {
     )]
     pub retired_edit_hotkey: Option<serde_json::Value>,
     pub paste_last_hotkey: Option<HotkeyBinding>,
+    /// Dictate without processing: records like the dictation shortcut and
+    /// pastes the transcript as heard. Unbound by default.
+    pub raw_dictation_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
@@ -1763,6 +1770,7 @@ impl Default for AppSettings {
             dictation_hotkey: HotkeyBinding::default(),
             retired_edit_hotkey: None,
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
+            raw_dictation_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
@@ -2349,6 +2357,10 @@ impl AppSettings {
             capture: self.capture_on().then(|| self.capture.hotkey.runtime()),
             #[cfg(not(hex_capture))]
             capture: None,
+            raw_dictation: self
+                .raw_dictation_hotkey
+                .as_ref()
+                .map(HotkeyBinding::runtime),
         }
     }
 
@@ -2377,6 +2389,10 @@ impl AppSettings {
             self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
             self.mouse_shortcut_notice = true;
         }
+        if self.raw_dictation_hotkey.as_ref().is_some_and(mouse) {
+            self.raw_dictation_hotkey = None;
+            self.mouse_shortcut_notice = true;
+        }
         #[cfg(hex_capture)]
         if mouse(&self.capture.hotkey) {
             self.capture.hotkey = HotkeyBinding::capture_default();
@@ -2400,6 +2416,14 @@ impl AppSettings {
             tracing::warn!("replaced a left-click paste-last shortcut with the default");
             self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
         }
+        if self
+            .raw_dictation_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click raw dictation shortcut");
+            self.raw_dictation_hotkey = None;
+        }
         #[cfg(hex_capture)]
         if self.capture.hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click capture shortcut with the default");
@@ -2422,6 +2446,7 @@ pub fn hotkey_conflicts(
 pub enum HotkeySlot {
     Dictation,
     PasteLast,
+    RawDictation,
     #[cfg(hex_capture)]
     Capture,
 }
@@ -2440,6 +2465,11 @@ impl AppSettings {
             && let Some(paste) = &self.paste_last_hotkey
         {
             others.push(paste.clone());
+        }
+        if slot != HotkeySlot::RawDictation
+            && let Some(raw) = &self.raw_dictation_hotkey
+        {
+            others.push(raw.clone());
         }
         if cfg!(target_os = "macos") && self.meetings.available() {
             others.push(HotkeyBinding::paste_meeting_default());

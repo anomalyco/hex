@@ -101,9 +101,10 @@ impl Pump {
             ControlCommand::Dictation {
                 action,
                 print: true,
+                raw,
             } => {
                 background(reply, move || {
-                    control::check_print(action, true)?;
+                    control::check_flags(action, true, raw)?;
                     listener_ready(&runtime)?;
                     let (print, printed) = control::PrintReply::channel();
                     // The listener answers once the recording stopped; only
@@ -111,6 +112,7 @@ impl Pump {
                     match ask(&runtime, |reply| RecognitionControl::Capture {
                         action,
                         print: Some(print),
+                        raw: false,
                         reply,
                     })? {
                         ControlReply::Done { .. } => {
@@ -121,12 +123,14 @@ impl Pump {
                 });
                 None
             }
-            ControlCommand::Dictation { action, .. } => {
+            ControlCommand::Dictation { action, raw, .. } => {
                 background(reply, move || {
+                    control::check_flags(action, false, raw)?;
                     listener_ready(&runtime)?;
                     ask(&runtime, |reply| RecognitionControl::Capture {
                         action,
                         print: None,
+                        raw,
                         reply,
                     })
                 });

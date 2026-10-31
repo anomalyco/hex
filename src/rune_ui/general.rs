@@ -138,14 +138,22 @@ pub(super) fn shortcut_rows(
         .gap(4.0)
         .center_y()
         .child(keys_button(ui, p, target));
-    if target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some() {
+    // The optional shortcuts can be turned off.
+    let optional = matches!(
+        target,
+        ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
+    );
+    if optional && s::binding(&ui.settings, target).is_some() {
         control = control.child(icon_button(
             p,
-            "clear-paste-last",
+            &format!("clear-{key}"),
             &rune_theme_opencode::icons::TRASH,
             tr("Clear shortcut"),
-            |ui: &mut Ui| {
-                ui.update(|settings| settings.paste_last_hotkey = None);
+            move |ui: &mut Ui| {
+                ui.update(|settings| match target {
+                    ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
+                    _ => settings.paste_last_hotkey = None,
+                });
             },
         ));
     }

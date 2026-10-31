@@ -89,6 +89,9 @@ pub enum PasteKind {
 #[derive(Clone, Copy, Debug)]
 pub enum TranscriptionTarget {
     Paste,
+    /// Dictate without processing: pasted as heard, skipping the Output
+    /// pane's steps.
+    RawPaste,
     Service,
     /// `hex dictation stop --print`: processed as a paste, then handed to
     /// the waiting command instead of pasted.
@@ -1004,7 +1007,7 @@ fn finish_output(
                 if !completed.text.trim().is_empty() {
                     let commit = || control.begin_output();
                     match target {
-                        TranscriptionTarget::Paste => {
+                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
                             paste(&completed.text, PasteMode::Continue, &commit)
                         }
                         TranscriptionTarget::Service | TranscriptionTarget::Print => commit()
@@ -1012,7 +1015,10 @@ fn finish_output(
                             .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
                     .map_err(|error| error.to_string())?;
-                    if matches!(target, TranscriptionTarget::Paste) {
+                    if matches!(
+                        target,
+                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste
+                    ) {
                         *last_transcript = Some(completed.text.clone());
                     }
                     if let Some(history) = history {
@@ -1077,6 +1083,7 @@ fn finish_output(
 fn record_history(history: &History, target: TranscriptionTarget, completed: &CompletedTranscript) {
     let kind = match target {
         TranscriptionTarget::Paste => HistoryKind::Dictation,
+        TranscriptionTarget::RawPaste => HistoryKind::Raw,
         TranscriptionTarget::Print => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
     };

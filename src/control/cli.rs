@@ -72,6 +72,11 @@ pub enum ControlCli {
         /// pasting it. Exits 4, printing nothing, when no speech was heard.
         #[arg(long)]
         print: bool,
+        /// With `start` or `toggle`: paste the transcript as heard,
+        /// skipping the Output pane's steps, like Dictate without
+        /// processing.
+        #[arg(long)]
+        raw: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -384,13 +389,14 @@ pub fn run(command: ControlCli) -> u8 {
         ControlCli::Dictation {
             action,
             print,
+            raw,
             output,
         } => {
-            if let Err(error) = super::check_print(action, print) {
+            if let Err(error) = super::check_flags(action, print, raw) {
                 eprintln!("hex: {}", error.message);
                 return 2;
             }
-            send(ControlCommand::Dictation { action, print }, output)
+            send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
         ControlCli::Settings { command } => settings(command),

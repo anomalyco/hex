@@ -364,7 +364,10 @@ pub(crate) fn connect_x11() -> Result<(RustConnection, Window, Keymap)> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HotkeyEvent {
-    Start,
+    /// `raw`: Dictate without processing started it.
+    Start {
+        raw: bool,
+    },
     Finish,
     /// `hex dictation stop --print` finished the dictation: its transcript
     /// goes to the reply instead of being pasted.
@@ -387,6 +390,9 @@ pub(crate) enum ShortcutCommand {
     DictationToggle,
     DictationCancel,
     PasteLast,
+    /// `hex dictation start --raw` and `toggle --raw`.
+    DictationStartRaw,
+    DictationToggleRaw,
 }
 
 /// What the listener's command queue carries: a `hex` command, or a
@@ -412,6 +418,8 @@ pub(crate) struct HotkeyOptions {
     pub(crate) double_tap_only: bool,
     pub(crate) toggle: bool,
     pub(crate) paste_last: Option<LinuxHotkey>,
+    /// Dictate without processing, while it is bound.
+    pub(crate) raw_dictation: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
@@ -610,10 +618,16 @@ enum Shortcut {
     Dictation,
     PasteLast,
     Capture,
+    RawDictation,
 }
 
 impl Shortcut {
-    const ALL: [Self; 3] = [Self::Dictation, Self::PasteLast, Self::Capture];
+    const ALL: [Self; 4] = [
+        Self::Dictation,
+        Self::PasteLast,
+        Self::Capture,
+        Self::RawDictation,
+    ];
 
     fn index(self) -> usize {
         self as usize
@@ -625,6 +639,7 @@ impl Shortcut {
             Self::Dictation => ("dictation", "Dictation"),
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::Capture => ("capture", "Annotate"),
+            Self::RawDictation => ("raw-dictation", "Dictate without processing"),
         }
     }
 }
@@ -662,6 +677,9 @@ struct ShortcutState {
     last_press: Option<Instant>,
     /// The dictation shortcut was pressed and its release hasn't arrived.
     down: bool,
+    /// Dictate without processing, not the dictation shortcut, owns the
+    /// capture (or the last one).
+    raw: bool,
 }
 
 impl ShortcutState {
@@ -674,6 +692,7 @@ impl ShortcutState {
             last_release: None,
             last_press: None,
             down: false,
+            raw: false,
         }
     }
 
@@ -693,14 +712,33 @@ impl ShortcutState {
         active.then_some(HotkeyEvent::Cancel)
     }
 
-    fn start_dictation(&mut self) -> Option<HotkeyEvent> {
+    fn start_dictation(&mut self, raw: bool) -> Option<HotkeyEvent> {
         if !self.idle() {
             return None;
         }
         // Like a locked capture: a shortcut press or `stop` finishes it.
+        self.raw = raw;
         self.capture = Capture::Locked;
         self.last_release = None;
-        Some(HotkeyEvent::Start)
+        Some(HotkeyEvent::Start { raw })
+    }
+
+    /// Hands an idle state to the shortcut pressed, or reports that the
+    /// other shortcut's capture owns its keys. A tap of one never counts
+    /// toward the other's double tap.
+    fn claim(&mut self, raw: bool) -> bool {
+        if self.raw == raw {
+            return true;
+        }
+        if !self.idle() {
+            return false;
+        }
+        self.raw = raw;
+        self.capture = Capture::Idle;
+        self.last_release = None;
+        self.last_press = None;
+        self.down = false;
+        true
     }
 
     fn stop_dictation(&mut self) -> Option<HotkeyEvent> {
@@ -722,7 +760,10 @@ impl ShortcutState {
                 self.down = false;
                 self.cancel()
             }
-            Input::Pressed(Shortcut::Dictation) => {
+            Input::Pressed(shortcut @ (Shortcut::Dictation | Shortcut::RawDictation)) => {
+                if !self.claim(shortcut == Shortcut::RawDictation) {
+                    return None;
+                }
                 // A press with no release since the last one, sooner than a
                 // new press could come, is the desktop repeating a held key.
                 let repeat = self.down
@@ -751,7 +792,7 @@ impl ShortcutState {
                             return None;
                         }
                         self.capture = Capture::Held { second_tap };
-                        Some(HotkeyEvent::Start)
+                        Some(HotkeyEvent::Start { raw: self.raw })
                     }
                     // The desktop never sent the release that would have
                     // finished or locked this capture (Hyprland's Lua binds and
@@ -765,7 +806,10 @@ impl ShortcutState {
                     Capture::Armed => None,
                 }
             }
-            Input::Released(Shortcut::Dictation) => {
+            Input::Released(shortcut @ (Shortcut::Dictation | Shortcut::RawDictation)) => {
+                if (shortcut == Shortcut::RawDictation) != self.raw {
+                    return None;
+                }
                 self.down = false;
                 match self.capture {
                     Capture::Armed => {
@@ -793,10 +837,14 @@ impl ShortcutState {
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
             Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
             Input::Command(command) => match command {
-                ShortcutCommand::DictationStart => self.start_dictation(),
+                ShortcutCommand::DictationStart => self.start_dictation(false),
+                ShortcutCommand::DictationStartRaw => self.start_dictation(true),
                 ShortcutCommand::DictationStop => self.stop_dictation(),
-                ShortcutCommand::DictationToggle => {
-                    self.stop_dictation().or_else(|| self.start_dictation())
+                ShortcutCommand::DictationToggle => self
+                    .stop_dictation()
+                    .or_else(|| self.start_dictation(false)),
+                ShortcutCommand::DictationToggleRaw => {
+                    self.stop_dictation().or_else(|| self.start_dictation(true))
                 }
                 ShortcutCommand::DictationCancel => self.cancel(),
                 ShortcutCommand::PasteLast => unreachable!("handled above"),
@@ -1025,6 +1073,10 @@ impl Backend {
                 .as_ref()
                 .map(|key| (Shortcut::PasteLast, key)),
             options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
+            options
+                .raw_dictation
+                .as_ref()
+                .map(|key| (Shortcut::RawDictation, key)),
         ];
         let mut shortcuts = Vec::new();
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
@@ -1169,6 +1221,9 @@ impl Backend {
             Some((Shortcut::Dictation, binding)),
             options.paste_last.map(|key| (Shortcut::PasteLast, key)),
             options.capture.map(|key| (Shortcut::Capture, key)),
+            options
+                .raw_dictation
+                .map(|key| (Shortcut::RawDictation, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);
@@ -1580,7 +1635,8 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use HotkeyEvent::{Cancel, Finish, PasteLast, Start};
+    use HotkeyEvent::{Cancel, Finish, PasteLast};
+    const START: HotkeyEvent = HotkeyEvent::Start { raw: false };
     use ShortcutCommand as Command;
 
     struct Test {
@@ -1632,10 +1688,29 @@ mod tests {
             self.tap();
             self.now += Duration::from_millis(20);
             self.tap();
-            assert_eq!(self.events, [Start, Finish, Start]);
+            assert_eq!(self.events, [START, Finish, START]);
             assert_eq!(self.state.capture, Capture::Locked);
             self.events.clear();
         }
+    }
+
+    #[test]
+    fn raw_dictation_owns_the_capture_it_starts() {
+        const RAW: HotkeyEvent = HotkeyEvent::Start { raw: true };
+        let mut test = Test::new(true);
+        test.press(Shortcut::RawDictation);
+        // The dictation shortcut can't finish or join another's capture.
+        test.tap();
+        test.release(Shortcut::RawDictation);
+        assert_eq!(test.events, [RAW, Finish]);
+        // A dictation tap right after a raw one is not its second tap.
+        test.now += Duration::from_millis(20);
+        test.tap();
+        assert_eq!(test.events, [RAW, Finish, START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+        test.command(Command::DictationToggleRaw);
+        test.command(Command::DictationToggleRaw);
+        assert_eq!(test.events, [RAW, Finish, START, Finish, RAW, Finish]);
     }
 
     #[test]
@@ -1679,7 +1754,7 @@ mod tests {
         };
         let (monitor, _commands) = x11_monitor(binding, double_tap(), Default::default());
         send_key(&harness.connection, harness.root, 4, 8);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         send_key(&harness.connection, harness.root, 5, 8);
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
@@ -1881,7 +1956,7 @@ mod tests {
         test.release(Shortcut::Dictation);
         test.now += Duration::from_millis(20);
         test.tap();
-        assert_eq!(test.events, [Start, Finish, Start, Finish]);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
     }
 
     #[test]
@@ -1892,14 +1967,14 @@ mod tests {
         test.release(Shortcut::Dictation);
         test.now += Duration::from_secs(1);
         test.release(Shortcut::Dictation);
-        assert_eq!(test.events, [Start, Finish]);
+        assert_eq!(test.events, [START, Finish]);
     }
 
     #[test]
     fn double_tap_window_has_an_explicit_boundary() {
         for (delay, expected) in [
-            (299, vec![Start, Finish, Start]),
-            (300, vec![Start, Finish, Start, Finish]),
+            (299, vec![START, Finish, START]),
+            (300, vec![START, Finish, START, Finish]),
         ] {
             let mut test = Test::new(true);
             test.tap();
@@ -1921,7 +1996,7 @@ mod tests {
         test.release(Shortcut::Dictation);
         test.now += Duration::from_secs(1);
         test.tap();
-        assert_eq!(test.events, [Finish, Start, Finish]);
+        assert_eq!(test.events, [Finish, START, Finish]);
     }
 
     #[test]
@@ -1939,10 +2014,10 @@ mod tests {
         test.tap();
         test.now += Duration::from_millis(20);
         test.tap();
-        assert_eq!(test.events, [Start]);
+        assert_eq!(test.events, [START]);
         assert_eq!(test.state.capture, Capture::Locked);
         test.tap();
-        assert_eq!(test.events, [Start, Finish]);
+        assert_eq!(test.events, [START, Finish]);
     }
 
     #[test]
@@ -1954,17 +2029,17 @@ mod tests {
                 ..HotkeyOptions::default()
             });
             test.tap();
-            assert_eq!(test.events, [Start]);
+            assert_eq!(test.events, [START]);
             assert_eq!(test.state.capture, Capture::Locked);
             test.now += Duration::from_secs(5);
             test.tap();
-            assert_eq!(test.events, [Start, Finish]);
+            assert_eq!(test.events, [START, Finish]);
             // A quick third tap starts a fresh capture rather than locking a double tap.
             test.now += Duration::from_millis(20);
             test.tap();
-            assert_eq!(test.events, [Start, Finish, Start]);
+            assert_eq!(test.events, [START, Finish, START]);
             test.input(Input::Escape);
-            assert_eq!(test.events, [Start, Finish, Start, Cancel]);
+            assert_eq!(test.events, [START, Finish, START, Cancel]);
         }
     }
 
@@ -1991,7 +2066,7 @@ mod tests {
             test.release(Shortcut::Dictation);
             test.now += Duration::from_secs(1);
             test.press(Shortcut::Dictation);
-            assert_eq!(test.events, [Finish, Start]);
+            assert_eq!(test.events, [Finish, START]);
         }
     }
 
@@ -2006,23 +2081,23 @@ mod tests {
                 test.now += Duration::from_millis(33);
                 test.press(Shortcut::Dictation);
             }
-            assert_eq!(test.events, [Start], "repeats never finish the hold");
+            assert_eq!(test.events, [START], "repeats never finish the hold");
             assert_eq!(test.state.capture, Capture::Held { second_tap: false });
             // Ctrl up first: the repeats stop and no release comes.
             test.now += Duration::from_secs(3);
             test.press(Shortcut::Dictation);
-            assert_eq!(test.events, [Start, Finish]);
+            assert_eq!(test.events, [START, Finish]);
             // The finishing press's own repeats and release start nothing.
             for _ in 0..20 {
                 test.now += Duration::from_millis(33);
                 test.press(Shortcut::Dictation);
             }
             test.release(Shortcut::Dictation);
-            assert_eq!(test.events, [Start, Finish]);
+            assert_eq!(test.events, [START, Finish]);
             assert_eq!(test.state.capture, Capture::Idle);
             test.now += Duration::from_secs(1);
             test.tap();
-            assert_eq!(test.events, [Start, Finish, Start, Finish]);
+            assert_eq!(test.events, [START, Finish, START, Finish]);
         }
     }
 
@@ -2036,11 +2111,11 @@ mod tests {
             test.press(Shortcut::Dictation);
         }
         test.release(Shortcut::Dictation);
-        assert_eq!(test.events, [Start, Finish]);
+        assert_eq!(test.events, [START, Finish]);
         // A quick new press after a release is a press, not a repeat.
         test.now += Duration::from_millis(100);
         test.press(Shortcut::Dictation);
-        assert_eq!(test.events, [Start, Finish, Start]);
+        assert_eq!(test.events, [START, Finish, START]);
     }
 
     #[test]
@@ -2057,7 +2132,7 @@ mod tests {
             test.now += Duration::from_millis(40);
         }
         test.release(Shortcut::Dictation);
-        assert_eq!(test.events, [Start]);
+        assert_eq!(test.events, [START]);
         assert_eq!(test.state.capture, Capture::Locked);
     }
 
@@ -2068,7 +2143,7 @@ mod tests {
         test.input(Input::Escape);
         test.release(Shortcut::Dictation);
         test.tap();
-        assert_eq!(test.events, [Start, Cancel, Start, Finish]);
+        assert_eq!(test.events, [START, Cancel, START, Finish]);
     }
 
     #[test]
@@ -2077,7 +2152,7 @@ mod tests {
         test.lock();
         test.input(Input::Escape);
         test.tap();
-        assert_eq!(test.events, [Cancel, Start, Finish]);
+        assert_eq!(test.events, [Cancel, START, Finish]);
     }
 
     #[test]
@@ -2114,7 +2189,7 @@ mod tests {
             assert!(test.state.last_release.is_none());
             test.release(Shortcut::Dictation);
             test.tap();
-            assert_eq!(test.events, [Cancel, Start, Finish]);
+            assert_eq!(test.events, [Cancel, START, Finish]);
         }
     }
 
@@ -2128,7 +2203,7 @@ mod tests {
         test.press(Shortcut::Dictation);
         test.press(Shortcut::PasteLast);
         test.command(Command::PasteLast);
-        assert_eq!(test.events, [PasteLast, PasteLast, Start]);
+        assert_eq!(test.events, [PasteLast, PasteLast, START]);
     }
 
     #[test]
@@ -2141,15 +2216,15 @@ mod tests {
         test.command(Command::DictationStart);
         assert_eq!(
             test.events,
-            [Start],
+            [START],
             "starting while recording does nothing"
         );
         test.command(Command::DictationStop);
         test.command(Command::DictationStop);
-        assert_eq!(test.events, [Start, Finish]);
+        assert_eq!(test.events, [START, Finish]);
         // A stop never counts as the first tap of a double-tap.
         test.tap();
-        assert_eq!(test.events, [Start, Finish, Start, Finish]);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
     }
 
     #[test]
@@ -2160,7 +2235,7 @@ mod tests {
         test.command(Command::DictationToggle);
         test.command(Command::DictationCancel);
         test.command(Command::DictationCancel);
-        assert_eq!(test.events, [Start, Finish, Start, Cancel]);
+        assert_eq!(test.events, [START, Finish, START, Cancel]);
     }
 
     #[test]
@@ -2176,11 +2251,11 @@ mod tests {
         test.release(Shortcut::Dictation);
         // A locked double-tap stops through toggle.
         test.now += Duration::from_secs(1);
-        test.lock_from(&[Start, Finish, Start, Finish]);
+        test.lock_from(&[START, Finish, START, Finish]);
         test.command(Command::DictationToggle);
         assert_eq!(
             test.events,
-            [Start, Finish, Start, Finish, Start, Finish, Start, Finish]
+            [START, Finish, START, Finish, START, Finish, START, Finish]
         );
     }
 
@@ -2190,7 +2265,7 @@ mod tests {
             self.now += Duration::from_millis(20);
             self.tap();
             let mut expected = before.to_vec();
-            expected.extend([Start, Finish, Start]);
+            expected.extend([START, Finish, START]);
             assert_eq!(self.events, expected);
             assert_eq!(self.state.capture, Capture::Locked);
         }
@@ -2364,9 +2439,12 @@ mod tests {
     #[test]
     fn full_event_queue_returns_an_error_instead_of_blocking_the_worker() {
         let (sender, receiver) = mpsc::sync_channel(1);
-        assert!(send_event(&sender, HotkeyEvent::Start).unwrap());
+        assert!(send_event(&sender, HotkeyEvent::Start { raw: false }).unwrap());
         assert!(send_event(&sender, HotkeyEvent::Finish).is_err());
-        assert_eq!(receiver.try_recv().unwrap(), HotkeyEvent::Start);
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            HotkeyEvent::Start { raw: false }
+        );
         drop(receiver);
         assert!(!send_event(&sender, HotkeyEvent::Cancel).unwrap());
     }
@@ -2501,7 +2579,7 @@ mod tests {
         commands.send(Command::DictationToggle.into()).unwrap();
         commands.send(Command::DictationToggle.into()).unwrap();
         let wait = || events.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!([wait(), wait()], [Start, Finish]);
+        assert_eq!([wait(), wait()], [START, Finish]);
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
     }
@@ -2532,7 +2610,11 @@ mod tests {
         let received: Vec<_> = events.try_iter().collect();
         assert!(matches!(
             received.as_slice(),
-            [Start, HotkeyEvent::FinishPrinting(_), Start]
+            [
+                HotkeyEvent::Start { raw: false },
+                HotkeyEvent::FinishPrinting(_),
+                HotkeyEvent::Start { raw: false }
+            ]
         ));
         // The listener owns the reply now; nothing has answered it yet.
         assert!(printed.try_recv().is_err());
@@ -2553,7 +2635,7 @@ mod tests {
         let (monitor, _commands) =
             x11_monitor(LinuxHotkey::default(), double_tap(), Default::default());
         harness.tap_alt_space();
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
@@ -2565,10 +2647,10 @@ mod tests {
             x11_monitor(LinuxHotkey::default(), double_tap(), Default::default());
 
         harness.tap_alt_space();
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
         harness.tap_alt_space();
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         assert!(
             monitor
                 .events
@@ -2594,7 +2676,7 @@ mod tests {
         harness.send_key(KEY_PRESS, trigger);
         harness.send_key(KEY_RELEASE, trigger);
 
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
@@ -2606,7 +2688,7 @@ mod tests {
             x11_monitor(LinuxHotkey::default(), double_tap(), Default::default());
         harness.send_key(KEY_PRESS, harness.alt);
         harness.send_key(KEY_PRESS, harness.space);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         commands.send(Command::DictationStop.into()).unwrap();
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
         // Releasing the held shortcut afterwards finishes nothing twice.
@@ -2619,7 +2701,7 @@ mod tests {
                 .is_err()
         );
         commands.send(Command::DictationStart.into()).unwrap();
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         // Escape is grabbed while the command's capture records.
         harness.send_key(KEY_PRESS, harness.escape);
         assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
@@ -2646,7 +2728,7 @@ mod tests {
         );
         for _ in 0..2 {
             harness.tap_alt_space();
-            assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+            assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
             assert_eq!(status.warning().as_deref(), Some(ESCAPE_CANCEL_WARNING));
             assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
             assert!(
@@ -2664,7 +2746,7 @@ mod tests {
         harness.connection.flush().unwrap();
         harness.send_key(KEY_PRESS, harness.alt);
         harness.send_key(KEY_PRESS, harness.space);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
         assert!(status.warning().is_none());
         harness.send_key(KEY_PRESS, harness.escape);
         assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
@@ -2687,7 +2769,11 @@ mod tests {
         let status = HotkeyStatus::default();
         let (monitor, _commands) =
             x11_monitor(LinuxHotkey::default(), double_tap(), status.clone());
-        for expected in [HotkeyEvent::Start, HotkeyEvent::Finish, HotkeyEvent::Start] {
+        for expected in [
+            HotkeyEvent::Start { raw: false },
+            HotkeyEvent::Finish,
+            HotkeyEvent::Start { raw: false },
+        ] {
             if expected != HotkeyEvent::Finish {
                 harness.tap_alt_space();
             }

@@ -36,11 +36,13 @@ pub(crate) struct HostState {
 pub(crate) trait Host {
     fn state(&self) -> Result<HostState, ControlError>;
     /// Hands a dictation command to the listener's own queue, as its
-    /// shortcut would; `print` rides along with a printing stop.
+    /// shortcut would; `print` rides along with a printing stop, and `raw`
+    /// with a start that skips processing.
     fn dictation(
         &self,
         action: CaptureAction,
         print: Option<PrintReply>,
+        raw: bool,
     ) -> Result<(), ControlError>;
     fn paste_last(&self) -> Result<(), ControlError>;
     /// Saves `settings` as the window would and lets the runtime, the
@@ -129,13 +131,15 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         ControlCommand::Dictation {
             action,
             print: true,
-        } => reply(super::check_print(action, true).and_then(|()| {
+            raw,
+        } => reply(super::check_flags(action, true, raw).and_then(|()| {
             let (print, printed) = PrintReply::channel();
-            host.dictation(action, Some(print))?;
+            host.dictation(action, Some(print), false)?;
             Ok(super::await_printed(&printed, super::PRINT_WAIT))
         })),
-        ControlCommand::Dictation { action, .. } => reply(
-            host.dictation(action, None)
+        ControlCommand::Dictation { action, raw, .. } => reply(
+            super::check_flags(action, false, raw)
+                .and_then(|()| host.dictation(action, None, raw))
                 .map(|()| ControlReply::done(dictation_message(action))),
         ),
         ControlCommand::PasteLast => reply(
@@ -628,6 +632,7 @@ mod tests {
             &self,
             action: CaptureAction,
             print: Option<PrintReply>,
+            _: bool,
         ) -> Result<(), ControlError> {
             self.dictations.lock().unwrap().push(action);
             if let Some(print) = print {
@@ -710,6 +715,7 @@ mod tests {
         let stop = |print| ControlCommand::Dictation {
             action: CaptureAction::Stop,
             print,
+            raw: false,
         };
         assert_eq!(
             ask(&host, stop(true)),
@@ -721,6 +727,7 @@ mod tests {
         let start_print = ControlCommand::Dictation {
             action: CaptureAction::Start,
             print: true,
+            raw: false,
         };
         assert_eq!(code(&ask(&host, start_print)), "invalid-value");
         assert_eq!(

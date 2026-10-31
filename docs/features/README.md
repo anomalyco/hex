@@ -608,6 +608,7 @@ General                                  // settings
 │   │   microphone instead of Bluetooth"),
 │   │   Recognition hints
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
+│   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
@@ -1199,6 +1200,7 @@ Linux beta                               // not macOS feature parity
 │       never the X11 mode
 ├── hex dictation start|stop|toggle|cancel, hex paste-last
 │   -> Same events as a shortcut                     // linux.commands
+│   ├── start|toggle --raw -> Dictate without processing's events
 │   ├── Idempotent: start while recording / stop while idle -> Nothing
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status

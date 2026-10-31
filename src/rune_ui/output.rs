@@ -8,14 +8,15 @@
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Button, ButtonVariant, TextInput};
 
-use super::Ui;
 use super::controls::{
     ButtonKind, CardRow, DESCRIPTION, METRICS, Paint, PushSize, button, card, folding, note, page,
     raised,
 };
+use super::icons::MIC;
 use super::lists::{Tone, tone_tag};
 use super::modes::{application_icon, monogram};
 use super::spark::spark;
+use super::{ShortcutTarget, Ui};
 use crate::app_settings::DictationMode;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::text_replacements::ReplacementSet;
@@ -154,6 +155,9 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     if !processing.modes.is_empty() {
         content = content.child(some_apps(ui, p, &processing.modes));
     }
+    if ui.records_shortcuts() {
+        content = content.child(without_processing(ui, p));
+    }
     super::scroll_body("output-scroll", content)
 }
 
@@ -239,6 +243,26 @@ fn every_dictation(ui: &Ui, p: Paint, mode: &DictationMode) -> El {
         tr("Every dictation"),
         tr("Runs top to bottom"),
         rows,
+    )
+}
+
+/// Dictate without processing: a second dictation shortcut that skips
+/// every step above. Unbound until the person records one.
+fn without_processing(ui: &Ui, p: Paint) -> El {
+    labeled(
+        p,
+        "without-processing",
+        tr("Without processing"),
+        tr("Skips every step"),
+        super::general::shortcut_rows(
+            ui,
+            p,
+            "raw-dictation",
+            &MIC,
+            tr("Dictate without processing"),
+            ShortcutTarget::RawDictation,
+            Some(tr("Pastes your words as Hex heard them")),
+        ),
     )
 }
 

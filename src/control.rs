@@ -80,6 +80,10 @@ pub enum ControlCommand {
         /// `stop` only: answer with the transcript instead of pasting it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         print: bool,
+        /// `start` and `toggle` only: the dictation this starts pastes the
+        /// transcript as heard, skipping the Output pane's steps.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        raw: bool,
     },
     PasteLast,
     MeetingRecord {
@@ -457,11 +461,17 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
 }
 
 /// `print` applies only to `stop`.
-pub fn check_print(action: CaptureAction, print: bool) -> Result<(), ControlError> {
+pub fn check_flags(action: CaptureAction, print: bool, raw: bool) -> Result<(), ControlError> {
     if print && action != CaptureAction::Stop {
         return Err(ControlError::new(
             "invalid-value",
             "--print works only with `hex dictation stop`",
+        ));
+    }
+    if raw && !matches!(action, CaptureAction::Start | CaptureAction::Toggle) {
+        return Err(ControlError::new(
+            "invalid-value",
+            "--raw works only with `hex dictation start` and `hex dictation toggle`",
         ));
     }
     Ok(())
@@ -839,8 +849,10 @@ mod tests {
             ControlReply::Error { code, .. } if code == "failed"
         ));
         // Only `stop` prints, and older requests without the field still parse.
-        assert!(check_print(CaptureAction::Start, true).is_err());
-        assert!(check_print(CaptureAction::Stop, true).is_ok());
+        assert!(check_flags(CaptureAction::Start, true, false).is_err());
+        assert!(check_flags(CaptureAction::Stop, true, false).is_ok());
+        assert!(check_flags(CaptureAction::Toggle, false, true).is_ok());
+        assert!(check_flags(CaptureAction::Stop, false, true).is_err());
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
                 r#"{"version":4,"command":"dictation","action":"stop"}"#
@@ -849,7 +861,8 @@ mod tests {
             .command,
             ControlCommand::Dictation {
                 action: CaptureAction::Stop,
-                print: false
+                print: false,
+                raw: false,
             }
         );
     }
@@ -872,10 +885,17 @@ mod tests {
             ControlCommand::Dictation {
                 action: CaptureAction::Toggle,
                 print: false,
+                raw: false,
             },
             ControlCommand::Dictation {
                 action: CaptureAction::Stop,
                 print: true,
+                raw: false,
+            },
+            ControlCommand::Dictation {
+                action: CaptureAction::Start,
+                print: false,
+                raw: true,
             },
             ControlCommand::PasteLast,
             ControlCommand::MeetingRecord {
