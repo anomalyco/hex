@@ -88,7 +88,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     lockFile = ../Cargo.lock;
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
-      "rune-0.0.1" = "sha256-5wDU0euin+oJBLKZ4u813TFDTB6yEuwMymgBOVO9QeA=";
+      "rune-0.0.1" = "sha256-wOLq6X7QiyH4aWUBipBBZrRq/TyrKnNH/93BwaCde6M=";
       "transcribe-cpp-sys-0.4.1" = "sha256-AP8+t4baAzjOVJo76vodPoWv8lrFLR2tsXvsrbMFeSk=";
     };
   };

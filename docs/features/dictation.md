@@ -1122,10 +1122,14 @@ Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no
 menu-bar or notch placement). On Windows the window is a topmost,
 click-through tool window with no redirection bitmap, drawn through
 DirectComposition. Rune shows and hides it with Win32 calls alone and
-re-asserts its styles on each show; winit never sees its visibility. A
-black rectangle that stayed after the first dictation (#499) and then no HUD
-at all (#510) followed from mixing winit and Win32 (fixed by reading the
-code, not yet observed on Windows). Every OS takes dark or light and Reduce Motion
+re-asserts its styles on each show; winit never sees its visibility. The
+click-through style makes it a layered window, which Windows composes only
+once it has layered attributes; without them the HUD never appeared (#510).
+Rune gives it opaque attributes, so the content's own alpha is the only
+transparency (Rune 5778a3a3; from reading Windows' rules, not yet observed on
+Windows). If the window, its GPU surface or the show fails, Rune reports why
+(`OverlayHandle::failure`): Hex logs it as an error in process.log once per
+reason and Settings shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
 from Rune, and loads `dot-scope.json` at launch.
 
 ```ts

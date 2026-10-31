@@ -71,6 +71,9 @@ pub(crate) struct HudSender {
     overlay: OverlayHandle<Hud>,
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
+    /// The overlay failure last logged, so each is logged once.
+    #[cfg(target_os = "windows")]
+    logged: Arc<Mutex<Option<String>>>,
 }
 
 impl HudSender {
@@ -89,6 +92,19 @@ impl HudSender {
     pub(crate) fn set_position(&self, position: IndicatorPosition) {
         self.overlay
             .update(move |hud, _| hud.set_position(position));
+    }
+
+    /// Why Windows could not show the HUD, for Settings; logged as an error
+    /// the first time each reason is seen.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn failure(&self) -> Option<String> {
+        let reason = self.overlay.failure()?;
+        let mut logged = self.logged.lock().unwrap_or_else(|error| error.into_inner());
+        if logged.as_deref() != Some(reason.as_str()) {
+            tracing::error!(%reason, "dictation HUD can't show");
+            *logged = Some(reason.clone());
+        }
+        Some(format!("The recording HUD can't show ({reason}). Dictation still works."))
     }
 
     /// The overlay, to ask whether the platform could show it.
@@ -233,6 +249,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         overlay,
         #[cfg(target_os = "macos")]
         animating,
+        #[cfg(target_os = "windows")]
+        logged: Arc::default(),
     }
 }
 
