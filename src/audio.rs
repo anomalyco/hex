@@ -1020,6 +1020,8 @@ enum InputTarget {
 /// How an input connects, as far as resolving it cares.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Transport {
+    /// The internal microphone, switched off while a MacBook's lid is
+    /// closed. A built-in headphone-jack input is `Other`.
     BuiltIn,
     /// Bluetooth or Bluetooth LE: opening its microphone switches the
     /// headset into low-quality call audio.
@@ -1141,8 +1143,9 @@ fn current_route() -> Route {
 
 /// Whether a MacBook's lid is closed, which switches its built-in microphone
 /// off in hardware while CoreAudio still lists it, often as the default
-/// input. Read from `AppleClamshellState` on IOKit's power root domain;
-/// Macs without a lid, and other OSes, read open.
+/// input. A microphone in the headphone jack stays on. Read from
+/// `AppleClamshellState` on IOKit's power root domain; Macs without a lid,
+/// and other OSes, read open.
 #[cfg(not(target_os = "macos"))]
 fn lid_closed() -> bool {
     false
@@ -1458,7 +1461,8 @@ pub struct InputDevices {
     pub system_default: Option<String>,
     /// The OS default is Hex Microphone, so `system_default` stands in.
     pub default_is_hex_microphone: bool,
-    /// The built-in microphone, listed but off because the lid is closed.
+    /// The internal microphone, listed but off because the lid is closed. A
+    /// headphone-jack microphone stays usable and is never named here.
     pub off_with_lid_closed: Option<String>,
     /// The OS default is `off_with_lid_closed`, so `system_default` stands in.
     pub default_is_off_with_lid_closed: bool,
@@ -1572,8 +1576,25 @@ fn transport(device: &Device) -> Transport {
     }
 }
 
+/// Whether a built-in CoreAudio input is the internal microphone the lid
+/// switches off, from its UID and selected input data source. A microphone
+/// in the headphone jack is built in too, but stays on with the lid closed:
+/// Apple silicon lists it as its own device (`BuiltInHeadphoneInputDevice`),
+/// older Macs as the built-in input's external-microphone or line-in source.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn is_lid_switched_microphone(uid: &str, data_source: Option<u32>) -> bool {
+    const EXTERNAL_MICROPHONE: u32 = u32::from_be_bytes(*b"emic");
+    const LINE_IN: u32 = u32::from_be_bytes(*b"line");
+    if uid.contains("HeadphoneInput") {
+        return false;
+    }
+    !matches!(data_source, Some(EXTERNAL_MICROPHONE | LINE_IN))
+}
+
 /// How CoreAudio reports `device` connects: built in, such as a MacBook's
-/// microphone, or Bluetooth (classic or LE), such as AirPods.
+/// microphone, or Bluetooth (classic or LE), such as AirPods. A
+/// headphone-jack microphone counts as other, since closing the lid leaves
+/// it on.
 #[cfg(target_os = "macos")]
 fn transport(device: &Device) -> Transport {
     use std::ffi::c_void;
@@ -1590,15 +1611,20 @@ fn transport(device: &Device) -> Transport {
     };
     use objc2_core_foundation::CFString;
 
+    /// `kAudioDevicePropertyDataSource` and `kAudioObjectPropertyScopeInput`.
+    const DATA_SOURCE_SELECTOR: u32 = u32::from_be_bytes(*b"ssrc");
+    const INPUT_SCOPE: u32 = u32::from_be_bytes(*b"inpt");
+
     fn read_u32(
         object: AudioObjectID,
         selector: AudioObjectPropertySelector,
+        scope: u32,
         qualifier: Option<NonNull<c_void>>,
         qualifier_size: u32,
     ) -> Option<u32> {
         let mut address = AudioObjectPropertyAddress {
             mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain,
         };
         let mut value = 0_u32;
@@ -1624,14 +1650,28 @@ fn transport(device: &Device) -> Transport {
     let Some(device_id) = read_u32(
         kAudioObjectSystemObject as AudioObjectID,
         kAudioHardwarePropertyTranslateUIDToDevice,
+        kAudioObjectPropertyScopeGlobal,
         Some(NonNull::from(&uid_ref).cast()),
         std::mem::size_of::<*const CFString>() as u32,
     )
     .filter(|device_id| *device_id != 0) else {
         return Transport::Other;
     };
-    match read_u32(device_id, kAudioDevicePropertyTransportType, None, 0) {
-        Some(kind) if kind == kAudioDeviceTransportTypeBuiltIn => Transport::BuiltIn,
+    match read_u32(
+        device_id,
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        None,
+        0,
+    ) {
+        Some(kind) if kind == kAudioDeviceTransportTypeBuiltIn => {
+            let data_source = read_u32(device_id, DATA_SOURCE_SELECTOR, INPUT_SCOPE, None, 0);
+            if is_lid_switched_microphone(id.id(), data_source) {
+                Transport::BuiltIn
+            } else {
+                Transport::Other
+            }
+        }
         Some(kind)
             if kind == kAudioDeviceTransportTypeBluetooth
                 || kind == kAudioDeviceTransportTypeBluetoothLE =>
@@ -1770,6 +1810,70 @@ mod tests {
                 Transport::Other
             }
         }
+    }
+
+    #[test]
+    fn only_the_internal_microphone_is_switched_off_by_the_lid() {
+        let source = |code: &[u8; 4]| Some(u32::from_be_bytes(*code));
+        assert!(is_lid_switched_microphone("BuiltInMicrophoneDevice", None));
+        assert!(is_lid_switched_microphone(
+            "AppleHDAEngineInput:1B,0,1,0:1",
+            source(b"imic")
+        ));
+        assert!(!is_lid_switched_microphone(
+            "BuiltInHeadphoneInputDevice",
+            None
+        ));
+        assert!(!is_lid_switched_microphone(
+            "AppleHDAEngineInput:1B,0,1,0:1",
+            source(b"emic")
+        ));
+        assert!(!is_lid_switched_microphone(
+            "AppleHDAEngineInput:1B,0,1,0:1",
+            source(b"line")
+        ));
+    }
+
+    #[test]
+    fn a_headphone_jack_microphone_is_used_with_the_lid_closed() {
+        use InputTarget::{Named, StandIn, SystemDefault};
+        let names = listed(&["MacBook Pro Microphone", "External Microphone"]);
+        // The jack input reads as Other, so only the internal one is off.
+        let transport = built_in_at(0);
+        let found = |target, selection| Ok(InputPlan { target, selection });
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &names,
+                Some("External Microphone"),
+                &transport,
+                CLOSED
+            ),
+            found(SystemDefault, Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                None,
+                Some("External Microphone"),
+                &names,
+                Some("MacBook Pro Microphone"),
+                &transport,
+                CLOSED
+            ),
+            found(Named(1), Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &names,
+                Some("MacBook Pro Microphone"),
+                &transport,
+                CLOSED
+            ),
+            found(StandIn(1), Selection::InUse)
+        );
     }
 
     #[test]

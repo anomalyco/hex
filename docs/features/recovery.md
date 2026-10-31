@@ -210,6 +210,9 @@ saved microphone missing or will not open
   -> found -> switch back once capture is idle        // not during a pending start or tail
 MacBook lid closed (macOS)                            // built-in mic is off but still listed
   -> built-in mic is passed over like Hex Microphone  // AppleClamshellState, read per resolve
+  ├── headphone-jack mic (BuiltInHeadphoneInputDevice UID, or the built-in
+  │   input's emic/line data source) -> stays usable: listed, selectable,
+  │   followed as the default, and can stand in (#712)
   ├── default or saved mic is built in -> first other real input stands in
   │     -> Settings: "… is off while the lid is closed, so Hex listens to …"
   ├── no other input -> "the built-in microphone is off while the lid is closed"
@@ -233,6 +236,8 @@ Checks in [audio.rs](../../src/audio.rs):
 `startup_retry_recovers_metadata_and_audio_without_restarting`,
 `a_missing_selection_uses_the_default_until_it_returns`,
 `a_closed_lid_passes_over_the_built_in_microphone`,
+`only_the_internal_microphone_is_switched_off_by_the_lid`,
+`a_headphone_jack_microphone_is_used_with_the_lid_closed`,
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
@@ -248,7 +253,9 @@ through the running listener).
 Proof limit: retry policy and channel-backed replacement audio, not a physical
 device reconnect or full native mic-to-target result. The closed-lid cases are
 pure resolution and a fixture scene; the IOKit lid read and its notification
-have not been observed on a real MacBook closing and opening its lid.
+have not been observed on a real MacBook closing and opening its lid, and the
+headphone-jack UID and data-source codes come from CoreAudio's documented
+values, not a jack microphone observed with the lid closed.
 
 `recover.cold-open`: "Release when idle" opens for a gesture, not an idle retry
 loop. Each attempt must own its opening result.
