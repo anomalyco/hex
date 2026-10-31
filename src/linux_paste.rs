@@ -26,6 +26,9 @@ const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
+/// How long an existing portal session waits after setting the clipboard
+/// before its paste shortcut, so the target has the new selection (#578).
+const PORTAL_CLIPBOARD_SETTLE: Duration = Duration::from_millis(150);
 /// How long after the paste shortcut the previous clipboard comes back, as
 /// on macOS. Nothing acknowledges that the target read the paste.
 const RESTORE_DELAY: Duration = Duration::from_millis(500);
@@ -100,6 +103,11 @@ impl WaylandKeys {
                     *session = Some(Box::new(RemoteDesktop::start(stop)?));
                     // The approval dialog hands focus back to the target.
                     thread::sleep(PORTAL_FOCUS_SETTLE);
+                } else {
+                    // Without data-control, Mutter hands the new selection to
+                    // the focused app only after wl-copy returns; a Ctrl+V sent
+                    // at once pastes nothing or the previous clipboard.
+                    thread::sleep(PORTAL_CLIPBOARD_SETTLE);
                 }
                 let result = session
                     .as_ref()
