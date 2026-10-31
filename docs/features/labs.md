@@ -411,9 +411,18 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   chapters in the manifest, and the boundary pass after Stop.
 - New onboarding (no toggle; it runs only when invoked): the onboarding
   story, replayed on every OS
-  (`rune_ui/onboarding_kit/live.rs`): the real model download, Microphone and
-  Accessibility rows that follow macOS (ready at once on Linux and Windows,
-  which ask for no permissions), and the practice step as a mini game
+  (`rune_ui/onboarding_kit/live.rs`), in order: "Without Hex" (the comedy
+  scene, `scenes/default.scene`) while the real model downloads; the
+  Microphone alone; the practice game as "With Hex" once the model is in
+  (a calm "Almost ready" until then; never Apple Speech); Accessibility
+  ("Make it work everywhere"); "Hex is ready". Steps already granted pass
+  at once (Linux and Windows ask for no permissions). Hex's shortcut needs
+  Accessibility (the event tap, and the listener starts only once setup is
+  ready), so a real run still missing it asks for it before the game. Short
+  presses coach holding, and after two the game offers "Use tap to start"
+  (`shortcut_mode` Toggle). Checks:
+  `the_first_run_asks_for_the_microphone_then_plays_then_asks_for_accessibility`.
+  The practice step is a mini game
   (`onboarding_kit/game.rs`): one lit message card at a time, answered by a
   real dictation (live words fly in while the shortcut is held, the paste
   lands in an unseen focused field), struck by lightning and burnt away,

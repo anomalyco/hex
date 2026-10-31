@@ -567,13 +567,23 @@ impl Play {
     }
 }
 
+/// One of the game's buttons.
+type Action<S> = Rc<dyn Fn(&mut S)>;
+
 /// What the game shows around [`Play`], and what its buttons do.
 struct Look<'a, S> {
     caps: &'a [String],
     /// Hex's Dot scope, the words' launch pad.
     hud: Option<&'a DotFrame>,
+    /// The heading over the cards.
+    title: &'static str,
+    /// The shortcut starts and stops dictation instead of being held.
+    toggle: bool,
     /// What the last try needs said.
     hint: Option<&'static str>,
+    /// Switches the shortcut to tap to start, for a player who keeps
+    /// tapping it.
+    offer: Option<Action<S>>,
     /// Done: the score card, or straight on when nothing was destroyed.
     finish: Rc<dyn Fn(&mut S)>,
     /// The score card's Continue.
@@ -810,8 +820,14 @@ fn finish(s: &mut Onboard) {
         scored
     });
     if !scored {
-        s.jump_to_ready();
+        s.after_game();
     }
+}
+
+/// Whether the practice offers tap to start: the player keeps tapping a
+/// shortcut that has to be held.
+fn offers_toggle(s: &Onboard) -> bool {
+    !s.toggle && s.taps >= super::stories::TAPS_BEFORE_TOGGLE
 }
 
 fn keep(s: &mut Onboard) {
@@ -838,14 +854,27 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         }
     };
     let hud = session.hud.frame();
-    let hint = s.live.as_ref().and_then(live::hint_copy);
+    let offers = offers_toggle(s);
+    let hint = if offers {
+        Some("Rather not hold it? Tap to start, tap again to stop.")
+    } else {
+        s.live.as_ref().and_then(live::hint_copy)
+    };
+    let title = if s.flow == super::stories::Flow::FirstRun {
+        "With Hex"
+    } else {
+        "Clear your messages"
+    };
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
             hud,
+            title,
+            toggle: s.toggle,
             hint,
+            offer: offers.then(|| Rc::new(live::use_toggle) as Action<Ui>),
             finish: Rc::new(live::on_ui(finish)),
-            done: Rc::new(live::on_ui(Onboard::jump_to_ready)),
+            done: Rc::new(live::on_ui(Onboard::after_game)),
             keep: Rc::new(live::on_ui(keep)),
         };
         let field = TextInput::new(&s.practice)
@@ -860,9 +889,17 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         let look = Look::<Onboard> {
             caps: &s.caps,
             hud,
+            title,
+            toggle: s.toggle,
             hint,
+            offer: offers.then(|| {
+                Rc::new(|s: &mut Onboard| {
+                    s.toggle = true;
+                    s.practice.focused = true;
+                }) as Action<Onboard>
+            }),
             finish: Rc::new(finish),
-            done: Rc::new(Onboard::jump_to_ready),
+            done: Rc::new(Onboard::after_game),
             keep: Rc::new(keep),
         };
         let field = TextInput::new(&s.practice)
@@ -985,7 +1022,10 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         &Look::<Game> {
             caps: &caps,
             hud: g.hud.frame(),
+            title: "Clear your messages",
+            toggle: false,
             hint: None,
+            offer: None,
             finish: Rc::new(|g: &mut Game| {
                 if !g.play.finish(g.now) {
                     g.restart();
@@ -1016,7 +1056,7 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
         .rotate_motion(Anim::INSTANT)
         .child(header(p, g, destroyed, t, reduced, look))
         .children(hud(g, t, look.hud))
-        .children(look.hint.map(|copy| hint(p, copy)));
+        .children(look.hint.map(|copy| hint(p, copy, look.offer.as_ref())));
 
     for r in &g.rounds {
         if let Some(card) = card(p, r, t, reduced, reward_fade(g, r, t)) {
@@ -1175,7 +1215,7 @@ fn header<S: 'static>(
         .gap(6.0)
         .items_center()
         .child(
-            text("Clear your messages")
+            text(look.title)
                 .key("t")
                 .font(title_font(p))
                 .color(p.text()),
@@ -1185,7 +1225,12 @@ fn header<S: 'static>(
                 .key("lead")
                 .gap(8.0)
                 .center_y()
-                .child(text("Hold").key("hold").font(LEAD).color(p.muted()))
+                .child(
+                    text(if look.toggle { "Tap" } else { "Hold" })
+                        .key("hold")
+                        .font(LEAD)
+                        .color(p.muted()),
+                )
                 .child(keys(p, "keys", look.caps, g.holding))
                 .child(
                     text("and answer the one that's lit")
@@ -1253,12 +1298,14 @@ impl GameHud {
 }
 
 /// What the last try needs said, over the HUD.
-fn hint(p: Paint, copy: &'static str) -> El {
+fn hint<S: 'static>(p: Paint, copy: &'static str, offer: Option<&Action<S>>) -> El {
     row()
         .key("hint")
-        .absolute(0.0, HUD_AT[1] - 48.0)
+        .absolute(0.0, HUD_AT[1] - if offer.is_some() { 58.0 } else { 48.0 })
         .w(STAGE_W)
+        .gap(6.0)
         .justify_center()
+        .center_y()
         .child(
             text(copy)
                 .key(copy)
@@ -1266,6 +1313,13 @@ fn hint(p: Paint, copy: &'static str) -> El {
                 .color(p.muted())
                 .transition(Transition::opacity()),
         )
+        .children(offer.map(|offer| {
+            Button::new("Use tap to start")
+                .variant(ButtonVariant::Ghost)
+                .on_press(act(offer))
+                .build_push(p.k)
+                .key("use-toggle")
+        }))
 }
 
 /// The notice or certificate as it looks at `t`.

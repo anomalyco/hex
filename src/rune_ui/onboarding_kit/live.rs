@@ -41,6 +41,7 @@ pub(crate) struct Live {
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
     granted_at: Option<f64>,
+    mic_granted_at: Option<f64>,
     checked: Option<Checked>,
     /// Dictation streams send their live words to the practice field.
     _live_words: crate::dictation::live_text::Demand,
@@ -57,6 +58,11 @@ struct Checked {
 impl Live {
     pub(crate) fn granted_for(&self, now: f64) -> bool {
         self.granted_at.is_some_and(|at| now - at >= GRANTED_BEAT)
+    }
+
+    pub(crate) fn mic_granted_for(&self, now: f64) -> bool {
+        self.mic_granted_at
+            .is_some_and(|at| now - at >= GRANTED_BEAT)
     }
 }
 
@@ -116,15 +122,18 @@ fn start(ui: &mut Ui) {
     set_other_label(transcription_models::language_name(&other.language));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let mic_granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready;
+    let granted =
+        mic_granted && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
 
     let mut s = Onboard::new(Flow::FirstRun);
     s.speech = Speech::AfterDownload;
+    s.toggle = ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     s.wants = wants;
     s.caps = ui.settings.dictation_hotkey.keycaps();
     s.had_model = had_model;
     s.granted = granted;
+    s.mic_granted = mic_granted;
     s.live = Some(Live {
         listening: false,
         failed: false,
@@ -134,6 +143,7 @@ fn start(ui: &mut Ui) {
         practice: Practice::Waiting,
         choice,
         granted_at: None,
+        mic_granted_at: None,
         checked: None,
         _live_words: crate::dictation::live_text::demand(),
     });
@@ -141,7 +151,7 @@ fn start(ui: &mut Ui) {
     s.now = now;
     match tour_step {
         TourStep::Welcome => s.begin_live(now),
-        TourStep::Setup => s.jump_to_permissions(),
+        TourStep::Setup => s.resume_setup(),
         TourStep::TryIt if had_model => s.jump_to_try(),
         TourStep::TryIt => s.jump_to_waiting(),
         TourStep::Done => s.jump_to_ready(),
@@ -180,6 +190,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let now = clock();
     let view = ui.tour.as_ref().map(|tour| tour.flow.view());
     let caps = ui.settings.dictation_hotkey.keycaps();
+    let toggle = ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     let Some(choice) = ui
         .first_run
         .as_ref()
@@ -251,10 +262,19 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
             }
         }
         live.restart = view.restart;
+        if view.practice == Practice::TooShort && live.practice != Practice::TooShort {
+            s.taps = s.taps.saturating_add(1);
+        }
         live.practice = view.practice;
     }
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let mic_granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready;
+    let granted =
+        mic_granted && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    if mic_granted {
+        live.mic_granted_at.get_or_insert(now);
+    } else {
+        live.mic_granted_at = None;
+    }
     if granted {
         live.granted_at.get_or_insert(now);
     } else {
@@ -265,7 +285,9 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     // The model download.
     live.failed = !choice_installed && !preparing && errored;
     s.granted = granted;
+    s.mic_granted = mic_granted;
     s.caps = caps;
+    s.toggle = toggle;
     if let Some(download) = s.download.as_mut() {
         if let Some(total) = model.and_then(|m| m.download_bytes()) {
             download.total = total;
@@ -385,12 +407,22 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
 /// What the practice dictation's last try needs said.
 pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
     Some(match live.practice {
-        Practice::TooShort => "Hold the shortcut a little longer while you speak.",
+        Practice::TooShort => "Keep holding the shortcut while you talk, then let go.",
         Practice::NothingHeard => "Hex didn't hear any words. Try again a little louder.",
         Practice::Failed => "That didn't work. Try again.",
         Practice::Transcribing => "Typing what you said…",
         _ => return None,
     })
+}
+
+/// The practice's `Use tap to start`: the shortcut starts and stops
+/// dictation from now on, as General's setting would.
+pub(super) fn use_toggle(ui: &mut Ui) {
+    ui.update(|settings| settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.toggle = true;
+        s.practice.focused = true;
+    }
 }
 
 /// [`hint_copy`] under the practice field.

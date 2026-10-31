@@ -313,13 +313,18 @@ impl SfxTrack {
         self.push(now, Tone::DictationDone);
     }
 
-    /// Permissions choreography: Microphone tick, Accessibility helper panel
-    /// escaping & docking, then Accessibility tick.
-    pub(crate) fn on_permissions(&mut self, from: f64) {
+    /// The microphone step: a tick as macOS's prompt grants it.
+    pub(crate) fn on_microphone(&mut self, from: f64) {
         self.push(
             from + permissions::MIC_GRANT,
             Tone::Onboarding(OnboardingTone::PermissionTick),
         );
+    }
+
+    /// The Accessibility step: the guide escaping Hex's card, then a tick
+    /// as the switch goes on.
+    pub(crate) fn on_accessibility(&mut self, from: f64) {
+        let from = from - permissions::AX_SHIFT;
         self.push(
             from + permissions::AX_ESCAPE + 0.18,
             Tone::Onboarding(OnboardingTone::PanelEscape),
@@ -550,7 +555,8 @@ mod tests {
         let mut track = SfxTrack::default();
         track.on_download_start(0.0);
         track.on_voice_take(10.0, &ANSWER_JAY);
-        track.on_permissions(14.0);
+        track.on_microphone(14.0);
+        track.on_accessibility(17.0);
         track.on_almost_ready(21.5);
         track.on_ready(28.0, false);
         track.advance_to(30.0);

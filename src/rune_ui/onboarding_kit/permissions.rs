@@ -1,4 +1,5 @@
-//! Permissions step for `"Prototypes/Onboarding/First run"`:
+//! The permission steps of `"Prototypes/Onboarding/First run"`: the
+//! microphone before the practice and Accessibility after it, featuring:
 //!
 //! - One `440 pt` column shared by Hex's setup card, System Settings, and the
 //!   floating drag guide, with every app icon aligned on one vertical spine
@@ -19,11 +20,17 @@ use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
-use super::stories::Onboard;
+use super::stories::{Onboard, Step};
 use crate::desktop::onboarding::{ItemStatus, SetupItem};
 
 /// Total duration of the automated permissions step.
 pub(crate) const PERMISSIONS_SECS: f64 = 7.2;
+/// The automated microphone step.
+pub(crate) const MIC_SECS: f64 = 3.0;
+/// Where the Accessibility step starts on the shared timeline, and how
+/// long it then runs.
+pub(crate) const AX_SHIFT: f64 = AX_TRAY_OPEN - 0.6;
+pub(crate) const AX_SECS: f64 = PERMISSIONS_SECS - AX_SHIFT;
 
 const COL_W: f32 = 440.0;
 const STAGE_H: f32 = 424.0;
@@ -41,6 +48,7 @@ const SWITCH_ON: f64 = 4.90;
 pub(crate) const AX_GRANT: f64 = 5.15;
 const SETTINGS_CLOSE: f64 = 5.80;
 const CONTINUE_AT: f64 = 6.00;
+const MIC_CONTINUE: f64 = 2.45;
 
 // Unified geometry inside the `440 pt` stage.
 const ROW_H: f32 = 58.0;
@@ -56,6 +64,7 @@ const ROW_PX: f32 = 10.0; // App icons sit at `16.0 + 10.0 = 26.0` everywhere!
 const GUIDE_Y: f32 = SETTINGS_Y + SETTINGS_H + 10.0; // 344.0
 const GUIDE_H: f32 = 70.0;
 const PROMPT_W: f32 = 276.0;
+const MIC_STAGE_H: f32 = ROW_H + 18.0 + 214.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PermState {
@@ -84,28 +93,43 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
+    let which = if s.step == Step::Accessibility {
+        Perm::Accessibility
+    } else {
+        Perm::Microphone
+    };
     if let Some(live) = &s.live {
-        return live_page(p, live, s.motion);
+        return live_page(p, live, s.motion, which);
     }
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
-    let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
-    let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
-
-    let head = heading(p, s.motion);
-
+    let (stage, continue_at) = match which {
+        Perm::Microphone => (
+            microphone_stage(p, e, state_at(e, MIC_ASK, MIC_GRANT, true)),
+            MIC_CONTINUE,
+        ),
+        // Accessibility joins the shared timeline where its tray opens.
+        Perm::Accessibility => {
+            let e = e + AX_SHIFT;
+            let ax = state_at(e, AX_ESCAPE, AX_GRANT, true);
+            (
+                stage(p, e, PermState::Allowed, ax, reduced),
+                CONTINUE_AT - AX_SHIFT,
+            )
+        }
+    };
     col()
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(head)
-        .child(s.motion.staggered(stage(p, e, mic, ax, reduced), 1.0, 8.0))
+        .child(heading(p, s.motion, which))
+        .child(s.motion.staggered(stage, 1.0, 8.0))
         .child(
             row()
                 .key("action")
                 .h(ACTION_H)
                 .center()
-                .child(if e >= CONTINUE_AT {
+                .child(if e >= continue_at {
                     continue_button(p, s)
                 } else {
                     el().key("none")
@@ -113,20 +137,35 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
         )
 }
 
-fn heading(p: Paint, motion: Motion) -> El {
+/// Which permission a page asks for: the microphone before the practice,
+/// Accessibility after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Perm {
+    Microphone,
+    Accessibility,
+}
+
+fn heading(p: Paint, motion: Motion, which: Perm) -> El {
+    let (key, title, lead) = match which {
+        Perm::Microphone => (
+            "microphone-head",
+            "Let Hex hear you",
+            "Hex listens only while you hold your shortcut.",
+        ),
+        Perm::Accessibility => (
+            "accessibility-head",
+            "Make it work everywhere",
+            "Let Hex notice your shortcut and type your words in any app.",
+        ),
+    };
     motion.heading(
         col()
-            .key("permissions-head")
+            .key(key)
             .gap(8.0)
             .items_center()
+            .child(text(title).key("title").font(title_font(p)).color(p.text()))
             .child(
-                text("Let Hex hear you and type for you")
-                    .key("title")
-                    .font(title_font(p))
-                    .color(p.text()),
-            )
-            .child(
-                text("macOS asks once. You can change these any time in System Settings.")
+                text(lead)
                     .key("lead")
                     .font(LEAD)
                     .color(p.muted())
@@ -135,9 +174,41 @@ fn heading(p: Paint, motion: Motion) -> El {
     )
 }
 
+/// The microphone alone: Hex's row, then macOS's prompt under it.
+fn microphone_stage(p: Paint, e: f64, mic: PermState) -> El {
+    let k = p.k;
+    let card = col()
+        .key("setup-card")
+        .absolute(0.0, 0.0)
+        .w(COL_W)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(p.hair, k.c.border_weak)
+        .child(perm_row(
+            p,
+            "mic-row",
+            &glyphs::MIC,
+            "Microphone",
+            "Hears you while you hold the shortcut",
+            perm_pill(p, "mic-pill", mic),
+        ));
+    let mut stage = el()
+        .key("microphone-stage")
+        .size(COL_W, MIC_STAGE_H)
+        .child(k.elevate(card, &k.elevation.raised));
+    if (MIC_ASK..MIC_GRANT).contains(&e) {
+        stage = stage.child(
+            microphone_prompt(p, e >= MIC_PRESS)
+                .absolute((COL_W - PROMPT_W) * 0.5, ROW_H + 18.0)
+                .transition(arrives()),
+        );
+    }
+    stage
+}
+
 /// The real first run's permissions: macOS's own prompt and System Settings
 /// with Hex's guide, and the rows follow what macOS reports.
-fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
+fn live_page(p: Paint, live: &Live, motion: Motion, which: Perm) -> El {
     let k = p.k;
     let mic_ready = live.microphone == ItemStatus::Ready;
     let ax_desc = match live.accessibility {
@@ -148,22 +219,24 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         ItemStatus::Denied => "Switch on Hex in System Settings",
         _ => "Hears you while you hold the shortcut",
     };
+    let mic_row = perm_row(
+        p,
+        "mic-row",
+        &glyphs::MIC,
+        "Microphone",
+        mic_desc,
+        live_pill(p, "mic-pill", live.microphone, true, SetupItem::Microphone),
+    );
     let card = col()
         .key("setup-card")
         .w(COL_W)
         .radius(k.radius.lg)
         .fill(k.c.bg_base)
         .border(p.hair, k.c.border_weak)
-        .child(perm_row(
-            p,
-            "mic-row",
-            &glyphs::MIC,
-            "Microphone",
-            mic_desc,
-            live_pill(p, "mic-pill", live.microphone, true, SetupItem::Microphone),
-        ))
-        .child(separator(p, "sep0"))
-        .child(perm_row(
+        .child(mic_row);
+    let card = match which {
+        Perm::Microphone => card,
+        Perm::Accessibility => card.child(separator(p, "sep0")).child(perm_row(
             p,
             "ax-row",
             &glyphs::CURSOR_TEXT,
@@ -176,7 +249,8 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
                 mic_ready,
                 SetupItem::Accessibility,
             ),
-        ));
+        )),
+    };
     let action = if live.restart {
         Button::new("Restart Hex")
             .variant(ButtonVariant::Contrast)
@@ -192,7 +266,7 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(heading(p, motion))
+        .child(heading(p, motion, which))
         .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
         .child(row().key("action").h(ACTION_H).center().child(action))
 }
@@ -243,16 +317,7 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
     // 1. Hex's own permissions card at the top of the `440 pt` column.
     stage = stage.child(setup_card(p, mic, ax, tray_open, escaped));
 
-    // 2. macOS Microphone permission alert (`MIC_ASK .. MIC_GRANT`).
-    if (MIC_ASK..MIC_GRANT).contains(&e) {
-        stage = stage.child(
-            microphone_prompt(p, e >= MIC_PRESS)
-                .absolute((COL_W - PROMPT_W) * 0.5, 2.0 * ROW_H + 18.0)
-                .transition(arrives()),
-        );
-    }
-
-    // 3. System Settings (`Privacy & Security › Accessibility`).
+    // 2. System Settings (`Privacy & Security › Accessibility`).
     if settings_open {
         stage = stage.child(
             settings_window(p, e, reduced)
@@ -261,7 +326,7 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
         );
     }
 
-    // 4. The Accessibility helper panel: sits inside Hex's card at `AX_TRAY_OPEN`,
+    // 3. The Accessibility helper panel: sits inside Hex's card at `AX_TRAY_OPEN`,
     //    then escapes out of the card at `AX_ESCAPE` and floats down to dock
     //    underneath System Settings (`GUIDE_Y`), then launches the drag row!
     if tray_open {
