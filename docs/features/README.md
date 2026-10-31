@@ -254,7 +254,7 @@ a term among other words is kept, and so is a repeat of only some terms.
 Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 `only_the_echo_segment_is_removed`, `single_hint_dictation_is_kept`, and
 `hints_without_spaces_after_commas_are_matched` in
-[gguf_session.rs](../../src/gguf_session.rs).
+[transcription/gguf_session.rs](../../src/transcription/gguf_session.rs).
 
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
@@ -286,7 +286,7 @@ language prompting in `transcribe-cpp-sys` 0.1.3.
 Sources: [model catalog](../../src/transcription/models.rs),
 [shared picker](../../src/rune_ui/picker.rs), and the runtime
 options in [parakeet.rs](../../src/parakeet.rs) and
-[local_transcriber.rs](../../src/local_transcriber.rs). The regression
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs). The regression
 `parakeet_v3_supports_portuguese_without_language_conditioning` checks that the
 Portuguese selection remains valid and available, sends no runtime language
 hint, and contrasts Whisper's `pt` hint. It does not run inference.
@@ -308,12 +308,12 @@ as Arabic, Turkish, and Spanish. `bangla_is_transcribed_by_whisper_with_its_lang
 checks the recommendation, the `bn` hint, and that Qwen3-ASR rejects it. It
 runs no inference, and Bangla accuracy has not been measured.
 
-Checks start in [onboarding.rs](../../src/onboarding.rs),
+Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
 [transcription/models.rs](../../src/transcription/models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
-The tour is the pure `onboarding::Flow` (steps, row states, background
+The tour is the pure `desktop::onboarding::Flow` (steps, row states, background
 download, practice hints, one-relaunch guard) drawn by
 [rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); `permission_control`
 in [rune_ui/lists.rs](../../src/rune_ui/lists.rs) is the one Allow / dot /
@@ -331,7 +331,7 @@ opens `ms-settings:privacy-microphone`, the row describes the "Let desktop apps
 access your microphone" switch, and setup finishes once it is on
 (`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`; the
 registry read is cross-compiled only, not run on a Windows PC).
-Unit tests (`onboarding::tests`) cover step order, the download starting on the
+Unit tests (`desktop::onboarding::tests`) cover step order, the download starting on the
 welcome screen and retrying from any step, permissions-only setup with the
 model waiting for practice, the auto-advance beat, live row flips, a refused
 microphone, platforms without permissions or practice, practice hints, resume,
@@ -389,7 +389,7 @@ cannot save, and delivered menu controls are drained before accepting completion
 The desktop root commits through an existing editor to retain unrelated unsaved
 settings, or through persisted settings when no window exists.
 
-Sources: [status_item.rs](../../src/status_item.rs) and
+Sources: [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) and
 [macos_rune.rs](../../src/macos_rune.rs). Key checks are
 `preparation_has_one_worker_and_only_keeps_the_latest_pending_choice`,
 `cancelling_a_completed_unpolled_preparation_never_commits_it`,
@@ -454,7 +454,7 @@ recording-time routing, model cache, or notifications.
 Sources: observers for [macOS](../../src/keyboard_input_sources/macos.rs),
 [Windows](../../src/keyboard_input_sources/windows.rs), and
 [X11](../../src/keyboard_input_sources/x11.rs),
-[switch policy](../../src/keyboard_model_switching.rs),
+[switch policy](../../src/transcription/keyboard_model_switching.rs),
 runtimes ([macOS](../../src/macos_rune.rs),
 [Windows](../../src/windows/app.rs), [Linux](../../src/linux/app.rs)), and
 [settings UI](../../src/rune_ui/settings.rs).
@@ -562,7 +562,7 @@ Diagnostic records over 1 MiB are skipped through their terminating newline;
 the original log and dictation output remain intact. Partial UTF-8 records carry
 over to the next refresh, and truncation or file replacement resets the reader.
 
-Checks: the `reader_*` regressions in [events.rs](../../src/events.rs). These
+Checks: the `reader_*` regressions in [desktop/events.rs](../../src/desktop/events.rs). These
 exercise synthetic files, not an installed app. The GPUI window's
 on-demand-loading regression went with GPUI; when the Rune window reads the
 log is not covered by a test. A first Commands/Activity refresh still scans the
@@ -713,8 +713,8 @@ every other app's audio session instead, leaving Hex's tones at full volume;
 sessions that start while recording are left alone.
 
 HEX snapshots the volumes and applies a smooth ramp in
-[output_ducking.rs](../../src/output_ducking.rs) over the CoreAudio adapter in
-[ducking.rs](../../src/recording_environment/ducking.rs), the sink adapter in
+[audio/output_ducking.rs](../../src/audio/output_ducking.rs) over the CoreAudio adapter in
+[ducking.rs](../../src/audio/recording_environment/ducking.rs), the sink adapter in
 [linux/audio_control.rs](../../src/linux/audio_control.rs), and the session
 adapter in [windows/audio_control.rs](../../src/windows/audio_control.rs). The worker runs inside the app and cannot restore volume after a
 hard process crash or SIGKILL. Changes during the ramp itself cannot be
@@ -756,7 +756,7 @@ for a subsequent edit or close-time flush; no Rune test injects a save failure
 yet.
 Persistence, conflict, and ownership checks live in
 [app_settings.rs](../../src/app_settings.rs),
-[recording_environment.rs](../../src/recording_environment.rs), and
+[audio/recording_environment.rs](../../src/audio/recording_environment.rs), and
 [audio.rs](../../src/audio.rs). Settings previews do not prove physical device
 switching or native mute support; muting is best-effort, not universal. The
 recording-environment ownership checks cover overlapping acquisition and release,
@@ -771,7 +771,7 @@ open the macOS dialog mid-dictation). macOS 15.4 and later no longer tell other 
 what is playing, so Hex hears the browsers through a private process tap
 (aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
 play only after it saw the browser go silent right after its own pause. The
-sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
+sequence checks in [audio/browser_media.rs](../../src/audio/browser_media.rs) run on fakes:
 `a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
 `a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
 `no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`,
@@ -864,7 +864,7 @@ real scripts. None is a live target-app paste.
 
 Selection and stage checks start in
 [dictation/processor.rs](../../src/dictation/processor.rs),
-[text_replacements.rs](../../src/text_replacements.rs), and
+[dictation/text_replacements.rs](../../src/dictation/text_replacements.rs), and
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
 
@@ -881,12 +881,12 @@ under headless Sway and `chrome` with the page under its XWayland, and `hex`
 on niri (Oct 30); the macOS adapters are compiled on CI only and not run.
 
 OpenCode transformation talks only to an already running OpenCode service,
-found through its registration file ([opencode_service.rs](../../src/opencode_service.rs));
+found through its registration file ([desktop/opencode_service.rs](../../src/desktop/opencode_service.rs));
 Hex runs no OpenCode executable and starts nothing. The catalog loads only while
 the Modes pane shows. Without a service, "OpenCode isn't running" shows beside
 the switch and the setup/retry notice below;
 `unavailable_opencode_is_explained_beside_each_switch` covers it headlessly, and
-the `opencode_service` tests cover registration, stale-PID, loopback, chunked,
+the `desktop/opencode_service` tests cover registration, stale-PID, loopback, chunked,
 deadline, and cancellation handling against a local fixture, not a live
 provider.
 
@@ -903,7 +903,7 @@ foreground mode activation.
 
 Application activations compare the picker's bundle name with the foreground
 application's localized name. When Finder shows all filename extensions, the
-picker name arrives as `Ghostty.app`; [context.rs](../../src/context.rs) strips
+picker name arrives as `Ghostty.app`; [dictation/context.rs](../../src/dictation/context.rs) strips
 that suffix on both sides and [app_settings.rs](../../src/app_settings.rs)
 rewrites already persisted activations on load, checked by
 `application_matching_ignores_finder_bundle_extensions` and
@@ -953,8 +953,8 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 └── Offline CLI -> hex dev voice-filter render <in.wav> --mode <m> --dictation <start>-<end> -o <out.wav>
 ```
 
-Sources: [voice_filter.rs](../../src/voice_filter.rs),
-[hex_microphone.rs](../../src/hex_microphone.rs),
+Sources: [audio/voice_filter.rs](../../src/audio/voice_filter.rs),
+[audio/hex_microphone.rs](../../src/audio/hex_microphone.rs),
 [HexMicrophoneDriver.c](../../macos/HexMicrophoneDriver/HexMicrophoneDriver.c),
 [build-app.sh](../../scripts/build-app.sh),
 and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
@@ -1029,7 +1029,7 @@ General > Launch at login                // maintain.login-item
 └── Close Settings -> Release channels without waiting for an active native call
 ```
 
-[login_item.rs](../../src/login_item.rs) serializes ServiceManagement calls on one
+[desktop/login_item.rs](../../src/desktop/login_item.rs) serializes ServiceManagement calls on one
 window-owned worker, with bounded request and response channels and an autorelease
 pool per operation. Settings reads responses without blocking on its 250 ms tick;
 refreshes do not accumulate while macOS is busy. The toggle is unavailable until
@@ -1039,7 +1039,7 @@ the switch need not wait for `SMAppService` (about 120 ms per toggle, measured
 October 24, 2026, plus up to one tick). macOS owns registration state; no login
 Boolean is persisted. Scenes never start the worker or call macOS.
 
-The worker tests in `login_item.rs` exercise thread reuse, nonblocking polling,
+The worker tests in `desktop/login_item.rs` exercise thread reuse, nonblocking polling,
 latest-action coalescing, action priority, and closing during a blocked call.
 `launch_at_login_asks_the_login_item_and_needs_approval_first` in
 [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs) checks the Rune row's
@@ -1181,7 +1181,7 @@ tree, installed-app behavior, or physical Linux compatibility; retain each entry
 stated limits when using it as evidence.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
-[login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),
+[desktop/login_item.rs](../../src/desktop/login_item.rs), [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs),
 [updater.rs](../../src/updater.rs), the
 [identity test](../../scripts/test-app-identity.sh), and
 [app validation](../../scripts/validate-app.sh) are maintenance evidence starting
@@ -1686,7 +1686,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Calls the host directly: saves settings through it; woken on host changes
 ├── Sidebar: General, Modes, History
 ├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
-├── First-run setup -> onboarding::Flow without permissions or practice
+├── First-run setup -> desktop::onboarding::Flow without permissions or practice
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
 ├── Modes: app icons (hicolor theme or pixmaps, PNG or SVG) in the picker,
 │   chips, and mode rows; monogram while loading or without an icon
@@ -1729,7 +1729,7 @@ Unmerged Windows / deferred features -> Not part of this map
 
 Sources: [meeting.rs](../../src/meeting.rs),
 [meeting/watcher.rs](../../src/meeting/watcher.rs),
-[developer_control.rs](../../src/developer_control.rs),
+[control/developer_control.rs](../../src/control/developer_control.rs),
 `SCENES` in [rune_ui.rs](../../src/rune_ui.rs), [iOS guide](../../ios/README.md).
 iOS physical-device proof and temporary-WAV failure cleanup remain gaps;
 best-effort deletion is not guaranteed deletion.
@@ -1804,7 +1804,7 @@ unconditional debug-only expectation and a test-only copy of the reservation rul
 they do not establish native keyboard delivery or meeting insertion.
 
 `structural_event_equality_preserves_serialized_identity` in
-[events.rs](../../src/events.rs) covers Activity's full-event equality across
+[desktop/events.rs](../../src/desktop/events.rs) covers Activity's full-event equality across
 event variants, equal timestamps, non-ASCII text, and optional/error payloads.
 It does not exercise native Activity selection or scrolling.
 

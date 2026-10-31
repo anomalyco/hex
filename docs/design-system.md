@@ -113,7 +113,7 @@ missing capability omits the row instead of imitating it.
   languages in [`desktop/i18n.rs`](../src/desktop/i18n.rs);
   `every_translated_string_has_every_language` scans each UI source.
   Developer-only panes (Activity, HUD Lab) stay English.
-- Exception: native macOS menus (`status_item.rs` and the app menu in
+- Exception: native macOS menus (`macos_rune/status_item.rs` and the app menu in
   `macos_rune.rs`) follow the macOS title-case convention ("Check for
   Updates…", "Paste Last Dictation", "Stop & Transcribe").
 

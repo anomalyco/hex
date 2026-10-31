@@ -178,7 +178,7 @@ POST /streams { priority: "dictation" | "stream" }
 
 ## 9. How `Hex.app` Talks to It & Incremental PR Plan
 
-`Hex.app` keeps **all** macOS-specific desktop responsibilities in-process: `dictation_audio` (CoreAudio mic + pre-roll), `suppression` (event taps + shortcut state machine), `dictation_indicator` (Metal HUD), `recording_environment` (mute/media pause/sleep), `dictation_processor` (corrections, OpenCode rewrite, transformations), `paste`, `history`, `recognition` (Moonshine voice commands), `meeting_capture`, and the Rune settings window. Only `TranscriptionEngine` (Parakeet/Cohere/Whisper GGUF + Apple Speech) moves behind an `EngineClient` seam that speaks to `hex engine` over `local-api.json`:
+`Hex.app` keeps **all** macOS-specific desktop responsibilities in-process: `dictation_audio` (CoreAudio mic + pre-roll), `suppression` (event taps + shortcut state machine), `dictation_indicator` (Metal HUD), `audio/recording_environment` (mute/media pause/sleep), `dictation_processor` (corrections, OpenCode rewrite, transformations), `paste`, `history`, `recognition` (Moonshine voice commands), `meeting_capture`, and the Rune settings window. Only `TranscriptionEngine` (Parakeet/Cohere/Whisper GGUF + Apple Speech) moves behind an `EngineClient` seam that speaks to `hex engine` over `local-api.json`:
 
 1. **PR 1 — `LocalApi::serve` `poll(2)` accept + HTTP keep-alive:** Land the 12-line `libc::poll` fix in `src/local_api.rs` (dropping loopback latency from 12.5 ms to **0.12 ms**) and `POST /warm`.
 2. **PR 2 — Standalone `hex engine` command & lock/discovery lifecycle:** Promote `hex service` / `hex engine` to start and share `TranscriptionEngine` with interactive QoS, App Nap assertion, 10-minute idle model unload, and `shutdown-when-idle`.

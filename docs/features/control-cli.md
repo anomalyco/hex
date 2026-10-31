@@ -101,7 +101,7 @@ and `model_selection` (remembered hints, wildcard-language validation); `control
 `every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts,
 and zero volume; `control::cli::tests` pin
 exit codes, output, and `hex start`'s `open`
-arguments; `onboarding::tests::relaunch_forwards_only_the_hex_environment`
+arguments; `desktop::onboarding::tests::relaunch_forwards_only_the_hex_environment`
 pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;
 `dictation::audio::tests::marked_captures_are_intentional_without_a_hold`

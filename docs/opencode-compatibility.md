@@ -25,7 +25,7 @@ new provider-backed validation must record its own CLI and server versions.
 
 Hex never runs an OpenCode executable, never starts or restarts the service,
 and never searches for or probes an installed CLI. It only talks to an already
-running service (`src/opencode_service.rs`):
+running service (`src/desktop/opencode_service.rs`):
 
 - It reads the bounded registration `service.json` (the stable, beta and dev
   channels), then other channels' `service-<channel>.json`, in

@@ -612,8 +612,8 @@ Source: [transcription/engine.rs](../../src/transcription/engine.rs) (one thread
 owns the model on every OS; streams, finishes, offline runs, and macOS model
 loads and switches share its FIFO because a live stream holds the model's
 compute lease), `probe_stream` and `with_stream` in
-[gguf_session.rs](../../src/gguf_session.rs), the stream entry points in
-[local_transcriber.rs](../../src/local_transcriber.rs) and
+[transcription/gguf_session.rs](../../src/transcription/gguf_session.rs), the stream entry points in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs) and
 [parakeet.rs](../../src/parakeet.rs), and `begin_stream` in
 [dictation.rs](../../src/dictation.rs): the capture owns its stream, feeds it as
 audio arrives, cancels it with the recording, and hands it to the finished clip.
@@ -741,7 +741,7 @@ Chunking bounds inference, not capture duration. No silence is removed.
 The shared `max_audio_chunk_samples` policy in
 [transcription/models.rs](../../src/transcription/models.rs) is used by
 [parakeet.rs](../../src/parakeet.rs) and
-[local_transcriber.rs](../../src/local_transcriber.rs). Cohere's pinned backend
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs). Cohere's pinned backend
 reports a 400-second encoder capacity, while its reference processor uses a
 35-second transcription window. Treating the encoder capacity as a useful
 inference window caused [#73](https://github.com/anomalyco/hex/issues/73)'s lost
@@ -811,7 +811,7 @@ Accepted job on a GPU device             // dictate.inference-threads
     // CPU-only devices keep the backend's default thread count
 ```
 
-Source: `session_options` in [gguf_session.rs](../../src/gguf_session.rs) and
+Source: `session_options` in [transcription/gguf_session.rs](../../src/transcription/gguf_session.rs) and
 `prioritize_inference_thread` in [parakeet.rs](../../src/parakeet.rs); check
 `gpu_sessions_bound_decoder_threads_and_cpu_sessions_keep_library_default`.
 Parakeet's per-token TDT decoder runs on CPU even with Metal encoding. ggml's
@@ -861,7 +861,7 @@ are deliberately left ungated: they skip both silence checks, and only output
 that repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped there.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
 tone, or a key click can lift a capture above it. Those captures then go to the
-Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
+Silero speech detector ([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs)),
 which discards them when it finds no speech. The detector (1.2 MB, pinned
 revision and checksum in [transcription/models.rs](../../src/transcription/models.rs))
 downloads in the background whenever a transcription model is downloaded or
@@ -1149,7 +1149,7 @@ behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
-At the top position the HUD sits 6 pt below the menu bar (`hud_placement::TOP_OFFSET`), or below the
+At the top position the HUD sits 6 pt below the menu bar (`rune_hud::hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
 and normal Spaces keep their position. Check: `scripts/check
@@ -1158,7 +1158,7 @@ fullscreen app on a notched Mac is not yet observed.
 
 ### Dot scope
 
-The HUD is Dot scope on every OS ([dot_scope.rs](../../src/dot_scope.rs),
+The HUD is Dot scope on every OS ([rune_hud/dot_scope.rs](../../src/rune_hud/dot_scope.rs),
 `dot_scope_fragment` in [rune_hud.wgsl](../../src/rune_hud.wgsl), drawn by
 a Rune overlay). It was the `dot-scope` experiment (#264) until 2026-10-29,
 when it replaced the glossy capsule, which Omarchy users on X called a
@@ -1215,12 +1215,12 @@ Dot scope                                    // dot_scope
 ```
 
 The simulation steps at a fixed 240 Hz, so any frame rate draws the same
-picture. Placement ([hud_placement.rs](../../src/hud_placement.rs), pure
+picture. Placement ([rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs), pure
 geometry the capture capsule can reuse) puts it on the screen with the
 pointer:
 
 ```ts
-Placement                                     // hud_placement::place
+Placement                                     // rune_hud::hud_placement::place
 ├── Below the menu bar (default) -> 6 pt under the menu bar, or above the Dock
 ├── In the menu bar -> A plate fitted to the bar's height, centred on a flat
 │   screen, just right of the notch on a notched one
@@ -1274,16 +1274,16 @@ Prototypes › HUD                             // R plays, P next look, A auto l
 The HUD is its own Rune overlay, not a view in the window, so a story drives
 the real HUD at the top of the screen and its stage only says what it shows. Playing a story
 puts its placement and look into the one tuning it shares with HUD Lab
-(`dot_scope::lab`).
+(`rune_hud::dot_scope::lab`).
 
 Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
 
-Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
+Check: `scripts/check rune_hud::dot_scope` (defaults, knobs, frame-rate independence,
 Reduce Motion, the stages, auto level, each processing
 look settling dark), `scripts/check dictation::indicator` (phases, the
 processing minimum, failure and cancel, a hot microphone still moving),
-`scripts/check hud_placement` (each placement on flat and notched screens),
+`scripts/check rune_hud::hud_placement` (each placement on flat and notched screens),
 and `rune_hud::tests::rune_hud_frames` (ignored; renders a fixed
 dictation through the real shaders offscreen into PNG frames, with
 `HEX_HUD_TUNING` for the look and placement over a pretend 14-inch MacBook
