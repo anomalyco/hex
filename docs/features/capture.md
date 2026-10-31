@@ -469,8 +469,8 @@ Hex's own windows                        // capture.own-windows
 │   │   (sharingType none) while shown; the dictation HUD and meeting
 │   │   capsules show
 │   │   └── Hidden (prewarmed, alpha zero on every Space) -> sharingType
-│   │       readOnly, set the turn after the hide, so Mission Control's
-│   │       Space thumbnails stay drawn (`capture_capsule::set_shown`)
+│   │       readOnly once the hide finishes, so Mission Control's Space
+│   │       thumbnails stay drawn (Rune's prewarmed panels do this)
 │   ├── Show in screen recordings on -> every recorder, Hex's captures
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's
