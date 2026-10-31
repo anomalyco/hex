@@ -368,8 +368,10 @@ observe input-source changes or show these controls.
 - `avoid_bluetooth_microphone` (default on) makes System default record from
   the built-in microphone, else another wired or USB input, when the OS
   default is a Bluetooth headset, so its audio stays out of call quality (on
-  Linux, Hex moves its PipeWire stream off a Bluetooth default source). A
-  saved microphone and `--device` are always used as named.
+  Linux, Hex moves its PipeWire stream off a Bluetooth default source after
+  opening it, so the headset may still switch to hands-free mode; see
+  [Bluetooth headsets](linux.md#bluetooth-headsets)). A saved microphone and
+  `--device` are always used as named.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, `f5`, or `left-option+right-option` (both Options
   held together). `left-` and `right-` apply to shortcuts without a key. On macOS, Windows and X11, `mouse4` and `option+mouse4`
