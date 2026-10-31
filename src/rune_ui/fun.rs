@@ -254,36 +254,22 @@ pub(super) fn driver_installed(ui: &Ui) -> bool {
 
 /// Turns the Voice Filter on or off. Off, Hex doesn't watch the driver or
 /// feed the Hex Microphone. While the driver is installed it shows on and
-/// can't be turned off: uninstalling the driver is the way.
+/// can't be turned off: the driver card's Uninstall is the way.
 fn switch(ui: &Ui, p: Paint) -> El {
     let title = tr("Turn on Voice Filter");
     let row = if driver_installed(ui) {
-        let uninstall = button(
-            p,
-            "switch-uninstall",
-            tr("Uninstall"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| ui.ask(PlatformRequest::UninstallHexMicrophone),
-        );
         setting_row(
             p,
             "fun-enabled",
             title,
             Some(tr(
-                "On while the Hex Microphone driver is installed. Uninstall the driver to turn it off.",
+                "On while the Hex Microphone driver is installed. Uninstall the driver below to turn it off.",
             )),
-            row()
-                .key("trailing")
-                .gap(8.0)
-                .center_y()
-                .child(uninstall)
-                .child(
-                    rune_kit::Switch::new(true)
-                        .disabled(true)
-                        .build(p.k)
-                        .key("switch")
-                        .focusable(false),
-                ),
+            rune_kit::Switch::new(true)
+                .disabled(true)
+                .build(p.k)
+                .key("switch")
+                .focusable(false),
         )
     } else {
         toggle_row(

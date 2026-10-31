@@ -1856,8 +1856,16 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
     if let Some(driver) = &mut rt.state.platform.hex_microphone {
         driver.driver_bundle_installed = false;
     }
+    rt.state.settings.experimental.hex_microphone = false;
+    rt.state.settings.labs.enabled = true;
+    rt.state.pane = Pane::VoiceFilter;
+    rt.state.labs_open = false;
     refresh(&mut rt);
-    assert!(rt.find("switch-uninstall").is_none());
+    tap(&mut rt, "fun-enabled");
+    assert!(
+        rt.state.settings.experimental.hex_microphone,
+        "without the driver the switch works"
+    );
 }
 
 fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
