@@ -2253,7 +2253,10 @@ impl AppSettings {
             self.shortcut_mode == crate::dictation::ShortcutMode::Toggle,
             Ordering::Relaxed,
         );
-        MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
+        MEETINGS_ENABLED.store(
+            self.meetings.available() && crate::labs::Feature::Meetings.shipped(),
+            Ordering::Release,
+        );
         crate::labs::apply(&self.labs);
         #[cfg(hex_capture)]
         {
@@ -2718,10 +2721,11 @@ pub fn meetings_enabled() -> bool {
 
 /// [`voice_filter_enabled`] for the running listener.
 pub fn hex_microphone_enabled() -> bool {
-    voice_filter_enabled(
-        HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-        crate::hex_microphone::driver_bundle_installed(),
-    )
+    crate::labs::Feature::VoiceFilter.shipped()
+        && voice_filter_enabled(
+            HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
+            crate::hex_microphone::driver_bundle_installed(),
+        )
 }
 
 /// Apple Intelligence may write meeting notes (macOS).

@@ -33,7 +33,9 @@ we're unsure about, especially ones people asked for that we built: **new or
 user-requested features land in Labs, off by default, not on by default.**
 Labs has no master switch; Settings › Labs is one flat list of rows (name,
 description, toggle), each off by default, plus Send feedback and Run setup
-again. A feature with its own pane joins the sidebar as a normal item while
+again. Each feature has an audience: `Everyone` or `Dev` (dev, local, test, and
+dev-channel builds only; a stable build never lists, accepts, or runs it).
+A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
 Meetings (beta), Voice Filter (locked on while its macOS driver is
 installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
@@ -449,7 +451,7 @@ substitute for source inspection or a second roadmap.
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
-  description), the runtime gates (`labs::live_text`, `live_chapters`,
+  description, audience), the runtime gates (`labs::live_text`, `live_chapters`,
   `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
   `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
