@@ -497,7 +497,7 @@ impl Pump {
                     crate::app_settings::set_dock_icon_visible(
                         crate::app_settings::dock_icon_visible(
                             change.settings.show_dock_icon,
-                            crate::status_item::installed(),
+                            crate::macos_rune::status_item::installed(),
                         ),
                     );
                 }
