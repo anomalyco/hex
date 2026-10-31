@@ -671,7 +671,8 @@ impl WindowsDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: visible_failure(&self.activity, self.last_completed_at),
+                warning: visible_failure(&self.activity, self.last_completed_at)
+                    .or_else(|| self.indicator.failure()),
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },
