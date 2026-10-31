@@ -31,6 +31,7 @@ pub(crate) struct Service {
     password: Option<String>,
 }
 
+#[derive(Debug)]
 pub(crate) struct Response {
     pub(crate) status: u16,
     pub(crate) body: Vec<u8>,
