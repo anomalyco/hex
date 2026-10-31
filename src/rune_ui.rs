@@ -13,6 +13,8 @@ mod activity;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod controls;
+#[cfg(target_os = "macos")]
+pub(crate) mod deep_link;
 mod explainer;
 mod fun;
 mod general;
@@ -210,7 +212,15 @@ pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
 /// A `hex://` link the system opened with Hex: a story link opens the window
 /// on that playground story; anything else is ignored.
 #[cfg(target_os = "macos")]
-fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
+fn on_open_url(ui: &mut Ui, link: &str, tx: &mut Tx) {
+    if let Some(target) = deep_link::parse(link, story_link::scheme()) {
+        match target {
+            Ok(target) => deep_link::open(ui, target, tx),
+            Err(why) => tracing::warn!(%why, "ignored a link opened with Hex"),
+        }
+        crate::macos_rune::bring_window_forward();
+        return;
+    }
     let link = match story_link::parse(link, story_link::scheme()) {
         Ok(link) => link,
         Err(why) => {
@@ -750,6 +760,8 @@ pub(crate) struct Ui {
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
+    /// The Labs row a link just opened, pulsing until it is cleared.
+    lab_flash: Option<(crate::labs::Feature, Instant)>,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -847,6 +859,7 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
+            lab_flash: None,
             build_preview: None,
             capture: Capture::Idle,
             vocabulary,
@@ -1264,6 +1277,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
+    changed |= labs::poll_flash(ui, now);
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
         ui.live()
@@ -2415,6 +2429,15 @@ const SCENES: &[Scene] = &[
             ui.platform.scrawl = Some(platform::ScrawlView::preview());
         }
         ui.labs_open = true;
+    }),
+    ("mac-labs-link", |ui| {
+        *ui = mac_fixture();
+        ui.labs_open = true;
+        // Far ahead, so the pulse holds for the render.
+        ui.lab_flash = Some((
+            crate::labs::Feature::VocabularyBiasing,
+            Instant::now() + Duration::from_secs(3600),
+        ));
     }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
