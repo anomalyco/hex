@@ -121,8 +121,12 @@ impl Hold {
 
 /// What the native environment holds for one effect until it is dropped.
 enum Held {
-    Sleep { _guard: Option<crate::idle_sleep::PreventSleep> },
-    Audio { _guard: AudioBehaviorGuard },
+    Sleep {
+        _guard: Option<crate::idle_sleep::PreventSleep>,
+    },
+    Audio {
+        _guard: AudioBehaviorGuard,
+    },
 }
 
 fn hold_native(effect: Effect) -> Held {
@@ -401,10 +405,8 @@ impl AudioBehaviorGuard {
                 }
                 paused_guard(players, browser)
             }
-            RecordingAudioBehavior::Duck => {
-                ducking::start(app_settings::recording_duck_volume())
-                    .map_or(Self::None, Self::Ducked)
-            }
+            RecordingAudioBehavior::Duck => ducking::start(app_settings::recording_duck_volume())
+                .map_or(Self::None, Self::Ducked),
             RecordingAudioBehavior::DoNothing => Self::None,
         }
     }

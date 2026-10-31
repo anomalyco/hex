@@ -183,10 +183,12 @@ fn restore(held: Held) {
 /// resuming players never delays it.
 fn restore_then(held: Option<Held>, then: Box<dyn FnOnce() + Send>) {
     match held {
-        Some(held @ Held {
-            audio: Suppressed::Muted(_) | Suppressed::Ducked(_),
-            ..
-        }) => {
+        Some(
+            held @ Held {
+                audio: Suppressed::Muted(_) | Suppressed::Ducked(_),
+                ..
+            },
+        ) => {
             restore(held);
             then();
         }
@@ -220,9 +222,13 @@ const PA_VOLUME_NORM: f32 = 65536.0;
 impl output_ducking::Volume for SinkVolume {
     fn read(&self) -> Option<Vec<f32>> {
         match self {
-            Self::Pactl => parse_pactl_volume(&run("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])?),
-            Self::Wpctl => parse_wpctl_volume(&run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])?)
-                .map(|volume| vec![volume]),
+            Self::Pactl => {
+                parse_pactl_volume(&run("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])?)
+            }
+            Self::Wpctl => {
+                parse_wpctl_volume(&run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])?)
+                    .map(|volume| vec![volume])
+            }
         }
     }
 
@@ -251,7 +257,9 @@ impl output_ducking::Volume for SinkVolume {
 /// Each channel's raw volume from `pactl get-sink-volume`, such as
 /// `Volume: front-left: 32768 /  50% / -18.06 dB,   front-right: ...`.
 fn parse_pactl_volume(output: &str) -> Option<Vec<f32>> {
-    let line = output.lines().find(|line| line.trim_start().starts_with("Volume:"))?;
+    let line = output
+        .lines()
+        .find(|line| line.trim_start().starts_with("Volume:"))?;
     let values = line
         .trim_start()
         .trim_start_matches("Volume:")

@@ -115,7 +115,8 @@ mod platform {
                     .await
                     .map_err(|_| std::io::Error::other("logind did not answer"))?
                     .map_err(std::io::Error::other)?;
-                let inhibitor: OwnedFd = reply.body().deserialize().map_err(std::io::Error::other)?;
+                let inhibitor: OwnedFd =
+                    reply.body().deserialize().map_err(std::io::Error::other)?;
                 Ok(Self {
                     _inhibitor: inhibitor,
                 })

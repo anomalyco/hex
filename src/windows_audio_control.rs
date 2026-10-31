@@ -161,8 +161,7 @@ fn mute_other_sessions() -> Option<Suppressed> {
         sessions
             .into_iter()
             .filter(|volume| {
-                let already_muted =
-                    unsafe { volume.GetMute() }.map_or(true, |mute| mute.as_bool());
+                let already_muted = unsafe { volume.GetMute() }.map_or(true, |mute| mute.as_bool());
                 !already_muted && unsafe { volume.SetMute(true, std::ptr::null()) }.is_ok()
             })
             .collect::<Vec<_>>()
@@ -208,11 +207,14 @@ impl output_ducking::Volume for Sessions {
     }
 
     fn write(&mut self, values: &[f32]) -> bool {
-        self.0.iter().zip(values).fold(true, |written, (volume, &value)| {
-            written
-                & unsafe { volume.SetMasterVolume(value.clamp(0.0, 1.0), std::ptr::null()) }
-                    .is_ok()
-        })
+        self.0
+            .iter()
+            .zip(values)
+            .fold(true, |written, (volume, &value)| {
+                written
+                    & unsafe { volume.SetMasterVolume(value.clamp(0.0, 1.0), std::ptr::null()) }
+                        .is_ok()
+            })
     }
 }
 
