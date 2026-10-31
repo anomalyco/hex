@@ -52,13 +52,12 @@ pub(super) struct Capabilities {
     /// The Voice Filter pane: the Hex Microphone's driver, tuning, and
     /// try-it demo (macOS, under Experiments).
     pub(super) fun: bool,
-    /// Modifier-only shortcuts can require the left or right key (macOS).
+    /// Modifier-only shortcuts can require the left or right key (macOS,
+    /// Windows; X11 grabs and the Wayland portal see no sides).
     pub(super) modifier_sides: bool,
     /// Input-source changes can operate the installed-model picker (macOS,
     /// Windows, and Linux on X11; Wayland has no general layout protocol).
     pub(super) keyboard_model_switching: bool,
-    /// Failures play the sound set's error sound (macOS).
-    pub(super) error_sound: bool,
 }
 
 impl Capabilities {
@@ -67,17 +66,16 @@ impl Capabilities {
         meetings: false,
         calendar: false,
         permissions: false,
-        launch_at_login: false,
+        launch_at_login: true,
         dock_icon: false,
         listener_control: true,
         terminal_paste: true,
         share_shortcut: false,
         hex_microphone: false,
-        practice_dictation: false,
+        practice_dictation: true,
         fun: false,
         modifier_sides: false,
         keyboard_model_switching: true,
-        error_sound: false,
     };
 
     pub(super) const MACOS: Self = Self {
@@ -95,7 +93,6 @@ impl Capabilities {
         fun: true,
         modifier_sides: true,
         keyboard_model_switching: true,
-        error_sound: true,
     };
 
     pub(super) const WINDOWS: Self = Self {
@@ -109,11 +106,10 @@ impl Capabilities {
         terminal_paste: false,
         share_shortcut: true,
         hex_microphone: false,
-        practice_dictation: false,
+        practice_dictation: true,
         fun: false,
-        modifier_sides: false,
+        modifier_sides: true,
         keyboard_model_switching: true,
-        error_sound: false,
     };
 
     /// This OS's capabilities, with the rows its window host decides.
@@ -563,13 +559,14 @@ pub(super) trait NativeHost {
     /// The microphone's latest peak, 0 to 1; silence when no audio arrived
     /// lately. The tour reads it only while a practice dictation records.
     fn practice_level(&self) -> f32 {
-        0.0
+        crate::input_level::recent().unwrap_or(0.0)
     }
 }
 
 pub(super) enum PlatformHost {
-    /// Linux: the service owns everything, so nothing is asked here.
-    None,
+    /// Linux and Windows: their runtimes own everything but the practice
+    /// dictation, which the window reads from the listener's event log.
+    Local(super::practice::LocalPractice),
     /// Scenes and tests: requests are recorded, never performed.
     Fixture(Vec<PlatformRequest>),
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -580,7 +577,7 @@ impl PlatformHost {
     pub(super) fn send(&mut self, request: PlatformRequest) -> Result<(), String> {
         match self {
             #[cfg(target_os = "linux")]
-            Self::None => {
+            Self::Local(_) => {
                 if let PlatformRequest::Scrawl(request) = request {
                     scrawl_request(request);
                 }
@@ -588,7 +585,7 @@ impl PlatformHost {
             }
             // Windows: the one permission is the microphone switch in Settings.
             #[cfg(target_os = "windows")]
-            Self::None => {
+            Self::Local(_) => {
                 if request
                     == PlatformRequest::Permission(PermissionAction::ShowGuide(
                         PermissionKind::Microphone,
@@ -605,7 +602,7 @@ impl PlatformHost {
                 Ok(())
             }
             #[cfg(target_os = "macos")]
-            Self::None => Ok(()),
+            Self::Local(_) => Ok(()),
             Self::Fixture(sent) => {
                 sent.push(request);
                 Ok(())
@@ -618,7 +615,7 @@ impl PlatformHost {
         match self {
             Self::Native(host) => host.poll(state),
             #[cfg(not(target_os = "macos"))]
-            Self::None => scrawl_poll(state),
+            Self::Local(_) => scrawl_poll(state),
             _ => false,
         }
     }
@@ -633,14 +630,16 @@ impl PlatformHost {
     pub(super) fn tour_inputs(&mut self, practicing: bool) -> Vec<Input> {
         match self {
             Self::Native(host) => host.tour_inputs(practicing),
-            _ => Vec::new(),
+            Self::Local(practice) => practice.tour_inputs(practicing),
+            Self::Fixture(_) => Vec::new(),
         }
     }
 
     pub(super) fn practice_level(&self) -> f32 {
         match self {
             Self::Native(host) => host.practice_level(),
-            _ => 0.0,
+            Self::Local(_) => crate::input_level::recent().unwrap_or(0.0),
+            Self::Fixture(_) => 0.0,
         }
     }
 

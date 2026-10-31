@@ -90,6 +90,8 @@ mod linux_input;
 #[cfg(target_os = "linux")]
 mod linux_input_route;
 #[cfg(target_os = "linux")]
+mod linux_login_item;
+#[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
 mod linux_portal;
@@ -161,6 +163,7 @@ mod transcription_models;
 mod transcription_preparation;
 mod transcription_service;
 mod transcription_stream;
+mod tray_menu;
 mod updater;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod vocabulary;

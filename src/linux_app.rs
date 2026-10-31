@@ -341,15 +341,27 @@ pub(crate) fn run(
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
     let (control, requests) = mpsc::sync_channel(8);
     server.serve(published.clone(), control.clone(), shutdown);
-    let tray = crate::linux_tray::start(control.clone(), shutdown);
+    let tray = crate::linux_tray::start(host.clone(), published.clone(), control.clone(), shutdown)
+        .map(Arc::new);
     linux_service::notify("READY=1");
     tracing::info!(pid = std::process::id(), "Hex instance ready");
 
     let worker = {
         let host = host.clone();
+        let tray = tray.clone();
         std::thread::Builder::new()
             .name("hex-host".into())
-            .spawn(move || run_host(host, published, server, control, session, shutdown))?
+            .spawn(move || {
+                run_host(
+                    host,
+                    published,
+                    server,
+                    control,
+                    session,
+                    tray.as_deref(),
+                    shutdown,
+                )
+            })?
     };
     let reopen = take_reopen_marker();
     let first = activation.or(reopen.then(Activation::default));
@@ -369,10 +381,12 @@ fn run_host(
     server: linux_service::Server,
     control: mpsc::SyncSender<Control>,
     session: linux_service::Session,
+    tray: Option<&rune::Tray>,
     shutdown: &'static AtomicBool,
 ) {
     let mut stopping = false;
     let mut shown: Option<HostSnapshot> = None;
+    let mut tray_view = None;
     loop {
         let (done, route, snapshot) = {
             let mut guard = host.lock();
@@ -394,6 +408,13 @@ fn run_host(
         *published.shortcuts.lock().unwrap() = route;
         *published.status.lock().unwrap() = Some(host.status(snapshot.clone(), session.clone()));
         if shown.as_ref() != Some(&snapshot) {
+            if let Some(tray) = tray {
+                let view = crate::linux_tray::view(&snapshot);
+                if tray_view.as_ref() != Some(&view) {
+                    crate::linux_tray::show(tray, &view);
+                    tray_view = Some(view);
+                }
+            }
             shown = Some(snapshot);
             host.wake();
         }

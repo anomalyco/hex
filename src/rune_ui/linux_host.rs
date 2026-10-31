@@ -186,11 +186,12 @@ pub(super) fn focused_application_known() -> bool {
     !crate::linux_session::LinuxSession::detect().is_wayland()
 }
 
-/// Linux has no Launch at login row; autostart is the desktop entry.
+/// The XDG autostart entry is the source of truth, never `settings.json`.
 pub(super) fn launch_at_login() -> Option<Result<bool, String>> {
-    None
+    Some(crate::linux_login_item::is_enabled().map_err(|error| format!("{error:#}")))
 }
 
-pub(super) fn set_launch_at_login(_: bool) -> Result<bool, String> {
-    Err("Launch at login is not available on Linux".into())
+pub(super) fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
+    crate::linux_login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
+    crate::linux_login_item::is_enabled().map_err(|error| format!("{error:#}"))
 }

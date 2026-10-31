@@ -284,8 +284,14 @@ substitute for source inspection or a second roadmap.
   Linux and Windows place it at the top or bottom edge.
   `rune_hud_frames` renders a fixed dictation through the shaders offscreen.
 - `linux_tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
-  with a dbusmenu: Show Hex, Quit Hex). It registers whenever a tray host
+  with a dbusmenu built by `tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
+- `tray_menu`: the tray menu Linux and Windows share (recording state, Show
+  Hex, Paste last dictation, the downloaded-model picker, the update item,
+  Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
+  lists too. Each tray maps a `TrayCommand` onto its own runtime.
+- `linux_login_item`: Launch at login on Linux, the managed XDG autostart
+  entry the installer also writes; the file is the only state.
 - `updater`: the in-app updater on every OS, a client of the Anomaly release
   service (`docs/plans/release-service.md`). `updater/protocol` is the
   protocol's strict SemVer, lenient manifest parsing, and client rules (the

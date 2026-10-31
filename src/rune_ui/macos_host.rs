@@ -27,6 +27,7 @@ use super::platform::{
     CalendarRequest, CalendarView, DemoRequest, HudDemo, HudLab, MeetingRequest, NativeHost,
     NotesAvailability, PlatformRequest, PlatformState, UpcomingMeeting,
 };
+use super::practice::PracticeFeed;
 use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::{
@@ -38,7 +39,7 @@ use crate::desktop_i18n::tr;
 use crate::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
-use crate::onboarding::{Input, Observation, PermissionAction, PermissionKind, PermissionState};
+use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState};
 
 /// The window saves a recorded shortcut; the listener follows `settings.json`.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = false;
@@ -798,10 +799,6 @@ impl NativeHost for MacHost {
         }
         inputs
     }
-
-    fn practice_level(&self) -> f32 {
-        crate::input_level::recent().unwrap_or(0.0)
-    }
 }
 
 /// The Calendar card's state. EventKit is touched only on the reader thread,
@@ -1191,49 +1188,6 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
         .collect()
 }
 
-/// The listener's dictation outcomes logged since the practice step began.
-struct PracticeFeed {
-    reader: crate::events::EventReader,
-    since_ms: u64,
-}
-
-impl PracticeFeed {
-    fn new(event_path: &std::path::Path) -> Self {
-        Self {
-            reader: crate::events::EventReader::open(event_path),
-            since_ms: crate::events::now_ms(),
-        }
-    }
-
-    fn observations(&mut self) -> Vec<Observation> {
-        use crate::events::{DictationPhase, VoiceEvent};
-        if let Err(error) = self.reader.refresh() {
-            tracing::warn!(%error, "could not read dictation events for practice");
-            return Vec::new();
-        }
-        let since_ms = self.since_ms;
-        self.reader
-            .drain()
-            .filter_map(|event| match event {
-                VoiceEvent::Dictation {
-                    timestamp_ms,
-                    phase,
-                    ..
-                } if timestamp_ms >= since_ms => Some(match phase {
-                    DictationPhase::Started => Observation::Started,
-                    DictationPhase::Transcribing => Observation::Transcribing,
-                    DictationPhase::Discarded => Observation::Discarded,
-                    DictationPhase::Cancelled => Observation::Cancelled,
-                    DictationPhase::Pasted | DictationPhase::Edited => Observation::Pasted,
-                    DictationPhase::Failed(_) => Observation::Failed,
-                    _ => return None,
-                }),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
 /// Opens the folder panel beside the window, starting at the current
 /// meetings folder.
 fn choose_folder() -> crate::file_dialog::Pending {
@@ -1553,46 +1507,6 @@ mod tests {
         assert!(!pane.chapters[1].markdown.contains("Last thing"));
         assert!(pane.chapters[2].markdown.contains("Last thing"));
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn practice_hears_dictations_logged_after_it_began() {
-        use crate::events::{DictationPhase, VoiceEvent};
-        let path = std::env::temp_dir().join(format!("hex-practice-{}.ndjson", std::process::id()));
-        let dictation = |timestamp_ms, phase| {
-            serde_json::to_string(&VoiceEvent::Dictation {
-                timestamp_ms,
-                phase,
-                text: String::new(),
-                processing: None,
-                reason: None,
-            })
-            .unwrap()
-                + "\n"
-        };
-        std::fs::write(&path, dictation(1, DictationPhase::Started)).unwrap();
-        let mut practice = PracticeFeed::new(&path);
-        let now = practice.since_ms;
-        let log = [
-            dictation(now, DictationPhase::Started),
-            dictation(now + 1, DictationPhase::Transcribing),
-            dictation(now + 2, DictationPhase::Logged),
-            dictation(now + 3, DictationPhase::Edited),
-        ];
-        std::fs::write(&path, dictation(1, DictationPhase::Started) + &log.concat()).unwrap();
-        assert_eq!(
-            practice.observations(),
-            [
-                Observation::Started,
-                Observation::Transcribing,
-                Observation::Pasted
-            ]
-        );
-        assert!(
-            practice.observations().is_empty(),
-            "each event is heard once"
-        );
-        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

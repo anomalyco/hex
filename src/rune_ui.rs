@@ -43,6 +43,7 @@ mod picker;
 mod platform;
 mod platform_settings;
 pub(crate) mod playground;
+mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
@@ -774,7 +775,7 @@ impl Ui {
             tour: None,
             first_run: None,
             platform: platform::PlatformState::new(platform::Capabilities::current()),
-            host: platform::PlatformHost::None,
+            host: platform::PlatformHost::Local(Default::default()),
             meetings: meetings::MeetingsPane::default(),
             fun: fun::FunPane::default(),
             activity: activity::ActivityPane::default(),
@@ -931,8 +932,9 @@ impl Ui {
                 }
             }
             platform::PlatformRequest::SetLaunchAtLogin(enabled) => match &self.host {
-                // Windows writes its Run key from the window's own process.
-                platform::PlatformHost::None => {
+                // Windows (its Run key) and Linux (XDG autostart) write
+                // the login item from the window's own process.
+                platform::PlatformHost::Local(_) => {
                     let result = host::set_launch_at_login(*enabled);
                     self.platform.set_login_item(Some(result));
                     return;

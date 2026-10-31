@@ -50,7 +50,6 @@ struct JobResult {
     result: Result<(), String>,
 }
 
-#[derive(Clone)]
 pub struct WindowsDictationConfig {
     pub device: Option<String>,
     pub hotkey: WindowsHotkey,
@@ -75,6 +74,14 @@ pub struct WindowsDictationConfig {
     pub paste_with_shift: bool,
     /// Where the listener reports a model change that failed to load.
     pub swap_failures: Option<mpsc::Sender<crate::local_transcriber::SwapFailed>>,
+    /// What the tray asks of the listener.
+    pub commands: Option<mpsc::Receiver<ListenerCommand>>,
+}
+
+/// A request from outside the keyboard hook, as the tray sends.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListenerCommand {
+    PasteLast,
 }
 
 impl WindowsDictationConfig {
@@ -110,6 +117,7 @@ impl WindowsDictationConfig {
             fallback_to_default_device: true,
             paste_with_shift: settings.paste_with_shift,
             swap_failures: None,
+            commands: None,
         }
     }
 }
@@ -145,6 +153,7 @@ pub fn run(
         fallback_to_default_device,
         paste_with_shift,
         swap_failures,
+        commands,
     } = config;
     // Read by the output worker at each paste, so a change applies in place.
     let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
@@ -264,7 +273,7 @@ pub fn run(
 
     while !shutdown.load(Ordering::Relaxed) {
         if let Some(failed) = model.poll() {
-            events.dictation(DictationPhase::Failed(failed.error.clone()), "")?;
+            fail(&events, failed.error.clone())?;
             if let Some(swap_failures) = &swap_failures {
                 let _ = swap_failures.send(failed);
             }
@@ -421,6 +430,20 @@ pub fn run(
                 audio_ready = false;
             }
         }
+        let commanded = commands
+            .as_ref()
+            .and_then(|commands| commands.try_recv().ok())
+            .filter(|_| finishing.is_none() && !recording);
+        if commanded == Some(ListenerCommand::PasteLast) {
+            submit_paste_last(
+                &jobs,
+                &mut events,
+                &mut pending,
+                &mut next_job_id,
+                &mut job_ids,
+            )?;
+            emit_state(&mut events, VoiceState::Transcribing, &device_label)?;
+        }
         while finishing.is_none()
             && let Ok(event) = hotkey.events.try_recv()
         {
@@ -536,12 +559,13 @@ pub fn run(
                     }
                 }
                 HotkeyAction::PasteLast if !recording => {
-                    let queued = pending;
-                    submit_paste_last(&jobs, &mut events, &mut pending)?;
-                    if pending > queued {
-                        next_job_id += 1;
-                        job_ids.push_back(next_job_id);
-                    }
+                    submit_paste_last(
+                        &jobs,
+                        &mut events,
+                        &mut pending,
+                        &mut next_job_id,
+                        &mut job_ids,
+                    )?;
                     emit_state(&mut events, VoiceState::Transcribing, &device_label)?;
                 }
                 _ => {}
@@ -579,7 +603,7 @@ pub fn run(
                         }
                     }
                 }
-                Err(error) => events.dictation(DictationPhase::Failed(error), "")?,
+                Err(error) => fail(&events, error)?,
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
@@ -689,10 +713,7 @@ pub fn run(
                 // and stay released rather than killing the listener.
                 start_pending = false;
                 audio_suppressor.restore();
-                events.dictation(
-                    DictationPhase::Failed(format!("could not open microphone: {error}")),
-                    "",
-                )?;
+                fail(&events, format!("could not open microphone: {error}"))?;
                 if let Some(indicator) = &indicator {
                     indicator.send(crate::rune_hud::HudEvent::Failed);
                 }
@@ -953,8 +974,7 @@ fn submit_capture(
                     submitted = true;
                     events.dictation(DictationPhase::Transcribing, "")?;
                 }
-                Err(TrySendError::Full(_)) => events
-                    .dictation(DictationPhase::Failed("dictation queue is full".into()), "")?,
+                Err(TrySendError::Full(_)) => fail(events, "dictation queue is full")?,
                 Err(TrySendError::Disconnected(_)) => {
                     return Err(eyre!("Windows dictation worker is unavailable"));
                 }
@@ -964,17 +984,29 @@ fn submit_capture(
     Ok(submitted)
 }
 
+/// Logs a failed dictation or paste with the sound set's error sound.
+fn fail(events: &EventLog, error: impl Into<String>) -> Result<()> {
+    crate::feedback::play(crate::feedback::Tone::Error);
+    events.dictation(DictationPhase::Failed(error.into()), "")?;
+    Ok(())
+}
+
+/// Queues a repaste of the last dictation. Its job id keeps the result
+/// queue aligned and is never announced to the HUD.
 fn submit_paste_last(
     jobs: &SyncSender<OutputJob>,
     events: &mut EventLog,
     pending: &mut usize,
+    next_job_id: &mut u64,
+    job_ids: &mut std::collections::VecDeque<u64>,
 ) -> Result<()> {
     match jobs.try_send(OutputJob::PasteLast) {
-        Ok(()) => *pending += 1,
-        Err(TrySendError::Full(_)) => events.dictation(
-            DictationPhase::Failed("dictation output queue is full".into()),
-            "",
-        )?,
+        Ok(()) => {
+            *pending += 1;
+            *next_job_id += 1;
+            job_ids.push_back(*next_job_id);
+        }
+        Err(TrySendError::Full(_)) => fail(events, "dictation output queue is full")?,
         Err(TrySendError::Disconnected(_)) => {
             return Err(eyre!("Windows dictation worker is unavailable"));
         }

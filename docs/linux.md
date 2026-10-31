@@ -26,9 +26,11 @@ workers, sounds, paste, History, the recording pill, and the window. The window
 is optional: closing it stops neither dictation nor a model download, and
 launching Hex again opens it. When the desktop has a tray (a
 StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
-tray icon: click it to open the window, or use its menu's **Show Hex** and
-**Quit Hex**. Without a tray, quit with **Quit Hex** at the bottom of the
-window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
+tray icon: click it to open the window, or use its menu: **Show Hex**,
+**Paste last dictation**, the downloaded speech models, the update once one
+is ready (**Restart to update**), **Enable / Disable Hex**, and **Quit Hex**;
+while Hex records or transcribes, the menu and tooltip say so. Without a
+tray, quit with **Quit Hex** at the bottom of the window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window opens at 980×760 logical pixels and floats on tiling window
 managers with no window rule: it maps with its minimum size equal to its
@@ -141,6 +143,8 @@ The installer verifies the signed release feed, exact artifact size, and
 SHA-256 before installing. It uses no root access. It creates the managed
 version layout, `~/.local/bin/hex`, a desktop launcher, and an XDG autostart
 entry and a `hex.service` user unit. It does not start recording during installation.
+General › **Launch at login** turns that autostart entry on or off
+(`~/.config/autostart/hex.desktop`); Hex leaves an entry it did not write alone.
 
 Remove the application while preserving logs and settings with:
 

@@ -317,7 +317,6 @@ fn stage(ui: &Ui, p: Paint) -> El {
     let sounding = ui.sound_sets.sounding();
     let chips = Cue::ALL
         .into_iter()
-        .filter(|&cue| cue != Cue::Error || ui.platform.caps.error_sound)
         .map(|cue| chip(p, set, cue, sounding == Some(cue)));
     col()
         .key("stage")
