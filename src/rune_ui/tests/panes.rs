@@ -336,48 +336,53 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 }
 
 #[test]
-fn the_browser_switch_shows_only_with_pause_media() {
-    let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    open_advanced(&mut rt, Pane::General);
-    assert!(rt.find("pause-browser").is_none());
-    rt.state.settings.recording_audio_behavior =
-        crate::app_settings::RecordingAudioBehavior::PauseMedia;
+fn the_browser_permission_shows_with_pause_media_and_its_labs_toggle() {
+    let mut rt = runtime("mac-settings-pause-browser", true, TALL_SIZE);
+    rt.state.settings.pause_browser_media = false;
     refresh(&mut rt);
-    assert!(rt.find("pause-browser").is_some());
-    assert!(
-        rt.find("pause-browser-audio").is_none(),
-        "the permission row waits for the switch"
-    );
+    open_advanced(&mut rt, Pane::General);
+    assert!(rt.find("pause-browser").is_none(), "the toggle is in Labs");
+    assert!(rt.find("pause-browser-audio").is_none());
+    rt.state.settings.pause_browser_media = true;
+    refresh(&mut rt);
+    assert!(rt.find("pause-browser-audio").is_some());
 }
 
 #[test]
-fn the_browser_switch_turns_on_and_asks_for_system_audio() {
-    let mut rt = runtime("mac-settings-pause-browser", true, TALL_SIZE);
-    rt.state.settings.pause_browser_media = false;
-    open_advanced(&mut rt, Pane::General);
-    tap(&mut rt, "pause-browser");
+fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-pause-browser");
     assert!(rt.state.settings.pause_browser_media);
     assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
-    assert!(
-        rt.find("pause-browser-allow-control/mark/dot").is_some(),
-        "the permission row waits with a dot"
-    );
+
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    rt.state.platform.system_audio = true;
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-pause-browser");
+    assert!(rt.state.settings.pause_browser_media);
+    assert!(asked(&rt).is_empty());
 }
 
 #[test]
-fn an_allowed_browser_switch_asks_nothing() {
-    let mut rt = runtime("mac-settings-pause-browser", true, TALL_SIZE);
-    rt.state.settings.pause_browser_media = false;
-    rt.state.platform.system_audio = true;
+fn contributed_options_are_labs_toggles_off_by_default() {
+    let mut rt = runtime("mac-settings", true, (980.0, 1600.0));
+    tap(&mut rt, "nav-labs");
+    for row in ["lab-mouse-shortcuts", "lab-pause-browser"] {
+        assert!(rt.find(row).is_some(), "Labs lacks {row}");
+    }
+    assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
+    assert!(!rt.state.settings.labs.mouse_shortcuts);
+    tap(&mut rt, "lab-mouse-shortcuts");
+    assert!(rt.state.settings.labs.mouse_shortcuts);
+
+    let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
     open_advanced(&mut rt, Pane::General);
-    tap(&mut rt, "pause-browser");
-    assert!(rt.state.settings.pause_browser_media);
-    assert!(asked(&rt).is_empty());
-    assert!(
-        rt.find("pause-browser-allow-control/mark/ink/check")
-            .is_some(),
-        "shows Allowed"
-    );
+    assert!(rt.find("share-dictation-shortcut").is_none());
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
+    tap(&mut rt, "lab-share-shortcut");
+    assert!(rt.state.settings.share_dictation_shortcut);
 }
 
 #[test]

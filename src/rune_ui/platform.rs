@@ -291,10 +291,6 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Dev, local, or test build (`crate::dev_build::is_dev_build` on a
-    /// native host; `true` in fixtures except `"mac-production"`). Production
-    /// builds hide Annotate and the developer panes.
-    pub(super) dev_build: bool,
     /// The window has the playground (Labs › Playground at launch): the
     /// sidebar shows its item.
     pub(super) playground: bool,
@@ -368,7 +364,6 @@ impl PlatformState {
             meeting_folder_error: None,
             calendar: CalendarView::default(),
             relaunch_failed: false,
-            dev_build: true,
             developer: false,
             playground: false,
             accessibility_renamed: false,
@@ -715,13 +710,12 @@ impl PlatformHost {
     }
 }
 
-/// The Scrawl pane on Linux and Windows: it shows while the `capture`
-/// experiment is on. Linux's portal asks for the screen at each capture and
+/// The Annotate pane on Linux and Windows. Linux's portal asks for the screen at each capture and
 /// Windows asks nothing, so nothing is granted ahead of time, and Scrawl's
 /// own app is macOS's.
 #[cfg(not(target_os = "macos"))]
 fn scrawl_poll(state: &mut PlatformState) -> bool {
-    if !state.dev_build || state.scrawl.is_some() {
+    if state.scrawl.is_some() {
         return false;
     }
     state.scrawl = Some(ScrawlView::preview());

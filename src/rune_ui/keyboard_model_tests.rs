@@ -33,24 +33,27 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
 }
 
 #[test]
-fn keyboard_model_switching_is_a_saved_opt_in_wherever_layouts_are_observable() {
+fn keyboard_model_switching_is_a_labs_toggle_wherever_layouts_are_observable() {
     let mut rt = runtime("mac-settings");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
-    assert!(rt.find("keyboard-model-switching").is_none(), "in Advanced");
-    tap(&mut rt, "advanced-toggle");
-    tap(&mut rt, "keyboard-model-switching");
+    assert!(
+        rt.find("keyboard-model-switching").is_none(),
+        "no General row"
+    );
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-keyboard-model-switching");
     assert!(rt.state.settings.keyboard_model_switching.enabled);
     assert_eq!(rt.state.saved, 1);
-    tap(&mut rt, "keyboard-model-switching");
+    tap(&mut rt, "lab-keyboard-model-switching");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
     let mut rt = runtime("windows-settings");
-    tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("keyboard-model-switching").is_some());
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("lab-keyboard-model-switching").is_some());
     // Wayland (the portal scene) has no layout protocol.
     let mut rt = runtime("portal");
     rt.state.platform.caps.keyboard_model_switching = false;
-    tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("keyboard-model-switching").is_none());
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("lab-keyboard-model-switching").is_none());
 }
 
 #[test]
@@ -64,10 +67,10 @@ fn keyboard_model_switching_maps_enabled_sources_to_an_installed_model_and_langu
     }];
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
     rt.state.advanced = vec![Pane::General];
+    rt.state.settings.keyboard_model_switching.enabled = true;
     rt.invalidate();
     rt.settle_all();
     rt.frame(0.0);
-    tap(&mut rt, "keyboard-model-switching");
     assert!(rt.find("input-source-language0").is_none());
     tap(&mut rt, "input-source-model0-trigger");
     tap(&mut rt, "input-source-model0-item1");

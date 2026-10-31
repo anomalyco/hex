@@ -1243,7 +1243,9 @@ impl Default for ExperimentalSettings {
 
 /// The `labs` switches (`crate::labs`), every one off by default. Labs
 /// features that already had a home keep it: `meetings.enabled`,
-/// `experimental.hex_microphone`, and `paste_with_shift`. An older
+/// `experimental.hex_microphone`, `paste_with_shift`,
+/// `keyboard_model_switching.enabled`, `pause_browser_media`, and
+/// `share_dictation_shortcut`. An older
 /// `labs.enabled` master switch is read and ignored.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -1256,6 +1258,8 @@ pub struct LabsSettings {
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,
+    /// Mouse buttons may be recorded as shortcuts (macOS, issue 209).
+    pub mouse_shortcuts: bool,
 }
 
 /// Whether the Voice Filter runs: the listener streams the Hex Microphone
@@ -1654,6 +1658,10 @@ pub struct AppSettings {
     /// Let other apps see the dictation shortcut's key presses too
     /// (Windows), so a push-to-talk key can drive both.
     pub share_dictation_shortcut: bool,
+    /// A mouse-button shortcut went back to its default because Labs ›
+    /// Mouse shortcuts is off; the window says so once, then clears it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mouse_shortcut_notice: bool,
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
@@ -1746,6 +1754,7 @@ impl Default for AppSettings {
             enable_on_launch: true,
             paste_with_shift: false,
             share_dictation_shortcut: false,
+            mouse_shortcut_notice: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
             updates: UpdateSettings::default(),
@@ -2006,6 +2015,8 @@ impl AppSettings {
                 settings.validate_recording_duck_volume()?;
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.repair_bare_primary_clicks();
+                #[cfg(target_os = "macos")]
+                settings.repair_mouse_shortcuts();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
@@ -2321,15 +2332,41 @@ impl AppSettings {
         }
     }
 
-    /// Annotate is on: dev build and the person hasn't turned it off.
+    /// Annotate is on: the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
-        crate::dev_build::is_dev_build() && self.capture.enabled
+        self.capture.enabled
     }
 
     /// A shortcut saved as a bare left click swallowed every click, so its
     /// owner couldn't change it in Settings. Such a shortcut goes back to its
     /// default when settings load.
+    /// With Labs › Mouse shortcuts off, a mouse-button shortcut (issue 209)
+    /// goes back to its default and the window notes it once.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn repair_mouse_shortcuts(&mut self) {
+        if self.labs.mouse_shortcuts {
+            return;
+        }
+        let mouse = |binding: &HotkeyBinding| binding.key.as_ref().is_some_and(HotkeyKey::is_mouse);
+        if mouse(&self.dictation_hotkey) {
+            self.dictation_hotkey = HotkeyBinding::default();
+            self.mouse_shortcut_notice = true;
+        }
+        if self.paste_last_hotkey.as_ref().is_some_and(mouse) {
+            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
+            self.mouse_shortcut_notice = true;
+        }
+        #[cfg(hex_capture)]
+        if mouse(&self.capture.hotkey) {
+            self.capture.hotkey = HotkeyBinding::capture_default();
+            self.mouse_shortcut_notice = true;
+        }
+        if self.mouse_shortcut_notice {
+            tracing::info!("reset mouse-button shortcuts: Labs › Mouse shortcuts is off");
+        }
+    }
+
     fn repair_bare_primary_clicks(&mut self) {
         if self.dictation_hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click dictation shortcut with the default");
@@ -2923,6 +2960,26 @@ mod tests {
         assert!(!voice_filter_enabled(false, false));
         assert!(voice_filter_enabled(true, false));
         assert!(voice_filter_enabled(false, true));
+    }
+
+    #[test]
+    fn mouse_shortcuts_go_back_to_their_default_while_their_labs_toggle_is_off() {
+        let mouse = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: HotkeyKey::mouse(3),
+        };
+        let mut settings = AppSettings {
+            dictation_hotkey: mouse.clone(),
+            ..Default::default()
+        };
+        settings.labs.mouse_shortcuts = true;
+        settings.repair_mouse_shortcuts();
+        assert_eq!(settings.dictation_hotkey, mouse);
+        assert!(!settings.mouse_shortcut_notice);
+        settings.labs.mouse_shortcuts = false;
+        settings.repair_mouse_shortcuts();
+        assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+        assert!(settings.mouse_shortcut_notice);
     }
 
     #[test]

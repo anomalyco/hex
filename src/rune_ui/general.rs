@@ -189,26 +189,12 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
         })
 }
 
-/// "Also pause the browser", under Pause media on macOS. Hex hears the
-/// browser through System Audio Recording, so turning it on asks for that
-/// here: never while you dictate.
+/// Labs › Also pause the browser's permission, under Pause media on macOS:
+/// Hex hears the browser through System Audio Recording, asked for here,
+/// never while you dictate.
 fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
     let on = ui.settings.pause_browser_media;
-    let mut rows = vec![icon_toggle_row(
-        p,
-        "pause-browser",
-        &GLOBE,
-        tr("Also pause the browser"),
-        tr("YouTube and other tabs, resumed only if Hex paused them"),
-        on,
-        |ui: &mut Ui| {
-            let on = !ui.settings.pause_browser_media;
-            ui.update(|settings| settings.pause_browser_media = on);
-            if on && !ui.platform.system_audio {
-                ui.ask(PlatformRequest::SystemAudio);
-            }
-        },
-    )];
+    let mut rows = Vec::new();
     if on {
         let control = if ui.platform.system_audio {
             PermissionControl::Allowed
@@ -712,27 +698,8 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         "release-confirmation-fold",
         ui.confirm_release.then(|| s::release_confirmation(ui, p)),
     ));
+    // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "keyboard-model-switching",
-                &KEYBOARD,
-                tr("Switch model with keyboard language"),
-                tr(
-                    "Changing input source selects its mapped model and language; manual choices still work",
-                ),
-                settings.keyboard_model_switching.enabled,
-                |ui: &mut Ui| {
-                    ui.open = None;
-                    ui.update(|settings| {
-                        settings.keyboard_model_switching.enabled =
-                            !settings.keyboard_model_switching.enabled;
-                    });
-                },
-            )
-            .into(),
-        );
         rows.push(folding(
             "input-source-mappings",
             if settings.keyboard_model_switching.enabled {
@@ -761,23 +728,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
-    if ui.platform.caps.share_shortcut {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "share-dictation-shortcut",
-                &KEYBOARD,
-                tr("Share dictation shortcut with other apps"),
-                tr("Lets apps such as Discord detect the same key"),
-                settings.share_dictation_shortcut,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.share_dictation_shortcut;
-                    ui.update(|settings| settings.share_dictation_shortcut = enabled);
-                },
-            )
-            .into(),
-        );
-    }
     let model = transcription_models::definition(settings.transcription.model);
     if model.supports_recognition_hints {
         rows.push(

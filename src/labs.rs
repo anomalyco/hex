@@ -3,8 +3,9 @@
 //! Settings › Labs lists every feature as a row with a toggle. A feature
 //! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
 //! as a normal item while on and is hidden while off; a behaviour-only
-//! feature (Live text, Live chapters, Vocabulary biasing, Terminal paste on
-//! Windows) is just its toggle.
+//! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
+//! model switching, mouse shortcuts, pausing the browser, and Terminal paste
+//! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
@@ -30,10 +31,14 @@ pub enum Feature {
     LiveChapters,
     VocabularyBiasing,
     TerminalPaste,
+    KeyboardModelSwitching,
+    MouseShortcuts,
+    PauseBrowser,
+    ShareShortcut,
 }
 
 impl Feature {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -41,6 +46,10 @@ impl Feature {
         Self::LiveChapters,
         Self::VocabularyBiasing,
         Self::TerminalPaste,
+        Self::KeyboardModelSwitching,
+        Self::MouseShortcuts,
+        Self::PauseBrowser,
+        Self::ShareShortcut,
     ];
 
     /// The features this OS has.
@@ -48,11 +57,13 @@ impl Feature {
         Self::ALL.into_iter().filter(|feature| feature.on_this_os())
     }
 
-    const fn on_this_os(self) -> bool {
+    fn on_this_os(self) -> bool {
         match self {
             Self::Meetings | Self::LiveChapters => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
-            Self::TerminalPaste => cfg!(target_os = "windows"),
+            Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::MouseShortcuts | Self::PauseBrowser => cfg!(target_os = "macos"),
+            Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground | Self::LiveText | Self::VocabularyBiasing => true,
         }
     }
@@ -67,6 +78,10 @@ impl Feature {
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
             Self::TerminalPaste => "terminal-paste",
+            Self::KeyboardModelSwitching => "keyboard-model-switching",
+            Self::MouseShortcuts => "mouse-shortcuts",
+            Self::PauseBrowser => "pause-browser",
+            Self::ShareShortcut => "share-shortcut",
         }
     }
 
@@ -80,6 +95,10 @@ impl Feature {
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::TerminalPaste => "paste_with_shift",
+            Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
+            Self::MouseShortcuts => "labs.mouse_shortcuts",
+            Self::PauseBrowser => "pause_browser_media",
+            Self::ShareShortcut => "share_dictation_shortcut",
         }
     }
 
@@ -100,6 +119,12 @@ impl Feature {
                 "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
             }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
+            Self::KeyboardModelSwitching => {
+                "Changing the keyboard language switches the speech model and language"
+            }
+            Self::MouseShortcuts => "Record mouse buttons as shortcuts",
+            Self::PauseBrowser => "Also pause the browser while dictating, with Pause media",
+            Self::ShareShortcut => "Let apps such as Discord see the dictation shortcut too",
         }
     }
 
@@ -117,6 +142,10 @@ impl Feature {
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
             Self::TerminalPaste => settings.paste_with_shift,
+            Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
+            Self::MouseShortcuts => settings.labs.mouse_shortcuts,
+            Self::PauseBrowser => settings.pause_browser_media,
+            Self::ShareShortcut => settings.share_dictation_shortcut,
         }
     }
 
@@ -129,6 +158,10 @@ impl Feature {
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
+            Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
+            Self::MouseShortcuts => settings.labs.mouse_shortcuts = on,
+            Self::PauseBrowser => settings.pause_browser_media = on,
+            Self::ShareShortcut => settings.share_dictation_shortcut = on,
         }
     }
 }
@@ -139,6 +172,7 @@ const LIVE_TEXT: u8 = 1 << 1;
 const LIVE_CHAPTERS: u8 = 1 << 2;
 const PLAYGROUND: u8 = 1 << 3;
 const VOCABULARY_BIASING: u8 = 1 << 4;
+const MOUSE_SHORTCUTS: u8 = 1 << 5;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -176,6 +210,11 @@ pub fn vocabulary_biasing() -> bool {
     on(VOCABULARY_BIASING)
 }
 
+/// Mouse buttons may be recorded as shortcuts (macOS).
+pub fn mouse_shortcuts() -> bool {
+    on(MOUSE_SHORTCUTS)
+}
+
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
@@ -187,6 +226,7 @@ fn encode(settings: &LabsSettings) -> u8 {
         (settings.live_chapters, LIVE_CHAPTERS),
         (settings.playground, PLAYGROUND),
         (settings.vocabulary_biasing, VOCABULARY_BIASING),
+        (settings.mouse_shortcuts, MOUSE_SHORTCUTS),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
