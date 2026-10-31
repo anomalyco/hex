@@ -339,7 +339,7 @@ impl ActiveMeeting {
             .open(directory.join("active.lock"))?;
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => Ok(Some(Self { _file: file })),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) if lock_contended(&error) => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
@@ -979,12 +979,19 @@ fn meeting_is_active(directory: &Path) -> Option<bool> {
             let _ = fs2::FileExt::unlock(&file);
             Some(false)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Some(true),
+        Err(error) if lock_contended(&error) => Some(true),
         Err(error) => {
             tracing::warn!(%error, directory = %directory.display(), "could not inspect meeting lock");
             None
         }
     }
+}
+
+/// Whether a failed try-lock means another handle holds the lock: `flock`'s
+/// `EWOULDBLOCK` on Unix, `ERROR_LOCK_VIOLATION` on Windows.
+fn lock_contended(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::WouldBlock
+        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn recovered_status(
