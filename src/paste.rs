@@ -244,7 +244,8 @@ impl Paster {
             None if crate::labs::smart_spacing() => with_smart_spacing(text),
             None => text.to_string(),
         };
-        if crate::context::frontmost_bundle_path().is_some_and(|bundle| has_clipboard_race(&bundle))
+        if crate::dictation::context::frontmost_bundle_path()
+            .is_some_and(|bundle| has_clipboard_race(&bundle))
         {
             commit_prepared_paste(
                 || Ok(()),
@@ -727,8 +728,8 @@ fn join(previous: &str, next: &str) -> String {
 /// focused app's cursor asks for it. A selection, or a cursor the app
 /// doesn't expose through Accessibility, leaves the text unchanged.
 fn with_smart_spacing(text: &str) -> String {
-    let previous =
-        crate::context::frontmost_pid().and_then(crate::accessibility::char_before_caret);
+    let previous = crate::dictation::context::frontmost_pid()
+        .and_then(crate::accessibility::char_before_caret);
     match previous {
         Some(previous) if needs_leading_space(previous, text) => format!(" {text}"),
         _ => text.to_string(),

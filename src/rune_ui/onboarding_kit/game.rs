@@ -708,7 +708,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         session.play.forget();
     }
     session.practice = practice;
-    let partial = crate::live_text::current().filter(|_| held);
+    let partial = crate::dictation::live_text::current().filter(|_| held);
     let words = match &partial {
         Some(partial) if !partial.stable.trim().is_empty() => Some(partial.stable.as_str()),
         _ => Some(session.typed.as_str()).filter(|typed| !typed.trim().is_empty()),

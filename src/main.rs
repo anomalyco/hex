@@ -21,10 +21,6 @@ mod browser_media;
 mod calendar;
 #[cfg(hex_capture)]
 mod capture_host;
-#[cfg(target_os = "macos")]
-mod config;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod context;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -43,7 +39,6 @@ mod events;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
 mod file_dialog;
-mod filler_words;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod hex_microphone;
 mod history;
@@ -61,7 +56,6 @@ mod keyboard_input_sources;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
-mod live_text;
 mod local_api;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod login_item;
@@ -92,20 +86,15 @@ mod recognition;
 mod recording_environment;
 mod rune_hud;
 mod rune_ui;
-mod spoken_formatting;
-mod spoken_symbols;
 mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
-mod text_replacements;
 mod transcript_cli;
 mod transcription;
 mod tray_menu;
 mod updater;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod vocabulary;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod voice_filter;
 #[cfg(target_os = "windows")]

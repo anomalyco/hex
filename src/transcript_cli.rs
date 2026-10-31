@@ -8,12 +8,12 @@ use clap::{Args, Subcommand};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
+use crate::dictation::vocabulary::VocabularyEntry;
 use crate::history::{HistoryEntry, HistoryKind, HistoryRetention};
 use crate::meeting::query::{
     ChapterView, Library, ListQuery, Meeting, OffsetRange, SearchQuery, TextHit, TimeRange,
     TranscriptSource, search_texts,
 };
-use crate::vocabulary::VocabularyEntry;
 
 #[derive(Args, Debug)]
 pub struct HistoryArgs {
@@ -295,7 +295,7 @@ pub fn history(args: &HistoryArgs) -> Result<()> {
         args,
         retention(&root)?,
         crate::events::now_ms(),
-        &crate::vocabulary::read_saved(&root),
+        &crate::dictation::vocabulary::read_saved(&root),
     )?;
     let mut out = io::stdout().lock();
     if args.json {
@@ -542,7 +542,7 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
                         limit: *limit as usize,
                         fuzzy: true,
                         include_in_progress: true,
-                        vocabulary: crate::vocabulary::read_saved(&root),
+                        vocabulary: crate::dictation::vocabulary::read_saved(&root),
                     },
                     now
                 )?

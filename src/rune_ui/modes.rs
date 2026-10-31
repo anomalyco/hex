@@ -27,10 +27,10 @@ use super::{Menu, Ui};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::dictation::text_replacements::TextReplacement;
 use crate::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
 use crate::opencode_catalog::OpenCodeFeature;
 use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};
-use crate::text_replacements::TextReplacement;
 
 const LIST_WIDTH: f32 = 240.0;
 const FIELD_WIDTH: f32 = 280.0;

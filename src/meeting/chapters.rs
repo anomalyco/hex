@@ -609,7 +609,12 @@ fn chapter_while_recording(
         }
         let started = Instant::now();
         // Read per pass, so vocabulary edits apply mid-meeting.
-        let result = run_pass(&mut next, &window, &crate::vocabulary::terms(), generate);
+        let result = run_pass(
+            &mut next,
+            &window,
+            &crate::dictation::vocabulary::terms(),
+            generate,
+        );
         let elapsed_ms = started.elapsed().as_millis() as u64;
         match result {
             Ok(outcome) => {
@@ -862,7 +867,7 @@ fn refine_meeting_with(
         &manifest.chapters,
         max_chars,
         REFINE_TIMEOUT,
-        &crate::vocabulary::terms(),
+        &crate::dictation::vocabulary::terms(),
         proceed,
         generate,
     );
@@ -985,7 +990,7 @@ pub fn chapters_file(path: &Path) -> Result<String> {
     let end_ms = entries.iter().map(|entry| entry.end_ms).max().unwrap_or(0);
     // This process never loads settings, so read the saved list directly.
     let terms = crate::app_paths::support_dir()
-        .map(|root| crate::vocabulary::read_saved(&root))
+        .map(|root| crate::dictation::vocabulary::read_saved(&root))
         .unwrap_or_default()
         .into_iter()
         .map(|entry| entry.term)

@@ -19,7 +19,7 @@ use super::spark::{Spark, spark};
 use super::{ShortcutTarget, Ui};
 use crate::app_settings::DictationMode;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::text_replacements::ReplacementSet;
+use crate::dictation::text_replacements::ReplacementSet;
 
 mod examples;
 
@@ -584,8 +584,8 @@ fn agent_prompt() -> String {
 /// Every dictation corrects words, lowercases, and drops the final period,
 /// then a script; chat apps add one more step.
 pub(super) fn fixture(ui: &mut Ui) {
+    use crate::dictation::text_replacements::TextReplacement;
     use crate::personal_commands::StatusTransformation;
-    use crate::text_replacements::TextReplacement;
     super::modes::fixture(ui);
     let pair = |phrase: &str, output: &str| TextReplacement {
         matched_phrase: phrase.into(),
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn the_preview_runs_corrections_then_built_in_steps_in_order() {
         let mode = DictationMode {
-            replacements: vec![crate::text_replacements::TextReplacement {
+            replacements: vec![crate::dictation::text_replacements::TextReplacement {
                 matched_phrase: "open code".into(),
                 output: "OpenCode".into(),
             }],

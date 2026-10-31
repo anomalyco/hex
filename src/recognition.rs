@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 
 use crate::audio::CaptureInstant;
-use crate::context::{ContextMonitor, ContextSnapshot};
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
 use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
+use crate::dictation::context::{ContextMonitor, ContextSnapshot};
 use crate::dictation::indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
 use crate::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};

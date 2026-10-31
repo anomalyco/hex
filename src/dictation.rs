@@ -1,12 +1,23 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod audio;
 #[cfg(target_os = "macos")]
+pub(crate) mod config;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod context;
+#[cfg(target_os = "macos")]
 pub(crate) mod diagnostics;
+pub(crate) mod filler_words;
 pub(crate) mod indicator;
+pub(crate) mod live_text;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
+pub(crate) mod spoken_formatting;
+pub(crate) mod spoken_symbols;
+pub(crate) mod text_replacements;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod vocabulary;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -397,7 +408,7 @@ struct Recording {
     stream: Option<LiveStream>,
     /// This recording's hold on the HUDs' live text, from its first text;
     /// dropping the recording clears it.
-    live_text: Option<crate::live_text::Publisher>,
+    live_text: Option<crate::dictation::live_text::Publisher>,
     #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
     #[cfg(target_os = "macos")]
@@ -847,7 +858,7 @@ impl DictationCapture {
         );
         recording
             .live_text
-            .get_or_insert_with(crate::live_text::Publisher::new)
+            .get_or_insert_with(crate::dictation::live_text::Publisher::new)
             .show(&partial);
     }
 

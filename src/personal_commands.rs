@@ -19,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 
 use script::Script;
 

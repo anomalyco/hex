@@ -14,7 +14,7 @@ use super::{
     CONTROL_VERSION, CaptureAction, ControlCommand, ControlReply, ControlRequest, ControlResponse,
     ModelInfo, Pane, StatusReport, settings::SettingValue,
 };
-use crate::vocabulary::VocabularyEntry;
+use crate::dictation::vocabulary::VocabularyEntry;
 
 pub const EXIT_REFUSED: u8 = 1;
 pub const EXIT_NOT_RUNNING: u8 = 3;
