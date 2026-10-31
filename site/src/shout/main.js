@@ -466,8 +466,8 @@ function spawnCard(at, opts = {}) {
   const spot = resolveAvoid(rawSpot.x, rawSpot.y, hw + PAD * 0.75 * s, hh + PAD * 0.75 * s)
   if (!cards.alloc(c)) return null
   if (!opts.kind) recentKinds = [kind, ...recentKinds].slice(0, 2)
-  const cue = { chat: "knock", dm: "knock", mail: "swoosh", messages: "bubble", calendar: "pop", review: "pop", issue: "pop", tweet: "bubble", discord: "knock", opencode: "pop" }[kind]
-  audio.sfx(cue, { gain: lerp(0.55, 0.3, I), rate: rnd(0.95, 1.06) * lerp(1, 1.12, I), pan: (spot.x / W) * 1.4 - 0.7 })
+  // Arrivals stay silent while the blast plays so they never fight the explosion.
+  if (!blastStage) audio.arrive(kind, { gain: lerp(1, 0.6, I), rate: rnd(0.97, 1.04) * lerp(1, 1.1, I), pan: (spot.x / W) * 1.4 - 0.7 })
   const baseScale = cardScale()
   const fromRight = spot.x > W / 2 ? 1 : -1
   Object.assign(c, {
@@ -2354,6 +2354,7 @@ function step(realDt) {
   const c = headPos()
   const sy = 1 + head.stretch.x
   renderer.draw((lastScene = {
+    keepCardsLegible: blastStage === "fire" || blastStage === "blast" || blastStage === "stare",
     w: W,
     h: H,
     time,

@@ -164,8 +164,6 @@ export class Canvas2DRenderer {
       ctx.restore()
     }
 
-    this.drawHead(ctx, head, look, saiyan, scene.time)
-
     const floorY = h - 14
     for (let i = this.shards.length - 1; i >= 0; i--) {
       const s = this.shards[i]
@@ -221,6 +219,9 @@ export class Canvas2DRenderer {
         ctx.restore()
       }
     }
+
+    // Shards sit behind the head so they never slice across the face.
+    this.drawHead(ctx, head, look, saiyan, scene.time)
 
     ctx.textAlign = "center"
     ctx.textBaseline = "middle"

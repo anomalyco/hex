@@ -83,6 +83,8 @@ fn saiyanCol(h0: f32) -> vec3f {
 // ─── 1. Physical Cards Shader (Razor-Sharp Resting Text, Gated Cracks, Clean Resolve) ───
 const PROBLEMS = /* wgsl */ `
 ${COMMON}
+// 1.0 for the base pass; the legibility pass redraws the cards over the blast glow at less than that.
+override LEGIBLE: f32 = 1.0;
 struct Prob {
   pos: vec2f, hs: vec2f,
   rot: f32, alpha: f32, flash: f32, dmg: f32,
@@ -255,7 +257,7 @@ struct VO {
   let specSweep = exp(-pow((q.x * 0.7 + q.y * 0.5 - (tilt.x - tilt.y) * 0.65) * 3.2, 2.0)) * tiltMag * 0.14;
   rgb = rgb + vec3f(0.92, 0.95, 1.0) * specSweep * bodyMask * t.a;
 
-  return vec4f(rgb, t.a) * i.b.y;
+  return vec4f(rgb, t.a) * i.b.y * LEGIBLE;
 }
 `
 
@@ -1227,18 +1229,19 @@ export class GpuRenderer {
 
     const pre = { color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" }, alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" } }
     const add = { color: { srcFactor: "one", dstFactor: "one" }, alpha: { srcFactor: "zero", dstFactor: "one" } }
-    const pipe = (code, blend) => {
+    const pipe = (code, blend, constants) => {
       const m = device.createShaderModule({ code })
       return device.createRenderPipeline({
         layout: "auto",
         vertex: { module: m, entryPoint: "vs" },
-        fragment: { module: m, entryPoint: "fs", targets: [{ format, blend }] },
+        fragment: { module: m, entryPoint: "fs", targets: [{ format, blend }], constants },
         primitive: { topology: "triangle-list" },
       })
     }
     const cpipe = (code) => device.createComputePipeline({ layout: "auto", compute: { module: device.createShaderModule({ code }), entryPoint: "sim" } })
 
     this.probPipe = pipe(PROBLEMS, pre)
+    this.probTopPipe = pipe(PROBLEMS, pre, { LEGIBLE: 0.62 })
     this.headPipe = pipe(HEAD, pre)
     this.shardPipe = pipe(SHARDS, pre)
     this.wordPipe = pipe(WORDS, pre)
@@ -1254,6 +1257,7 @@ export class GpuRenderer {
       })
     const B = (b) => ({ buffer: b })
     this.probBind = bg(this.probPipe, [B(this.probBuf), this.probTex.createView(), this.samp])
+    this.probTopBind = bg(this.probTopPipe, [B(this.probBuf), this.probTex.createView(), this.samp])
     this.headBind = bg(this.headPipe, [])
     this.shardBind = bg(this.shardPipe, [B(this.shards), this.probTex.createView(), this.samp])
     this.wordBind = bg(this.wordPipe, [B(this.wordBuf), this.wordTex.createView(), this.samp])
@@ -1475,10 +1479,13 @@ export class GpuRenderer {
       rp.draw(6, count)
     }
     pass(this.probPipe, this.probBind, np)
-    pass(this.headPipe, this.headBind, head.visible > 0 ? 1 : 0)
+    // Shards sit behind the head so they never slice across the face.
     pass(this.shardPipe, this.shardBind, MAX_SHARDS)
+    pass(this.headPipe, this.headBind, head.visible > 0 ? 1 : 0)
     pass(this.wordPipe, this.wordBind, nw)
     pass(this.fxPipe, this.fxBind, nf)
+    // While the blast glow washes the screen, the cards come back over it so their text stays readable.
+    if (scene.keepCardsLegible) pass(this.probTopPipe, this.probTopBind, np)
     pass(this.sparkPipe, this.sparkBind, MAX_SPARKS)
     rp.end()
     q.submit([enc.finish()])
