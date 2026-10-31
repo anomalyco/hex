@@ -252,12 +252,16 @@ ready stream fails while the press is held
   │     └── ready -> capture from the original press -> expected output
   └── after the threshold -> fail with "Microphone capture was interrupted"
 CoreAudio processor overload (Xrun) -> warn and keep the stream // not a failure
+gap in the microphone timeline (any OS, warm or cold)
+  ├── 50–250 ms -> filled with silence, capture continues // logged, #619
+  └── over 250 ms -> fail as a capture discontinuity
 ```
 Checks in [dictation_audio.rs](../../src/dictation_audio.rs):
 `cold_capture_restart_rejects_late_open_results_and_closes_after_finish`,
 `enabling_warm_microphone_preserves_pending_capture_and_recovers_after_cancellation`,
 `cold_stream_failure_before_hold_threshold_reopens_for_the_same_press`,
-`cold_stream_failure_after_hold_threshold_still_fails_the_capture`; in
+`cold_stream_failure_after_hold_threshold_still_fails_the_capture`,
+`a_short_microphone_gap_is_filled_with_silence_instead_of_failing_the_capture`; in
 [audio.rs](../../src/audio.rs): `overload_glitches_do_not_interrupt_the_stream`,
 `cold_open_retries_the_selected_microphone_before_falling_back`.
 
@@ -278,6 +282,16 @@ Not verified: the reporter's hardware, whether 200 ms of retries is long enough
 for their device, or a physical cold open after idle.
 Proof limit: controlled asynchronous opener and capture ownership, not onset
 latency or the macOS microphone indicator.
+
+**Fixed after dev ([#619](https://github.com/anomalyco/hex/issues/619)):** a
+Bluetooth headset's stream skipped about 130–145 ms of audio soon after it
+started, and every gap over 50 ms failed the held capture with the error tone.
+Gaps up to 250 ms are now filled with silence on the timeline, so the capture
+(and its pre-roll ring) keeps going; longer gaps still fail it. The Annotate
+sink still records the gap itself. Not verified on the reporter's headset; the
+report that a Bluetooth device was used with `avoid_bluetooth_microphone` on
+was not reproduced (a saved Bluetooth microphone, or no other usable input,
+keeps it by design).
 
 ### Fence Late Capture Notifications
 
