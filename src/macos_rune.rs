@@ -955,9 +955,30 @@ fn bring_forward(window: &rune::AppHandle<Ui>) {
     // would deactivate Hex and drop the window behind other apps.
     crate::app_settings::set_dock_icon_visible(true);
     if let Some(mtm) = MainThreadMarker::new() {
-        NSApplication::sharedApplication(mtm).activate();
+        let app = NSApplication::sharedApplication(mtm);
+        follow_active_space(&app);
+        app.activate();
     }
     window.open();
+}
+
+/// Lets Hex's main window open on the Space the user is on, instead of
+/// activating Hex switching back to the Space it was first shown on (#596).
+/// Overlays and panels (which can't become main, or already join every
+/// Space) are left alone: AppKit refuses `MoveToActiveSpace` beside
+/// `CanJoinAllSpaces`.
+fn follow_active_space(app: &NSApplication) {
+    use objc2_app_kit::NSWindowCollectionBehavior;
+    for window in app.windows().iter() {
+        let behavior = window.collectionBehavior();
+        if !window.canBecomeMainWindow()
+            || behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces)
+            || behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace)
+        {
+            continue;
+        }
+        window.setCollectionBehavior(behavior | NSWindowCollectionBehavior::MoveToActiveSpace);
+    }
 }
 
 impl Pump {
