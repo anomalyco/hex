@@ -2,7 +2,7 @@
 //! it pairs cleanly beside `[ ⌥  Change shortcut ]` on the same horizontal
 //! spine.
 
-use rune::{El, Transition, icon, row, text};
+use rune::{El, Spring, Transition, icon, row, text};
 
 use super::super::controls::{DESCRIPTION, Paint};
 
@@ -45,7 +45,7 @@ pub(crate) fn mic_capsule(p: Paint, peak: Option<f32>) -> El {
                 .key("name")
                 .font(DESCRIPTION)
                 .color(p.muted())
-                .truncate(),
+                .truncate_fade(),
         )
         .child(
             icon(k.glyph.chevron_down, 12.0)
@@ -60,13 +60,15 @@ pub(crate) fn mic_capsule(p: Paint, peak: Option<f32>) -> El {
 
 fn bars(p: Paint, level: f32) -> El {
     const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
-    let mut out = row().key("level").size(12.0, 14.0).gap(2.0).center();
+    let mut out = rune::el().key("level").size(12.0, 14.0);
     for (i, w) in WEIGHTS.into_iter().enumerate() {
-        let h = (2.0 + w * 3.5 + level * w * 7.5).round();
+        let h = 2.0 + w * 3.5 + level * w * 7.5;
         out = out.child(
             rune::el()
                 .key(format!("b{i}"))
+                .absolute(1.0 + i as f32 * 4.0, (14.0 - h) * 0.5)
                 .size(2.0, h)
+                .motion(Spring::new(0.12, 0.0))
                 .radius(1.0)
                 .fill(if level > 0.0 { p.text() } else { p.faint() }),
         );
@@ -75,9 +77,7 @@ fn bars(p: Paint, level: f32) -> El {
 }
 
 fn level(peak: Option<f32>) -> f32 {
-    peak.map_or(0.0, |peak| {
-        ((peak * 3.0).clamp(0.0, 1.0) * 6.0).round() / 6.0
-    })
+    peak.map_or(0.0, |peak| (peak * 3.0).clamp(0.0, 1.0))
 }
 
 #[cfg(test)]
@@ -85,9 +85,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_level_rests_until_hex_listens_then_steps() {
+    fn the_level_rests_until_hex_listens_then_follows_speech() {
         assert_eq!(level(None), 0.0);
-        assert_eq!(level(Some(0.1)), 2.0 / 6.0);
+        assert!((level(Some(0.1)) - 0.3).abs() < 1e-6);
         assert_eq!(level(Some(0.9)), 1.0);
     }
 }

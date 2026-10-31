@@ -2049,10 +2049,6 @@ impl AppSettings {
         Ok(())
     }
 
-    pub(crate) fn refresh_runtime(&self) {
-        self.apply_runtime();
-    }
-
     fn validate_recording_duck_volume(&self) -> Result<()> {
         if !self.recording_duck_volume.is_finite()
             || !(0.0..=1.0).contains(&self.recording_duck_volume)
@@ -2943,10 +2939,12 @@ mod tests {
         let loaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(loaded.dictation_hotkey, HotkeyBinding::default());
 
-        let settings = AppSettings {
+        let mut settings = AppSettings {
             dictation_hotkey: back_button.clone(),
             ..AppSettings::default()
         };
+        // macOS keeps a mouse shortcut only with Labs › Mouse shortcuts on.
+        settings.labs.mouse_shortcuts = true;
         fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
         let loaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(loaded.dictation_hotkey, back_button);

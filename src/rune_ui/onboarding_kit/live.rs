@@ -38,6 +38,8 @@ pub(crate) struct Live {
     choice: TranscriptionSelection,
     granted_at: Option<f64>,
     checked: Option<Checked>,
+    /// Dictation streams send their live words to the practice field.
+    _live_words: crate::live_text::Demand,
 }
 
 /// The last look at the disk and macOS.
@@ -131,6 +133,7 @@ fn start(ui: &mut Ui) {
         choice,
         granted_at: None,
         checked: None,
+        _live_words: crate::live_text::demand(),
     });
     let now = clock();
     s.now = now;

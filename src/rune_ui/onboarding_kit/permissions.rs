@@ -16,9 +16,8 @@ use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
 use super::flows::continue_button;
-use super::gpu_stage::set_dot_hud;
 use super::hex_meter::hex_meter;
-use super::landing::{LEAD, arrives, clean_heading, staggered, title_font};
+use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
 use super::stories::Onboard;
 use crate::onboarding::{ItemStatus, SetupItem};
@@ -85,23 +84,22 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
-    set_dot_hud(None);
     if let Some(live) = &s.live {
-        return live_page(p, live);
+        return live_page(p, live, s.motion);
     }
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
     let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
     let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
 
-    let head = heading(p);
+    let head = heading(p, s.motion);
 
     col()
         .key("permissions")
         .gap(22.0)
         .items_center()
         .child(head)
-        .child(staggered(stage(p, e, mic, ax, reduced), 0.08, 10.0))
+        .child(s.motion.staggered(stage(p, e, mic, ax, reduced), 1.0, 8.0))
         .child(
             row()
                 .key("action")
@@ -115,8 +113,8 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
         )
 }
 
-fn heading(p: Paint) -> El {
-    clean_heading(
+fn heading(p: Paint, motion: Motion) -> El {
+    motion.heading(
         col()
             .key("permissions-head")
             .gap(8.0)
@@ -139,7 +137,7 @@ fn heading(p: Paint) -> El {
 
 /// The real first run's permissions: macOS's own prompt and System Settings
 /// with Hex's guide, and the rows follow what macOS reports.
-fn live_page(p: Paint, live: &Live) -> El {
+fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     let k = p.k;
     let mic_ready = live.microphone == ItemStatus::Ready;
     let ax_desc = match live.accessibility {
@@ -148,7 +146,7 @@ fn live_page(p: Paint, live: &Live) -> El {
     };
     let mic_desc = match live.microphone {
         ItemStatus::Denied => "Switch on Hex in System Settings",
-        _ => "Hears you only while you hold the shortcut",
+        _ => "Hears you while you hold the shortcut",
     };
     let card = col()
         .key("setup-card")
@@ -194,8 +192,8 @@ fn live_page(p: Paint, live: &Live) -> El {
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(heading(p))
-        .child(staggered(k.elevate(card, &k.elevation.raised), 0.08, 10.0))
+        .child(heading(p, motion))
+        .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
         .child(row().key("action").h(ACTION_H).center().child(action))
 }
 
@@ -293,7 +291,7 @@ fn setup_card(p: Paint, mic: PermState, ax: PermState, tray_open: bool, escaped:
             "mic-row",
             &glyphs::MIC,
             "Microphone",
-            "Hears you only while you hold the shortcut",
+            "Hears you while you hold the shortcut",
             perm_pill(p, "mic-pill", mic),
         ))
         .child(separator(p, "sep0"))

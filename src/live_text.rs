@@ -1,5 +1,6 @@
 //! What the dictation being recorded has said so far, for the HUDs (the
-//! Labs feature live text).
+//! Labs feature live text) and the first run's practice field, which
+//! [`demand`]s it while it shows and reads it with [`current`].
 //!
 //! The capture loop publishes through its recording's [`Publisher`], which
 //! the recording owns: dropping the recording (release, Escape, a short tap,
@@ -8,7 +9,7 @@
 //! loop's thread; it must hand the text to its own thread and never wait.
 //! The text is provisional: it is only ever shown, never pasted or kept.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::transcription_engine::Partial;
@@ -18,14 +19,18 @@ type Watcher = Arc<dyn Fn(Option<&Partial>) + Send + Sync>;
 struct Board {
     /// The publisher whose text is current, or 0 when none is.
     owner: u64,
+    /// The current publisher's latest text.
+    text: Option<Partial>,
     watchers: Vec<Watcher>,
 }
 
 static BOARD: Mutex<Board> = Mutex::new(Board {
     owner: 0,
+    text: None,
     watchers: Vec::new(),
 });
 static NEXT_PUBLISHER: AtomicU64 = AtomicU64::new(1);
+static DEMANDS: AtomicUsize = AtomicUsize::new(0);
 
 fn board() -> MutexGuard<'static, Board> {
     BOARD.lock().unwrap_or_else(|error| error.into_inner())
@@ -35,6 +40,32 @@ fn board() -> MutexGuard<'static, Board> {
 /// that published it ends.
 pub(crate) fn watch(watcher: impl Fn(Option<&Partial>) + Send + Sync + 'static) {
     board().watchers.push(Arc::new(watcher));
+}
+
+/// The text the recording in progress has shown, if any.
+pub(crate) fn current() -> Option<Partial> {
+    board().text.clone()
+}
+
+/// Asks dictation streams to publish their text while it is held, without
+/// the experiment (the first run's practice field). The HUD plate still
+/// shows only with the experiment.
+pub(crate) struct Demand(());
+
+pub(crate) fn demand() -> Demand {
+    DEMANDS.fetch_add(1, Ordering::AcqRel);
+    Demand(())
+}
+
+impl Drop for Demand {
+    fn drop(&mut self) {
+        DEMANDS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Whether anything holds a [`Demand`].
+pub(crate) fn demanded() -> bool {
+    DEMANDS.load(Ordering::Acquire) > 0
 }
 
 /// One recording's hold on the live text.
@@ -54,6 +85,7 @@ impl Publisher {
         let watchers = {
             let mut board = board();
             board.owner = self.id;
+            board.text = Some(partial.clone());
             board.watchers.clone()
         };
         for watcher in watchers {
@@ -71,6 +103,7 @@ impl Drop for Publisher {
                 return;
             }
             board.owner = 0;
+            board.text = None;
             board.watchers.clone()
         };
         for watcher in watchers {
@@ -116,7 +149,9 @@ mod tests {
         let recording = Publisher::new();
         recording.show(&said("so the plan"));
         recording.show(&said("so the plan for today"));
+        assert_eq!(current().unwrap().stable, "so the plan for today");
         drop(recording);
+        assert_eq!(current(), None);
         assert_eq!(
             *seen.lock().unwrap(),
             [
