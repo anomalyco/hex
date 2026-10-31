@@ -139,8 +139,8 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
         # Control commands ride the same socket.
         assert run("settings", "set", "sound_effects", "off").returncode == 0
         assert run("settings", "get", "sound_effects").stdout.strip() == "false"
-        refused = run("meetings", "record")
-        assert refused.returncode == 1 and "Meetings are off" in refused.stderr, refused.stderr
+        refused = run("window", "story", "HUD")
+        assert refused.returncode == 1 and "macOS-only" in refused.stderr, refused.stderr
 
         # Keybinding commands need a listening Hex; they fail fast without one,
         # with one line rather than an error report.

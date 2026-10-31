@@ -157,7 +157,6 @@ struct LoadedHistory {
 
 /// Read one atomic file snapshot without recovery, pruning writes, or workers.
 /// Opening once pins the old or new inode while the app replaces the file.
-#[cfg(target_os = "macos")]
 pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
     use std::io::Read;
     // Text can expand sixfold when JSON-escaped, plus bounded metadata.

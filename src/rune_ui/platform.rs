@@ -772,12 +772,6 @@ impl Difference {
 #[cfg(test)]
 const DIFFERENCES: &[(&str, Difference)] = &[
     (
-        "meetings",
-        Difference::Pending(
-            "system audio (WASAPI loopback, a PipeWire monitor) and call detection",
-        ),
-    ),
-    (
         "calendar",
         Difference::OsPattern("EventKit; there is no cross-platform calendar source"),
     ),
