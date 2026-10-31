@@ -280,6 +280,28 @@ fn retention(root: &Path) -> Result<HistoryRetention> {
     Ok(settings.history_retention)
 }
 
+/// Labs' History word count: the words of the listed entries' final text,
+/// or nothing when none are listed.
+fn word_total_line(rows: &[HistoryRow<'_>]) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let words: usize = rows
+        .iter()
+        .map(|row| row.final_text.split_whitespace().count())
+        .sum();
+    let word_label = if words == 1 { "word" } else { "words" };
+    let dictation_label = if rows.len() == 1 {
+        "dictation"
+    } else {
+        "dictations"
+    };
+    Some(format!(
+        "Total: {words} {word_label} across {} {dictation_label}",
+        rows.len()
+    ))
+}
+
 pub fn history(args: &HistoryArgs) -> Result<()> {
     let root = crate::app_paths::support_dir()?;
     let entries = crate::history::read_snapshot(&root.join("history.json"))
@@ -315,6 +337,11 @@ pub fn history(args: &HistoryArgs) -> Result<()> {
     }
     if output.entries.is_empty() {
         writeln!(out, "No history matches.")?;
+    }
+    if crate::labs::history_word_count()
+        && let Some(line) = word_total_line(&output.entries)
+    {
+        writeln!(out, "{line}")?;
     }
     if output.truncated {
         writeln!(out, "More matches; raise --limit or narrow the time range.")?;

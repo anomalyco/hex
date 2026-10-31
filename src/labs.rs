@@ -26,6 +26,7 @@ const KNOWN: u8 = 1;
 const ENABLED: u8 = 1 << 1;
 const LIVE_TEXT: u8 = 1 << 2;
 const LIVE_CHAPTERS: u8 = 1 << 3;
+const HISTORY_WORD_COUNT: u8 = 1 << 4;
 
 /// This process's switches: unknown until settings load or one is first read.
 static STATE: AtomicU8 = AtomicU8::new(0);
@@ -56,6 +57,13 @@ pub fn live_chapters() -> bool {
     state() & (ENABLED | LIVE_CHAPTERS) == ENABLED | LIVE_CHAPTERS
 }
 
+/// Whether `hex history` ends with a total word count: Labs and its own
+/// switch are on.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn history_word_count() -> bool {
+    state() & (ENABLED | HISTORY_WORD_COUNT) == ENABLED | HISTORY_WORD_COUNT
+}
+
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
@@ -67,6 +75,7 @@ fn encode(settings: &LabsSettings) -> u8 {
         (settings.enabled, ENABLED),
         (settings.live_text, LIVE_TEXT),
         (settings.live_chapters, LIVE_CHAPTERS),
+        (settings.history_word_count, HISTORY_WORD_COUNT),
     ] {
         if on {
             state |= bit;

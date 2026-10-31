@@ -254,6 +254,11 @@ const KEYS: &[Key] = &[
         "Labs: chapter meeting transcripts while recording",
     ),
     key(
+        "labs.history_word_count",
+        Kind::Bool,
+        "Labs: end `hex history` with the total words of the listed dictations",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Meetings (beta): call detection, recording, and transcripts",

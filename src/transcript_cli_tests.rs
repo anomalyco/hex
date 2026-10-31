@@ -225,6 +225,48 @@ fn history_json_contract_snapshot() {
 }
 
 #[test]
+fn history_word_total_counts_only_the_listed_entries() {
+    let entries = entries();
+    let limited = history_output(
+        &entries,
+        &args(&["--limit", "1"]),
+        HistoryRetention::Week,
+        NOW,
+        &[],
+    )
+    .unwrap();
+    assert!(limited.truncated);
+    assert_eq!(
+        word_total_line(&limited.entries).as_deref(),
+        Some("Total: 2 words across 1 dictation")
+    );
+    let grep = history_output(
+        &entries,
+        &args(&["--grep", "problems"]),
+        HistoryRetention::Week,
+        NOW,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        word_total_line(&grep.entries).as_deref(),
+        Some("Total: 3 words across 1 dictation")
+    );
+    let none = history_output(
+        &entries,
+        &args(&["--grep", "nothing matches this"]),
+        HistoryRetention::Week,
+        NOW,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(word_total_line(&none.entries), None);
+    // The switch is off by default, and Labs off hides it too.
+    let labs = crate::app_settings::LabsSettings::default();
+    assert!(labs.enabled && !labs.history_word_count);
+}
+
+#[test]
 fn retention_defaults_fails_closed_and_off_preserves_existing_entries() {
     let root = temp();
     assert_eq!(retention(&root).unwrap(), HistoryRetention::Week);

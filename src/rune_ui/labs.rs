@@ -368,6 +368,20 @@ fn features(ui: &Ui) -> Vec<Feature> {
             })),
         });
     }
+    // `hex history` is a macOS command.
+    if caps.os == super::platform::Os::Macos {
+        items.push(Feature {
+            key: "exp-history-word-count",
+            icon: &super::HISTORY_ICON,
+            title: tr("History word count"),
+            about: tr("End hex history with the total words of the listed dictations"),
+            pane: None,
+            switch: Some((ui.settings.labs.history_word_count, |ui| {
+                let on = !ui.settings.labs.history_word_count;
+                ui.update(|settings| settings.labs.history_word_count = on);
+            })),
+        });
+    }
     items.push(Feature {
         key: "exp-playground",
         icon: &SPARKLES,

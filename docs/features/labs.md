@@ -15,6 +15,7 @@ Feature           Own switch (settings.json)            On: what it does
 ├── Voice Filter  experimental.hex_microphone, in its pane  feeds the Hex Microphone through a filter, watches its driver
 ├── Live text     labs.live_text, on its Labs row       provisional words beside the HUD while dictating (restart)
 ├── Live chapters labs.live_chapters, on its Labs row   chapters a meeting while it records, boundary pass after Stop
+├── History word count labs.history_word_count, on its Labs row  `hex history` text ends with "Total: N words across M dictations" (macOS)
 ├── Meetings      meetings.enabled, on the Labs page    call detection, recording, transcripts (macOS)
 ├── Playground    none (a view)                         ⇧⌘D story browser; read at launch
 └── New onboarding none (runs only when invoked)        the first run on a new install, or Run setup again
@@ -23,8 +24,8 @@ Settings › Labs                          // labs.page
 ├── Labs switch -> labs.enabled; "Try unfinished features. They may change or break."
 │   └── Send feedback -> https://github.com/anomalyco/hex/issues/new
 ├── Opt-in features -> Meetings (beta) on macOS, Annotate in dev builds; their own switches
-└── Labs on -> Experiments: each feature (Open jumps to a pane; Live text and
-    Live chapters carry their switches) + Run setup again
+└── Labs on -> Experiments: each feature (Open jumps to a pane; Live text,
+    Live chapters, and History word count (macOS) carry their switches) + Run setup again
 
 Settings › Labs › Voice Filter           // labs.voice-filter
 ├── Off (default) -> only "Turn on Voice Filter"; no driver status, poll, or stream
@@ -36,7 +37,7 @@ hex labs                                 // labs.cli; edits settings.json, no ru
 └── hex experiments … -> "Experiments are now one switch, Labs: hex labs on|off|status"
 
 hex settings set labs.enabled false      // macOS: through the running Hex
-hex settings set labs.live_text true     // also labs.live_chapters, experimental.hex_microphone
+hex settings set labs.live_text true     // also labs.live_chapters, labs.history_word_count, experimental.hex_microphone
 ```
 
 Panes a Labs feature adds list indented under **Labs** in the sidebar, which
@@ -64,6 +65,17 @@ and [Dot scope](dictation.md#dot-scope). The smart-turn predictor was removed.
 
 ## Features
 
+- History word count: `hex history` (macOS, text output only) ends its list
+  with `Total: N words across M dictations`, counting the whitespace-separated
+  words of the final text of the entries it listed (after filters and
+  `--limit`), before the truncation notice. Nothing prints when no entry
+  matches, and `--json` output is unchanged. Its own switch is
+  `labs.history_word_count` (off by default) on its Labs row (macOS). The
+  gate, `labs::history_word_count()`, is read in `transcript_cli::history`
+  from the saved settings without loading or writing them. Check:
+  `history_word_total_counts_only_the_listed_entries` in
+  [transcript_cli_tests.rs](../../src/transcript_cli_tests.rs). The gate
+  itself and the printed line have no automated check.
 - Live chapters: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-labs)). Its own switch is

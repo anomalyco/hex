@@ -45,6 +45,10 @@ may have no app or mode; Hex does not infer missing metadata.
   cleanup. Missing settings use seven days. Invalid settings fail rather than
   silently widening the retention window. Off preserves existing entries and
   prevents new ones, matching the History pane.
+- With Labs' History word count on (`labs.history_word_count`, off by
+  default), text output ends with `Total: N words across M dictations` over
+  the listed entries' final text, before the truncation notice. JSON output
+  is unchanged.
 
 ## Meetings use the same queries as MCP
 

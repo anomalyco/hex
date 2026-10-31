@@ -1246,6 +1246,8 @@ pub struct LabsSettings {
     pub live_text: bool,
     /// Live chapters while a meeting records.
     pub live_chapters: bool,
+    /// A total word count at the end of `hex history`.
+    pub history_word_count: bool,
 }
 
 impl Default for LabsSettings {
@@ -1254,6 +1256,7 @@ impl Default for LabsSettings {
             enabled: true,
             live_text: false,
             live_chapters: false,
+            history_word_count: false,
         }
     }
 }
