@@ -26,7 +26,7 @@ pub enum StatusItemAction {
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
-    /// Copy chapter `n` of the recording meeting (experiment `live-chapters`).
+    /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
     OpenMeetings,
     /// Flips `capture.show_overlays_in_recordings`.

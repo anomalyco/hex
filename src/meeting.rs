@@ -89,7 +89,7 @@ pub enum RecordingUpdate {
     Started { id: String, title: String },
     /// A provisional title from the transcript so far.
     Retitled { title: String },
-    /// The live chapters so far (experiment `live-chapters`).
+    /// The live chapters so far (Labs).
     Chapters(Vec<Chapter>),
     /// Capture stopped; final transcription is running.
     Transcribing,
@@ -199,7 +199,7 @@ pub struct MeetingManifest {
     /// than the default one counts as the user's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_source: Option<TitleSource>,
-    /// Topic chapters in time order (experiment `live-chapters`).
+    /// Topic chapters in time order (Labs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chapters: Vec<Chapter>,
     /// The chapter boundaries were corrected over the whole transcript.
@@ -644,7 +644,7 @@ fn set_title_source(manifest: &mut MeetingManifest, source: TitleSource) {
     }
 }
 
-/// Keeps a rename made while recording (experiment `live-chapters`).
+/// Keeps a rename made while recording (Labs).
 fn keep_rename(directory: &Path, manifest: &mut MeetingManifest) {
     if crate::labs::enabled() {
         adopt_rename(directory, manifest);

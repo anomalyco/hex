@@ -1,4 +1,4 @@
-//! Dot scope's HUD as playground stories (the `playground` experiment, ⇧⌘D,
+//! Dot scope's HUD as playground stories (Labs, ⇧⌘D,
 //! group Prototypes › HUD). The HUD is a Rune overlay of its
 //! own, not a view in the window, so a story can't draw it: each one drives the real
 //! HUD at the top of the screen through the same events dictation sends,

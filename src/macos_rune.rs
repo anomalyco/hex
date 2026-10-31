@@ -1308,7 +1308,7 @@ fn with_window(f: impl FnOnce(&rune::AppHandle<Ui>)) {
 }
 
 /// The menu bar while the window is active: Hex, File, View (with the
-/// `playground` experiment), Window.
+/// Labs), Window.
 /// Rune draws no Edit menu items, so ⌘C/⌘V reach its text fields as keys.
 fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
     let main = NSMenu::new(mtm);

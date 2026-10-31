@@ -1,5 +1,5 @@
 //! The capsule's states as stories in Hex's own window playground (the
-//! `playground` experiment): each of [`SCENES`] on the capsule's overlay
+//! Labs): each of [`SCENES`] on the capsule's overlay
 //! frame, driven by the same fake host, with the states, tuning, and log
 //! beside it. Sound and its volume stay Hex's.
 

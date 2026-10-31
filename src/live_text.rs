@@ -1,5 +1,5 @@
 //! What the dictation being recorded has said so far, for the HUDs (the
-//! `live-text` experiment).
+//! Labs feature live text).
 //!
 //! The capture loop publishes through its recording's [`Publisher`], which
 //! the recording owns: dropping the recording (release, Escape, a short tap,

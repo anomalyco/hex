@@ -209,7 +209,7 @@ fn on_open_url(_: &mut Ui, link: &str, tx: &mut Tx) {
 }
 
 /// `hex app -- --snap …`: a headless render of a fixture scene. With the
-/// `playground` experiment on, `--playground [story]` renders the playground.
+/// Labs on, `--playground [story]` renders the playground.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     let playground = rune_args.iter().any(|arg| arg == "--playground");
@@ -696,7 +696,7 @@ pub(crate) struct Ui {
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
-    /// The new first run over the tour (experiment `new-onboarding`).
+    /// The new first run over the tour (Labs).
     first_run: Option<onboarding_kit::Onboard>,
     /// The OS's capabilities and the OS-only state its panes show.
     platform: platform::PlatformState,

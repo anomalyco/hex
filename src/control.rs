@@ -114,7 +114,7 @@ pub enum ControlCommand {
     /// Replay the first-run onboarding in the window (dev, test, and local
     /// builds); settings, history, models, and permissions stay.
     OnboardingReset,
-    /// Open the window on a playground story (the `playground` experiment).
+    /// Open the window on a playground story (Labs).
     WindowStory {
         story: String,
         #[serde(default)]

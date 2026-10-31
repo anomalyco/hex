@@ -105,7 +105,7 @@ On Linux                                 // capture.linux
 
 Settings › Annotate                      // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
-│   input, retention, or folder, as with the experiment off
+│   input, retention, or folder
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux) -> same keycap and recorder as dictation;
 │   a key is required; refused when it overlaps dictation or paste
@@ -137,7 +137,7 @@ Settings › Annotate                      // capture.pane
 └── No iPhone pairing row: ScrawlKit pairing needs the ingest server, which Hex
     doesn't run. A cabled iPhone needs no row (capture.phone)
 
-First launch with the experiment on      // capture.import
+First launch with Annotate on            // capture.import
 ├── ~/.config/scrawl/config.json -> transcriber (apple; else Parakeet), capturesDir,
 │   retention, read once (migration `scrawl-capture-settings`); token not used
 ├── Scrawl's router settings -> capture.routing, read once (migration
@@ -658,8 +658,8 @@ audio.
 
 `hex dev capture-replay <wav>…` (debug, with the feature) runs the same
 capture host on a fresh transcription engine with the selected model, feeding
-WAV files instead of the microphone, and prints the bundle path. It needs the
-experiment on too, and records the screen meanwhile.
+WAV files instead of the microphone, and prints the bundle path. It needs
+Annotate on too, and records the screen meanwhile.
 
 Sources: [capture_host.rs](../../src/capture_host.rs), the tap in
 [suppression.rs](../../src/suppression.rs), the shortcut and Escape in
@@ -676,9 +676,7 @@ control commands in [control.rs](../../src/control.rs).
 
 Checks:
 
-- Gate: `capture_exists_only_where_it_has_a_host` in
-  [experiments.rs](../../src/experiments.rs);
-  `the_host_is_absent_while_the_experiment_is_off` in capture_host.rs;
+- Gate: `the_host_is_absent_while_the_experiment_is_off` in capture_host.rs;
   [test-app-identity.sh](../../scripts/test-app-identity.sh) for the
   release-path refusals.
 - Sink, in dictation_audio.rs: `capture_sink_shares_the_timeline_with_dictation`,

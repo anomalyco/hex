@@ -1,5 +1,5 @@
 //! Pieces for the next onboarding, and the options built from them as
-//! playground stories (only with the `playground` experiment; the shipping
+//! playground stories (only with Labs; the shipping
 //! tour in [`onboarding`](super::onboarding) doesn't use them yet).
 //!
 //! - [`gpu_stage`] & [`hud_stage`]: flat Rune UI + Hex's real `Dot scope`

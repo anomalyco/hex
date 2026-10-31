@@ -1,4 +1,4 @@
-//! Live chapters (experiment `live-chapters`). While a meeting records,
+//! Live chapters (Labs). While a meeting records,
 //! Apple's on-device model reads each ~3 minutes of settled transcript and
 //! says whether it is still the current chapter's topic or a new one, with a
 //! short name and one line. After Stop, one call per change labels the lines

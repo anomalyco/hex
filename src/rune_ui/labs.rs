@@ -79,7 +79,7 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
 
 /// The Labs features' panes this install has: listed under Labs, never in
 /// the main sidebar.
-pub(super) fn experiments(ui: &Ui) -> Vec<Pane> {
+pub(super) fn lab_panes(ui: &Ui) -> Vec<Pane> {
     Pane::ALL
         .iter()
         .copied()
@@ -90,15 +90,15 @@ pub(super) fn experiments(ui: &Ui) -> Vec<Pane> {
 /// Every pane the sidebar can open, in its order, for Command-1 through 9.
 pub(super) fn order(ui: &Ui) -> Vec<Pane> {
     let mut panes = main_panes(ui);
-    panes.extend(experiments(ui));
+    panes.extend(lab_panes(ui));
     panes
 }
 
 /// The Labs row, and, while Labs or one of its panes is open, the
-/// experiments' panes indented under it.
+/// Labs features' panes indented under it.
 pub(super) fn nav(ui: &Ui, p: Paint) -> El {
     let c = &p.k.c;
-    let inside = experiments(ui);
+    let inside = lab_panes(ui);
     let expanded = ui.labs_open || inside.contains(&ui.pane);
     let on = ui.labs_open;
     let mut item = row()
