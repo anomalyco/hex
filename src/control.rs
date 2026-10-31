@@ -6,9 +6,14 @@
 //! here or in the app's own setters.
 
 pub mod cli;
+#[cfg(all(debug_assertions, target_os = "macos"))]
+pub(crate) mod dashboard;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod developer_control;
 #[cfg(not(target_os = "macos"))]
 pub(crate) mod host;
 pub mod settings;
+pub(crate) mod transcript_cli;
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::time::Duration;
