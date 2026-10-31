@@ -71,13 +71,40 @@ pub(crate) struct HudSender {
     overlay: OverlayHandle<Hud>,
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
-    /// The overlay failure last logged, so each is logged once.
     #[cfg(target_os = "windows")]
-    logged: Arc<Mutex<Option<String>>>,
+    watch: Arc<Mutex<Watch>>,
 }
+
+/// What Windows checks of the HUD: Rune can show the overlay without
+/// Windows ever drawing it (#510), so a show must also present a frame.
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+struct Watch {
+    position: IndicatorPosition,
+    /// The overlay failure last logged, so each is logged once.
+    logged: Option<String>,
+    described: bool,
+    /// A dictation's start awaiting the HUD's first frame: when, and the
+    /// frames presented before it.
+    pending: Option<(Instant, u64)>,
+    /// The last start presented nothing.
+    unpresented: Option<String>,
+}
+
+/// How long a started HUD has to present its first frame.
+#[cfg(target_os = "windows")]
+const FIRST_FRAME: std::time::Duration = std::time::Duration::from_millis(1500);
 
 impl HudSender {
     pub(crate) fn send(&self, event: HudEvent) {
+        #[cfg(target_os = "windows")]
+        if matches!(event, HudEvent::Started) {
+            let presents = self.overlay.surface_stats().totals.presents;
+            let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
+            if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() {
+                watch.pending = Some((Instant::now(), presents));
+            }
+        }
         self.overlay.update(move |hud, _| hud.handle(event));
     }
 
@@ -90,22 +117,50 @@ impl HudSender {
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn set_position(&self, position: IndicatorPosition) {
+        #[cfg(target_os = "windows")]
+        {
+            self.watch
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .position = position;
+        }
         self.overlay
             .update(move |hud, _| hud.set_position(position));
     }
 
-    /// Why Windows could not show the HUD, for Settings; logged as an error
-    /// the first time each reason is seen.
+    /// Why Windows could not show the HUD, for Settings: Rune's reason, or a
+    /// started HUD that presented no frame. Logged as an error the first time
+    /// each reason is seen; what draws the HUD is logged once it exists.
     #[cfg(target_os = "windows")]
     pub(crate) fn failure(&self) -> Option<String> {
-        let reason = self.overlay.failure()?;
-        let mut logged = self
-            .logged
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if logged.as_deref() != Some(reason.as_str()) {
+        let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
+        let surface = self.overlay.surface_description();
+        if !watch.described
+            && let Some(surface) = &surface
+        {
+            tracing::info!(%surface, "dictation HUD surface");
+            watch.described = true;
+        }
+        if let Some((at, before)) = watch.pending
+            && at.elapsed() >= FIRST_FRAME
+        {
+            watch.pending = None;
+            let presents = self.overlay.surface_stats().totals.presents;
+            watch.unpresented = (presents == before).then(|| {
+                format!(
+                    "shown but presented no frame in {} ms; surface: {}",
+                    FIRST_FRAME.as_millis(),
+                    surface.as_deref().unwrap_or("none")
+                )
+            });
+        }
+        let reason = self
+            .overlay
+            .failure()
+            .or_else(|| watch.unpresented.clone())?;
+        if watch.logged.as_deref() != Some(reason.as_str()) {
             tracing::error!(%reason, "dictation HUD can't show");
-            *logged = Some(reason.clone());
+            watch.logged = Some(reason.clone());
         }
         Some(format!(
             "The recording HUD can't show ({reason}). Dictation still works."
@@ -255,7 +310,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         #[cfg(target_os = "macos")]
         animating,
         #[cfg(target_os = "windows")]
-        logged: Arc::default(),
+        watch: Arc::default(),
     }
 }
 

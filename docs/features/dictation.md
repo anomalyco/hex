@@ -1124,12 +1124,19 @@ click-through tool window with no redirection bitmap, drawn through
 DirectComposition. Rune shows and hides it with Win32 calls alone and
 re-asserts its styles on each show; winit never sees its visibility. The
 click-through style makes it a layered window, which Windows composes only
-once it has layered attributes; without them the HUD never appeared (#510).
-Rune gives it opaque attributes, so the content's own alpha is the only
-transparency (Rune 5778a3a3; from reading Windows' rules, not yet observed on
-Windows). If the window, its GPU surface or the show fails, Rune reports why
-(`OverlayHandle::failure`): Hex logs it as an error in process.log once per
-reason and Settings shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
+once it has layered attributes; Rune gives it opaque ones (5778a3a3). Only
+a DX12 DirectComposition swapchain composites alpha on Windows: a Vulkan
+surface is a swapchain on the HWND, which this window shows black (#499) or
+not at all (#510, a hybrid laptop where the integrated GPU's Vulkan driver
+claimed premultiplied alpha). Rune draws transparent Windows surfaces only
+through DX12, on the lowest-power adapter, and fails the overlay when none
+can (93c7a04b; from reading the code and Windows' rules, not yet observed on
+Windows). If the window, its GPU surface or the show fails (including a
+cloaked window), Rune reports why (`OverlayHandle::failure`). Hex logs the
+HUD's surface (backend, adapter, alpha mode) once, and treats a dictation
+start whose HUD presents no frame within 1.5 s as a failure too. Each
+failure is logged as an error in process.log once per reason, and Settings
+shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
 from Rune, and loads `dot-scope.json` at launch.
 
 ```ts
