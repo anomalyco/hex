@@ -10,7 +10,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
@@ -35,10 +35,11 @@ pub enum Feature {
     MouseShortcuts,
     PauseBrowser,
     ShareShortcut,
+    UnloadIdle,
 }
 
 impl Feature {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -50,6 +51,7 @@ impl Feature {
         Self::MouseShortcuts,
         Self::PauseBrowser,
         Self::ShareShortcut,
+        Self::UnloadIdle,
     ];
 
     /// The features this OS has.
@@ -64,7 +66,7 @@ impl Feature {
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::MouseShortcuts | Self::PauseBrowser => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
-            Self::Playground | Self::LiveText | Self::VocabularyBiasing => true,
+            Self::Playground | Self::LiveText | Self::VocabularyBiasing | Self::UnloadIdle => true,
         }
     }
 
@@ -82,6 +84,7 @@ impl Feature {
             Self::MouseShortcuts => "mouse-shortcuts",
             Self::PauseBrowser => "pause-browser",
             Self::ShareShortcut => "share-shortcut",
+            Self::UnloadIdle => "unload-idle",
         }
     }
 
@@ -99,6 +102,7 @@ impl Feature {
             Self::MouseShortcuts => "labs.mouse_shortcuts",
             Self::PauseBrowser => "pause_browser_media",
             Self::ShareShortcut => "share_dictation_shortcut",
+            Self::UnloadIdle => "labs.unload_idle",
         }
     }
 
@@ -123,6 +127,9 @@ impl Feature {
             Self::MouseShortcuts => "Record mouse buttons as shortcuts",
             Self::PauseBrowser => "Also pause the browser while dictating, with Pause media",
             Self::ShareShortcut => "Let apps such as Discord see the dictation shortcut too",
+            Self::UnloadIdle => {
+                "Free the speech model's memory after a while unused (labs.unload_idle_minutes); the next dictation reloads it"
+            }
         }
     }
 
@@ -144,6 +151,7 @@ impl Feature {
             Self::MouseShortcuts => settings.labs.mouse_shortcuts,
             Self::PauseBrowser => settings.pause_browser_media,
             Self::ShareShortcut => settings.share_dictation_shortcut,
+            Self::UnloadIdle => settings.labs.unload_idle,
         }
     }
 
@@ -160,32 +168,39 @@ impl Feature {
             Self::MouseShortcuts => settings.labs.mouse_shortcuts = on,
             Self::PauseBrowser => settings.pause_browser_media = on,
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
+            Self::UnloadIdle => settings.labs.unload_idle = on,
         }
     }
 }
 
 /// Set once this process knows its settings.
-const KNOWN: u8 = 1;
-const LIVE_TEXT: u8 = 1 << 1;
-const LIVE_CHAPTERS: u8 = 1 << 2;
-const PLAYGROUND: u8 = 1 << 3;
-const VOCABULARY_BIASING: u8 = 1 << 4;
-const MOUSE_SHORTCUTS: u8 = 1 << 5;
+const KNOWN: u32 = 1;
+const LIVE_TEXT: u32 = 1 << 1;
+const LIVE_CHAPTERS: u32 = 1 << 2;
+const PLAYGROUND: u32 = 1 << 3;
+const VOCABULARY_BIASING: u32 = 1 << 4;
+const MOUSE_SHORTCUTS: u32 = 1 << 5;
+const UNLOAD_IDLE: u32 = 1 << 6;
+/// Unload-idle minutes sit above the switches.
+const MINUTES_SHIFT: u32 = 8;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
-static STATE: AtomicU8 = AtomicU8::new(0);
+static STATE: AtomicU32 = AtomicU32::new(0);
 
-fn on(bit: u8) -> bool {
-    let state = match STATE.load(Ordering::Acquire) {
+fn on(bit: u32) -> bool {
+    state() & bit != 0
+}
+
+fn state() -> u32 {
+    match STATE.load(Ordering::Acquire) {
         0 => {
             let saved = encode(&AppSettings::saved_labs());
             let _ = STATE.compare_exchange(0, saved, Ordering::AcqRel, Ordering::Acquire);
             STATE.load(Ordering::Acquire)
         }
         state => state,
-    };
-    state & bit != 0
+    }
 }
 
 /// Live text: provisional words beside the HUD (read as each dictation starts).
@@ -214,22 +229,32 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// How long the speech model may sit unused before the engine unloads it,
+/// while Labs › Unload model when idle is on.
+pub fn unload_idle() -> Option<std::time::Duration> {
+    let state = state();
+    (state & UNLOAD_IDLE != 0)
+        .then(|| std::time::Duration::from_secs(u64::from(state >> MINUTES_SHIFT) * 60))
+}
+
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-fn encode(settings: &LabsSettings) -> u8 {
+fn encode(settings: &LabsSettings) -> u32 {
+    let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
     [
         (settings.live_text, LIVE_TEXT),
         (settings.live_chapters, LIVE_CHAPTERS),
         (settings.playground, PLAYGROUND),
         (settings.vocabulary_biasing, VOCABULARY_BIASING),
         (settings.mouse_shortcuts, MOUSE_SHORTCUTS),
+        (settings.unload_idle, UNLOAD_IDLE),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
-    .fold(KNOWN, |state, (_, bit)| state | bit)
+    .fold(KNOWN | minutes, |state, (_, bit)| state | bit)
 }
 
 /// The names of the features on, for `hex status`.
@@ -357,6 +382,19 @@ mod tests {
             feature.set(&mut settings, true);
             assert!(feature.on(&settings));
         }
+    }
+
+    #[test]
+    fn unload_idle_carries_its_minutes() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(labs.unload_idle_minutes, 15);
+        let state = encode(&labs);
+        assert_eq!(state & UNLOAD_IDLE, 0);
+        labs.unload_idle = true;
+        labs.unload_idle_minutes = 30;
+        let state = encode(&labs);
+        assert_ne!(state & UNLOAD_IDLE, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 30);
     }
 
     #[test]

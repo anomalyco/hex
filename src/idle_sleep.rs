@@ -4,18 +4,43 @@
 //! until its guard drops. Starting one may wait on the OS, so callers start
 //! it off the capture loop.
 
-/// Prevents idle sleep until dropped, or `None` (logged) when the OS refuses.
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Guards alive now, whether or not the OS granted them.
+static HELD: AtomicUsize = AtomicUsize::new(0);
+
+/// Prevents idle sleep until dropped. When the OS refuses (logged), the
+/// guard still counts as Hex recording ([`held`]).
 pub fn prevent_sleep() -> Option<PreventSleep> {
-    match PreventSleep::start() {
+    let platform = match platform::PreventSleep::start() {
         Ok(prevention) => Some(prevention),
         Err(error) => {
             tracing::warn!(%error, "could not prevent idle system sleep");
             None
         }
-    }
+    };
+    HELD.fetch_add(1, Ordering::AcqRel);
+    Some(PreventSleep {
+        _platform: platform,
+    })
 }
 
-pub use platform::PreventSleep;
+/// Whether Hex records now (a dictation past its hold, or a meeting): some
+/// guard is alive.
+pub fn held() -> bool {
+    HELD.load(Ordering::Acquire) > 0
+}
+
+/// Idle-sleep prevention, held until dropped.
+pub struct PreventSleep {
+    _platform: Option<platform::PreventSleep>,
+}
+
+impl Drop for PreventSleep {
+    fn drop(&mut self) {
+        HELD.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod platform {

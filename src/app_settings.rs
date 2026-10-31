@@ -1251,7 +1251,7 @@ impl Default for ExperimentalSettings {
 /// `keyboard_model_switching.enabled`, `pause_browser_media`, and
 /// `share_dictation_shortcut`. An older
 /// `labs.enabled` master switch is read and ignored.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
@@ -1264,6 +1264,28 @@ pub struct LabsSettings {
     pub vocabulary_biasing: bool,
     /// Mouse buttons may be recorded as shortcuts (macOS, issue 209).
     pub mouse_shortcuts: bool,
+    /// The engine unloads the speech model after `unload_idle_minutes`
+    /// unused (issue 442).
+    pub unload_idle: bool,
+    /// 5, 15 (the default), 30, or 60.
+    pub unload_idle_minutes: u32,
+}
+
+/// The idle times Labs › Unload model when idle offers, in minutes.
+pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
+
+impl Default for LabsSettings {
+    fn default() -> Self {
+        Self {
+            live_text: false,
+            live_chapters: false,
+            playground: false,
+            vocabulary_biasing: false,
+            mouse_shortcuts: false,
+            unload_idle: false,
+            unload_idle_minutes: 15,
+        }
+    }
 }
 
 /// Whether the Voice Filter runs: the listener streams the Hex Microphone
