@@ -691,6 +691,9 @@ struct OnboardingSounds {
     panel_escape: SamplesBuffer,
     permission_tick: SamplesBuffer,
     almost_ready: SamplesBuffer,
+    chat_incoming: SamplesBuffer,
+    chat_sent: SamplesBuffer,
+    chat_read: SamplesBuffer,
 }
 
 impl OnboardingSounds {
@@ -730,6 +733,9 @@ impl OnboardingSounds {
             panel_escape: decode_wav(bundled_sound!("onboarding", "panel_escape"))?,
             permission_tick: decode_wav(bundled_sound!("onboarding", "permission_tick"))?,
             almost_ready: decode_wav(bundled_sound!("onboarding", "almost_ready"))?,
+            chat_incoming: decode_wav(bundled_sound!("onboarding", "chat_incoming"))?,
+            chat_sent: decode_wav(bundled_sound!("onboarding", "chat_sent"))?,
+            chat_read: decode_wav(bundled_sound!("onboarding", "chat_read"))?,
         })
     }
 
@@ -759,9 +765,9 @@ impl OnboardingSounds {
             OnboardingTone::PanelEscape => &self.panel_escape,
             OnboardingTone::PermissionTick => &self.permission_tick,
             OnboardingTone::AlmostReady => &self.almost_ready,
-            OnboardingTone::Incoming => &self.hexagon,
-            OnboardingTone::Sent => &self.panel_escape,
-            OnboardingTone::Read => &self.permission_tick,
+            OnboardingTone::Incoming => &self.chat_incoming,
+            OnboardingTone::Sent => &self.chat_sent,
+            OnboardingTone::Read => &self.chat_read,
         })
     }
 }

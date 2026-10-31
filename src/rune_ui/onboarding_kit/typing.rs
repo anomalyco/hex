@@ -1,7 +1,11 @@
-//! `"Without Hex"` as one timeline. Jay (CEO) asks whether we're ready to
-//! ship with the investors in the room. You type the answer by hand, a
-//! finger slips onto Return and sends `"Yse, we're dead"`, and every fix
-//! makes it worse until Jay removes you from #launch.
+//! `"Without Hex"` as one timeline, in the `"Launch Room"` group. Jay (CEO)
+//! asks whether we're ready to ship with the investors in the room. You type
+//! the answer by hand, a finger slips onto Return and sends
+//! `"Yse, we're dead"`, and every fix makes it worse until Jay removes you
+//! from the group mid-word.
+//!
+//! Jay's question is already there before `"Watch what happens"`: lines
+//! before [`Op::Start`] sit at negative times, shown while the stage waits.
 //!
 //! [`Timing`] holds every pause and the key pace, so the playground can tune
 //! them live; [`Scene::build`] turns the script into strokes, chat lines, a
@@ -10,7 +14,7 @@
 /// Every pause and pace in the scene, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Timing {
-    /// From pressing start to Jay's first message.
+    /// From pressing start to Jay's `"they're asking right now"`.
     pub(crate) arrive: f64,
     /// Reading time per word of each of Jay's messages, after a fixed beat.
     pub(crate) read_word: f64,
@@ -24,7 +28,7 @@ pub(crate) struct Timing {
     pub(crate) freeze: f64,
     /// Jay's typing dots before the punchline.
     pub(crate) punch: f64,
-    /// How long `"Jay removed you from #launch"` holds before `"With Hex"`.
+    /// How long the removal holds before `"With Hex"`.
     pub(crate) fired: f64,
     /// `"With Hex"`: from the words landing to the reply sending.
     pub(crate) hex_send: f64,
@@ -35,14 +39,14 @@ pub(crate) struct Timing {
 impl Default for Timing {
     fn default() -> Self {
         Self {
-            arrive: 0.5,
+            arrive: 0.35,
             read_word: 0.2,
             jay_typing: 1.0,
             pace: 0.17,
             panic_pace: 0.072,
             freeze: 1.5,
             punch: 1.6,
-            fired: 2.6,
+            fired: 2.0,
             hex_send: 0.7,
             hex_reply: 1.3,
         }
@@ -66,11 +70,17 @@ enum Gap {
 
 #[derive(Clone, Copy)]
 enum Op {
+    /// Before the button: Jay's line at this many seconds before it.
+    Before(&'static str, f64),
+    /// The button: the scene's clock starts here.
+    Start,
     Wait(Gap),
     /// Jay's typing dots, `x` times [`Timing::jay_typing`] or the punch.
     Dots(f64),
     Punch,
     Jay(&'static str),
+    /// One of Jay's lines, held this long instead of its reading time.
+    JayFor(&'static str, f64),
     /// Typed by hand, panic rising from the first to the second level.
     Type(&'static str, f64, f64),
     Hesitate(f64),
@@ -78,23 +88,27 @@ enum Op {
     /// Return. `true` when the finger slipped onto it.
     Send(bool),
     Read,
+    /// You're removed: the line lands mid-keystroke and the draft is gone.
     System(&'static str),
 }
 
 const SCRIPT: &[Op] = &[
+    Op::Before("The investors are in the room.", 0.9),
+    Op::Before("Are we ready to ship?", 0.5),
+    Op::Start,
     Op::Wait(Gap::Arrive),
-    Op::Jay("The investors are in the room."),
-    Op::Jay("Are we ready to ship?"),
-    Op::Dots(1.0),
-    Op::Jay("they're asking right now"),
+    Op::JayFor("they're asking right now", 0.9),
     Op::Type("Yse, we're deady", 0.0, 0.75),
-    Op::Hesitate(0.24),
+    // Long enough to read `"deady"`.
+    Op::Hesitate(0.40),
     Op::Back(1),
-    // Reaching for delete again, the finger lands on Return.
+    // `"dead"` sits there a moment; reaching for delete again, the finger
+    // lands on Return.
+    Op::Hesitate(0.23),
     Op::Send(true),
     Op::Wait(Gap::Freeze),
     Op::Read,
-    Op::Wait(Gap::Beat(1.1)),
+    Op::Wait(Gap::Beat(0.8)),
     Op::Dots(0.9),
     Op::Jay("what??"),
     Op::Type("oh god *reayd", 0.8, 1.0),
@@ -103,12 +117,15 @@ const SCRIPT: &[Op] = &[
     Op::Jay("ready or dead?"),
     Op::Type("yes", 1.0, 1.0),
     Op::Send(false),
-    Op::Wait(Gap::Beat(1.0)),
+    Op::Wait(Gap::Beat(0.6)),
     Op::Dots(1.0),
     Op::Jay("they can see my screen"),
     Op::Punch,
-    Op::Jay("Clear your desk."),
-    Op::System("Jay removed you from #launch"),
+    Op::JayFor("Clear your desk.", 1.0),
+    // `"wait no i meant ready"`, cut off.
+    Op::Type("wait no i m", 1.0, 1.0),
+    Op::Wait(Gap::Beat(0.06)),
+    Op::System("Jay removed you from \"Launch Room\""),
     Op::Wait(Gap::Fired),
 ];
 
@@ -118,7 +135,10 @@ pub(crate) const TYPOS: usize = 3;
 const HOLD: f64 = 0.072;
 const MODIFIER_LEAD: f64 = 0.052;
 const SINK: f64 = 0.022;
-const RISE: f64 = 0.055;
+/// Keys come back up slowly enough to catch in peripheral vision.
+const RISE: f64 = 0.11;
+/// How long Return flashes after the finger slips onto it.
+const FLASH: f64 = 0.28;
 /// How far into panic a stroke has to be for the harder clack.
 const HARD: f64 = 0.5;
 
@@ -169,6 +189,9 @@ pub(crate) struct Scene {
     read: Option<(f64, usize)>,
     focus: Vec<(f64, Focus)>,
     knocks: Vec<(f64, f32)>,
+    /// The line the finger slipped onto Return for.
+    slip: Option<usize>,
+    flashes: Vec<f64>,
     typing: f64,
     end: f64,
 }
@@ -208,6 +231,8 @@ impl Scene {
             read: None,
             focus: vec![(0.0, Focus::Waiting)],
             knocks: Vec::new(),
+            slip: None,
+            flashes: Vec::new(),
             typing: 0.0,
             end: 0.0,
         };
@@ -230,6 +255,12 @@ impl Scene {
         let mut panic = 0.0;
         for op in SCRIPT {
             match *op {
+                Op::Before(line, secs) => s.lines.push(Line {
+                    at: -secs,
+                    who: Who::Jay,
+                    text: line.to_string(),
+                }),
+                Op::Start => at = 0.0,
                 Op::Wait(gap) => {
                     at += match gap {
                         Gap::Arrive => t.arrive,
@@ -257,10 +288,20 @@ impl Scene {
                     });
                     at += t.read(line);
                 }
+                Op::JayFor(line, hold) => {
+                    s.focus.push((at, Focus::Line(s.lines.len())));
+                    s.lines.push(Line {
+                        at,
+                        who: Who::Jay,
+                        text: line.to_string(),
+                    });
+                    at += hold;
+                }
                 Op::Type(chars, from, to) => {
                     s.focus.push((at, Focus::Field));
-                    // A beat to find the keys before the first one lands.
-                    at += 0.25;
+                    // A beat to find the keys before the first one lands,
+                    // shorter in a panic.
+                    at += 0.25 - 0.12 * from;
                     let count = chars.chars().count().max(2) - 1;
                     for (i, c) in chars.chars().enumerate() {
                         n += 1;
@@ -315,6 +356,10 @@ impl Scene {
                     stroke(&mut s, at, gap, "return", None, "", 0, true);
                     s.focus.push((at, Focus::Line(s.lines.len())));
                     s.knocks.push((at, if slip { 6.0 } else { 3.5 }));
+                    if slip {
+                        s.slip.get_or_insert(s.lines.len());
+                        s.flashes.push(at);
+                    }
                     s.lines.push(Line {
                         at,
                         who: Who::You,
@@ -329,6 +374,8 @@ impl Scene {
                     s.read = Some((at, line));
                 }
                 Op::System(line) => {
+                    // A draft cut off mid-word was never sent.
+                    began = None;
                     s.focus.push((at, Focus::Line(s.lines.len())));
                     s.knocks.push((at, 4.0));
                     s.lines.push(Line {
@@ -353,8 +400,25 @@ impl Scene {
     }
 
     /// The time spent typing: each reply's first key to its send.
+    #[cfg(test)]
     pub(crate) fn typing_secs(&self) -> f64 {
         self.typing
+    }
+
+    /// From Jay's first message after the button to your removal: what
+    /// answering by hand cost.
+    pub(crate) fn score_secs(&self) -> f64 {
+        let asked = self
+            .lines
+            .iter()
+            .find(|l| l.at >= 0.0)
+            .map_or(0.0, |l| l.at);
+        let removed = self
+            .lines
+            .iter()
+            .find(|l| l.who == Who::System)
+            .map_or(self.end, |l| l.at);
+        removed - asked
     }
 
     pub(crate) fn lines(&self) -> &[Line] {
@@ -395,8 +459,12 @@ impl Scene {
             .map_or(Focus::Waiting, |&(_, f)| f)
     }
 
-    /// The draft in the field at `t`, and its caret while you type.
+    /// The draft in the field at `t`, and its caret while you type; gone
+    /// once you're removed.
     pub(crate) fn draft(&self, t: f64) -> (&str, Option<usize>) {
+        if self.removed(t) {
+            return ("", None);
+        }
         let stroke = self.strokes.iter().take_while(|s| s.at <= t).last();
         let text = stroke.map_or("", |s| s.text.as_str());
         let caret = (self.focus(t) == Focus::Field).then(|| stroke.map_or(0, |s| s.caret));
@@ -407,6 +475,35 @@ impl Scene {
         self.lines[..self.shown(t)]
             .iter()
             .any(|l| l.who == Who::System)
+    }
+
+    /// The two moments everything else drops away for: the accidental send
+    /// until `"Read"` has sunk in, and the removal.
+    pub(crate) fn frozen(&self, t: f64) -> bool {
+        self.removed(t)
+            || match self.focus(t) {
+                Focus::Read(_) => true,
+                Focus::Line(i) => Some(i) == self.slip,
+                _ => false,
+            }
+    }
+
+    /// Return's red flash after the finger slips onto it, `0..=1`.
+    pub(crate) fn flash(&self, t: f64, key: &str) -> f32 {
+        if key != "return" {
+            return 0.0;
+        }
+        self.flashes
+            .iter()
+            .map(|&at| {
+                let u = (t - at) / FLASH;
+                if (0.0..1.0).contains(&u) {
+                    (1.0 - u * u) as f32
+                } else {
+                    0.0
+                }
+            })
+            .fold(0.0, f32::max)
     }
 
     /// The chat window's shake after a bad send, in points.
@@ -473,12 +570,42 @@ mod tests {
         assert_eq!(last.who, Who::System);
         assert!(scene.removed(scene.duration()));
         assert_eq!(scene.draft(scene.duration()), ("", None));
+        let removal = last.at;
+        assert_eq!(scene.draft(removal - 0.01).0, "wait no i m");
+        assert!(scene.typing_secs() < scene.score_secs());
+    }
+
+    #[test]
+    fn jay_has_asked_before_the_button() {
+        let scene = Scene::default();
+        assert_eq!(scene.shown(-0.01), 2);
+        assert_eq!(scene.focus(-0.01), Focus::Waiting);
+        let asking = &scene.lines()[2];
+        assert!((0.2..0.6).contains(&asking.at), "{}", asking.at);
+        let typing = scene.strokes()[0].at;
+        assert!((1.2..1.8).contains(&typing), "{typing}");
+    }
+
+    #[test]
+    fn the_slip_reads_and_return_flashes() {
+        let scene = Scene::default();
+        let strokes = scene.strokes();
+        let back = strokes.iter().position(|s| s.key == "delete").unwrap();
+        assert_eq!(strokes[back - 1].text, "Yse, we're deady");
+        assert!(strokes[back].at - strokes[back - 1].at >= 0.4);
+        let slip = &strokes[back + 1];
+        assert_eq!(slip.key, "return");
+        assert!(slip.at - strokes[back].at >= 0.3);
+        assert!(scene.flash(slip.at + 0.05, "return") > 0.9);
+        assert_eq!(scene.flash(slip.at + 0.05, "a"), 0.0);
+        assert_eq!(scene.flash(slip.at + 0.3, "return"), 0.0);
+        assert!(scene.frozen(slip.at + 0.1));
     }
 
     #[test]
     fn every_joke_has_time_to_land() {
         let scene = Scene::default();
-        let lines = scene.lines();
+        let lines: Vec<&Line> = scene.lines().iter().filter(|l| l.at >= 0.0).collect();
         for pair in lines.windows(2) {
             assert!(
                 pair[1].at - pair[0].at >= 0.9,
@@ -495,7 +622,12 @@ mod tests {
             "{}",
             scene.typing_secs()
         );
-        assert!(scene.duration() < 32.0, "{}", scene.duration());
+        assert!(
+            (20.0..=23.5).contains(&scene.duration()),
+            "{}",
+            scene.duration()
+        );
+        assert!(scene.score_secs() > 18.0, "{}", scene.score_secs());
     }
 
     #[test]
@@ -517,8 +649,8 @@ mod tests {
     fn one_focus_at_a_time() {
         let scene = Scene::default();
         assert_eq!(scene.focus(0.0), Focus::Waiting);
-        let first = scene.lines()[0].at;
-        assert_eq!(scene.focus(first + 0.01), Focus::Line(0));
+        let first = scene.lines()[2].at;
+        assert_eq!(scene.focus(first + 0.01), Focus::Line(2));
         let typing = scene.strokes()[0].at;
         assert_eq!(scene.focus(typing), Focus::Field);
         let (read_at, line) = scene.read.unwrap();

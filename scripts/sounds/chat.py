@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""The onboarding comedy's chat sounds, written to
+`resources/audio/sounds/onboarding/` as 48 kHz mono 16-bit WAVs. Standard
+library only, so it runs anywhere:
+
+    python3 scripts/sounds/chat.py
+
+- `chat_incoming`: a message arriving, two quick bright pips (G5 -> B5).
+- `chat_sent`: a message leaving, a breathy upward swish (500 Hz -> 2.4 kHz).
+- `chat_read`: the deadpan `"Read"`, one dry low pip (about 360 Hz).
+
+Peaks are set to sit with the other onboarding cues (about -14 dBFS)."""
+
+import math
+import random
+import struct
+import wave
+from pathlib import Path
+
+SR = 48_000
+OUT = Path(__file__).resolve().parents[2] / "resources/audio/sounds/onboarding"
+rng = random.Random(7)
+
+
+def silence(secs):
+    return [0.0] * int(secs * SR)
+
+
+def add(into, at, x):
+    i = int(at * SR)
+    for j, v in enumerate(x):
+        if i + j < len(into):
+            into[i + j] += v
+
+
+def pip(hz, secs, tau, attack=0.002, h2=0.0):
+    out = []
+    for i in range(int(secs * SR)):
+        t = i / SR
+        env = min(1.0, t / attack) * math.exp(-t / tau)
+        out.append(env * (math.sin(2 * math.pi * hz * t) + h2 * math.sin(4 * math.pi * hz * t)))
+    return out
+
+
+def swish(secs, lo, hi):
+    """White noise through a resonant band-pass sweeping `lo` -> `hi`."""
+    n = int(secs * SR)
+    low = band = 0.0
+    out = []
+    for i in range(n):
+        u = i / n
+        f = lo * (hi / lo) ** u
+        g = 2 * math.sin(math.pi * f / SR)
+        q = 0.9
+        x = rng.uniform(-1.0, 1.0)
+        low += g * band
+        high = x - low - q * band
+        band += g * high
+        # Swells in quickly and trails off, like breath.
+        env = math.sin(math.pi * u ** 0.7) ** 1.5
+        out.append(env * band)
+    return out
+
+
+def finish(x, peak_dbfs, fade=0.005):
+    n = int(fade * SR)
+    for i in range(min(n, len(x))):
+        x[-1 - i] *= i / n
+    top = max(abs(v) for v in x) or 1.0
+    gain = 10 ** (peak_dbfs / 20) / top
+    return [v * gain for v in x]
+
+
+def write(name, x):
+    with wave.open(str(OUT / f"{name}.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes(b"".join(struct.pack("<h", round(max(-1.0, min(1.0, v)) * 32767)) for v in x))
+
+
+def main():
+    incoming = silence(0.09)
+    add(incoming, 0.0, [0.8 * v for v in pip(783.99, 0.05, 0.016, h2=0.12)])
+    add(incoming, 0.032, pip(987.77, 0.058, 0.018, h2=0.10))
+    write("chat_incoming", finish(incoming, -15.0))
+
+    sent = silence(0.105)
+    add(sent, 0.0, swish(0.105, 500.0, 2400.0))
+    write("chat_sent", finish(sent, -14.0))
+
+    read = silence(0.035)
+    add(read, 0.0, pip(360.0, 0.035, 0.008, attack=0.0008, h2=0.25))
+    write("chat_read", finish(read, -19.0, fade=0.004))
+
+
+if __name__ == "__main__":
+    main()
