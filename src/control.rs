@@ -114,7 +114,7 @@ pub enum ControlCommand {
     /// Replay the first-run onboarding in the window (dev, test, and local
     /// builds); settings, history, models, and permissions stay.
     OnboardingReset,
-    /// Open the window on a playground story (the `playground` experiment).
+    /// Open the window on a playground story (Labs).
     WindowStory {
         story: String,
         #[serde(default)]
@@ -500,9 +500,9 @@ pub struct StatusReport {
     pub window: WindowReport,
     /// current, checking, available, or unavailable.
     pub update: String,
-    /// The experiments this Hex read at its launch (`crate::experiments`).
+    /// Labs is on (`crate::labs`).
     #[serde(default)]
-    pub experiments: Vec<String>,
+    pub labs: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

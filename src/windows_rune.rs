@@ -146,7 +146,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let Some(instance) = crate::windows_app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
-    crate::experiments::log_launch();
+    crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
     let (settings, settings_error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
@@ -218,6 +218,15 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             );
             quit.quit();
         })?;
+    let onboarding = window.clone();
+    if let Err(error) = crate::windows_app::serve_onboarding_requests(move || {
+        onboarding.open();
+        onboarding.update(|ui, tx| {
+            let _ = crate::rune_ui::restart_onboarding(ui, tx);
+        });
+    }) {
+        tracing::warn!(%error, "`hex onboarding reset` will not reach this Hex");
+    }
     let relaunch = window.clone();
     instance.forward_launches(move || {
         relaunch.open();

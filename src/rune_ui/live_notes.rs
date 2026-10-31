@@ -1,4 +1,4 @@
-//! Live meeting notes as a playground story (the `playground` experiment,
+//! Live meeting notes as a playground story (Labs,
 //! ⇧⌘D, Prototypes › Meetings › Live notes): a canned nine-minute call
 //! plays in accelerated time through a stand-in for the live pipeline, on a
 //! mock screen. The recording capsule's title follows the chapter, and the

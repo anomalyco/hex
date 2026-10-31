@@ -463,7 +463,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, in dev builds only.
     #[cfg(hex_capture)]
-    let capture_overlays = crate::experiments::is_dev_build()
+    let capture_overlays = crate::dev_build::is_dev_build()
         .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let pump = Pump {
         window: window.clone(),
@@ -1308,7 +1308,7 @@ fn with_window(f: impl FnOnce(&rune::AppHandle<Ui>)) {
 }
 
 /// The menu bar while the window is active: Hex, File, View (with the
-/// `playground` experiment), Window.
+/// Labs), Window.
 /// Rune draws no Edit menu items, so ⌘C/⌘V reach its text fields as keys.
 fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
     let main = NSMenu::new(mtm);

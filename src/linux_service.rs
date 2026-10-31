@@ -68,6 +68,8 @@ pub(crate) enum Request {
     CaptureUndo,
     /// `hex annotate draw`: the pen on or off, as the capsule's pen.
     CaptureDraw,
+    /// `hex onboarding reset`: replays the first run in the window.
+    OnboardingReset,
     Status,
     /// Drain accepted work and exit.
     Quit,
@@ -151,9 +153,9 @@ pub(crate) struct Status {
     pub(crate) window_open: bool,
     pub(crate) pid: u32,
     pub(crate) session: Session,
-    /// The experiments this Hex read at its launch.
+    /// Labs is on (`crate::labs`).
     #[serde(default)]
-    pub(crate) experiments: Vec<String>,
+    pub(crate) labs: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -250,6 +252,8 @@ pub(crate) struct Published {
 #[derive(Debug)]
 pub(crate) enum Control {
     Activate(Activation),
+    /// Replays the first run in the window, answering whether it opened.
+    OnboardingReset(SyncSender<std::result::Result<(), String>>),
     Quit,
 }
 
@@ -438,6 +442,31 @@ pub(crate) fn capture_send(
             .control
             .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
         Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
+/// `hex onboarding reset`: the running Hex replays its first run.
+pub(crate) fn onboarding_reset() -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    match exchange(Request::OnboardingReset, SEND_WAIT) {
+        Ok(reply) => reply
+            .control
+            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+        Err(error) => ControlReply::error("failed", format!("{error}")),
+    }
+}
+
+/// Asks the window to replay the first run and waits for its answer.
+fn reset_onboarding(control: &SyncSender<Control>) -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    if control.try_send(Control::OnboardingReset(sender)).is_err() {
+        return ControlReply::error("busy", "Hex is busy; try again");
+    }
+    match receiver.recv_timeout(SEND_WAIT / 2) {
+        Ok(Ok(())) => ControlReply::done("Opened onboarding"),
+        Ok(Err(why)) => ControlReply::error("unsupported", why),
+        Err(_) => ControlReply::error("unavailable", "the window didn't answer; try again"),
     }
 }
 
@@ -654,6 +683,10 @@ fn serve_client(
                 crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Command(
                     crate::capture_host::CaptureCommand::Undo,
                 ))
+            }
+            Request::OnboardingReset => {
+                answer = Some(reset_onboarding(control));
+                Ok(())
             }
             Request::Status => Ok(()),
             Request::Quit => {

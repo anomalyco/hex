@@ -835,13 +835,13 @@ Final title + summary, one call, 11,151-char excerpt     3.4–3.5 s (3 runs)
 Before: map-reduce over 8 chunks, 9 calls, 51-minute call  96 s
 ```
 
-### Live Chapters (experiment `live-chapters`)
+### Live Chapters (Labs)
 
-Off by default and unsupported: `hex experiments enable live-chapters`, then
-relaunch. Off, nothing below starts, and meetings behave as without it.
+Part of [Labs](labs.md), on by default; `hex labs off` and a relaunch turn it
+off. Off, nothing below starts, and meetings behave as without it.
 
 ```ts
-Recording starts, experiment on                        // meetings.chapters.live
+Recording starts, Labs on                             // meetings.chapters.live
   -> meeting-chapters thread, utility QoS; checks the rolling transcript every 5 s
      (nothing read while Apple Intelligence is unavailable or titles are off)
   -> ≥ 3 min of new meeting time and ≥ 40 new words -> waits (≤30 s) for dictation
@@ -878,7 +878,7 @@ Copy section (pane, per chapter; menu bar "Copy Section" while recording;
      chapter, joined into turns only within it (one shared function)
 ```
 
-Titles: with the experiment on, the manifest records `title_source` (`default`,
+Titles: with Labs on, the manifest records `title_source` (`default`,
 `call`, `calendar`, `user`); off, it is written only to a manifest that already
 has it or has chapters. Unless it is `user`, the shown title is the base title
 plus up to three of the longest chapters in meeting order, once there are two:
@@ -953,7 +953,7 @@ hex mcp [--meetings-dir <path>]                     // meetings.mcp; release bui
     │   └── stored title + two-sentence summary + "read the transcript for
     │       details, decisions, and action items", or an explicit
     │       "No Apple Intelligence notes are stored" + get_transcript hint
-    └── get_chapters(meeting_id)                      // experiment live-chapters
+    └── get_chapters(meeting_id)                      // Labs
         └── "N. mm:ss–mm:ss · name" + line each, whether boundaries were
             corrected, a get_transcript start/end hint; or "No chapters are
             stored" ("No chapters yet" while recording); never generates any
@@ -1110,7 +1110,7 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
-- Live chapters (experiment) have not run in a real recording: the worker,
+- Live chapters (Labs) have not run in a real recording: the worker,
   manifest writes, title updates, menu bar Copy Section, and the boundary pass
   after publication ran only in unit tests and the debug CLI over one synthetic
   transcript. The thresholds (3 min passes, 90 s minimum, name overlap) are

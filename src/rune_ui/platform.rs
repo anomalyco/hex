@@ -294,21 +294,13 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Dev, local, or test build (`crate::experiments::is_dev_build` on a
+    /// Dev, local, or test build (`crate::dev_build::is_dev_build` on a
     /// native host; `true` in fixtures except `"mac-production"`). Production
-    /// builds hide Labs and every experimental pane.
+    /// builds hide Annotate and the developer panes.
     pub(super) dev_build: bool,
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
-    /// The `playground` experiment.
-    pub(super) playground: bool,
-    /// The `voice-filter` experiment: the Voice Filter pane even before the
-    /// Hex Microphone is on (`crate::experiments::enabled` on a native host).
-    pub(super) voice_filter: bool,
-    /// Live per-experiment switch state for non-pane experiments (`live-text`,
-    /// `live-chapters`, …).
-    pub(super) experiments: [bool; crate::experiments::Experiment::ALL.len()],
     /// macOS 27 lists Accessibility as "Device Control and Data Access"
     /// (`permission_guide::list_name`); the permission rows use that name.
     pub(super) accessibility_renamed: bool,
@@ -378,9 +370,6 @@ impl PlatformState {
             relaunch_failed: false,
             dev_build: true,
             developer: false,
-            playground: false,
-            voice_filter: false,
-            experiments: [false; crate::experiments::Experiment::ALL.len()],
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,

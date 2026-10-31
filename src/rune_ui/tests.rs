@@ -711,7 +711,7 @@ fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
 type NavRow = (Pane, [f32; 4]);
 
 /// Neighbouring sidebar items with nothing but a gap between them: the
-/// Labs row splits the main panes from the experiments.
+/// Labs row splits the main panes from the Labs panes.
 fn nav_neighbours(rt: &Runtime<Ui>) -> Vec<(NavRow, NavRow)> {
     let labs = rt
         .elements()

@@ -77,10 +77,21 @@ enum Command {
         #[command(subcommand)]
         command: crate::control::cli::SettingsCommand,
     },
-    /// Turn unfinished, unsupported features on or off for your Hex.
-    Experiments {
+    /// Turn Labs, every unfinished feature, on or off.
+    Labs {
         #[command(subcommand)]
-        command: crate::experiments::ExperimentsCommand,
+        command: crate::labs::LabsCommand,
+    },
+    /// Replaced by `hex labs`.
+    #[command(hide = true)]
+    Experiments {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Replay the first-run onboarding (needs Labs on).
+    Onboarding {
+        #[command(subcommand)]
+        command: crate::control::cli::OnboardingCommand,
     },
 }
 
@@ -157,8 +168,20 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         crate::control::cli::finish(crate::control::cli::settings(command));
     }
     // Like a read command: no log, lock, or running Hex.
-    if let Command::Experiments { command } = &command {
-        return crate::experiments::run(command);
+    match &command {
+        Command::Labs { command } => return crate::labs::run(command),
+        Command::Experiments { .. } => return crate::labs::run_retired_experiments(),
+        Command::Onboarding {
+            command: crate::control::cli::OnboardingCommand::Reset { output },
+        } => crate::control::cli::finish(crate::control::cli::print(
+            match crate::windows_app::request_onboarding() {
+                Ok(true) => crate::control::ControlReply::done("Asked Hex to open onboarding"),
+                Ok(false) => crate::control::cli::not_running(),
+                Err(error) => crate::control::ControlReply::error("failed", format!("{error:#}")),
+            },
+            *output,
+        )),
+        _ => {}
     }
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
 
@@ -177,7 +200,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::Listen { device, selection } => {
             shutdown.store(false, Ordering::Relaxed);
             let _instance = crate::instance::acquire("windows-listener")?;
-            crate::experiments::log_launch();
+            crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
             let config = crate::windows_dictation::WindowsDictationConfig {
@@ -223,7 +246,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::Status { lines } => print_status(&event_path, lines),
         Command::Model { command } => run_model_command(command, shutdown),
         Command::Settings { .. } => unreachable!("handled before logging"),
-        Command::Experiments { .. } => unreachable!("handled before logging"),
+        Command::Labs { .. } | Command::Experiments { .. } | Command::Onboarding { .. } => {
+            unreachable!("handled before logging")
+        }
     }
 }
 
@@ -524,11 +549,10 @@ fn fail_capture(events: &EventLog, device: &str, error: &str) -> Result<()> {
 }
 
 fn print_status(path: &Path, limit: usize) -> Result<()> {
-    // Read from the sources now; the running Hex read them at its launch.
-    let experiments = crate::experiments::active_names();
-    if !experiments.is_empty() {
-        println!("experiments\t{}", experiments.join(","));
-    }
+    println!(
+        "labs\t{}",
+        if crate::labs::enabled() { "on" } else { "off" }
+    );
     if !path.exists() {
         println!("No observations yet at {}", path.display());
         return Ok(());

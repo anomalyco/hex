@@ -287,7 +287,7 @@ impl HostHandle {
             window_open: self.window_open(),
             pid: std::process::id(),
             session,
-            experiments: crate::experiments::active_names(),
+            labs: crate::labs::enabled(),
         }
     }
 }
@@ -301,7 +301,7 @@ pub(crate) fn run(
     activation: Option<Activation>,
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
-    crate::experiments::log_launch();
+    crate::labs::log_launch();
     let (settings, error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (

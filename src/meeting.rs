@@ -89,7 +89,7 @@ pub enum RecordingUpdate {
     Started { id: String, title: String },
     /// A provisional title from the transcript so far.
     Retitled { title: String },
-    /// The live chapters so far (experiment `live-chapters`).
+    /// The live chapters so far (Labs).
     Chapters(Vec<Chapter>),
     /// Capture stopped; final transcription is running.
     Transcribing,
@@ -199,7 +199,7 @@ pub struct MeetingManifest {
     /// than the default one counts as the user's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_source: Option<TitleSource>,
-    /// Topic chapters in time order (experiment `live-chapters`).
+    /// Topic chapters in time order (Labs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chapters: Vec<Chapter>,
     /// The chapter boundaries were corrected over the whole transcript.
@@ -512,8 +512,7 @@ pub fn record(
         let started = Instant::now();
         let titles = notes::ProvisionalTitles::start(manifest.id.clone());
         let live_chapters =
-            crate::experiments::enabled(crate::experiments::Experiment::LiveChapters)
-                .then(|| chapters::LiveChapters::start(manifest.id.clone()));
+            crate::labs::enabled().then(|| chapters::LiveChapters::start(manifest.id.clone()));
         println!("Recording '{}' (Ctrl-C to stop)", manifest.title);
         let take_updates = |manifest: &mut MeetingManifest| {
             if let Some(title) = titles.take() {
@@ -640,17 +639,14 @@ fn record_chapters(
 /// Records where the title came from, which only live chapters read; with
 /// the experiment off, a manifest that has neither stays as it was.
 fn set_title_source(manifest: &mut MeetingManifest, source: TitleSource) {
-    if manifest.title_source.is_some()
-        || !manifest.chapters.is_empty()
-        || crate::experiments::enabled(crate::experiments::Experiment::LiveChapters)
-    {
+    if manifest.title_source.is_some() || !manifest.chapters.is_empty() || crate::labs::enabled() {
         manifest.title_source = Some(source);
     }
 }
 
-/// Keeps a rename made while recording (experiment `live-chapters`).
+/// Keeps a rename made while recording (Labs).
 fn keep_rename(directory: &Path, manifest: &mut MeetingManifest) {
-    if crate::experiments::enabled(crate::experiments::Experiment::LiveChapters) {
+    if crate::labs::enabled() {
         adopt_rename(directory, manifest);
     }
 }

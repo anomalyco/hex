@@ -927,7 +927,7 @@ fn relaunch_arguments(
 }
 
 /// `open --env` arguments for every `HEX_*` variable in `vars`
-/// (HEX_RETAIN_DICTATION_AUDIO, HEX_ENABLE_LLM, HEX_EXPERIMENTS, …), sorted.
+/// (HEX_RETAIN_DICTATION_AUDIO, HEX_ENABLE_LLM, HEX_EXPERIMENTAL_MIC, …), sorted.
 /// LaunchServices starts apps without the caller's environment, so a
 /// relaunch or `hex start` passes these explicitly. Values go only to
 /// `open`'s arguments; never log them.
@@ -1014,7 +1014,7 @@ mod tests {
             ("PATH", "/usr/bin"),
             ("HEX_RETAIN_DICTATION_AUDIO", "1"),
             ("HEX_ENABLE_LLM", "1"),
-            ("HEX_EXPERIMENTS", "a=b,c"),
+            ("HEX_EXPERIMENTAL_MIC", "a=b,c"),
             ("HEXAGON", "no"),
         ]
         .map(|(key, value)| (key.into(), value.into()));
@@ -1033,7 +1033,7 @@ mod tests {
                 "--env",
                 "HEX_ENABLE_LLM=1",
                 "--env",
-                "HEX_EXPERIMENTS=a=b,c",
+                "HEX_EXPERIMENTAL_MIC=a=b,c",
                 "--env",
                 "HEX_RETAIN_DICTATION_AUDIO=1",
                 "/Applications/Hex.app",

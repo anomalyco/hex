@@ -64,7 +64,7 @@ pub(crate) enum ControllerEvent {
     Retitled {
         title: String,
     },
-    /// The recording's live chapters so far (experiment `live-chapters`).
+    /// The recording's live chapters so far (Labs).
     Chapters(Vec<meeting::Chapter>),
     OpenMeeting(String),
     Transcribing,
@@ -101,7 +101,7 @@ pub enum MeetingMenuState {
         started: Instant,
         id: String,
         title: String,
-        /// Live chapters, for Copy Section (experiment `live-chapters`).
+        /// Live chapters, for Copy Section (Labs).
         chapters: Vec<meeting::Chapter>,
     },
     Transcribing,

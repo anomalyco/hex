@@ -143,6 +143,58 @@ impl AppInstance {
     }
 }
 
+/// Names the event `hex onboarding reset` signals to replay the first run in
+/// the running Hex.
+const ONBOARDING_EVENT: &str = r"Local\anomaly.hex.onboarding";
+
+/// Opens the session's event called `name`; also says whether it existed.
+fn named_event(name: &str) -> Result<(HANDLE, bool)> {
+    let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the call.
+    let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+    if event.is_null() {
+        return Err(eyre!(
+            "could not create a Hex event: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: read immediately after the call whose result it describes.
+    let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+    Ok((event, existed))
+}
+
+/// `hex onboarding reset`: asks the running Hex to replay its first run.
+/// Returns false when no Hex app runs in this session.
+pub(crate) fn request_onboarding() -> Result<bool> {
+    let (event, existed) = named_event(ONBOARDING_EVENT)?;
+    if existed {
+        // SAFETY: `event` is a valid handle owned by this function; the
+        // running app may bring its window forward.
+        unsafe {
+            AllowSetForegroundWindow(ASFW_ANY);
+            SetEvent(event);
+        }
+    }
+    // SAFETY: `event` is a valid handle owned by this function.
+    unsafe { CloseHandle(event) };
+    Ok(existed)
+}
+
+/// Calls `on_request` for each `hex onboarding reset` while Hex runs.
+pub(crate) fn serve_onboarding_requests(on_request: impl Fn() + Send + 'static) -> Result<()> {
+    let (event, _) = named_event(ONBOARDING_EVENT)?;
+    let event = event as usize;
+    std::thread::Builder::new()
+        .name("hex-onboarding".into())
+        .spawn(move || {
+            // SAFETY: the handle is never closed while the process runs.
+            while unsafe { WaitForSingleObject(event as HANDLE, INFINITE) } == WAIT_OBJECT_0 {
+                on_request();
+            }
+        })?;
+    Ok(())
+}
+
 impl WindowsDesktopHost {
     pub(crate) fn new(
         event_path: PathBuf,

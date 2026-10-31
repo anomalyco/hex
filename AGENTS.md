@@ -28,15 +28,15 @@ and keep consequential behavior explicit. Deterministic personal transcript
 transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-The distributed production release (`!experiments::is_dev_build()`) shows
-General, Output, and History, plus Labs on macOS with only the opt-in
-`Meetings (beta)` switch (`meetings.enabled`, default off: no call detection or
-EventKit reads while off); it ignores `HEX_EXPERIMENTS` and
-`~/.config/hex/experiments` and keeps Annotate, Voice Filter, and every
-experiment dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
-add Annotate and every experiment (`Voice Filter`, `Live text`,
-`Live chapters`, `Playground`) to Labs, writing `~/.config/hex/experiments` and
-applying live where supported. HUD Lab's live Dot scope tuning lives inside
+Every build shows General, Output, History, and Labs. Labs is one persisted
+switch (`labs.enabled`, on by default in every build, stable included) that
+turns on every unfinished feature (`Voice Filter`, `Live text`,
+`Live chapters`, `Playground`, the new onboarding) so people can try them and
+send feedback; there are no per-feature experiment switches. Labs also holds
+the opt-in `Meetings (beta)` switch on macOS (`meetings.enabled`, default off:
+no call detection or EventKit reads while off). Dev, local, and test builds
+(`dev_build::is_dev_build()`) add Annotate to Labs; production builds keep it
+dormant. HUD Lab's live Dot scope tuning lives inside
 Playground (`⇧⌘D`, `Prototypes/HUD/*`). `DEVELOPER_FEATURES_ENABLED` keeps
 Meetings available by default in debug builds and keeps the meeting CLI
 debug-only.
@@ -265,7 +265,7 @@ substitute for source inspection or a second roadmap.
   `rune_ui/windows_host.rs` is the window's host), the WASAPI dictation loop,
   low-level keyboard hook, clipboard paste, UI Automation context, audio ducking, and the
   login item.
-- `live_text`: the `live-text` experiment's text of the recording in
+- `live_text`: Labs' live text of the recording in
   progress: the recording's `Publisher` shows it and its drop clears it, and
   each OS's host installs `rune_ui::live_text`, one click-through line just
   past the HUD, as a watcher, placed where `rune_hud` last showed the HUD
@@ -295,7 +295,7 @@ substitute for source inspection or a second roadmap.
   `rune-kit` and the OpenCode theme: General, Output, and History, then in dev
   builds the opt-in Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
-  the opt-in and experiment switches) Annotate and the Voice Filter, plus in
+  the Labs switch and the opt-ins) Annotate and the Voice Filter, plus in
   Playground (`⇧⌘D`) HUD Lab's live Dot scope sliders (`hud_stories`), the transcription
   picker, the Sounds sheet (its stage replays `rune_hud`'s HUD, drawn by the
   window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
@@ -340,7 +340,7 @@ substitute for source inspection or a second roadmap.
   post-publication call over a bounded transcript excerpt for the final title
   and a two-sentence summary, with deadline, manifest storage, and
   marker-delimited in-place Markdown updates.
-- `meeting_chapters`: live chapters (experiment `live-chapters`): one
+- `meeting_chapters`: live chapters (Labs): one
   on-device pass per ~3 minutes of rolling transcript while recording, with
   Rust deciding topic changes, the per-boundary fix-up after publication,
   chapter-extended titles that never touch a user-typed one, and section
@@ -368,9 +368,9 @@ substitute for source inspection or a second roadmap.
   "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
-- `experiments`: the compiled list of unsupported experiments and the
-  launch snapshot of `HEX_EXPERIMENTS` and `~/.config/hex/experiments`
-  behind `experiments::enabled` and `hex experiments`.
+- `labs`: the one Labs switch (`labs.enabled`) behind `labs::enabled` and
+  `hex labs on|off|status`. `dev_build`: whether this is a dev, local, test,
+  or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
   `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
   kept out of the workspace; `scripts/check` names it on macOS) hosted in
@@ -553,7 +553,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   and last 0.3 s (Parakeet drops words after pauses past its left context),
   the finish always carries the complete clip, and a failed, empty, overfed, late, or interrupted stream
   falls back to the whole clip. Nothing pastes or reaches the focused app
-  before the final text. With the `live-text` experiment a hotkey capture's
+  before the final text. With Labs on, a hotkey capture's
   stream publishes its provisional text for Hex's own HUD only; it is never
   pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live
   stream holds the model's compute lease. Streams run only on GPU devices
@@ -1083,13 +1083,11 @@ git diff --check
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
-Unfinished features land on `dev` dormant behind an experiment
-([docs/features/experiments.md](docs/features/experiments.md)): add a variant to
-`Experiment` in `src/experiments.rs` and gate where the feature's work starts
-(worker, thread, capture), not just its UI. Turn one on for yourself with
-`hex experiments enable <name>` or `HEX_EXPERIMENTS=<name>`; it applies at the
-next launch. Experiments are unsupported and never on by default, in debug
-builds too; remove the variant when the feature ships or is dropped.
+Unfinished features land on `dev` behind Labs
+([docs/features/labs.md](docs/features/labs.md)): gate where the feature's work
+starts (worker, thread, capture) with `labs::enabled()`, not just its UI, and
+list it on the Labs page. Labs is one switch, on by default; never add
+per-feature switches. Remove the gate when the feature ships or is dropped.
 
 Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
 tests through cargo-nextest (`brew install cargo-nextest`) with

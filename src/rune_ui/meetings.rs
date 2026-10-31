@@ -57,7 +57,7 @@ pub(super) struct Turn {
     pub(super) pause_before_ms: Option<u64>,
 }
 
-/// One topic of a meeting (experiment `live-chapters`), from `start_ms` to
+/// One topic of a meeting (Labs), from `start_ms` to
 /// the next chapter's start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Chapter {
@@ -368,7 +368,7 @@ impl MeetingsPane {
         }
     }
 
-    /// The fixture with live chapters (experiment `live-chapters`) on the
+    /// The fixture with live chapters (Labs) on the
     /// meeting with notes, its title extended by them.
     pub(super) fn chapters_fixture() -> Self {
         let mut pane = Self::fixture();

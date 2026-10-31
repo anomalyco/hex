@@ -95,7 +95,7 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: WindowCommand,
     },
-    /// Replay the first-run onboarding (dev, test, and local builds).
+    /// Replay the first-run onboarding (needs Labs on).
     Onboarding {
         #[command(subcommand)]
         command: OnboardingCommand,
@@ -192,10 +192,9 @@ pub enum ModelCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum OnboardingCommand {
-    /// Open the first-run onboarding in the window now, as on a new Mac.
+    /// Open the first-run onboarding in the window now, as on a new install.
     ///
-    /// Turns the new onboarding on for this install and forgets that
-    /// onboarding finished. Settings, history, models, and permissions stay,
+    /// Forgets that onboarding finished. Settings, history, models, and permissions stay,
     /// so their steps pass at once.
     #[command(visible_alias = "restart")]
     Reset {
@@ -218,9 +217,8 @@ pub enum WindowCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Experiment: open the window on a playground story by its path, name,
-    /// or slug (`Prototypes/HUD/Processing`, `prototypes-hud-processing`; `hex experiments enable
-    /// playground`).
+    /// Labs: open the window on a playground story by its path, name, or
+    /// slug (`Prototypes/HUD/Processing`, `prototypes-hud-processing`).
     Story {
         story: String,
         /// The variant, by number from 1 or by name.
@@ -567,7 +565,7 @@ fn call(_request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     Err(unsupported())
 }
 
-fn not_running() -> ControlReply {
+pub(crate) fn not_running() -> ControlReply {
     ControlReply::error("not-running", "Hex is not running; run `hex start`")
 }
 
@@ -1090,11 +1088,6 @@ fn human_status(report: &StatusReport) -> String {
         (None, true) => "open".into(),
         _ => "closed".into(),
     };
-    // Shown only when on: experiments are unsupported and off for nearly everyone.
-    let experiments = match report.experiments.as_slice() {
-        [] => String::new(),
-        names => format!("Experiments  {}\n", names.join(", ")),
-    };
     format!(
         "Hex {} (pid {}{memory})\n\
          Listener     {}\n\
@@ -1105,7 +1098,7 @@ fn human_status(report: &StatusReport) -> String {
          Permissions  {permission_line}\n\
          Window       {window}\n\
          Update       {}\n\
-         {experiments}",
+         Labs         {}\n",
         report.app_version,
         report.pid,
         if report.listener.running {
@@ -1117,6 +1110,7 @@ fn human_status(report: &StatusReport) -> String {
         on(features.release_microphone_while_idle),
         features.history_retention,
         report.update,
+        on(report.labs),
     )
 }
 
@@ -1230,22 +1224,21 @@ mod tests {
         let text = human_status(&report);
         assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
-        assert!(!text.contains("Experiments"));
-
-        report.experiments = vec!["live-chapters".into(), "live-text".into()];
-        assert!(human_status(&report).ends_with("Experiments  live-chapters, live-text\n"));
+        assert!(text.ends_with("Labs         off\n"));
+        report.labs = true;
+        assert!(human_status(&report).ends_with("Labs         on\n"));
     }
 
     #[test]
-    fn status_reports_experiments_and_reads_older_replies_without_them() {
+    fn status_reports_labs_and_reads_older_replies_without_it() {
         let report = StatusReport {
-            experiments: vec!["live-text".into()],
+            labs: true,
             ..Default::default()
         };
         let mut json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["experiments"], serde_json::json!(["live-text"]));
-        json.as_object_mut().unwrap().remove("experiments");
+        assert_eq!(json["labs"], serde_json::json!(true));
+        json.as_object_mut().unwrap().remove("labs");
         let older: StatusReport = serde_json::from_value(json).unwrap();
-        assert!(older.experiments.is_empty());
+        assert!(!older.labs);
     }
 }

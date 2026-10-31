@@ -1451,14 +1451,15 @@ fn hud_lab_and_activity_stay_out_of_the_window_sidebar() {
 }
 
 #[test]
-fn voice_filter_needs_its_experiment_or_hex_microphone() {
+fn voice_filter_needs_labs_or_hex_microphone() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     rt.state.settings.experimental.hex_microphone = false;
+    rt.state.settings.labs.enabled = false;
     rt.state.platform.hex_microphone = None;
     refresh(&mut rt);
     tap(&mut rt, "nav-labs");
     assert!(rt.find("nav-voice-filter").is_none());
-    rt.state.platform.voice_filter = true;
+    rt.state.settings.labs.enabled = true;
     refresh(&mut rt);
     assert!(rt.find("nav-voice-filter").is_some());
 }
@@ -1518,7 +1519,7 @@ fn hud_lab_picks_dot_scope_processing_placement_and_level() {
 }
 
 #[test]
-fn production_builds_offer_meetings_in_labs_and_hide_experiments() {
+fn production_builds_offer_meetings_and_labs() {
     let mut rt = runtime("mac-production", true, PANE_SIZE);
     assert!(!rt.state.platform.dev_build);
     assert!(rt.find("nav-general").is_some());
@@ -1537,15 +1538,12 @@ fn production_builds_offer_meetings_in_labs_and_hide_experiments() {
 
     tap(&mut rt, "nav-labs");
     assert!(rt.find("lab-meetings").is_some());
-    for hidden in [
-        "lab-annotate",
-        "exp-voice-filter",
-        "exp-live-text",
-        "exp-live-chapters",
-        "exp-playground",
-    ] {
-        assert!(rt.find(hidden).is_none(), "production Labs listed {hidden}");
-    }
+    assert!(rt.find("labs-enabled").is_some());
+    assert!(
+        rt.find("lab-annotate").is_none(),
+        "production Labs listed Annotate"
+    );
+    assert!(rt.find("exp-live-text").is_some(), "Labs is on by default");
 
     tap(&mut rt, "lab-meetings");
     assert!(rt.state.settings.meetings.enabled);
@@ -1554,61 +1552,71 @@ fn production_builds_offer_meetings_in_labs_and_hide_experiments() {
         "enabling Meetings (beta) in Labs adds Meetings to the sidebar"
     );
 
-    // Linux and Windows have no release Labs opt-in, so Labs stays hidden in
-    // production builds there.
+    // Linux and Windows have the Labs switch in production builds too.
     for scene in ["portal", "windows-settings"] {
         let mut os_rt = runtime(scene, true, PANE_SIZE);
         os_rt.state.platform.dev_build = false;
         refresh(&mut os_rt);
         assert!(
-            os_rt.find("nav-labs").is_none(),
-            "{scene} showed Labs in production"
+            os_rt.find("nav-labs").is_some(),
+            "{scene} hid Labs in production"
         );
     }
 }
 
 #[test]
-fn dev_experiments_switches_toggle_panes_live() {
+fn the_labs_switch_turns_every_feature_on_and_off() {
     let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
     assert!(rt.find("nav-output").is_some(), "Output is a main tab");
-    for retired in ["exp-modes", "exp-smart-turn", "exp-hud-lab", "exp-activity"] {
-        assert!(rt.find(retired).is_none(), "Labs still listed {retired}");
-    }
     assert!(rt.find("nav-hud-lab").is_none());
     assert!(rt.find("nav-activity").is_none());
+    assert!(rt.state.settings.labs.enabled, "Labs is on by default");
+    assert!(rt.find("send-feedback").is_some());
 
-    // Voice Filter starts on in `mac-labs` (`hex_microphone = true`); clear the
-    // preview driver bundle so flipping the experiment hides and shows the pane.
+    // Clear the preview driver bundle and the Hex Microphone so Labs alone
+    // decides the Voice Filter pane.
     rt.state.platform.hex_microphone = None;
+    rt.state.settings.experimental.hex_microphone = false;
     refresh(&mut rt);
     assert!(rt.find("nav-voice-filter").is_some());
-    tap(&mut rt, "exp-voice-filter");
-    assert!(!rt.state.platform.voice_filter);
+    assert!(rt.find("exp-live-text").is_some());
+    assert!(rt.find("restart-onboarding").is_some());
+
+    tap(&mut rt, "labs-enabled");
+    assert!(!rt.state.settings.labs.enabled);
     assert!(
         rt.find("nav-voice-filter").is_none(),
         "Voice Filter hides live"
     );
-    tap(&mut rt, "exp-voice-filter");
-    assert!(rt.state.platform.voice_filter);
+    assert!(rt.find("exp-live-text").is_none());
+    assert!(rt.find("restart-onboarding").is_none());
+
+    tap(&mut rt, "labs-enabled");
+    assert!(rt.state.settings.labs.enabled);
     assert!(
         rt.find("nav-voice-filter").is_some(),
         "Voice Filter joins Labs live"
     );
-
-    tap(&mut rt, "exp-live-text");
-    assert!(rt.state.platform.experiments[crate::experiments::Experiment::LiveText.index()]);
-    tap(&mut rt, "exp-playground");
-    assert!(rt.state.platform.playground);
 }
 
 #[test]
-fn labs_restart_onboarding_opens_the_first_run() {
+fn labs_run_setup_again_opens_the_first_run() {
     let mut rt = runtime("mac-labs", true, (980.0, 1400.0));
     assert!(rt.state.first_run.is_none());
     tap(&mut rt, "restart-onboarding");
     assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
     assert!(rt.state.first_run.is_some(), "the first run opens at once");
-    assert!(rt.state.platform.experiments[crate::experiments::Experiment::NewOnboarding.index()]);
+}
+
+#[test]
+fn run_setup_again_opens_the_first_run_on_linux_and_windows() {
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 1400.0));
+        tap(&mut rt, "nav-labs");
+        tap(&mut rt, "restart-onboarding");
+        assert!(rt.state.error.is_none(), "{scene}: {:?}", rt.state.error);
+        assert!(rt.state.first_run.is_some(), "{scene}: the first run opens");
+    }
 }
 
 #[test]

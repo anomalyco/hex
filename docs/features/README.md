@@ -28,7 +28,7 @@ Hex                                      // macOS release
 have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
-[Experiments](experiments.md) turn unfinished features on per person with a flag.
+[Labs](labs.md) is one switch, on by default, for every unfinished feature.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Annotate](capture.md) (macOS and
 Linux) records the screen while you draw and talk and sends it to an agent.
@@ -527,7 +527,7 @@ latency measurement.
 Sidebar                                  // settings.nav
 ├── General, History, then each opt-in feature that is on (Meetings)
 └── Labs ▸ -> Labs page: a switch per opt-in feature; one turned on joins the sidebar
-    └── Experiments' panes (and Modes when shown) indent under Labs while it's open
+    └── Labs features' panes (and Modes when shown) indent under Labs while it's open
         // Command-1…9 follow this order (labs::order)
 
 General                                  // settings
@@ -740,17 +740,7 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 ## Process Text With Modes
 
 ```ts
-Experiment `modes` off (the default)     // experiments.md; modes.experiment
-├── Sidebar -> No Output pane; onboarding -> No Modes tip
-├── `window show --pane modes` -> Stays on the current pane
-├── Processing -> Global replacements only    // literal, cheap, still applied
-│   └── No per-app mode, corrections, OpenCode rewrite, or transformations
-├── Custom transformations -> Not loaded for modes; a hex.config.ts still loads them
-├── History -> No processing profile, since nothing processed
-└── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
-    // `hex experiments enable modes` + restart -> everything below, as saved
-
-Output (Labs, replaces the Modes editor) // rune_ui/output.rs; scenes output*
+Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes output*
 ├── Edit with agent -> Copy a prompt naming the steps' keys and `hex settings`
 ├── Open file -> settings.json in the default editor
 ├── Every dictation -> Global's steps, numbered, read-only
@@ -841,7 +831,7 @@ suppression, and the Markdown copy in the user's transcript folder.
 ## Experimental: Hex Microphone And Voice Filter
 
 ```ts
-voice-filter experiment, HEX_EXPERIMENTAL_MIC=1, experimental.hex_microphone = true,
+Labs on, HEX_EXPERIMENTAL_MIC=1, experimental.hex_microphone = true,
 or the driver installed                  // fun.hex-microphone; macOS
 ├── Sidebar > Labs > Voice Filter  // the only home of these controls
 ├── Hex Microphone card
@@ -882,7 +872,7 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `audio_service_restart_interrupts_stream_and_recovers`,
 `voice_filter_saves_the_mode_and_applies_the_tuning_live`,
 `try_it_records_and_plays_through_the_host`, and
-`voice_filter_needs_its_experiment_or_hex_microphone`.
+`voice_filter_needs_labs_or_hex_microphone`.
 Scenes: `mac-voice-filter`, `mac-voice-filter-muted`,
 `mac-voice-filter-driver-missing`.
 Proof limit: in-process `dlopen` loopback proves the compiled driver's 48 kHz
@@ -1487,7 +1477,7 @@ microphone behavior.
 macOS debug runtime                      // not release navigation
 ├── Meetings -> Always available; release builds need the Meetings opt-in (its pane's card or Meetings › Settings)
 ├── Activity / HUD Lab / hex dev -> Observation and developer controls
-└── HUD Lab in release -> Only while the playground experiment is on
+└── HUD Lab in release -> Only in the playground, while Labs is on
 
 `hex app -- --snap OUT --scene NAME` -> Rendered fixtures    // not proof capture/download/update happened
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui

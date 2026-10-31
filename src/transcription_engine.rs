@@ -81,7 +81,7 @@ pub(crate) enum Command {
         /// Aborts this stream only.
         cancel: CancelToken,
         /// Where the stream publishes its text after each feed, when live
-        /// text is on (the `live-text` experiment).
+        /// text is on (Labs).
         partials: Option<Partials>,
     },
     Feed {
@@ -388,7 +388,7 @@ pub struct TranscriptionEngine {
     /// Whether the loaded model can stream on its device.
     streams: Arc<AtomicBool>,
     /// Whether dictation streams publish their text as they go (the
-    /// `live-text` experiment).
+    /// Labs).
     live_text: bool,
     #[cfg(target_os = "macos")]
     held: Held,
@@ -548,7 +548,7 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: crate::experiments::enabled(crate::experiments::Experiment::LiveText),
+            live_text: crate::labs::enabled(),
             #[cfg(target_os = "macos")]
             held,
             next_stream: AtomicU64::new(0),
@@ -592,7 +592,7 @@ impl TranscriptionEngine {
         self
     }
 
-    /// Turns live text on, as the `live-text` experiment does.
+    /// Turns live text on, as Labs does.
     #[cfg(test)]
     pub(crate) fn with_live_text(mut self) -> Self {
         self.live_text = true;

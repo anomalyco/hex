@@ -104,7 +104,7 @@ pub enum MeetingsCommand {
         #[arg(long, conflicts_with_all = ["from", "to"])]
         chapter: Option<usize>,
     },
-    /// List a meeting's chapters (experiment `live-chapters`), by id, unique
+    /// List a meeting's chapters (Labs), by id, unique
     /// prefix, or latest.
     Chapters {
         id: String,

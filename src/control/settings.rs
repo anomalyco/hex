@@ -239,6 +239,11 @@ const KEYS: &[Key] = &[
         "How long dictation history is kept",
     ),
     key(
+        "labs.enabled",
+        Kind::Bool,
+        "Labs: every unfinished feature (hex labs on|off)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Meetings (beta): call detection, recording, and transcripts",

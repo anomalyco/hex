@@ -1,5 +1,4 @@
-//! Hex's real first run on the onboarding story (experiment
-//! `new-onboarding`). The window's tour ([`onboarding`](super::super::onboarding))
+//! Hex's real first run on the onboarding story, while Labs is on. The window's tour ([`onboarding`](super::super::onboarding))
 //! stays the state machine underneath: it starts the model download, asks
 //! for the permissions, relaunches when macOS needs it, watches the practice
 //! dictation, and records completion. This module shows the story's pages
@@ -62,13 +61,11 @@ fn clock() -> f64 {
 
 /// Whether this run shows the new first run in place of the tour.
 pub(in crate::rune_ui) fn wanted(ui: &Ui) -> bool {
-    wanted_for(&ui.platform)
+    wanted_for(&ui.settings)
 }
 
-pub(in crate::rune_ui) fn wanted_for(platform: &super::super::platform::PlatformState) -> bool {
-    platform.experiments[crate::experiments::Experiment::NewOnboarding.index()]
-        && platform.caps.permissions
-        && platform.caps.practice_dictation
+pub(in crate::rune_ui) fn wanted_for(settings: &crate::app_settings::AppSettings) -> bool {
+    settings.labs.enabled
 }
 
 fn english(selection: &TranscriptionSelection) -> bool {
@@ -165,32 +162,19 @@ pub(in crate::rune_ui) fn start(ui: &mut Ui) {
 
 /// Why Hex can't replay its first run here, if it can't.
 pub(crate) fn restart_unavailable(ui: &Ui) -> Option<&'static str> {
-    if !ui.platform.dev_build {
-        Some("Restarting onboarding is only in dev, test, and local builds")
-    } else if !(ui.platform.caps.permissions && ui.platform.caps.practice_dictation) {
-        Some("The new onboarding is not on this OS yet")
-    } else {
-        None
-    }
+    (!ui.settings.labs.enabled).then_some("Turn on Labs first: hex labs on")
 }
 
-/// "Restart onboarding" and `hex onboarding reset`: turns the new first run
-/// on for this install, forgets that onboarding finished, and opens it now.
-/// Settings, history, models, and permissions stay as they are, so the run
-/// finds them ready and passes their steps.
+/// "Run setup again" and `hex onboarding reset`: forgets that onboarding
+/// finished and opens it now. Settings, history, models, and permissions
+/// stay as they are, so the run finds them ready and passes their steps.
 pub(crate) fn restart(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
-    use crate::experiments::{self, Experiment};
     if let Some(why) = restart_unavailable(ui) {
         return Err(why.into());
     }
     if ui.live() {
-        if !experiments::enabled(Experiment::NewOnboarding) {
-            experiments::set_enabled(Experiment::NewOnboarding, true)
-                .map_err(|error| format!("{error:#}"))?;
-        }
         crate::onboarding::reset().map_err(|error| format!("{error:#}"))?;
     }
-    ui.platform.experiments[Experiment::NewOnboarding.index()] = true;
     ui.select_pane(super::super::Pane::General, tx);
     ui.first_run = None;
     ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
@@ -257,6 +241,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     {
         onboarding::input(ui, Input::Continue);
     }
+    let asks_permissions = ui.platform.caps.permissions;
     let Some(s) = ui.first_run.as_mut() else {
         return false;
     };
@@ -264,6 +249,11 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     live.checked = Some(checked);
+    // Linux and Windows ask for no permissions: both rows are ready.
+    if !asks_permissions {
+        live.microphone = ItemStatus::Ready;
+        live.accessibility = ItemStatus::Ready;
+    }
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {

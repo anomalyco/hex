@@ -1235,20 +1235,33 @@ impl Default for ExperimentalSettings {
     }
 }
 
+/// Labs (`crate::labs`): on by default so everyone can try the unfinished
+/// features and send feedback.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct LabsSettings {
+    pub enabled: bool,
+}
+
+impl Default for LabsSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 impl ExperimentalSettings {
     /// [`voice_filter_enabled`] with this setting.
-    pub fn voice_filter_enabled(&self, experiment: bool, driver_installed: bool) -> bool {
-        voice_filter_enabled(self.hex_microphone, experiment, driver_installed)
+    pub fn voice_filter_enabled(&self, labs: bool, driver_installed: bool) -> bool {
+        voice_filter_enabled(self.hex_microphone, labs, driver_installed)
     }
 }
 
 /// Whether the Voice Filter is on: its pane shows and the listener streams
-/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), the
-/// `voice-filter` experiment, or an installed driver each turn it on, so a
-/// driver apps already use keeps receiving audio.
-pub fn voice_filter_enabled(setting: bool, experiment: bool, driver_installed: bool) -> bool {
-    crate::experiments::is_dev_build()
-        && (setting || env_hex_experimental_mic() || experiment || driver_installed)
+/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), Labs, or an
+/// installed driver each turn it on, so a driver apps already use keeps
+/// receiving audio.
+pub fn voice_filter_enabled(setting: bool, labs: bool, driver_installed: bool) -> bool {
+    setting || env_hex_experimental_mic() || labs || driver_installed
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -1629,6 +1642,8 @@ pub struct AppSettings {
     pub capture_from_other_build: Option<serde_json::Value>,
     #[serde(default)]
     pub experimental: ExperimentalSettings,
+    /// The one switch for every unfinished feature (`crate::labs`).
+    pub labs: LabsSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
     /// listener can be off).
     pub enable_on_launch: bool,
@@ -1725,6 +1740,7 @@ impl Default for AppSettings {
             #[cfg(not(hex_capture))]
             capture_from_other_build: None,
             experimental: ExperimentalSettings::default(),
+            labs: LabsSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
             share_dictation_shortcut: false,
@@ -1952,6 +1968,21 @@ impl AppSettings {
         }
     }
 
+    /// The saved `labs.enabled`, read without loading, normalizing, or
+    /// writing anything else.
+    pub fn saved_labs() -> bool {
+        #[derive(Deserialize)]
+        struct File {
+            #[serde(default)]
+            labs: LabsSettings,
+        }
+        path()
+            .ok()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|data| serde_json::from_slice::<File>(&data).ok())
+            .map_or_else(|| LabsSettings::default().enabled, |file| file.labs.enabled)
+    }
+
     /// The saved `updates.channel`, read without loading, normalizing, or
     /// writing anything else, so the updater thread never races a save.
     pub fn saved_update_channel() -> Option<UpdateChannel> {
@@ -2062,6 +2093,7 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
+        crate::labs::apply(self.labs.enabled);
         #[cfg(hex_capture)]
         {
             *CAPTURE_SETTINGS
@@ -2288,7 +2320,7 @@ impl AppSettings {
     /// Annotate is on: dev build and the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
-        crate::experiments::is_dev_build() && self.capture.enabled
+        crate::dev_build::is_dev_build() && self.capture.enabled
     }
 
     /// A shortcut saved as a bare left click swallowed every click, so its
@@ -2468,7 +2500,7 @@ pub fn meetings_enabled() -> bool {
 pub fn hex_microphone_enabled() -> bool {
     voice_filter_enabled(
         HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-        crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter),
+        crate::labs::enabled(),
         crate::hex_microphone::driver_bundle_installed(),
     )
 }
@@ -2876,7 +2908,7 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_the_experiment_or_an_installed_driver_turns_the_voice_filter_on() {
+    fn the_setting_labs_or_an_installed_driver_turns_the_voice_filter_on() {
         if env_hex_experimental_mic() {
             return;
         }
