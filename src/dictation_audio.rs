@@ -20,6 +20,11 @@ const RECOGNITION_QUEUE_CAPACITY: usize = 64;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
 /// How long past the tail itself a finish waits for the stream to deliver it.
 const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
+/// A step in the microphone timeline larger than this is a gap.
+const CHUNK_GAP_TOLERANCE: Duration = Duration::from_millis(50);
+/// Gaps up to this long (a Bluetooth stream's startup hiccup is ~140 ms) are
+/// filled with silence so the capture keeps going; longer ones fail it.
+const MAX_PADDED_GAP: Duration = Duration::from_millis(250);
 
 pub struct RecognitionAudio {
     pub samples: Vec<f32>,
@@ -712,7 +717,9 @@ impl Owner {
                 RecoveringAudioInputEvent::Chunk {
                     samples,
                     captured_through,
-                } => self.chunk_gap(samples.len(), *captured_through).is_none(),
+                } => self
+                    .chunk_gap(samples.len(), *captured_through)
+                    .is_none_or(|gap| gap <= MAX_PADDED_GAP),
                 RecoveringAudioInputEvent::Timeout => true,
                 _ => false,
             };
@@ -731,7 +738,7 @@ impl Owner {
         let captured_from = captured_through.sub_frames(frames, self.sample_rate());
         self.last_captured_through
             .map(|previous| captured_from.duration_since(previous))
-            .filter(|gap| *gap > Duration::from_millis(50))
+            .filter(|gap| *gap > CHUNK_GAP_TOLERANCE)
     }
 
     fn capture_idle(&self) -> bool {
@@ -759,7 +766,22 @@ impl Owner {
                 samples,
                 captured_through,
             } => {
-                if let Some(gap) = self.chunk_gap(samples.len(), captured_through) {
+                let mut padding = 0;
+                let gap = self.chunk_gap(samples.len(), captured_through);
+                if let Some(gap) = gap
+                    && gap <= MAX_PADDED_GAP
+                {
+                    // A short hiccup (often a Bluetooth stream starting) is
+                    // filled with silence on the timeline instead of failing
+                    // the capture.
+                    self.discontinuity_at = Some(Instant::now());
+                    padding = (gap.as_secs_f64() * f64::from(self.sample_rate())).round() as usize;
+                    tracing::warn!(
+                        gap_ms = gap.as_millis() as u64,
+                        recording = self.capture.is_recording(),
+                        "microphone audio skipped briefly; filled the gap with silence"
+                    );
+                } else if let Some(gap) = gap {
                     self.discontinuity_at = Some(Instant::now());
                     let was_recording = self.capture.is_recording();
                     let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
@@ -779,11 +801,21 @@ impl Owner {
                     .captured_through
                     .store(captured_through.as_nanos(), Ordering::Release);
                 crate::input_level::record(&samples);
-                self.capture.ingest_with_pending(
-                    &samples,
-                    captured_through,
-                    self.pending_input.oldest(),
-                );
+                if padding > 0 {
+                    let mut padded = vec![0.0; padding];
+                    padded.extend_from_slice(&samples);
+                    self.capture.ingest_with_pending(
+                        &padded,
+                        captured_through,
+                        self.pending_input.oldest(),
+                    );
+                } else {
+                    self.capture.ingest_with_pending(
+                        &samples,
+                        captured_through,
+                        self.pending_input.oldest(),
+                    );
+                }
                 // Short taps and shortcut chords never reach the model; the
                 // stream starts with the backlog once the hold counts.
                 if self.stream_capture
@@ -1211,7 +1243,7 @@ mod tests {
                     } else {
                         owner.handle_input(RecoveringAudioInputEvent::Chunk {
                             samples: vec![0.25; 480],
-                            captured_through: at + Duration::from_millis(110),
+                            captured_through: at + Duration::from_millis(1_010),
                         });
                     }
                     assert!(!input.is_recording());
@@ -1426,7 +1458,7 @@ mod tests {
                 samples: vec![0.25; 19_200],
                 captured_through: at + Duration::from_millis(400),
             });
-            let boundary = at + Duration::from_millis(510);
+            let boundary = at + Duration::from_millis(1_410);
             samples.send((vec![0.25; 480], boundary)).unwrap();
             if starting {
                 start(&mut owner, boundary);
@@ -1501,6 +1533,29 @@ mod tests {
         let clip = clip.into_transcription_samples();
         assert!((clip[clip.len() - 400] - 0.5).abs() < 0.05);
         assert!(clip.iter().all(|sample| *sample < 0.6));
+    }
+
+    #[test]
+    fn a_short_microphone_gap_is_filled_with_silence_instead_of_failing_the_capture() {
+        // #619: a Bluetooth stream skips ~140 ms while the shortcut is held.
+        let (mut owner, input, _samples) = owner_for_test(true);
+        let released = intentional_capture(&mut owner, capture_time());
+        let resumed = released + Duration::from_millis(150);
+        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+            samples: vec![0.25; 480],
+            captured_through: resumed,
+        });
+        assert!(input.is_recording(), "the held capture must survive");
+        assert!(input.try_recv_event().is_none(), "no failure is reported");
+        let Finish::Transcribe(clip) = finish_after(&mut owner, resumed, Duration::ZERO) else {
+            panic!("expected transcription");
+        };
+        // 10 ms pre-roll, 400 ms of speech, 140 ms of silence, 10 ms of speech.
+        assert!(
+            (555..=565).contains(&clip.duration_ms()),
+            "{}",
+            clip.duration_ms()
+        );
     }
 
     #[test]
