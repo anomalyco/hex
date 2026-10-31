@@ -90,8 +90,8 @@ no instance, otherwise    -> become the instance in this process (custom data ro
 
 ## Windows under Rune
 
-[`windows_rune.rs`](../../src/windows_rune.rs),
-[`windows_app.rs`](../../src/windows_app.rs), and
+[`windows/rune.rs`](../../src/windows/rune.rs),
+[`windows/app.rs`](../../src/windows/app.rs), and
 [`rune_ui/windows_host.rs`](../../src/rune_ui/windows_host.rs):
 
 - Single instance uses the named auto-reset event `Local\anomaly.hex.app`.

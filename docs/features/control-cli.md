@@ -75,12 +75,12 @@ so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
 
 On Linux and Windows `control::host::answer` carries every command out through
-the OS's adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`):
+the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
 dictation and paste-last go to the listener's own queue (Windows: the same
 hotkey loop, as a toggle press would), settings save and reload as the
 window's do, and `settings set` refuses a key whose capability the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
-go to the meeting recorder (`meeting_runtime`) as the tray's items do;
+go to the meeting recorder (`meeting/runtime`) as the tray's items do;
 `window story` answers `unsupported`; Windows sends every `annotate`
 command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.

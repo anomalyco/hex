@@ -122,15 +122,15 @@ Provisional defaults, each changed in one place:
 ```ts
 hex vocabulary listed in --help          // control/cli.rs: add #[command(hide = true)] to hide it
 Prompt wording                           // dictation_processor.rs: vocabulary_lines
-Chapter prompt wording                   // meeting_chapters.rs: vocabulary_line
-Short-name rule                          // meeting_query.rs: SOUND_ALIKE_MIN_CONSONANTS
+Chapter prompt wording                   // meeting/chapters.rs: vocabulary_line
+Short-name rule                          // meeting/query.rs: SOUND_ALIKE_MIN_CONSONANTS
 Suggested terms                          // vocabulary.rs: SUGGESTED
 Boost strengths (nats per term piece)    // vocabulary.rs: VocabularyBoost::nats
 ```
 
 Sources: [vocabulary.rs](../../src/vocabulary.rs),
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
-[meeting_query.rs](../../src/meeting_query.rs) (`vocabulary_aliases`,
+[meeting/query.rs](../../src/meeting/query.rs) (`vocabulary_aliases`,
 `sounds_alike`), [dictation_processor.rs](../../src/dictation_processor.rs)
 (`vocabulary_lines`), and [control.rs](../../src/control.rs)
 (`edit_vocabulary`).
@@ -151,7 +151,7 @@ folding hints, boost names);
 `sounds_like_spellings_and_split_words_alias_a_term`,
 `vocabulary_never_pulls_in_common_words`, and
 `sound_alikes_need_two_consonant_sounds_and_few_changes` in
-[meeting_query_tests.rs](../../src/meeting_query_tests.rs);
+[meeting/query_tests.rs](../../src/meeting/query_tests.rs);
 `prompt_names_vocabulary_terms_and_their_mistranscriptions`;
 `vocabulary_edits_report_whether_they_changed_the_list` and the request round
 trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in

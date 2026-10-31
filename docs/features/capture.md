@@ -36,7 +36,7 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   while it records, the pointer draws with no click until it comes up
 │   (macOS: CaptureShortcut tells the tap from the hold at release; Linux:
 │   the portal's Activated/Deactivated or the X11 grab's press and release,
-│   linux_input Capture/CaptureUp; Windows: the keyboard hook's
+│   linux/input Capture/CaptureUp; Windows: the keyboard hook's
 │   HotkeyAction::Capture/CaptureUp -> CaptureHost::annotate_down/up)
 ├── The capsule's pen -> on until clicked again, or the key is tapped, or
 │   held and let go (Action::Pen -> capture_host::toggle_pen). Like a real
@@ -92,7 +92,7 @@ On Linux                                 // capture.linux
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
 │   X11 clipboard), as the Mac copies it
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
-│   each with Hex's own Ctrl+V (linux_paste). An app that takes no image (a
+│   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
 ├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
@@ -122,15 +122,15 @@ On Windows                               // capture.windows
 │   points, converted with capture_host::pixels_per_point (mixed-DPI displays:
 │   the primary's scale applies everywhere)
 ├── Narration -> the listener's microphone through ListenerTimeline, fed by
-│   windows_dictation; released-while-idle microphones open for the capture
+│   windows/dictation; released-while-idle microphones open for the capture
 ├── Words -> one foreground job on the listener's engine (its loaded model)
-├── Input -> windows_input's low-level hooks: the Annotate key (F9; tap to
+├── Input -> windows/input's low-level hooks: the Annotate key (F9; tap to
 │   start and stop, hold to draw), Escape while drawing, and while a capture
 │   records every pointer move, click, wheel turn, and modifier change
 │   (capture_host::report_input, as the macOS tap): Shift alone inks, the
 │   laser follows the pointer, clicks are logged. Injected events are skipped
 ├── While it records, dictation starts nothing
-├── While dictating -> General's setting through windows_audio_control, one
+├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
 │   contact sheet, then the summary
@@ -203,7 +203,7 @@ While a capture records                  // capture.quiet
 ├── Stop, cancel, discard, failed start, captures off, quit -> released; a
 │   switch carries it to the next capture without restoring in between
 ├── Dictation shortcut -> starts nothing while it records
-│   (macOS: recognition.rs swallows it in the tap; Linux: linux_dictation
+│   (macOS: recognition.rs swallows it in the tap; Linux: linux/dictation
 │   ignores Start). Nothing leaks to the app in front
 └── Dictation that began before the capture -> each effect is held from the first session that
     wants it to the last, so neither unmutes or resumes what the other still
