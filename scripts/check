@@ -6,7 +6,7 @@
 #
 # Tests run through cargo-nextest (.config/nextest.toml): each test is its own
 # process, and one that hangs is killed and reported by name. Exit codes:
-# 10 fmt, 11 clippy, 12 tests. NEXTEST_PROFILE=ci selects CI's profile.
+# 10 fmt, 11 clippy, 12 tests, 13 code-shape. NEXTEST_PROFILE=ci selects CI's profile.
 # Tests build with the `capture` feature, so the debug-only capture
 # experiment's code (macOS) is tested too. `crates/capture` and
 # `crates/capture-core` sit outside the workspace (Cargo.toml), so on macOS
@@ -27,6 +27,9 @@ stage() {
 
 stage "fmt"
 cargo fmt --all --check || exit 10
+
+stage "code-shape"
+python3 scripts/code-shape.py --check || exit 13
 
 if [[ $# -eq 0 ]]; then
     stage "clippy"

@@ -1265,6 +1265,16 @@ tests through cargo-nextest (`brew install cargo-nextest`) with
 the same config's `ci` profile. Read its output whole rather than piping it
 through `grep | head`; failures are summarized at the end.
 
+Keep source files under 800 non-test lines (`#[cfg(test)]` code excluded);
+1,500 is a hard cap, and older files above it live in
+`scripts/file-size-exceptions.txt` with ceilings that only go down. Keep
+folders shaped by capability: `x.rs` or `x/` beside two or more `x_*.rs` (or
+three or more `x_*.rs` alone) moves into `x/`, and a folder over 40 non-test
+source files warns and over 60 fails (`scripts/folder-shape-exceptions.txt`).
+`scripts/check` and the `code_shape_tests` suite run `scripts/code-shape.py`
+rules on every check; refresh ratcheted ceilings with
+`python3 scripts/code-shape.py --update-exceptions`.
+
 Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 --snap <png> --scene <name>` draws one named fixture scene from `SCENES` in
 `src/rune_ui.rs` without starting the runtime, on every OS (`--list-scenes`

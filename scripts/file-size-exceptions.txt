@@ -1,0 +1,21 @@
+# <path> <ceiling>: non-test line ceilings for files above 1500. Ceilings only go down.
+# Refresh with python3 scripts/code-shape.py --update-exceptions.
+crates/capture/src/autocrop.rs 1950
+crates/capture/src/capture.rs 3200
+crates/capture/src/capture/macos.rs 2100
+crates/capture/src/phone.rs 2450
+crates/capture/src/render.rs 1800
+crates/router/src/routing/jev.rs 2300
+crates/router/src/routing/router.rs 2400
+ios/HEXShared/DotScope.swift 1850
+src/app_settings.rs 3050
+src/capture_host.rs 3100
+src/linux/input.rs 1800
+src/meeting/query.rs 2450
+src/meeting/transcript.rs 2250
+src/recognition.rs 2050
+src/rune_ui.rs 2750
+src/rune_ui/capture_capsule/flow.rs 2050
+src/rune_ui/capture_capsule/mod.rs 2100
+src/rune_ui/onboarding_kit/game.rs 2200
+src/suppression.rs 2450
