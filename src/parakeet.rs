@@ -1017,7 +1017,15 @@ fn finish_output(
                     let commit = || control.begin_output();
                     match target {
                         TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
-                            paste(&completed.text, PasteMode::Continue, &commit)
+                            // Labs › Copy dictation only, read as the output
+                            // commits: dictations go to the clipboard
+                            // unpasted; Paste last dictation still pastes.
+                            let mode = if crate::labs::copy_only() {
+                                PasteMode::CopyOnly
+                            } else {
+                                PasteMode::Continue
+                            };
+                            paste(&completed.text, mode, &commit)
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print

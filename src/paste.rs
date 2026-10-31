@@ -29,6 +29,9 @@ pub struct Paster {
 pub enum PasteMode {
     Continue,
     Standalone,
+    /// Labs › Copy dictation only: the text goes to the clipboard as an
+    /// ordinary entry and nothing is pasted, typed, or restored.
+    CopyOnly,
 }
 
 struct PreparedClipboard {
@@ -228,6 +231,9 @@ impl Paster {
         mode: PasteMode,
         commit: impl FnOnce() -> bool,
     ) -> Result<()> {
+        if matches!(mode, PasteMode::CopyOnly) {
+            return self.copy_only(text, commit);
+        }
         let revision = self.activity.revision();
         let text = self
             .continuation
@@ -270,6 +276,25 @@ impl Paster {
             inserted: text,
         });
         Ok(())
+    }
+
+    /// Leaves `text` on the clipboard for the user to paste: no ⌘V, no typed
+    /// text, and no restore. A pending restore stands down and no earlier
+    /// snapshot comes back, and the next paste starts a new continuation.
+    fn copy_only(&mut self, text: &str, commit: impl FnOnce() -> bool) -> Result<()> {
+        commit_prepared_paste(
+            || Ok(()),
+            commit,
+            |()| {
+                self.continuation = None;
+                self.prepared_clipboard = None;
+                self.clipboard_restore
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .keep();
+                write_clipboard_text(&self.clipboard, text, false)
+            },
+        )
     }
 
     fn paste_through_clipboard(
@@ -1075,6 +1100,73 @@ mod tests {
                 .to_string(),
             "kept text"
         );
+    }
+
+    #[test]
+    fn a_copy_only_dictation_is_left_on_the_clipboard_with_nothing_to_restore() {
+        let _test = PASTEBOARD_TEST.lock().unwrap();
+        let clipboard = NSPasteboard::pasteboardWithUniqueName();
+        write_clipboard_text(&clipboard, "before", false).unwrap();
+        let mut paster = Paster {
+            clipboard: clipboard.clone(),
+            activity: InputActivity::default(),
+            continuation: Some(Continuation {
+                revision: 0,
+                inserted: "earlier".into(),
+            }),
+            clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
+            prepared_clipboard: None,
+        };
+        let pending = paster.clipboard_restore.lock().unwrap().register(
+            capture_clipboard(&clipboard).unwrap(),
+            1,
+            2,
+        );
+
+        // A rejected commit changes nothing.
+        assert!(
+            paster
+                .paste("dictated text", PasteMode::CopyOnly, || false)
+                .is_err()
+        );
+        assert_eq!(
+            clipboard
+                .stringForType(unsafe { NSPasteboardTypeString })
+                .unwrap()
+                .to_string(),
+            "before"
+        );
+
+        // Returns without posting ⌘V or typing: only the clipboard changes.
+        paster
+            .paste("dictated text", PasteMode::CopyOnly, || true)
+            .unwrap();
+
+        assert_eq!(
+            clipboard
+                .stringForType(unsafe { NSPasteboardTypeString })
+                .unwrap()
+                .to_string(),
+            "dictated text",
+            "the transcript is not joined to an earlier paste"
+        );
+        let snapshot = capture_clipboard(&clipboard).unwrap();
+        let types = snapshot.items[0]
+            .iter()
+            .map(|flavor| flavor.data_type.as_str())
+            .collect::<Vec<_>>();
+        for marker in CLIPBOARD_MANAGER_MARKERS {
+            assert!(!types.contains(&marker), "{marker} in {types:?}");
+        }
+        let restore = paster.clipboard_restore.lock().unwrap();
+        assert_ne!(
+            restore.generation, pending,
+            "the pending restore stands down"
+        );
+        assert_eq!(restore.original, None);
+        assert_eq!(restore.last_change_count, None);
+        drop(restore);
+        assert!(paster.continuation.is_none());
     }
 
     #[test]

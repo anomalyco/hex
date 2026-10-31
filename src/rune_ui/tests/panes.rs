@@ -373,6 +373,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-mouse-shortcuts",
         "lab-pause-browser",
         "lab-keep-on-clipboard",
+        "lab-copy-only",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
@@ -383,6 +384,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.keep_on_clipboard);
     tap(&mut rt, "lab-keep-on-clipboard");
     assert!(rt.state.settings.labs.keep_on_clipboard);
+    assert!(!rt.state.settings.labs.copy_only);
+    tap(&mut rt, "lab-copy-only");
+    assert!(rt.state.settings.labs.copy_only);
 
     let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
     open_advanced(&mut rt, Pane::General);
@@ -390,6 +394,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     tap(&mut rt, "nav-labs");
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
     assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
+    assert!(rt.find("lab-copy-only").is_none(), "macOS only");
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
 }

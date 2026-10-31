@@ -24,6 +24,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the engine frees the speech model after that long unused (#442)
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
+├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -116,6 +117,25 @@ typing. Off, pasting and clipboard restore are exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real paste
 on a Mac with the toggle on.
+
+Copy dictation only (`copy-only`, issue 629, macOS): while on, a finished
+dictation (the dictation shortcut, Dictate without processing, or
+`hex dictation` without `--print`) is put on the clipboard and nothing is
+sent to the focused app: no ⌘V, no typed text (Chromium 155/156 included),
+and no 500 ms restore, so selected text is never replaced. The paste worker
+(`parakeet::finish_output`) reads `labs::copy_only()` as each dictation's
+output commits and hands `paste::Paster` `PasteMode::CopyOnly`, which writes
+the transcript as an ordinary clipboard entry (no nspasteboard.org transient
+markers), drops any earlier snapshot and pending restore
+(`ClipboardRestore::keep`), and ends the continuation, so the next dictation
+is not joined to it. History and Paste last dictation update as for a paste,
+and Paste last dictation and meeting pastes still paste. Off, output is
+exactly as before. Checks:
+`a_copy_only_dictation_is_left_on_the_clipboard_with_nothing_to_restore` in
+[paste.rs](../../src/paste.rs) (macOS only);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation on a Mac with the toggle on.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
