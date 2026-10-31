@@ -1199,6 +1199,11 @@ Linux beta                               // not macOS feature parity
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
+│   ├── Display -> picked at each capture start, kept until it hides (#486)
+│   │   ├── X11 -> the monitor under the pointer (XRandR monitors)
+│   │   ├── Layer-shell (niri, Sway, Hyprland) -> no output pinned: the
+│   │   │   compositor's focused output
+│   │   └── GNOME, KDE (XDG_CURRENT_DESKTOP) -> the primary display
 │   └── Rune overlay in Hex's process (rune_hud, rune_hud.wgsl on the GPU)
 │       ├── Wayland -> layer-shell overlay layer, no keyboard, empty input region
 │       ├── X11 -> override-redirect window, empty input shape
@@ -1301,6 +1306,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Launch -> DLLs load from System32 and Hex's folder only, never PATH (#587)
 │   └── DX12 compiles shaders with FXC (System32), never a dxcompiler.dll on PATH
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
+├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
+│   start, inside that monitor's work area, at its own DPI (#486)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch

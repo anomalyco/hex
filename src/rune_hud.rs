@@ -190,6 +190,10 @@ pub(crate) struct Hud {
     animating: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     placed: Option<crate::hud_placement::Placed>,
+    /// The position the overlay was last placed for, while it stays on that
+    /// display; a capture's start or a hide picks the display again.
+    #[cfg(not(target_os = "macos"))]
+    edge_placed: Option<IndicatorPosition>,
 }
 
 impl Hud {
@@ -197,6 +201,10 @@ impl Hud {
         #[cfg(target_os = "macos")]
         if let HudEvent::ConfigureDotScope(_) = event {
             self.placed = None;
+        }
+        #[cfg(not(target_os = "macos"))]
+        if let HudEvent::Started = event {
+            self.edge_placed = None;
         }
         self.model.handle(event, Instant::now(), self.reduce);
         self.animating.store(true, Ordering::Release);
@@ -242,7 +250,12 @@ impl Hud {
                 IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
                 _ => (ScreenEdge::Top, TOP_OFFSET),
             };
-            overlay.place(edge, margin);
+            // Placing picks the display again (`display`), so the HUD
+            // never moves mid-capture when the pointer does.
+            if self.edge_placed != Some(self.position) {
+                overlay.place(edge, margin);
+                self.edge_placed = Some(self.position);
+            }
             // The plate sits in the middle of the window.
             let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
             set_live_text(Spot::Edge(edge, past_plate));
@@ -254,6 +267,10 @@ impl Hud {
     }
 
     fn hide(&mut self) {
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.edge_placed = None;
+        }
         if std::mem::take(&mut self.shown)
             && let Some(overlay) = &self.this
         {
@@ -282,6 +299,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         .options(OverlayOptions {
             // The first press never waits on the panel or its pipeline.
             prewarm: cfg!(target_os = "macos"),
+            #[cfg(not(target_os = "macos"))]
+            display: display(),
             ..OverlayOptions::default()
         })
         // The shaders write display (sRGB-encoded) values.
@@ -301,6 +320,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             animating: animating.clone(),
             #[cfg(target_os = "macos")]
             placed: None,
+            #[cfg(not(target_os = "macos"))]
+            edge_placed: None,
         },
     );
     let this = overlay.clone();
@@ -312,6 +333,27 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         #[cfg(target_os = "windows")]
         watch: Arc::default(),
     }
+}
+
+/// The display the HUD and live text appear on, picked at each capture's
+/// start: the one under the pointer, as on macOS (#486). Windows and X11 read
+/// the pointer and pick its monitor; a layer-shell surface pins no output, so
+/// the compositor puts it on the focused one. GNOME (whose HUD runs on
+/// XWayland, blind to the pointer over Wayland windows) and KDE keep the
+/// primary display.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn display() -> rune::DisplayTarget {
+    #[cfg(target_os = "linux")]
+    if std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
+        desktops.split(':').any(|desktop| {
+            ["GNOME", "KDE"]
+                .iter()
+                .any(|d| desktop.eq_ignore_ascii_case(d))
+        })
+    }) {
+        return rune::DisplayTarget::Primary;
+    }
+    rune::DisplayTarget::UnderPointer
 }
 
 fn view(_: &Hud, _: &mut Cx<Hud>) -> El {
