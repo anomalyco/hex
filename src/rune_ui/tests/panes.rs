@@ -1669,6 +1669,24 @@ fn replay_onboarding_opens_the_first_run_on_every_os() {
 }
 
 #[test]
+fn a_test_build_launch_that_needs_onboarding_opens_the_first_run() {
+    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
+    rt.update(|ui, _| {
+        ui.tour = Some(super::super::onboarding::Tour::replay(
+            &ui.settings,
+            &ui.platform,
+        ));
+        super::super::onboarding_kit::live::open_on_launch(ui, false);
+    });
+    assert!(rt.state.first_run.is_none(), "other builds keep the tour");
+    rt.update(|ui, _| super::super::onboarding_kit::live::open_on_launch(ui, true));
+    assert!(
+        rt.state.first_run.is_some(),
+        "the test build opens the first run"
+    );
+}
+
+#[test]
 fn activity_lists_events_and_shows_the_raw_one() {
     let mut rt = runtime("mac-activity", true, PANE_SIZE);
     assert!(texts(&rt).iter().any(|t| t == "Context changed to Slack"));

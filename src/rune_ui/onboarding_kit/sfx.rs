@@ -340,6 +340,14 @@ impl SfxTrack {
         self.push(now + 0.05, Tone::Onboarding(OnboardingTone::AlmostReady));
     }
 
+    /// The practice game's first score card: the comedy's triumph take.
+    pub(crate) fn on_game_score(&mut self, at: f64) {
+        self.push(
+            at,
+            Tone::Onboarding(OnboardingTone::Triumph(triumph_take())),
+        );
+    }
+
     /// `"Almost ready"` waiting screen (fires at most once per run).
     pub(crate) fn on_almost_ready(&mut self, now: f64) {
         if !self.almost_ready_scheduled {

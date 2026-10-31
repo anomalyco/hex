@@ -673,6 +673,8 @@ pub(crate) struct Session {
     /// The best score on disk, for a real run; a story's game keeps none.
     saved: Option<usize>,
     hud: GameHud,
+    /// Whether the run's first score card has sounded its triumph.
+    cheered: bool,
 }
 
 impl Session {
@@ -701,6 +703,15 @@ impl Session {
             practice: None,
             saved: None,
             hud: GameHud::default(),
+            cheered: false,
+        }
+    }
+
+    /// The first score card of the run lands on the comedy's triumph.
+    fn cheer(&mut self, sfx: &mut super::sfx::SfxTrack) {
+        if let Some(at) = self.play.share.filter(|_| !self.cheered) {
+            self.cheered = true;
+            sfx.on_game_score(at);
         }
     }
 
@@ -736,6 +747,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         session
             .hud
             .step(&session.play, now, peak.is_some(), peak, reduced);
+        session.cheer(&mut s.sfx);
         let leave = s.autoplay
             && session
                 .play
@@ -788,6 +800,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     let peak = crate::audio::input_level::recent().filter(|_| held);
     session.hud.step(&session.play, now, held, peak, reduced);
     session.keep_best();
+    session.cheer(&mut s.sfx);
     s.game = Some(session);
     true
 }

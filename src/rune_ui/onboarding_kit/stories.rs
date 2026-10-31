@@ -1761,6 +1761,18 @@ mod tests {
         assert!(played);
         assert_eq!(s.step, Step::Ready);
         assert!(now < 120.0, "{now}");
+        let triumphs = s
+            .sfx
+            .fired_cues()
+            .iter()
+            .filter(|(_, t, _)| {
+                matches!(
+                    t,
+                    crate::feedback::Tone::Onboarding(crate::feedback::OnboardingTone::Triumph(_))
+                )
+            })
+            .count();
+        assert_eq!(triumphs, 1, "the first score card sounds the triumph once");
     }
 
     #[test]

@@ -164,6 +164,15 @@ fn start(ui: &mut Ui) {
     }
 }
 
+/// A launch that still needs onboarding: `Hex Test.app` opens the first run
+/// over the tour, at the step the tour starts from; every other build keeps
+/// the tour alone for now.
+pub(in crate::rune_ui) fn open_on_launch(ui: &mut Ui, wanted: bool) {
+    if wanted && ui.tour.is_some() && ui.first_run.is_none() {
+        start(ui);
+    }
+}
+
 /// General's Replay onboarding and `hex onboarding reset`: forgets that
 /// onboarding finished and opens it now. Settings, history, models, and permissions
 /// stay as they are, so the run finds them ready and passes their steps.

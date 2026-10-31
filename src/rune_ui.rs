@@ -832,6 +832,7 @@ impl Ui {
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
+        onboarding_kit::live::open_on_launch(&mut ui, crate::app_paths::is_macos_test_build());
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
