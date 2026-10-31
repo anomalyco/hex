@@ -30,9 +30,12 @@ runtime settings persist in Application Support.
 
 Every build shows General, Output, History, and Labs. Labs is one persisted
 switch (`labs.enabled`, on by default in every build, stable included) that
-turns on every unfinished feature (`Voice Filter`, `Live text`,
+shows every unfinished feature (`Voice Filter`, `Live text`,
 `Live chapters`, `Playground`, the new onboarding) so people can try them and
-send feedback; there are no per-feature experiment switches. Labs also holds
+send feedback. Labs on only shows them: a feature with side effects or
+background work keeps its own switch, off by default (`experimental.hex_microphone`
+in the Voice Filter pane, `labs.live_text` and `labs.live_chapters` on their
+Labs rows), and nothing starts at launch because Labs is on. Labs also holds
 the opt-in `Meetings (beta)` switch on macOS (`meetings.enabled`, default off:
 no call detection or EventKit reads while off). Dev, local, and test builds
 (`dev_build::is_dev_build()`) add Annotate to Labs; production builds keep it
@@ -368,7 +371,8 @@ substitute for source inspection or a second roadmap.
   "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
-- `labs`: the one Labs switch (`labs.enabled`) behind `labs::enabled` and
+- `labs`: the Labs switch (`labs.enabled`, what shows) and the per-feature
+  switches it gates (`labs::live_text`, `labs::live_chapters`), plus
   `hex labs on|off|status`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
@@ -1085,9 +1089,13 @@ cd sdk/typescript && bun run check && bun run test && bun run build
 
 Unfinished features land on `dev` behind Labs
 ([docs/features/labs.md](docs/features/labs.md)): gate where the feature's work
-starts (worker, thread, capture) with `labs::enabled()`, not just its UI, and
-list it on the Labs page. Labs is one switch, on by default; never add
-per-feature switches. Remove the gate when the feature ships or is dropped.
+starts (worker, thread, capture), not just its UI, and list it on the Labs
+page. Labs on only shows a feature; one with side effects or background work
+(devices, workers, polls, dictation output, UI outside its pane) also gets
+its own switch, off by default, persisted in settings.json and named in
+`hex settings`, and runs only while both are on (as `labs::live_text()`
+does). Pure views need no switch. Remove the gate when the feature ships or
+is dropped.
 
 Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
 tests through cargo-nextest (`brew install cargo-nextest`) with

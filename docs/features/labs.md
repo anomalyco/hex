@@ -1,16 +1,34 @@
 # Labs
 
-Labs is one switch for every unfinished feature: `labs.enabled` in
+Labs is one switch that **shows** every unfinished feature: `labs.enabled` in
 `settings.json`, **on by default in every build**, stable included, so people
-can try the features and send feedback. There are no per-feature switches:
-Labs on turns every feature below on, Labs off turns all of them off.
+can try the features and send feedback. Labs on only shows them. A feature
+with side effects or background work (it opens a device, runs a worker,
+polls, changes dictation output, or changes UI outside its own pane) also has
+its own switch, **off by default**, in its pane or, without a pane, on its
+Labs row, and runs only while both are on. Nothing starts at launch because
+Labs is on. Pure views (the playground's stories) and features that run only
+when invoked (the new onboarding) have no switch of their own.
 
 ```ts
+Feature           Own switch (settings.json)            On: what it does
+├── Voice Filter  experimental.hex_microphone, in its pane  feeds the Hex Microphone through a filter, watches its driver
+├── Live text     labs.live_text, on its Labs row       provisional words beside the HUD while dictating (restart)
+├── Live chapters labs.live_chapters, on its Labs row   chapters a meeting while it records, boundary pass after Stop
+├── Meetings      meetings.enabled, on the Labs page    call detection, recording, transcripts (macOS)
+├── Playground    none (a view)                         ⇧⌘D story browser; read at launch
+└── New onboarding none (runs only when invoked)        the first run on a new install, or Run setup again
+
 Settings › Labs                          // labs.page
 ├── Labs switch -> labs.enabled; "Try unfinished features. They may change or break."
 │   └── Send feedback -> https://github.com/anomalyco/hex/issues/new
 ├── Opt-in features -> Meetings (beta) on macOS, Annotate in dev builds; their own switches
-└── Labs on -> Experiments: what Labs turns on (Open jumps to a pane) + Run setup again
+└── Labs on -> Experiments: each feature (Open jumps to a pane; Live text and
+    Live chapters carry their switches) + Run setup again
+
+Settings › Labs › Voice Filter           // labs.voice-filter
+├── Off (default) -> only "Turn on Voice Filter"; no driver status, poll, or stream
+└── On -> experimental.hex_microphone; the driver card, modes, and Try it
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── on | off -> Save labs.enabled; print the restart hint
@@ -18,6 +36,7 @@ hex labs                                 // labs.cli; edits settings.json, no ru
 └── hex experiments … -> "Experiments are now one switch, Labs: hex labs on|off|status"
 
 hex settings set labs.enabled false      // macOS: through the running Hex
+hex settings set labs.live_text true     // also labs.live_chapters, experimental.hex_microphone
 ```
 
 Panes a Labs feature adds list indented under **Labs** in the sidebar, which
@@ -26,13 +45,18 @@ text), `labs` in its JSON (macOS and Linux), and Windows prints `labs\ton|off`.
 `HEX_EXPERIMENTS` and `~/.config/hex/experiments` are no longer read: settings
 saved before Labs have no `labs` key, so Labs comes out on.
 
-Some features read Labs once at launch (Live text, Playground, Live chapters'
-recorder) and apply after a restart; the Voice Filter pane and the new
-onboarding follow the switch at once.
+Live text and the playground are read at launch and apply after a restart;
+Live chapters are read when a recording starts; the Voice Filter and the new
+onboarding follow their switches at once. Turning Labs off hides everything
+and turns `experimental.hex_microphone` off; Live text and Live chapters keep
+their switches but stop, since `labs::live_text()` and `labs::live_chapters()`
+need Labs on too.
 
 Gate a Labs feature where its work starts (the worker, thread, or capture),
-with `labs::enabled()`, not only where its UI appears. In the window, read
-`ui.settings.labs.enabled`. When a feature ships, remove its gate.
+not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
+or `app_settings::hex_microphone_enabled()`. Give any new feature with side
+effects its own switch, off by default; `labs::enabled()` alone only decides
+what shows. When a feature ships, remove its gate.
 
 Shipped features that used to be experiments are no longer gated: Annotate
 (dev builds, its own `capture.enabled` switch), Output and Modes, Vocabulary,
@@ -42,8 +66,9 @@ and [Dot scope](dictation.md#dot-scope). The smart-turn predictor was removed.
 
 - Live chapters: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
-  [Live Chapters](meetings.md#live-chapters-labs)). The
-  gate is where the work starts: the recorder's chapter worker, recording
+  [Live Chapters](meetings.md#live-chapters-labs)). Its own switch is
+  `labs.live_chapters` (off by default) on its Labs row. The gate,
+  `labs::live_chapters()`, is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
 - New onboarding: the onboarding story as the real first run on every OS
   (`rune_ui/onboarding_kit/live.rs`): the real model download, Microphone and
@@ -63,8 +88,9 @@ and [Dot scope](dictation.md#dot-scope). The smart-turn predictor was removed.
   start, so it shows no listening state.
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
-  OS; see [Streaming Finish](dictation.md#streaming-finish)). The gate is
-  where the work starts: with it off, the engine gives a hotkey capture's
+  OS; see [Streaming Finish](dictation.md#streaming-finish)). Its own switch
+  is `labs.live_text` (off by default) on its Labs row, read at launch. The
+  gate, `labs::live_text()`, is where the work starts: with it off, the engine gives a hotkey capture's
   live stream no partial slot and never reads the model's text between
   feeds, and no host adds the line's overlay. Each dictation's `finished
   live stream` line in process.log counts its text changes (`partials`);
@@ -146,12 +172,20 @@ and [Dot scope](dictation.md#dot-scope). The smart-turn predictor was removed.
   ([Hex Microphone](README.md#experimental-hex-microphone-and-voice-filter)).
   It lists under Labs while Labs is on, and also whenever
   `experimental.hex_microphone` is true or the driver is installed, so nobody
-  loses the controls for a driver they already use. Turning Labs off also
-  turns `experimental.hex_microphone` off. Check:
-  `voice_filter_needs_labs_or_hex_microphone` in
-  [panes.rs](../../src/rune_ui/tests/panes.rs).
+  loses the controls for a driver they already use. Labs alone runs nothing:
+  until **Turn on Voice Filter** (`experimental.hex_microphone`, off by
+  default) the pane shows only that switch, and Hex neither reads the
+  driver's status nor starts its sink supervisor. An installed driver keeps
+  it running so apps using the Hex Microphone keep their audio. Turning Labs
+  off also turns `experimental.hex_microphone` off. Checks:
+  `voice_filter_needs_labs_or_hex_microphone` and
+  `labs_features_with_side_effects_stay_off_until_their_own_switch` in
+  [panes.rs](../../src/rune_ui/tests/panes.rs);
+  `the_setting_or_an_installed_driver_turns_the_voice_filter_on_and_labs_never_does`
+  in [app_settings.rs](../../src/app_settings.rs).
 
 Checks: `the_labs_switch_turns_every_feature_on_and_off`,
+`labs_features_with_side_effects_stay_off_until_their_own_switch`,
 `production_builds_offer_meetings_and_labs`, and
 `voice_filter_needs_labs_or_hex_microphone` in
 [panes.rs](../../src/rune_ui/tests/panes.rs); `labs_parse_as_a_read_command`

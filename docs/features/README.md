@@ -831,8 +831,8 @@ suppression, and the Markdown copy in the user's transcript folder.
 ## Experimental: Hex Microphone And Voice Filter
 
 ```ts
-Labs on, HEX_EXPERIMENTAL_MIC=1, experimental.hex_microphone = true,
-or the driver installed                  // fun.hex-microphone; macOS
+Turn on Voice Filter (experimental.hex_microphone = true), HEX_EXPERIMENTAL_MIC=1,
+or the driver installed; Labs only shows the pane  // fun.hex-microphone; macOS
 ├── Sidebar > Labs > Voice Filter  // the only home of these controls
 ├── Hex Microphone card
 │   ├── Driver status -> Installed v<ver> / In use by <app> + Uninstall
