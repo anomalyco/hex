@@ -213,15 +213,15 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
     let colors = Colors::new(p);
     let keys = ui.settings.dictation_hotkey.keycaps();
     let hold = ui.settings.shortcut_mode == ShortcutMode::Hold;
-    let window = cx.layout("explainer-layer");
+    let window = cx.layout_size("explainer-layer");
     let keys_width = cx
-        .layout("mode-hold/visual/keys")
-        .map_or_else(|| keys_estimate(&keys), |[_, _, width, _]| width);
-    let width = panel_width(keys_width, window.map(|[_, _, width, _]| width));
+        .layout_size("mode-hold/visual/keys")
+        .map_or_else(|| keys_estimate(&keys), |[width, _]| width);
+    let width = panel_width(keys_width, window.map(|[width, _]| width));
     // The lanes draw at the width they lay out at, whatever the keycaps take.
     let lanes = |owner: &str, estimate: f32| {
-        cx.layout(&format!("{owner}/visual/lanes"))
-            .map_or(estimate, |[_, _, width, _]| width)
+        cx.layout_size(&format!("{owner}/visual/lanes"))
+            .map_or(estimate, |[width, _]| width)
     };
     let inside = width - 2.0 * PADDING;
     let card_lanes = (inside - CARD_GAP) / 2.0 - 2.0 * CARD_PADDING - keys_width - VISUAL_GAP;
@@ -325,7 +325,7 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
     // Centred at its Hold height in either mode, so the cards hold still
     // under the pointer and Hold and Toggle move only the bottom edge.
     let hold_body = &ui.explainer.hold_body;
-    let laid_height = |key| cx.layout(key).map(|[_, _, _, height]| height);
+    let laid_height = |key| cx.layout_size(key).map(|[_, height]| height);
     let body_height = laid_height("shortcut-explainer/explainer-body");
     // A pass that still sees Toggle's layout, its slot empty, measures nothing.
     let unfolded =
@@ -334,7 +334,7 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
         hold_body.set(body_height);
     }
     let placed = match window.zip(laid_height("shortcut-explainer")) {
-        Some(([_, _, _, window], height)) => {
+        Some(([_, window], height)) => {
             let folded = match (hold, hold_body.get(), body_height) {
                 (true, _, _) => 0.0,
                 (false, Some(full), Some(body)) => full - body,
