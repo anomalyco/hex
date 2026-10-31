@@ -666,6 +666,10 @@ jobs:
         run: |
           brew tap anomalyco/tap
           cp "$RUNNER_TEMP/cask/hex.rb" "$(brew --repo anomalyco/tap)/Casks/hex.rb"
+          # Homebrew 6 refuses to load casks from third-party taps until they
+          # are trusted; this runner trusts our own tap. Older Homebrew has no
+          # `brew trust` and no such check.
+          if brew trust --help > /dev/null 2>&1; then brew trust anomalyco/tap; fi
           brew style --cask anomalyco/tap/hex
           brew audit --cask --strict --online anomalyco/tap/hex
       - id: upload
