@@ -870,6 +870,10 @@ pub(crate) struct Sampler {
     pub stopping: Arc<AtomicBool>,
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
+    /// Why the screen source gave up before the stop (Linux: the portal's picker was cancelled
+    /// or the stream never started), so the host can end the capture.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub failure: Arc<Mutex<Option<String>>>,
     /// Where the Windows recorder stores when its movie started (ms since `started_at`).
     #[cfg(target_os = "windows")]
     pub video_offset_ms: Arc<AtomicU64>,
@@ -882,6 +886,7 @@ pub struct ScreenCaptureSession {
     stopping: Arc<AtomicBool>,
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
+    failure: Arc<Mutex<Option<String>>>,
     sampler_thread: Option<JoinHandle<Option<Movie>>>,
     _recording: crate::retention::Recording,
 }
@@ -918,6 +923,8 @@ impl ScreenCaptureSession {
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
+        let failure = Arc::new(Mutex::new(None));
+        let thread_failure = Arc::clone(&failure);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
             .name("scrawl-frame-sampler".into())
@@ -933,6 +940,7 @@ impl ScreenCaptureSession {
                     stopping: thread_stopping,
                     urgent: thread_urgent,
                     frames: thread_frames,
+                    failure: thread_failure,
                     #[cfg(target_os = "windows")]
                     video_offset_ms: Arc::new(AtomicU64::new(0)),
                 })
@@ -944,9 +952,19 @@ impl ScreenCaptureSession {
             stopping,
             urgent_snapshot,
             frames,
+            failure,
             sampler_thread,
             _recording: crate::retention::Recording::start(),
         }
+    }
+
+    /// Why the screen source gave up before the stop, if it did: nothing more of the screen
+    /// will be recorded.
+    pub fn failure(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn request_immediate_frame(&self) {
@@ -2787,6 +2805,15 @@ impl Capture {
         match &self.source {
             InnerSource::Phone(session) => session.has_ended(),
             InnerSource::Screen { .. } => false,
+        }
+    }
+
+    /// Why the screen source gave up before the stop, if it did (Linux: the portal's picker
+    /// was cancelled): the capture has nothing more to record.
+    pub fn screen_failure(&self) -> Option<String> {
+        match &self.source {
+            InnerSource::Screen { session, .. } => session.failure(),
+            InnerSource::Phone(_) => None,
         }
     }
 

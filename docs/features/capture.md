@@ -85,6 +85,11 @@ On Linux                                 // capture.linux
 │   pass: radeonsi crashes past it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`
 ├── Missing PipeWire, ffmpeg, or a picker answer -> that capture fails with why
+│   └── The screen-share picker cancelled (or the stream never starting) after
+│       the capture started -> its collector notices within 100 ms, cancels
+│       it, and settles `failed`; the listener's next reap ends it, so the
+│       shortcut and dictation work again (#681). Check: capture_host
+│       a_screen_source_that_gives_up_ends_the_capture; not observed on GNOME
 ├── Narration -> the listener's microphone through ListenerTimeline (each
 │   stream anchored to the monotonic clock); released-while-idle microphones
 │   open for the capture
@@ -729,6 +734,7 @@ Checks:
   `finalize_capture_bundle_with_flags`, without a screen):
   `controls_are_idempotent_and_stop_writes_a_scrawl_bundle`,
   `an_engine_that_cannot_start_leaves_nothing_behind`,
+  `a_screen_source_that_gives_up_ends_the_capture`,
   `scrawls_engine_claims_nothing_machine_wide`,
   `the_timeline_resamples_pads_gaps_and_ends_at_the_stop`,
   `a_pending_gap_and_a_stalled_tail_come_back_from_the_closed_sink`,

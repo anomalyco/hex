@@ -154,6 +154,9 @@ pub const SHORTCUT_DEBOUNCE: Duration = Duration::from_millis(400);
 /// Retention passes over the captures folder.
 const RETENTION_FIRST: Duration = Duration::from_secs(90);
 const RETENTION_EVERY: Duration = Duration::from_secs(60 * 60);
+/// How often a recording capture's collector looks whether its screen source
+/// gave up.
+const SCREEN_CHECK: Duration = Duration::from_millis(100);
 /// How long captures wait to try again after the host failed to start.
 const START_RETRY: Duration = Duration::from_secs(60);
 
@@ -301,6 +304,11 @@ trait Recording: Send {
     fn input(&self) -> Option<InputSink> {
         None
     }
+    /// Why its screen source gave up before the stop (Linux: the portal's
+    /// picker was cancelled), if it did: the capture then fails.
+    fn failure(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A stopped capture, waiting to be written.
@@ -345,6 +353,10 @@ impl Recording for scrawl_capture::capture::Capture {
 
     fn input(&self) -> Option<InputSink> {
         Some(scrawl_capture::capture::Capture::input(self).clone())
+    }
+
+    fn failure(&self) -> Option<String> {
+        scrawl_capture::capture::Capture::screen_failure(self)
     }
 }
 
@@ -1741,8 +1753,9 @@ impl CaptureHost {
         }
     }
 
-    /// Ends a capture whose engine failed to start: its collector exited on
-    /// its own and settled the failure. Finishes an iPhone capture whose
+    /// Ends a capture whose engine failed to start, or whose screen source
+    /// gave up while it recorded: its collector exited on its own and
+    /// settled the failure. Finishes an iPhone capture whose
     /// mirror ended on its own (unplugged, never found, or no camera
     /// access): what it recorded is written, or why it recorded nothing
     /// fails it.
@@ -3272,14 +3285,36 @@ fn collect(
         }
     };
     let mut timeline = Timeline::new(t0);
-    for chunk in chunks {
+    let mut checked = Instant::now();
+    loop {
+        let chunk = match chunks.recv_timeout(SCREEN_CHECK) {
+            Ok(chunk) => Some(chunk),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         match chunk {
-            CaptureAudio::Samples {
+            Some(CaptureAudio::Samples {
                 samples,
                 sample_rate,
                 captured_through,
-            } => timeline.push(&samples, sample_rate, captured_through),
-            CaptureAudio::Gap { from, through } => timeline.gap(from, through),
+            }) => timeline.push(&samples, sample_rate, captured_through),
+            Some(CaptureAudio::Gap { from, through }) => timeline.gap(from, through),
+            None => {}
+        }
+        // A screen source that gave up (the portal's picker cancelled) ends
+        // the capture, as an engine that never started does: the listener's
+        // next reap clears it, so dictation and the shortcut work again.
+        if checked.elapsed() >= SCREEN_CHECK {
+            checked = Instant::now();
+            if let Some(error) = capture.failure() {
+                tracing::error!(error, "the capture's screen source failed");
+                input.detach(&bundle);
+                drop(chunks);
+                capture.cancel();
+                remove_bundle(&bundle);
+                lock(outcomes).fail(bundle, error);
+                return;
+            }
         }
     }
     input.detach(&bundle);
@@ -4110,6 +4145,63 @@ mod tests {
         assert!(audio.open.lock().unwrap().is_none(), "the sink is closed");
         // The next start is a fresh capture.
         assert!(report(host.control(ScrawlCaptureAction::Start, &audio)).changed);
+        host.shutdown(&audio);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A screen source that gives up after the engine started (GNOME's
+    /// screen-share picker cancelled) fails the capture on its own, so it
+    /// no longer counts as recording and dictation works again (#681).
+    #[test]
+    fn a_screen_source_that_gives_up_ends_the_capture() {
+        struct GivesUp;
+        impl CaptureEngine for GivesUp {
+            fn start(&self, start: Start) -> anyhow::Result<Box<dyn Recording>> {
+                Ok(Box::new(GaveUp {
+                    dir: start.bundle_dir.unwrap(),
+                }))
+            }
+
+            fn phones(&self) -> anyhow::Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+        }
+        struct GaveUp {
+            dir: PathBuf,
+        }
+        impl Recording for GaveUp {
+            fn cancel(self: Box<Self>) {
+                let _ = fs::remove_dir_all(&self.dir);
+            }
+
+            fn stop(self: Box<Self>) -> Box<dyn Sealed> {
+                panic!("a capture whose screen gave up is never stopped")
+            }
+
+            fn failure(&self) -> Option<String> {
+                Some("the screen share was cancelled".into())
+            }
+        }
+
+        let dir = temp_dir("gave-up");
+        let audio = FakeTimeline::default();
+        let mut host = CaptureHost::with(Arc::new(GivesUp), Some(dir.clone())).unwrap();
+        let bundle = report(host.control(ScrawlCaptureAction::Start, &audio))
+            .bundle
+            .unwrap();
+        let last = wait_for_last(&mut host, &audio, &bundle, true);
+        assert_eq!(last.stage, "failed");
+        assert!(!bundle.exists());
+        let mut recording = true;
+        for _ in 0..500 {
+            recording = host.recording_since(&audio).is_some();
+            if !recording {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!recording, "the failed capture still counts as recording");
+        assert!(audio.open.lock().unwrap().is_none(), "the sink is closed");
         host.shutdown(&audio);
         fs::remove_dir_all(dir).unwrap();
     }
