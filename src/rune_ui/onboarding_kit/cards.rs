@@ -1,8 +1,10 @@
-//! Example macOS notifications to answer by voice, drawn strictly with
-//! OpenCode theme tokens. Supports stacked sent bubbles above the input field
-//! during the `"Without Hex"` double-send typo comedy!
+//! Example macOS notifications to answer by voice, and the Messages
+//! conversation `"Without Hex"` plays out in, drawn strictly with OpenCode
+//! theme tokens.
 
-use rune::{Color, El, Path, Shape, Spring, TextStyle, Transition, canvas, col, el, row, text};
+use rune::{
+    Color, El, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col, el, row, text,
+};
 
 use super::super::controls::{KeySize, Paint, key_tray, keycap};
 use super::super::lists::allowed;
@@ -96,7 +98,6 @@ pub(crate) enum Reply<'a> {
     Typing(&'a str),
     Sent(&'a str),
     Lines {
-        sent_bubbles: &'a [String],
         text: &'a str,
         caret: Option<usize>,
         lines: usize,
@@ -106,8 +107,8 @@ pub(crate) enum Reply<'a> {
     },
 }
 
-/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with empty
-/// `sent_bubbles` and `lines` wrapped lines.
+/// Height of [`notice`] when its reply field uses [`Reply::Lines`] with
+/// `lines` wrapped lines.
 pub(crate) fn lines_card_height(n: &Notice, lines: usize) -> f32 {
     // Measure how many lines `n.body` takes inside the top message column
     // (`CARD_W - 2*CARD_PAD - ICON - 10.0`).
@@ -164,13 +165,8 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .max_lines(2),
         );
 
-    let bubbles: &[String] = match reply {
-        Reply::Lines { sent_bubbles, .. } => sent_bubbles,
-        _ => &[],
-    };
-
     let (fill, rim) = material(p);
-    let mut card = col()
+    let card = col()
         .key(n.key)
         .w(CARD_W)
         .padding(CARD_PAD)
@@ -188,53 +184,202 @@ pub(crate) fn notice(p: Paint, n: &Notice, reply: Reply<'_>, example: bool) -> E
                 .items_start()
                 .child(app_icon(p, n.app))
                 .child(message),
-        );
-
-    if !bubbles.is_empty() {
-        card = card.child(sent_thread(p, bubbles));
-    }
-
-    // Remove the field in the same layout change as the second sent bubble,
-    // not when Return lifts. Otherwise the card first makes room for both,
-    // then shrinks while the departing field is already outside its new edge.
-    let hide_field = bubbles.len() >= 2 && matches!(reply, Reply::Lines { text: "", .. });
-    if !hide_field {
-        card = card.child(field(p, n, reply));
-    }
-
+        )
+        .child(field(p, n, reply));
     k.elevate(card, &k.elevation.floating)
 }
 
-/// Right-aligned sent bubbles for the accidental double-send typos!
-fn sent_thread(p: Paint, bubbles: &[String]) -> El {
+/// The conversation's visible thread, between its header and the field.
+pub(crate) const THREAD_H: f32 = 132.0;
+const HEADER_H: f32 = 34.0;
+const BUBBLE_MAX: f32 = 280.0;
+const BUBBLE_FONT: TextStyle = FIELD_FONT.lh(17.0);
+
+/// Height of [`chat`] with a reply field `lines` tall.
+pub(crate) fn chat_height(lines: usize) -> f32 {
+    2.0 * CARD_PAD + HEADER_H + 10.0 + THREAD_H + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
+}
+
+/// A Messages conversation with `n.from`: header, the newest of `thread`'s
+/// lines (older ones scroll up under a soft edge), and the reply field.
+pub(crate) fn chat(
+    p: Paint,
+    n: &Notice,
+    thread: Vec<El>,
+    reply: Reply<'_>,
+    field_opacity: f32,
+) -> El {
     let k = p.k;
-    let bubble_bg = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 4 } else { 3 });
-    let bubble_rim = rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 });
-    let mut list = col().key("sent-thread").w_full().gap(5.0).items_end();
-    for (i, msg) in bubbles.iter().enumerate() {
-        list = list.child(
-            row()
-                .key(format!("sent-bubble-{i}"))
-                .px(10.0)
-                .py(4.0)
-                .gap(6.0)
-                .center_y()
-                .radius(12.0)
-                .fill(bubble_bg)
-                .border(p.hair, bubble_rim)
-                // The travel comes from the launch out of the field
-                // (`stories::poll`); the bubble itself only fades up.
-                .transition(Transition::opacity())
+    let head = row()
+        .key("head")
+        .h(HEADER_H)
+        .gap(10.0)
+        .center_y()
+        .child(app_icon(p, n.app))
+        .child(
+            col()
+                .key("who")
+                .grow(1.0)
                 .child(
-                    text(msg.clone())
-                        .key("msg")
-                        .font(FIELD_FONT.lh(16.0))
+                    text(n.from)
+                        .key("title")
+                        .font(TextStyle {
+                            weight: if k.dark { 560.0 } else { 600.0 },
+                            ..k.ty.ui_medium
+                        })
                         .color(p.text()),
                 )
-                .child(text("Sent").key("tag").font(k.ty.small).color(p.muted())),
+                .child(text(n.field).key("app").font(k.ty.small).color(p.faint())),
         );
+    let thread = col()
+        .key("thread")
+        .w_full()
+        .h(THREAD_H)
+        .justify_end()
+        .gap(6.0)
+        .clip_fade(0.0, 26.0, 0.0, 0.0)
+        .children(thread);
+    let (fill, rim) = material(p);
+    let card = col()
+        .key(n.key)
+        .w(CARD_W)
+        .padding(CARD_PAD)
+        .gap(10.0)
+        .radius(RADIUS)
+        .continuous_corners()
+        .fill(fill)
+        .backdrop_blur(24.0)
+        .border(p.hair, rim)
+        .child(head)
+        .child(thread)
+        .child(
+            field(p, n, reply)
+                .opacity(field_opacity)
+                .opacity_motion(Spring::new(0.32, 0.0)),
+        );
+    k.elevate(card, &k.elevation.floating)
+}
+
+/// Who a [`bubble`] is from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    Them,
+    You,
+}
+
+/// One message in [`chat`]'s thread: theirs on the left, yours on the right
+/// in cobalt. It glides up as newer lines arrive and fades to `opacity`.
+pub(crate) fn bubble(
+    p: Paint,
+    key: String,
+    side: Side,
+    copy: &str,
+    opacity: f32,
+    reduced: bool,
+) -> El {
+    let k = p.k;
+    let (fill, rim) = match side {
+        Side::Them => (
+            if k.dark { k.c.layer_02 } else { k.c.layer_01 },
+            k.c.border_weak,
+        ),
+        Side::You => (
+            rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 4 } else { 3 }),
+            rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 }),
+        ),
+    };
+    let bubble = row()
+        .key("bubble")
+        .max_w(BUBBLE_MAX)
+        .px(11.0)
+        .py(5.0)
+        .radius(13.0)
+        .continuous_corners()
+        .fill(fill)
+        .border(p.hair, rim)
+        .child(
+            text(copy.to_string())
+                .key("msg")
+                .font(BUBBLE_FONT)
+                .color(p.text())
+                .wrap()
+                .shrink(),
+        );
+    line(key, side, opacity, reduced).child(bubble.shrink())
+}
+
+/// A row of [`chat`]'s thread, aligned to `side`. Under Reduce Motion it
+/// only fades.
+pub(crate) fn line(key: String, side: Side, opacity: f32, reduced: bool) -> El {
+    let row = row().key(key).w_full();
+    let row = match side {
+        Side::Them => row.justify_start(),
+        Side::You => row.justify_end(),
+    };
+    let row = row.opacity(opacity).opacity_motion(Spring::new(0.32, 0.0));
+    if reduced {
+        return row.transition(Transition::opacity());
     }
-    list
+    row.motion(Spring::new(0.34, 0.0)).transition(
+        Transition::opacity()
+            .combined(Transition::offset(0.0, 10.0))
+            .springs(SpringPair::new(
+                Spring::new(0.34, 0.0),
+                Spring::new(0.2, 0.0),
+            )),
+    )
+}
+
+/// Their three typing dots, pulsing in turn at `now`.
+pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced: bool) -> El {
+    let k = p.k;
+    let dot = |i: usize| {
+        let phase = (now * 1.7 - i as f64 * 0.22).rem_euclid(1.0);
+        let lit = (1.0 - (phase * 2.0 - 0.5).abs() * 2.0).clamp(0.0, 1.0) as f32;
+        el().key(format!("d{i}"))
+            .size(6.0, 6.0)
+            .radius(3.0)
+            .fill(p.muted())
+            .opacity(0.35 + 0.65 * lit)
+            .opacity_motion(rune::Anim::INSTANT)
+    };
+    line(key, Side::Them, opacity, reduced).child(
+        row()
+            .key("dots")
+            .h(27.0)
+            .px(12.0)
+            .gap(4.0)
+            .center_y()
+            .radius(13.0)
+            .continuous_corners()
+            .fill(if k.dark { k.c.layer_02 } else { k.c.layer_01 })
+            .border(p.hair, k.c.border_weak)
+            .child(dot(0))
+            .child(dot(1))
+            .child(dot(2)),
+    )
+}
+
+/// `"Read"` under the message it reads.
+pub(crate) fn receipt(p: Paint, opacity: f32, reduced: bool) -> El {
+    line("read".into(), Side::You, opacity, reduced).child(
+        text("Read")
+            .key("read")
+            .font(p.k.ty.small_medium)
+            .color(p.muted()),
+    )
+}
+
+/// A centred system notice, such as someone removing you.
+pub(crate) fn system_line(p: Paint, key: String, copy: &str, opacity: f32, reduced: bool) -> El {
+    line(key, Side::Them, opacity, reduced)
+        .justify_center()
+        .child(
+            text(copy.to_string())
+                .key("system")
+                .font(p.k.ty.small_medium)
+                .color(p.danger()),
+        )
 }
 
 fn material(p: Paint) -> (Color, Color) {
@@ -270,7 +415,7 @@ fn app_icon(p: Paint, app: App) -> El {
             squircle
                 .fill(bot)
                 .gradient(top, bot)
-                .child(canvas(bubble(white)).key("bubble").size(ICON, ICON))
+                .child(canvas(bubble_mark(white)).key("bubble").size(ICON, ICON))
         }
         App::Slack => squircle
             .fill(rune_theme_opencode::scale("lilac", true, 3))
@@ -283,7 +428,7 @@ fn app_icon(p: Paint, app: App) -> El {
     }
 }
 
-fn bubble(color: Color) -> Shape {
+fn bubble_mark(color: Color) -> Shape {
     const K: f32 = 0.5523;
     let (cx, cy, rx, ry) = (16.0, 15.0, 10.2, 8.4);
     let oval = Path::new()

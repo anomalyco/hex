@@ -70,6 +70,12 @@ pub enum OnboardingTone {
     PermissionTick,
     /// `"Almost ready"` appearing while finishing a slow model download.
     AlmostReady,
+    /// A message arriving in the `"Without Hex"` conversation.
+    Incoming,
+    /// A reply leaving the field.
+    Sent,
+    /// The deadpan `"Read"` under a reply that should not have been sent.
+    Read,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -753,6 +759,9 @@ impl OnboardingSounds {
             OnboardingTone::PanelEscape => &self.panel_escape,
             OnboardingTone::PermissionTick => &self.permission_tick,
             OnboardingTone::AlmostReady => &self.almost_ready,
+            OnboardingTone::Incoming => &self.hexagon,
+            OnboardingTone::Sent => &self.panel_escape,
+            OnboardingTone::Read => &self.permission_tick,
         })
     }
 }
@@ -1326,6 +1335,9 @@ mod tests {
             OnboardingTone::PanelEscape,
             OnboardingTone::PermissionTick,
             OnboardingTone::AlmostReady,
+            OnboardingTone::Incoming,
+            OnboardingTone::Sent,
+            OnboardingTone::Read,
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))

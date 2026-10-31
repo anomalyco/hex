@@ -686,7 +686,6 @@ fn body(p: Paint, r: &Round, t: f64, reduced: bool) -> El {
         Card::Chat(n) => {
             let lines = CARD.wrap(spec.take.text()).len();
             let reply = Reply::Lines {
-                sent_bubbles: &[],
                 text: "",
                 caret: None,
                 lines,

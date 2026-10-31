@@ -90,18 +90,25 @@ impl SfxTrack {
         self.push(now + 0.08, Tone::Onboarding(OnboardingTone::Hexagon));
     }
 
-    /// `"Without Hex"`: hexagon settling into top pill + every typing stroke.
-    pub(crate) fn on_without_hex(&mut self, now: f64, typing_from: f64, had_model: bool) {
+    /// `"Without Hex"` waiting to start: the hexagon settles into the top
+    /// pill.
+    pub(crate) fn on_parked(&mut self, now: f64, had_model: bool) {
         if !had_model {
             self.push(now + 0.12, Tone::Onboarding(OnboardingTone::Hexagon));
         }
+    }
+
+    /// `"Without Hex"` from `from`: every keystroke, harder as panic builds
+    /// (a space-bar thud under the tap), a soft send, Jay's messages, a
+    /// deadpan tick on `"Read"`, and the selected set's error on removal.
+    pub(crate) fn on_without_hex(&mut self, from: f64, scene: &typing::Scene) {
         let style = self.style;
         let mut prev_variant: Option<u8> = None;
-        for (i, stroke) in typing::all_strokes().iter().enumerate() {
-            let at = typing_from + stroke.at;
+        for (i, stroke) in scene.strokes().iter().enumerate() {
+            let at = from + stroke.at;
             let tone = match stroke.key {
-                "space" | "return" => Tone::Onboarding(OnboardingTone::KeySpace(style)),
-                "delete" => Tone::Onboarding(OnboardingTone::KeyBackspace(style)),
+                "space" | "return" => OnboardingTone::KeySpace(style),
+                "delete" => OnboardingTone::KeyBackspace(style),
                 key => {
                     let hash = key
                         .bytes()
@@ -111,11 +118,34 @@ impl SfxTrack {
                         v = (v + 1) % 6;
                     }
                     prev_variant = Some(v);
-                    Tone::Onboarding(OnboardingTone::Key(style, v))
+                    OnboardingTone::Key(style, v)
                 }
             };
-            self.push(at, tone);
+            self.push(at, Tone::Onboarding(tone));
+            if stroke.hard && matches!(tone, OnboardingTone::Key(..)) {
+                self.push(
+                    at + 0.004,
+                    Tone::Onboarding(OnboardingTone::KeySpace(style)),
+                );
+            }
         }
+        for line in scene.lines() {
+            let at = from + line.at;
+            match line.who {
+                typing::Who::Jay => self.push(at, Tone::Onboarding(OnboardingTone::Incoming)),
+                typing::Who::You => self.push(at + 0.03, Tone::Onboarding(OnboardingTone::Sent)),
+                typing::Who::System => self.push(at, Tone::Error),
+            }
+        }
+        if let Some(at) = scene.read_at() {
+            self.push(from + at, Tone::Onboarding(OnboardingTone::Read));
+        }
+    }
+
+    /// `"With Hex"`'s answer sending at `send`, and Jay's reply at `reply`.
+    pub(crate) fn on_hex_reply(&mut self, send: f64, reply: f64) {
+        self.push(send, Tone::Onboarding(OnboardingTone::Sent));
+        self.push(reply, Tone::Onboarding(OnboardingTone::Incoming));
     }
 
     /// `"With Hex"` or scripted `"Your turn"` dictation: physical shortcut
@@ -237,14 +267,16 @@ mod tests {
 
     #[test]
     fn typing_clacks_never_repeat_an_adjacent_key_sample() {
+        let scene = typing::Scene::default();
         let mut track = SfxTrack::default();
-        track.on_without_hex(0.0, 0.5, false);
-        track.advance_to(20.0);
+        track.on_without_hex(0.5, &scene);
+        track.advance_to(60.0);
 
         let mut last_key: Option<u8> = None;
         let mut key_count = 0;
-        let mut space_count = 0;
         let mut back_count = 0;
+        let mut sent = 0;
+        let mut read = 0;
         for &(_, tone) in track.fired_cues() {
             match tone {
                 Tone::Onboarding(OnboardingTone::Key(_, v)) => {
@@ -252,20 +284,48 @@ mod tests {
                     last_key = Some(v);
                     key_count += 1;
                 }
-                Tone::Onboarding(OnboardingTone::KeySpace(_)) => {
-                    last_key = None;
-                    space_count += 1;
-                }
                 Tone::Onboarding(OnboardingTone::KeyBackspace(_)) => {
                     last_key = None;
                     back_count += 1;
                 }
+                Tone::Onboarding(OnboardingTone::Sent) => sent += 1,
+                Tone::Onboarding(OnboardingTone::Read) => read += 1,
                 _ => {}
             }
         }
         assert!(key_count >= 18, "{key_count}");
-        assert!(space_count >= 4, "{space_count}");
-        assert_eq!(back_count, 3);
+        assert_eq!(back_count, 1);
+        assert_eq!(sent, 3);
+        assert_eq!(read, 1);
+        assert!(track.fired_cues().iter().any(|&(_, t)| t == Tone::Error));
+    }
+
+    #[test]
+    fn panic_strokes_land_harder() {
+        let scene = typing::Scene::default();
+        let mut track = SfxTrack::default();
+        track.on_without_hex(0.0, &scene);
+        track.advance_to(60.0);
+        let first = scene.strokes()[0].at;
+        let last = scene
+            .strokes()
+            .iter()
+            .rev()
+            .find(|s| s.hard && s.key.len() == 1)
+            .unwrap()
+            .at;
+        let thuds = |at: f64| {
+            track
+                .fired_cues()
+                .iter()
+                .filter(|&&(t, tone)| {
+                    (t - at).abs() < 0.01
+                        && matches!(tone, Tone::Onboarding(OnboardingTone::KeySpace(_)))
+                })
+                .count()
+        };
+        assert_eq!(thuds(first), 0);
+        assert_eq!(thuds(last), 1);
     }
 
     #[test]
