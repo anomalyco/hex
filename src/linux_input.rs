@@ -574,6 +574,27 @@ fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool
     }
 }
 
+/// The portal id of a shortcut asking for `trigger`. A desktop keeps the
+/// trigger it stored for an id and ignores a later `preferred_trigger`
+/// (GNOME, KDE), so a shortcut changed in Hex gets a new id, which the
+/// desktop binds to the new trigger (#575). An unchanged shortcut keeps its
+/// id, and with it any trigger the user assigned in the desktop.
+fn portal_shortcut_id(base: &str, trigger: &str) -> String {
+    format!("{base}-{}", trigger.replace('+', "-"))
+}
+
+/// The trigger the desktop granted a shortcut, by the id Hex bound it under.
+fn granted_trigger<'a>(
+    granted: &'a std::collections::HashMap<String, Option<String>>,
+    ids: &[Option<String>; Shortcut::ALL.len()],
+    shortcut: Shortcut,
+) -> Option<&'a str> {
+    ids[shortcut.index()]
+        .as_deref()
+        .and_then(|id| granted.get(id))
+        .and_then(Option::as_deref)
+}
+
 /// A shortcut a backend reports pressed or released.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Shortcut {
@@ -997,17 +1018,21 @@ impl Backend {
             options.capture.as_ref().map(|key| (Shortcut::Capture, key)),
         ];
         let mut shortcuts = Vec::new();
+        let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         for (shortcut, key) in requested.into_iter().flatten() {
-            let (id, description) = shortcut.portal_id();
+            let (base, description) = shortcut.portal_id();
             // Keep keyboard shortcuts usable after moving X11 settings to
             // Wayland. Mouse actions remain available through the CLI.
             if mouse_button(&key.key).is_some() {
                 continue;
             }
+            let trigger = key.portal_trigger()?;
+            let id = portal_shortcut_id(base, &trigger);
+            ids[shortcut.index()] = Some(id.clone());
             shortcuts.push(crate::linux_portal::Shortcut {
                 id,
                 description,
-                trigger: Some(key.portal_trigger()?),
+                trigger: Some(trigger),
             });
         }
         // Every shortcut, cancel included, goes in this one bind: a second
@@ -1020,9 +1045,7 @@ impl Backend {
                 .flatten()
                 .map(|(shortcut, _)| DesktopGrantedShortcut {
                     name: shortcut.portal_id().1.into(),
-                    trigger: granted
-                        .get(shortcut.portal_id().0)
-                        .and_then(Option::as_deref)
+                    trigger: granted_trigger(granted, &ids, *shortcut)
                         .map(crate::linux_portal::readable_trigger),
                 })
                 .collect::<Vec<_>>()
@@ -1031,12 +1054,7 @@ impl Backend {
             Shortcut::ALL.map(|shortcut| {
                 requested.iter().flatten().any(|(requested, key)| {
                     *requested == shortcut
-                        && trigger_has_modifiers(
-                            granted
-                                .get(shortcut.portal_id().0)
-                                .and_then(Option::as_deref),
-                            key,
-                        )
+                        && trigger_has_modifiers(granted_trigger(granted, &ids, shortcut), key)
                 })
             })
         };
@@ -1053,7 +1071,7 @@ impl Backend {
         let shortcut_for = |id: &str| {
             Shortcut::ALL
                 .into_iter()
-                .find(|shortcut| shortcut.portal_id().0 == id)
+                .find(|shortcut| ids[shortcut.index()].as_deref() == Some(id))
         };
         while !self.stopping() {
             for event in portal.events() {
@@ -1814,6 +1832,28 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn a_changed_portal_trigger_gets_a_new_shortcut_id() {
+        let id = |trigger: &str| portal_shortcut_id(Shortcut::Dictation.portal_id().0, trigger);
+        assert_eq!(id("ALT+space"), "dictation-ALT-space");
+        assert_eq!(id("ALT+space"), id("ALT+space"));
+        assert_ne!(id("ALT+space"), id("CTRL+ALT+space"));
+        let granted = std::collections::HashMap::from([
+            (
+                "dictation".to_string(),
+                Some("Press <alt>space".to_string()),
+            ),
+            (id("CTRL+F9"), Some("Press <ctrl>F9".to_string())),
+        ]);
+        let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
+        ids[Shortcut::Dictation.index()] = Some(id("CTRL+F9"));
+        assert_eq!(
+            granted_trigger(&granted, &ids, Shortcut::Dictation),
+            Some("Press <ctrl>F9")
+        );
+        assert_eq!(granted_trigger(&granted, &ids, Shortcut::PasteLast), None);
     }
 
     #[test]
