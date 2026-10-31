@@ -163,6 +163,7 @@ pub(super) struct MeetingsPane {
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
     /// Where Linux and Windows perform meeting requests.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(super) local: super::meetings_host::LocalMeetings,
 }
 

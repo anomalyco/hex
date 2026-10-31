@@ -2939,10 +2939,12 @@ mod tests {
         let loaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(loaded.dictation_hotkey, HotkeyBinding::default());
 
-        let settings = AppSettings {
+        let mut settings = AppSettings {
             dictation_hotkey: back_button.clone(),
             ..AppSettings::default()
         };
+        // macOS keeps a mouse shortcut only with Labs › Mouse shortcuts on.
+        settings.labs.mouse_shortcuts = true;
         fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
         let loaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(loaded.dictation_hotkey, back_button);

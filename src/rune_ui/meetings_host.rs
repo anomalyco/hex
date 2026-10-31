@@ -11,6 +11,17 @@ use crate::desktop_i18n::tr;
 
 const RESCAN: Duration = Duration::from_secs(1);
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn controller(request: crate::meeting::MeetingRequest) -> Result<(), String> {
+    crate::meeting_runtime::request(request)
+}
+
+/// macOS sends meeting requests through `macos_host`, never here.
+#[cfg(target_os = "macos")]
+fn controller(_request: crate::meeting::MeetingRequest) -> Result<(), String> {
+    Err("meeting requests go through the macOS host".into())
+}
+
 /// Linux and Windows: the window and the meeting controller share one
 /// process, so the window performs meeting requests itself.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -32,13 +43,9 @@ impl LocalMeetings {
         use crate::meeting::MeetingRequest as Controller;
         let failed = |error: color_eyre::Report| format!("{error:#}");
         match request {
-            MeetingRequest::Start => {
-                crate::meeting_runtime::request(Controller::Start { title: None })
-            }
-            MeetingRequest::Stop => crate::meeting_runtime::request(Controller::Stop),
-            MeetingRequest::Summarize(id) => {
-                crate::meeting_runtime::request(Controller::Summarize(id))
-            }
+            MeetingRequest::Start => controller(Controller::Start { title: None }),
+            MeetingRequest::Stop => controller(Controller::Stop),
+            MeetingRequest::Summarize(id) => controller(Controller::Summarize(id)),
             MeetingRequest::Rename { id, title } => crate::meeting::rename(&id, &title)
                 .map(|_| ())
                 .map_err(failed),
