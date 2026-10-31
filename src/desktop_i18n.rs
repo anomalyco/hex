@@ -1106,8 +1106,8 @@ mod tests {
         include_str!("rune_ui/windows_host.rs"),
         include_str!("tray_menu.rs"),
         include_str!("rune_ui/meetings_host.rs"),
-        include_str!("windows_app.rs"),
-        include_str!("windows_rune.rs"),
+        include_str!("windows/app.rs"),
+        include_str!("windows/rune.rs"),
     ];
 
     /// The string literals passed to `tr`, `tr_fill`, and `tr_named`.

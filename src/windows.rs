@@ -1,3 +1,13 @@
+pub(crate) mod app;
+pub(crate) mod audio_control;
+pub(crate) mod context;
+pub(crate) mod dictation;
+pub(crate) mod gpu_fallback;
+pub(crate) mod input;
+pub(crate) mod login_item;
+pub(crate) mod paste;
+pub(crate) mod rune;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -159,7 +169,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 return Ok(());
             }
             detach_from_console();
-            crate::windows_rune::open(event_path, shutdown, hidden)
+            crate::windows::rune::open(event_path, shutdown, hidden)
         }
         Command::Listen { device, selection } => {
             shutdown.store(false, Ordering::Relaxed);
@@ -167,11 +177,11 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
-            let config = crate::windows_dictation::WindowsDictationConfig {
+            let config = crate::windows::dictation::WindowsDictationConfig {
                 device,
                 history: Some(history),
                 fallback_to_default_device: false,
-                ..crate::windows_dictation::WindowsDictationConfig::from_settings(&settings)
+                ..crate::windows::dictation::WindowsDictationConfig::from_settings(&settings)
             };
             let _personal_commands =
                 crate::app_settings::transformations_used(&settings.dictation_processing)
@@ -183,7 +193,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                     .flatten();
             // Settings a foreground listener loaded stay as they are, and
             // only its shortcut drives it.
-            crate::windows_dictation::run(
+            crate::windows::dictation::run(
                 &event_path,
                 &selection.resolve()?,
                 config,

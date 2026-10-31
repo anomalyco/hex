@@ -186,7 +186,7 @@ fn windowed_executables() -> Vec<PathBuf> {
                 && GetWindow(window, GW_OWNER).is_null()
                 && GetWindowLongPtrW(window, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW == 0
         })
-        .filter_map(crate::windows_input::window_process_path)
+        .filter_map(crate::windows::input::window_process_path)
         .collect()
 }
 

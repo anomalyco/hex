@@ -266,7 +266,7 @@ fn keyboard_input(key: u16, scan: u16, flags: u32) -> INPUT {
                 wScan: scan,
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: crate::windows_input::HEX_INJECTED,
+                dwExtraInfo: crate::windows::input::HEX_INJECTED,
             },
         },
     }

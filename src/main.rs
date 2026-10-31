@@ -144,24 +144,6 @@ mod vocabulary;
 mod voice_filter;
 #[cfg(target_os = "windows")]
 mod windows;
-#[cfg(target_os = "windows")]
-mod windows_app;
-#[cfg(target_os = "windows")]
-mod windows_audio_control;
-#[cfg(target_os = "windows")]
-mod windows_context;
-#[cfg(target_os = "windows")]
-mod windows_dictation;
-#[cfg(target_os = "windows")]
-mod windows_gpu_fallback;
-#[cfg(target_os = "windows")]
-mod windows_input;
-#[cfg(target_os = "windows")]
-mod windows_login_item;
-#[cfg(target_os = "windows")]
-mod windows_paste;
-#[cfg(target_os = "windows")]
-mod windows_rune;
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
@@ -949,7 +931,7 @@ fn main() -> Result<()> {
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
     windows::restrict_dll_search();
-    windows_gpu_fallback::choose();
+    windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
     windows::run(&SHUTDOWN)

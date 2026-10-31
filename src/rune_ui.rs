@@ -1376,7 +1376,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // The native title bar takes the window's background, so it follows a
     // system theme switch along with the rest of the window.
     #[cfg(target_os = "windows")]
-    crate::windows_rune::match_title_bar(p.k.c.bg_deep);
+    crate::windows::rune::match_title_bar(p.k.c.bg_deep);
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {

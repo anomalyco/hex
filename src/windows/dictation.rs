@@ -14,9 +14,9 @@ use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, Voice
 use crate::local_transcriber::LocalTranscriber;
 use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription_models::TranscriptionSelection;
-use crate::windows_input::WindowsHotkey;
-use crate::windows_input::{HotkeyAction, WindowsHotkeyMonitor};
-use crate::windows_paste::WindowsPaster;
+use crate::windows::input::WindowsHotkey;
+use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
+use crate::windows::paste::WindowsPaster;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 /// How long past the tail a release waits for audio that never arrives.
@@ -236,7 +236,7 @@ pub fn run(
     let mut hotkey = shortcuts.start()?;
     let mut while_dictating = while_dictating;
     let mut audio_suppressor =
-        crate::windows_audio_control::AudioSuppressor::start(while_dictating);
+        crate::windows::audio_control::AudioSuppressor::start(while_dictating);
     let mut model = crate::local_transcriber::ModelSwap::new(selection);
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
     // The local API transcribes host audio on this engine's model.
@@ -333,7 +333,7 @@ pub fn run(
             if next_config.while_dictating != while_dictating {
                 while_dictating = next_config.while_dictating;
                 audio_suppressor =
-                    crate::windows_audio_control::AudioSuppressor::start(while_dictating);
+                    crate::windows::audio_control::AudioSuppressor::start(while_dictating);
             }
             if next_config.device != device
                 || next_config.release_microphone_while_idle != release_while_idle
@@ -812,7 +812,7 @@ fn process_dictation_job(
     let started = Instant::now();
     let printed = job.print.is_some();
     // The context read starts now so the UIA walk overlaps inference.
-    let pending_context = crate::windows_context::begin_capture();
+    let pending_context = crate::windows::context::begin_capture();
     let inference_started = Instant::now();
     let transcription = job.transcript.wait().map(|transcribed| {
         tracing::info!(
