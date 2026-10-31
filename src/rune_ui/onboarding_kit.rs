@@ -30,6 +30,7 @@ mod fixture;
 mod flight;
 mod flows;
 mod game;
+pub(crate) mod game_fx;
 pub(crate) mod gpu_stage;
 mod hex_meter;
 mod hud_stage;

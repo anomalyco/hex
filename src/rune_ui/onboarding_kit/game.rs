@@ -1,9 +1,10 @@
 //! A throwaway proposal: the practice step as a mini game. Notifications
 //! drift in, one is targeted at a time, the player holds the shortcut and
-//! answers it, the words fly into it, and it explodes like the site's cards
-//! (`explode` in `site/src/shout/main.js`). Three scripted messages end on a
-//! certificate the player signs by voice; signing it shows a shareable score
-//! card, and Keep playing carries on for as long as they like.
+//! answers it, the words fly into it, and a bolt of lightning strikes it and
+//! burns it away (`game_fx`, after Psychopomp's lightning and dissolve).
+//! Three scripted messages end on a certificate the player signs by voice;
+//! signing it shows a shareable score card, and Keep playing carries on for
+//! as long as they like.
 //!
 //! Scripted fixture answers only. Nothing here touches the real first run.
 
@@ -11,8 +12,7 @@ use std::cell::Cell;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, LineCap, Playground, Shape, Story, TextStyle, Transition, Tx, canvas, col,
-    el, row, text,
+    Anim, Color, Cx, El, Playground, Story, TextStyle, Transition, Tx, col, effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant};
 
@@ -24,6 +24,7 @@ use super::cards::{
 use super::field_text::{CARD, Field};
 use super::fixture::Take;
 use super::flight::{Flight, ember_tone, flicker, flying, typeset};
+use super::game_fx::{self, BURN, BURN_MARK, Bolt, Burn, Fx, Mote, STRIKE_MARK, Tones};
 use super::landing::{LEAD, keys, title_font};
 use super::mic::mic_level;
 use super::sparks::impacts;
@@ -35,10 +36,10 @@ const FRAME: Duration = Duration::from_millis(16);
 
 /// How long a card takes to drift in from off screen.
 const DRIFT: f64 = 1.7;
-/// The site's hit-stop: the card freezes, flashed, before it shatters.
+/// The site's hit-stop: the card freezes while the leader climbs to it.
 const HITSTOP: f64 = 0.07;
-/// After the last word lands, the cracks race out and the card swells
-/// into the hit-stop: one beat, not two.
+/// After the last word lands, the card swells into the hit-stop: one beat,
+/// not two.
 const AFTER_LAND: f64 = 0.12;
 const SHARE_HOLD: f64 = 2.8;
 /// Keep playing folds the share card into the score pill.
@@ -320,17 +321,18 @@ fn schedule(streams: bool, keep: bool) -> Schedule {
         let arrive = rounds.last().map_or(0.3, |r| r.hold);
         let target = rounds
             .last()
-            .map_or(arrive + 1.0, |r| (arrive + 1.1).max(r.shatter() + 0.45));
+            .map_or(arrive + 1.0, |r| (arrive + 1.1).max(r.shatter() + 0.6));
         rounds.push(round(spec, arrive, target, streams));
     }
-    let share = rounds[2].shatter() + 0.3;
+    // The certificate all but burns away before the score card takes its place.
+    let share = rounds[2].shatter() + 0.85;
     if keep {
         let mut arrive = share + SHARE_HOLD;
         let mut target = arrive + 1.0;
         for spec in ENDLESS {
             let r = round(spec, arrive, target, streams);
             arrive = r.hold;
-            target = (arrive + 1.1).max(r.shatter() + 0.45);
+            target = (arrive + 1.1).max(r.shatter() + 0.6);
             rounds.push(r);
         }
     }
@@ -407,13 +409,6 @@ fn smooth(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn rnd(seed: usize, a: f32, b: f32) -> f32 {
-    let x = ((seed as f32 * 12.9898 + 78.233).sin() * 43_758.545)
-        .fract()
-        .abs();
-    lerp(a, b, x)
-}
-
 fn view(g: &Game, cx: &mut Cx<Game>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     g.reduced.set(cx.is_reduced_motion() || g.force_reduced);
@@ -442,19 +437,23 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         .child(header(p, destroyed, holding, t, &s, g.keep, reduced))
         .child(hud(p, &s, t, g.keep));
 
-    // Glows sit under the cards they light; shards, sparks and rings over them.
     for (i, r) in s.rounds.iter().enumerate() {
-        world = world.children(glows(p, i, r, t, reduced));
-    }
-    for (i, r) in s.rounds.iter().enumerate() {
-        if let Some(card) = card(p, i, r, t, reduced) {
+        if let Some(card) = card(p, i, r, t, reduced, reward_fade(&s, i, t)) {
             world = world.child(card);
         }
     }
-    world = world.children(fragments(p, &s, t, reduced));
     world = world.child(words(p, &s, t, reduced));
-    world = world.children(rings(p, &s, t, reduced));
-    world = world.child(debris(p, &s, t, reduced));
+    // Bolts, sparks and ash, over the cards and under the share card.
+    let fx = fx(p, &s, t, reduced);
+    if !fx.bolts.is_empty() || !fx.motes.is_empty() {
+        world = world.child(
+            effect(STRIKE_MARK)
+                .key("strike")
+                .absolute(0.0, 0.0)
+                .size(STAGE_W, STAGE_H),
+        );
+    }
+    game_fx::publish(fx);
     world = world.children(share(p, &s, t, destroyed, g.keep, reduced));
 
     el().key("game")
@@ -700,16 +699,6 @@ fn body(p: Paint, r: &Round, t: f64, reduced: bool) -> El {
     }
 }
 
-/// The card frozen at `t` with its answer typeset in, in card coordinates:
-/// what each fragment of the explosion carries.
-fn face(p: Paint, ri: usize, r: &Round, t: f64, at: [f32; 2]) -> El {
-    el().key(format!("face{ri}"))
-        .absolute(at[0], at[1])
-        .size(r.size[0], r.size[1])
-        .child(body(p, r, t, false))
-        .children(landed_words(p, ri, r, t, false, r.spec.home))
-}
-
 /// The words already in the field, in coordinates relative to `at`.
 fn landed_words(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool, at: [f32; 2]) -> Vec<El> {
     let (field, origin, _) = field_of(&r.spec);
@@ -732,8 +721,8 @@ fn landed_words(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool, at: [f32;
     out
 }
 
-fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
-    if t < r.arrive || t >= r.shatter() + if reduced { 0.3 } else { 0.0 } {
+fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool, clear: f32) -> Option<El> {
+    if t < r.arrive || t >= r.shatter() + if reduced { 0.3 } else { f64::from(BURN) + 0.05 } {
         return None;
     }
     let spec = r.spec;
@@ -761,7 +750,7 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
     } else {
         1.0
     };
-    opacity *= gone;
+    opacity *= gone * clear;
     let knock = if reduced {
         [0.0, 0.0]
     } else {
@@ -771,8 +760,8 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
         })
     }
     .map(|v| v.clamp(-10.0, 10.0));
-    // One beat: the cracks race out and the card swells, then it holds that
-    // pose through the hit-stop and shatters.
+    // One beat: the card swells and holds that pose through the hit-stop
+    // while the leader climbs to it, then the bolt hits and it burns.
     let charge = if reduced {
         0.0
     } else {
@@ -785,6 +774,13 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
             .iter()
             .map(|(f, _, _)| f.flash(t))
             .fold(charge, f32::max)
+            // Once the bolt hits, its strokes do the flashing.
+            * (1.0 - smooth(0.0, 0.12, (t - r.shatter()) as f32))
+    };
+    let strike = if reduced {
+        0.0
+    } else {
+        strike_light(seed_of(i), (t - r.explode) as f32)
     };
     let done = r.flights.iter().all(|(f, _, _)| t >= f.arrives());
     let body = body(p, r, t, reduced);
@@ -805,15 +801,33 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
             .border(1.0, ember.alpha(lerp(0.0, 0.75, lit) * breathe))
             .shadow(0.0, 30.0, ember.alpha(lerp(0.0, 0.2, lit) * breathe))
     });
-    let flash_el = (flash > 0.02).then(|| {
+    // Each stroke flashes the card white-hot (on a light page, a tint).
+    let strike = strike * if p.k.dark { 1.0 } else { 0.45 };
+    let flash_el = (flash.max(strike) > 0.02).then(|| {
         el().key("flash")
             .absolute(0.0, 0.0)
             .size(r.size[0], r.size[1])
             .radius(16.0)
             .continuous_corners()
-            .fill(ember_tone(p, 0.75).alpha((flash * 0.35).min(0.45)))
+            .fill(
+                ember_tone(p, lerp(0.75, 1.0, strike.min(1.0)))
+                    .alpha((flash * 0.35).max(strike * 0.55).min(0.6)),
+            )
     });
-    let cracks = (charge > 0.0).then(|| cracks(p, r, &fracture(r, i * 7919 + 13), t));
+    // The burn, last in the card so it can eat through everything drawn in
+    // it, the shadow included (the bleed).
+    let burn = (!reduced && burning(r, t).is_some()).then(|| {
+        effect(BURN_MARK + i as u32)
+            .key("burn")
+            .absolute(0.0, 0.0)
+            .size(r.size[0], r.size[1])
+            .effect_bleed(40.0)
+    });
+    // The burn erases the card's own pixels, so the card draws in its own
+    // layer while it burns (an opacity short of 1 isolates it).
+    if burn.is_some() {
+        opacity = opacity.min(0.999);
+    }
     // The answer rides in the card: it knocks and swells with it, and under
     // Reduce Motion fades out with it.
     let answer = landed_words(p, i, r, t, reduced, spec.home);
@@ -835,57 +849,12 @@ fn card(p: Paint, i: usize, r: &Round, t: f64, reduced: bool) -> Option<El> {
             .child(body)
             .children(answer)
             .children(flash_el)
-            .children(cracks),
+            .children(burn),
     )
 }
 
 /// How far the card swells into the hit-stop.
 const SWELL: f32 = 1.035;
-
-/// The fracture lines racing out from where the last word hit, along the
-/// pieces' own edges, between the landing and the shatter.
-fn cracks(p: Paint, r: &Round, f: &Fracture, t: f64) -> El {
-    let window = (AFTER_LAND + HITSTOP) as f32;
-    let u = ((t - r.charge()) as f32 / window).clamp(0.0, 1.0);
-    let [w, h] = r.size;
-    let impact = r.impact();
-    let reach = w.hypot(h);
-    // On a light page a glow reads as paint: thinner, fainter strokes there.
-    let (glow_w, hot_w, glow_a) = if p.k.dark {
-        (3.2, 1.3, 0.4)
-    } else {
-        (2.2, 0.9, 0.15)
-    };
-    let glow = ember_tone(p, 0.7).alpha(glow_a);
-    let hot = ember_tone(p, 0.95);
-    let mut shape = Shape::new();
-    for &(a, b) in &f.seams {
-        let (near, far) = if dist(a, impact) <= dist(b, impact) {
-            (a, b)
-        } else {
-            (b, a)
-        };
-        // Nearer cracks start first; each runs out from its end nearest the hit.
-        let start = 0.5 * dist(near, impact) / reach;
-        let run = smooth(start, start + 0.4, u);
-        if run <= 0.0 {
-            continue;
-        }
-        let tip = [lerp(near[0], far[0], run), lerp(near[1], far[1], run)];
-        shape = shape.line(near, tip, glow_w, LineCap::Round, glow).line(
-            near,
-            tip,
-            hot_w,
-            LineCap::Round,
-            hot,
-        );
-    }
-    canvas(shape).key("cracks").absolute(0.0, 0.0).size(w, h)
-}
-
-fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
-    (a[0] - b[0]).hypot(a[1] - b[1])
-}
 
 fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
     let k = p.k;
@@ -959,222 +928,6 @@ fn words(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
     out.child(impacts(p, "impacts", [STAGE_W, STAGE_H], &all, t, reduced).absolute(0.0, 0.0))
 }
 
-/// How the card breaks: convex pieces cut by straight fracture lines, each
-/// carrying its part of the card, words and all, the way the site clips the
-/// card's own image into every Voronoi cell. Pieces near the hit are small;
-/// the far ones stay big enough to read.
-struct Fracture {
-    pieces: Vec<Piece>,
-    /// Every cut's chord through the piece it split, in card coordinates:
-    /// together they're the edges between pieces.
-    seams: Vec<([f32; 2], [f32; 2])>,
-}
-
-/// A cut line: a point on it and the normal into the piece it bounds.
-type Cut = ([f32; 2], [f32; 2]);
-
-struct Piece {
-    /// Card coordinates, clockwise.
-    poly: Vec<[f32; 2]>,
-    /// The cuts that bound it: a point on each line and the normal into the piece.
-    cuts: Vec<Cut>,
-    centroid: [f32; 2],
-    v: [f32; 2],
-    spin: f32,
-    life: f32,
-}
-
-const SLAB_DRAG: f32 = 2.2;
-const SLAB_GRAVITY: f32 = 900.0;
-
-fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
-    a[0] * b[0] + a[1] * b[1]
-}
-
-fn sub(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
-    [a[0] - b[0], a[1] - b[1]]
-}
-
-fn area(poly: &[[f32; 2]]) -> f32 {
-    let n = poly.len();
-    (0..n)
-        .map(|i| {
-            let (a, b) = (poly[i], poly[(i + 1) % n]);
-            a[0] * b[1] - b[0] * a[1]
-        })
-        .sum::<f32>()
-        .abs()
-        * 0.5
-}
-
-fn centroid(poly: &[[f32; 2]]) -> [f32; 2] {
-    let n = poly.len();
-    let (mut cx, mut cy, mut a2) = (0.0, 0.0, 0.0);
-    for i in 0..n {
-        let (a, b) = (poly[i], poly[(i + 1) % n]);
-        let c = a[0] * b[1] - b[0] * a[1];
-        cx += (a[0] + b[0]) * c;
-        cy += (a[1] + b[1]) * c;
-        a2 += c;
-    }
-    if a2.abs() < 1e-3 {
-        let k = n.max(1) as f32;
-        return [
-            poly.iter().map(|q| q[0]).sum::<f32>() / k,
-            poly.iter().map(|q| q[1]).sum::<f32>() / k,
-        ];
-    }
-    [cx / (3.0 * a2), cy / (3.0 * a2)]
-}
-
-/// `poly`'s span along `d`.
-fn extent(poly: &[[f32; 2]], d: [f32; 2]) -> (f32, f32) {
-    poly.iter()
-        .map(|&q| dot(q, d))
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
-            (lo.min(v), hi.max(v))
-        })
-}
-
-/// Cuts a convex polygon along the line through `at` with normal `n`: the
-/// part `n` points into, the rest, and the chord between them.
-#[allow(clippy::type_complexity)]
-fn split(
-    poly: &[[f32; 2]],
-    at: [f32; 2],
-    n: [f32; 2],
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 2]>) {
-    let side = |q: [f32; 2]| dot(sub(q, at), n);
-    let (mut front, mut back, mut chord) = (Vec::new(), Vec::new(), Vec::new());
-    for i in 0..poly.len() {
-        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
-        let (da, db) = (side(a), side(b));
-        if da >= 0.0 {
-            front.push(a);
-        } else {
-            back.push(a);
-        }
-        if (da >= 0.0) != (db >= 0.0) {
-            let f = da / (da - db);
-            let x = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
-            front.push(x);
-            back.push(x);
-            chord.push(x);
-        }
-    }
-    (front, back, chord)
-}
-
-fn fracture(r: &Round, seed: usize) -> Fracture {
-    let [w, h] = r.size;
-    let impact = r.impact();
-    let reach = w.hypot(h);
-    let count = lerp(12.0, 18.0, r.spec.heat).round() as usize;
-    let smallest = w * h * 0.012;
-    let mut cells: Vec<(Vec<[f32; 2]>, Vec<Cut>, bool)> = vec![(
-        vec![[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
-        Vec::new(),
-        false,
-    )];
-    let mut seams = Vec::new();
-    let mut tries = 0;
-    while cells.len() < count && tries < 64 {
-        tries += 1;
-        // Split the cell that's biggest for how near the hit it is.
-        let Some(ci) = (0..cells.len()).filter(|&i| !cells[i].2).max_by(|&a, &b| {
-            let weight = |i: usize| {
-                let poly = &cells[i].0;
-                area(poly) / (0.18 + dist(centroid(poly), impact) / reach).powf(1.4)
-            };
-            weight(a).total_cmp(&weight(b))
-        }) else {
-            break;
-        };
-        let poly = cells[ci].0.clone();
-        let g = centroid(&poly);
-        let away = sub(g, impact);
-        let len = away[0].hypot(away[1]);
-        let radial = if len > 1.0 {
-            [away[0] / len, away[1] / len]
-        } else {
-            [0.0, 1.0]
-        };
-        let around = [-radial[1], radial[0]];
-        // Cut across its long way: a ring crack across a long radial
-        // piece, a radial crack across a wide one.
-        let (lo_r, hi_r) = extent(&poly, radial);
-        let (lo_a, hi_a) = extent(&poly, around);
-        let normal = if hi_r - lo_r > hi_a - lo_a {
-            radial
-        } else {
-            around
-        };
-        let mut done = false;
-        for attempt in 0..6 {
-            let s = seed + tries * 101 + attempt * 13;
-            let turn = rnd(s, -0.45, 0.45);
-            let (sn, cs) = turn.sin_cos();
-            let n = [
-                normal[0] * cs - normal[1] * sn,
-                normal[0] * sn + normal[1] * cs,
-            ];
-            let (lo, hi) = extent(&poly, n);
-            let at = dot(g, n) + (hi - lo) * rnd(s + 1, -0.18, 0.18);
-            let point = [n[0] * at, n[1] * at];
-            let (front, back, chord) = split(&poly, point, n);
-            let (fa, ba) = (area(&front), area(&back));
-            if chord.len() != 2 || fa.min(ba) < smallest.max((fa + ba) * 0.16) {
-                continue;
-            }
-            seams.push((chord[0], chord[1]));
-            let mut front_cuts = cells[ci].1.clone();
-            let mut back_cuts = front_cuts.clone();
-            front_cuts.push((point, n));
-            back_cuts.push((point, [-n[0], -n[1]]));
-            cells[ci] = (front, front_cuts, false);
-            cells.push((back, back_cuts, false));
-            done = true;
-            break;
-        }
-        if !done {
-            cells[ci].2 = true;
-        }
-    }
-    let i = r.spec.heat;
-    let [dx, dy] = r.heading();
-    let speed = lerp(300.0, 680.0, i);
-    let pieces = cells
-        .into_iter()
-        .enumerate()
-        .map(|(n, (poly, cuts, _))| {
-            // Only the cuts that still touch it bound it.
-            let cuts = cuts
-                .into_iter()
-                .filter(|&(at, nrm)| poly.iter().any(|&q| dot(sub(q, at), nrm).abs() < 0.5))
-                .collect();
-            let g = centroid(&poly);
-            let s = seed + 401 + n * 53;
-            let rx = (g[0] - w * 0.5) / (w * 0.5);
-            let ry = (g[1] - h * 0.5) / (h * 0.5);
-            let rl = rx.hypot(ry) + 0.3;
-            // Small pieces near the hit fly hardest.
-            let near = 1.0 - (dist(g, impact) / reach).min(1.0);
-            let sp = speed * rnd(s, 0.7, 1.15) * lerp(0.85, 1.25, near);
-            let ox = rx / rl + dx * 0.6 + rnd(s + 1, -0.15, 0.15);
-            let oy = ry / rl * 1.2 + dy * 0.6 - 0.35 + rnd(s + 2, -0.15, 0.15);
-            Piece {
-                poly,
-                cuts,
-                centroid: g,
-                v: [ox * sp, oy * sp],
-                spin: rnd(s + 3, 1.5, 5.5) * if ox < 0.0 { -1.0 } else { 1.0 },
-                life: rnd(s + 4, 0.7, 1.0),
-            }
-        })
-        .collect();
-    Fracture { pieces, seams }
-}
-
 /// What's left of the certificate clears fast once the share card shows.
 fn reward_fade(s: &Schedule, ri: usize, t: f64) -> f32 {
     if ri == 2 {
@@ -1183,198 +936,6 @@ fn reward_fade(s: &Schedule, ri: usize, t: f64) -> f32 {
         1.0
     }
 }
-
-/// A frame for the clip chain: local point `q` sits at card point
-/// `origin + R(angle)·q`.
-#[derive(Clone, Copy)]
-struct Frame {
-    origin: [f32; 2],
-    angle: f32,
-}
-
-fn rot(v: [f32; 2], a: f32) -> [f32; 2] {
-    let (s, c) = a.sin_cos();
-    [c * v[0] - s * v[1], s * v[0] + c * v[1]]
-}
-
-impl Frame {
-    /// Card point `x` in this frame's local coordinates.
-    fn local(self, x: [f32; 2]) -> [f32; 2] {
-        rot(sub(x, self.origin), -self.angle)
-    }
-}
-
-/// One piece of the card, clipped to its polygon: each cut is a node turned
-/// so the cut runs along its top edge, clipping everything inside it to the
-/// cut's far side; the card's face sits inside the last one, turned back.
-#[allow(clippy::too_many_arguments)]
-fn piece(
-    p: Paint,
-    ri: usize,
-    n: usize,
-    r: &Round,
-    pc: &Piece,
-    face_el: El,
-    motion: ([f32; 2], f32, f32, f32),
-    heat: f32,
-) -> El {
-    let (offset, angle, scale, opacity) = motion;
-    let [w, h] = r.size;
-    let g = pc.centroid;
-    let pad = 2.0;
-    let (x0, x1) = extent(&pc.poly, [1.0, 0.0]);
-    let (y0, y1) = extent(&pc.poly, [0.0, 1.0]);
-    let (x0, y0, x1, y1) = (x0 - pad, y0 - pad, x1 + pad, y1 + pad);
-    let mut frame = Frame {
-        origin: [x0, y0],
-        angle: 0.0,
-    };
-    // Outermost first; built inside out below.
-    let mut nodes: Vec<([f32; 4], f32, f32)> = Vec::new();
-    for &(at, nrm) in &pc.cuts {
-        // The cut's frame: x along the line, y into the piece, its origin
-        // where the piece's centroid projects onto the line.
-        let theta = (-nrm[0]).atan2(nrm[1]);
-        let anchor = sub(
-            g,
-            [nrm[0] * dot(sub(g, at), nrm), nrm[1] * dot(sub(g, at), nrm)],
-        );
-        let d = [nrm[1], -nrm[0]];
-        let (lo, hi) = extent(&pc.poly, d);
-        let base = dot(anchor, d);
-        let (ua, ub) = (lo - base - pad, hi - base + pad);
-        let (_, vb) = extent(&pc.poly, nrm);
-        let depth = vb - dot(anchor, nrm) + pad;
-        let pivot = frame.local(anchor);
-        let pos = [pivot[0] + ua, pivot[1]];
-        nodes.push((
-            [pos[0], pos[1], ub - ua, depth],
-            -ua / (ub - ua),
-            theta - frame.angle,
-        ));
-        frame = Frame {
-            origin: [
-                anchor[0] + rot([ua, 0.0], theta)[0],
-                anchor[1] + rot([ua, 0.0], theta)[1],
-            ],
-            angle: theta,
-        };
-    }
-    let hot = ember_tone(p, 0.95);
-    // A hot tint over a light card reads as pink paint, so it's mostly a rim there.
-    let (tint, rim, rim_a) = if p.k.dark {
-        (0.3, 3.0, 1.0)
-    } else {
-        (0.08, 1.5, 0.7)
-    };
-    let glow = (heat > 0.03).then(|| {
-        let shape = Shape::new()
-            .fill(pc.poly.clone(), hot.alpha(tint * heat))
-            .stroke_with(
-                pc.poly.clone(),
-                true,
-                rim,
-                LineCap::Round,
-                hot.alpha(rim_a * heat),
-            );
-        canvas(shape).key("heat").absolute(0.0, 0.0).size(w, h)
-    });
-    let pivot = frame.local(g);
-    let mut inner = el()
-        .key("face")
-        .absolute(pivot[0] - g[0], pivot[1] - g[1])
-        .size(w, h)
-        .origin(g[0] / w, g[1] / h)
-        .rotate(-frame.angle)
-        .rotate_motion(Anim::INSTANT)
-        .child(face_el)
-        .children(glow);
-    for (k, ([x, y, nw, nh], pivot_x, turn)) in nodes.into_iter().enumerate().rev() {
-        inner = el()
-            .key(format!("cut{k}"))
-            .absolute(x, y)
-            .size(nw, nh)
-            .origin(pivot_x, 0.0)
-            .rotate(turn)
-            .rotate_motion(Anim::INSTANT)
-            .clip_rounded(0.0)
-            .child(inner);
-    }
-    let (bw, bh) = (x1 - x0, y1 - y0);
-    el().key(format!("piece{ri}-{n}"))
-        .absolute(r.spec.home[0] + x0, r.spec.home[1] + y0)
-        .size(bw, bh)
-        .origin((g[0] - x0) / bw, (g[1] - y0) / bh)
-        .offset(offset[0], offset[1])
-        .rotate(angle)
-        .scale(scale)
-        .opacity(opacity)
-        .offset_motion(Anim::INSTANT)
-        .rotate_motion(Anim::INSTANT)
-        .scale_motion(Anim::INSTANT)
-        .opacity_motion(Anim::INSTANT)
-        .child(inner)
-}
-
-fn fragments(p: Paint, s: &Schedule, t: f64, reduced: bool) -> Vec<El> {
-    let mut out = Vec::new();
-    if reduced {
-        return out;
-    }
-    for (ri, r) in s.rounds.iter().enumerate() {
-        let te = (t - r.shatter()) as f32;
-        if !(0.0..1.1).contains(&te) {
-            continue;
-        }
-        let [w, h] = r.size;
-        let clear = reward_fade(s, ri, t);
-        if clear <= 0.0 {
-            continue;
-        }
-        for (n, pc) in fracture(r, ri * 7919 + 13).pieces.iter().enumerate() {
-            if te >= pc.life {
-                continue;
-            }
-            let g = pc.centroid;
-            let ([px, py], _) = ballistic([0.0, 0.0], pc.v, SLAB_DRAG, SLAB_GRAVITY, te);
-            let ang = pc.spin * (1.0 - (-1.4 * te).exp()) / 1.4;
-            // Falls away from the camera: starts at the hit-stop's swell, then shrinks.
-            let depth = lerp(SWELL, 0.84, 1.0 - (-2.4 * te).exp());
-            let grow = depth - 1.0;
-            let fade = ((pc.life - te) / (pc.life * 0.45)).min(1.0) * clear;
-            let heat = (-te / 0.2).exp();
-            let offset = [px + (g[0] - w * 0.5) * grow, py + (g[1] - h * 0.5) * grow];
-            out.push(piece(
-                p,
-                ri,
-                n,
-                r,
-                pc,
-                face(p, ri, r, r.shatter(), [0.0, 0.0]),
-                (offset, ang, depth, fade),
-                heat,
-            ));
-        }
-    }
-    out
-}
-
-/// Small chips spraying out of the cracks: splinters that fly faster than
-/// the slabs, tumbling under drag and gravity and catching the light as
-/// they turn.
-struct Shard {
-    at: [f32; 2],
-    v: [f32; 2],
-    spin: f32,
-    life: f32,
-    verts: [[f32; 2]; 3],
-    tint: f32,
-}
-
-const SHARD_DRAG: f32 = 2.6;
-const SHARD_GRAVITY: f32 = 620.0;
-const SPARK_DRAG: f32 = 4.2;
-const SPARK_GRAVITY: f32 = 380.0;
 
 fn ballistic(at: [f32; 2], v: [f32; 2], drag: f32, gravity: f32, t: f32) -> ([f32; 2], [f32; 2]) {
     let decay = (-drag * t).exp();
@@ -1389,377 +950,378 @@ fn ballistic(at: [f32; 2], v: [f32; 2], drag: f32, gravity: f32, t: f32) -> ([f3
     )
 }
 
-fn shards(r: &Round, seed: usize) -> Vec<Shard> {
-    let [w, h] = r.size;
-    let i = r.spec.heat;
-    let seams = fracture(r, seed).seams;
-    let [dx, dy] = r.heading();
-    let [hx, hy] = r.spec.home;
-    let speed = lerp(480.0, 1100.0, i);
-    let count = lerp(36.0, 72.0, i).round() as usize;
-    (0..count)
-        .map(|n| {
-            let s = seed + 3001 + n * 23;
-            let (a, b) = seams[n % seams.len()];
-            let f = rnd(s, 0.05, 0.95);
-            let at = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
-            let (rx, ry) = ((at[0] - w * 0.5) / (w * 0.5), (at[1] - h * 0.5) / (h * 0.5));
-            let rl = rx.hypot(ry) + 0.35;
-            let sp = speed * rnd(s + 1, 0.45, 1.25);
-            let ox = rx / rl * 0.85 + dx * 0.8 + rnd(s + 2, -0.45, 0.45);
-            let oy = ry / rl * 0.85 + dy * 0.8 + rnd(s + 3, -0.45, 0.45) - 0.1;
-            let size = rnd(s + 4, 3.0, 9.0);
-            let verts = [0.0, 2.2, 4.1].map(|turn: f32| {
-                let ang = turn + rnd(s + 5 + (turn * 3.0) as usize, -0.5, 0.5);
-                let reach = size * rnd(s + 9 + (turn * 3.0) as usize, 0.6, 1.2);
-                [ang.cos() * reach, ang.sin() * reach]
-            });
-            Shard {
-                at: [hx + at[0], hy + at[1]],
-                v: [ox * sp, oy * sp],
-                spin: rnd(s + 6, -14.0, 14.0),
-                life: rnd(s + 7, 0.45, 0.95),
-                verts,
-                tint: rnd(s + 8, 0.0, 1.0),
-            }
+/// The strike, after Psychopomp's lightning: through the hit-stop a stepped
+/// leader feels its way up from the HUD to where the last word hit, then
+/// return strokes light the channel white-hot and flash the card, each
+/// cooling to an afterglow.
+const STROKES: u32 = 3;
+const LEADER_STEP: f32 = 1.0 / 60.0;
+const STROKE_HOLD: f32 = 0.014;
+const CORE_DECAY: f32 = 0.03;
+const AFTERGLOW_DECAY: f32 = 0.065;
+const AFTERGLOW: f32 = 0.6;
+/// How far a bolt's midpoints wander, against each segment's length, by
+/// subdivision level: coarse bends, then finer and finer kinks.
+const ROUGHNESS: [f32; 6] = [0.55, 0.8, 1.0, 1.1, 1.2, 1.25];
+/// How much of each coarse level a re-strike redraws: the channel keeps
+/// its big bends and gets new fine detail.
+const SWAY: [f32; 3] = [0.25, 0.4, 0.6];
+/// Ash flakes shed at each card's rim, and sparks at the strike.
+const ASH: usize = 150;
+const SPARKS: usize = 26;
+
+fn hash(seed: u32, salt: u32) -> f32 {
+    let mut h = seed.wrapping_mul(0x9E37_79B1) ^ salt.wrapping_mul(0x85EB_CA77);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h = h.wrapping_mul(0x297A_2D39);
+    h ^= h >> 15;
+    (h >> 8) as f32 / 16_777_216.0
+}
+
+/// When stroke `k` lands, in seconds after the shatter.
+fn stroke_at(seed: u32, k: u32) -> f32 {
+    (0..k).map(|i| 0.045 + 0.065 * hash(seed, 101 + i)).sum()
+}
+
+fn strength(seed: u32, k: u32) -> f32 {
+    if k == 0 {
+        1.0
+    } else {
+        0.55 + 0.4 * hash(seed, 211 + k)
+    }
+}
+
+/// A stroke `since` seconds old fades out over the second half of its glow.
+fn rest(since: f32) -> f32 {
+    1.0 - smooth(AFTERGLOW * 0.5, AFTERGLOW, since)
+}
+
+/// A stroke's white-hot core and its cooling afterglow, `since` seconds in.
+fn stroke_light(seed: u32, k: u32, since: f32) -> (f32, f32) {
+    if !(0.0..AFTERGLOW).contains(&since) {
+        return (0.0, 0.0);
+    }
+    let decay = if since < STROKE_HOLD {
+        1.0
+    } else {
+        (-(since - STROKE_HOLD) / CORE_DECAY).exp()
+    };
+    let s = strength(seed, k) * rest(since);
+    (s * decay, 0.45 * s * (-since / AFTERGLOW_DECAY).exp())
+}
+
+/// How far up the channel the leader has stepped, `0..1`, while it's out.
+fn leader(te: f32) -> Option<f32> {
+    let length = HITSTOP as f32;
+    (0.0..length).contains(&te).then(|| {
+        let steps = (length / LEADER_STEP).ceil();
+        (((te / LEADER_STEP).floor() + 1.0) / (steps + 1.0)).min(0.95)
+    })
+}
+
+/// How brightly the strike lights the card at `te` seconds after the
+/// hit-stop starts: faint under the leader, flashing on each stroke.
+fn strike_light(seed: u32, te: f32) -> f32 {
+    if let Some(progress) = leader(te) {
+        return 0.25 + 0.2 * progress;
+    }
+    let since = te - HITSTOP as f32;
+    (0..STROKES)
+        .map(|k| {
+            let (core, glow) = stroke_light(seed, k, since - stroke_at(seed, k));
+            core + 0.6 * glow
+        })
+        .fold(0.0, f32::max)
+}
+
+/// A jagged channel along `base` by midpoint displacement. `shape` holds
+/// its coarse bends across re-strikes; `strike` redraws its fine detail.
+fn jag(
+    base: impl Fn(f32) -> [f32; 2],
+    levels: u32,
+    shape: u32,
+    strike: u32,
+    amplitude: f32,
+) -> Vec<[f32; 2]> {
+    let n = 1usize << levels;
+    let points: Vec<[f32; 2]> = (0..=n).map(|i| base(i as f32 / n as f32)).collect();
+    let deviate = |level: u32, index: u32, salt: u32| {
+        let key = index.wrapping_mul(0x9E37_79B1) ^ level.wrapping_mul(0x85EB_CA77) ^ salt;
+        let fine = hash(strike ^ key, 0x51ED) * 2.0 - 1.0;
+        let fine = fine.signum() * fine.abs().powf(0.7);
+        match SWAY.get(level as usize) {
+            Some(&sway) => lerp(hash(shape ^ key, 0x2C1B) * 2.0 - 1.0, fine, sway),
+            None => fine,
+        }
+    };
+    let mut across = vec![0.0f32; n + 1];
+    let mut along = vec![0.0f32; n + 1];
+    for level in 0..levels {
+        let stride = n >> level;
+        let half = stride / 2;
+        for segment in 0..n / stride {
+            let (start, end) = (segment * stride, segment * stride + stride);
+            let reach = amplitude * dist(points[start], points[end]) * ROUGHNESS[level as usize];
+            let mid = start + half;
+            across[mid] =
+                (across[start] + across[end]) * 0.5 + deviate(level, segment as u32, 1) * reach;
+            along[mid] = (along[start] + along[end]) * 0.5
+                + deviate(level, segment as u32, 2) * reach * 0.22;
+        }
+    }
+    (0..=n)
+        .map(|i| {
+            let a = points[i.saturating_sub(1)];
+            let b = points[(i + 1).min(n)];
+            let l = dist(a, b).max(1e-4);
+            let t = [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+            [
+                points[i][0] - t[1] * across[i] + t[0] * along[i],
+                points[i][1] + t[0] * across[i] + t[1] * along[i],
+            ]
         })
         .collect()
 }
 
-struct Spark {
-    at: [f32; 2],
-    v: [f32; 2],
-    life: f32,
-    heat: f32,
-    size: f32,
-    gravity: f32,
+fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
 }
 
-fn sparks(r: &Round, seed: usize) -> Vec<Spark> {
-    let i = r.spec.heat;
-    let [dx, dy] = r.heading();
-    let [cx, cy] = r.centre();
-    let [hw, hh] = [r.size[0] * 0.5, r.size[1] * 0.5];
-    let mut out = Vec::new();
-    for n in 0..(lerp(18.0, 60.0, i).round() as usize) {
-        let s = seed + n * 11;
-        let a = rnd(s, 0.0, std::f32::consts::TAU);
-        let sp = rnd(s + 1, 500.0, 1800.0);
-        out.push(Spark {
-            at: [cx, cy],
-            v: [a.cos() * sp + dx * 400.0, a.sin() * sp + dy * 400.0],
-            life: rnd(s + 2, 0.18, 0.5),
-            heat: 1.0,
-            size: rnd(s + 3, 1.4, 2.6),
-            gravity: SPARK_GRAVITY,
-        });
-    }
-    for n in 0..10 {
-        let s = seed + 997 + n * 13;
-        let a = rnd(s, 0.0, std::f32::consts::TAU);
-        let sp = rnd(s + 1, 40.0, 200.0);
-        out.push(Spark {
-            at: [cx + rnd(s + 2, -40.0, 40.0), cy + rnd(s + 3, -14.0, 14.0)],
-            v: [a.cos() * sp, a.sin() * sp - 40.0],
-            life: rnd(s + 4, 0.8, 1.5),
-            heat: 0.0,
-            size: rnd(s + 5, 1.2, 2.0),
-            gravity: SPARK_GRAVITY,
-        });
-    }
-    // Buoyant embers rising off a big blast.
-    let pyro = smooth(0.32, 0.92, i);
-    for n in 0..(lerp(8.0, 28.0, pyro).round() as usize) {
-        let s = seed + 1999 + n * 17;
-        let a = rnd(s, 0.0, std::f32::consts::TAU);
-        let sp = rnd(s + 1, 60.0, 260.0);
-        out.push(Spark {
-            at: [
-                cx + rnd(s + 2, -hw * 0.65, hw * 0.65),
-                cy + rnd(s + 3, -hh * 0.45, hh * 0.45),
-            ],
-            v: [
-                a.cos() * sp + dx * 110.0,
-                -rnd(s + 4, 120.0, 360.0) + a.sin() * 60.0,
-            ],
-            life: rnd(s + 5, 0.65, 1.45),
-            heat: rnd(s + 6, 0.75, 1.0),
-            size: rnd(s + 7, 1.6, 3.0),
-            gravity: -SPARK_GRAVITY * 0.25,
-        });
-    }
-    out
+fn length(points: &[[f32; 2]]) -> f32 {
+    points.windows(2).map(|w| dist(w[0], w[1])).sum()
 }
 
-/// A stroked circle as a native rounded box, so it stays round at any size.
-fn ring(key: String, centre: [f32; 2], r: f32, width: f32, color: Color) -> El {
-    let outer = r + width * 0.5;
-    el().key(key)
-        .absolute(centre[0] - outer, centre[1] - outer)
-        .size(2.0 * outer, 2.0 * outer)
-        .radius(outer)
-        .border(width, color)
-}
-
-/// The shockwave (the site's kind 0: cubic ease-out, hot cooling to
-/// ember) and the slower pressure ring behind it (kind 10).
-fn rings(p: Paint, s: &Schedule, t: f64, reduced: bool) -> Vec<El> {
-    let mut out = Vec::new();
-    if reduced {
-        return out;
-    }
-    for (ri, r) in s.rounds.iter().enumerate() {
-        let te = (t - r.shatter()) as f32;
-        if !(0.0..1.0).contains(&te) {
-            continue;
+/// The point `f` of the way along a path.
+fn along(points: &[[f32; 2]], f: f32) -> [f32; 2] {
+    let mut left = length(points) * f.clamp(0.0, 1.0);
+    for w in points.windows(2) {
+        let d = dist(w[0], w[1]);
+        if left <= d && d > 0.0 {
+            let u = left / d;
+            return [lerp(w[0][0], w[1][0], u), lerp(w[0][1], w[1][1], u)];
         }
-        let size = r.size[0].max(r.size[1]);
-        let i = r.spec.heat;
-        let centre = r.centre();
-        let pyro = smooth(0.32, 0.92, i);
-        let u = te / 0.36;
-        if u < 1.0 {
-            let rad = (size * 0.42 + 36.0) * lerp(0.9, 1.25, i) * (1.0 - (1.0 - u).powi(3));
-            let width = lerp(2.4, 3.4, pyro) * (1.0 - u * 0.8);
-            let fade = (1.0 - u) * (1.0 - u);
-            let color = ember_tone(p, 1.0 - u * 0.5).alpha(0.9 * fade);
-            out.push(ring(
-                format!("shock{ri}"),
-                centre,
-                rad.max(1.0),
-                width,
-                color,
-            ));
-        }
-        let u = (te - 0.04) / lerp(0.4, 0.6, i);
-        if (0.0..1.0).contains(&u) {
-            let rad = (size * 0.55 + 50.0) * (0.3 + 0.7 * (1.0 - (1.0 - u).powf(2.2)));
-            let color = ember_tone(p, 0.7).alpha(0.35 * (1.0 - u));
-            out.push(ring(format!("pressure{ri}"), centre, rad, 1.2, color));
-        }
+        left -= d;
     }
-    out
+    *points.last().unwrap_or(&[0.0, 0.0])
 }
 
-fn debris(p: Paint, s: &Schedule, t: f64, reduced: bool) -> El {
-    let k = p.k;
-    let mut shape = Shape::new();
-    if !reduced {
-        let fill = if k.dark {
-            k.c.surface_raised
+/// A channel and its forks: each fork as its path, where it leaves the
+/// channel (a fraction of the channel's length), and its brightness.
+struct Channel {
+    main: Vec<[f32; 2]>,
+    forks: Vec<(Vec<[f32; 2]>, f32, f32)>,
+}
+
+fn channel(from: [f32; 2], to: [f32; 2], shape: u32, strike: u32) -> Channel {
+    let main = jag(
+        |u| [lerp(from[0], to[0], u), lerp(from[1], to[1], u)],
+        6,
+        shape,
+        strike,
+        0.3,
+    );
+    let total = length(&main).max(1.0);
+    let heading = [(to[0] - from[0]) / total, (to[1] - from[1]) / total];
+    let mut forks = Vec::new();
+    for b in 0..(3 + (hash(strike, 301) * 3.0) as u32) {
+        let salt = 310 + b * 13;
+        let fork = 0.1 + 0.7 * hash(strike, salt).powf(1.3);
+        let side = if hash(strike, salt + 1) < 0.5 {
+            -1.0
         } else {
-            k.c.bg_base
+            1.0
         };
-        let shade = fill.mix(k.c.text_base, if k.dark { 0.06 } else { 0.1 });
-        let shine = if k.dark { k.c.text_strong } else { k.c.white };
-        for (ri, r) in s.rounds.iter().enumerate() {
-            let te = (t - r.shatter()) as f32;
-            if !(0.0..1.6).contains(&te) {
+        let turn = side * (0.35 + 0.5 * hash(strike, salt + 2));
+        let (s, c) = turn.sin_cos();
+        let d = [
+            c * heading[0] - s * heading[1],
+            s * heading[0] + c * heading[1],
+        ];
+        let reach = total * (0.12 + 0.22 * hash(strike, salt + 3)) * (1.0 - 0.5 * fork);
+        let start = along(&main, fork);
+        let twig = jag(
+            |u| [start[0] + d[0] * reach * u, start[1] + d[1] * reach * u],
+            4,
+            shape ^ salt,
+            strike ^ salt,
+            0.34,
+        );
+        forks.push((twig, fork, 0.4 + 0.25 * hash(strike, salt + 5)));
+    }
+    Channel { main, forks }
+}
+
+/// A card point on the stage: cards swell about their centre.
+fn on_stage(r: &Round, local: [f32; 2], scale: f32) -> [f32; 2] {
+    let c = [r.size[0] * 0.5, r.size[1] * 0.5];
+    [
+        r.spec.home[0] + c[0] + (local[0] - c[0]) * scale,
+        r.spec.home[1] + c[1] + (local[1] - c[1]) * scale,
+    ]
+}
+
+fn seed_of(ri: usize) -> u32 {
+    (ri * 7919 + 13) as u32
+}
+
+/// Whether a card is still burning at `t`, and how far in (seconds).
+fn burning(r: &Round, t: f64) -> Option<f32> {
+    let age = (t - r.shatter()) as f32;
+    (0.0..BURN + 0.05).contains(&age).then_some(age)
+}
+
+/// The strike and burn's colours: a white-hot core and an ember corona on a
+/// dark page; on a light one, deep ember paint and a brown char.
+fn tones(p: Paint) -> Tones {
+    let k = p.k;
+    if k.dark {
+        Tones {
+            core: k.c.text_strong,
+            corona: ember_tone(p, 0.55),
+            scorch: k.c.black.mix(ember_tone(p, 0.2), 0.15),
+            ash: k.c.text_weak.alpha(0.85),
+        }
+    } else {
+        Tones {
+            core: ember_tone(p, 1.0),
+            corona: ember_tone(p, 0.6),
+            scorch: k.c.black.mix(ember_tone(p, 0.9), 0.3),
+            ash: k.c.text_muted.alpha(0.8),
+        }
+    }
+}
+
+/// This frame's strike and burn for the compositor (`game_fx`).
+fn fx(p: Paint, s: &Schedule, t: f64, reduced: bool) -> Fx {
+    let mut fx = Fx {
+        dark: p.k.dark,
+        tones: tones(p),
+        ..Fx::default()
+    };
+    if reduced {
+        return fx;
+    }
+    let source = [HUD_AT[0], HUD_AT[1] - 15.0];
+    for (ri, r) in s.rounds.iter().enumerate() {
+        let seed = seed_of(ri);
+        let clear = reward_fade(s, ri, t);
+        let impact = on_stage(r, r.impact(), SWELL);
+        let te = (t - r.explode) as f32;
+        if (0.0..HITSTOP as f32 + 1.0).contains(&te) && clear > 0.0 {
+            bolts(&mut fx, seed, source, impact, te, clear);
+        }
+        if let Some(age) = burning(r, t) {
+            fx.burns.push(Burn {
+                card: ri,
+                size: r.size,
+                impact: r.impact(),
+                age,
+                seed,
+            });
+        }
+        let age = (t - r.shatter()) as f32;
+        if (0.0..BURN + 1.6).contains(&age) && clear > 0.0 {
+            ash(&mut fx, r, seed, age, clear);
+            sparks(&mut fx, seed, impact, source, age, clear);
+        }
+    }
+    fx
+}
+
+fn bolts(fx: &mut Fx, seed: u32, from: [f32; 2], to: [f32; 2], te: f32, clear: f32) {
+    let mut push = |c: &Channel, core: f32, glow: f32, reach: f32| {
+        if core + glow < 0.01 {
+            return;
+        }
+        let total = length(&c.main);
+        fx.bolts.push(Bolt {
+            points: c.main.clone(),
+            width: 1.3,
+            core: core * clear,
+            glow: glow * clear,
+            drawn: total * reach,
+        });
+        for (twig, fork, energy) in &c.forks {
+            if reach <= *fork {
                 continue;
             }
-            let seed = ri * 7919 + 13;
-            let clear = reward_fade(s, ri, t);
-            for sh in shards(r, seed) {
-                if te >= sh.life {
-                    continue;
-                }
-                let ([x, y], _) = ballistic(sh.at, sh.v, SHARD_DRAG, SHARD_GRAVITY, te);
-                let ang = sh.spin * (1.0 - (-0.95 * te).exp()) / 0.95;
-                let tumble = 1.0 + (sh.spin.abs() * 0.65 + 2.5) * te + sh.tint * 6.0;
-                let tilt = 0.25 + 0.75 * tumble.cos().abs();
-                let (sin, cos) = ang.sin_cos();
-                let pts: Vec<[f32; 2]> = sh
-                    .verts
-                    .iter()
-                    .map(|&[vx, vy]| {
-                        let vx = vx * tilt;
-                        [x + vx * cos - vy * sin, y + vx * sin + vy * cos]
-                    })
-                    .collect();
-                let left = sh.life - te;
-                let fade = (left / (sh.life * 0.35)).min(1.0) * clear;
-                let heat = (-te / 0.25).exp();
-                // A chip flashes as its face turns to the light.
-                let glint = tumble.cos().max(0.0).powi(8);
-                let face = if sh.tint > 0.6 { shade } else { fill }
-                    .mix(shine, 0.35 * glint)
-                    .mix(ember_tone(p, 0.8), 0.6 * heat);
-                shape = shape.fill(pts.clone(), face.alpha(fade));
-                let edge = k.c.border_base.mix(ember_tone(p, 0.85), heat);
-                shape = shape.stroke_with(pts, true, 0.8, LineCap::Round, edge.alpha(fade));
-            }
-            for sp in sparks(r, seed) {
-                if te >= sp.life {
-                    continue;
-                }
-                let left = 1.0 - te / sp.life;
-                let ([x, y], [vx, vy]) = ballistic(sp.at, sp.v, SPARK_DRAG, sp.gravity, te);
-                let streak = 1.6 / 60.0 * 0.5;
-                let color = if sp.heat > 0.0 {
-                    k.c.bg_base
-                        .mix(ember_tone(p, sp.heat * left), (left * 0.9).clamp(0.0, 1.0))
-                } else {
-                    k.c.bg_base.mix(k.c.text_weak, left * 0.6)
-                };
-                shape = shape.line(
-                    [x - vx * streak, y - vy * streak],
-                    [x + vx * streak + 0.1, y + vy * streak],
-                    sp.size,
-                    LineCap::Round,
-                    color.alpha(clear),
-                );
-            }
+            fx.bolts.push(Bolt {
+                points: twig.clone(),
+                width: 0.75,
+                core: core * energy * clear,
+                glow: glow * energy * clear,
+                drawn: (reach - fork) * total,
+            });
         }
-    }
-    canvas(shape)
-        .key("debris")
-        .absolute(0.0, 0.0)
-        .size(STAGE_W, STAGE_H)
-}
-
-/// A soft disc lit from inside: `core` at the centre, through `shell`, to
-/// nothing at the rim.
-fn blob(key: String, centre: [f32; 2], r: f32, core: Color, shell: Color) -> El {
-    el().key(key)
-        .absolute(centre[0] - r, centre[1] - r)
-        .size(2.0 * r, 2.0 * r)
-        .radial_gradient(
-            [0.5, 0.5],
-            r,
-            [
-                (0.0, core),
-                (0.3, shell),
-                (0.65, shell.alpha(shell.a * 0.35)),
-                (1.0, shell.alpha(0.0)),
-            ],
-        )
-}
-
-/// A fireball's core and shell `age` seconds in: white-hot for 70 ms, ember
-/// cooling over the next 250 ms, then smoke.
-fn fire(p: Paint, age: f32, smoke: Color) -> (Color, Color) {
-    let white = if p.k.dark {
-        p.k.c.text_strong
-    } else {
-        p.k.c.white
     };
-    let core = white
-        .mix(ember_tone(p, 0.95), smooth(0.05, 0.09, age))
-        .mix(ember_tone(p, 0.5), smooth(0.09, 0.34, age))
-        .mix(smoke, smooth(0.34, 0.6, age));
-    let shell = ember_tone(p, 0.85)
-        .mix(ember_tone(p, 0.4), smooth(0.0, 0.3, age))
-        .mix(smoke, smooth(0.3, 0.55, age));
-    (core, shell)
+    if let Some(progress) = leader(te) {
+        let c = channel(from, to, seed, hash(seed, 400).to_bits());
+        push(&c, 0.0, 0.3 + 0.25 * progress, progress);
+        return;
+    }
+    let since = te - HITSTOP as f32;
+    for k in 0..STROKES {
+        let (core, glow) = stroke_light(seed, k, since - stroke_at(seed, k));
+        let c = channel(from, to, seed, hash(seed, 401 + k).to_bits());
+        push(&c, core, glow, 1.0);
+    }
 }
 
-/// The site's volumetric pieces as radial glows: the flash (kind 1), the
-/// blast light on its neighbours, fireball lobes cooling to smoke (kind 8),
-/// and smoke plumes rising after them (kind 9).
-fn glows(p: Paint, ri: usize, r: &Round, t: f64, reduced: bool) -> Vec<El> {
-    let te = (t - r.shatter()) as f32;
-    if reduced || !(0.0..2.0).contains(&te) {
-        return Vec::new();
-    }
-    let k = p.k;
-    let i = r.spec.heat;
-    let pyro = smooth(0.32, 0.92, i).max(0.35);
-    let size = r.size[0].max(r.size[1]);
-    let [cx, cy] = r.centre();
-    let [dx, dy] = r.heading();
-    let seed = ri * 4513 + 7;
-    let smoke = if k.dark {
-        k.c.text_weak
-    } else {
-        k.c.text_muted
-    };
-    // Light on a light page reads as paint, so it's much thinner there.
-    let thin = if k.dark { 1.0 } else { 0.25 };
-    let mut out = Vec::new();
-
-    let u = te / 0.38;
-    if u < 1.0 {
-        let rad = (size * 0.45 + 50.0) * lerp(0.9, 1.3, pyro) * 1.3;
-        let a = 0.18 * thin * (1.0 - u).powf(1.85);
-        let light = ember_tone(p, 0.6);
-        out.push(blob(
-            format!("light{ri}"),
-            [cx, cy],
-            rad,
-            light.alpha(a),
-            light.alpha(a * 0.55),
-        ));
-    }
-    let lobes = if pyro > 0.55 { 3 } else { 2 };
-    for li in 0..lobes {
-        let s = seed + li * 19;
-        // Each lobe kindles a beat after the one before.
-        let age = te - li as f32 * 0.025;
-        let life = lerp(0.58, 0.92, pyro);
-        let u = age / life;
-        if !(0.0..1.0).contains(&u) {
-            continue;
-        }
-        let (ox, oy) = if li == 0 {
-            (0.0, 0.0)
-        } else {
-            (
-                rnd(s, -r.size[0] * 0.22, r.size[0] * 0.22),
-                rnd(s + 1, -r.size[1] * 0.17, r.size[1] * 0.17),
-            )
-        };
-        let r0 = if li == 0 { size * 0.13 } else { size * 0.1 } * lerp(0.85, 1.3, pyro);
-        let rad = lerp(r0, r0 * lerp(1.6, 2.0, pyro), 1.0 - (1.0 - u).powf(2.2)) * 1.4;
-        let vx = dx * rnd(s + 2, 25.0, 70.0) + ox * 0.6;
-        let vy = -rnd(s + 3, 28.0, 65.0) + dy * 25.0;
-        let at = [cx + ox + vx * age, cy + oy + vy * age];
-        let (core, shell) = fire(p, age, smoke);
-        let a = 0.5 * thin * (1.0 - u).powf(1.8) * lerp(0.85, 1.0, pyro);
-        out.push(blob(
-            format!("fire{ri}-{li}"),
-            at,
-            rad,
-            core.alpha(a),
-            shell.alpha(a * 0.7),
-        ));
-    }
-    let u = te / 0.08;
-    if u < 1.0 {
-        let rad = (size * 0.2 + 24.0) * 1.3;
-        let white = if k.dark { k.c.text_strong } else { k.c.white };
-        let a = 0.75 * (1.0 - u) * (1.0 - u);
-        out.push(blob(
-            format!("flash{ri}"),
-            [cx, cy],
-            rad,
-            white.alpha(a),
-            white.mix(ember_tone(p, 1.0), 0.35).alpha(a * 0.6),
-        ));
-    }
-    for si in 0..2 {
-        let s = seed + 300 + si * 23;
-        let age = te - 0.05 - si as f32 * 0.04;
-        let life = rnd(s, 1.15, 1.85);
-        let u = age / life;
-        if !(0.0..1.0).contains(&u) {
-            continue;
-        }
-        let r0 = size * rnd(s + 1, 0.14, 0.2);
-        let rad = lerp(r0, r0 * 2.0, 1.0 - (1.0 - u).powf(2.2)) * 1.5;
-        let at = [
-            cx + rnd(s + 2, -r.size[0] * 0.25, r.size[0] * 0.25) + rnd(s + 3, -28.0, 28.0) * age,
-            cy - rnd(s + 4, 52.0, 98.0) * age,
+/// Flakes leave the rim as the front passes their spot, glowing, and drift
+/// up as grey ash.
+fn ash(fx: &mut Fx, r: &Round, seed: u32, age: f32, clear: f32) {
+    let impact = r.impact();
+    for n in 0..ASH as u32 {
+        let local = [
+            hash(seed ^ 0xA5, n * 3) * r.size[0],
+            hash(seed ^ 0xA5, n * 3 + 1) * r.size[1],
         ];
-        let a = 0.12 * thin * (u * std::f32::consts::PI).sin();
-        out.push(blob(
-            format!("smoke{ri}-{si}"),
+        let born = game_fx::passes(game_fx::field(local, r.size, impact, seed));
+        let life = lerp(0.6, 1.3, hash(seed, n * 7 + 2));
+        let a = age - born;
+        if !(0.0..life).contains(&a) {
+            continue;
+        }
+        let out = [local[0] - impact[0], local[1] - impact[1]];
+        let l = (out[0].hypot(out[1])).max(1.0);
+        let push = lerp(15.0, 60.0, hash(seed, n * 7 + 3));
+        let v = [
+            out[0] / l * push + lerp(-25.0, 25.0, hash(seed, n * 7 + 4)),
+            out[1] / l * push - lerp(30.0, 110.0, hash(seed, n * 7 + 5)),
+        ];
+        let (at, _) = ballistic(on_stage(r, local, SWELL), v, 1.4, -50.0, a);
+        let size = lerp(0.8, 2.2, hash(seed, n * 7 + 6).powi(2));
+        fx.motes.push(Mote {
             at,
-            rad,
-            smoke.alpha(a),
-            smoke.alpha(a * 0.6),
-        ));
+            radius: size * (1.0 - 0.3 * a / life),
+            heat: (-a / 0.16).exp(),
+            opacity: (1.0 - smooth(life * 0.45, life, a)) * clear,
+        });
     }
-    out
+}
+
+/// The strike spits sparks from where it hit, away from the channel.
+fn sparks(fx: &mut Fx, seed: u32, at: [f32; 2], from: [f32; 2], age: f32, clear: f32) {
+    let back = [from[0] - at[0], from[1] - at[1]];
+    let away = (-back[1]).atan2(-back[0]);
+    for n in 0..SPARKS as u32 {
+        let life = lerp(0.2, 0.55, hash(seed ^ 0x5A, n * 5));
+        if age >= life {
+            continue;
+        }
+        let angle = away + lerp(-1.7, 1.7, hash(seed ^ 0x5A, n * 5 + 1));
+        let speed = lerp(260.0, 900.0, hash(seed ^ 0x5A, n * 5 + 2));
+        let v = [angle.cos() * speed, angle.sin() * speed];
+        let (p, _) = ballistic(at, v, 4.2, 380.0, age);
+        fx.motes.push(Mote {
+            at: p,
+            radius: lerp(0.8, 1.5, hash(seed ^ 0x5A, n * 5 + 3)),
+            heat: 1.0 - smooth(life * 0.4, life, age),
+            opacity: (1.0 - smooth(life * 0.6, life, age)) * clear,
+        });
+    }
 }
 
 fn ease_in_out(x: f32) -> f32 {
@@ -2107,38 +1669,64 @@ mod tests {
     }
 
     #[test]
-    fn every_card_breaks_into_pieces() {
-        let s = schedule(true, true);
-        for (ri, r) in s.rounds.iter().enumerate() {
-            assert!(shards(r, 1).len() >= 24);
-            assert!(sparks(r, 1).len() >= 28);
-            let f = fracture(r, ri * 7919 + 13);
-            assert!((12..=18).contains(&f.pieces.len()), "{}", f.pieces.len());
-            // The pieces tile the card exactly, each bounded by its cuts.
-            let total: f32 = f.pieces.iter().map(|pc| area(&pc.poly)).sum();
-            let card = r.size[0] * r.size[1];
-            assert!((total - card).abs() < card * 1e-3, "{total} vs {card}");
-            for pc in &f.pieces {
-                assert!(!pc.cuts.is_empty());
-                for &(at, n) in &pc.cuts {
-                    assert!(pc.poly.iter().all(|&q| dot(sub(q, at), n) > -0.01));
-                }
-            }
+    fn the_leader_climbs_then_strokes_flash_and_fade() {
+        let seed = seed_of(1);
+        let climb: Vec<f32> = (0..4).map(|i| leader(i as f32 * 0.017).unwrap()).collect();
+        assert!(climb.windows(2).all(|w| w[1] >= w[0]), "{climb:?}");
+        assert!(leader(HITSTOP as f32).is_none());
+        let hit = HITSTOP as f32;
+        assert!(
+            strike_light(seed, hit) > 0.95,
+            "the first stroke is full strength"
+        );
+        for k in 1..STROKES {
+            let at = hit + stroke_at(seed, k);
+            assert!(at > hit + stroke_at(seed, k - 1) + 0.04);
+            assert!(strike_light(seed, at) > 0.5, "stroke {k} flashes");
+        }
+        assert!(strike_light(seed, hit + stroke_at(seed, STROKES - 1) + AFTERGLOW) < 1e-3);
+    }
+
+    #[test]
+    fn a_bolt_runs_from_the_hud_to_the_card() {
+        let (from, to) = ([440.0, 571.0], [300.0, 220.0]);
+        for k in 0..STROKES {
+            let c = channel(from, to, 7, hash(7, 401 + k).to_bits());
+            assert_eq!(c.main.len(), 65);
+            assert!(dist(c.main[0], from) < 1e-3 && dist(c.main[64], to) < 1e-3);
+            assert!(length(&c.main) < dist(from, to) * 2.5);
+            assert!(c.forks.len() >= 3);
         }
     }
 
     #[test]
-    fn a_frame_maps_its_origin_and_turns() {
-        let f = Frame {
-            origin: [10.0, 20.0],
-            angle: 0.5,
-        };
-        let q = [3.0, -4.0];
-        let x = [
-            f.origin[0] + rot(q, f.angle)[0],
-            f.origin[1] + rot(q, f.angle)[1],
-        ];
-        let back = f.local(x);
-        assert!((back[0] - q[0]).abs() < 1e-4 && (back[1] - q[1]).abs() < 1e-4);
+    fn every_card_burns_away_and_sheds_ash() {
+        let s = schedule(true, true);
+        for (ri, r) in s.rounds.iter().enumerate() {
+            let born = |t: f64| {
+                let mut fx = Fx::default();
+                ash(&mut fx, r, seed_of(ri), (t - r.shatter()) as f32, 1.0);
+                fx.motes.len()
+            };
+            assert!(born(r.shatter() + 0.4) > 10, "ash leaves the rim");
+            assert!(burning(r, r.shatter() + f64::from(BURN)).is_some());
+            assert!(burning(r, r.shatter() + f64::from(BURN) + 0.1).is_none());
+            assert!(card(paint(), ri, r, r.shatter() + 0.5, false, 1.0).is_some());
+            assert!(card(paint(), ri, r, r.shatter() + 1.1, false, 1.0).is_none());
+        }
+    }
+
+    #[test]
+    fn reduce_motion_has_no_strike() {
+        let s = schedule(true, false);
+        let t = s.rounds[0].shatter() + 0.2;
+        let fx = fx(paint(), &s, t, true);
+        assert!(fx.bolts.is_empty() && fx.motes.is_empty() && fx.burns.is_empty());
+        let fx = super::fx(paint(), &s, t, false);
+        assert!(!fx.motes.is_empty() && fx.burns.len() == 1);
+    }
+
+    fn paint() -> Paint {
+        Paint::new(true, 2.0)
     }
 }
