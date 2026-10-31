@@ -15,7 +15,14 @@ protocol ActiveAudioCapture: AnyObject {
     var isRecording: Bool { get }
     var currentTime: TimeInterval { get }
     func normalizedPowerLevel() -> Float
+    func averagePowerDB() -> Float
     func stop()
+}
+
+extension ActiveAudioCapture {
+    func averagePowerDB() -> Float {
+        DotScopeSimulation.loudness(fromNormalized: normalizedPowerLevel())
+    }
 }
 
 @MainActor
@@ -58,9 +65,13 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
         recorder.currentTime
     }
 
-    func normalizedPowerLevel() -> Float {
+    func averagePowerDB() -> Float {
         recorder.updateMeters()
-        let decibels = recorder.averagePower(forChannel: 0)
+        return recorder.averagePower(forChannel: 0)
+    }
+
+    func normalizedPowerLevel() -> Float {
+        let decibels = averagePowerDB()
         return max(0, min(1, (decibels + 48) / 48))
     }
 

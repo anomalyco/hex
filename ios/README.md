@@ -22,7 +22,7 @@ it never accesses the microphone, speech model, or network.
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain
     (`ContainingAppOpener`).
-  - **Cold start:** Tapping **Start Hex** opens the containing app
+  - **Cold start:** Tapping **Dictate** opens the containing app
     (`hex-dictation://keyboard/record?...`) with a 10-second
     handoff window, starts recording, and opens the selected host app's URL
     scheme (`messages://`, `slack://`, `claude://`, `chatgpt://`,
@@ -32,11 +32,18 @@ it never accesses the microphone, speech model, or network.
     usual return app once on the `↩` chip (or jump bar), and apps without a
     registered URL scheme fall back cleanly within ~1s to the bottom-edge swipe
     bar and quick-jump chips.
-  - **Warm session (`Off`, `5m`, `15m`, `1h`):** Keeps an `AVAudioEngine` input
-    session alive for the chosen duration (default `15m`) so subsequent taps on
-    **Dictate** record directly inside the keyboard with zero app switches. The
-    iOS orange microphone indicator stays visible while warm, and you can end
-    the warm session anytime from the app header.
+  - **GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`):**
+    Both `HEXMobile` and `HEXKeyboard` render Hex's desktop menu-bar braided
+    oscilloscope (`src/dot_scope.rs`, `src/rune_hud.wgsl`) at native display
+    refresh via `CAMetalLayer` + `CADisplayLink`, pausing at 0% CPU/GPU once
+    settled in idle. Lock Screen / Dynamic Island Live Activities render a
+    matching `Canvas` dot-matrix badge (`HexDotMatrixBadge`) because WidgetKit
+    archives static view snapshots rather than hosting live `CAMetalLayer`s.
+  - **Warm session (`Off`, `5m`, `15m`, `1h`):** Picking a duration on **Keep
+    mic warm** starts an `AVAudioEngine` input session immediately (default
+    `15m`) so subsequent taps on **Dictate** record directly inside the
+    keyboard with zero app switches; picking `Off` or tapping the header timer
+    ends it.
   - **Styles:** `Polished` (sentence case + punctuation + filler trim),
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware

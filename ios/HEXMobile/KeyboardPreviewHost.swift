@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Renders the exact `KeyboardSurfaceView` docked beneath a dark composer stage
+/// Renders `KeyboardSurfaceView` docked beneath a dark composer stage
 /// when `--snap-state keyboard-*` is passed on Simulator for deterministic UI proof.
 struct KeyboardSnapshotStage: View {
     let scene: String
@@ -19,35 +19,22 @@ struct KeyboardSnapshotStage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Messages")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                    Spacer()
-                    if viewModel.isWarmAvailable {
-                        HStack(spacing: 5) {
-                            HexStatusDot(color: HexTheme.warmMic, size: 6)
-                            Text("Mic warm")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(HexTheme.textMuted)
-                        }
-                    }
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Messages")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(HexTheme.textMuted)
 
-                HStack(alignment: .bottom, spacing: 8) {
-                    Text(composerText)
-                        .font(.system(size: 15))
-                        .foregroundStyle(composerTextIsPlaceholder ? HexTheme.textFaint : HexTheme.textBase)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: 18))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(HexTheme.borderStrong, lineWidth: 1)
-                        )
-                }
+                Text(composerText)
+                    .font(.system(size: 15))
+                    .foregroundStyle(composerTextIsPlaceholder ? HexTheme.textFaint : HexTheme.textBase)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(HexTheme.borderWeak, lineWidth: 1)
+                    )
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 14)
@@ -69,7 +56,7 @@ struct KeyboardSnapshotStage: View {
         switch scene {
         case "keyboard-warm":
             "let's ship the iOS keyboard build tonight"
-        case "keyboard-recording":
+        case "keyboard-recording", "keyboard-transcribing":
             "Sending over the TestFlight invite…"
         default:
             "Message"
@@ -77,7 +64,7 @@ struct KeyboardSnapshotStage: View {
     }
 
     private var composerTextIsPlaceholder: Bool {
-        scene != "keyboard-warm" && scene != "keyboard-recording"
+        scene != "keyboard-warm" && scene != "keyboard-recording" && scene != "keyboard-transcribing"
     }
 
     private func configureScene() {
@@ -113,6 +100,16 @@ struct KeyboardSnapshotStage: View {
                 expiresAt: now + 15 * 60,
                 recordingStartedAt: now - 5,
                 audioLevel: 0.78,
+                loudnessDB: -31.0,
+                jobID: "snap-job"
+            )
+
+        case "keyboard-transcribing":
+            viewModel.style = .polished
+            viewModel.snapshot = KeyboardSnapshot(
+                state: .transcribing,
+                heartbeat: now - 0.05,
+                expiresAt: now + 15 * 60,
                 jobID: "snap-job"
             )
 

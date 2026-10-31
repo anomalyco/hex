@@ -223,6 +223,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     let expiresAt: TimeInterval
     let recordingStartedAt: TimeInterval?
     let audioLevel: Float
+    let loudnessDB: Float?
     let jobID: String?
     let resultID: String?
     let resultExpiresAt: TimeInterval?
@@ -235,6 +236,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         expiresAt: TimeInterval,
         recordingStartedAt: TimeInterval? = nil,
         audioLevel: Float = 0,
+        loudnessDB: Float? = nil,
         jobID: String? = nil,
         resultID: String? = nil,
         resultExpiresAt: TimeInterval? = nil,
@@ -246,11 +248,16 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
         self.recordingStartedAt = recordingStartedAt
         self.audioLevel = audioLevel
+        self.loudnessDB = loudnessDB
         self.jobID = jobID
         self.resultID = resultID
         self.resultExpiresAt = resultExpiresAt
         self.transcript = transcript
         self.message = message
+    }
+
+    var effectiveLoudnessDB: Float {
+        loudnessDB ?? DotScopeSimulation.loudness(fromNormalized: audioLevel)
     }
 
     static let offline = KeyboardSnapshot(
