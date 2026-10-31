@@ -27,12 +27,29 @@ fn exempt(arguments: &[std::ffi::OsString]) -> bool {
 
 /// Exits with a clear message on a processor below the floor.
 pub fn require() {
-    if supported() || exempt(&std::env::args_os().collect::<Vec<_>>()) {
+    let arguments = std::env::args_os().collect::<Vec<_>>();
+    if supported() || exempt(&arguments) {
         return;
     }
     eprintln!("{MESSAGE}");
-    show();
-    std::process::exit(1);
+    // Under a service manager (hex.service: Restart=on-failure), a failure
+    // exit would restart Hex and repeat the message forever; the journal
+    // keeps the message, and a clean exit ends it.
+    let supervised =
+        std::env::var_os("INVOCATION_ID").is_some() || std::env::var_os("NOTIFY_SOCKET").is_some();
+    if !supervised && !interactive(&arguments) {
+        show();
+    }
+    std::process::exit(if supervised { 0 } else { 1 });
+}
+
+/// A terminal already shows stderr, and `hex service` never opens windows.
+fn interactive(arguments: &[std::ffi::OsString]) -> bool {
+    use std::io::IsTerminal;
+    std::io::stderr().is_terminal()
+        || arguments
+            .get(1)
+            .is_some_and(|argument| argument == "service")
 }
 
 #[cfg(target_os = "windows")]
@@ -51,9 +68,8 @@ fn show() {
     };
 }
 
-/// stderr reaches the terminal or the journal (hex.service); a desktop
-/// dialog, when one of these tools is installed and a display is up, reaches
-/// someone who opened Hex from the launcher.
+/// For Hex opened from the launcher, where nobody sees stderr: a desktop
+/// dialog when one of these tools is installed and a display is up.
 #[cfg(target_os = "linux")]
 fn show() {
     use std::process::{Command, Stdio};

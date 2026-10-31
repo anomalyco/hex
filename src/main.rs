@@ -979,8 +979,9 @@ fn main() -> Result<()> {
 
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
+    // DLL search hardening first: the CPU check's message box loads DLLs.
+    windows::restrict_dll_search();
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
-    windows::restrict_dll_search();
     windows::run(&SHUTDOWN)
 }
