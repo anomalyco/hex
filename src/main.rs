@@ -971,5 +971,6 @@ fn main() -> Result<()> {
 
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
+    windows::restrict_dll_search();
     windows::run(&SHUTDOWN)
 }
