@@ -213,6 +213,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Restore shortcut default"),
         tr("Offer Restore default next to Paste last dictation's shortcut"),
     ));
+    rows.push(row(
+        Feature::SpokenFormatting,
+        &HINTS,
+        tr("Spoken formatting"),
+        tr("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -249,6 +255,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
         Feature::KeepOnClipboard => "lab-keep-on-clipboard",
         Feature::CopyOnly => "lab-copy-only",
+        Feature::SpokenFormatting => "lab-spoken-formatting",
     }
 }
 

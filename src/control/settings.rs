@@ -306,6 +306,11 @@ const KEYS: &[Key] = &[
         "Labs: put the dictation on the clipboard instead of pasting it (macOS)",
     ),
     key(
+        "labs.spoken_formatting",
+        Kind::Bool,
+        "Labs: turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
