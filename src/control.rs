@@ -654,6 +654,12 @@ pub struct ModelInfo {
     pub installed: bool,
     pub selected: bool,
     pub streams: bool,
+    /// How transcription takes the vocabulary: `prompt` (Whisper,
+    /// Qwen3-ASR), `bias` (Parakeet, with Labs › Vocabulary biasing), or
+    /// `none`.
+    pub vocabulary: String,
+    /// Deprecated: whether the model reads the vocabulary as its prompt,
+    /// which is what recognition hints became. Use `vocabulary`.
     pub supports_recognition_hints: bool,
 }
 
@@ -661,6 +667,7 @@ pub struct ModelInfo {
 pub fn model_infos(
     selection: &crate::transcription_models::TranscriptionSelection,
 ) -> Vec<ModelInfo> {
+    use crate::transcription_models::VocabularyUse;
     crate::transcription_models::MODELS
         .iter()
         .filter(|model| model.available())
@@ -672,7 +679,13 @@ pub fn model_infos(
             installed: crate::transcription_models::is_installed(model, &selection.language),
             selected: model.id == selection.model,
             streams: model.streams,
-            supports_recognition_hints: model.supports_recognition_hints,
+            vocabulary: match model.vocabulary_use() {
+                VocabularyUse::Prompt => "prompt",
+                VocabularyUse::Bias => "bias",
+                VocabularyUse::None => "none",
+            }
+            .into(),
+            supports_recognition_hints: model.vocabulary_use() == VocabularyUse::Prompt,
         })
         .collect()
 }
@@ -695,16 +708,13 @@ pub fn model_selection(
                 format!("unknown model `{model}`; run `hex model list` for the ids"),
             )
         })?;
-    // The model's own remembered language and recognition hints, as the
-    // menu bar picks them; only the language can be overridden.
+    // The model's own remembered language, as the menu bar picks it; only
+    // the language can be overridden.
     let mut selection = settings.transcription_for_model(id);
     if let Some(language) = language {
         selection.language = language.into();
     }
     let definition = crate::transcription_models::definition(id);
-    if !definition.supports_recognition_hints {
-        selection.recognition_hints.clear();
-    }
     crate::transcription_models::validate(&selection).map_err(|error| {
         let supported = if definition.languages.contains(&"*") {
             "any language code Hex knows (en, de, fr, ja, …)".to_owned()
@@ -1171,35 +1181,24 @@ mod tests {
     }
 
     #[test]
-    fn model_selection_keeps_remembered_hints_and_validates_the_language() {
+    fn model_selection_keeps_the_remembered_language_and_validates_it() {
         use crate::transcription_models::{TranscriptionModelId as Id, TranscriptionSelection};
         let settings = crate::app_settings::AppSettings {
             transcription: TranscriptionSelection {
                 model: Id::ParakeetV3,
                 language: "en".into(),
-                recognition_hints: "Current hints".into(),
             },
             transcription_recents: vec![TranscriptionSelection {
                 model: Id::WhisperLargeV3Turbo,
                 language: "de".into(),
-                recognition_hints: "Kit Langton".into(),
             }],
             ..Default::default()
         };
         let pick = |model, language| model_selection(&settings, model, language);
         let remembered = pick("whisper_large_v3_turbo", None).unwrap();
-        assert_eq!(
-            (
-                remembered.language.as_str(),
-                remembered.recognition_hints.as_str()
-            ),
-            ("de", "Kit Langton")
-        );
+        assert_eq!(remembered.language, "de");
         let french = pick("whisper_large_v3_turbo", Some("fr")).unwrap();
-        assert_eq!(
-            (french.language.as_str(), french.recognition_hints.as_str()),
-            ("fr", "Kit Langton")
-        );
+        assert_eq!(french.language, "fr");
         // Whisper's wildcard takes any language Hex knows, not any string.
         for (model, language) in [
             ("whisper_large_v3_turbo", "klingon"),

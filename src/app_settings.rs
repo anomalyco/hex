@@ -1911,7 +1911,6 @@ impl KeyboardModelChoice {
         let model = crate::transcription_models::validate(&TranscriptionSelection {
             model: self.model,
             language: self.language.clone(),
-            recognition_hints: String::new(),
         })?;
         match model.runtime {
             crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
@@ -1920,6 +1919,31 @@ impl KeyboardModelChoice {
             }
         }
     }
+}
+
+/// Recognition hints saved before they merged into the vocabulary: the
+/// selected model's, then the recent models' from newest. `load_from` folds
+/// them into the vocabulary and the rewritten file drops them.
+fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Selection {
+        recognition_hints: String,
+    }
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct File {
+        transcription: Selection,
+        transcription_recents: Vec<Selection>,
+    }
+    let Ok(file) = serde_json::from_slice::<File>(data) else {
+        return Vec::new();
+    };
+    std::iter::once(file.transcription)
+        .chain(file.transcription_recents.into_iter().rev())
+        .map(|selection| selection.recognition_hints)
+        .filter(|hints| !hints.trim().is_empty())
+        .collect()
 }
 
 /// A new install starts with the model recommended for the person's
@@ -1942,7 +1966,6 @@ impl AppSettings {
         TranscriptionSelection {
             model: id,
             language: model.language_for(&self.transcription.language).into(),
-            recognition_hints: String::new(),
         }
     }
 
@@ -2134,6 +2157,7 @@ impl AppSettings {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 let loaded = serde_json::to_value(&settings)?;
+                let hints = legacy_recognition_hints(&data);
                 settings.validate_recording_duck_volume()?;
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.repair_bare_primary_clicks();
@@ -2143,7 +2167,9 @@ impl AppSettings {
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
                 settings.migrate_disabled_transcription_model();
-                settings.clear_unsupported_recognition_hints();
+                for hints in &hints {
+                    crate::vocabulary::fold_hints(&mut settings.vocabulary, hints);
+                }
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
                 // A model that is gone, or a language it lost, maps to nothing.
@@ -2152,7 +2178,7 @@ impl AppSettings {
                     .mappings
                     .retain(|_, choice| choice.validate().is_ok());
                 crate::transcription_models::validate(&settings.transcription)?;
-                if serde_json::to_value(&settings)? != loaded
+                if (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
                     && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist normalized settings");
@@ -2390,11 +2416,6 @@ impl AppSettings {
         let selection = TranscriptionSelection {
             model: model.id,
             language: "en".into(),
-            recognition_hints: if model.supports_recognition_hints {
-                self.transcription.recognition_hints.clone()
-            } else {
-                String::new()
-            },
         };
         if crate::transcription_models::validate(&selection).is_err() {
             return;
@@ -2404,23 +2425,6 @@ impl AppSettings {
             "switched English dictation to the streaming English model"
         );
         self.remember_transcription(selection);
-    }
-
-    /// Recognition hints saved for a model that can't use them (edited by
-    /// hand, or left from another model) are dropped with a warning rather
-    /// than failing the whole settings load.
-    fn clear_unsupported_recognition_hints(&mut self) {
-        let model = crate::transcription_models::definition(self.transcription.model);
-        if model.supports_recognition_hints
-            || self.transcription.recognition_hints.trim().is_empty()
-        {
-            return;
-        }
-        tracing::warn!(
-            model = self.transcription.model.as_str(),
-            "cleared recognition hints the selected model doesn't support"
-        );
-        self.transcription.recognition_hints.clear();
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
@@ -3019,35 +3023,43 @@ mod tests {
     }
 
     #[test]
-    fn loading_clears_recognition_hints_the_model_does_not_support() {
-        let dir = TestSettingsDir::new("unsupported-hints");
-        let mut settings = AppSettings {
+    fn loading_folds_saved_recognition_hints_into_the_vocabulary_once() {
+        use crate::vocabulary::VocabularyEntry;
+        let dir = TestSettingsDir::new("folded-hints");
+        let mut file = serde_json::to_value(AppSettings {
             transcription: TranscriptionSelection {
-                model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                model: TranscriptionModelId::WhisperLargeV3Turbo,
                 language: "en".into(),
-                recognition_hints: "Hex, Rune".into(),
             },
+            vocabulary: vec![VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: vec!["rune's".into()],
+            }],
             sound_effect_volume: 0.25,
             ..AppSettings::default()
-        };
-        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        })
+        .unwrap();
+        file["transcription"]["recognition_hints"] = "Hex, rune\nKaffar".into();
+        file["transcription_recents"] = serde_json::json!([
+            {"model": "parakeet_v3", "language": "de", "recognition_hints": "Old; Hex"},
+            {"model": "qwen3_asr06_b", "language": "en", "recognition_hints": "Rodolfo"},
+        ]);
+        fs::write(&dir.path, serde_json::to_vec(&file).unwrap()).unwrap();
         let loaded = AppSettings::load_from(&dir.path).unwrap();
-        assert_eq!(
-            loaded.transcription.model,
-            TranscriptionModelId::ParakeetUnifiedEnglish
-        );
-        assert!(loaded.transcription.recognition_hints.is_empty());
+        let terms: Vec<_> = loaded
+            .vocabulary
+            .iter()
+            .map(|entry| entry.term.as_str())
+            .collect();
+        assert_eq!(terms, ["Rune", "Hex", "Kaffar", "Rodolfo", "Old"]);
+        assert_eq!(loaded.vocabulary[0].sounds_like, ["rune's"]);
         assert_eq!(loaded.sound_effect_volume, 0.25);
-
-        let whisper = TranscriptionSelection {
-            model: TranscriptionModelId::WhisperLargeV3Turbo,
-            language: "en".into(),
-            recognition_hints: "Hex, Rune".into(),
-        };
-        settings.transcription = whisper.clone();
-        fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
-        let loaded = AppSettings::load_from(&dir.path).unwrap();
-        assert_eq!(loaded.transcription, whisper);
+        let written = fs::read_to_string(&dir.path).unwrap();
+        assert!(!written.contains("recognition_hints"));
+        assert_eq!(
+            AppSettings::load_from(&dir.path).unwrap().vocabulary,
+            loaded.vocabulary
+        );
     }
 
     /// Labs › Second dictation shortcut (issue 627): its binding takes
@@ -3336,7 +3348,7 @@ mod tests {
 
     fn english(model: TranscriptionModelId) -> String {
         format!(
-            r#"{{"transcription":{{"model":"{}","language":"en","recognition_hints":""}}}}"#,
+            r#"{{"transcription":{{"model":"{}","language":"en"}}}}"#,
             model.as_str()
         )
     }
@@ -3398,7 +3410,7 @@ mod tests {
             fs::write(
                 &dir.path,
                 format!(
-                    r#"{{"transcription":{{"model":"{}","language":"{language}","recognition_hints":""}}}}"#,
+                    r#"{{"transcription":{{"model":"{}","language":"{language}"}}}}"#,
                     model.as_str()
                 ),
             )
@@ -3418,7 +3430,6 @@ mod tests {
             transcription: TranscriptionSelection {
                 model: TranscriptionModelId::ParakeetV3,
                 language: "en".into(),
-                recognition_hints: String::new(),
             },
             ..AppSettings::default()
         };
@@ -3730,7 +3741,6 @@ mod tests {
             transcription: TranscriptionSelection {
                 model: crate::transcription_models::TranscriptionModelId::WhisperLargeV3Turbo,
                 language: "zh".into(),
-                recognition_hints: "OpenCode, Effect".into(),
             },
             ..AppSettings::default()
         };
@@ -3743,11 +3753,10 @@ mod tests {
     }
 
     #[test]
-    fn model_switches_remember_language_and_hints_without_changing_other_settings() {
+    fn model_switches_remember_language_without_changing_other_settings() {
         let french = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,
             language: "fr".into(),
-            recognition_hints: "Example project".into(),
         };
         let mut settings = AppSettings {
             show_dock_icon: false,
@@ -3793,7 +3802,6 @@ mod tests {
         let candidate = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,
             language: "fr".into(),
-            recognition_hints: String::new(),
         };
         let error = settings
             .save_transcription_with(candidate.clone(), |next| {
@@ -3821,12 +3829,10 @@ mod tests {
                 TranscriptionSelection {
                     model: TranscriptionModelId::ParakeetV2,
                     language: "fr".into(),
-                    recognition_hints: String::new(),
                 },
                 TranscriptionSelection {
                     model: TranscriptionModelId::WhisperLargeV3Turbo,
                     language: "not-a-language".into(),
-                    recognition_hints: String::new(),
                 },
             ],
             ..Default::default()
@@ -3853,7 +3859,6 @@ mod tests {
             transcription: TranscriptionSelection {
                 model: crate::transcription_models::TranscriptionModelId::WhisperLargeV3Turbo,
                 language: crate::transcription_models::AUTO_LANGUAGE.into(),
-                recognition_hints: String::new(),
             },
             ..AppSettings::default()
         };
@@ -3868,10 +3873,9 @@ mod tests {
 
     #[test]
     fn disabled_apple_speech_selection_migrates_to_the_default_model() {
-        let mut settings: AppSettings = serde_json::from_str(
-            r#"{"transcription":{"model":"apple_speech","language":"de","recognition_hints":""}}"#,
-        )
-        .unwrap();
+        let mut settings: AppSettings =
+            serde_json::from_str(r#"{"transcription":{"model":"apple_speech","language":"de"}}"#)
+                .unwrap();
 
         settings.migrate_disabled_transcription_model();
         assert_eq!(settings.transcription, TranscriptionSelection::default());

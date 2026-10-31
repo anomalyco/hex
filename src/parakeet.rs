@@ -1158,12 +1158,10 @@ impl Parakeet {
         Ok(parakeet)
     }
 
-    /// Streams decode like offline runs, without the recognition hints'
-    /// prompt and at segment timestamps: only the text of a stream is used.
+    /// Streams decode like offline runs, at segment timestamps: only the text
+    /// of a stream is used.
     fn stream_run_options(&self) -> RunOptions {
         RunOptions {
-            family: None,
-            prompt: None,
             timestamps: match self.options.timestamps {
                 TimestampKind::Word | TimestampKind::Token => TimestampKind::Segment,
                 timestamps => timestamps,
@@ -1263,12 +1261,6 @@ impl Parakeet {
                     crate::transcription_models::language_name(&selection.language)
                 ));
             }
-            crate::gguf_session::apply_recognition_hints(
-                &mut options,
-                &model,
-                definition,
-                &selection.recognition_hints,
-            )?;
             options.language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
@@ -1404,7 +1396,6 @@ mod tests {
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::CohereTranscribe,
             language: "en".into(),
-            recognition_hints: String::new(),
         };
         let mut model = Parakeet::load_from(&model_path, false, Some(&selection)).unwrap();
         eprintln!(

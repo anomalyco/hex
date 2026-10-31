@@ -942,17 +942,7 @@ impl LinuxDesktopHost {
         language: String,
     ) -> Result<()> {
         self.manual_choice();
-        let definition = crate::transcription_models::definition(model);
-        let selection = crate::transcription_models::TranscriptionSelection {
-            model,
-            language,
-            // Hints persist across models that can use them.
-            recognition_hints: if definition.supports_recognition_hints {
-                self.settings.transcription.recognition_hints.clone()
-            } else {
-                String::new()
-            },
-        };
+        let selection = crate::transcription_models::TranscriptionSelection { model, language };
         self.prepare_transcription(selection, false)
     }
 

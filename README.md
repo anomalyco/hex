@@ -124,8 +124,8 @@ visibility. Corrections in Modes fix names and preferred spellings before text
 is pasted; modes can also apply optional rewriting and text transformations.
 
 Use **menu bar > Transcription Model** to switch between downloaded models without
-opening Settings. Each model remembers its last selected language and, for
-Whisper, recognition hints. Choose the language in Settings once, then switch
+opening Settings. Each model remembers its last selected language. Choose the
+language in Settings once, then switch
 between combinations such as English with Parakeet and French with Whisper from
 the menu. **Manage Models…** opens the full picker for downloads and language changes.
 

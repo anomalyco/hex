@@ -154,7 +154,6 @@ fn a_mapping_to_the_current_model_in_another_language_switches_the_language() {
     settings.transcription = TranscriptionSelection {
         model: TranscriptionModelId::ParakeetV3,
         language: "en".into(),
-        recognition_hints: String::new(),
     };
     let mut fixture = Fixture::new(settings);
     fixture.source("Spanish");
@@ -170,8 +169,7 @@ fn a_mapping_to_the_current_model_in_another_language_switches_the_language() {
 #[test]
 fn hex_model_use_with_the_current_model_and_language_loads_nothing() {
     let mut fixture = Fixture::new(AppSettings::default());
-    let mut same = fixture.runtime.settings.transcription.clone();
-    same.recognition_hints = "Only hints differ".into();
+    let same = fixture.runtime.settings.transcription.clone();
     fixture.runtime.handle(Request::UseInstalledSelection(same));
     assert_eq!(fixture.runtime.preparation.status().model, None);
 }
@@ -188,7 +186,6 @@ fn input_source_choices_use_installed_only_preparation_and_manual_choices_supers
     let manual = TranscriptionSelection {
         model: TranscriptionModelId::WhisperLargeV3Turbo,
         language: "de".into(),
-        recognition_hints: "Kit".into(),
     };
     fixture
         .runtime
@@ -254,7 +251,6 @@ fn a_due_source_choice_supersedes_manual_preparation_even_for_the_current_model(
         settings.transcription = TranscriptionSelection {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
-            recognition_hints: String::new(),
         };
         let mut fixture = Fixture::new(settings);
         fixture.start_manual();

@@ -926,7 +926,6 @@ mod tests {
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,
             language: "de".into(),
-            recognition_hints: "Kit Langton".into(),
         };
         runtime.handle(super::use_request(selection.clone()));
         // installed_only: verify what's on disk, never download or repair.

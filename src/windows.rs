@@ -108,7 +108,6 @@ impl SelectionArgs {
                 .parse::<TranscriptionModelId>()
                 .wrap_err_with(|| format!("invalid model id: {}", self.model))?,
             language: self.language.clone(),
-            recognition_hints: String::new(),
         };
         validate(&selection)?;
         Ok(selection)

@@ -570,7 +570,7 @@ words rather than sentences keeps a sentence that runs across a hard cut whole;
 joining sentences lost its words on one side (10% word error on `You` lines).
 
 Speechless chunks: models invent text for silence and noise ("Thank you",
-"Grazie a tutti", or the recognition hints), and room or keyboard noise passes
+"Grazie a tutti", or the vocabulary prompt), and room or keyboard noise passes
 the -60 dB silent-chunk check, so every chunk that passes it also goes through
 the Silero speech detector used by dictation (see
 [dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
@@ -581,8 +581,8 @@ the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
 and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
 scanned the call in 1.6 s on the CPU. Invented text inside a
 chunk that also holds speech is not addressed. Without the detector only the
--60 dB check applies, as before. A Whisper chunk that returns only the recognition
-hints is emptied too ([models](README.md#get-ready)).
+-60 dB check applies, as before. A Whisper or Qwen3-ASR chunk that returns only
+the vocabulary prompt is emptied too ([models](README.md#get-ready)).
 
 In-call text was a Moonshine draft until 2026-10-22: the pane showed Parakeet
 only for time rolling had covered, and Option-Control-V and the GPUI capsule's

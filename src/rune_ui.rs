@@ -753,7 +753,6 @@ pub(crate) struct Ui {
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
-    hints: TextEdit,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
     preparing: Option<(TranscriptionModelId, Instant)>,
@@ -788,7 +787,6 @@ pub(crate) struct Ui {
 /// Which of the window's text editors hold unsaved typing.
 #[derive(Clone, Copy, Debug)]
 struct Drafts {
-    hints: bool,
     modes: bool,
     vocabulary: bool,
 }
@@ -828,7 +826,6 @@ impl Ui {
     }
 
     fn with(settings: AppSettings, service: Service) -> Self {
-        let hints = TextEdit::new(settings.transcription.recognition_hints.clone());
         let modes = modes::ModesPane::new(&settings);
         let vocabulary = vocabulary::VocabularyEditor::new(&settings.vocabulary);
         Self {
@@ -851,7 +848,6 @@ impl Ui {
             labs_open: false,
             build_preview: None,
             capture: Capture::Idle,
-            hints,
             vocabulary,
             preparing: None,
             draft_since: None,
@@ -932,17 +928,9 @@ impl Ui {
     /// The settings with every text field's current text applied.
     fn drafted(&self) -> AppSettings {
         let mut candidate = self.settings.clone();
-        if self.hints_shown(&candidate) {
-            candidate.transcription.recognition_hints = self.hints.text.clone();
-        }
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
         candidate
-    }
-
-    fn hints_shown(&self, settings: &AppSettings) -> bool {
-        crate::transcription_models::definition(settings.transcription.model)
-            .supports_recognition_hints
     }
 
     /// Which editors hold typing the saved settings don't have yet.
@@ -951,8 +939,6 @@ impl Ui {
         let mut modes = settings.clone();
         self.modes.project(&mut modes);
         Drafts {
-            hints: self.hints_shown(settings)
-                && self.hints.text != settings.transcription.recognition_hints,
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
         }
@@ -1115,12 +1101,6 @@ impl Ui {
         let changed = service != self.settings;
         if changed {
             let drafts = self.drafts();
-            if !drafts.hints
-                && service.transcription.recognition_hints
-                    != self.settings.transcription.recognition_hints
-            {
-                self.hints = TextEdit::new(service.transcription.recognition_hints.clone());
-            }
             if !drafts.modes && service.dictation_processing != self.settings.dictation_processing {
                 self.modes.reload(&service);
             }
@@ -2203,11 +2183,11 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         vocabulary::fixture(ui, false);
     }),
-    // Whisper ignores the list: the row and the sheet say so.
+    // Cohere ignores the list: the row and the sheet say so.
     ("vocabulary-unused", |ui| {
         *ui = portal_fixture();
-        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
-        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        ui.settings.transcription.model = TranscriptionModelId::CohereTranscribe;
+        ui.picker.installed = Some(vec![TranscriptionModelId::CohereTranscribe]);
         vocabulary::fixture(ui, true);
     }),
     ("mac-settings-recording", |ui| {
@@ -2662,7 +2642,6 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         transcription: crate::transcription_models::TranscriptionSelection {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
-            recognition_hints: String::new(),
         },
         paste_with_shift: true,
         ..AppSettings::default()
