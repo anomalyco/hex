@@ -648,6 +648,26 @@ impl Portal {
         self.bind_session(session, shortcuts, stop)
     }
 
+    /// Clears the shortcuts GNOME keeps listed for Hex once its session
+    /// closes (#575). GNOME Settings stores exactly the set an app binds and
+    /// asks for approval only for shortcuts it has not stored, so binding none
+    /// in a fresh session empties the list without a dialog; binding them again
+    /// asks again. Only on GNOME: KDE would drop keys the person chose for Hex's
+    /// shortcuts (#482).
+    pub(crate) fn forget(mut self) -> Result<()> {
+        if !gnome() {
+            return Ok(());
+        }
+        if let Some(session) = self.session.take() {
+            self.bus.close_session(session.as_str());
+        }
+        let stop = AtomicBool::new(false);
+        let session = self.bus.create_session(&stop)?;
+        self.bind_session(session, &[], &stop)?;
+        tracing::info!("cleared Hex's shortcuts from GNOME Settings");
+        Ok(())
+    }
+
     /// The presses, releases, and changes that arrived since the last call.
     pub(crate) fn events(&mut self) -> Vec<Event> {
         let shortcuts = self.session.as_ref().map(|session| session.as_str());
@@ -695,6 +715,14 @@ impl Portal {
             .unwrap_or_default();
         Ok(triggers(bound))
     }
+}
+
+fn gnome() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
+        desktops
+            .split(':')
+            .any(|desktop| desktop.eq_ignore_ascii_case("GNOME"))
+    })
 }
 
 /// A desktop's trigger description as Settings shows it. GNOME describes a

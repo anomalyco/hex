@@ -647,6 +647,20 @@ impl LinuxDesktopHost {
         self.status = "Enabling…".into();
     }
 
+    /// Enable and Disable also decide whether Hex listens at its next launch,
+    /// so a disabled Hex stays disabled after a restart (#575).
+    fn remember_listening(&mut self, enabled: bool) {
+        if self.settings.enable_on_launch == enabled {
+            return;
+        }
+        match save_listening(&self.settings, enabled) {
+            Ok(settings) => self.adopt_settings(settings),
+            Err(error) => {
+                self.settings_error = Some(format!("Could not save settings: {error:#}"));
+            }
+        }
+    }
+
     fn stop(&mut self) {
         self.listen_when_ready = false;
         if let Some(edit) = &self.shortcut_edit {
@@ -1088,6 +1102,19 @@ fn save_with(change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings> {
     Ok(settings)
 }
 
+#[cfg(not(test))]
+fn save_listening(_: &AppSettings, enabled: bool) -> Result<AppSettings> {
+    save_with(|settings| settings.enable_on_launch = enabled)
+}
+
+/// Tests never write the person's `settings.json`.
+#[cfg(test)]
+fn save_listening(current: &AppSettings, enabled: bool) -> Result<AppSettings> {
+    let mut settings = current.clone();
+    settings.enable_on_launch = enabled;
+    Ok(settings)
+}
+
 impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
         self.updater.stop();
@@ -1379,8 +1406,15 @@ impl LinuxDesktopHost {
                 self.error = None;
                 self.dismissed_failure_at = self.activity.last_failure.as_ref().map(|(at, _)| *at);
                 self.start();
+                self.remember_listening(true);
             }
-            DesktopAction::StopListening => self.stop(),
+            DesktopAction::StopListening => {
+                if let Some(listener) = &self.listener {
+                    listener.hotkey_status.forget_on_stop();
+                }
+                self.stop();
+                self.remember_listening(false);
+            }
             DesktopAction::ConfigureShortcuts => {
                 if let Some(listener) = &self.listener {
                     listener.hotkey_status.configure();
@@ -1846,5 +1880,9 @@ mod tests {
 
         assert!(!host.listen_when_ready);
         assert!(host.transcription_preparation.is_some());
+        // Disabled stays disabled at the next launch (#575).
+        assert!(!host.settings.enable_on_launch);
+        host.dispatch(DesktopAction::StartListening).unwrap();
+        assert!(host.settings.enable_on_launch);
     }
 }

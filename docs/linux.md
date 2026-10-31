@@ -313,7 +313,10 @@ dictation rules:
   `systemctl --user restart xdg-desktop-portal`. Run `hex service` directly:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
-  focused application.
+  focused application. **Disable** (General or the tray) keeps Hex disabled
+  across restarts until you enable it again. On GNOME, Disable also removes
+  Hex's entries from Settings › Keyboard › Global Shortcuts; Enable then asks
+  you to approve them again.
 - **Hyprland** has the portal but takes every shortcut without a key, so
   nothing happens until you bind one in your config, and the key Settings
   records is not used. Hex can't tell whether your config binds it. Prefer

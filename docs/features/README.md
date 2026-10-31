@@ -1258,6 +1258,14 @@ Linux beta                               // not macOS feature parity
         removed once a package ships anomaly.hex.desktop
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
+Enable / Disable (General, tray)         // linux.listener-persist
+├── Saves enable_on_launch -> a disabled Hex stays disabled after a restart (#575)
+└── GNOME (XDG_CURRENT_DESKTOP) Disable -> after the listener's session closes, a
+    fresh session binds no shortcuts: GNOME Settings stores that empty set, so
+    Hex's entries leave its list; Enable shows GNOME's approval dialog again
+    // never on KDE: an empty bind drops the user's keys (#482)
+    // observed on apollo with gnome-control-center 51.1's provider, portal-gnome 50,
+    // a stand-in org.gnome.Shell, not a full GNOME session
 ```
 
 Clipboard restoration lives in [linux_paste.rs](../../src/linux_paste.rs)
