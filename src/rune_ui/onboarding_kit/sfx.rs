@@ -573,8 +573,8 @@ mod tests {
         let built: Vec<i64> = track
             .fired_cues()
             .iter()
-            .filter(|(_, t)| matches!(t, Tone::Onboarding(OnboardingTone::Build(_))))
-            .map(|&(at, _)| ((at - 28.0) * 1000.0).round() as i64)
+            .filter(|(_, t, _)| matches!(t, Tone::Onboarding(OnboardingTone::Build(_))))
+            .map(|&(at, _, _)| ((at - 28.0) * 1000.0).round() as i64)
             .collect();
         assert_eq!(built, [0, 150, 300], "rising notes 150 ms apart");
     }
@@ -586,7 +586,7 @@ mod tests {
         track.advance_to(5.0);
         assert_eq!(
             track.fired_cues(),
-            [(1.0, Tone::Onboarding(OnboardingTone::Build(2)))]
+            [(1.0, Tone::Onboarding(OnboardingTone::Build(2)), 100)]
         );
     }
 }

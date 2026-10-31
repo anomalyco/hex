@@ -1823,14 +1823,14 @@ mod tests {
                 crate::feedback::Tone::Onboarding(crate::feedback::OnboardingTone::Build(_))
             )
         };
-        let before = |cues: &[(f64, crate::feedback::Tone)]| -> Vec<_> {
-            cues.iter().filter(|(_, t)| !build(t)).copied().collect()
+        let before = |cues: &[(f64, crate::feedback::Tone, u8)]| -> Vec<_> {
+            cues.iter().filter(|(_, t, _)| !build(t)).copied().collect()
         };
         assert_eq!(before(&full), before(&reduced));
-        let notes = |cues: &[(f64, crate::feedback::Tone)]| -> Vec<_> {
+        let notes = |cues: &[(f64, crate::feedback::Tone, u8)]| -> Vec<_> {
             cues.iter()
-                .filter(|(_, t)| build(t))
-                .map(|&(_, t)| t)
+                .filter(|(_, t, _)| build(t))
+                .map(|&(_, t, _)| t)
                 .collect()
         };
         assert_eq!(notes(&full).len(), 3);
