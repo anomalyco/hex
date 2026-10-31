@@ -101,6 +101,24 @@ a {
   flex: none;
 }
 
+.show__hint {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  translate: -50% 0;
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+  color: rgba(242, 242, 239, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 600ms ease-out;
+}
+
+.show__hint.is-on {
+  opacity: 1;
+}
+
 .show__head img {
   display: block;
   width: 100%;

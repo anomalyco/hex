@@ -97,3 +97,48 @@ export class ArrivalGate {
     return gain
   }
 }
+
+// A short wet "pfft-blip" for a nonsense word leaving the mouth: a pitched sine chirp with a puff of
+// band-passed noise. Pitch varies a little per word through `rate`.
+export function scheduleSpit(ctx, destination, when, { gain = 1, rate = 1, pan = 0 } = {}) {
+  const out = ctx.createGain()
+  out.gain.value = 0.32 * gain
+  let tail = out
+  if (ctx.createStereoPanner) {
+    const p = ctx.createStereoPanner()
+    p.pan.value = Math.max(-1, Math.min(1, pan))
+    out.connect(p)
+    tail = p
+  }
+  tail.connect(destination)
+  const osc = ctx.createOscillator()
+  const env = ctx.createGain()
+  osc.type = "sine"
+  osc.frequency.setValueAtTime(260 * rate, when)
+  osc.frequency.exponentialRampToValueAtTime(720 * rate, when + 0.05)
+  env.gain.setValueAtTime(0.0001, when)
+  env.gain.linearRampToValueAtTime(1, when + 0.006)
+  env.gain.exponentialRampToValueAtTime(0.0001, when + 0.075)
+  osc.connect(env).connect(out)
+  osc.start(when)
+  osc.stop(when + 0.09)
+  const len = Math.max(1, Math.floor(ctx.sampleRate * 0.04))
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+  const d = buf.getChannelData(0)
+  let seed = 777
+  for (let i = 0; i < len; i++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    d[i] = ((seed / 4294967296) * 2 - 1) * Math.exp(-i / (len * 0.3))
+  }
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+  const bp = ctx.createBiquadFilter()
+  bp.type = "bandpass"
+  bp.frequency.value = 1800 * rate
+  bp.Q.value = 0.7
+  const g = ctx.createGain()
+  g.gain.value = 0.35
+  src.connect(bp).connect(g).connect(out)
+  src.start(when)
+  return when + 0.09
+}
