@@ -205,6 +205,19 @@ pub enum SettingsCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Set several settings at once from a JSON object of `key: value`,
+    /// all or none; other settings keep their values.
+    ///
+    /// Values are JSON (`true`, `0.4`, `"option+space"`, `null` for none);
+    /// `transcription.model` and `transcription.language` select a model
+    /// without downloading it. With Hex stopped, writes settings.json
+    /// directly.
+    Apply {
+        /// A JSON file, or `-` for standard input.
+        file: std::path::PathBuf,
+        #[command(flatten)]
+        output: Output,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -769,7 +782,76 @@ pub fn settings(command: SettingsCommand) -> u8 {
         SettingsCommand::Set { key, value, output } => {
             send(ControlCommand::SettingsSet { key, value }, output)
         }
+        SettingsCommand::Apply { file, output } => apply_settings(&file, output),
     }
+}
+
+/// `hex settings apply`: the running Hex saves and adopts the settings, so
+/// it never overwrites them from memory; with no Hex running they are
+/// written to settings.json here.
+fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
+    use std::io::Read;
+
+    let mut text = String::new();
+    let read = if file == std::path::Path::new("-") {
+        std::io::stdin().read_to_string(&mut text).map(drop)
+    } else {
+        std::fs::read_to_string(file).map(|read| text = read)
+    };
+    if let Err(error) = read {
+        return fail(&format!("couldn't read {}: {error}", file.display()));
+    }
+    let values: serde_json::Map<String, serde_json::Value> = match serde_json::from_str(&text) {
+        Ok(values) => values,
+        Err(error) => return fail(&format!("expected a JSON object of settings: {error}")),
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+    loop {
+        if running() {
+            return send(ControlCommand::SettingsApply { values }, output);
+        }
+        // A Hex that holds the service lock may have read settings.json
+        // already; wait for it to answer instead of writing behind it.
+        #[cfg(target_os = "linux")]
+        let lock = crate::instance::acquire("service");
+        #[cfg(not(target_os = "linux"))]
+        let lock: color_eyre::Result<()> = Ok(());
+        match lock {
+            Ok(_lock) if !running() => return print(apply_offline(&values), output),
+            Ok(_) => {}
+            Err(_) if std::time::Instant::now() >= deadline => {
+                return print(
+                    ControlReply::error(
+                        "busy",
+                        "Hex is starting but didn't answer; run `hex settings apply` again",
+                    ),
+                    output,
+                );
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
+fn apply_offline(values: &serde_json::Map<String, serde_json::Value>) -> ControlReply {
+    let result = crate::app_settings::AppSettings::load()
+        .map_err(|error| {
+            super::ControlError::new("internal", format!("couldn't read settings: {error:#}"))
+        })
+        .and_then(|before| {
+            let change =
+                super::settings::apply_all(&before, values, &crate::rune_ui::shortcut_rules())?;
+            if !change.changed(&before) {
+                return Ok(ControlReply::unchanged(
+                    "Every setting already has its value",
+                ));
+            }
+            change.settings.save().map_err(|error| {
+                super::ControlError::new("internal", format!("couldn't save: {error:#}"))
+            })?;
+            Ok(ControlReply::done(change.message))
+        });
+    result.unwrap_or_else(ControlReply::from)
 }
 
 /// `hex history clear`; the confirmation is asked here, before Hex is.

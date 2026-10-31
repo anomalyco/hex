@@ -157,6 +157,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             })
         })),
         ControlCommand::SettingsSet { key, value } => reply(set_setting(host, &key, &value)),
+        ControlCommand::SettingsApply { values } => reply(apply_settings(host, &values)),
         ControlCommand::ModelList => reply(load().map(|settings| ControlReply::Models {
             models: super::model_infos(&settings.transcription),
         })),
@@ -343,8 +344,32 @@ fn set_setting(host: &dyn Host, key: &str, value: &str) -> Result<ControlReply, 
     }
     let before = load()?;
     let change = settings::apply(&before, key, value, &host.shortcut_rules())?;
-    if !change.changed(&before) {
-        return Ok(ControlReply::unchanged(format!("{key} is already {value}")));
+    commit(host, &before, change, || {
+        format!("{key} is already {value}")
+    })
+}
+
+/// Saves every setting in `values` at once, as the window would.
+fn apply_settings(
+    host: &dyn Host,
+    values: &serde_json::Map<String, serde_json::Value>,
+) -> Result<ControlReply, ControlError> {
+    let before = load()?;
+    let change = settings::apply_all(&before, values, &host.shortcut_rules())?;
+    commit(host, &before, change, || {
+        "Every setting already has its value".into()
+    })
+}
+
+/// Saves a validated change and carries out its effects.
+fn commit(
+    host: &dyn Host,
+    before: &AppSettings,
+    change: settings::Change,
+    unchanged: impl FnOnce() -> String,
+) -> Result<ControlReply, ControlError> {
+    if !change.changed(before) {
+        return Ok(ControlReply::unchanged(unchanged()));
     }
     host.save(change.settings)?;
     for effect in change.effects {

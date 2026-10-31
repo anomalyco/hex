@@ -96,6 +96,10 @@ pub enum ControlCommand {
         key: String,
         value: String,
     },
+    /// Several settings at once, all or none (`hex settings apply`).
+    SettingsApply {
+        values: serde_json::Map<String, serde_json::Value>,
+    },
     ModelList,
     ModelUse {
         model: String,
@@ -883,6 +887,9 @@ mod tests {
             ControlCommand::SettingsSet {
                 key: "release_microphone_while_idle".into(),
                 value: "on".into(),
+            },
+            ControlCommand::SettingsApply {
+                values: serde_json::Map::from_iter([("sound_effects".into(), false.into())]),
             },
             ControlCommand::ModelList,
             ControlCommand::ModelUse {
