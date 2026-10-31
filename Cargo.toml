@@ -152,3 +152,33 @@ windows-future = "0.3.2"
 # on Windows-on-ARM are not a dependable target yet.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
+
+[workspace.lints.rust]
+# abattoir-lints begin
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+# abattoir-lints end
+# shared: forbid; 346 errors left (t1003). Allowed, not warn: scripts/check runs clippy with -D warnings.
+unsafe_code = "allow"
+
+[workspace.lints.clippy]
+# abattoir-lints begin
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+dbg_macro = "deny"
+disallowed_types = "deny"
+todo = "warn"
+# abattoir-lints end
+# shared: deny; 85 errors left (t1003). Allowed, not warn: scripts/check runs clippy with -D warnings.
+disallowed_methods = "allow"
+# shared: deny; 437 errors left (t1003)
+let_underscore_must_use = "allow"
+# shared: deny; 144 errors left (t1003)
+undocumented_unsafe_blocks = "allow"
+# shared: warn; 59 errors left under -D warnings (t1003)
+expect_used = "allow"
+# shared: warn; 41 errors left under -D warnings (t1003)
+unwrap_used = "allow"
+
+[lints]
+workspace = true
