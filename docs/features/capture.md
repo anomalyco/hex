@@ -43,6 +43,12 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   pen it inks only between mouse-down and mouse-up (capture_host::
 │   pen_button; Linux: the overlay's drag, macOS: the tap's buttons); moving
 │   with the button up draws nothing, and clicks still never reach the app
+│   └── Releasing the button ends the stroke on the `capture-input` thread;
+│       the pointer it reads (capture_host::ink_source) has its own lock, so
+│       it never re-takes the input target's lock that thread holds (#572:
+│       Windows hung on the first stroke). Check: capture_host
+│       ending_a_stroke_while_the_input_target_is_locked_does_not_deadlock;
+│       not observed on a Windows PC
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
 │   on macOS; Escape bound through the portal or grab on Linux; the keyboard
 │   hook on Windows, when no dictation takes it; and the overlay's own key
