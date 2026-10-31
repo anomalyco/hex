@@ -132,8 +132,26 @@ its side (`L⌥ R⌥ ⌘` on the Mac, `Left Alt` elsewhere), so an accidental ex
 key is visible before release. `hex settings` takes
 `left-option+right-option`. Settings store `{"keys": [...]}`; files with the
 old `modifiers`/`key` shape load as the same chord and are written back once.
-Windows matches sides through its low-level hook and accepts both Alts (two
-keys) as a modifier-only chord; one modifier alone stays refused there. Linux
+Windows matches sides through its low-level hook and accepts one modifier
+alone (Right Alt or Right Ctrl, [#508](https://github.com/anomalyco/hex/issues/508))
+as well as both Alts:
+
+```ts
+Windows modifier-only shortcut                           // dictate.windows-lone-modifier
+  ├── Press alone -> Down; release -> Up (hold, lock, Toggle as above)
+  ├── Any key or click joins while held -> Chord: Cancel if recording, else nothing
+  │   (the key reaches the app; locked and toggle captures keep recording)
+  ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
+  │   -> No menu bar or Start menu; Share shortcut skips the mask
+  └── Hex's own injected keys (paste, mask) -> Skipped by the hook (HEX_INJECTED)
+```
+
+On layouts where Right Alt is AltGr, Windows adds a Left Ctrl press, so Right
+Alt alone never matches there; bind Right Ctrl instead. Checks:
+`one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
+`a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
+[windows_input.rs](../../src/windows_input.rs), cross-compiled only; the menu
+mask and AltGr behavior have not run on a Windows PC. Linux
 binds what the portal and X11 grabs take, a key with modifiers and no side:
 releasing modifiers pressed alone in the recorder says Linux needs a key (or
 can't bind both sides) and suggests adding one, such as Space.

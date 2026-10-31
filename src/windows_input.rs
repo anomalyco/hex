@@ -10,13 +10,14 @@ use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-    VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
-    PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
-    WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
+    PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -125,12 +126,11 @@ impl WindowsHotkey {
     }
 
     pub fn validate(&self) -> Result<()> {
-        // Both Alts count as two keys, so they make a chord of their own.
         let modifier_count = self.modifiers().count();
         let Some(key) = self.key.as_deref() else {
-            if modifier_count < 2 {
+            if modifier_count == 0 {
                 return Err(eyre!(
-                    "modifier-only Windows dictation shortcuts require at least two modifier keys"
+                    "Windows dictation shortcuts require a key or a modifier"
                 ));
             }
             return Ok(());
@@ -155,6 +155,29 @@ impl WindowsHotkey {
     pub fn label(&self) -> String {
         HotkeyBinding::from(self).keycaps().join("+")
     }
+
+    /// Releasing Alt or Windows pressed alone opens the menu bar or Start,
+    /// so a modifier-only shortcut holding either masks its release.
+    fn masks_release(&self) -> bool {
+        self.key.is_none() && (self.alt.is_some() || self.windows.is_some())
+    }
+}
+
+/// `dwExtraInfo` on every event Hex injects, so its own hook skips them: a
+/// paste's Ctrl must never press a Ctrl-alone shortcut.
+pub(crate) const HEX_INJECTED: usize = 0x4845_5821;
+
+/// Unassigned, so pressing it between an Alt or Windows press and release
+/// keeps the menu bar and Start closed, as AutoHotkey and PowerToys do.
+const MASK_KEY: u16 = 0xE8;
+
+/// What the hook does with an event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Disposition {
+    Pass,
+    Suppress,
+    /// Swallow this Alt or Windows release and replay it after the mask key.
+    Mask,
 }
 
 const EVENT_CAPACITY: usize = 16;
@@ -212,6 +235,9 @@ struct CallbackState {
     share_trigger: bool,
     capture: CaptureState,
     dirty: bool,
+    /// A modifier-only shortcut with Alt or Windows was pressed with no
+    /// other key since, so its release would open the menu bar or Start.
+    mask_release: bool,
 }
 
 #[derive(Default)]
@@ -276,6 +302,21 @@ impl CaptureState {
         }
         self.recording = false;
         Some(HotkeyAction::Finish)
+    }
+
+    /// Another key joined a held modifier-only shortcut: it was a chord
+    /// meant for another application. Only a recording capture reports
+    /// it, since a bare cancel also cancels the newest unfinished job.
+    fn interrupt(&mut self) -> Option<HotkeyAction> {
+        if !self.active {
+            return None;
+        }
+        let recording = self.recording;
+        self.active = false;
+        self.second_tap = false;
+        self.recording = false;
+        self.last_release_ms = None;
+        recording.then_some(HotkeyAction::Cancel)
     }
 
     fn cancel(&mut self) -> Option<HotkeyAction> {
@@ -396,6 +437,7 @@ impl WindowsHotkeyMonitor {
                 ..CaptureState::default()
             },
             dirty: false,
+            mask_release: false,
         };
         let worker = thread::Builder::new()
             .name("windows-hotkey".into())
@@ -533,11 +575,56 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
     let event = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
-    if process_button(event.vkCode, is_down, event.time) {
-        1
-    } else {
-        unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
+    if event.dwExtraInfo == HEX_INJECTED {
+        return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
+    match process_button(event.vkCode, is_down, event.time) {
+        Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
+        Disposition::Suppress => 1,
+        Disposition::Mask if replay_masked_release(event) => 1,
+        // Windows refused the injection (an elevated foreground window):
+        // let the release through rather than leave the key held.
+        Disposition::Mask => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
+    }
+}
+
+/// Taps the mask key, then replays the swallowed release, so the system
+/// sees a chord instead of Alt or Windows alone.
+fn replay_masked_release(release: &KBDLLHOOKSTRUCT) -> bool {
+    let extended = if release.flags & LLKHF_EXTENDED != 0 {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        0
+    };
+    let input = |vk: u16, scan: u16, flags: u32| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: HEX_INJECTED,
+            },
+        },
+    };
+    let inputs = [
+        input(MASK_KEY, 0, 0),
+        input(MASK_KEY, 0, KEYEVENTF_KEYUP),
+        input(
+            release.vkCode as u16,
+            release.scanCode as u16,
+            KEYEVENTF_KEYUP | extended,
+        ),
+    ];
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    };
+    sent as usize == inputs.len()
 }
 
 fn mouse_message(message: u32, data: u32) -> Option<(u32, bool)> {
@@ -570,7 +657,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         // SAFETY: Windows supplies a live MSLLHOOKSTRUCT for this callback.
         let event = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
         if let Some((vk, down)) = mouse_message(wparam as u32, event.mouseData)
-            && process_button(vk, down, event.time)
+            && process_button(vk, down, event.time) != Disposition::Pass
         {
             return 1;
         }
@@ -579,9 +666,10 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
 }
 
 // Both low-level hooks feed exactly the same capture and suppression rules.
-fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
+fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
     let is_up = !is_down;
     let mut suppressed = false;
+    let mut mask = false;
     {
         let mut guard = CALLBACK_STATE
             .lock()
@@ -600,7 +688,11 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
             // it neither triggers actions nor suppresses keys, so the
             // capture can observe every key through GetAsyncKeyState.
             if CAPTURE_INHIBIT.load(Ordering::Relaxed) {
-                return false;
+                state.mask_release = false;
+                return Disposition::Pass;
+            }
+            if !modifier_event && is_down {
+                state.mask_release = false;
             }
             let paste_event = state.paste_trigger_vk == Some(vk)
                 && (state.paste_trigger_down
@@ -667,7 +759,23 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                         state.dirty = false;
                     }
                 }
-            } else if modifier_event {
+            } else if !modifier_event {
+                // A key or button joining a held modifier-only shortcut makes
+                // a chord meant for another application, such as Alt+Tab.
+                if is_down && state.trigger_vk.is_none() && state.capture.active {
+                    state.dirty = true;
+                    if let Some(action) = state.capture.interrupt() {
+                        send_event(state, action, time);
+                    }
+                }
+            } else {
+                if is_up
+                    && state.mask_release
+                    && matches!(vk as u16, VK_LMENU | VK_RMENU | VK_MENU | VK_LWIN | VK_RWIN)
+                {
+                    state.mask_release = false;
+                    mask = !state.share_trigger;
+                }
                 if state.trigger_vk.is_none()
                     && state.capture.locked
                     && !state.dirty
@@ -706,13 +814,25 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> bool {
                 {
                     send_event(state, action, time);
                 }
+                if is_down
+                    && state.binding.masks_release()
+                    && state.modifiers.matches(&state.binding)
+                {
+                    state.mask_release = true;
+                }
                 if state.dirty && !state.modifiers.any_required_down(&state.binding) {
                     state.dirty = false;
                 }
             }
         }
     }
-    suppressed
+    if mask {
+        Disposition::Mask
+    } else if suppressed {
+        Disposition::Suppress
+    } else {
+        Disposition::Pass
+    }
 }
 
 fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32) {
@@ -1183,7 +1303,10 @@ mod tests {
             alt: Some(ModifierSide::Right),
             ..both_alts.clone()
         };
-        assert!(right_alt.validate().is_err(), "one key alone stays unsafe");
+        assert!(
+            right_alt.validate().is_ok(),
+            "one key alone is a shortcut too"
+        );
         assert_eq!(
             WindowsHotkey::from(&HotkeyBinding::from(&both_alts)),
             both_alts
@@ -1247,15 +1370,75 @@ mod tests {
     }
 
     #[test]
-    fn one_modifier_is_not_safe_as_a_modifier_only_binding() {
-        let binding = WindowsHotkey {
-            control: Some(ModifierSide::Either),
+    fn one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release() {
+        let none = WindowsHotkey {
+            control: None,
             windows: None,
             alt: None,
             shift: None,
             key: None,
         };
-        assert!(binding.validate().is_err());
+        assert!(none.validate().is_err(), "a shortcut needs some key");
+        let right_control = WindowsHotkey {
+            control: Some(ModifierSide::Right),
+            ..none.clone()
+        };
+        assert!(right_control.validate().is_ok());
+        assert!(!right_control.masks_release(), "Ctrl alone opens nothing");
+        let right_alt = WindowsHotkey {
+            alt: Some(ModifierSide::Right),
+            ..none.clone()
+        };
+        assert!(right_alt.validate().is_ok());
+        assert!(right_alt.masks_release(), "Alt alone opens the menu bar");
+        let windows = WindowsHotkey {
+            windows: Some(ModifierSide::Either),
+            ..none.clone()
+        };
+        assert!(windows.masks_release(), "Windows alone opens Start");
+        let alt_space = WindowsHotkey {
+            key: Some("space".into()),
+            ..right_alt
+        };
+        assert!(!alt_space.masks_release(), "its key already masks it");
+
+        let mut held = ModifierState::default();
+        held.update(u32::from(VK_RMENU), true);
+        assert!(held.matches(&WindowsHotkey {
+            alt: Some(ModifierSide::Right),
+            ..none.clone()
+        }));
+        held.update(u32::from(VK_LCONTROL), true);
+        assert!(
+            !held.matches(&WindowsHotkey {
+                alt: Some(ModifierSide::Right),
+                ..none
+            }),
+            "AltGr's added Left Ctrl is not Right Alt alone"
+        );
+    }
+
+    #[test]
+    fn a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records() {
+        let mut state = CaptureState::default();
+        assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
+        assert_eq!(state.interrupt(), Some(HotkeyAction::Cancel));
+        assert!(!state.active && !state.locked);
+        assert_eq!(state.release(true, 150), None, "its release is spent");
+        // The armed first tap of double-tap-only records nothing, so it
+        // reports nothing: a bare cancel would cancel the newest job.
+        assert_eq!(state.press(true, true, 1_000), None);
+        assert_eq!(state.interrupt(), None);
+        assert_eq!(state.press(true, true, 1_100), None, "no double tap");
+        // A locked capture is not held, so typing never ends it.
+        let mut locked = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        locked.press(true, false, 100);
+        locked.release(true, 140);
+        assert_eq!(locked.interrupt(), None);
+        assert!(locked.locked);
     }
 
     #[test]

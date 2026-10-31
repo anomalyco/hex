@@ -454,6 +454,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   macOS and Windows match sides (device flags, the low-level hook); Linux
   binds a key with side-less modifiers only, and its recorder says so when
   modifiers are pressed alone.
+- Windows accepts one modifier alone (Right Alt, Right Ctrl) as a dictation
+  shortcut. Any key or mouse button joining a held modifier-only shortcut
+  ends it as a chord (Cancel only while it records). Releasing Alt or Windows
+  after a modifier-only shortcut held them is swallowed and replayed after a
+  tap of unassigned VK 0xE8, so the menu bar and Start stay closed (not with
+  Share shortcut). Hex marks every event it injects with `HEX_INJECTED` and its
+  hook skips them, so a paste's Ctrl never presses a Ctrl-alone shortcut.
+- Windows onboarding adds a Microphone row only while Settings' microphone
+  switch (device, user, or "Let desktop apps access your microphone") is off;
+  Allow opens `ms-settings:privacy-microphone`, and setup waits for it.
 - GUI startup must successfully call `keyboard::initialize_layout` on the OS
   main thread before settings, keyboard-using workers, or Rune start. That
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.

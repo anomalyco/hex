@@ -587,7 +587,22 @@ impl PlatformHost {
                 }
                 Ok(())
             }
-            #[cfg(not(target_os = "linux"))]
+            // Windows: the one permission is the microphone switch in Settings.
+            #[cfg(target_os = "windows")]
+            Self::None => {
+                if request
+                    == PlatformRequest::Permission(PermissionAction::ShowGuide(
+                        PermissionKind::Microphone,
+                    ))
+                {
+                    crate::opencode_catalog::open_url(
+                        crate::onboarding::WINDOWS_MICROPHONE_SETTINGS,
+                    )
+                    .map_err(|error| format!("{error:#}"))?;
+                }
+                Ok(())
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             Self::None => Ok(()),
             Self::Fixture(sent) => {
                 sent.push(request);
