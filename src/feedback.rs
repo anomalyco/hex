@@ -74,7 +74,6 @@ pub enum OnboardingTone {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
-    #[cfg(target_os = "macos")]
     Error,
     DictationStart,
     DictationStop,
@@ -433,8 +432,8 @@ impl SoundSet {
         }
     }
 
-    /// Whether the set plays a sound for `cue`. Classic and Thock have no done sound;
-    /// its errors play macOS Basso, and errors sound only on macOS.
+    /// Whether the set plays a sound for `cue`. Classic and Thock have no done
+    /// sound; Classic's error is macOS Basso, or Signature's elsewhere.
     pub fn has(self, cue: Cue) -> bool {
         cue != Cue::Done || BUNDLED_SETS[self as usize].done.is_some()
     }
@@ -576,7 +575,7 @@ impl Auditioning {
 }
 
 /// One set's bundled files, in `resources/audio/sounds/<set>/`. A missing
-/// done tone stays silent, a missing error plays macOS Basso, and a missing
+/// done tone stays silent, a missing error (macOS only) plays Basso, and a missing
 /// success plays the set's own stop sound.
 struct BundledSet {
     start: &'static [u8],
@@ -623,7 +622,12 @@ const BUNDLED_SETS: [BundledSet; 7] = [
         stop: bundled_sound!("classic", "stop"),
         done: None,
         cancel: bundled_sound!("classic", "cancel"),
-        error: None,
+        // macOS plays Basso; elsewhere Classic borrows Signature's error.
+        error: if cfg!(target_os = "macos") {
+            None
+        } else {
+            Some(bundled_sound!("signature", "error"))
+        },
         success: None,
     },
     synthesized_set!("click"),
@@ -647,7 +651,7 @@ struct SetSounds {
     stop: SamplesBuffer,
     done: Option<SamplesBuffer>,
     cancel: SamplesBuffer,
-    /// Played for failures on macOS, and auditioned on every OS.
+    /// Played for failures; `None` plays macOS Basso.
     error: Option<SamplesBuffer>,
     success: Option<SamplesBuffer>,
 }
@@ -811,7 +815,6 @@ impl Sounds {
                 return sounds.success.as_ref().or(Some(&sounds.stop));
             }
             Tone::Onboarding(cue) => return self.onboarding.get(cue),
-            #[cfg(target_os = "macos")]
             Tone::Error => return sounds.error.as_ref(),
             #[cfg(hex_capture)]
             Tone::CaptureStart => &self.capture[0],

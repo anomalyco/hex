@@ -373,7 +373,7 @@ pub(crate) fn run(
             }
         }
         if let Some(failed) = model.poll() {
-            events.dictation(DictationPhase::Failed(failed.error), "")?;
+            fail(&events, failed.error)?;
         }
         if !capture.is_recording() && !start_pending && finishing.is_none() {
             let mut register = next_suspended.take().is_some_and(|suspended| {
@@ -633,7 +633,7 @@ pub(crate) fn run(
             // A repeated paste has no transcript and is not pending work.
             if kind == OutputKind::PasteLast {
                 if let Err(error) = result {
-                    events.dictation(DictationPhase::Failed(error), "")?;
+                    fail(&events, error)?;
                 }
                 continue;
             }
@@ -650,7 +650,7 @@ pub(crate) fn run(
                     })?;
                     events.dictation(phase, text)?;
                 }
-                Err(error) => events.dictation(DictationPhase::Failed(error), "")?,
+                Err(error) => fail(&events, error)?,
             }
             emit_state(
                 &mut events,
@@ -744,10 +744,7 @@ pub(crate) fn run(
                 // it and stay released rather than stopping the listener.
                 start_pending = false;
                 suppressor.restore();
-                events.dictation(
-                    DictationPhase::Failed(format!("could not open microphone: {error}")),
-                    "",
-                )?;
+                fail(&events, format!("could not open microphone: {error}"))?;
                 emit_state(&mut events, active_state(false, pending), &device_label)?;
             }
         }
@@ -871,8 +868,7 @@ fn submit_capture(
                     *pending += 1;
                     events.dictation(DictationPhase::Transcribing, "")?;
                 }
-                Err(TrySendError::Full(_)) => events
-                    .dictation(DictationPhase::Failed("dictation queue is full".into()), "")?,
+                Err(TrySendError::Full(_)) => fail(events, "dictation queue is full")?,
                 Err(TrySendError::Disconnected(_)) => {
                     return Err(eyre!("dictation worker is unavailable"));
                 }
@@ -890,6 +886,13 @@ fn active_state(recording: bool, pending: usize) -> VoiceState {
     } else {
         VoiceState::Listening
     }
+}
+
+/// Logs a failed dictation or paste with the sound set's error sound.
+fn fail(events: &EventLog, error: impl Into<String>) -> Result<()> {
+    feedback::play(Tone::Error);
+    events.dictation(DictationPhase::Failed(error.into()), "")?;
+    Ok(())
 }
 
 fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<()> {

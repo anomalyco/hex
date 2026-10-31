@@ -541,7 +541,8 @@ pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 }
 
 /// Launch at login, driven by the OS's login item: macOS's `SMAppService`
-/// (which may need approval) or Windows's `Run` key.
+/// (which may need approval), Windows's `Run` key, or Linux's XDG autostart
+/// entry.
 fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
     if !ui.platform.caps.launch_at_login {
         return Vec::new();

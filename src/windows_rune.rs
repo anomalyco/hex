@@ -35,10 +35,11 @@ use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_i18n::tr_fill;
 use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription_models::TranscriptionModelId;
+use crate::tray_menu::{TrayCommand, TrayView};
 use crate::windows_app::WindowsDesktopHost;
 
 /// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
@@ -72,6 +73,8 @@ pub(crate) enum Request {
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
     ToggleListening,
+    /// The tray's Paste last dictation, into the app its menu covered.
+    PasteLast,
     /// The window's Quit Hex: stop the listener, then end the app.
     Quit,
 }
@@ -94,6 +97,8 @@ pub(crate) struct Published {
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
     pub(crate) settings: AppSettings,
+    /// The running listener's state, for the tray.
+    pub(crate) state: Option<crate::events::VoiceState>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -263,7 +268,7 @@ fn run_runtime(
     indicator: crate::rune_hud::HudSender,
     tray: Option<&rune::Tray>,
 ) {
-    let mut tray_update = None;
+    let mut tray_view = None;
     indicator.set_position(settings.indicator_position);
     let mut host =
         WindowsDesktopHost::new(event_path, settings, settings_error, history, indicator);
@@ -298,10 +303,14 @@ fn run_runtime(
             }
         }
         if let Some(tray) = tray
-            && tray_update.as_ref() != Some(&published.update_status)
+            && (changed || tray_view.is_none())
         {
-            tray_update = Some(published.update_status.clone());
-            show_update_in_tray(tray, &published.update_status);
+            let view = tray_view_for(&published);
+            if tray_view.as_ref() != Some(&view) {
+                tray.set_tooltip(view.tooltip());
+                tray.set_menu(view.menu());
+                tray_view = Some(view);
+            }
         }
     }
     host.stop();
@@ -310,32 +319,18 @@ fn run_runtime(
 // ---------------------------------------------------------------------------
 // The tray and the window icon
 
-/// The tray's menu, with the update the window's sidebar offers below Show
-/// Hex: Restart to update once a managed install has staged it, or Download
-/// update for an install that cannot apply it itself.
-fn tray_menu(update: Option<String>) -> Vec<rune::TrayItem> {
-    let mut menu = vec![rune::TrayItem::action("show", tr("Show Hex"))];
-    menu.extend(update.map(|label| rune::TrayItem::action("update", label)));
-    menu.push(rune::TrayItem::action("toggle", tr("Enable / Disable Hex")));
-    menu.push(rune::TrayItem::action("quit", tr("Quit Hex")));
-    menu
-}
-
-fn show_update_in_tray(tray: &rune::Tray, status: &DesktopUpdateStatus) {
-    let label = match status {
-        DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update").to_owned()),
-        DesktopUpdateStatus::Available => Some(tr("Download update").to_owned()),
-        DesktopUpdateStatus::SwitchAvailable { channel, version } => {
-            Some(crate::updater::switch_label(channel, version))
-        }
-        _ => None,
-    };
-    tray.set_tooltip(if label.is_some() {
-        tr("Hex Dictation: update available")
-    } else {
-        tr("Hex Dictation")
-    });
-    tray.set_menu(tray_menu(label));
+/// What the tray shows for what the runtime published.
+fn tray_view_for(published: &Published) -> TrayView {
+    TrayView::new(
+        published.listener.running,
+        published.state,
+        &published.update_status,
+        crate::tray_menu::model_menu_entries(
+            &published.settings,
+            published.transcription.preparing.is_some(),
+            crate::transcription_models::is_installed,
+        ),
+    )
 }
 
 /// Gives the window the executable's embedded icon (resource 1, see
@@ -440,36 +435,42 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
         TRAY_ICON_SIZE,
         tray_icon_pixels(taskbar_is_light()),
     );
+    let view = TrayView::default();
     let spec = rune::TraySpec::new("hex", "Hex", icon)
-        .tooltip(tr("Hex Dictation"))
-        .menu(tray_menu(None));
+        .tooltip(view.tooltip())
+        .menu(view.menu());
     let tray = rune::Tray::new(spec, move |event| match event {
         // Left click shows the window; right click opens the menu.
         rune::TrayEvent::Activate { .. } => window.open(),
-        rune::TrayEvent::Menu(id) => match id.as_str() {
-            "show" => window.open(),
-            "update" => {
+        rune::TrayEvent::Menu(id) => match TrayCommand::from_id(&id) {
+            Some(TrayCommand::Show) => window.open(),
+            Some(TrayCommand::Quit) => window.quit(),
+            Some(command) => {
                 let Some(runtime) = runtime() else { return };
-                let action = match runtime
-                    .published()
-                    .map(|published| published.update_status.clone())
-                {
-                    Some(DesktopUpdateStatus::ReadyToRestart) => DesktopAction::RestartIntoUpdate,
-                    Some(DesktopUpdateStatus::Available) => DesktopAction::OpenUpdate,
-                    Some(DesktopUpdateStatus::SwitchAvailable { .. }) => {
-                        DesktopAction::ConfirmUpdateSwitch
+                let published = runtime.published();
+                let request = match command {
+                    TrayCommand::PasteLast => Request::PasteLast,
+                    TrayCommand::ToggleListening => Request::ToggleListening,
+                    TrayCommand::UseModel(model) => {
+                        let Some(published) = published else { return };
+                        Request::ChooseModel {
+                            model,
+                            language: published.settings.transcription_for_model(model).language,
+                        }
                     }
-                    _ => return,
+                    TrayCommand::Update => {
+                        let Some(action) = published.and_then(|published| {
+                            crate::tray_menu::update_action(&published.update_status)
+                        }) else {
+                            return;
+                        };
+                        Request::Desktop(action)
+                    }
+                    TrayCommand::Show | TrayCommand::Quit => return,
                 };
-                let _ = runtime.send(Request::Desktop(action));
+                let _ = runtime.send(request);
             }
-            "toggle" => {
-                if let Some(runtime) = runtime() {
-                    let _ = runtime.send(Request::ToggleListening);
-                }
-            }
-            "quit" => window.quit(),
-            _ => {}
+            None => {}
         },
         _ => {}
     })?;

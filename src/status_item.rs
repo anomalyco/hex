@@ -9,7 +9,8 @@ use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::AppSettings;
-use crate::transcription_models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
+use crate::transcription_models::{MODELS, TranscriptionModelId};
+use crate::tray_menu::model_menu_entries;
 use crate::transcription_preparation::PreparationStatus;
 
 const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
@@ -387,39 +388,11 @@ fn add_item(
     item
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct ModelMenuEntry {
-    model: TranscriptionModelId,
-    title: String,
-    selected: bool,
-    enabled: bool,
-}
-
 fn model_from_tag(tag: isize) -> Option<TranscriptionModelId> {
     MODELS
         .get(usize::try_from(tag).ok()?)
         .filter(|model| model.available())
         .map(|model| model.id)
-}
-
-fn model_menu_entries(
-    settings: &AppSettings,
-    preparing: bool,
-    installed: impl Fn(&ModelDefinition, &str) -> bool,
-) -> Vec<ModelMenuEntry> {
-    MODELS
-        .iter()
-        .filter(|model| model.available())
-        .filter_map(|model| {
-            let selection = settings.transcription_for_model(model.id);
-            installed(model, &selection.language).then(|| ModelMenuEntry {
-                model: model.id,
-                title: format!("{} · {}", model.name, language_name(&selection.language)),
-                selected: model.id == settings.transcription.model,
-                enabled: !preparing && model.id != settings.transcription.model,
-            })
-        })
-        .collect()
 }
 
 pub fn installed() -> bool {
@@ -642,7 +615,6 @@ pub fn update_meeting(state: &crate::meeting_watcher::MeetingMenuState, enabled:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_models::TranscriptionSelection;
 
     #[test]
     fn meeting_menu_offers_one_action_per_state() {
@@ -698,39 +670,6 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
-    }
-
-    #[test]
-    fn model_menu_only_lists_downloaded_models_with_their_remembered_language() {
-        let mut settings = AppSettings::default();
-        settings.remember_transcription(TranscriptionSelection {
-            model: TranscriptionModelId::WhisperLargeV3Turbo,
-            language: "fr".into(),
-            recognition_hints: String::new(),
-        });
-        settings.remember_transcription(TranscriptionSelection::default());
-        let installed = |model: &ModelDefinition, _: &str| {
-            matches!(
-                model.id,
-                TranscriptionModelId::ParakeetUnifiedEnglish
-                    | TranscriptionModelId::WhisperLargeV3Turbo
-            )
-        };
-        let entries = model_menu_entries(&settings, false, installed);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].title, "Parakeet Unified English · English");
-        assert!(entries[0].selected);
-        assert!(!entries[0].enabled);
-        assert_eq!(entries[1].title, "Whisper large-v3-turbo · French");
-        assert!(!entries[1].selected);
-        assert!(entries[1].enabled);
-        let preparing = model_menu_entries(&settings, true, installed);
-        assert!(preparing.iter().all(|entry| !entry.enabled));
-        assert!(
-            preparing[0].selected,
-            "preparing must not mark the candidate selected"
-        );
-        assert!(model_menu_entries(&settings, false, |_, _| false).is_empty());
     }
 
     #[test]

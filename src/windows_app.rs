@@ -40,6 +40,7 @@ struct RunningListener {
     /// Saved settings the listener applies in place.
     updates: mpsc::Sender<Box<AppSettings>>,
     swap_failures: Receiver<crate::local_transcriber::SwapFailed>,
+    commands: mpsc::Sender<crate::windows_dictation::ListenerCommand>,
 }
 
 impl RunningListener {
@@ -81,6 +82,9 @@ pub(crate) struct WindowsDesktopHost {
     /// or a later source change supersedes.
     automatic_preparation: bool,
     updater: crate::updater::Updater,
+    /// The newest foreground window of another app, where the tray's Paste
+    /// last dictation goes once its menu has taken the foreground.
+    foreground: ForeignWindow,
 }
 
 /// Names the event that marks the running Hex app in this login session.
@@ -252,6 +256,7 @@ impl WindowsDesktopHost {
             input_sources: None,
             automatic_preparation: false,
             updater: crate::updater::Updater::start(),
+            foreground: ForeignWindow::default(),
         };
         crate::transcription_models::delete_set_aside();
         host.refresh_personal_commands_host();
@@ -281,6 +286,14 @@ impl WindowsDesktopHost {
             Request::CancelModel => {
                 self.manual_choice();
                 self.preparation.cancel();
+            }
+            Request::PasteLast => {
+                if let Some(listener) = &self.listener {
+                    self.foreground.activate();
+                    let _ = listener
+                        .commands
+                        .send(crate::windows_dictation::ListenerCommand::PasteLast);
+                }
             }
             Request::Quit => return true,
             Request::ReloadSettings => match AppSettings::load() {
@@ -404,10 +417,12 @@ impl WindowsDesktopHost {
         let (result_sender, result_receiver) = mpsc::channel();
         let (updates, update_receiver) = mpsc::channel();
         let (swap_failure_sender, swap_failures) = mpsc::channel();
+        let (commands, command_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let selection = self.runtime_selection();
         let config = crate::windows_dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
+            commands: Some(command_receiver),
             history: self.history.clone(),
             last_dictation: self.last_dictation.clone(),
             indicator: Some(self.indicator.clone()),
@@ -437,6 +452,7 @@ impl WindowsDesktopHost {
                     worker,
                     updates,
                     swap_failures,
+                    commands,
                 });
                 self.session_before_start = self.activity.session_started_at;
                 self.awaiting_session_start = true;
@@ -640,6 +656,7 @@ impl WindowsDesktopHost {
             self.start();
         }
 
+        self.foreground.track();
         self.activity.refresh(&mut self.event_reader);
         self.last_completed_at = last_completed_at(self.event_reader.events().iter());
         if self.awaiting_session_start
@@ -677,6 +694,7 @@ impl WindowsDesktopHost {
             },
             update_status: self.updater.status(),
             settings: self.settings.clone(),
+            state: self.activity.state.filter(|_| self.is_running()),
         }
     }
 }
@@ -710,6 +728,45 @@ fn last_completed_at<'a>(events: impl DoubleEndedIterator<Item = &'a VoiceEvent>
 
 /// The newest failure, hidden once a later dictation completed, so a silent
 /// failure still reaches the Settings window without sticking around.
+/// The newest foreground window another process owns, polled with the
+/// runtime's refresh.
+#[derive(Default)]
+struct ForeignWindow(Option<isize>);
+
+impl ForeignWindow {
+    fn track(&mut self) {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId,
+        };
+        // SAFETY: plain queries; a null window owns no process.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return;
+            }
+            let mut process_id = 0;
+            GetWindowThreadProcessId(window, &mut process_id);
+            if process_id != GetCurrentProcessId() {
+                self.0 = Some(window as isize);
+            }
+        }
+    }
+
+    /// Brings that window back to the foreground, where a paste lands.
+    fn activate(&self) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+        let Some(window) = self.0 else { return };
+        let window = window as windows_sys::Win32::Foundation::HWND;
+        // SAFETY: `IsWindow` vets a handle that may have closed since.
+        unsafe {
+            if IsWindow(window) != 0 {
+                SetForegroundWindow(window);
+            }
+        }
+    }
+}
+
 fn visible_failure(activity: &DesktopActivity, last_completed_at: Option<u64>) -> Option<String> {
     activity
         .last_failure
