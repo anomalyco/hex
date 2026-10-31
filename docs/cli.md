@@ -100,7 +100,7 @@ and `hex paste-last` reach the listener's own queue as its shortcut would.
 transcript as heard, skipping the Output pane's steps, as the Dictate without
 processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
 and Paste Last pastes it. `--raw` with `stop` or `cancel` is a usage error
-(exit 2); a printing stop always processes.
+(exit 2); `stop --print` of a raw dictation prints the transcript as heard.
 
 `dictation cancel` with nothing recording cancels the newest unfinished
 dictation, like Escape. Escape cancels an active recording before any job, so

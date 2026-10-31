@@ -1416,7 +1416,7 @@ fn finish_hotkey_dictation(
             dictation,
             action_at,
             POST_RELEASE_TAIL,
-            |clip| worker.transcribe_printed(clip, print, context.clone()),
+            |clip| worker.transcribe_printed(clip, print, raw, context.clone()),
             device,
             events,
             indicator,
@@ -1875,7 +1875,9 @@ fn handle_dictation_event(
                 TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
                     DictationPhase::Pasted
                 }
-                TranscriptionTarget::Print => DictationPhase::Printed,
+                TranscriptionTarget::Print | TranscriptionTarget::RawPrint => {
+                    DictationPhase::Printed
+                }
                 TranscriptionTarget::Service => return Ok(()),
             };
             feedback::play(Tone::DictationDone);
