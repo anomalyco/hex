@@ -9,8 +9,10 @@ use super::super::controls::Paint;
 /// How long the flying word and its typeset self cross-fade.
 pub(crate) const HANDOFF: f64 = 0.11;
 /// Shutter smear across 10 velocity samples.
-const SHUTTER: f32 = 0.72 / 60.0;
-const TAPS: usize = 10;
+const SHUTTER: f32 = 0.45 / 60.0;
+/// A few soft exposures across the shutter, heaviest in the middle, read as
+/// one smear rather than a stack of copies.
+const TAPS: [f32; 4] = [0.16, 0.28, 0.28, 0.16];
 const GLOW_INK: f32 = 0.42;
 const CARET_RATE: f64 = 45.0;
 const NUDGE: f32 = 14.0;
@@ -370,19 +372,30 @@ pub(crate) fn flying(p: Paint, key: &str, word: &str, weight: f32, pose: Pose) -
                 .blur(0.14 * pose.sprite),
         );
     }
-    let tap = 0.25;
-    for n in 0..TAPS {
-        let [dx, dy] = local(((n as f32 + 0.5) / TAPS as f32 - 0.5) * SHUTTER);
+    let speed = pose.vx.hypot(pose.vy);
+    let smear = (speed * 0.0022).clamp(0.9, 3.2) / k;
+    for (n, weight) in TAPS.iter().enumerate() {
+        let [dx, dy] = local(((n as f32 + 0.5) / TAPS.len() as f32 - 0.5) * SHUTTER);
         sprite = sprite.child(
             text(word.to_string())
                 .key(format!("tap{n}"))
                 .font(font)
                 .color(ink(p, pose.heat))
                 .absolute(dx, dy)
-                .opacity(tap),
+                .opacity(*weight)
+                .blur(smear),
         );
     }
-    sprite
+    // A sharp core keeps the word legible in the smear.
+    sprite.child(
+        text(word.to_string())
+            .key("core")
+            .font(font)
+            .color(ink(p, pose.heat))
+            .absolute(0.0, 0.0)
+            .opacity(0.55)
+            .blur(0.5 / k),
+    )
 }
 
 pub(crate) fn flicker(now: f64, index: usize) -> f32 {

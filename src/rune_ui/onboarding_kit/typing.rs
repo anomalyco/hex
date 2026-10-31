@@ -45,7 +45,7 @@ impl Default for Timing {
             pace: 0.17,
             panic_pace: 0.072,
             freeze: 1.5,
-            punch: 1.6,
+            punch: 1.25,
             fired: 2.0,
             hex_send: 0.7,
             hex_reply: 1.3,
@@ -119,13 +119,13 @@ const SCRIPT: &[Op] = &[
     Op::Send(false),
     Op::Wait(Gap::Beat(0.6)),
     Op::Dots(1.0),
-    Op::Jay("they can see my screen"),
+    Op::JayFor("they can see my screen", 1.25),
     Op::Punch,
     Op::JayFor("Clear your desk.", 1.0),
     // `"wait no i meant ready"`, cut off.
-    Op::Type("wait no i m", 1.0, 1.0),
-    Op::Wait(Gap::Beat(0.06)),
-    Op::System("Jay removed you from \"Launch Room\""),
+    Op::Type("wait no i mea", 1.0, 1.0),
+    Op::Wait(Gap::Beat(0.12)),
+    Op::System("Jay removed you from \u{201c}Launch Room\u{201d}"),
     Op::Wait(Gap::Fired),
 ];
 
@@ -152,6 +152,8 @@ pub(crate) struct Stroke {
     pub(crate) caret: usize,
     /// Struck hard, in panic.
     pub(crate) hard: bool,
+    /// How far into panic, `0..=1`.
+    pub(crate) panic: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,7 +243,7 @@ impl Scene {
         let mut caret = 0;
         let mut n = 0;
         let mut began: Option<f64> = None;
-        let stroke = |s: &mut Scene, at: f64, gap: f64, key, modifier, text: &str, caret, hard| {
+        let stroke = |s: &mut Scene, at: f64, gap: f64, key, modifier, text: &str, caret, panic| {
             s.strokes.push(Stroke {
                 at,
                 key,
@@ -249,7 +251,8 @@ impl Scene {
                 hold: HOLD.min(gap.max(0.05) * 0.8),
                 text: text.to_string(),
                 caret,
-                hard,
+                hard: panic >= HARD,
+                panic,
             });
         };
         let mut panic = 0.0;
@@ -323,7 +326,6 @@ impl Scene {
                             pace * wobble(n) + extra
                         };
                         at += gap;
-                        let hard = panic >= HARD;
                         began.get_or_insert(at);
                         stroke(
                             &mut s,
@@ -333,7 +335,7 @@ impl Scene {
                             shift.then_some("shift"),
                             &text,
                             caret,
-                            hard,
+                            panic,
                         );
                     }
                 }
@@ -345,7 +347,7 @@ impl Scene {
                         text.remove(caret);
                         let gap = 0.12 * wobble(n);
                         at += gap;
-                        stroke(&mut s, at, gap, "delete", None, &text, caret, panic >= HARD);
+                        stroke(&mut s, at, gap, "delete", None, &text, caret, panic);
                     }
                 }
                 Op::Send(slip) => {
@@ -353,7 +355,7 @@ impl Scene {
                     at += gap;
                     let sent = std::mem::take(&mut text);
                     caret = 0;
-                    stroke(&mut s, at, gap, "return", None, "", 0, true);
+                    stroke(&mut s, at, gap, "return", None, "", 0, panic.max(HARD));
                     s.focus.push((at, Focus::Line(s.lines.len())));
                     s.knocks.push((at, if slip { 6.0 } else { 3.5 }));
                     if slip {
@@ -571,7 +573,7 @@ mod tests {
         assert!(scene.removed(scene.duration()));
         assert_eq!(scene.draft(scene.duration()), ("", None));
         let removal = last.at;
-        assert_eq!(scene.draft(removal - 0.01).0, "wait no i m");
+        assert_eq!(scene.draft(removal - 0.01).0, "wait no i mea");
         assert!(scene.typing_secs() < scene.score_secs());
     }
 
