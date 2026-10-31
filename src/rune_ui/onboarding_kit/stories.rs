@@ -1458,6 +1458,26 @@ mod tests {
     }
 
     #[test]
+    fn skip_shows_two_seconds_in_and_leaves_the_comedy() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.had_model = true;
+        s.begin_live(0.0);
+        let mut tx = Tx::default();
+        poll(&mut s, 30.0, &mut tx);
+        s.start_scene();
+        poll(&mut s, 31.0, &mut tx);
+        assert!(!versus::skippable(&s));
+        assert!(!s.skip_scene());
+        poll(&mut s, 32.1, &mut tx);
+        assert!(versus::skippable(&s));
+        assert!(s.skip_scene());
+        assert!(matches!(
+            s.step,
+            Step::Permissions | Step::Waiting | Step::Try
+        ));
+    }
+
+    #[test]
     fn a_retimed_scene_plays_at_its_new_length() {
         let mut s = Onboard::new(Flow::FirstRun);
         let before = s.scene.duration();
