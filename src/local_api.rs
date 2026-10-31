@@ -1907,10 +1907,7 @@ fn write_discovery(path: &Path, document: &DiscoveryDocument) -> Result<()> {
         std::os::unix::fs::PermissionsExt::from_mode(0o600),
     )?;
     fs::rename(&temporary, path)?;
-    #[cfg(unix)]
-    fs::File::open(parent)?.sync_all()?;
-    #[cfg(not(unix))]
-    let _ = parent;
+    crate::durable::sync_directory(parent)?;
     Ok(())
 }
 

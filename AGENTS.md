@@ -390,6 +390,9 @@ substitute for source inspection or a second roadmap.
 - `meeting_runtime`: the Linux and Windows apps' meeting controller thread,
   capsules, recording state, and tray items (macOS runs the same controller
   from `macos_rune`).
+- `durable`: crash-safe writes on every OS (`write`, `sync_file`,
+  `sync_directory`). Windows flushes only through a writable handle and
+  cannot open a directory, so file syncs and directory syncs go through it.
 - `meeting_generator`: who writes notes and live chapters: Apple
   Intelligence on a Mac that has it, else OpenCode when
   `meetings.summarize_with_opencode` is on (off by default; it sends the

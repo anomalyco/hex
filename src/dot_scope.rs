@@ -361,9 +361,7 @@ impl Tuning {
     /// Saves the tuning atomically so a crash never leaves half a file.
     pub fn save(&self) -> color_eyre::Result<()> {
         let path = Self::file()?;
-        let staging = path.with_extension("json.tmp");
-        std::fs::write(&staging, self.json() + "\n")?;
-        std::fs::rename(&staging, &path)?;
+        crate::durable::write(&path, (self.json() + "\n").as_bytes())?;
         Ok(())
     }
 }
