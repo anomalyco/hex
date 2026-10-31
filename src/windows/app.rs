@@ -39,7 +39,7 @@ struct RunningListener {
     worker: JoinHandle<()>,
     /// Saved settings the listener applies in place.
     updates: mpsc::Sender<Box<AppSettings>>,
-    swap_failures: Receiver<crate::local_transcriber::SwapFailed>,
+    swap_failures: Receiver<crate::transcription::local_transcriber::SwapFailed>,
     /// The tray's and `hex` commands, handled as the shortcut would be.
     commands: mpsc::Sender<crate::windows::dictation::ListenerCommand>,
 }
@@ -76,7 +76,7 @@ pub(crate) struct WindowsDesktopHost {
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
     preparation: TranscriptionPreparation,
-    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     /// Present only while keyboard model switching is on.
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
     /// The preparation running is a keyboard switch, which a manual choice
@@ -172,7 +172,7 @@ impl WindowsDesktopHost {
         ));
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
-        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+        let keyboard_switcher = crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
             settings
                 .keyboard_model_switching
@@ -509,7 +509,7 @@ impl WindowsDesktopHost {
     /// The listener could not load a newly chosen model and still runs the
     /// previous one. Settings go back to it, so they never name a model that
     /// is not running and the picker never offers to delete the one in use.
-    fn keep_running_model(&mut self, failed: crate::local_transcriber::SwapFailed) {
+    fn keep_running_model(&mut self, failed: crate::transcription::local_transcriber::SwapFailed) {
         // A choice made after the failed one stands.
         if self.runtime_selection() != failed.wanted {
             return;

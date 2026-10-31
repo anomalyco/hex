@@ -2142,7 +2142,7 @@ const SCENES: &[Scene] = &[
         ]
         .into_iter()
         .map(
-            |(id, name, language)| crate::keyboard_model_switching::InputSource {
+            |(id, name, language)| crate::transcription::keyboard_model_switching::InputSource {
                 id: id.into(),
                 name: name.into(),
                 languages: vec![language.into()],

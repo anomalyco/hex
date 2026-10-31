@@ -511,7 +511,7 @@ impl ProvisionalTitles {
         if let Err(error) = thread::Builder::new()
             .name("meeting-title".into())
             .spawn(move || {
-                crate::background_priority::deprioritize_background_thread();
+                crate::transcription::background_priority::deprioritize_background_thread();
                 name_while_recording(&id, &stop, &latest);
             })
         {
@@ -991,7 +991,7 @@ pub fn spawn_summary(
     thread::Builder::new()
         .name("meeting-notes".into())
         .spawn(move || {
-            crate::background_priority::deprioritize_background_thread();
+            crate::transcription::background_priority::deprioritize_background_thread();
             done(summarize_claimed(&id, claim));
         })
         .map_err(|error| tracing::error!(%error, "could not start meeting notes"))

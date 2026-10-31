@@ -499,7 +499,7 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
     #[cfg(not(target_os = "macos"))]
     if !running() {
         return report(selection(Some(model), language).and_then(|selection| {
-            crate::local_transcriber::install(
+            crate::transcription::local_transcriber::install(
                 &selection,
                 &std::sync::atomic::AtomicBool::new(false),
             )
@@ -544,14 +544,15 @@ fn offline_model(command: ModelCommand) -> u8 {
             Ok(())
         }
         ModelCommand::Devices => {
-            for device in crate::local_transcriber::devices()? {
+            for device in crate::transcription::local_transcriber::devices()? {
                 println!("{device}");
             }
             Ok(())
         }
         ModelCommand::Check { model, language } => {
-            let transcriber =
-                crate::local_transcriber::LocalTranscriber::load(&selection(model, language)?)?;
+            let transcriber = crate::transcription::local_transcriber::LocalTranscriber::load(
+                &selection(model, language)?,
+            )?;
             println!("ready\t{}", transcriber.device_label());
             Ok(())
         }
@@ -562,7 +563,7 @@ fn offline_model(command: ModelCommand) -> u8 {
         } => {
             println!(
                 "{}",
-                crate::local_transcriber::transcribe_wav_with_selection(
+                crate::transcription::local_transcriber::transcribe_wav_with_selection(
                     &wav,
                     &selection(model, language)?
                 )?

@@ -914,7 +914,7 @@ mod tests {
         ));
         let mut runtime = super::super::Runtime {
             settings: Default::default(),
-            keyboard_switcher: crate::keyboard_model_switching::Switcher::new(
+            keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
                 Default::default(),
                 None,
             ),

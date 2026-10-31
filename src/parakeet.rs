@@ -13,13 +13,13 @@ use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Tr
 use crate::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
-use crate::gguf_session::OfflineGgufSession;
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
 use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::gguf_session::OfflineGgufSession;
 use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, model_path, validate,
 };
@@ -1240,7 +1240,7 @@ impl Parakeet {
             ..Default::default()
         };
         if let (Some(selection), Some(definition)) = (selection, definition) {
-            let runtime_language = crate::gguf_session::validate_gguf_artifact(
+            let runtime_language = crate::transcription::gguf_session::validate_gguf_artifact(
                 model_path,
                 definition,
                 &architecture,

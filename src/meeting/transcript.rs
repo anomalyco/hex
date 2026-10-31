@@ -21,13 +21,13 @@ use hound::WavReader;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::StreamingResampler;
-#[cfg(not(target_os = "macos"))]
-use crate::local_transcriber::LocalTranscriber as Transcriber;
-use crate::pause_segmenter::PauseSegmenter;
-use crate::transcript::{Transcript, TranscriptSegment};
 #[cfg(target_os = "macos")]
 use crate::transcription::Transcriber;
+#[cfg(not(target_os = "macos"))]
+use crate::transcription::local_transcriber::LocalTranscriber as Transcriber;
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::pause_segmenter::PauseSegmenter;
+use crate::transcription::transcript::{Transcript, TranscriptSegment};
 
 use super::echo::{EchoEnvelope, Signal};
 use super::{
@@ -191,7 +191,7 @@ fn transcribe_speech(
 /// Whether the speech detector heard no speech in `samples`, so they skip the
 /// model.
 fn speechless(samples: &[f32]) -> bool {
-    let speechless = crate::speech_detector::contains_speech(samples) == Some(false);
+    let speechless = crate::transcription::speech_detector::contains_speech(samples) == Some(false);
     if speechless {
         tracing::debug!(
             audio_ms = samples_ms(samples.len()),
@@ -783,11 +783,11 @@ impl ChunkModel {
                 return Shared::Busy;
             }
             match engine_model(model) {
-                Some(transcriber) => {
-                    Shared::Ran(crate::background_priority::at_background_priority(|| {
+                Some(transcriber) => Shared::Ran(
+                    crate::transcription::background_priority::at_background_priority(|| {
                         transcriber.transcribe_segments(samples)
-                    }))
-                }
+                    }),
+                ),
                 None => Shared::NoModel,
             }
         });
@@ -1310,7 +1310,7 @@ fn run_rolling(
     receiver: Receiver<RollingInput>,
     incomplete: &[AtomicBool; 2],
 ) -> RollingOutcome {
-    crate::background_priority::deprioritize_background_thread();
+    crate::transcription::background_priority::deprioritize_background_thread();
     let mut worker = RollingWorker::new(directory, ChunkModel::new(selection.clone()));
     loop {
         let mut disconnected = false;
@@ -1760,7 +1760,7 @@ pub(super) fn transcribe(
     selection: &TranscriptionSelection,
     rolling: Option<RollingOutcome>,
 ) -> Result<(Vec<TranscriptEntry>, u64)> {
-    crate::background_priority::deprioritize_background_thread();
+    crate::transcription::background_priority::deprioritize_background_thread();
     let (mut rolled, mut cuts, mut envelope, mut model) = match rolling {
         Some(outcome) => (
             outcome.tracks,
@@ -2310,7 +2310,7 @@ mod tests {
     }
 
     fn speech(seconds: usize) -> Vec<f32> {
-        crate::pause_segmenter::tests::utterance(&[(seconds * 1_000, 0)], -70.0)
+        crate::transcription::pause_segmenter::tests::utterance(&[(seconds * 1_000, 0)], -70.0)
     }
 
     fn chunks_of(audio: &[f32], block: usize) -> Vec<Chunk> {
@@ -2360,7 +2360,7 @@ mod tests {
 
     #[test]
     fn chunks_end_at_the_first_pause_after_the_target_length() {
-        let audio = crate::pause_segmenter::tests::utterance(
+        let audio = crate::transcription::pause_segmenter::tests::utterance(
             &[(4_000, 800), (3_000, 800), (5_000, 800), (2_000, 0)],
             -70.0,
         );
@@ -2404,7 +2404,7 @@ mod tests {
 
     #[test]
     fn a_speechless_chunk_skips_the_shared_model() {
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let mut model = ChunkModel::new(TranscriptionSelection::default());
         let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
             panic!("a speechless chunk must not reach the model");
@@ -2415,7 +2415,7 @@ mod tests {
 
     #[test]
     fn speechless_chunks_skip_the_model_and_still_advance_coverage() {
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let mut track = TrackTranscript::new(MeetingSource::Microphone, 1_000);
         let chunk = Chunk {
             start: 0,
@@ -2454,7 +2454,7 @@ mod tests {
             &first,
             transcribe_speech(&first.samples, || Ok(spoken)).unwrap(),
         );
-        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
         let second = Chunk {
             start: 28 * RATE,
             overlap: 2 * RATE,

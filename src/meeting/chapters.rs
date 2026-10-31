@@ -518,7 +518,7 @@ impl LiveChapters {
         if let Err(error) = thread::Builder::new()
             .name("meeting-chapters".into())
             .spawn(move || {
-                crate::background_priority::deprioritize_background_thread();
+                crate::transcription::background_priority::deprioritize_background_thread();
                 chapter_while_recording(
                     &id,
                     read,

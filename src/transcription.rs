@@ -1,11 +1,25 @@
+pub(crate) mod background_priority;
 #[cfg(target_os = "macos")]
 pub(crate) mod benchmark;
+#[cfg(all(
+    target_arch = "x86_64",
+    any(target_os = "linux", target_os = "windows")
+))]
+pub(crate) mod cpu_floor;
 pub(crate) mod engine;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) mod gguf_session;
+pub(crate) mod keyboard_model_switching;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) mod local_transcriber;
 pub(crate) mod models;
+pub(crate) mod pause_segmenter;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(crate) mod preparation;
 pub(crate) mod service;
+pub(crate) mod speech_detector;
 pub(crate) mod stream;
+pub(crate) mod transcript;
 
 #[cfg(target_os = "macos")]
 use color_eyre::eyre::Result;
@@ -15,11 +29,11 @@ use crate::apple_speech::AppleSpeech;
 #[cfg(target_os = "macos")]
 use crate::parakeet::Parakeet;
 #[cfg(target_os = "macos")]
-pub use crate::transcript::{Transcript, TranscriptSegment};
-#[cfg(target_os = "macos")]
 use crate::transcription::models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
 };
+#[cfg(target_os = "macos")]
+pub use crate::transcription::transcript::{Transcript, TranscriptSegment};
 
 /// Silence after a Unified English clip (400 ms at 16 kHz), so the model
 /// has the context to emit the final word and its closing punctuation

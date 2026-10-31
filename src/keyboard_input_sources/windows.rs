@@ -10,7 +10,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
-use crate::keyboard_model_switching::InputSource;
+use crate::transcription::keyboard_model_switching::InputSource;
 
 const LOCALE_NAME_MAX_LENGTH: usize = 85;
 const LAYOUTS_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Keyboard Layouts";
