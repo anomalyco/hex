@@ -117,6 +117,11 @@ jobs:
             dnf install -y -q "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.rpm"
             test "$(hex --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
             rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop'
+      - name: Check the x86_64 CPU floor
+        if: env.HEX_LINUX_ARCH == 'x86_64'
+        run: |
+          bash .github/release/check-x86-baseline.sh "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" \
+            target/release/build/transcribe-cpp-sys-*/out/lib/libggml*.a
       - name: Report the glibc floor
         run: |
           floor=$(objdump -T "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
@@ -209,6 +214,14 @@ jobs:
           export MSYS2_ENV_CONV_EXCL=CL
           export HEX_RELEASE_DIST="$(cygpath -u "$RUNNER_TEMP")/dist"
           source/scripts/build-windows.sh
+      - name: Check the x86_64 CPU floor
+        if: env.HEX_WINDOWS_ARCH == 'x86_64'
+        shell: bash
+        run: |
+          OBJDUMP="$(cygpath -u "$PROGRAMFILES")/LLVM/bin/llvm-objdump.exe" \
+            bash source/.github/release/check-x86-baseline.sh \
+            "$(cygpath -u "$RUNNER_TEMP")/dist/Hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
+            source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
       - name: Check the executable needs no Visual C++ Redistributable
         shell: pwsh
         run: |

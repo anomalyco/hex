@@ -53,6 +53,11 @@ mkdir -p "$dist"
 # Portable native code: ggml otherwise tunes its CPU kernels to this build
 # machine (for example AVX-512), and the release would crash on older CPUs.
 cmake_args="-DGGML_NATIVE=OFF"
+if [ "$arch" = x86_64 ]; then
+  # GGML_NATIVE=OFF alone still turns AVX2, BMI2, FMA and F16C on: pin the
+  # Ivy Bridge floor instead (issue #592).
+  cmake_args="$cmake_args $(cat "$script_root/scripts/ggml-x86-baseline.txt")"
+fi
 if [ "$arch" = aarch64 ]; then
   # ggml's ARM CPU backend refuses MSVC; clang-cl uses LLVM codegen, so
   # ggml's own threadpool replaces OpenMP there.
