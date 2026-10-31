@@ -369,19 +369,27 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 fn contributed_options_are_labs_toggles_off_by_default() {
     let mut rt = runtime("mac-settings", true, (980.0, 1600.0));
     tap(&mut rt, "nav-labs");
-    for row in ["lab-mouse-shortcuts", "lab-pause-browser"] {
+    for row in [
+        "lab-mouse-shortcuts",
+        "lab-pause-browser",
+        "lab-keep-on-clipboard",
+    ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
     assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
     assert!(!rt.state.settings.labs.mouse_shortcuts);
     tap(&mut rt, "lab-mouse-shortcuts");
     assert!(rt.state.settings.labs.mouse_shortcuts);
+    assert!(!rt.state.settings.labs.keep_on_clipboard);
+    tap(&mut rt, "lab-keep-on-clipboard");
+    assert!(rt.state.settings.labs.keep_on_clipboard);
 
     let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     tap(&mut rt, "nav-labs");
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
+    assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
 }

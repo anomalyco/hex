@@ -23,6 +23,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Unload model when idle no labs.unload_idle + labs.unload_idle_minutes (5/15/30/60, default 15)
 │                                        the engine frees the speech model after that long unused (#442)
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
+├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -100,10 +101,26 @@ other work). Check:
 `restore_default_brings_back_paste_last_only_with_its_lab_on` in
 [tests.rs](../../src/rune_ui/tests.rs).
 
+Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS): while
+on, a pasted dictation stays on the clipboard. `paste::Paster` reads
+`labs::keep_on_clipboard()` as each paste commits: it writes the transcript
+without the nspasteboard.org transient markers (so clipboard managers may
+record it), schedules no 500 ms restore, and drops any earlier snapshot and
+pending restore (`ClipboardRestore::keep`), so a later restoring paste never
+brings back an older clipboard. Into Chromium 155/156, where Hex types the
+text instead of pasting, it also writes the transcript to the clipboard after
+typing. Off, pasting and clipboard restore are exactly as before. Checks:
+`a_kept_paste_leaves_nothing_to_restore` and
+`a_kept_transcript_is_an_ordinary_clipboard_entry` in
+[paste.rs](../../src/paste.rs) (macOS only);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real paste
+on a Mac with the toggle on.
+
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
-restore, the vocabulary list itself (rewriting and search), and Linux's
-Terminal paste.
+restore (Labs › Keep dictation on clipboard skips it on macOS), the
+vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 
 ## Features
 
