@@ -295,6 +295,50 @@ and short taps never do; Hex restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+### Bluetooth headsets
+
+A Bluetooth headset can't play high-quality audio (A2DP) and use its
+microphone at once. While any application records from the headset's
+microphone, PipeWire (WirePlumber) or the headset switches it to the
+hands-free profile (HFP/HSP): mono, call-quality sound in both directions.
+This is how Bluetooth audio works, not something Hex chooses, and how quickly
+the headset switches back depends on the headset and WirePlumber's settings.
+
+If Hex records from the headset's microphone, the two **Microphone mode**
+choices trade off differently:
+
+- **Release when idle** opens the microphone only when you press the shortcut,
+  so each dictation switches the headset to hands-free and back. Playback
+  drops out or pauses during the switch, and the microphone takes longer to
+  open, so the first words can be lost.
+- **Keep ready** keeps the microphone open, so the headset stays in hands-free
+  mode, with call-quality playback, for as long as Hex listens.
+
+The recommended setup is a separate microphone for input (the laptop's
+built-in microphone or a USB microphone) and the Bluetooth earbuds for output
+only. Pick that microphone in General's **Microphone** list, or make it the
+system's default input (for example with `wpctl set-default`), so nothing
+opens the headset's microphone.
+
+General › Advanced's Bluetooth option (`avoid_bluetooth_microphone`, on by
+default) helps only part of the way:
+
+- It applies only while the microphone is **System default** and the default
+  input is a Bluetooth headset. A Bluetooth microphone you picked in Settings,
+  or `--device`, is always used as named.
+- It needs another hardware input that isn't reported unplugged, and
+  `pactl` (PipeWire's PulseAudio server or PulseAudio) to move the stream.
+  With no other input, Hex records from the headset.
+- On Linux, Hex can only open ALSA's default device, which is the Bluetooth
+  source, and then moves its own stream to the other microphone. The stream
+  is briefly on the headset first, so the headset may still switch to
+  hands-free mode, and Hex doesn't switch its profile back. Forcing the
+  headset's profile is up to your sound settings.
+- It changes only Hex's own recording, never other applications or the
+  system default.
+
+To avoid the switch entirely, use the recommended setup above.
+
 ## Shortcuts
 
 Hex gets its shortcuts one of three ways, and all of them drive the same

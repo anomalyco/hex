@@ -368,8 +368,10 @@ observe input-source changes or show these controls.
 - `avoid_bluetooth_microphone` (default on) makes System default record from
   the built-in microphone, else another wired or USB input, when the OS
   default is a Bluetooth headset, so its audio stays out of call quality (on
-  Linux, Hex moves its PipeWire stream off a Bluetooth default source). A
-  saved microphone and `--device` are always used as named.
+  Linux, Hex moves its PipeWire stream off a Bluetooth default source after
+  opening it, so the headset may still switch to hands-free mode; see
+  [Bluetooth headsets](linux.md#bluetooth-headsets)). A saved microphone and
+  `--device` are always used as named.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, `f5`, or `left-option+right-option` (both Options
   held together). `left-` and `right-` apply to shortcuts without a key. On macOS, Windows and X11, `mouse4` and `option+mouse4`
@@ -400,9 +402,11 @@ observe input-source changes or show these controls.
   or `notch`: the capsule's flow after a capture, prototypes to compare). Both
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
-- `meetings.retention` is `day`, `week`, `month`, or `forever` (the
-  default). While Meetings is on, Hex moves meetings that ended longer ago
-  than that to the Trash at launch and hourly.
+- `meetings.retention` is `day`, `week`, `month`, `forever`, or `none` (the
+  default: meetings recorded since the default began are kept 24 hours, and
+  older ones stay until you choose). Hex moves meetings that ended longer
+  ago than that to the Trash at launch and hourly, Meetings on or off, and
+  `hex meetings` and `hex mcp` no longer list them.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).

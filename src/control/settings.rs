@@ -367,10 +367,10 @@ const KEYS: &[Key] = &[
         Kind::Choice(&["top_right", "top_left", "bottom_right", "bottom_left"]),
         "Screen corner of the meeting recording indicator",
     ),
-    key(
+    optional(
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings are kept before they move to the Trash",
+        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
     ),
     key(
         "meetings.providers",
@@ -540,6 +540,14 @@ fn needs(key: &str) -> Option<&'static str> {
 
 /// Why `hex settings set` refuses `name` on this OS, if it does.
 pub fn unavailable(name: &str) -> Option<ControlError> {
+    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
+        && !feature.shipped()
+    {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to a Labs feature that only dev builds have"),
+        ));
+    }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
     Some(ControlError::new(
         "unsupported",

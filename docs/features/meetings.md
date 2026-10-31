@@ -815,25 +815,43 @@ Checks: `markdown_lists_metadata_and_labeled_turns` and
 
 ### Retention
 
+Meeting data is a liability, so new meetings are kept 24 hours by default.
+
 ```ts
 Meetings › Settings -> Keep meetings: 24 hours / 7 days / 30 days / Forever
-│   (default Forever; `meetings.retention` day|week|month|forever)
-Meeting controller, while Meetings is on        // meetings.retention
+│   `meetings.retention` day|week|month|forever, or none (unchosen)
+├── Unchosen (default) -> meetings recorded since the default began
+│   (manifest `retention_applies`) are kept 24 hours; older ones stay
+│   until the user chooses (the `meeting-retention-default` migration
+│   unsets the `forever` that #604 saved as its default)
+└── Chosen -> applies to every finished meeting, older ones included
+Each finished card -> "Deleted after 24 hours" (or 7 days, 30 days)
+Meeting controller, Meetings on or off           // meetings.retention
 ├── At launch, hourly, and soon after the setting changes
-├── Age from ended_at_ms, else created_at_ms; older than the setting
-│   -> the same path as Delete: exported Markdown, then the recording folder,
-│      to the Trash (never removed outright)
+├── Age from ended_at_ms, else created_at_ms; older than its retention
+│   -> the recording folder (audio, transcripts, notes and summary, live
+│      drafts) to the Trash, never removed outright
+│   -> the exported Markdown to the Trash only while its SHA-256 still
+│      matches the copy Hex last wrote (manifest `export_sha256`; Hex's own
+│      heading and notes rewrites keep it current); an edited copy stays
 ├── Skips recording, transcribing, writing-notes, and final.pending
 │   meetings; a later pass retries them
-└── Forever reads nothing from disk; nothing expires while Hex is not running
+└── Nothing expires while Hex is not running
+Queries (`hex meetings`, `hex mcp`, the pane) -> leave out expired meetings
+    at once, before a pass moves them; a process that never loaded settings
+    reads `meetings.retention` from settings.json without writing it
 ```
 
-Sources: `expire` / `expired_meetings` in [meeting.rs](../../src/meeting.rs),
-`MeetingExpiry` in [meeting/watcher.rs](../../src/meeting/watcher.rs), the row
-in [rune_ui/platform_settings.rs](../../src/rune_ui/platform_settings.rs).
-Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`
-and `forever_retention_moves_nothing_and_is_the_default`. No live run of an
-expiry pass against a real Trash has been observed.
+Sources: `retention_for`, `expired`, `expire`, and `trash_expired` in
+[meeting.rs](../../src/meeting.rs), `MeetingExpiry` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs), `Library::scan` in
+[meeting/query.rs](../../src/meeting/query.rs), the row in
+[rune_ui/platform_settings.rs](../../src/rune_ui/platform_settings.rs).
+Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
+`until_one_is_chosen_only_meetings_recorded_since_the_default_expire`,
+`expiry_leaves_a_markdown_copy_the_user_edited`, and
+`hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not`. No
+live run of an expiry pass against a real Trash has been observed.
 
 ### Titles And Summary (Apple Intelligence)
 

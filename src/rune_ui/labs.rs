@@ -5,8 +5,11 @@
 
 use rune::{El, Icon, Tx, row, text};
 
-use super::controls::{self, CardRow, Paint, card, icon_row, pressable_row, row_switch};
+use super::controls::{
+    self, CardRow, Paint, card, icon_row, icon_row_tagged, pressable_row, row_switch,
+};
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::lists::{Tone, tone_tag};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
@@ -381,7 +384,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
         )
         .child(feedback);
     let mut cards: Vec<CardRow> = Vec::new();
-    for row in rows(ui) {
+    for row in rows(ui).into_iter().filter(|row| row.feature.shipped()) {
         let unload_idle = row.feature == Feature::UnloadIdle && row.on;
         let flashing = ui
             .lab_flash
@@ -409,11 +412,14 @@ fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {
     } else {
         row_switch(p, row.on)
     };
-    let mut item = icon_row(
+    let tag = (row.feature.audience() == crate::labs::Audience::Dev)
+        .then(|| tone_tag(p, "dev-tag", tr("Dev"), Tone::Neutral));
+    let mut item = icon_row_tagged(
         p,
         row_key(row.feature),
         row.icon,
         row.title,
+        tag,
         Some(row.about),
         switch,
     );

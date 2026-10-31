@@ -10,6 +10,11 @@
 //! (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
+//! Each feature has an audience (`Feature::audience`): `Everyone` ships in
+//! every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
+//! debug, local, test, and dev-channel builds). A stable build never lists,
+//! accepts, or runs a Dev feature, and keeps its saved setting untouched.
+//!
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
@@ -23,6 +28,32 @@ use crate::app_settings::{AppSettings, LabsSettings};
 
 /// Where people send feedback on Labs features.
 pub const FEEDBACK_URL: &str = "https://github.com/anomalyco/hex/issues/new";
+
+/// Who a Labs feature is for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Audience {
+    /// Ships in every build.
+    Everyone,
+    /// Only dev builds have it.
+    Dev,
+}
+
+impl Audience {
+    /// Whether a build of this kind has features for it.
+    pub const fn reaches(self, dev_build: bool) -> bool {
+        match self {
+            Self::Everyone => true,
+            Self::Dev => dev_build,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Everyone => "everyone",
+            Self::Dev => "dev",
+        }
+    }
+}
 
 /// One Labs feature.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,9 +106,60 @@ impl Feature {
         Self::SpokenSymbols,
     ];
 
-    /// The features this OS has.
+    /// The features this OS and build have.
     pub fn available() -> impl Iterator<Item = Self> {
-        Self::ALL.into_iter().filter(|feature| feature.on_this_os())
+        Self::available_where(Self::shipped)
+    }
+
+    /// The features on this OS that `reaches` admits.
+    fn available_where(reaches: impl Fn(Self) -> bool) -> impl Iterator<Item = Self> {
+        Self::ALL
+            .into_iter()
+            .filter(move |feature| feature.on_this_os() && reaches(*feature))
+    }
+
+    /// Whether this build has the feature: its audience reaches a dev or
+    /// stable build.
+    pub fn shipped(self) -> bool {
+        self.audience().reaches(crate::dev_build::is_dev_build())
+    }
+
+    /// Who the feature is for. Every feature picks one.
+    pub const fn audience(self) -> Audience {
+        match self {
+            Self::Meetings
+            | Self::VoiceFilter
+            | Self::Playground
+            | Self::LiveText
+            | Self::LiveChapters
+            | Self::VocabularyBiasing
+            | Self::TerminalPaste
+            | Self::KeyboardModelSwitching
+            | Self::MouseShortcuts
+            | Self::PauseBrowser
+            | Self::ShareShortcut
+            | Self::UnloadIdle
+            | Self::RestoreShortcutDefault
+            | Self::KeepOnClipboard
+            | Self::CopyOnly
+            | Self::SpokenFormatting
+            | Self::FillerWords
+            | Self::SubtitleExport
+            | Self::SecondDictationShortcut
+            | Self::SmartSpacing
+            | Self::SpokenSymbols => Audience::Everyone,
+        }
+    }
+
+    /// The feature `hex settings` key `key` switches (its toggle, or
+    /// Unload when idle's minutes).
+    pub fn for_settings_key(key: &str) -> Option<Self> {
+        if key == "labs.unload_idle_minutes" {
+            return Some(Self::UnloadIdle);
+        }
+        Self::ALL
+            .into_iter()
+            .find(|feature| feature.settings_key() == key)
     }
 
     fn on_this_os(self) -> bool {
@@ -389,25 +471,55 @@ pub(crate) fn apply(settings: &LabsSettings) {
 }
 
 fn encode(settings: &LabsSettings) -> u32 {
+    encode_where(settings, Feature::shipped)
+}
+
+/// The switches `settings` hold for the features `reaches` admits; the
+/// rest read off while their saved setting stays as it is.
+fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u32 {
     let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
     [
-        (settings.live_text, LIVE_TEXT),
-        (settings.live_chapters, LIVE_CHAPTERS),
-        (settings.playground, PLAYGROUND),
-        (settings.vocabulary_biasing, VOCABULARY_BIASING),
-        (settings.mouse_shortcuts, MOUSE_SHORTCUTS),
-        (settings.unload_idle, UNLOAD_IDLE),
-        (settings.keep_on_clipboard, KEEP_ON_CLIPBOARD),
-        (settings.copy_only, COPY_ONLY),
-        (settings.spoken_formatting, SPOKEN_FORMATTING),
-        (settings.filler_words, FILLER_WORDS),
-        (settings.subtitle_export, SUBTITLE_EXPORT),
-        (settings.smart_spacing, SMART_SPACING),
-        (settings.spoken_symbols, SPOKEN_SYMBOLS),
+        (Feature::LiveText, settings.live_text, LIVE_TEXT),
+        (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
+        (Feature::Playground, settings.playground, PLAYGROUND),
+        (
+            Feature::VocabularyBiasing,
+            settings.vocabulary_biasing,
+            VOCABULARY_BIASING,
+        ),
+        (
+            Feature::MouseShortcuts,
+            settings.mouse_shortcuts,
+            MOUSE_SHORTCUTS,
+        ),
+        (Feature::UnloadIdle, settings.unload_idle, UNLOAD_IDLE),
+        (
+            Feature::KeepOnClipboard,
+            settings.keep_on_clipboard,
+            KEEP_ON_CLIPBOARD,
+        ),
+        (Feature::CopyOnly, settings.copy_only, COPY_ONLY),
+        (
+            Feature::SpokenFormatting,
+            settings.spoken_formatting,
+            SPOKEN_FORMATTING,
+        ),
+        (Feature::FillerWords, settings.filler_words, FILLER_WORDS),
+        (
+            Feature::SubtitleExport,
+            settings.subtitle_export,
+            SUBTITLE_EXPORT,
+        ),
+        (Feature::SmartSpacing, settings.smart_spacing, SMART_SPACING),
+        (
+            Feature::SpokenSymbols,
+            settings.spoken_symbols,
+            SPOKEN_SYMBOLS,
+        ),
     ]
     .into_iter()
-    .filter(|(on, _)| *on)
-    .fold(KNOWN | minutes, |state, (_, bit)| state | bit)
+    .filter(|(feature, on, _)| *on && reaches(*feature))
+    .fold(KNOWN | minutes, |state, (_, _, bit)| state | bit)
 }
 
 /// The names of the features on, for `hex status`.
@@ -451,7 +563,7 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
             "{}",
             crate::rune_ui::deep_link::labs_link(
                 crate::rune_ui::story_link::scheme(),
-                available_feature(feature)?
+                resolve(feature, Feature::shipped)?
             )
         );
         return Ok(());
@@ -467,7 +579,7 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         Some(LabsCommand::On { feature }) => (feature, true),
         Some(LabsCommand::Off { feature }) => (feature, false),
     };
-    let feature = available_feature(name)?;
+    let feature = resolve(name, Feature::shipped)?;
     if feature == Feature::VoiceFilter && !on && crate::hex_microphone::driver_bundle_installed() {
         return Err(eyre!(
             "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
@@ -497,13 +609,14 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
     Ok(())
 }
 
-fn available_feature(name: &str) -> Result<Feature> {
+/// The feature `name` names, if this OS has it and `reaches` admits it.
+fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Feature> {
     Feature::from_name(name)
-        .filter(|feature| feature.on_this_os())
+        .filter(|feature| feature.on_this_os() && reaches(*feature))
         .ok_or_else(|| {
             eyre!(
                 "unknown Labs feature {name:?}; this Hex has: {}",
-                Feature::available()
+                Feature::available_where(reaches)
                     .map(Feature::name)
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -522,9 +635,10 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {} (hex settings {})\n",
+            "{:<width$}  {:<3}  {:<8}  {} (hex settings {})\n",
             feature.name(),
             if on { "on" } else { "off" },
+            feature.audience().name(),
             feature.description(),
             feature.settings_key(),
         ));
@@ -555,6 +669,52 @@ mod tests {
             feature.set(&mut settings, true);
             assert!(feature.on(&settings));
         }
+    }
+
+    #[test]
+    fn an_audience_reaches_the_builds_it_names() {
+        assert!(Audience::Everyone.reaches(false));
+        assert!(Audience::Everyone.reaches(true));
+        assert!(Audience::Dev.reaches(true));
+        assert!(!Audience::Dev.reaches(false));
+    }
+
+    /// Stands in for a Dev feature in a stable build.
+    fn stable(feature: Feature) -> bool {
+        feature != Feature::LiveText
+    }
+
+    #[test]
+    fn a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off() {
+        assert!(Feature::available_where(stable).all(|feature| feature != Feature::LiveText));
+        assert!(Feature::available_where(|_| true).any(|feature| feature == Feature::LiveText));
+        assert!(resolve("live-text", stable).is_err());
+        assert!(resolve("filler-words", stable).is_ok());
+        let labs = LabsSettings {
+            live_text: true,
+            filler_words: true,
+            ..LabsSettings::default()
+        };
+        let state = encode_where(&labs, stable);
+        assert_eq!(state & LIVE_TEXT, 0);
+        assert_ne!(state & FILLER_WORDS, 0);
+        assert_ne!(encode_where(&labs, |_| true) & LIVE_TEXT, 0);
+        assert!(labs.live_text, "the saved setting is kept");
+    }
+
+    #[test]
+    fn settings_keys_name_their_feature() {
+        for feature in Feature::ALL {
+            assert_eq!(
+                Feature::for_settings_key(feature.settings_key()),
+                Some(feature)
+            );
+        }
+        assert_eq!(
+            Feature::for_settings_key("labs.unload_idle_minutes"),
+            Some(Feature::UnloadIdle)
+        );
+        assert_eq!(Feature::for_settings_key("dictation_hotkey"), None);
     }
 
     #[test]

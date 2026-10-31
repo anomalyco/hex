@@ -676,27 +676,46 @@ pub(super) fn apply_title(markdown: &str, previous_title: &str, title: &str) -> 
 
 /// Renames the exported file's heading in place, under the same rule as
 /// generated titles.
-pub(super) fn retitle_markdown_file(path: &Path, previous_title: &str, title: &str) -> Result<()> {
-    rewrite_markdown_file(path, |markdown| {
+pub(super) fn retitle_markdown_file(
+    path: &Path,
+    written: &mut Option<String>,
+    previous_title: &str,
+    title: &str,
+) -> Result<()> {
+    rewrite_markdown_file(path, written, |markdown| {
         apply_title(markdown, previous_title, title)
     })
 }
 
 /// Applies the notes to the exported file in place, keeping its name.
-fn update_markdown_file(path: &Path, previous_title: &str, title: &str, block: &str) -> Result<()> {
-    rewrite_markdown_file(path, |markdown| {
+fn update_markdown_file(
+    path: &Path,
+    written: &mut Option<String>,
+    previous_title: &str,
+    title: &str,
+    block: &str,
+) -> Result<()> {
+    rewrite_markdown_file(path, written, |markdown| {
         apply_notes(markdown, previous_title, title, block)
     })
 }
 
 /// The file is replaced atomically, and only if nothing changed it meanwhile.
-fn rewrite_markdown_file(path: &Path, rewrite: impl FnOnce(&str) -> String) -> Result<()> {
+/// `written` is the SHA-256 of the copy Hex last wrote; it follows the
+/// rewrite only while the file was still that copy, so a file the user
+/// edited never becomes Hex's to expire.
+fn rewrite_markdown_file(
+    path: &Path,
+    written: &mut Option<String>,
+    rewrite: impl FnOnce(&str) -> String,
+) -> Result<()> {
     let original =
         fs::read_to_string(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
     let updated = rewrite(&original);
     if updated == original {
         return Ok(());
     }
+    let unchanged = written.as_deref() == Some(super::text_sha256(original.as_bytes()).as_str());
     let folder = path
         .parent()
         .ok_or_else(|| eyre!("{} has no folder", path.display()))?;
@@ -715,6 +734,9 @@ fn rewrite_markdown_file(path: &Path, rewrite: impl FnOnce(&str) -> String) -> R
         return Err(eyre!("the Markdown changed while it was being updated"));
     }
     fs::rename(&temporary, path)?;
+    if unchanged {
+        *written = Some(super::text_sha256(updated.as_bytes()));
+    }
     Ok(sync_directory(folder)?)
 }
 
@@ -817,7 +839,13 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
             let title = display_title(&manifest);
             if let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) {
                 let block = render_notes_block(manifest.notes.as_ref().expect("notes were set"));
-                if let Err(error) = update_markdown_file(&path, &previous_title, &title, &block) {
+                if let Err(error) = update_markdown_file(
+                    &path,
+                    &mut manifest.export_sha256,
+                    &previous_title,
+                    &title,
+                    &block,
+                ) {
                     tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                     manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
                 }
@@ -1428,7 +1456,14 @@ mod tests {
         let path = folder.join("2026-10-15 1430 Zoom call — 2-30 PM.md");
         fs::write(&path, EXPORT).unwrap();
         let block = render_notes_block(&meeting_notes());
-        update_markdown_file(&path, "Zoom call — 2:30 PM", "Launch plan review", &block).unwrap();
+        update_markdown_file(
+            &path,
+            &mut None,
+            "Zoom call — 2:30 PM",
+            "Launch plan review",
+            &block,
+        )
+        .unwrap();
         let written = fs::read_to_string(&path).unwrap();
         assert!(written.starts_with("# Launch plan review\n"));
         assert!(written.contains(NOTES_START));
