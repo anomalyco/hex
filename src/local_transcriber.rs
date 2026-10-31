@@ -13,7 +13,6 @@ use crate::transcription_models::{
 };
 
 /// A word or segment's start and end (ms from the clip's start) and text.
-#[cfg(target_os = "linux")]
 pub type TimedSpan = (i64, i64, String);
 
 pub struct LocalTranscriber {
@@ -24,7 +23,6 @@ pub struct LocalTranscriber {
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
     /// The finest timestamps the model gives, for a capture's word times.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     finest_timestamps: TimestampKind,
 }
 
@@ -279,7 +277,6 @@ impl LocalTranscriber {
     /// Text and word times (ms from the clip's start) for a capture, in
     /// chunks the model takes whole. A model without word times gives its
     /// segments instead.
-    #[cfg(target_os = "linux")]
     pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
         const CHUNK: usize = 30 * 16_000;
         let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));

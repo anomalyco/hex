@@ -130,7 +130,9 @@ values are never logged.
 in every macOS and Linux build; with `capture.enabled` off it refuses with
 `feature-off`. On Linux, `list`, `show`, `route`, and `send` run in the
 `hex` process itself and `start`, `stop`, and `cancel` are handed to the
-running Hex's listener; `status` is macOS-only for now. `capture stop` replies at once with the bundle
+running Hex's listener; `status` is macOS-only for now. Windows records
+Annotate captures from its shortcut and capsule but has no `annotate`
+command yet. `capture stop` replies at once with the bundle
 path while the words and files are written in the background; `capture status`
 lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
 of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,

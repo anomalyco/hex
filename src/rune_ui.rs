@@ -527,7 +527,7 @@ enum Pane {
 }
 
 impl Pane {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     const ALL: &[Pane] = &[
         Pane::General,
         Pane::Output,

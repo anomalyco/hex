@@ -82,6 +82,8 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     PasteLast,
+    /// Annotate (the `capture` experiment).
+    Capture,
 }
 
 /// What the runtime last published for the window.
@@ -191,6 +193,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
+    // The capture capsule, picker, and ink, in dev builds only.
+    let _capture_overlays = crate::dev_build::is_dev_build()
+        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let (requests, receiver) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     RUNTIME

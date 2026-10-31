@@ -240,6 +240,7 @@ pub(super) enum Job {
     Undo,
     /// `hex capture send`: any capture, to `to` or where its route or its
     /// last send says.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     SendBundle {
         bundle: PathBuf,
         to: Option<String>,
@@ -255,11 +256,13 @@ static NEXT_ROUTES: AtomicU64 = AtomicU64::new(0);
 
 /// How long `hex capture send` waits for the send, inside the control
 /// deadline.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 const CLI_WAIT: Duration = Duration::from_secs(8);
 
 /// Sends `bundle` through the `capture-route` thread and says what became
 /// of it: as the capsule's pick when it is the newest capture, so its
 /// route and Undo follow.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(super) fn send_bundle(
     bundle: PathBuf,
     to: Option<String>,

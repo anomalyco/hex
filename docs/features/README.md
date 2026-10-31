@@ -30,8 +30,8 @@ Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Labs](labs.md) is one switch, on by default, for every unfinished feature.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
-[Annotate](capture.md) (macOS and
-Linux) records the screen while you draw and talk and sends it to an agent.
+[Annotate](capture.md) (macOS, Linux,
+and Windows) records the screen while you draw and talk and sends it to an agent.
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready

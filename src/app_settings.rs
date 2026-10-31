@@ -1388,7 +1388,7 @@ impl Default for DictationPostProcessing {
     }
 }
 
-/// Annotate: Scrawl's captures inside Hex, on macOS and Linux
+/// Annotate: Scrawl's captures inside Hex, on macOS, Linux, and Windows
 /// (`capture_host`). On by default; off means no capture work at all.
 #[cfg(hex_capture)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

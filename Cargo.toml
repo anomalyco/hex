@@ -103,17 +103,14 @@ x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
 
-# The `capture` experiment (Scrawl's capture engine), compiled into every macOS
-# and Linux build and dormant until `hex experiments enable capture` and
-# `capture.enabled`. Windows has no host for it yet.
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# The desktop UI, and the `capture` experiment (Scrawl's capture engine),
+# compiled into every desktop build and dormant until
+# `hex experiments enable capture` and `capture.enabled`.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
 rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
-
-# The desktop UI.
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 pollster = "1.0.1"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
 procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }

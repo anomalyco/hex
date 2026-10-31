@@ -190,6 +190,9 @@ pub enum HotkeyAction {
     Finish,
     Cancel,
     PasteLast,
+    /// The Annotate key went down, and came up (`CaptureUp`).
+    Capture,
+    CaptureUp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -224,6 +227,11 @@ struct CallbackState {
     trigger_vk: Option<u32>,
     paste_last: Option<WindowsHotkey>,
     paste_trigger_vk: Option<u32>,
+    annotate: Option<WindowsHotkey>,
+    annotate_trigger_vk: Option<u32>,
+    annotate_trigger_down: bool,
+    /// Escape went down to stop Annotate's drawing; its release is ours too.
+    drawing_escape_down: bool,
     modifiers: ModifierState,
     side_down: SideDownTimes,
     trigger_down: bool,
@@ -405,6 +413,7 @@ impl WindowsHotkeyMonitor {
     pub fn start(
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
+        annotate: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
         shortcut_mode: ShortcutMode,
@@ -413,6 +422,7 @@ impl WindowsHotkeyMonitor {
         binding.validate()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
         let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
+        let annotate_trigger_vk = chord_virtual_key(annotate.as_ref(), "Annotate")?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
         let (error_sender, errors) = mpsc::channel();
@@ -424,6 +434,10 @@ impl WindowsHotkeyMonitor {
             trigger_vk,
             paste_last,
             paste_trigger_vk,
+            annotate,
+            annotate_trigger_vk,
+            annotate_trigger_down: false,
+            drawing_escape_down: false,
             modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),
             trigger_down: false,
@@ -656,6 +670,9 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code == HC_ACTION as i32 {
         // SAFETY: Windows supplies a live MSLLHOOKSTRUCT for this callback.
         let event = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
+        if crate::capture_host::wants_input() {
+            report_pointer(wparam as u32, event);
+        }
         if let Some((vk, down)) = mouse_message(wparam as u32, event.mouseData)
             && process_button(vk, down, event.time) != Disposition::Pass
         {
@@ -663,6 +680,83 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         }
     }
     unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
+}
+
+/// What a recording Annotate capture takes from the mouse hook: every move,
+/// click, and wheel turn, in physical screen pixels as the engine's Windows
+/// target frames are. The event still reaches the app beneath.
+fn report_pointer(message: u32, event: &MSLLHOOKSTRUCT) {
+    use crate::capture_host::{Tapped, report_input};
+    use scrawl_capture::hosted_input::HostInput;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        LLMHF_INJECTED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        WM_RBUTTONDOWN, WM_RBUTTONUP,
+    };
+    if event.flags & LLMHF_INJECTED != 0 {
+        return;
+    }
+    let (x, y) = (f64::from(event.pt.x), f64::from(event.pt.y));
+    let modifiers = held_modifiers();
+    // One notch is 120 in the high word, signed; up and right are positive.
+    let notches = f64::from((event.mouseData >> 16) as i16) / 120.0;
+    let input = match message {
+        WM_MOUSEMOVE => HostInput::Moved { x, y, modifiers },
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP => HostInput::Button {
+            down: matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN),
+            right: matches!(message, WM_RBUTTONDOWN | WM_RBUTTONUP),
+            x,
+            y,
+            modifiers,
+        },
+        WM_MOUSEWHEEL => HostInput::Scroll {
+            x,
+            y,
+            dx: 0.0,
+            dy: notches,
+        },
+        WM_MOUSEHWHEEL => HostInput::Scroll {
+            x,
+            y,
+            dx: notches,
+            dy: 0.0,
+        },
+        _ => return,
+    };
+    report_input(CaptureInstant::now(), Tapped::Pointer(input));
+}
+
+/// A modifier changed while an Annotate capture records: Shift alone inks.
+/// `held` includes the change, which the async key state does not yet.
+fn report_modifiers(held: &ModifierState) {
+    use crate::capture_host::{Tapped, report_input};
+    use scrawl_capture::hosted_input::HostInput;
+    let mut point = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+    // SAFETY: `point` is a valid POINT to fill.
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) };
+    report_input(
+        CaptureInstant::now(),
+        Tapped::Pointer(HostInput::ModifiersChanged {
+            x: f64::from(point.x),
+            y: f64::from(point.y),
+            modifiers: scrawl_capture::hosted_input::Modifiers {
+                command: held.left_windows || held.right_windows,
+                control: held.left_control || held.right_control,
+                option: held.left_alt || held.right_alt,
+                shift: held.left_shift || held.right_shift,
+            },
+        }),
+    );
+}
+
+/// The modifiers held now, as the engine names them: the Windows key is its
+/// Command, Alt its Option.
+fn held_modifiers() -> scrawl_capture::hosted_input::Modifiers {
+    scrawl_capture::hosted_input::Modifiers {
+        command: key_down(VK_LWIN) || key_down(VK_RWIN),
+        control: key_down(VK_CONTROL),
+        option: key_down(VK_MENU),
+        shift: key_down(VK_SHIFT),
+    }
 }
 
 // Both low-level hooks feed exactly the same capture and suppression rules.
@@ -693,6 +787,39 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
             }
             if !modifier_event && is_down {
                 state.mask_release = false;
+            }
+            if modifier_event && crate::capture_host::wants_input() {
+                report_modifiers(&state.modifiers);
+            }
+            let annotate_event = state.annotate_trigger_vk == Some(vk)
+                && (state.annotate_trigger_down
+                    || (is_down
+                        && !state.capture.active
+                        && !state.capture.locked
+                        && !state.dirty
+                        && state
+                            .annotate
+                            .as_ref()
+                            .is_some_and(|binding| state.modifiers.matches(binding))));
+            if annotate_event {
+                if is_down && !state.annotate_trigger_down {
+                    state.annotate_trigger_down = true;
+                    send_event(state, HotkeyAction::Capture, time);
+                } else if is_up && state.annotate_trigger_down {
+                    state.annotate_trigger_down = false;
+                    send_event(state, HotkeyAction::CaptureUp, time);
+                }
+                return Disposition::Suppress;
+            }
+            // Escape stops Annotate's drawing, never its recording, when no
+            // dictation takes it.
+            if vk == u32::from(VK_ESCAPE)
+                && !state.capture.active
+                && !state.capture.locked
+                && (state.drawing_escape_down || (is_down && crate::capture_host::exit_drawing()))
+            {
+                state.drawing_escape_down = is_down;
+                return Disposition::Suppress;
             }
             let paste_event = state.paste_trigger_vk == Some(vk)
                 && (state.paste_trigger_down
