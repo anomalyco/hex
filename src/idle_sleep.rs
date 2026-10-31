@@ -226,6 +226,6 @@ mod tests {
     #[test]
     #[ignore = "exercises the OS's native idle-sleep prevention"]
     fn native_idle_sleep_prevention_acquires_and_releases() {
-        drop(super::PreventSleep::start().unwrap());
+        drop(super::platform::PreventSleep::start().unwrap());
     }
 }
