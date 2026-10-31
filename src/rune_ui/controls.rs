@@ -975,23 +975,6 @@ pub(super) fn note(key: &str, copy: &str, color: Color) -> El {
     )
 }
 
-pub(super) fn text_field(
-    p: Paint,
-    key: &str,
-    edit: &TextEdit,
-    placeholder: &str,
-    access: fn(&mut Ui) -> &mut TextEdit,
-    submit: fn(&mut Ui, &mut Tx),
-) -> El {
-    TextInput::new(edit)
-        .placeholder(placeholder)
-        .width(Some(280.0))
-        .on_edit(access)
-        .on_submit(submit)
-        .build(p.k)
-        .key(key)
-}
-
 /// The keyboard highlight in a search popover's results: Up and Down move
 /// it, Enter picks it, and it returns to the first result whenever the query
 /// changes.

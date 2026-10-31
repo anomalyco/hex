@@ -13,7 +13,7 @@ use rune_kit::{Placement, Select, SelectAppearance};
 use super::controls::{
     self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card,
     copy_row, folding, icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray,
-    keycap, note, page, pressable_row, row_switch, section, text_field,
+    keycap, note, page, pressable_row, row_switch, section,
 };
 use super::icons::*;
 use super::lists::{PermissionControl, permission_control, slider};
