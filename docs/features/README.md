@@ -170,8 +170,19 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
 │   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
-└── Done -> paste last, Modes tips -> Start using Hex
+└── Done -> paste last, Modes tips
+    ├── Model ready -> green check, "You're all set", success sound -> Start using Hex
+    ├── Model still downloading (practice skipped, #676) -> neutral badge with the
+    │   download's percent in the ring, "Almost ready" + "Hex starts listening once…"
+    │   -> Continue; turns green with the success sound once the model is ready
+    │   // check: done_waits_for_the_model_after_a_skipped_practice
+    └── Download stopped -> "Download stopped" + Retry stay in the corner
     // Windows and Linux: Welcome -> Setup (the model row only) -> Give it a try -> Done
+
+General > Speech model, selected model not downloaded     // settings.model-missing (#676)
+├── Muted "Hex can't listen until the speech model has downloaded"
+├── Downloading -> progress bar beside the model
+└── No download running -> Download (the same ChooseModel); a failure shows its error
 
 General > Speech model or Language
   -> Prepare candidate
@@ -343,9 +354,10 @@ and the saved step
 `onboarding_downloads_the_model_through_the_service`), and every macOS step
 is a scene (`mac-onboarding`, `-setup`, `-progress`, `-denied`, `-restart`,
 `-download-failed`, `-try`, `-listening`, `-landed`, `-reopen`, `-done`).
-Reaching the last step in a live tour plays the onboarding success sound
-(Classic: its stop sound)
-(`remember_step`; fixtures stay silent), checked by reading the code.
+Reaching the last step in a live tour with dictation ready plays the
+onboarding success sound (Classic: its stop sound); a Done still waiting for
+the model plays it once the model is ready
+(`remember_step`, `poll`; fixtures stay silent), checked by reading the code.
 The default model comes from `desktop_i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing
 settings keep their saved model.
