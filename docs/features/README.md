@@ -801,7 +801,7 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
     // the old Modes editor stays in the code for its scenes, unreachable
 
 Foreground context -> Select processing
-├── Matching Brave website
+├── Matching website                     // macOS: scriptable browsers, then AXWebArea; Windows: UIA; Linux: AT-SPI
 ├── Otherwise matching application
 └── Otherwise Global
 
@@ -834,7 +834,19 @@ Selection and stage checks start in
 [dictation_processor.rs](../../src/dictation_processor.rs),
 [text_replacements.rs](../../src/text_replacements.rs), and
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
-provider availability or real application/Brave context changes.
+provider availability or real application/browser context changes.
+
+Website context per OS: macOS asks the front tab of Safari, Orion, Chrome,
+Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
+Automation prompt per browser; a refusal keeps the application context) and
+reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
+Linux matches the focused window from X11 or the Wayland foreign-toplevel list
+to an AT-SPI window by title and process and reads its showing web
+document's `DocURL` (Firefox) or `URI` (Chromium, only with
+`--force-renderer-accessibility`). `linux_context_reads_the_focused_window`
+(ignored, manual) printed `google-chrome-stable` with `https://example.com/path`
+under headless Sway and `chrome` with the page under its XWayland, and `hex`
+on niri (Oct 30); the macOS adapters are compiled on CI only and not run.
 
 OpenCode transformation discovery accepts `opencode2` or a V2 `opencode` and
 rejects V1. While the switch can't be turned on, the
