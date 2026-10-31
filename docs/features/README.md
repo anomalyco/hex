@@ -122,7 +122,8 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
 │   │            Parakeet v3, Japanese -> Qwen3-ASR); no picker in the tour
-│   ├── Progress sits beside the step dots on every step; failure -> Retry
+│   ├── Progress sits in the top corner on every step (under the practice
+│   │   field while Give it a try waits for it); failure -> Retry
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── macOS: opens centred at one fixed size, so tiling managers float it
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
@@ -150,7 +151,10 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── The first unfinished row carries the screen's one accent
 │   └── Last grant -> 0.7 s beat -> Give it a try (Continue also works)
 ├── Give it a try                         // setup.practice; every OS (rune_ui/practice.rs)
-│   ├── Model still downloading -> "Hex starts listening once…" + footer progress
+│   ├── Model still downloading -> "Almost ready" + "Hex starts listening once…";
+│   │   progress (or Download stopped + Retry) under the field, not in the corner;
+│   │   model ready -> the normal Give it a try heading, body, and hint
+│   │   // check: try_it_waits_for_the_model_until_it_is_ready
 │   ├── Focused practice field; hold the shortcut, speak, release
 │   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
 │   ├── Discarded before transcribing -> quick-tap hint
