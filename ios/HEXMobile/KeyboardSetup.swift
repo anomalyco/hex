@@ -67,7 +67,7 @@ struct KeyboardSetupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Keyboard setup")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(HexTheme.textBase)
 
             VStack(spacing: 0) {
@@ -108,24 +108,19 @@ struct KeyboardSetupCard: View {
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "gearshape.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13, weight: .medium))
                         Text("Open Settings")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .medium))
                     }
                     .foregroundStyle(HexTheme.textBase)
-                    .frame(maxWidth: .infinity, minHeight: 42)
-                    .background(HexTheme.layer02, in: Capsule())
-                    .overlay(Capsule().stroke(HexTheme.borderStrong, lineWidth: 1))
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .background(Color.white.opacity(0.09), in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(14)
+        .padding(16)
         .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
-                .stroke(HexTheme.borderWeak, lineWidth: 1)
-        )
     }
 
     private var keyboardStatus: String {
@@ -174,7 +169,7 @@ struct KeyboardSetupCard: View {
                 .foregroundStyle(done ? HexTheme.success : HexTheme.textFaint)
 
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(HexTheme.textBase)
 
             Spacer(minLength: 8)
@@ -191,17 +186,17 @@ struct KeyboardSetupCard: View {
 
     private func smallButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 13, weight: .medium))
             .foregroundStyle(HexTheme.textBase)
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(HexTheme.layer02, in: Capsule())
+            .background(Color.white.opacity(0.09), in: Capsule())
             .buttonStyle(.plain)
     }
 
     private var divider: some View {
         Rectangle()
             .fill(HexTheme.borderWeak)
-            .frame(height: 1)
+            .frame(height: 0.5)
     }
 }
