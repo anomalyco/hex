@@ -4,6 +4,7 @@ export const MODEL_IDS = [
   "parakeet_v3",
   "whisper_large_v3_turbo",
   "qwen3_asr06_b",
+  "qwencleo_asr_1_7b",
   "sense_voice_small",
   "cohere_transcribe",
   "underdog_bark_3_pro",
