@@ -291,9 +291,6 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// The window has the playground (Labs › Playground at launch): the
-    /// sidebar shows its item.
-    pub(super) playground: bool,
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
@@ -365,7 +362,6 @@ impl PlatformState {
             calendar: CalendarView::default(),
             relaunch_failed: false,
             developer: false,
-            playground: false,
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,

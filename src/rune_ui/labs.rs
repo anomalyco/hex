@@ -69,9 +69,9 @@ fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str
         .child(item.grow(1.0))
 }
 
-/// The Playground item while the window has the playground: it opens it.
+/// The Playground item while Labs › Playground is on: it opens it.
 pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
-    ui.platform.playground.then(|| {
+    ui.settings.labs.playground.then(|| {
         nav_row(p, "nav-playground", &SPARKLES, "Playground", false)
             .on_press_tx(|_: &mut Ui, tx: &mut Tx| tx.open_playground())
     })
@@ -145,13 +145,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::Playground,
         &SPARKLES,
         "Playground",
-        tr("Scene and story browser in the window (applies on restart)"),
+        tr("Scene and story browser in the window"),
     ));
     rows.push(row(
         Feature::LiveText,
         &WAVE,
         tr("Live text"),
-        tr("Show provisional words beside the HUD while dictating (applies on restart)"),
+        tr("Show provisional words beside the HUD while dictating"),
     ));
     if caps.meetings {
         rows.push(row(

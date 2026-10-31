@@ -1254,11 +1254,11 @@ impl Default for ExperimentalSettings {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
-    /// Live text beside the HUD while dictating (applies on restart).
+    /// Live text beside the HUD while dictating.
     pub live_text: bool,
     /// Live chapters while a meeting records.
     pub live_chapters: bool,
-    /// The playground in the window (applies on restart).
+    /// The playground in the window.
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,

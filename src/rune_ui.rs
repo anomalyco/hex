@@ -197,10 +197,11 @@ pub(crate) fn run_app(
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
-/// its host through `connect`, with the playground when its experiment is on.
+/// its host through `connect`, with the playground that Labs › Playground
+/// opens.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     onboarding_kit::set_live_window(true);
-    let app = build(connect, playground::enabled());
+    let app = build(connect, PlaygroundMode::Gated);
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
     app
@@ -232,7 +233,15 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
         .iter()
         .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
     onboarding_kit::set_live_window(playground && !headless);
-    let app = build(Default::default(), playground && playground::enabled()).args(rune_args);
+    let app = build(
+        Default::default(),
+        if playground && playground::enabled() {
+            PlaygroundMode::Attached
+        } else {
+            PlaygroundMode::None
+        },
+    )
+    .args(rune_args);
     if playground && !headless {
         app.handle().update_if(|_, _| {
             crate::feedback::set_enabled(true);
@@ -272,11 +281,22 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
     }
 }
 
-fn build(connect: host::Connect, with_playground: bool) -> rune::App<Ui> {
-    let spec = if with_playground {
-        playground::spec(spec())
-    } else {
+/// Whether and how the window has the playground.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlaygroundMode {
+    None,
+    /// With Rune's own ⇧⌘D (headless `--playground` renders).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    Attached,
+    /// Opened only while Labs › Playground is on (the window).
+    Gated,
+}
+
+fn build(connect: host::Connect, playground: PlaygroundMode) -> rune::App<Ui> {
+    let spec = if playground == PlaygroundMode::None {
         spec()
+    } else {
+        playground::spec(spec())
     };
     let app = rune::App::new(spec)
         .init(move || Ui::load_with(connect))
@@ -288,10 +308,10 @@ fn build(connect: host::Connect, with_playground: bool) -> rune::App<Ui> {
     // alone reaches the recorder, which says Linux needs a key with it.
     #[cfg(target_os = "linux")]
     let app = app.modifier_keys();
-    let app = if with_playground {
-        playground::attach(app)
-    } else {
-        app
+    let app = match playground {
+        PlaygroundMode::None => app,
+        PlaygroundMode::Attached => playground::attach(app),
+        PlaygroundMode::Gated => playground::attach_gated(app),
     };
     let window = app.handle();
     // Nothing shown reads the handle, so this asks for no frame. The first
@@ -795,7 +815,6 @@ impl Ui {
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.playground = playground::enabled();
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
@@ -1158,6 +1177,11 @@ impl Ui {
 /// the sound sets sheet, the picker, or the open menu.
 fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if settings::on_key(ui, event, tx) {
+        return true;
+    }
+    // Labs › Playground: ⇧⌘D (Ctrl+Shift+D off macOS) opens the playground.
+    if event.key == rune::Key::Command('d') && event.mods.shift && playground::enabled() {
+        tx.toggle_playground();
         return true;
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key

@@ -799,6 +799,18 @@ fn running() -> bool {
     crate::local_api::running_pid().is_some()
 }
 
+/// `hex settings set key value` in the running Hex, which saves and applies
+/// it; `None` when no Hex runs.
+pub(crate) fn set_in_running_hex(key: &str, value: &str) -> Option<ControlReply> {
+    running().then(|| {
+        call(ControlRequest::new(ControlCommand::SettingsSet {
+            key: key.into(),
+            value: value.into(),
+        }))
+        .map_or_else(|reply| reply, |response| response.reply)
+    })
+}
+
 fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     if !running() {
         return Err(not_running());
