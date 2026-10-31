@@ -14,7 +14,7 @@
 //! Closing the window hides it; Quit (menu bar, ⌘Q, `hex quit`, `hex restart`
 //! and the onboarding relaunch after scheduling the new copy, or Ctrl-C) ends
 //! the loop, then stops and joins everything and ends the process with
-//! `_exit` ([`crate::process_exit`]). AppKit's own terminate
+//! `_exit` ([`crate::desktop::process_exit`]). AppKit's own terminate
 //! (the quit Apple event, logout) does the same from its
 //! will-terminate notification.
 //!
@@ -296,9 +296,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         .enabled
         .then(|| crate::keyboard_input_sources::current(mtm))
         .flatten();
-    let setup_ready = crate::onboarding::status(&settings.transcription).ready();
-    crate::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
-    let onboarding_completed = crate::onboarding::completion_recorded();
+    let setup_ready = crate::desktop::onboarding::status(&settings.transcription).ready();
+    crate::desktop::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
+    let onboarding_completed = crate::desktop::onboarding::completion_recorded();
     let history = match crate::history::History::open_default(settings.history_retention) {
         Ok(history) => Some(history),
         Err(error) => {
@@ -307,7 +307,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         }
     };
     let event_path = listener.event_path.clone();
-    let event_log = crate::events::EventLog::create(&event_path)?;
+    let event_log = crate::desktop::events::EventLog::create(&event_path)?;
     let drained_event_log = event_log.clone();
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
@@ -382,7 +382,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     tracing::error!(%error, "desktop recognition stopped");
                     let message = format!("{error:#}");
                     if message.contains("event tap") {
-                        crate::onboarding::note_listener_failure();
+                        crate::desktop::onboarding::note_listener_failure();
                     }
                     message
                 }
@@ -548,11 +548,11 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
             state.timer.invalidate();
         }
     });
-    crate::process_exit::finish(&DRAIN)
+    crate::desktop::process_exit::finish(&DRAIN)
 }
 
 /// Stops and joins the runtime, listener, meeting controller, and local API.
-static DRAIN: crate::process_exit::Drain = crate::process_exit::Drain::new();
+static DRAIN: crate::desktop::process_exit::Drain = crate::desktop::process_exit::Drain::new();
 
 // ---------------------------------------------------------------------------
 // Runtime thread
@@ -739,7 +739,7 @@ impl Runtime {
             }
         }
         if self.recognition_start.is_some()
-            && crate::onboarding::status(&self.settings.transcription).ready()
+            && crate::desktop::onboarding::status(&self.settings.transcription).ready()
             && let Some(start) = self.recognition_start.take()
         {
             let _ = start.try_send(());
@@ -825,7 +825,7 @@ struct Launch {
 }
 
 /// AppKit's terminate (the quit Apple event, logout) calls `exit` right after
-/// this notification, so Hex finishes there ([`crate::process_exit`]).
+/// this notification, so Hex finishes there ([`crate::desktop::process_exit`]).
 fn observe_termination(target: &MenuTarget) {
     // SAFETY: the target outlives the observer (kept in LAUNCH, then PUMP,
     // for the app's life), and the selector matches its method.
@@ -1299,7 +1299,7 @@ objc2::define_class!(
         /// `-[NSApplication terminate:]` calls `exit` right after this.
         #[unsafe(method(applicationWillTerminate:))]
         fn application_will_terminate(&self, _notification: Option<&AnyObject>) {
-            crate::process_exit::finish(&DRAIN);
+            crate::desktop::process_exit::finish(&DRAIN);
         }
     }
 );

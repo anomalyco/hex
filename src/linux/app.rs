@@ -20,11 +20,11 @@ use color_eyre::Result;
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
 use crate::desktop::activity::DesktopActivity;
+use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
     DesktopTranscriptionSnapshot,
 };
-use crate::events::EventReader;
 use crate::linux::dictation::ListenerUpdate;
 use crate::linux::input::{LinuxHotkey, ListenerCommand, ShortcutCommand};
 use crate::linux::service::{
@@ -629,7 +629,7 @@ impl LinuxDesktopHost {
         let (commands, command_receiver) = mpsc::sync_channel(16);
         let (updates, update_receiver) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let result = crate::instance::acquire("listener").and_then(|_instance| {
+            let result = crate::desktop::instance::acquire("listener").and_then(|_instance| {
                 crate::linux::dictation::run(
                     &event_path,
                     None,

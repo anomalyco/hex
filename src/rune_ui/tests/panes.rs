@@ -2,8 +2,10 @@
 //! data: Meetings, the OS-only General rows, and the full tour.
 
 use super::*;
-use crate::login_item::LoginItemStatus;
-use crate::onboarding::{Input, Observation, PermissionAction, PermissionKind, Practice, Step};
+use crate::desktop::login_item::LoginItemStatus;
+use crate::desktop::onboarding::{
+    Input, Observation, PermissionAction, PermissionKind, Practice, Step,
+};
 use platform::{CalendarRequest, MeetingRequest, PlatformHost, PlatformRequest};
 
 fn asked(rt: &Runtime<Ui>) -> &[PlatformRequest] {
@@ -99,8 +101,8 @@ fn login_item(status: LoginItemStatus) -> platform::PlatformState {
     state
 }
 
-fn login_failed(status: Option<LoginItemStatus>) -> crate::login_item::LoginItemResult {
-    Err(crate::login_item::LoginItemFailure {
+fn login_failed(status: Option<LoginItemStatus>) -> crate::desktop::login_item::LoginItemResult {
+    Err(crate::desktop::login_item::LoginItemFailure {
         status,
         message: "Operation not permitted".into(),
     })
@@ -1305,7 +1307,7 @@ fn the_mac_tour_asks_each_permission_then_practices() {
         )]
     );
     // macOS grants everything and the model lands: setup moves on.
-    use crate::onboarding::PermissionState::Ready;
+    use crate::desktop::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);

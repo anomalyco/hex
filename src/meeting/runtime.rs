@@ -11,10 +11,10 @@ use std::time::Instant;
 
 use color_eyre::Result;
 
+use crate::desktop::tray_menu::MeetingTray;
 use crate::meeting::MeetingRequest;
 use crate::meeting::watcher::{ControllerEvent, MeetingMenuState};
 use crate::rune_ui::{Destination, Ui};
-use crate::tray_menu::MeetingTray;
 
 static REQUESTS: OnceLock<SyncSender<MeetingRequest>> = OnceLock::new();
 /// The app, whose clipboard the tray's copy writes.

@@ -18,8 +18,8 @@ use super::hud_stage::{FlowHud, LiveHud};
 use super::live::Live;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
+use crate::desktop::onboarding::Practice;
 use crate::feedback::KeySoundStyle;
-use crate::onboarding::Practice;
 
 static LIVE_WINDOW: AtomicBool = AtomicBool::new(false);
 

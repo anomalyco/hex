@@ -362,7 +362,8 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
         .control_size(rune_kit::ControlSize::Small)
         .on_press(|ui: &mut Ui| {
             if ui.live()
-                && let Err(error) = crate::opencode_catalog::open_url(crate::labs::FEEDBACK_URL)
+                && let Err(error) =
+                    crate::desktop::opencode_catalog::open_url(crate::labs::FEEDBACK_URL)
             {
                 ui.error = Some(format!("{error:#}"));
             }

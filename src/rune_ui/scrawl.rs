@@ -17,7 +17,7 @@ use super::settings::cancel_capture;
 use super::{Menu, ShortcutTarget, Ui};
 use crate::app_settings::{AppSettings, CaptureTranscriber};
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::onboarding::{PermissionAction, PermissionKind};
+use crate::desktop::onboarding::{PermissionAction, PermissionKind};
 
 fn description(enabled: bool) -> &'static str {
     if enabled {

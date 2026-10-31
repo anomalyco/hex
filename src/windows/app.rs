@@ -21,11 +21,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWi
 
 use crate::app_settings::AppSettings;
 use crate::desktop::activity::DesktopActivity;
+use crate::desktop::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
 };
 use crate::desktop::i18n::tr_fill;
-use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
 use crate::transcription::models::{ModelPreparationStage, TranscriptionModelId};
 use crate::transcription::preparation::TranscriptionPreparation;
@@ -211,7 +211,7 @@ impl WindowsDesktopHost {
         host.refresh_personal_commands_host();
         // The microphone stays cold until first-run setup finishes.
         if host.settings.enable_on_launch {
-            if crate::onboarding::completion_recorded() {
+            if crate::desktop::onboarding::completion_recorded() {
                 host.start();
             } else {
                 host.listen_after_setup = true;
@@ -389,15 +389,16 @@ impl WindowsDesktopHost {
         let worker = std::thread::Builder::new()
             .name("windows-listener".into())
             .spawn(move || {
-                let result = crate::instance::acquire("windows-listener").and_then(|_instance| {
-                    crate::windows::dictation::run(
-                        &event_path,
-                        &selection,
-                        config,
-                        update_receiver,
-                        &worker_stop,
-                    )
-                });
+                let result =
+                    crate::desktop::instance::acquire("windows-listener").and_then(|_instance| {
+                        crate::windows::dictation::run(
+                            &event_path,
+                            &selection,
+                            config,
+                            update_receiver,
+                            &worker_stop,
+                        )
+                    });
                 let _ = result_sender.send(result.map_err(|error| format!("{error:#}")));
             });
         match worker {
@@ -580,7 +581,7 @@ impl WindowsDesktopHost {
         for failed in swap_failures {
             self.keep_running_model(failed);
         }
-        if self.listen_after_setup && crate::onboarding::completion_recorded() {
+        if self.listen_after_setup && crate::desktop::onboarding::completion_recorded() {
             self.listen_after_setup = false;
             self.start();
         }

@@ -9,11 +9,11 @@ use color_eyre::Result;
 use crate::audio::CaptureInstant;
 use crate::audio::recording_environment::RecordingEnvironmentController;
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
+use crate::desktop::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};
 use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
 use crate::dictation::context::{ContextMonitor, ContextSnapshot};
 use crate::dictation::indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
-use crate::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{
     DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,

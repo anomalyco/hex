@@ -17,12 +17,12 @@ use super::modes::Selection;
 use super::{Menu, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::dictation::processor::{ModelCatalog, ModelChoice};
-use crate::opencode_catalog::{
+use crate::desktop::opencode_catalog::{
     ModelCatalogState, OPENCODE_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
     model_variants, open_opencode_docs, opencode_unavailable_copy, provider_label,
     start_model_catalog_load,
 };
+use crate::dictation::processor::{ModelCatalog, ModelChoice};
 
 const MODEL_FIELD_WIDTH: f32 = 240.0;
 

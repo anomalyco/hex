@@ -679,7 +679,7 @@ fn source_index(source: MeetingSource) -> usize {
 fn wait_for_dictation() {
     let started = Instant::now();
     while crate::transcription::engine::dictation_busy()
-        && !crate::process_exit::quitting()
+        && !crate::desktop::process_exit::quitting()
         && started.elapsed() < DICTATION_WAIT
     {
         thread::sleep(Duration::from_millis(50));
@@ -718,7 +718,7 @@ impl ChunkModel {
     fn transcribe(&mut self, samples: &[f32]) -> Result<Chunked> {
         // Quitting drops the dictation engine; a model loaded now would
         // outlast the drain.
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
         }
         if speechless(samples) {
@@ -751,7 +751,7 @@ impl ChunkModel {
                 "meeting transcriber is unavailable"
             )));
         }
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
         }
         let model = match load_model(&mut self.owned, &selection) {
@@ -1027,7 +1027,7 @@ impl RollingFlusher {
     /// Quitting ends the wait.
     pub(super) fn transcribe_up_to_now(&self, wait: Duration) -> Option<Vec<TranscriptEntry>> {
         const STEP: Duration = Duration::from_millis(50);
-        if crate::process_exit::quitting() {
+        if crate::desktop::process_exit::quitting() {
             return None;
         }
         let deadline = Instant::now() + wait;
@@ -1038,7 +1038,7 @@ impl RollingFlusher {
             match entries.recv_timeout(left.min(STEP)) {
                 Ok(entries) => return Some(entries),
                 Err(RecvTimeoutError::Timeout)
-                    if !left.is_zero() && !crate::process_exit::quitting() => {}
+                    if !left.is_zero() && !crate::desktop::process_exit::quitting() => {}
                 Err(_) => return None,
             }
         }
@@ -1212,7 +1212,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
             thread::sleep(PREEMPTED_RETRY.min(deadline.saturating_duration_since(Instant::now())))
         };
         let give_up = |model_failed: bool| {
-            model_failed || crate::process_exit::quitting() || Instant::now() >= deadline
+            model_failed || crate::desktop::process_exit::quitting() || Instant::now() >= deadline
         };
         while !self.pending.is_empty() {
             if give_up(self.model_failed) {
@@ -1339,7 +1339,7 @@ fn run_rolling(
         // A preempted chunk falls through to the wait below before retrying.
         if !worker.pending.is_empty()
             && !worker.model_failed
-            && !crate::process_exit::quitting()
+            && !crate::desktop::process_exit::quitting()
             && !crate::transcription::engine::dictation_busy()
             && worker.transcribe_next()
         {
@@ -1369,7 +1369,7 @@ fn run_rolling(
             track.end(index, &mut envelope, &mut pending);
         }
     }
-    while !pending.is_empty() && !model_failed && !crate::process_exit::quitting() {
+    while !pending.is_empty() && !model_failed && !crate::desktop::process_exit::quitting() {
         wait_for_dictation();
         if !transcribe_pending(
             directory,
@@ -1498,7 +1498,7 @@ fn transcribe_pending(
             pending.push_front((index, chunk));
             return false;
         }
-        Ok(Chunked::Unavailable(_)) if crate::process_exit::quitting() => {
+        Ok(Chunked::Unavailable(_)) if crate::desktop::process_exit::quitting() => {
             *model_failed = true;
             return true;
         }
@@ -2606,7 +2606,7 @@ mod tests {
         let mut feed = rolling.feed().unwrap();
         // Set before any audio arrives so no chunk can start a load first.
         if mode == "quit" {
-            crate::process_exit::begin_quitting_for_test();
+            crate::desktop::process_exit::begin_quitting_for_test();
         }
         let quit = Instant::now();
         let audio = speech(30);
@@ -3204,7 +3204,7 @@ mod tests {
         let flusher = RollingFlusher(sender);
         thread::spawn(|| {
             thread::sleep(Duration::from_millis(200));
-            crate::process_exit::begin_quitting_for_test();
+            crate::desktop::process_exit::begin_quitting_for_test();
         });
         let started = Instant::now();
         let answered = flusher.transcribe_up_to_now(Duration::from_secs(3));
@@ -3936,7 +3936,7 @@ mod tests {
         let folder = std::env::temp_dir().join(format!(
             "hex-meeting-export-{}-{}",
             std::process::id(),
-            crate::events::now_ms()
+            crate::desktop::events::now_ms()
         ));
         let mut manifest = manifest();
         manifest.title = "Design/sync: Q4?".into();

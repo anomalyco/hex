@@ -18,7 +18,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 
-use crate::events::now_ms;
+use crate::desktop::events::now_ms;
 use crate::meeting::query::{Library, ListQuery, OffsetRange, SearchQuery, TranscriptQuery};
 
 const RESOURCE_SCHEME: &str = "hex-meeting://";

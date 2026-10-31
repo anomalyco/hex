@@ -500,7 +500,7 @@ pub(crate) struct Server {
     acceptor: Option<JoinHandle<()>>,
     workers: Vec<JoinHandle<()>>,
     stop: Arc<AtomicBool>,
-    _lock: crate::instance::InstanceLock,
+    _lock: crate::desktop::instance::InstanceLock,
 }
 
 impl Server {
@@ -511,7 +511,7 @@ impl Server {
         }
         let path = socket_path()?;
         private_directory(path.parent().unwrap())?;
-        let lock = crate::instance::acquire("service")?;
+        let lock = crate::desktop::instance::acquire("service")?;
         if let Ok(metadata) = fs::symlink_metadata(&path) {
             if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
                 bail!("Refusing to replace an unmanaged Hex socket path");
@@ -813,7 +813,7 @@ pub(crate) fn another_instance_answers() -> bool {
         if request(Request::Status).is_ok() {
             return true;
         }
-        if crate::instance::acquire("service").is_ok() {
+        if crate::desktop::instance::acquire("service").is_ok() {
             // Nobody holds the root: the failure was this process's own.
             return false;
         }

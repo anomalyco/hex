@@ -196,7 +196,7 @@ pub(crate) fn controller_loop(
     // The app is quitting: a recording keeps its audio, and its transcript
     // finishes at the next launch. macOS marks this before it drains.
     #[cfg(not(target_os = "macos"))]
-    crate::process_exit::begin_quitting();
+    crate::desktop::process_exit::begin_quitting();
     if let Some(active) = recording {
         active.stop.store(true, Ordering::Relaxed);
         active
@@ -276,7 +276,7 @@ impl PendingFinals {
             .name("meeting-pending-finals".into())
             .spawn(move || {
                 for id in ids {
-                    if crate::process_exit::quitting() {
+                    if crate::desktop::process_exit::quitting() {
                         return;
                     }
                     match meeting::finish_pending(&id) {

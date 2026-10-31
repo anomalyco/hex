@@ -515,8 +515,10 @@ fn launch_at_login(host: &dyn Host, enabled: Option<bool>) -> ControlReply {
 }
 
 /// What the listener is doing, from the event log's latest state.
-pub(crate) fn capture_from_state(state: Option<crate::events::VoiceState>) -> CaptureSnapshot {
-    use crate::events::VoiceState;
+pub(crate) fn capture_from_state(
+    state: Option<crate::desktop::events::VoiceState>,
+) -> CaptureSnapshot {
+    use crate::desktop::events::VoiceState;
     CaptureSnapshot {
         recording: matches!(state, Some(VoiceState::Dictating))
             .then_some(super::CaptureKind::Dictation),
@@ -623,7 +625,7 @@ mod tests {
                 update: DesktopUpdateStatus::Current,
                 capture: capture_from_state(
                     self.recording
-                        .then_some(crate::events::VoiceState::Dictating),
+                        .then_some(crate::desktop::events::VoiceState::Dictating),
                 ),
                 window_open: false,
             })

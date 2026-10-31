@@ -91,7 +91,7 @@ impl HistoryPane {
             "The deploy failed because the cache key changed.",
             Some("Slack"),
         );
-        rewritten.processing = Some(crate::events::DictationProcessing {
+        rewritten.processing = Some(crate::desktop::events::DictationProcessing {
             profile: "Chat".into(),
             latency_ms: 910,
             fallback: None,

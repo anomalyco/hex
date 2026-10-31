@@ -1092,7 +1092,7 @@ fn download_artifact(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = crate::background_process::command("curl")
+    let mut child = crate::desktop::background_process::command("curl")
         .args([
             "--fail",
             "--location",

@@ -36,7 +36,7 @@ use super::live;
 use super::mic::mic_level;
 use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
-use crate::onboarding::Practice;
+use crate::desktop::onboarding::Practice;
 
 const STAGE_W: f32 = 880.0;
 const STAGE_H: f32 = 620.0;

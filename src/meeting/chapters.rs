@@ -843,7 +843,7 @@ pub(super) fn refine_meeting(directory: &Path, entries: &[TranscriptEntry], stop
         directory,
         entries,
         super::notes::excerpt_budget(generator::context_tokens(), REFINE_EXCERPT_CHARS),
-        || super::notes::wait_for_dictation(stop) && !crate::process_exit::quitting(),
+        || super::notes::wait_for_dictation(stop) && !crate::desktop::process_exit::quitting(),
         generator::generate_chapter_lines,
     );
 }

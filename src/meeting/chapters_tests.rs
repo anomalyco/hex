@@ -399,7 +399,7 @@ fn a_stopped_boundary_pass_records_nothing_and_runs_again() {
     let directory = std::env::temp_dir().join(format!(
         "hex-refine-stop-{}-{}",
         std::process::id(),
-        crate::events::now_ms()
+        crate::desktop::events::now_ms()
     ));
     fs::create_dir_all(&directory).unwrap();
     let export = directory.join("Team sync.md");
@@ -529,7 +529,7 @@ fn a_recording_title_counts_the_last_chapter_until_now() {
     ];
     manifest.status = MeetingStatus::Recording;
     manifest.duration_ms = None;
-    manifest.created_at_ms = crate::events::now_ms() - 1_860_000;
+    manifest.created_at_ms = crate::desktop::events::now_ms() - 1_860_000;
     assert_eq!(
         display_title(&manifest),
         "Team sync: Motion lint, Chat app name, Launch plan"

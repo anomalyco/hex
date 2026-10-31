@@ -20,7 +20,7 @@ use super::{
     MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
 };
-use crate::events::now_ms;
+use crate::desktop::events::now_ms;
 
 /// Room left in the context for instructions, the schema, and the response.
 const RESERVED_TOKENS: usize = 1_000;

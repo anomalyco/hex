@@ -95,8 +95,9 @@ fn chosen() -> Option<Writer> {
     {
         return Some(Writer::AppleIntelligence);
     }
-    (crate::app_settings::meeting_notes_with_opencode() && crate::opencode_service::running())
-        .then_some(Writer::OpenCode)
+    (crate::app_settings::meeting_notes_with_opencode()
+        && crate::desktop::opencode_service::running())
+    .then_some(Writer::OpenCode)
 }
 
 /// Whether finished meetings get notes, and recording ones titles,
