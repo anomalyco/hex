@@ -23,9 +23,9 @@ use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{IndicatorPosition, RecordingAudioBehavior, UpdateChannel};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::desktop::login_item::LoginItemStatus;
+use crate::desktop::onboarding::PermissionKind;
 use crate::dictation::ShortcutMode;
-use crate::login_item::LoginItemStatus;
-use crate::onboarding::PermissionKind;
 use crate::transcription::models as transcription_models;
 
 /// The missing permissions, the listener (Windows and Linux), the basics,
@@ -189,7 +189,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// The selected speech model's download, while it is not installed, so
 /// Hex can't listen yet. Fixtures that name no installed models say nothing,
 /// so their rows never depend on this machine's models.
-fn missing_model(ui: &Ui) -> Option<crate::onboarding::ModelProgress> {
+fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }

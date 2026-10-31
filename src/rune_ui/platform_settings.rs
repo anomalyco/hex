@@ -22,7 +22,7 @@ use crate::app_settings::{
 use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
-use crate::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
+use crate::desktop::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
 
 /// A permission's row key, its name as System Settings lists it, and what
 /// Hex cannot do without it.
@@ -68,7 +68,7 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
     if !ui.platform.caps.permissions || ui.tour.is_some() {
         return None;
     }
-    let warnings = crate::onboarding::permission_warnings(ui.platform.permissions);
+    let warnings = crate::desktop::onboarding::permission_warnings(ui.platform.permissions);
     if warnings.is_empty() {
         return None;
     }

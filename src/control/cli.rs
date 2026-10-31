@@ -841,7 +841,7 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
         // A Hex that holds the service lock may have read settings.json
         // already; wait for it to answer instead of writing behind it.
         #[cfg(target_os = "linux")]
-        let lock = crate::instance::acquire("service");
+        let lock = crate::desktop::instance::acquire("service");
         #[cfg(not(target_os = "linux"))]
         let lock: color_eyre::Result<()> = Ok(());
         match lock {
@@ -1054,7 +1054,7 @@ fn open_arguments(
     test_build: bool,
     vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> Vec<std::ffi::OsString> {
-    let mut arguments = crate::onboarding::open_env_arguments(vars);
+    let mut arguments = crate::desktop::onboarding::open_env_arguments(vars);
     match bundle {
         Some(bundle) => arguments.push(bundle.into()),
         None => arguments.extend([

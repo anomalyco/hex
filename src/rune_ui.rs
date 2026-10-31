@@ -984,17 +984,17 @@ impl Ui {
     fn ask(&mut self, request: platform::PlatformRequest) {
         match &request {
             platform::PlatformRequest::Permission(
-                crate::onboarding::PermissionAction::RequestMicrophone,
+                crate::desktop::onboarding::PermissionAction::RequestMicrophone,
             ) => self
                 .platform
-                .note_asked(crate::onboarding::PermissionKind::Microphone),
+                .note_asked(crate::desktop::onboarding::PermissionKind::Microphone),
             platform::PlatformRequest::Permission(
-                crate::onboarding::PermissionAction::ShowGuide(kind),
+                crate::desktop::onboarding::PermissionAction::ShowGuide(kind),
             ) => {
                 // Previews grant Screen Recording on the second ask, as for
                 // system audio.
                 #[cfg(hex_capture)]
-                if *kind == crate::onboarding::PermissionKind::ScreenRecording
+                if *kind == crate::desktop::onboarding::PermissionKind::ScreenRecording
                     && self.host.is_fixture()
                     && self.platform.asked(*kind)
                     && let Some(view) = self.platform.scrawl.as_mut()
@@ -1004,7 +1004,7 @@ impl Ui {
                 self.platform.note_asked(*kind);
             }
             platform::PlatformRequest::SystemAudio => {
-                let kind = crate::onboarding::PermissionKind::SystemAudio;
+                let kind = crate::desktop::onboarding::PermissionKind::SystemAudio;
                 // Previews grant on the second ask, so a scene can play
                 // Allow, waiting, and Allowed in turn.
                 if self.host.is_fixture() && self.platform.asked(kind) {
@@ -1038,7 +1038,7 @@ impl Ui {
                 platform::PlatformHost::Native(_) => {
                     self.platform.request_login_item(*enabled);
                     if let Err(message) = self.host.send(request) {
-                        let failure = crate::login_item::LoginItemFailure {
+                        let failure = crate::desktop::login_item::LoginItemFailure {
                             status: None,
                             message,
                         };
@@ -2081,11 +2081,11 @@ const SCENES: &[Scene] = &[
     }),
     ("onboarding", |ui| {
         *ui = portal_fixture();
-        onboarding::fixture(ui, crate::onboarding::Step::Welcome, false);
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Welcome, false);
     }),
     ("onboarding-setup", |ui| {
         *ui = portal_fixture();
-        onboarding::fixture(ui, crate::onboarding::Step::Setup, true);
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
@@ -2223,13 +2223,14 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-permissions", |ui| {
         *ui = mac_fixture();
-        use crate::onboarding::PermissionState;
+        use crate::desktop::onboarding::PermissionState;
         ui.platform.permissions.microphone = PermissionState::NeedsSettings;
         ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
         ui.platform
             .permissions_asked
-            .push(crate::onboarding::PermissionKind::Accessibility);
-        ui.platform.login_item = Some(crate::login_item::LoginItemStatus::RequiresApproval);
+            .push(crate::desktop::onboarding::PermissionKind::Accessibility);
+        ui.platform.login_item =
+            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
         ui.platform.accessibility_renamed = true;
     }),
     ("mac-settings-pause-browser", |ui| {

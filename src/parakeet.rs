@@ -734,12 +734,12 @@ pub fn transcribe_with_words(
 fn wait_for_dictation_idle() -> Result<()> {
     let started = Instant::now();
     while dictation_busy()
-        && !crate::process_exit::quitting()
+        && !crate::desktop::process_exit::quitting()
         && started.elapsed() < WORD_DICTATION_WAIT
     {
         thread::sleep(std::time::Duration::from_millis(50));
     }
-    if crate::process_exit::quitting() {
+    if crate::desktop::process_exit::quitting() {
         return Err(eyre!("Hex is quitting"));
     }
     Ok(())

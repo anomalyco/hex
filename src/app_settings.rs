@@ -2245,7 +2245,7 @@ impl AppSettings {
         #[cfg(target_os = "macos")]
         if !path.exists() {
             // Saving new preferences does not imply onboarding completion.
-            crate::onboarding::record_pending_at(parent)?;
+            crate::desktop::onboarding::record_pending_at(parent)?;
         }
         crate::durable::write(path, &serde_json::to_vec_pretty(self)?)?;
         Ok(())
@@ -3574,7 +3574,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn new_settings_require_onboarding_across_reloads() {
-        use crate::onboarding::{completion_recorded_at, record_completion_at};
+        use crate::desktop::onboarding::{completion_recorded_at, record_completion_at};
         use std::os::unix::fs::PermissionsExt;
 
         let dir = TestSettingsDir::new("new-onboarding");
@@ -3673,7 +3673,9 @@ mod tests {
         let settings = AppSettings::load_from(&dir.path).unwrap();
         settings.write_to(&dir.path).unwrap();
         assert!(!dir.directory.join("onboarding-pending").exists());
-        assert!(crate::onboarding::completion_recorded_at(&dir.directory));
+        assert!(crate::desktop::onboarding::completion_recorded_at(
+            &dir.directory
+        ));
         assert!(dir.directory.join("onboarding-complete").is_file());
     }
 

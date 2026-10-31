@@ -11,8 +11,10 @@ use color_eyre::eyre::eyre;
 use crate::app_settings::AppSettings;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::control::{PrintReply, PrintedTranscript};
+use crate::desktop::events::{
+    DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
-use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
 use crate::linux::input::{
     CommandQueue, HotkeyEvent, HotkeyOptions, HotkeyStatus, LinuxHotkey, LinuxHotkeyMonitor,

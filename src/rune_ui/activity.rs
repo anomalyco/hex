@@ -13,8 +13,8 @@ use super::lists::{
     source_list, split,
 };
 use crate::desktop::activity::DesktopActivity;
+use crate::desktop::events::{EventReader, VoiceEvent, VoiceState};
 use crate::desktop::i18n::{event_age, tr};
-use crate::events::{EventReader, VoiceEvent, VoiceState};
 
 const LIMIT: usize = 100;
 
@@ -69,8 +69,8 @@ impl ActivityPane {
     }
 
     pub(super) fn fixture() -> Self {
-        use crate::events::{DictationPhase, DictationProcessing, TranscriptPhase};
-        let now = crate::events::now_ms();
+        use crate::desktop::events::{DictationPhase, DictationProcessing, TranscriptPhase};
+        let now = crate::desktop::events::now_ms();
         let at = |seconds: u64| now - seconds * 1_000;
         let events = vec![
             VoiceEvent::Dictation {

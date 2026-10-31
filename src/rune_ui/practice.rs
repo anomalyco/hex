@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
-use crate::events::{DictationPhase, EventReader, VoiceEvent};
-use crate::onboarding::{Input, Observation};
+use crate::desktop::events::{DictationPhase, EventReader, VoiceEvent};
+use crate::desktop::onboarding::{Input, Observation};
 
 /// The listener's dictation outcomes logged since the practice step began.
 pub(super) struct PracticeFeed {
@@ -17,7 +17,7 @@ impl PracticeFeed {
     pub(super) fn new(event_path: &Path) -> Self {
         Self {
             reader: EventReader::open(event_path),
-            since_ms: crate::events::now_ms(),
+            since_ms: crate::desktop::events::now_ms(),
         }
     }
 

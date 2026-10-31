@@ -258,7 +258,7 @@ impl Engine for SharedEngine {
 
     fn quitting(&self) -> bool {
         #[cfg(target_os = "macos")]
-        return crate::process_exit::quitting();
+        return crate::desktop::process_exit::quitting();
         // Elsewhere the engine itself goes when Hex quits.
         #[cfg(not(target_os = "macos"))]
         false

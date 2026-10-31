@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::events::{EventLog, VoiceEvent, now_ms};
+use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
 mod dictation;
 mod streams;
@@ -47,7 +47,7 @@ pub struct LocalApi {
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
     transcription_service: Option<crate::transcription::service::TranscriptionService>,
-    _instance: Option<crate::instance::InstanceLock>,
+    _instance: Option<crate::desktop::instance::InstanceLock>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -149,7 +149,7 @@ pub struct LocalApiOptions {
 impl LocalApi {
     /// Start the one app-owned local API and publish its discovery document.
     pub fn start(events: EventLog, options: LocalApiOptions) -> Result<Self> {
-        let instance = crate::instance::acquire("local-api")?;
+        let instance = crate::desktop::instance::acquire("local-api")?;
         Self::start_bound(
             Some(crate::app_paths::local_api_discovery_file()?),
             Arc::new(current_health),
@@ -200,7 +200,7 @@ impl LocalApi {
         health: HealthProvider,
         events: EventLog,
         options: LocalApiOptions,
-        instance: Option<crate::instance::InstanceLock>,
+        instance: Option<crate::desktop::instance::InstanceLock>,
     ) -> Result<Self> {
         if let Some(path) = &discovery_path {
             prepare_discovery_path(path)?;

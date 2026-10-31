@@ -25,11 +25,11 @@ use super::platform::{Os, PlatformRequest, PlatformState};
 use super::{Menu, Request};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::dictation::ShortcutMode;
-use crate::onboarding::{
+use crate::desktop::onboarding::{
     Effect, Flow, Input, ItemStatus, ModelProgress, Observation, PermissionState, Practice, Row,
     SetupItem, Step, View,
 };
+use crate::dictation::ShortcutMode;
 
 const WIDTH: f32 = 520.0;
 const ART_HEIGHT: f32 = 140.0;
@@ -150,9 +150,11 @@ impl Tour {
     pub(super) fn start(settings: &AppSettings, platform: &PlatformState) -> Option<Tour> {
         let installed = super::picker::Picker::default().selected_installed(settings);
         let status = platform.setup_status(installed);
-        let completed = crate::onboarding::completion_recorded();
-        let resume = crate::onboarding::take_resume();
-        let saved = (!completed).then(crate::onboarding::saved_step).flatten();
+        let completed = crate::desktop::onboarding::completion_recorded();
+        let resume = crate::desktop::onboarding::take_resume();
+        let saved = (!completed)
+            .then(crate::desktop::onboarding::saved_step)
+            .flatten();
         (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
             Tour::new(
                 Flow::new(
@@ -212,7 +214,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     }
     if status.ready() && !tour.completed {
         tour.completed = true;
-        if live && let Err(error) = crate::onboarding::record_completion() {
+        if live && let Err(error) = crate::desktop::onboarding::record_completion() {
             tracing::warn!(%error, "could not record onboarding completion");
         }
     }
@@ -267,7 +269,7 @@ fn remember_step(ui: &Ui, before: Step) {
         && tour.flow.step() != before
         && ui.live()
     {
-        crate::onboarding::record_step(tour.flow.step());
+        crate::desktop::onboarding::record_step(tour.flow.step());
         if tour.flow.step() == Step::Done && tour.flow.view().dictation_ready {
             crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
         }
@@ -304,10 +306,10 @@ fn apply(ui: &mut Ui, effect: Effect) {
             }
         }
         Effect::RequestMicrophone => ui.ask(PlatformRequest::Permission(
-            crate::onboarding::PermissionAction::RequestMicrophone,
+            crate::desktop::onboarding::PermissionAction::RequestMicrophone,
         )),
         Effect::ShowGuide(kind) => ui.ask(PlatformRequest::Permission(
-            crate::onboarding::PermissionAction::ShowGuide(kind),
+            crate::desktop::onboarding::PermissionAction::ShowGuide(kind),
         )),
         Effect::Relaunch => ui.ask(PlatformRequest::Relaunch),
         Effect::Finish => ui.tour = None,
@@ -1130,7 +1132,7 @@ pub(super) enum MacStep {
 /// macOS capabilities.
 pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     use PermissionState::{NeedsRequest, NeedsRestart, NeedsSettings, Ready};
-    let fresh = crate::onboarding::SetupStatus {
+    let fresh = crate::desktop::onboarding::SetupStatus {
         microphone: NeedsRequest,
         accessibility: NeedsSettings,
         transcription_model: false,
@@ -1145,20 +1147,20 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     );
     let permissions = match state {
         MacStep::Welcome | MacStep::Setup | MacStep::SetupDownloadFailed => fresh,
-        MacStep::SetupProgress => crate::onboarding::SetupStatus {
+        MacStep::SetupProgress => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             ..fresh
         },
-        MacStep::SetupDenied => crate::onboarding::SetupStatus {
+        MacStep::SetupDenied => crate::desktop::onboarding::SetupStatus {
             microphone: NeedsSettings,
             ..fresh
         },
-        MacStep::SetupRestart => crate::onboarding::SetupStatus {
+        MacStep::SetupRestart => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             accessibility: NeedsRestart,
             ..fresh
         },
-        _ => crate::onboarding::SetupStatus {
+        _ => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             accessibility: Ready,
             transcription_model: true,
@@ -1240,7 +1242,7 @@ mod tests {
 
     #[test]
     fn try_it_focuses_the_practice_field_until_the_dictation_lands() {
-        let ready = crate::onboarding::SetupStatus {
+        let ready = crate::desktop::onboarding::SetupStatus {
             microphone: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: true,
@@ -1268,7 +1270,7 @@ mod tests {
 
     #[test]
     fn try_it_waits_for_the_model_until_it_is_ready() {
-        let downloading = crate::onboarding::SetupStatus {
+        let downloading = crate::desktop::onboarding::SetupStatus {
             microphone: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: false,
@@ -1277,7 +1279,7 @@ mod tests {
         assert_eq!(flow.step(), Step::TryIt);
         assert!(waiting_for_model(&flow.view()));
 
-        let ready = crate::onboarding::SetupStatus {
+        let ready = crate::desktop::onboarding::SetupStatus {
             transcription_model: true,
             ..downloading
         };
@@ -1293,7 +1295,7 @@ mod tests {
 
     #[test]
     fn done_waits_for_the_model_after_a_skipped_practice() {
-        let downloading = crate::onboarding::SetupStatus {
+        let downloading = crate::desktop::onboarding::SetupStatus {
             microphone: PermissionState::Ready,
             accessibility: PermissionState::Ready,
             transcription_model: false,
@@ -1310,7 +1312,7 @@ mod tests {
         assert!(!view.dictation_ready, "Done must not claim Hex is ready");
         assert!(done_shows_progress(&view));
 
-        let ready = crate::onboarding::SetupStatus {
+        let ready = crate::desktop::onboarding::SetupStatus {
             transcription_model: true,
             ..downloading
         };

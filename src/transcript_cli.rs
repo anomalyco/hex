@@ -294,7 +294,7 @@ pub fn history(args: &HistoryArgs) -> Result<()> {
         &entries,
         args,
         retention(&root)?,
-        crate::events::now_ms(),
+        crate::desktop::events::now_ms(),
         &crate::dictation::vocabulary::read_saved(&root),
     )?;
     let mut out = io::stdout().lock();
@@ -447,7 +447,7 @@ fn meeting_list_json(
 pub fn meetings(command: &MeetingsCommand) -> Result<()> {
     let root = crate::app_paths::support_dir()?;
     let library = Library::new(root.join("meetings"));
-    let now = crate::events::now_ms();
+    let now = crate::desktop::events::now_ms();
     let mut out = io::stdout().lock();
     match command {
         MeetingsCommand::List(args) => {

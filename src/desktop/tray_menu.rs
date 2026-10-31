@@ -45,9 +45,9 @@ pub(crate) use tray::*;
 #[cfg(not(target_os = "macos"))]
 mod tray {
     use super::ModelMenuEntry;
+    use crate::desktop::events::VoiceState;
     use crate::desktop::host::DesktopUpdateStatus;
     use crate::desktop::i18n::tr;
-    use crate::events::VoiceState;
     use crate::transcription::models::TranscriptionModelId;
 
     /// What a tray menu item asks for.
@@ -268,8 +268,8 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn tray_menu_ids_round_trip_and_show_the_state() {
+        use crate::desktop::events::VoiceState;
         use crate::desktop::host::DesktopUpdateStatus;
-        use crate::events::VoiceState;
         let settings = AppSettings::default();
         let models = model_menu_entries(&settings, false, |model, _| {
             model.id == settings.transcription.model

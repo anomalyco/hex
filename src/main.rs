@@ -14,7 +14,6 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
-mod background_process;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]
@@ -30,13 +29,9 @@ mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 mod durable;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod events;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
-mod file_dialog;
 mod history;
-mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg_attr(target_os = "macos", path = "keyboard_input_sources/macos.rs")]
@@ -47,28 +42,18 @@ mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
 mod local_api;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod login_item;
 #[cfg(target_os = "macos")]
 mod macos_rune;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod onboarding;
-mod opencode_catalog;
-mod opencode_service;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
-#[cfg(target_os = "macos")]
-mod permission_guide;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod personal_commands;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod process_exit;
 #[cfg(target_os = "macos")]
 mod recognition;
 mod rune_hud;
@@ -79,7 +64,6 @@ mod status_item;
 mod suppression;
 mod transcript_cli;
 mod transcription;
-mod tray_menu;
 mod updater;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -397,11 +381,11 @@ fn main() -> Result<()> {
     match command {
         Command::App { device, rune_args } => open_app(event_path, device, rune_args),
         Command::Listen { device } => {
-            let _instance = instance::acquire("listener")?;
+            let _instance = desktop::instance::acquire("listener")?;
             labs::log_launch();
             let settings = app_settings::AppSettings::load()?;
             audio::hex_microphone::host_service();
-            let events = events::EventLog::create(&event_path)?;
+            let events = desktop::events::EventLog::create(&event_path)?;
             let history = match history::History::open_default(settings.history_retention) {
                 Ok(history) => Some(history),
                 Err(error) => {
@@ -591,7 +575,7 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
         crate::rune_ui::render_app(rune_args).run();
         return Ok(());
     }
-    let _instance = instance::acquire("listener")?;
+    let _instance = desktop::instance::acquire("listener")?;
     labs::log_launch();
     audio::hex_microphone::host_service();
     macos_rune::run(

@@ -90,7 +90,7 @@ impl HistoryKind {
 }
 
 /// Bounded record of the post-processing that shaped the final text.
-pub type HistoryProcessing = crate::events::DictationProcessing;
+pub type HistoryProcessing = crate::desktop::events::DictationProcessing;
 
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -522,7 +522,7 @@ impl History {
     }
 }
 
-pub use crate::events::now_ms;
+pub use crate::desktop::events::now_ms;
 
 fn truncated(text: &str, max_bytes: usize) -> String {
     text[..text.floor_char_boundary(max_bytes)].to_string()

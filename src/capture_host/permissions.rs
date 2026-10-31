@@ -6,7 +6,7 @@
 
 use std::sync::OnceLock;
 
-use crate::onboarding::{PermissionKind, PermissionState};
+use crate::desktop::onboarding::{PermissionKind, PermissionState};
 
 /// A permission a capture needs.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -94,11 +94,11 @@ pub fn state_of(need: CaptureNeed, fresh: bool) -> Option<NeedState> {
             }
         }
         CaptureNeed::Microphone => {
-            need_state(crate::onboarding::status_with_transcription_model(true).microphone)
+            need_state(crate::desktop::onboarding::status_with_transcription_model(true).microphone)
         }
-        CaptureNeed::Accessibility => {
-            need_state(crate::onboarding::status_with_transcription_model(true).accessibility)
-        }
+        CaptureNeed::Accessibility => need_state(
+            crate::desktop::onboarding::status_with_transcription_model(true).accessibility,
+        ),
     }
 }
 
@@ -117,17 +117,17 @@ pub fn state_of(_need: CaptureNeed, _fresh: bool) -> Option<NeedState> {
 /// System Settings with the guide floating beside it. Main thread only.
 #[cfg(target_os = "macos")]
 pub fn allow(need: CaptureNeed) {
-    use crate::onboarding::PermissionState;
+    use crate::desktop::onboarding::PermissionState;
     match need {
         CaptureNeed::Microphone
-            if crate::onboarding::status_with_transcription_model(true).microphone
+            if crate::desktop::onboarding::status_with_transcription_model(true).microphone
                 == PermissionState::NeedsRequest =>
         {
-            crate::onboarding::request_microphone();
+            crate::desktop::onboarding::request_microphone();
         }
         // Granted since the helper opened: the next poll shows it.
         CaptureNeed::ScreenRecording if super::screen_access() != super::ScreenAccess::Off => {}
-        need => crate::permission_guide::show(need.kind()),
+        need => crate::desktop::permission_guide::show(need.kind()),
     }
 }
 
@@ -137,7 +137,7 @@ pub fn allow(_need: CaptureNeed) {}
 /// The helper's Restart Hex. Main thread only.
 #[cfg(target_os = "macos")]
 pub fn restart() {
-    if crate::onboarding::spawn_relaunch() {
+    if crate::desktop::onboarding::spawn_relaunch() {
         crate::macos_rune::quit();
     } else {
         tracing::warn!("could not restart Hex for a capture permission");

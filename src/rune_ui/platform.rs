@@ -13,8 +13,10 @@ use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
 };
 use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
-use crate::login_item::{LoginItemResult, LoginItemStatus};
-use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState, SetupStatus};
+use crate::desktop::login_item::{LoginItemResult, LoginItemStatus};
+use crate::desktop::onboarding::{
+    Input, PermissionAction, PermissionKind, PermissionState, SetupStatus,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Os {
@@ -349,7 +351,7 @@ impl PlatformState {
         Self {
             caps,
             input_sources: Vec::new(),
-            permissions: crate::onboarding::status_with_transcription_model(false),
+            permissions: crate::desktop::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
             system_audio: false,
             login_item: None,
@@ -376,7 +378,9 @@ impl PlatformState {
     /// which knows the selected model.
     pub(super) fn setup_status(&self, transcription_model: bool) -> SetupStatus {
         if !self.caps.permissions {
-            return crate::onboarding::status_with_transcription_model(transcription_model);
+            return crate::desktop::onboarding::status_with_transcription_model(
+                transcription_model,
+            );
         }
         SetupStatus {
             transcription_model,
@@ -645,8 +649,8 @@ impl PlatformHost {
                         PermissionKind::Microphone,
                     ))
                 {
-                    crate::opencode_catalog::open_url(
-                        crate::onboarding::WINDOWS_MICROPHONE_SETTINGS,
+                    crate::desktop::opencode_catalog::open_url(
+                        crate::desktop::onboarding::WINDOWS_MICROPHONE_SETTINGS,
                     )
                     .map_err(|error| format!("{error:#}"))?;
                 }

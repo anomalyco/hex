@@ -9,8 +9,10 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
+use crate::desktop::events::{
+    DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
-use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::TranscriptionSelection;

@@ -20,7 +20,7 @@ use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
 use super::stories::Onboard;
-use crate::onboarding::{ItemStatus, SetupItem};
+use crate::desktop::onboarding::{ItemStatus, SetupItem};
 
 /// Total duration of the automated permissions step.
 pub(crate) const PERMISSIONS_SECS: f64 = 7.2;
