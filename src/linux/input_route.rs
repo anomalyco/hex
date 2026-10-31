@@ -2,7 +2,9 @@
 //! through ALSA's default device, which PipeWire (or PulseAudio) routes to
 //! its default source and cannot name another one, so when that source is
 //! Bluetooth Hex moves its own capture streams to the built-in microphone,
-//! else the first other hardware input. The streams are marked so
+//! else the first other hardware input, passing over any whose active port
+//! the sound server reports unplugged (an empty headset jack records only
+//! silence). The streams are marked so
 //! WirePlumber never remembers the move for the next launch.
 
 use std::process::Command;
@@ -39,6 +41,17 @@ struct Source {
     description: String,
     #[serde(default)]
     properties: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    ports: Vec<Port>,
+    #[serde(default)]
+    active_port: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Port {
+    name: String,
+    #[serde(default)]
+    availability: String,
 }
 
 impl Source {
@@ -56,6 +69,17 @@ impl Source {
         self.property("device.api") == Some("alsa")
             && self.property("device.class") != Some("monitor")
             && !self.name.ends_with(".monitor")
+    }
+
+    /// The sound server reports the active port unplugged, such as an empty
+    /// headset jack, which records only silence.
+    fn is_unplugged(&self) -> bool {
+        let Some(active) = self.active_port.as_deref() else {
+            return false;
+        };
+        self.ports
+            .iter()
+            .any(|port| port.name == active && port.availability == "not available")
     }
 }
 
@@ -92,9 +116,9 @@ fn stand_in_for(default: &str, sources: &[Source]) -> Option<StandIn> {
         .find(|source| source.name == default)
         .filter(|source| source.is_bluetooth())?;
     let usable = || {
-        sources
-            .iter()
-            .filter(|source| source.is_hardware_input() && !source.is_bluetooth())
+        sources.iter().filter(|source| {
+            source.is_hardware_input() && !source.is_bluetooth() && !source.is_unplugged()
+        })
     };
     let input = usable()
         .find(|source| source.property("device.bus") == Some("pci"))
@@ -225,5 +249,37 @@ mod tests {
             .collect::<Vec<_>>();
         let stand_in = stand_in_for("bluez_input.AA_BB_CC_DD_EE_FF.0", &no_built_in).unwrap();
         assert_eq!(stand_in.input, "Yeti Stereo Microphone");
+    }
+
+    #[test]
+    fn an_empty_headset_jack_never_stands_in() {
+        let sources: Vec<Source> = serde_json::from_str(
+            r#"[
+              {"index": 1, "name": "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__Mic1__source",
+               "description": "Stereo Microphone",
+               "properties": {"device.api": "alsa", "device.class": "sound", "device.bus": "pci"},
+               "ports": [{"name": "[In] Mic1", "availability": "not available"}],
+               "active_port": "[In] Mic1"},
+              {"index": 2, "name": "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__Mic2__source",
+               "description": "Digital Microphone",
+               "properties": {"device.api": "alsa", "device.class": "sound", "device.bus": "pci"},
+               "ports": [{"name": "[In] Mic2", "availability": "availability unknown"}],
+               "active_port": "[In] Mic2"},
+              {"index": 3, "name": "bluez_input.AA_BB_CC_DD_EE_FF.0",
+               "description": "Kit Pods",
+               "properties": {"device.api": "bluez5"}}
+            ]"#,
+        )
+        .unwrap();
+        let stand_in = stand_in_for("bluez_input.AA_BB_CC_DD_EE_FF.0", &sources).unwrap();
+        assert_eq!(stand_in.input, "Digital Microphone");
+        let only_jack = sources
+            .into_iter()
+            .filter(|source| source.index != 2)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            stand_in_for("bluez_input.AA_BB_CC_DD_EE_FF.0", &only_jack),
+            None
+        );
     }
 }
