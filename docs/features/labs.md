@@ -25,6 +25,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
+├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks (#630)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -136,6 +137,27 @@ exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac with the toggle on.
+
+Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
+`Profiles::process_cancellable` in
+[dictation_processor.rs](../../src/dictation_processor.rs) reads
+`labs::spoken_formatting()` as each dictation's processing starts and runs
+`spoken_formatting::apply` before the mode's corrections, OpenCode
+rewriting, and transformations (on Windows and Linux, after the Global
+replacements). Whole phrases, ignoring case, are replaced: "new line" and
+"line break" by one line break, "new paragraph" by two, "open quote" and
+"close quote" by `"`; the commas, periods, and spaces the model puts around a
+command go with it ("Hello. New line. Next" becomes "Hello.\nNext"). Words
+such as "newline" or "new liner" stay as they are. Only English phrases are
+recognized. Dictate without processing, meetings, and live text are
+unchanged, and with the toggle off processing is exactly as before. Checks:
+the tests in [spoken_formatting.rs](../../src/spoken_formatting.rs);
+`spoken_formatting_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation with the toggle on; the Labs page goldens need regenerating on
+Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

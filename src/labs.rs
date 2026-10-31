@@ -41,10 +41,11 @@ pub enum Feature {
     RestoreShortcutDefault,
     KeepOnClipboard,
     CopyOnly,
+    SpokenFormatting,
 }
 
 impl Feature {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -60,6 +61,7 @@ impl Feature {
         Self::RestoreShortcutDefault,
         Self::KeepOnClipboard,
         Self::CopyOnly,
+        Self::SpokenFormatting,
     ];
 
     /// The features this OS has.
@@ -80,7 +82,8 @@ impl Feature {
             | Self::LiveText
             | Self::VocabularyBiasing
             | Self::UnloadIdle
-            | Self::RestoreShortcutDefault => true,
+            | Self::RestoreShortcutDefault
+            | Self::SpokenFormatting => true,
         }
     }
 
@@ -102,6 +105,7 @@ impl Feature {
             Self::RestoreShortcutDefault => "restore-shortcut-default",
             Self::KeepOnClipboard => "keep-on-clipboard",
             Self::CopyOnly => "copy-only",
+            Self::SpokenFormatting => "spoken-formatting",
         }
     }
 
@@ -123,6 +127,7 @@ impl Feature {
             Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
             Self::KeepOnClipboard => "labs.keep_on_clipboard",
             Self::CopyOnly => "labs.copy_only",
+            Self::SpokenFormatting => "labs.spoken_formatting",
         }
     }
 
@@ -157,6 +162,9 @@ impl Feature {
                 "Leave the dictation on the clipboard after pasting instead of restoring what was there"
             }
             Self::CopyOnly => "Put the dictation on the clipboard instead of pasting it",
+            Self::SpokenFormatting => {
+                "Turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks"
+            }
         }
     }
 
@@ -182,6 +190,7 @@ impl Feature {
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
             Self::CopyOnly => settings.labs.copy_only,
+            Self::SpokenFormatting => settings.labs.spoken_formatting,
         }
     }
 
@@ -202,6 +211,7 @@ impl Feature {
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
             Self::CopyOnly => settings.labs.copy_only = on,
+            Self::SpokenFormatting => settings.labs.spoken_formatting = on,
         }
     }
 }
@@ -216,8 +226,9 @@ const MOUSE_SHORTCUTS: u32 = 1 << 5;
 const UNLOAD_IDLE: u32 = 1 << 6;
 const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
 const COPY_ONLY: u32 = 1 << 8;
+const SPOKEN_FORMATTING: u32 = 1 << 9;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 9;
+const MINUTES_SHIFT: u32 = 10;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -278,6 +289,12 @@ pub fn copy_only() -> bool {
     on(COPY_ONLY)
 }
 
+/// Spoken formatting phrases become line breaks and quotation marks (read
+/// as each dictation's processing starts).
+pub fn spoken_formatting() -> bool {
+    on(SPOKEN_FORMATTING)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -302,6 +319,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.unload_idle, UNLOAD_IDLE),
         (settings.keep_on_clipboard, KEEP_ON_CLIPBOARD),
         (settings.copy_only, COPY_ONLY),
+        (settings.spoken_formatting, SPOKEN_FORMATTING),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -446,6 +464,17 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & UNLOAD_IDLE, 0);
         assert_eq!(state >> MINUTES_SHIFT, 30);
+    }
+
+    #[test]
+    fn spoken_formatting_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & SPOKEN_FORMATTING, 0);
+        labs.spoken_formatting = true;
+        labs.unload_idle_minutes = 60;
+        let state = encode(&labs);
+        assert_ne!(state & SPOKEN_FORMATTING, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 60);
     }
 
     #[test]

@@ -269,6 +269,15 @@ impl Profiles {
         cancelled: &AtomicBool,
     ) -> Processed {
         let profile = self.select(context);
+        // Labs › Spoken formatting starts here, ahead of every mode's
+        // corrections, so it is off for raw dictation and meetings.
+        let formatted;
+        let transcript = if crate::labs::spoken_formatting() {
+            formatted = crate::spoken_formatting::apply(transcript);
+            formatted.as_str()
+        } else {
+            transcript
+        };
         let corrected = profile.replacements.replace(transcript);
         if !profile.ai_enabled {
             return Processed {

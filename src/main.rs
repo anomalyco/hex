@@ -154,6 +154,7 @@ mod recording_environment;
 mod rune_hud;
 mod rune_ui;
 mod speech_detector;
+mod spoken_formatting;
 mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
