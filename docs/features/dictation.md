@@ -566,6 +566,9 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── auto, yue, ko: no SenseVoice; mt: Parakeet v3 only (Whisper fails Maltese)
   ├── en: Underdog Bark 3.0 Pro and Clean (Parakeet v3 fine-tunes; Clean
   │   drops filler words) follow without a badge
+  ├── ar: QwenCleo-ASR 1.7B (Qwen3-ASR 1.7B fine-tune for Egyptian Arabic and
+  │   Arabic/English code-switching; Arabic only, 2.2 GB; its 19.85% WER is
+  │   the author's own test) follows without a badge
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

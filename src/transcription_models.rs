@@ -23,6 +23,8 @@ pub enum TranscriptionModelId {
     ParakeetV3,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
+    #[serde(rename = "qwencleo_asr_1_7b")]
+    QwenCleoAsr17B,
     SenseVoiceSmall,
     CohereTranscribe,
     #[serde(rename = "underdog_bark_3_pro")]
@@ -40,6 +42,7 @@ impl TranscriptionModelId {
             Self::ParakeetV3 => "parakeet_v3",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
+            Self::QwenCleoAsr17B => "qwencleo_asr_1_7b",
             Self::SenseVoiceSmall => "sense_voice_small",
             Self::CohereTranscribe => "cohere_transcribe",
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
@@ -59,6 +62,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_v3" => Ok(Self::ParakeetV3),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
+            "qwencleo_asr_1_7b" => Ok(Self::QwenCleoAsr17B),
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
@@ -344,6 +348,20 @@ const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "qwen3_asr",
     variant: "qwen3-asr-0.6b",
 };
+// Mohammed Aly's Qwen3-ASR 1.7B fine-tune for Egyptian Arabic and
+// Arabic/English code-switching (Apache-2.0), from mohammedaly22/QwenCleo-ASR
+// at 50f6b901. Converted with transcribe.cpp 7045d1c's Qwen3-ASR converter,
+// with the fine-tune's attribution in `general.*`, and quantized to Q8_0;
+// rebuilding it that way reproduces this file byte for byte.
+const QWENCLEO_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "QwenCleo-ASR-1.7B-Q8_0.gguf",
+    revision: "08c66976a0496e1e3f1a88965eea123631e634fa",
+    repository: "reomar15/QwenCleo-ASR-transcribe-cpp-GGUF",
+    bytes: 2_185_030_816,
+    sha256: "43bae9d5d7a26684b4a0faf1abc6e872b5825cc9147dbb7200da9ff4c5d12f87",
+    architecture: "qwen3_asr",
+    variant: "qwen3-asr-1.7b",
+};
 const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "SenseVoiceSmall-Q8_0.gguf",
     revision: "4a08b8e900b38a977e32eb08d5d0697d6e72ba04",
@@ -473,6 +491,23 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: true,
+        supports_recognition_hints: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::QwenCleoAsr17B,
+        name: "QwenCleo-ASR 1.7B",
+        // Half Qwen3-ASR 0.6B's speed on apollo's Vulkan GPU (22x against 41x).
+        realtime: "~9x",
+        // The author's own 3,699-utterance evaluation, not a public test set.
+        word_error_rate: Some(19.85),
+        quality_context: "Author's Egyptian Arabic test",
+        coverage: "Egyptian Arabic, with English terms",
+        timestamps: "No timestamps",
+        streams: false,
+        runtime: ModelRuntime::Gguf(&QWENCLEO_ARTIFACT),
+        languages: &["ar"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -1420,6 +1455,7 @@ mod tests {
                 "whisper_large_v3_turbo",
             ),
             (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
+            (TranscriptionModelId::QwenCleoAsr17B, "qwencleo_asr_1_7b"),
             (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
             (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
             (
