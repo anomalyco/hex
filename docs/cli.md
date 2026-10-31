@@ -6,14 +6,9 @@ status. They are meant for agents and scripts as much as people, so every
 command takes `--json`, is idempotent, and exits with a stable code.
 
 One command tree (`control::cli`) is compiled on macOS, Linux, and Windows,
-and one versioned protocol carries it over each OS's owner-only transport:
-
-```ts
-hex <command>
-├── macOS    local API, bearer-authenticated POST /control (local_api)
-├── Linux    the single-instance socket, Request::Control (linux_service)
-└── Windows  a named pipe only this user can open (windows_control)
-```
+and one versioned protocol carries it on every OS through the running Hex's
+local API: the owner-only discovery file (`local-api.json`) and the
+bearer-authenticated `POST /control` (`local_api`).
 
 On Linux and Windows one shared host (`control::host`) carries out the
 commands through each OS's thin adapter (`linux_app`, `windows_rune`); macOS's
@@ -153,7 +148,7 @@ in every macOS, Linux, and Windows build; with `capture.enabled` off it refuses 
 `feature-off`. On Linux, `list`, `show`, `route`, and `send` run in the
 `hex` process itself and `start`, `stop`, and `cancel` are handed to the
 running Hex's listener, as is `status`. On Windows every `annotate` command
-goes to the running Hex over its pipe. `capture stop` replies at once with the bundle
+goes to the running Hex. `capture stop` replies at once with the bundle
 path while the words and files are written in the background; `capture status`
 lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
 of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,

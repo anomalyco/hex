@@ -172,15 +172,13 @@ substitute for source inspection or a second roadmap.
   `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
   the macOS recognition loop only; elsewhere it answers
   `service-capture-unavailable` at runtime, and `/profile/vitals` answers 503.
-  Linux and Windows carry `hex` control over their socket and pipe
-  (`control`), not this `/control`.
+  `/control` carries the `hex` control commands on every OS (`control`).
 - `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
   rules and the capability each needs), and the one CLI tree and client
   (`control::cli`), which each OS's `main` flattens beside its own commands.
-  Transports: the macOS local API's `/control`, the Linux socket's
-  `Request::Control`, and the Windows named pipe (`windows_control`).
+  The transport on every OS is the local API's `/control`.
   `control::host` carries commands out on Linux and Windows through a thin
   adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`);
   `macos_rune::control` is macOS's host. What an OS can't do answers
@@ -496,7 +494,7 @@ substitute for source inspection or a second roadmap.
   `hex capture` is `control::cli::capture` (macOS through the running app;
   Linux reads the folder itself and hands start/stop/cancel to the
   listener over `linux_service`; Windows sends every `hex annotate` command
-  to the running Hex over its control pipe).
+  to the running Hex).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -932,12 +930,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   carries only MCP messages.
 - `hex` control commands (`status`, `quit`, `dictation`, `meetings record`,
   `settings set`, `model use`, `window show`, …) are release-available on
-  every OS and drive only the one running Hex: on macOS through the
-  owner-only discovery file and bearer-authenticated `POST /control`, on
-  Linux through the owner-only, peer-checked socket, on Windows through a
-  named pipe only this user's SID can open, whose server the client checks
-  runs as the same user (64 KiB request, 1 MiB reply, 10 s in-app
-  deadline). A command an OS can't do answers `unsupported` at runtime. They dispatch before process logging,
+  every OS and drive only the one running Hex through the owner-only
+  discovery file and bearer-authenticated `POST /control` (64 KiB request,
+  1 MiB reply, 10 s in-app deadline). A command an OS can't do answers `unsupported` at runtime. They dispatch before process logging,
   or the instance lock, and never launch Hex; only `hex start` and
   `hex restart` open it. Every command is carried out by the app's own paths
   (the menu bar's meeting request, the window's settings save followed by
@@ -1081,8 +1076,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   the same `linux_input` state machine and emits the same events. Commands are
   idempotent: starting while recording or stopping while idle does nothing.
   They talk only to a running, listening Hex and fail with a clear error
-  otherwise; they never start one. The socket hands them straight to the
-  listener's queue, never through the window's thread.
+  otherwise; they never start one. The control host hands them straight to
+  the listener's queue, never through the window's thread.
 - One Linux Hex process per user and data root owns the microphone, model
   workers, saved settings, History, the HUD, and the window. The window is
   optional and opened on demand; closing it never stops capture, accepted

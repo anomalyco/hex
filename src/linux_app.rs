@@ -326,7 +326,8 @@ pub(crate) fn run(
     crate::linux_dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::local_transcriber::initialize_backends();
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path);
+    let (control_calls, control_receiver) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let enable_on_launch = settings.enable_on_launch;
     let mut host = LinuxDesktopHost::new(
         event_path,
@@ -342,14 +343,14 @@ pub(crate) fn run(
     let published = Arc::new(Published::default());
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
     let (control, requests) = mpsc::sync_channel(8);
-    *published.control.lock().unwrap() = Some({
-        let host = LinuxControl {
+    crate::control::host::serve(
+        control_receiver,
+        Arc::new(LinuxControl {
             host: host.clone(),
             published: Arc::downgrade(&published),
             window: control.clone(),
-        };
-        Arc::new(move |request| crate::control::host::answer(&host, request))
-    });
+        }),
+    );
     server.serve(published.clone(), control.clone());
     let tray = crate::linux_tray::start(host.clone(), published.clone(), control.clone(), shutdown)
         .map(Arc::new);
@@ -1088,8 +1089,8 @@ impl Drop for LinuxDesktopHost {
     }
 }
 
-/// The Linux adapter `hex` control commands run through
-/// ([`crate::control::host`]), on the socket's worker.
+/// The Linux adapter `hex` control commands from the local API run through
+/// ([`crate::control::host`]).
 struct LinuxControl {
     host: HostHandle,
     published: std::sync::Weak<Published>,

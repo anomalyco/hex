@@ -162,10 +162,21 @@ impl LocalApi {
     /// Start the running Linux or Windows app's local API. Hex runs on
     /// without it, so a failure is only logged.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub fn start_for_app(event_path: &Path) -> Option<Self> {
+    pub fn start_for_app(
+        event_path: &Path,
+        control: SyncSender<crate::control::ControlCall>,
+    ) -> Option<Self> {
         let started = EventLog::create(event_path)
             .map_err(Into::into)
-            .and_then(|events| Self::start(events, LocalApiOptions::default()));
+            .and_then(|events| {
+                Self::start(
+                    events,
+                    LocalApiOptions {
+                        control: Some(control),
+                        ..Default::default()
+                    },
+                )
+            });
         started
             .inspect_err(
                 |error| tracing::warn!(error = %format!("{error:#}"), "local API is unavailable"),

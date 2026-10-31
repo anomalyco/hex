@@ -2,12 +2,11 @@
 //!
 //! The running process binds `service.sock` next to its `service.lock`. A
 //! later `hex` forwards `Activate` (with the launcher's activation token) and
-//! exits; every `hex` control command (`crate::control`: status, dictation,
-//! including `stop --print`, whose connection waits for the transcript,
-//! settings, model, window, quit, …) rides the same socket as one
-//! `ControlRequest`, answered by `linux_app`'s control host on the socket's
-//! worker. Dictation commands go straight from there to the listener's
-//! command queue, never through the window's thread. This module also owns the
+//! exits; Annotate's recording commands and `Status` ride the same socket.
+//! The `hex` control commands (`crate::control`) reach Hex through its local
+//! API instead, answered by `linux_app`'s control host; dictation commands go
+//! from there straight to the listener's command queue, never through the
+//! window's thread. This module also owns the
 //! per-user systemd lifecycle (`Type=notify` readiness, the session
 //! environment, start, stop, and restart).
 use std::fs::{self, OpenOptions};
@@ -32,8 +31,7 @@ use crate::linux_input::{ListenerCommand, ShortcutCommand};
 /// Version 1 was the service/Settings-client protocol; its clients get a
 /// version error and exit.
 const VERSION: u32 = 2;
-/// Replies carry `hex settings list` and the status report.
-const MAX_FRAME: usize = 1024 * 1024;
+const MAX_FRAME: usize = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
 /// A send waits for the router's answer (it waits 8 s itself).
@@ -53,8 +51,6 @@ pub(crate) enum Request {
         show: bool,
         session: Session,
     },
-    /// A `hex` control command, answered by the running Hex's control host.
-    Control(crate::control::ControlRequest),
     /// `hex annotate start|stop|cancel`.
     Capture(crate::control::ScrawlCaptureAction),
     /// `hex annotate send`: the listener's router sends it and says how.
@@ -205,12 +201,7 @@ pub(crate) fn route_shortcut(
 pub(crate) struct Published {
     pub(crate) status: Mutex<Option<Status>>,
     pub(crate) shortcuts: Mutex<Option<ShortcutRoute>>,
-    /// Answers `hex` control commands on the socket's worker.
-    pub(crate) control: Mutex<Option<ControlHandler>>,
 }
-
-pub(crate) type ControlHandler =
-    Arc<dyn Fn(crate::control::ControlRequest) -> crate::control::ControlResponse + Send + Sync>;
 
 /// Requests for the main thread, which owns the window.
 #[derive(Debug)]
@@ -237,7 +228,7 @@ struct Reply {
     #[serde(default)]
     status: Option<Status>,
     error: Option<String>,
-    /// What a control or Annotate command did, for the CLI to print.
+    /// What an Annotate command did, for the CLI to print.
     #[serde(default)]
     control: Option<crate::control::ControlReply>,
 }
@@ -434,41 +425,6 @@ pub(crate) fn capture_undo() -> crate::control::ControlReply {
     }
 }
 
-/// Whether a current Hex answers on the socket.
-pub(crate) fn running() -> bool {
-    request(Request::Status).is_ok()
-}
-
-/// One `hex` control command, answered by the running Hex. Never starts one.
-pub(crate) fn control(
-    request: &crate::control::ControlRequest,
-) -> std::result::Result<crate::control::ControlResponse, crate::control::ControlReply> {
-    use crate::control::ControlReply;
-    match exchange(
-        Request::Control(request.clone()),
-        request.command.deadline(),
-    ) {
-        Ok(Reply {
-            control: Some(reply),
-            ..
-        }) => Ok(reply.into()),
-        Ok(_) => Err(ControlReply::error("failed", "Hex did not say how it went")),
-        Err(RequestError::NotRunning) => Err(crate::control::cli::not_running()),
-        Err(RequestError::Failed(error))
-            if format!("{error}").starts_with("Unsupported Hex request") =>
-        {
-            Err(ControlReply::error(
-                "version-mismatch",
-                format!(
-                    "an older Hex is running; restart it (`systemctl --user restart {}`) and try again",
-                    unit()
-                ),
-            ))
-        }
-        Err(error) => Err(ControlReply::error("transport", format!("{error}"))),
-    }
-}
-
 /// Before `hex restart`: the unit restarts into this desktop's session
 /// (without a desktop, over SSH, the one Hex last ran in).
 pub(crate) fn prepare_restart() -> Result<()> {
@@ -653,17 +609,6 @@ fn serve_client(
                 } else {
                     Ok(())
                 }
-            }
-            Request::Control(request) => {
-                let handler = published.control.lock().unwrap().clone();
-                answer = Some(match handler {
-                    Some(handler) => handler(request).reply,
-                    None => crate::control::ControlReply::error(
-                        "not-ready",
-                        "Hex is starting; try again",
-                    ),
-                });
-                Ok(())
             }
             Request::Capture(action) => crate::capture_host::send_to_listener(
                 crate::capture_host::CaptureControl::Scrawl(action),

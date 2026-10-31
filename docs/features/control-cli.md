@@ -2,8 +2,8 @@
 
 ```ts
 Agent or terminal                                  // control.cli; every OS
-├── One tree and protocol; transport per OS -> macOS local API, Linux socket,
-│   Windows named pipe; OS can't do it -> unsupported at runtime, exit 1
+├── One tree and protocol over the local API's POST /control on every OS;
+│   OS can't do it -> unsupported at runtime, exit 1
 ├── hex status [--json] -> Listener, capture, meeting, model, features,
 │   permissions, window, update, version, pid, memory
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
@@ -59,12 +59,9 @@ Agent or terminal                                  // control.cli; every OS
 ```
 
 Every command except `start`, `restart`, `logs`, and the read commands talks
-only to the running Hex; none of them launch Hex. macOS reaches it through the
-owner-only discovery file and the bearer-authenticated `POST /control` route,
-Linux through its owner-only, peer-checked socket (`Request::Control`), and
-Windows through a named pipe whose name carries the user's SID, whose DACL
-grants only that SID, and whose client checks the serving process runs as the
-same user. Commands dispatch before logging and the instance lock on every OS,
+only to the running Hex; none of them launch Hex. Every OS reaches it through
+the local API's owner-only discovery file and the bearer-authenticated
+`POST /control` route. Commands dispatch before logging and the instance lock on every OS,
 so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
 
@@ -75,14 +72,12 @@ hotkey loop, as a toggle press would), settings save and reload as the
 window's do, and `settings set` refuses a key whose capability the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
 go to the meeting recorder (`meeting_runtime`) as the tray's items do;
-`window story` answers `unsupported`; Windows carries every `annotate`
-command over its pipe. `hex history`, `hex meetings list|show|search`, and
+`window story` answers `unsupported`; Windows sends every `annotate`
+command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.
 
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
 [control/host.rs](../../src/control/host.rs) (the Linux and Windows host),
-[linux_service.rs](../../src/linux_service.rs) and
-[windows_control.rs](../../src/windows_control.rs) (transports),
 [control/settings.rs](../../src/control/settings.rs) (settings registry),
 [control/cli.rs](../../src/control/cli.rs) (clap, output, exit codes, start,
 logs), [macos_rune/control.rs](../../src/macos_rune/control.rs) (the macOS host),

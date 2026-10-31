@@ -218,7 +218,8 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             history: history.clone(),
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path);
+    let (control_calls, control_receiver) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime_shared = shared.clone();
@@ -238,16 +239,14 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             );
             quit.quit();
         })?;
-    let control = WindowsControl {
-        runtime: runtime_handle(),
-        shared,
-        window: Mutex::new(window.clone()),
-    };
-    if let Err(error) = crate::windows_control::serve(Arc::new(move |request| {
-        crate::control::host::answer(&control, request)
-    })) {
-        tracing::warn!(%error, "`hex` control commands will not reach this Hex");
-    }
+    crate::control::host::serve(
+        control_receiver,
+        Arc::new(WindowsControl {
+            runtime: runtime_handle(),
+            shared,
+            window: Mutex::new(window.clone()),
+        }),
+    );
     let relaunch = window.clone();
     instance.forward_launches(move || {
         relaunch.open();
@@ -341,15 +340,15 @@ fn runtime_handle() -> RuntimeHandle {
         .expect("the runtime is set before control starts")
 }
 
-/// The Windows adapter `hex` control commands run through
-/// ([`crate::control::host`]), on the control pipe's threads.
+/// The Windows adapter `hex` control commands from the local API run
+/// through ([`crate::control::host`]).
 struct WindowsControl {
     runtime: RuntimeHandle,
     shared: Arc<Shared>,
     window: Mutex<rune::AppHandle<Ui>>,
 }
 
-/// Lets the pipe write its reply before Hex quits.
+/// Lets the local API write the reply before Hex quits.
 const QUIT_GRACE: Duration = Duration::from_millis(250);
 
 impl WindowsControl {

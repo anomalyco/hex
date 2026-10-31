@@ -153,7 +153,7 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
             reply = call(client, "Snapshot", version=1)
             assert reply["version"] == 2 and reply["error"]
         with connection() as client:
-            client.sendall(struct.pack(">I", 1024 * 1024 + 1))
+            client.sendall(struct.pack(">I", 128 * 1024 + 1))
             assert client.recv(1) == b""
         # A stalled request cannot stall other clients.
         with connection() as stalled:

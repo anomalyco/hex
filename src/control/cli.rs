@@ -793,38 +793,18 @@ pub fn send(command: ControlCommand, output: Output) -> u8 {
     }
 }
 
-#[cfg(target_os = "macos")]
+/// Every OS reaches the running Hex through its local API's owner-only
+/// discovery file and bearer-authenticated `POST /control`.
 fn running() -> bool {
     crate::local_api::running_pid().is_some()
 }
 
-#[cfg(target_os = "linux")]
-fn running() -> bool {
-    crate::linux_service::running()
-}
-
-#[cfg(target_os = "windows")]
-fn running() -> bool {
-    crate::windows_control::running()
-}
-
-#[cfg(target_os = "macos")]
 fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     if !running() {
         return Err(not_running());
     }
     crate::local_api::call_control(&request)
         .map_err(|error| ControlReply::error("transport", format!("{error:#}")))
-}
-
-#[cfg(target_os = "linux")]
-fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
-    crate::linux_service::control(&request)
-}
-
-#[cfg(target_os = "windows")]
-fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
-    crate::windows_control::call(&request)
 }
 
 pub(crate) fn not_running() -> ControlReply {
