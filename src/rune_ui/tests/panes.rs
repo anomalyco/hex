@@ -1827,7 +1827,6 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
     assert!(fun_driver_installed(&rt));
     rt.state.settings.experimental.hex_microphone = false;
     refresh(&mut rt);
-    assert!(rt.find("switch-uninstall").is_some());
     assert!(
         rt.find("fun-hex-microphone").is_some(),
         "the driver keeps it running"
@@ -1837,7 +1836,7 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
         !rt.state.settings.experimental.hex_microphone,
         "the switch is locked"
     );
-    tap(&mut rt, "switch-uninstall");
+    tap(&mut rt, "uninstall");
     assert!(matches!(
         asked(&rt).last(),
         Some(PlatformRequest::UninstallHexMicrophone)
