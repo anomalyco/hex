@@ -1091,7 +1091,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   `packaging/linux/icons` (16–512 px; deb/rpm refresh the icon cache in
   postinst/postrm), and without a packaged icon Hex writes the same embedded
   PNGs into `~/.local/share/icons/hicolor` at startup and names that icon in
-  the managed entries it or the installer wrote (#652). Launch at login is
+  the managed entries it or the installer wrote (#652). The PNGs carry an
+  `X-Hex-Managed=true` text chunk: Hex replaces and the installer removes only
+  marked regular files, never a user's own icon or a symlink. Launch at login is
   `~/.config/autostart/anomaly.hex.desktop`. At startup Hex renames its own
   managed `hex.desktop` entries (the names before #579) and never touches
   unmanaged ones. Only a loose binary without any entry writes its own
