@@ -907,13 +907,12 @@ pub fn learn_capture(dir: &Path, session: &str) -> Option<policy::OfferRule> {
     {
         return None;
     }
-    let candidate = evidence.candidates.iter().find(|c| c.id == session)?;
-    let folder = policy::rule_folder(candidate)?;
+    evidence.candidates.iter().find(|c| c.id == session)?;
     let bundle_id = crate::bundle::load_bundle(dir)
         .ok()
         .and_then(|(_, bundle)| bundle.target.bundle_id);
     let (counted, offer) =
-        policy::learn_pick(evidence.url.as_deref(), bundle_id.as_deref(), &folder);
+        policy::learn_pick(evidence.url.as_deref(), bundle_id.as_deref(), session);
     let counted = counted?;
     // Kept so an undo of the send can take the pick back (`undo`).
     body["learned"] = serde_json::to_value(&counted).ok()?;
