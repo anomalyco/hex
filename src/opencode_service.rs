@@ -256,7 +256,9 @@ impl Service {
         let mut buffer = [0; 64 * 1024];
         loop {
             check(remaining())?;
-            stream.set_read_timeout(Some(remaining().clamp(Duration::from_millis(1), READ_SLICE)))?;
+            stream.set_read_timeout(Some(
+                remaining().clamp(Duration::from_millis(1), READ_SLICE),
+            ))?;
             match stream.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {

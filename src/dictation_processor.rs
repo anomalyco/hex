@@ -529,7 +529,6 @@ pub fn load_model_catalog() -> Result<Option<ModelCatalog>> {
     Ok(Some(catalog))
 }
 
-
 fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> ModelCatalog {
     let fallback_default_key = default
         .as_ref()
@@ -610,7 +609,6 @@ fn opencode_api<T: for<'de> Deserialize<'de>>(service: &Service, path: &str) -> 
     }
     decode_api_response(path, &response.body)
 }
-
 
 pub struct Processed {
     pub text: String,
@@ -730,7 +728,6 @@ fn generate_cancellable(
         |data, remaining, cancelled| post_generation(&service, data, remaining, cancelled),
     )
 }
-
 
 fn generate_with_candidates(
     prompt: &str,
@@ -857,9 +854,9 @@ fn post_generation(
     if response.status == 404 {
         return Err(eyre!("OpenCode does not serve a generation route"));
     }
-    serde_json::from_slice(&response.body).wrap_err("OpenCode returned an invalid generation response")
+    serde_json::from_slice(&response.body)
+        .wrap_err("OpenCode returned an invalid generation response")
 }
-
 
 fn retryable_generation_error(message: &str) -> bool {
     message.starts_with("Model unavailable:")

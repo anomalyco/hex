@@ -80,9 +80,7 @@ impl Models {
         }
         let due = match self.retry_at {
             None => true,
-            Some(at) => {
-                matches!(self.state, ModelCatalogState::NotRunning) && Instant::now() >= at
-            }
+            Some(at) => matches!(self.state, ModelCatalogState::NotRunning) && Instant::now() >= at,
         };
         if wanted && due {
             self.start_load();

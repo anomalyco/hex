@@ -989,7 +989,10 @@ fn unavailable_opencode_is_explained_beside_each_switch() {
     };
     let rt = runtime("modes-opencode-not-running", true, PANE_SIZE);
     assert!(rt.find("processing-toggle").is_some());
-    assert_eq!(beside(&rt, "processing-enabled"), ["OpenCode isn't running"]);
+    assert_eq!(
+        beside(&rt, "processing-enabled"),
+        ["OpenCode isn't running"]
+    );
     assert!(
         texts(&rt)
             .iter()
