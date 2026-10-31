@@ -425,9 +425,15 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 listener_failure,
             )
         })?;
+    // A closed window is only ordered out, and AppKit keeps it on the Space
+    // it was last shown on: reopening it from the menu bar would switch back
+    // to that Space. Bring it to the active Space instead.
+    let native = rune::MacWindowOptions::default()
+        .collection_behavior(objc2_app_kit::NSWindowCollectionBehavior::MoveToActiveSpace.0);
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
-        .accessory();
+        .accessory()
+        .macos_window(native);
     // The first-run tour opens centred at one size; a tiling window manager
     // would otherwise stretch it to half the screen.
     if !onboarding_completed {
