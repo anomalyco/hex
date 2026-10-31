@@ -10,6 +10,7 @@ use std::time::Duration;
 use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, col, el, row, text};
 
 use super::super::controls::Paint;
+use super::dictated::Dictated;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
@@ -18,6 +19,7 @@ use super::live::Live;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
 use crate::feedback::KeySoundStyle;
+use crate::onboarding::Practice;
 
 static LIVE_WINDOW: AtomicBool = AtomicBool::new(false);
 
@@ -118,6 +120,57 @@ pub(crate) struct Onboard {
     /// Set when this is Hex's real first run (experiment `new-onboarding`):
     /// what the window's tour reports, in place of the fixtures.
     pub(crate) live: Option<Live>,
+    /// The dictated words flying into the practice field.
+    pub(crate) dictated: Dictated,
+    /// A story's stand-in for a real dictation on the interactive try.
+    pub(crate) rehearsal: Option<Rehearsal>,
+}
+
+/// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
+/// through the same live words and paste as Hex's real one.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Rehearsal {
+    /// Whether the model sends live words while the shortcut is held.
+    pub(crate) streams: bool,
+    from: f64,
+    pasted: bool,
+}
+
+impl Rehearsal {
+    /// How long after `"Your turn"` shows the shortcut goes down.
+    const LEAD: f64 = 1.0;
+    /// How long the paste takes after the shortcut comes up.
+    const TRANSCRIBE: f64 = 0.45;
+
+    pub(crate) fn new(streams: bool) -> Self {
+        Self {
+            streams,
+            from: f64::INFINITY,
+            pasted: false,
+        }
+    }
+
+    fn elapsed(&self, now: f64) -> f64 {
+        now - self.from - Self::LEAD
+    }
+
+    fn held(&self, now: f64) -> bool {
+        let t = self.elapsed(now);
+        (0.0..ANSWER_TRY.release).contains(&t)
+    }
+
+    fn partial(&self, now: f64) -> Option<crate::transcription_engine::Partial> {
+        (self.streams && self.held(now)).then(|| crate::transcription_engine::Partial {
+            stable: ANSWER_TRY.partial(self.elapsed(now)).to_owned(),
+            tentative: String::new(),
+        })
+    }
+
+    fn paste_due(&mut self, now: f64) -> bool {
+        let due = !self.pasted && self.elapsed(now) >= ANSWER_TRY.release + Self::TRANSCRIBE;
+        self.pasted |= due;
+        due
+    }
 }
 
 impl Drop for Onboard {
@@ -176,6 +229,8 @@ impl Onboard {
             hud_landed: false,
             sfx: SfxTrack::default(),
             live: None,
+            dictated: Dictated::default(),
+            rehearsal: None,
         }
     }
 
@@ -183,7 +238,7 @@ impl Onboard {
     /// rather than auto-playing the scripted reply.
     pub(crate) fn interactive_try(&self) -> bool {
         self.flow == Flow::FirstRun
-            && (self.live.is_some() || is_live_window())
+            && (self.live.is_some() || is_live_window() || self.rehearsal.is_some())
             && !self.scripted_try
     }
 
@@ -255,6 +310,7 @@ impl Onboard {
     /// Called when the interactive `"Your turn"` [`TextArea`] changes (e.g. a
     /// real dictation paste from Hex lands or the user types).
     pub(crate) fn on_practice_change(&mut self, _: &mut Tx) {
+        self.dictated.changed(&self.practice.text, self.now);
         let has_words = !self.practice.text.trim().is_empty();
         self.hud_landed |= has_words;
         if has_words && self.step == Step::Try {
@@ -361,6 +417,11 @@ impl Onboard {
         self.live_hold_from = None;
         self.practice = TextEdit::default();
         self.practice.focused = self.interactive_try();
+        self.dictated.reset();
+        if let Some(rehearsal) = self.rehearsal.as_mut() {
+            *rehearsal = Rehearsal::new(rehearsal.streams);
+            rehearsal.from = self.now;
+        }
         self.step = Step::Try;
         if !self.interactive_try() {
             self.auto_due_at = Some(self.now + 1.2);
@@ -483,6 +544,12 @@ fn first_run() -> Story<Onboard> {
     .variant("Model already downloaded", |s| s.had_model = true)
     .variant("Permissions already granted", |s| s.granted = true)
     .variant("Auto-play video", |s| s.scripted_try = true)
+    .variant("Your turn, model streams", |s| {
+        s.rehearsal = Some(Rehearsal::new(true));
+    })
+    .variant("Your turn, model doesn't stream", |s| {
+        s.rehearsal = Some(Rehearsal::new(false));
+    })
     .variant("Quick motion", |s| {
         s.motion.enter = 0.28;
         s.motion.exit = 0.20;
@@ -533,6 +600,13 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     s.live_hold_from = None;
     s.sfx.clear();
     s.examples_from = Some(play.now());
+    if s.rehearsal.is_some() {
+        s.had_model = true;
+        s.granted = true;
+        s.jump_to_try();
+        play.wake_after(Duration::ZERO);
+        return;
+    }
     if s.flow == Flow::FirstRun {
         start_first_run(s, play);
         return;
@@ -695,6 +769,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.hud_from = Some(now);
             s.partial = "";
             s.practice = TextEdit::default();
+            s.dictated.reset();
             if s.interactive_try() {
                 s.practice.focused = true;
                 None
@@ -789,8 +864,11 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
 
     if s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard) {
         // The real first run follows Hex's own dictation, which sounds its
-        // own tones.
-        let real = s.live.as_ref().map(|live| live.listening);
+        // own tones; a rehearsal plays one without them.
+        let real = match s.rehearsal {
+            Some(rehearsal) => Some(rehearsal.held(now)),
+            None => s.live.as_ref().map(|live| live.listening),
+        };
         let held = real.unwrap_or_else(|| physical_shortcut_held(&s.caps));
         match (s.live_hold_from, held) {
             (None, true) => {
@@ -807,6 +885,24 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             }
             _ => {}
         }
+        let partial = match s.rehearsal {
+            Some(rehearsal) => rehearsal.partial(now),
+            None => crate::live_text::current(),
+        };
+        s.dictated.hear(partial.as_ref(), now);
+        if s.live.as_ref().is_some_and(|live| {
+            matches!(
+                live.practice,
+                Practice::TooShort | Practice::NothingHeard | Practice::Failed
+            )
+        }) {
+            s.dictated.forget();
+        }
+        if s.rehearsal.as_mut().is_some_and(|r| r.paste_due(now)) {
+            s.practice.insert(ANSWER_TRY.text());
+            s.on_practice_change(tx);
+        }
+        s.dictated.settle(now);
         let landed = std::mem::take(&mut s.hud_landed);
         s.hud.step(
             now,
@@ -829,6 +925,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         || s.live_hold_from.is_some()
         || (s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard))
         || (s.examples_from.is_some() && (s.step < Step::Ready || !s.reduced.get()));
+    moving |= s.dictated.moving();
 
     // The real first run's download comes from Hex (`live::poll`).
     let from = s.download_from.filter(|_| s.live.is_none());

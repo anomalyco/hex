@@ -14,6 +14,7 @@ use rune_kit::{Button, ButtonVariant, TextArea};
 
 use super::super::controls::{DESCRIPTION, KeySize, Paint, PushSize, keycap};
 use super::super::lists::allowed;
+use super::dictated::Stage;
 use super::field_text::Field;
 use super::fixture::{ANSWER_TRY, Download};
 use super::flight::{Flight, caret_x, ember_tone, flicker, flying, typeset};
@@ -42,6 +43,10 @@ const TRY_TEXT: Field = Field {
     width: TRY_FIELD_W - 2.0 * TRY_PAD,
 };
 const HOT: f32 = 0.52;
+const PRACTICE_HUD_H: f32 = 74.0;
+const PRACTICE_GAP: f32 = 16.0;
+/// Lines the practice field grows to before it scrolls.
+const PRACTICE_ROWS: usize = 5;
 const KNOCK: f32 = 8.0;
 const BURST: f64 = 0.06;
 
@@ -461,10 +466,17 @@ fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
     };
 
     let shortcut = s.caps.join("");
+    let stage = practice_stage(p);
+    let reduced = s.reduced.get();
     let editor = TextArea::new(&s.practice)
-        .placeholder(format!("Hold {shortcut} and say a sentence…"))
+        .placeholder(if s.dictated.hearing() {
+            String::new()
+        } else {
+            format!("Hold {shortcut} and say a sentence…")
+        })
         .width(Some(TRY_FIELD_W))
-        .auto_grow(3, 5);
+        .auto_grow(3, PRACTICE_ROWS)
+        .spans(s.dictated.spans(p, &stage, s.now, reduced));
     let editor = if s.live.is_some() {
         editor
             .on_edit(live::practice)
@@ -481,10 +493,34 @@ fn interactive_try_stage(p: Paint, s: &Onboard) -> El {
         .key("try-stage")
         .w(TRY_W)
         .items_center()
-        .gap(16.0)
-        .child(el().key("try-hud-box").size(TRY_W, 74.0).children(hud_el))
+        .gap(PRACTICE_GAP)
+        .child(
+            el().key("try-hud-box")
+                .size(TRY_W, PRACTICE_HUD_H)
+                .children(hud_el),
+        )
         .child(editor)
         .children(s.live.as_ref().and_then(|live| live::hint(p, live)))
+        .child(s.dictated.overlay(p, "dictated", &stage, s.now, reduced))
+}
+
+/// Where the practice field's text sits under the plate: the kit's
+/// [`TextArea`] pads its text 8 points and sets it in the UI face.
+fn practice_stage(p: Paint) -> Stage {
+    const PAD: f32 = 8.0;
+    let line = (13.0f32 * 1.35 * 2.0).round() / 2.0;
+    let field_y = PRACTICE_HUD_H + PRACTICE_GAP;
+    Stage {
+        from: TRY_HUD,
+        origin: [TRY_FIELD_X + PAD, field_y + PAD],
+        field: Field {
+            font: p.k.ty.ui.lh(line),
+            line,
+            width: TRY_FIELD_W - 2.0 * PAD,
+        },
+        rows: PRACTICE_ROWS,
+        size: [TRY_W, field_y + PRACTICE_ROWS as f32 * line + 2.0 * PAD],
+    }
 }
 
 fn try_stage(p: Paint, s: &Onboard) -> El {

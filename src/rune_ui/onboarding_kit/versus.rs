@@ -156,10 +156,6 @@ fn download(s: &Onboard) -> super::fixture::Download {
     s.download.expect("the download starts at the pick")
 }
 
-fn seconds(secs: f64) -> String {
-    format!("{secs:.1} s")
-}
-
 fn typed_secs() -> f64 {
     typing::duration()
 }
@@ -201,10 +197,7 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         Step::Parked if s.demo_hears() => (
             "without",
             "Without Hex",
-            line(
-                "lead-sent",
-                format!("Two panic typos and {} later.", seconds(typed_secs())),
-            ),
+            line("lead-sent", "Two panic typos later.".into()),
         ),
         Step::Parked => (
             "with",
@@ -231,24 +224,13 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             faster_headline(),
             line(
                 "lead-done",
-                format!(
-                    "Typed in {} (with two typos). Spoken cleanly in {}.",
-                    seconds(typed_secs()),
-                    seconds(ANSWER_JAY.release)
-                ),
+                "Typed with two typos. Spoken without any.".into(),
             ),
         ),
         _ => (
             "heard",
             "That's it",
-            line(
-                "lead-done",
-                format!(
-                    "Typed in {}. Spoken in {}.",
-                    seconds(typed_secs()),
-                    seconds(ANSWER_JAY.release)
-                ),
-            ),
+            line("lead-done", "The same reply, typed and then spoken.".into()),
         ),
     };
     s.motion.heading(

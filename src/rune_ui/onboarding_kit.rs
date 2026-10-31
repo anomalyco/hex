@@ -23,6 +23,7 @@
 //! - [`landing`]: shared typography, zero-bounce transitions, and `"Hex is ready"`.
 
 mod cards;
+mod dictated;
 mod field_text;
 mod first_run;
 mod fixture;

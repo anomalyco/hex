@@ -146,7 +146,7 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     };
     let mic_desc = match live.microphone {
         ItemStatus::Denied => "Switch on Hex in System Settings",
-        _ => "Hears you only while you hold the shortcut",
+        _ => "Hears you while you hold the shortcut",
     };
     let card = col()
         .key("setup-card")
@@ -291,7 +291,7 @@ fn setup_card(p: Paint, mic: PermState, ax: PermState, tray_open: bool, escaped:
             "mic-row",
             &glyphs::MIC,
             "Microphone",
-            "Hears you only while you hold the shortcut",
+            "Hears you while you hold the shortcut",
             perm_pill(p, "mic-pill", mic),
         ))
         .child(separator(p, "sep0"))
