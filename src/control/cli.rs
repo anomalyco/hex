@@ -335,7 +335,7 @@ pub enum VocabularyCommand {
     Add {
         term: String,
         /// Spellings a transcript may show instead, comma-separated
-        /// (`--sounds-like "avatar,a bat war"`).
+        /// (`--sounds-like "capuchin,cap a chino"`).
         #[arg(long, value_name = "SPELLINGS")]
         sounds_like: Option<String>,
         #[command(flatten)]
@@ -1615,8 +1615,8 @@ mod tests {
         assert!(human_vocabulary(&[]).starts_with("The vocabulary is empty"));
         let entries = [
             VocabularyEntry {
-                term: "abattoir".into(),
-                sounds_like: vec!["avatar".into(), "a bat war".into()],
+                term: "cappuccino".into(),
+                sounds_like: vec!["capuchin".into(), "cap a chino".into()],
             },
             VocabularyEntry {
                 term: "Rune".into(),
@@ -1625,7 +1625,7 @@ mod tests {
         ];
         assert_eq!(
             human_vocabulary(&entries),
-            "abattoir  (sounds like avatar, a bat war)\nRune\n"
+            "cappuccino  (sounds like capuchin, cap a chino)\nRune\n"
         );
     }
 

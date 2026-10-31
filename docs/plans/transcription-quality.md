@@ -4,7 +4,7 @@
 
 ## Summary
 
-Hex's default model (`ParakeetUnifiedEnglish`) is fast (~188x realtime on Metal) and accurate on general English (5.91% 8-set WER), but it has no vocabulary input today and misrecognizes domain terms and names into common English words (`"Hex"` -> `"Hanks"`, `"Abattoir"` -> `"Avatar"`, `"OpenCode"` -> `"open code"`). Blind find-and-replace cannot fix real-word collisions like `"Hanks"` or `"Avatar"` without corrupting legitimate sentences. Meanwhile, in-call meeting transcripts are moving onto rolling Parakeet chunks on the shared `TranscriptionEngine` (with Moonshine being dropped from `src/meeting_live.rs`), leaving voice commands (`src/moonshine.rs`) as the last consumer of the ONNX Runtime + `libmoonshine` stack.
+Hex's default model (`ParakeetUnifiedEnglish`) is fast (~188x realtime on Metal) and accurate on general English (5.91% 8-set WER), but it has no vocabulary input today and misrecognizes domain terms and names into common English words (`"Hex"` -> `"Hanks"`, `"Cappuccino"` -> `"Capuchin"`, `"OpenCode"` -> `"open code"`). Blind find-and-replace cannot fix real-word collisions like `"Hanks"` or `"Capuchin"` without corrupting legitimate sentences. Meanwhile, in-call meeting transcripts are moving onto rolling Parakeet chunks on the shared `TranscriptionEngine` (with Moonshine being dropped from `src/meeting_live.rs`), leaving voice commands (`src/moonshine.rs`) as the last consumer of the ONNX Runtime + `libmoonshine` stack.
 
 ```ts
 Transcription quality plan (ordered by value / effort)
@@ -15,7 +15,7 @@ Transcription quality plan (ordered by value / effort)
 ├── Phase 3: `transcribe-cpp` 0.2.4 -> 0.4.1 & catalog refresh (2d)
 │   └── Unlocks `RunOptions::vocabulary`, Qwen3-ASR hints (#129), and `parakeet-ultra` (replaces Parakeet v3)
 ├── Phase 4: Parakeet greedy-decode phrase boost in `transcribe.cpp` (5d spike + 5d ship)
-│   └── Host CPU logit biasing + SentencePiece tokenizer + margin gate (`"Hanks"` -> `"Hex"`, `"Avatar"` -> `"Abattoir"`)
+│   └── Host CPU logit biasing + SentencePiece tokenizer + margin gate (`"Hanks"` -> `"Hex"`, `"Capuchin"` -> `"Cappuccino"`)
 ├── Phase 5: In-call meeting transcripts & optional Apple live tail (3d)
 │   └── Tightens rolling Parakeet pause cuts (6-10 s) with shared vocabulary; optional ~2% CPU `SpeechTranscriber` draft tail
 └── Phase 6: Moonshine Streaming GGUF for voice commands (5d)
@@ -39,7 +39,7 @@ Transcription quality plan (ordered by value / effort)
     - `term_recall`: fraction of `expected_terms` present in the output (case- and spacing-normalized).
     - `false_replacements`: count and rate of vocabulary terms appearing in transcripts when absent from `expected`.
   - Build a two-part local benchmark manifest reusing the corpus infrastructure landed in `f4755e4` (`scripts/dictation-corpus.sh` and `src/dictation_corpus_tests.rs`, merged from `test/dictation-corpus`):
-    1. **Target-term set (~100 clips):** `say` voices, ElevenLabs clips, and Kit's real recordings containing `Hex` (including the real `"Hanks"` miss), `Abattoir` (the `"Avatar"` miss), `OpenCode`, `Rune`, `Scrawl`, `Effect`, `Anomaly`, and teammate names.
+    1. **Target-term set (~100 clips):** `say` voices, ElevenLabs clips, and Kit's real recordings containing `Hex` (including the real `"Hanks"` miss), `Cappuccino` (the `"Capuchin"` miss), `OpenCode`, `Rune`, `Scrawl`, `Effect`, `Anomaly`, and teammate names.
     2. **Term-free guard set (200 LibriSpeech `test-clean` clips + Kit's term-free dictation clips):** includes legitimate sentences using common words like `"Tom Hanks"` and `"Avatar"` to catch over-eager biasing.
 - **Measurement & gate:** Harness runs end-to-end via `cargo run --release -- benchmark-transcription` and reports baseline `ParakeetUnifiedEnglish` WER, `term_recall`, `false_replacements`, `median_rtf`, `p95_clip_ms`, and `/usr/bin/time -l` peak resident memory. Every subsequent phase gates on: **WER delta <= +0.3 pt on the term-free set, false replacements <= 0.5%, and p95 latency delta < 20 ms on a 10 s clip.**
 - **Effort:** 2 days.
@@ -61,10 +61,10 @@ Transcription quality plan (ordered by value / effort)
   - **Pipeline wiring (`src/parakeet.rs`, `src/transcription/local_transcriber.rs`, `src/dictation_processor.rs`, `src/meeting_transcript.rs`):**
     - **Model hints:** Pass `vocabulary` terms (capped at 64 terms to prevent Whisper silence hallucinations, #108/#193) to models with `supports_recognition_hints`.
     - **Global alias replacements:** Compile unambiguous `aliases -> term` pairs ( plus multi-word compound joins like `"open code" -> "OpenCode"`) into a shared `ReplacementSet` that runs before mode-specific `replacements` in `dictation_processor.rs`, `dictation_modes.rs`, and on rolling/final chunks in `meeting_transcript.rs`.
-    - **OpenCode rewrite prompt (`src/dictation_processor.rs`):** When a mode enables OpenCode rewriting, append a compact `Vocabulary` block (`"Prefer these exact spellings when a word sounds like one: Hex (heard as: Hanks), Abattoir (heard as: Avatar), OpenCode, Rune, Scrawl, Effect…"`). Because the LLM sees sentence context, it resolves real-word collisions (`"Hanks"`, `"Avatar"`) without corrupting ordinary prose.
+    - **OpenCode rewrite prompt (`src/dictation_processor.rs`):** When a mode enables OpenCode rewriting, append a compact `Vocabulary` block (`"Prefer these exact spellings when a word sounds like one: Hex (heard as: Hanks), Cappuccino (heard as: Capuchin), OpenCode, Rune, Scrawl, Effect…"`). Because the LLM sees sentence context, it resolves real-word collisions (`"Hanks"`, `"Capuchin"`) without corrupting ordinary prose.
   - **Rune UI (`src/rune_ui/settings.rs`, `src/rune_ui/history.rs`, `src/desktop_i18n.rs`):**
     - Follow [`docs/design-system.md`](../design-system.md): replace the Whisper-only `Recognition hints` row in `settings::dictation_section` with a `Vocabulary` `section` card visible for every model.
-    - Compose existing `rune_ui/controls.rs` pieces: `card_header` with a Ghost `PLUS` `IconButton` (`"Add term"`) and a Secondary `"Import…"` / `"Export…"` action (`#160`); rows with `TextInput` for `Term (e.g. Abattoir)` and optional `Heard as (e.g. Avatar)`, plus `remove_button`.
+    - Compose existing `rune_ui/controls.rs` pieces: `card_header` with a Ghost `PLUS` `IconButton` (`"Add term"`) and a Secondary `"Import…"` / `"Export…"` action (`#160`); rows with `TextInput` for `Term (e.g. Cappuccino)` and optional `Heard as (e.g. Capuchin)`, plus `remove_button`.
     - In `src/rune_ui/history.rs`, add a Secondary `"Add to vocabulary…"` action in `detail_header` when `raw_text` differs from `final_text` or is selected, prefilling the misheard phrase.
     - Add all five language translations in `src/desktop_i18n.rs` and update `--snap` scenes (`mac-settings`, `history`) in light and dark.
 - **Measurement & gate:**
@@ -100,21 +100,21 @@ Transcription quality plan (ordered by value / effort)
 
 ## Phase 4: Parakeet Greedy-Decode Phrase Boost
 
-- **Goal:** Bias Parakeet's acoustic decoder toward the user's vocabulary during inference so `"Hex"`, `"Abattoir"`, `"OpenCode"`, `"Rune"`, `"Scrawl"`, `"Effect"`, and people's names win over phonetically similar common words (`"Hanks"`, `"Avatar"`) without an LLM call or a second model.
+- **Goal:** Bias Parakeet's acoustic decoder toward the user's vocabulary during inference so `"Hex"`, `"Cappuccino"`, `"OpenCode"`, `"Rune"`, `"Scrawl"`, `"Effect"`, and people's names win over phonetically similar common words (`"Hanks"`, `"Capuchin"`) without an LLM call or a second model.
 - **Why this works in Parakeet:**
   - In `transcribe.cpp` (`src/arch/parakeet/decoder.cpp`), `decode_rnnt_greedy` (Unified English), `decode_tdt_greedy` (v2/v3/ultra), and streaming RNN-T all run on the host CPU (`n_threads = 1` on GPU devices in `src/transcription/gguf_session.rs`).
   - At every step, `joint_step` copies the joint network output into a host `std::vector<float> logits`, applies `log_softmax`, and selects `argmax_range(token_logits, n_token_cls)` with `blank_id = vocab`.
 - **Changes:**
   - **Step 4a: 5-day spike in a local `transcribe.cpp` 0.4.1 checkout:**
-    1. **SentencePiece encoder:** Implement tokenization for Parakeet's 1,024-piece SentencePiece vocabulary stored in the GGUF metadata (replacing the `INT_MIN` stub in `transcribe_tokenize`), generating casing variants (`"Hex"`, `" hex"`, `"Abattoir"`, `" abattoir"`).
+    1. **SentencePiece encoder:** Implement tokenization for Parakeet's 1,024-piece SentencePiece vocabulary stored in the GGUF metadata (replacing the `INT_MIN` stub in `transcribe_tokenize`), generating casing variants (`"Hex"`, `" hex"`, `"Cappuccino"`, `" cappuccino"`).
     2. **Aho-Corasick / prefix trie shallow fusion (GPU-PB style, arXiv 2508.07014):** Build a token-level prefix trie with failure links from `RunOptions::vocabulary`.
-    3. **Acoustic margin gate + prefix rollback:** At each `joint_step`, only apply `boost` (e.g. +1.5 to +3.0 nats) to a trie-advancing token `t` when `logits[best_non_blank] - logits[t] <= margin` (the acoustics already support `t`). To prevent a multi-token term (`"Abattoir"`, `"OpenCode"`) from stranding a broken first subword if a later subword fails the acoustic margin gate, keep a single shadow predictor state while inside an active multi-token trie prefix and commit it only when the full term completes (zero extra compute outside active prefixes).
+    3. **Acoustic margin gate + prefix rollback:** At each `joint_step`, only apply `boost` (e.g. +1.5 to +3.0 nats) to a trie-advancing token `t` when `logits[best_non_blank] - logits[t] <= margin` (the acoustics already support `t`). To prevent a multi-token term (`"Cappuccino"`, `"OpenCode"`) from stranding a broken first subword if a later subword fails the acoustic margin gate, keep a single shadow predictor state while inside an active multi-token trie prefix and commit it only when the full term completes (zero extra compute outside active prefixes).
   - **Step 4b: Ship upstream + fork bridge (`Cargo.toml`, `src/parakeet.rs`, `src/transcription/local_transcriber.rs`):**
     - Wire `Parakeet` and `LocalTranscriber` to pass `settings.vocabulary` terms into `RunOptions::vocabulary` (both offline `run` and `with_stream`).
     - **Upstream vs. fork strategy:** Open an upstream PR to `handy-computer/transcribe.cpp` filling Parakeet's currently empty `vocabulary` slot in `docs/prompting.md` and `transcribe_tokenize`. While upstream reviews, carry a narrow `[patch.crates-io]` git patch pointing to `anomalyco/transcribe.cpp` (pinned rev, updating `nix/package.nix` hashes if needed) so Hex ships immediately, then return to the crates.io pin once upstream releases.
     - **Fallback if greedy spike misses the gate:** Confidence-gated phonetic snap in Rust using `Transcript::tokens` (`Token::p`) and word timestamps already returned by `transcribe_segments` (`src/parakeet.rs:1190`), with FluidAudio-style guards (>=80% similarity for <=4-char words, >=85% with stop words).
 - **Measurement & gate:**
-  - Must pass the Phase 1 gate on `ParakeetUnifiedEnglish`: **term recall >= 70% (including `"Hanks" -> "Hex"` and `"Avatar" -> "Abattoir"` real clips), false-replacement rate <= 0.5% on the 200-clip LibriSpeech + term-free guard set, overall WER delta <= +0.3 pt, and p95 decode overhead < 5 ms per clip.**
+  - Must pass the Phase 1 gate on `ParakeetUnifiedEnglish`: **term recall >= 70% (including `"Hanks" -> "Hex"` and `"Capuchin" -> "Cappuccino"` real clips), false-replacement rate <= 0.5% on the 200-clip LibriSpeech + term-free guard set, overall WER delta <= +0.3 pt, and p95 decode overhead < 5 ms per clip.**
 - **Effort:** 5 days (spike) + 5 days (streaming path, `[patch.crates-io]`, upstream PR).
 - **Risk:** Medium. Over-boosting short 1-token words (`"Hex"`) can cause false replacements on similar rhymes (`"checks"`, `"text"`, `"necks"`). Mitigated by scaling the required acoustic margin tighter for short words (<=4 chars) and allowing per-entry `"heard as"` aliases to restrict when a short word boosts.
 - **Unblocks:** Zero-latency custom vocabulary in hotkey dictation and rolling meeting transcripts without requiring OpenCode.
@@ -131,7 +131,7 @@ Transcription quality plan (ordered by value / effort)
     - Today `CHUNK_MIN = 10 s`, `CHUNK_TARGET = 20 s`, `CHUNK_MAX = 30 s` (`src/meeting_transcript.rs:36-40`), which leaves in-call rolling transcripts 20-30 s behind live speech.
     - Lower `CHUNK_MIN` to `5 s` and `CHUNK_TARGET` to `8 s` (keeping `CHUNK_MAX = 25 s` and `CHUNK_OVERLAP = 2 s` for continuous talkers). At ~190x realtime on Metal, an 8 s chunk takes ~42 ms on the shared engine thread, finishing well inside dictation's 300 ms hold threshold + 200 ms release tail.
   - **Vocabulary in rolling and final meeting chunks (`src/meeting_transcript.rs`):**
-    - Apply Phase 2's shared vocabulary replacements and Phase 4's `RunOptions::vocabulary` to rolling and final meeting chunks so `"Hex"`, `"Abattoir"`, `"OpenCode"`, and participant names are right on the first rolling pass.
+    - Apply Phase 2's shared vocabulary replacements and Phase 4's `RunOptions::vocabulary` to rolling and final meeting chunks so `"Hex"`, `"Cappuccino"`, `"OpenCode"`, and participant names are right on the first rolling pass.
   - **Optional sub-second volatile tail via Apple `SpeechTranscriber` (`src/apple_speech.rs`, `src/meeting_live.rs`, macOS 26+):**
     - Once Moonshine is removed from `meeting_live.rs`, the only gap is the 0-8 s sentence currently being spoken before a pause cut lands.
     - If Kit wants live word-by-word captions for that active sentence, stream 100 ms Int16 buffers per track into Apple's on-device `SpeechAnalyzer` / `SpeechTranscriber` (`docs/plans/meeting-live-transcription.md`), emitting `TranscriptPhase::Updated` / `Completed` into `transcript.live.ndjson` after `rolling.covered_ms`. Rolling Parakeet overwrites the tail as each 5-8 s chunk completes.

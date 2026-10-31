@@ -40,7 +40,7 @@ clips**. Don't switch dictation to Qwen for vocabulary on this evidence.
 - **Terms.** 13 pre-registered occurrences in 10 clips: Dax ×3, Rune ×4, Hex ×2,
   HiveMind, dotfiles, grill, Adam. Names are matched case-sensitively, so
   "hex" counts as a miss. Every arm gets Hex if casing is ignored.
-- **Hints.** `hints17` is the boost spike's frozen list (Hex, Abattoir,
+- **Hints.** `hints17` is the boost spike's frozen list (Hex, Cappuccino,
   OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine,
   GPUI, Sparkle, Argon, Astra, HiveMind). It was fixed before these clips
   existed. `hints27` adds Psychopomp, dotfiles, Qwen, Claude, Opus, Sonnet,

@@ -1,7 +1,6 @@
 {
   "vocabulary": [
     "Hex",
-    "Abattoir",
     "OpenCode",
     "Rune",
     "Scrawl",
@@ -61,39 +60,6 @@
       "group": "target",
       "sha256": "df9d6e3e31e5de1e840b19ba8e0930634596f3c853861975b51f1a2b1eaefb55",
       "duration_s": 2.64
-    },
-    {
-      "id": "term-abattoir-1",
-      "audio": "audio/term-abattoir-1.wav",
-      "expected": "Open Abattoir and run the next experiment.",
-      "expected_terms": [
-        "Abattoir"
-      ],
-      "group": "target",
-      "sha256": "8d7f8942cd90e0fc691154b3768f83011eff0bc694a89f1cfbb9a70f7cc68372",
-      "duration_s": 2.64
-    },
-    {
-      "id": "term-abattoir-2",
-      "audio": "audio/term-abattoir-2.wav",
-      "expected": "I want to change the settings in Abattoir.",
-      "expected_terms": [
-        "Abattoir"
-      ],
-      "group": "target",
-      "sha256": "648338604e9ae740fe573e683a77c1cdd804ade29fcdd608bc0a6215d9f13c17",
-      "duration_s": 2.48
-    },
-    {
-      "id": "term-abattoir-3",
-      "audio": "audio/term-abattoir-3.wav",
-      "expected": "We should test Abattoir before the release.",
-      "expected_terms": [
-        "Abattoir"
-      ],
-      "group": "target",
-      "sha256": "2a3f5a08e8571fbb5dfbd68028cf980e7d51b33dcf42e446287b593ca09c47da",
-      "duration_s": 2.4
     },
     {
       "id": "term-opencode-1",

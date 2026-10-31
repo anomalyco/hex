@@ -17,7 +17,7 @@ including training or modifying the model?
   [Why Parakeet can be biased at all](#why-parakeet-can-be-biased-at-all)).
   Adding a vocabulary boost is a small change to that loop. It is not a model
   change.
-- Today's replacements cannot fix Kit's real misses. "Hanks" and "Avatar" are
+- Today's replacements cannot fix Kit's real misses. "Hanks" and "Capuchin" are
   real words. A blind replace corrupts every legitimate use.
 - Per-user fine-tuning is not worth it. Training once, centrally, on a
   developer-vocabulary corpus is a plausible later bet.
@@ -123,7 +123,7 @@ hints). It feeds:
    hit was `Model::capabilities()` returning a `Result`.
 2. **The OpenCode rewrite prompt:** "these terms exist; prefer these spellings
    when a word sounds like one". This is the cheapest option that can fix
-   "Hanks" and "Avatar", because an LLM sees the whole sentence. It costs
+   "Hanks" and "Capuchin", because an LLM sees the whole sentence. It costs
    latency and is optional per mode.
 3. **Replacements:** keep as the deterministic layer, with bulk import and the
    #139 and #177 fixes first.
@@ -144,8 +144,8 @@ already has.
 
 - It runs on every model, and it needs no model change.
 - "Hex" and "Hanks" are close in sound (`hɛks` and `hæŋks`), and so are
-  "Abattoir" and "Avatar". The weak spot is the second case: Parakeet is likely
-  to be **confident** about "Avatar", since it is a common word. A confidence
+  "Cappuccino" and "Capuchin". The weak spot is the second case: Parakeet is likely
+  to be **confident** about "Capuchin", since it is a common word. A confidence
   gate would then skip the exact miss Kit reported. I have not measured this.
   Treat the gate as a false-positive limiter, not a recall driver.
 - FluidAudio's rescorer has the same shape of guards, and it is a useful list of
@@ -317,7 +317,7 @@ candidate word, and it needs no second model.
 - Screen OCR for context (kitlangton/Hex #187) as a first step. Permission cost
   is high, and Parakeet cannot take a prompt anyway. Revisit when a boosting
   list exists, since on-screen terms are just a dynamic vocabulary.
-- Blind replacements for real words. "Hanks to Hex" and "Avatar to Abattoir"
+- Blind replacements for real words. "Hanks to Hex" and "Capuchin to Cappuccino"
   corrupt legitimate uses. Keep them behind a mode, a context, or an alias that
   only exists after a confident phonetic match.
 
@@ -338,9 +338,9 @@ Add:
 
 1. **A term corpus.** Text only to start: about 100 sentences, each containing
    one or more target terms (OpenCode, Rune, Scrawl, Effect, Anomaly,
-   Abattoir, Hex, plus real names). Render with several `say` voices, at least
+   Cappuccino, Hex, plus real names). Render with several `say` voices, at least
    one ElevenLabs voice, and a handful of Kit's own recordings, including the
-   meeting clips where "Hanks" and "Avatar" occurred. Real clips matter more
+   meeting clips where "Hanks" and "Capuchin" occurred. Real clips matter more
    than synthetic ones: MacParakeet's note itself says synthetic `say` audio is
    no substitute for accents and microphones.
 2. **Two metrics, not one.**
@@ -352,7 +352,7 @@ Add:
 3. **A gate:** WER change at most 0.3 pt on the term-free corpus, as in
    MacParakeet's note, and p95 added latency under about 100 ms for a 10 s clip
    (my number). Run baseline, A, B, and the spike as separate columns.
-4. **A fixture of real misses.** Keep `Hanks` and `Avatar` as permanent
+4. **A fixture of real misses.** Keep `Hanks` and `Capuchin` as permanent
    regression clips.
 
 Extend the manifest with `expected_terms` and add a `--vocabulary <file>`

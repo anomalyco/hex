@@ -50,7 +50,7 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transc
 │   rescored on the same audio frames from the same decoder state: the term
 │   replaces the span only when its score plus the boost per term piece beats
 │   the heard words'
-├── Left alone: case-only differences, inflections ("Abattoirs"), and addresses
+├── Left alone: case-only differences, inflections ("Cappuccinos"), and addresses
 │   and paths ("opencode.ai"); rescoring also skips terms under 5 letters
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
 └── SenseVoice, Cohere, Apple Speech -> no vocabulary in transcription

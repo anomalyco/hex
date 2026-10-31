@@ -758,9 +758,9 @@ mod tests {
                 "hex",
                 "vocabulary",
                 "add",
-                "abattoir",
+                "cappuccino",
                 "--sounds-like",
-                "avatar,a bat war"
+                "capuchin,cap a chino"
             ]),
             Ok(Some(Command::Control(ControlCli::Vocabulary {
                 command: crate::control::cli::VocabularyCommand::Add {

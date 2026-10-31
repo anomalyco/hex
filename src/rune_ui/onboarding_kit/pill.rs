@@ -16,7 +16,7 @@ pub(crate) const PILL: &str = "hex-mark";
 /// Shared-element id of the download capsule itself, so the centred progress
 /// capsule and the top-bar pill are one shape that moves and widens.
 pub(crate) const CAPSULE: &str = "download-capsule";
-/// Zero-bounce flight spring (`0.42 s / 0.0`, Abattoir motion guide).
+/// Zero-bounce flight spring (`0.42 s / 0.0`).
 pub(crate) const FLY: Spring = Spring::new(0.42, 0.0);
 const HEIGHT: f32 = 30.0;
 

@@ -156,21 +156,21 @@ windows-future = "0.3.2"
 transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
 
 [workspace.lints.rust]
-# abattoir-lints begin
+# shared-lints begin
 unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
-# abattoir-lints end
+# shared-lints end
 # shared: forbid; 346 errors left (t1003). Allowed, not warn: scripts/check runs clippy with -D warnings.
 unsafe_code = "allow"
 
 [workspace.lints.clippy]
-# abattoir-lints begin
+# shared-lints begin
 await_holding_lock = "deny"
 await_holding_refcell_ref = "deny"
 dbg_macro = "deny"
 disallowed_types = "deny"
 todo = "warn"
-# abattoir-lints end
+# shared-lints end
 # shared: deny; 85 errors left (t1003). Allowed, not warn: scripts/check runs clippy with -D warnings.
 disallowed_methods = "allow"
 # shared: deny; 437 errors left (t1003)

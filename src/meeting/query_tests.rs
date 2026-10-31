@@ -676,20 +676,20 @@ fn matched(texts: &[&str], query: &str, vocabulary: &[VocabularyEntry]) -> Vec<u
 #[test]
 fn a_vocabulary_term_finds_its_mis_transcriptions_below_exact_hits() {
     let texts = [
-        "the abattoir guides cover release notes and a long list of other things",
-        "avatar avatar avatar",
+        "the cappuccino guides cover release notes and a long list of other things",
+        "capuchin capuchin capuchin",
         "lunch was great",
-        "abattoir has the skills",
+        "cappuccino has the skills",
     ];
-    let vocabulary = [entry("abattoir", &[])];
-    // Without the vocabulary, `avatar` is too far from `abattoir` to match.
-    assert_eq!(matched(&texts, "abattoir", &[]), [3, 0]);
-    // With it, `avatar` sounds alike, yet ranks after every exact hit even
+    let vocabulary = [entry("cappuccino", &[])];
+    // Without the vocabulary, `capuchin` is too far from `cappuccino` to match.
+    assert_eq!(matched(&texts, "cappuccino", &[]), [3, 0]);
+    // With it, `capuchin` sounds alike, yet ranks after every exact hit even
     // though its repeated word scores higher.
-    assert_eq!(matched(&texts, "abattoirs", &vocabulary), [3, 0, 1]);
+    assert_eq!(matched(&texts, "cappuccinos", &vocabulary), [3, 0, 1]);
     let documents = texts.map(|text| vec![text]);
-    let hits = search_texts(&documents, "abattoir", &vocabulary).unwrap();
-    assert_eq!(hits[2].snippet, "**avatar** **avatar** **avatar**");
+    let hits = search_texts(&documents, "cappuccino", &vocabulary).unwrap();
+    assert_eq!(hits[2].snippet, "**capuchin** **capuchin** **capuchin**");
 }
 
 #[test]
@@ -752,8 +752,8 @@ fn vocabulary_never_pulls_in_common_words() {
 
 #[test]
 fn sound_alikes_need_two_consonant_sounds_and_few_changes() {
-    assert_eq!(sound_key("abattoir"), sound_key("avatar"));
-    assert!(sounds_alike("abattoir", "avatar"));
+    assert_eq!(sound_key("cappuccino"), sound_key("capuchin"));
+    assert!(sounds_alike("cappuccino", "capuchin"));
     assert!(sounds_alike("claud", "cloud"));
     assert!(sounds_alike("scrawl", "scroll"));
     // One consonant sound matches too many words.
@@ -762,9 +762,9 @@ fn sound_alikes_need_two_consonant_sounds_and_few_changes() {
     // The first letter and most letters must agree.
     assert!(!sounds_alike("effect", "affect"));
     assert!(!sounds_alike("parakeet", "pirate"));
-    assert!(!sounds_alike("avatar", "avatar"));
+    assert!(!sounds_alike("capuchin", "capuchin"));
     // Soundex itself is unchanged by the uncapped key.
-    assert_eq!(soundex("abattoir").as_deref(), Some("a136"));
+    assert_eq!(soundex("cappuccino").as_deref(), Some("c125"));
     assert_eq!(soundex("dax").as_deref(), Some("d200"));
     assert_eq!(soundex("moonshine").as_deref(), Some("m525"));
 }

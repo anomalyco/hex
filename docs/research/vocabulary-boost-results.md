@@ -6,12 +6,12 @@ on by default (no experiment) on 2026-10-29. Follows [`custom-vocabulary.md`](cu
 [`vocabulary-real-clips.md`](vocabulary-real-clips.md) and the no-ship
 `spike/parakeet-boost` branch.
 
-**Question:** Can Parakeet write the user's Vocabulary terms ("Abattoir",
+**Question:** Can Parakeet write the user's Vocabulary terms ("Cappuccino",
 "OpenCode", "Scrawl") when it mishears them, without writing them where they
 weren't said?
 
 **Answer:** Yes, at the default strength (Normal, 2.5 nats per piece). With
-"Abattoir" in the list, Hex writes it right **12 of 19** times on Kit's real
+"Cappuccino" in the list, Hex writes it right **12 of 19** times on Kit's real
 clips (was 4), and **13 of 19** when streaming (was 6). Across every listed term,
 recall goes from 136 to 146 of 157. Word error rate is no worse in any group.
 Clips that contain no term are unchanged, and every new term the boost wrote
@@ -47,30 +47,30 @@ decoding, never on the audio thread.
 
 The spike added a bonus to term pieces at each greedy step, behind a margin
 gate. On real speech the gate was either too tight or too loose. Parakeet is
-very sure of "a" at the start of "Abattoir" (log-prob near 0), so a gate that
-protected ordinary speech never let the term start: Abattoir went 0/11 → 1/11
-on the microphone and "Avatar" stayed Avatar. A looser gate fired on ordinary
+very sure of "a" at the start of "Cappuccino" (log-prob near 0), so a gate that
+protected ordinary speech never let the term start: Cappuccino went 0/11 → 1/11
+on the microphone and "Capuchin" stayed Capuchin. A looser gate fired on ordinary
 words and raised streaming WER by 0.9 points. Rescoring sees the whole span
-before it decides. Where Kit said Abattoir and Parakeet wrote "avatar", the
-frames score −0.2 as "avatar" and −9.2 as "Abattoir". Abattoir is 5 pieces, so a
-2.5 boost (12.5 total) covers that gap and the term wins. Elsewhere "avatar"
+before it decides. Where Kit said Cappuccino and Parakeet wrote "capuchin", the
+frames score −0.2 as "capuchin" and −9.2 as "Cappuccino". Cappuccino is 5 pieces, so a
+2.5 boost (12.5 total) covers that gap and the term wins. Elsewhere "capuchin"
 scored −0.1 against −13.7. That gap is wider than the boost, so the word stayed.
 The audio decides, not the spelling.
 
 ### Rejected: internal language model subtraction
 
 Subtracting the predictor's own text prior (ILM, λ = 0.3–0.5) makes rare names
-cheaper. It over-fired: "about" → Abattoir and "right" → Parakeet. The boost
+cheaper. It over-fired: "about" → Cappuccino and "right" → Parakeet. The boost
 stays a plain value per piece.
 
 ## Method
 
 - **rve** (real-voice-expansion): 168 of Kit's real clips: 20 dictations, 78
-  meeting microphone, 70 meeting system audio. 19 contain "Abattoir" and 43
+  meeting microphone, 70 meeting system audio. 19 contain "Cappuccino" and 43
   contain no term.
 - **tc** (transcription-corpus): 274 clips: 51 synthesized term clips, 18
   synthesized look-alikes, 200 ordinary synthesized sentences, 5 private.
-- **Vocabulary:** Hex, Abattoir, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax,
+- **Vocabulary:** Hex, Cappuccino, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax,
   Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind.
 - **Model:** `parakeet-unified-en-0.6b-Q8_0`, Metal, on the MacBook Pro. Each
   clip runs offline and streaming, with and without the list.
@@ -87,18 +87,18 @@ Recall counts listed terms written correctly. WER is term-normalized.
 
 | rve, offline | Off | Normal (2.5) | Strong (4.0)¹ |
 |---|---|---|---|
-| Abattoir | 4/19 | **12/19** | 14/19 |
+| Cappuccino | 4/19 | **12/19** | 14/19 |
 | All terms | 136/157 | **146/157** | 148/157 |
 | WER, all | 5.05 | **4.90** | 4.88 |
 | WER, dictation mic | 3.32 | 3.32 | |
 | WER, meeting mic | 4.85 | 4.60 | |
 | WER, meeting system | 5.63 | 5.59 | |
 | WER, no-term clips | 3.14 | **3.14** | 3.24 |
-| Wrong insertions | — | **0** | 1 ("Avatar") |
+| Wrong insertions | — | **0** | 1 ("Capuchin") |
 
 | rve, streaming | Off | Normal (2.5) |
 |---|---|---|
-| Abattoir | 6/19 | **13/19** |
+| Cappuccino | 6/19 | **13/19** |
 | All terms | 139/157 | **146/157** |
 | WER, all | 6.00 | **5.91** |
 | WER, dictation mic | 0.26 | 0.26 |
@@ -109,7 +109,7 @@ Recall counts listed terms written correctly. WER is term-normalized.
 
 | tc | Offline off | Offline Normal | Streaming off | Streaming Normal |
 |---|---|---|---|---|
-| Abattoir | 2/5 | 4/5 | 2/5 | 4/5 |
+| Cappuccino | 2/5 | 4/5 | 2/5 | 4/5 |
 | All terms | 47/56 | 53/56 | 47/56 | 53/56 |
 | WER, all | 1.82 | 1.69 | 1.65 | 1.54 |
 | WER, no-term clips | 1.63 | 1.63 | 1.61 | 1.61 |
@@ -122,7 +122,7 @@ The scorer counted four "false" insertions on rve and one on tc at Normal. None
 is an error. Two are "Scrawl" where the reference wrote "scroll" but Kit said
 Scrawl. Two ("Kit", "Scrawl") are already there with the boost off. The tc one
 is "Parakeet" in a clip whose rough reference spells it "parake". At 3.0, the
-literal word "Avatar" became Abattoir once. That is why Normal is the default.
+literal word "Capuchin" became Cappuccino once. That is why Normal is the default.
 
 ### Latency
 
@@ -166,7 +166,7 @@ path and branching only inside terms fixes both.
 
 | | Off | Rescoring, Normal | Decoder, Light (2.0) | Decoder, Normal (2.5) | Decoder, Strong (4.0) |
 |---|---|---|---|---|---|
-| rve Abattoir | 4/19 | 12/19 | 11/19 | **14/19** | 18/19 |
+| rve Cappuccino | 4/19 | 12/19 | 11/19 | **14/19** | 18/19 |
 | rve all terms | 136/157 | 146/157 | 148/157 | **151/157** | 155/157 |
 | rve WER, all | 5.05 | 4.90 | 4.87 | **4.80** | 4.80 |
 | rve WER, no-term clips | 3.14 | 3.14 | 3.14 | **3.14** | 3.24 |
@@ -190,6 +190,6 @@ CLI: `hex settings set vocabulary_boost normal`.
 
 - Rescoring cost grows with candidates per clip. If the streaming finish
   matters, score candidates in one batched joint pass instead of one at a time.
-- Remaining misses are mostly "about"/"other" for Abattoir, where the audio
+- Remaining misses are mostly "about"/"other" for Cappuccino, where the audio
   really sounds like the common word. A user's sounds-like spelling ("a bat
   war") fixes those without a stronger boost.

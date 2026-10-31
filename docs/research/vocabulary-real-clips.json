@@ -2595,8 +2595,8 @@
   "qwen": "handy-computer/Qwen3-ASR-1.7B-gguf@0e0a596 Q8_0 sha256 9a0d8179\u2026"
  },
  "hint_prompts": {
-  "qwen-hints17": "Names and technical terms: Hex, Abattoir, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind.",
-  "qwen-hints27": "Names and technical terms: Hex, Abattoir, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind, Psychopomp, dotfiles, Qwen, Claude, Opus, Sonnet, Gemini, skulk, Zen, grill me."
+  "qwen-hints17": "Names and technical terms: Hex, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind.",
+  "qwen-hints27": "Names and technical terms: Hex, OpenCode, Rune, Scrawl, Effect, Anomaly, Dax, Aiden, Kit, Parakeet, Moonshine, GPUI, Sparkle, Argon, Astra, HiveMind, Psychopomp, dotfiles, Qwen, Claude, Opus, Sonnet, Gemini, skulk, Zen, grill me."
  },
  "raw_results_sha256": "81eb7e9f51e18aa9aa28895bb646c1a0bdcbb9b70f01e2ca66b469e745ae343c",
  "notes": "Term recall is case-sensitive for names (Hex, Dax, Rune, Adam, HiveMind with optional space). MacBook Air was added to the reference after inference. production-history is the text Hex pasted (transcribe-cpp 0.2.4 streaming); no replacements or transformations were configured, so it is also the corrections arm. Per-clip transcripts are kept out of git."

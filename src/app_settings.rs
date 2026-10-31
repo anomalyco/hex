@@ -3538,8 +3538,8 @@ mod tests {
         let filled = AppSettings {
             vocabulary: vec![
                 VocabularyEntry {
-                    term: "Abattoir".into(),
-                    sounds_like: vec!["avatar".into(), "a bat war".into()],
+                    term: "Cappuccino".into(),
+                    sounds_like: vec!["capuchin".into(), "cap a chino".into()],
                 },
                 VocabularyEntry {
                     term: "Rune".into(),
@@ -3554,7 +3554,7 @@ mod tests {
         assert_eq!(
             json["vocabulary"],
             serde_json::json!([
-                {"term": "Abattoir", "sounds_like": ["avatar", "a bat war"]},
+                {"term": "Cappuccino", "sounds_like": ["capuchin", "cap a chino"]},
                 {"term": "Rune"},
             ])
         );
