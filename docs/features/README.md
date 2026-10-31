@@ -1401,7 +1401,10 @@ See the [Linux guide](../linux.md), [linux_app.rs](../../src/linux_app.rs),
 The [direct installer/updater](../../src/updater/linux.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
 a published, supported-host-validated signed release. [Nix](../nix.md) owns its
-package updates; Hex updates only managed direct installs.
+package updates; Hex updates only managed direct installs. Its Home Manager
+module merges `programs.hex.settings` into Hex on every activation through
+`hex settings apply` ([control-cli.md](control-cli.md)); `nix/checks.nix`
+evaluates the module, not a live activation.
 
 ```ts
 Linux process                            // maintain.linux-service

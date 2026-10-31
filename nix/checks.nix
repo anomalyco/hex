@@ -104,8 +104,7 @@ in
     assert enabled.systemd.user.services.hex.Service.NotifyAccess == "main";
     assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/hex"
       enabled.systemd.user.services.hex.Service.Environment;
-    assert
-      custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];
+    assert custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];
     assert lib.all (name: custom.systemd.user.services.hex.Unit.${name} == [ "sway-session.target" ]) [
       "After"
       "PartOf"
@@ -113,7 +112,9 @@ in
     assert custom.systemd.user.services.hex.Install.WantedBy == [ "sway-session.target" ];
     assert !(enabled.home.activation ? hexSettings);
     assert !(enabled.systemd.user.services ? hex-model);
-    assert lib.hasInfix "settings apply ${declaredSettings}" declared.home.activation.hexSettings.data;
+    assert lib.hasInfix (builtins.unsafeDiscardStringContext "settings apply ${declaredSettings}") (
+      builtins.unsafeDiscardStringContext declared.home.activation.hexSettings.data
+    );
     assert lib.elem "reloadSystemd" declared.home.activation.hexSettings.after;
     assert declared.systemd.user.services.hex-model.Service.Type == "exec";
     assert declared.systemd.user.services.hex-model.Install.WantedBy == [ "default.target" ];

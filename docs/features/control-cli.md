@@ -40,7 +40,13 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex settings list | get <key|prefix> | set <key> <value>
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
-│   └── Shortcut conflict -> refused, as the window's recorder would
+│   ├── Shortcut conflict -> refused, as the window's recorder would
+│   └── apply <file|-> -> a JSON object of key: value, all or none
+│       ├── Undeclared settings keep their values; dependent keys in any order
+│       ├── transcription.model / .language -> selected, never downloaded
+│       ├── Hex running -> SettingsApply: saved and adopted live, like set
+│       └── Hex stopped -> written to settings.json under the service lock
+│           (Linux); a Hex holding it is waited for (≤ 35 s) instead
 ├── hex model list | use <id> | install [id] | cancel
 │   ├── use -> installed models only; never downloads or repairs; keeps the
 │   │   model's remembered language and hints (--language overrides)
@@ -58,8 +64,8 @@ Agent or terminal                                  // control.cli; every OS
 └── hex logs [--process] [-n N] [-f] -> local tail; works with Hex stopped
 ```
 
-Every command except `start`, `restart`, `logs`, and the read commands talks
-only to the running Hex; none of them launch Hex. Every OS reaches it through
+Every command except `start`, `restart`, `logs`, `settings apply`, and the
+read commands talks only to the running Hex; none of them launch Hex. Every OS reaches it through
 the local API's owner-only discovery file and the bearer-authenticated
 `POST /control` route. Commands dispatch before logging and the instance lock on every OS,
 so they never compete with the running app for its files. Opt-ins stay

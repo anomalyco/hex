@@ -8,11 +8,13 @@ let
   cfg = config.programs.hex;
   json = pkgs.formats.json { };
   supportDir = "${config.xdg.dataHome}/hex";
-  settings = lib.filterAttrs (_: value: value != null) {
-    dictation_hotkey = cfg.shortcut;
-    "transcription.model" = cfg.model;
-    "transcription.language" = cfg.language;
-  } // cfg.settings;
+  settings =
+    lib.filterAttrs (_: value: value != null) {
+      dictation_hotkey = cfg.shortcut;
+      "transcription.model" = cfg.model;
+      "transcription.language" = cfg.language;
+    }
+    // cfg.settings;
   # User managers have no network-online.target of their own, so this asks
   # the system's, then tries anyway; failed downloads retry.
   installModel = pkgs.writeShellApplication {
