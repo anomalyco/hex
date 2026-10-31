@@ -15,12 +15,12 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
-use crate::linux_clipboard::{Selection, Snapshot};
-use crate::linux_input::{
+use crate::linux::clipboard::{Selection, Snapshot};
+use crate::linux::input::{
     KEY_PRESS, KEY_RELEASE, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
 };
-use crate::linux_remote_desktop::RemoteDesktop;
-use crate::linux_session::LinuxSession;
+use crate::linux::remote_desktop::RemoteDesktop;
+use crate::linux::session::LinuxSession;
 
 const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
@@ -178,7 +178,7 @@ fn copied_only(
     };
     eyre!(
         "Copied to the clipboard; press {shortcut} to paste. Automatic paste needs the desktop's RemoteDesktop portal ({}), or wtype with a compositor offering the virtual keyboard protocol: {error:#}",
-        crate::linux_remote_desktop::INTERFACE
+        crate::linux::remote_desktop::INTERFACE
     )
 }
 

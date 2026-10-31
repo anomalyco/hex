@@ -25,9 +25,11 @@ use crate::desktop_host::{
     DesktopTranscriptionSnapshot,
 };
 use crate::events::EventReader;
-use crate::linux_dictation::ListenerUpdate;
-use crate::linux_input::{LinuxHotkey, ListenerCommand, ShortcutCommand};
-use crate::linux_service::{self, Activation, Control, Published, ShortcutRoute, Status};
+use crate::linux::dictation::ListenerUpdate;
+use crate::linux::input::{LinuxHotkey, ListenerCommand, ShortcutCommand};
+use crate::linux::service::{
+    self as linux_service, Activation, Control, Published, ShortcutRoute, Status,
+};
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
 /// How often the host asks X11 for the active keyboard group.
@@ -77,11 +79,11 @@ struct Listener {
     stop: Arc<AtomicBool>,
     worker: JoinHandle<ListenerResult>,
     startup: ListenerStartup,
-    hotkey_status: crate::linux_input::HotkeyStatus,
+    hotkey_status: crate::linux::input::HotkeyStatus,
     /// `hex` commands for the listener's shortcut state machine.
     commands: mpsc::SyncSender<ListenerCommand>,
     /// Settings, models, and shortcut suspension the listener applies in place.
-    updates: mpsc::Sender<crate::linux_dictation::ListenerUpdate>,
+    updates: mpsc::Sender<crate::linux::dictation::ListenerUpdate>,
 }
 
 enum ListenerStartup {
@@ -95,7 +97,7 @@ impl Listener {
     }
 
     /// A listener that already stopped has nothing to apply.
-    fn update(&self, update: crate::linux_dictation::ListenerUpdate) {
+    fn update(&self, update: crate::linux::dictation::ListenerUpdate) {
         let _ = self.updates.send(update);
     }
 
@@ -132,7 +134,7 @@ struct LinuxDesktopHost {
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     updater: crate::updater::Updater,
-    output: crate::linux_dictation::DictationOutput,
+    output: crate::linux::dictation::DictationOutput,
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
@@ -287,7 +289,7 @@ impl HostHandle {
     }
 
     fn status(&self, snapshot: HostSnapshot, session: linux_service::Session) -> Status {
-        let hud_limitation = crate::linux_rune_hud::limitation();
+        let hud_limitation = crate::linux::rune_hud::limitation();
         let mut desktop = snapshot.desktop;
         // A running listener also reports the missing HUD as its warning.
         if desktop.listener.running && desktop.listener.warning.is_none() {
@@ -316,16 +318,16 @@ pub(crate) fn run(
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
     // Installs before #579 named the entries hex.desktop.
-    if let Err(error) = crate::linux_icons::install() {
+    if let Err(error) = crate::linux::icons::install() {
         tracing::warn!(%error, "could not install Hex's icon");
     }
-    if let Err(error) = crate::linux_portal::tidy_desktop_entries() {
+    if let Err(error) = crate::linux::portal::tidy_desktop_entries() {
         tracing::warn!(%error, "could not move Hex's desktop entry");
     }
-    if let Err(error) = crate::linux_portal::forget_legacy_gnome_shortcuts() {
+    if let Err(error) = crate::linux::portal::forget_legacy_gnome_shortcuts() {
         tracing::warn!(%error, "could not remove Hex's old GNOME shortcuts");
     }
-    if let Err(error) = crate::linux_login_item::tidy() {
+    if let Err(error) = crate::linux::login_item::tidy() {
         tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
     crate::labs::log_launch();
@@ -337,7 +339,7 @@ pub(crate) fn run(
             Some(format!("Could not load settings: {error:#}")),
         ),
     };
-    crate::linux_dictation::initialize_feedback(&settings);
+    crate::linux::dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
@@ -366,8 +368,9 @@ pub(crate) fn run(
         }),
     );
     server.serve(published.clone(), control.clone());
-    let tray = crate::linux_tray::start(host.clone(), published.clone(), control.clone(), shutdown)
-        .map(Arc::new);
+    let tray =
+        crate::linux::tray::start(host.clone(), published.clone(), control.clone(), shutdown)
+            .map(Arc::new);
     linux_service::notify("READY=1");
     tracing::info!(pid = std::process::id(), "Hex instance ready");
 
@@ -437,9 +440,9 @@ fn run_host(
         if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
             tray_meetings = meetings;
             if let Some(tray) = tray {
-                let view = crate::linux_tray::view(&snapshot);
+                let view = crate::linux::tray::view(&snapshot);
                 if tray_view.as_ref() != Some(&view) {
-                    crate::linux_tray::show(tray, &view);
+                    crate::linux::tray::show(tray, &view);
                     tray_view = Some(view);
                 }
             }
@@ -517,7 +520,7 @@ impl LinuxDesktopHost {
                 .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
                 .ok()
         };
-        let output = crate::linux_dictation::DictationOutput::from_settings(&settings, history);
+        let output = crate::linux::dictation::DictationOutput::from_settings(&settings, history);
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
         let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
@@ -621,13 +624,13 @@ impl LinuxDesktopHost {
         let output = self.output.clone();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
-        let hotkey_status = crate::linux_input::HotkeyStatus::default();
+        let hotkey_status = crate::linux::input::HotkeyStatus::default();
         let worker_hotkey_status = hotkey_status.clone();
         let (commands, command_receiver) = mpsc::sync_channel(16);
         let (updates, update_receiver) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
-                crate::linux_dictation::run(
+                crate::linux::dictation::run(
                     &event_path,
                     None,
                     &worker_stop,
@@ -899,12 +902,12 @@ impl LinuxDesktopHost {
             let canceled = edit.canceled.clone();
             edit.worker = Some(std::thread::spawn(move || {
                 binding.validate()?;
-                if crate::linux_session::LinuxSession::detect().is_wayland() {
+                if crate::linux::session::LinuxSession::detect().is_wayland() {
                     // The listener asks the desktop again and reports what it granted.
                     binding.portal_trigger()?;
                 } else {
                     // Fail before saving when another X11 client holds the chord.
-                    crate::linux_input::LinuxHotkeyMonitor::start(
+                    crate::linux::input::LinuxHotkeyMonitor::start(
                         binding.clone(),
                         Default::default(),
                         Default::default(),
@@ -1265,9 +1268,9 @@ impl crate::control::host::Host for LinuxControl {
     fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
         let format = |error: color_eyre::Report| format!("{error:#}");
         Some(match enabled {
-            None => crate::linux_login_item::is_enabled().map_err(format),
-            Some(enabled) => crate::linux_login_item::set_enabled(enabled)
-                .and_then(|()| crate::linux_login_item::is_enabled())
+            None => crate::linux::login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::linux::login_item::set_enabled(enabled)
+                .and_then(|()| crate::linux::login_item::is_enabled())
                 .map_err(format),
         })
     }
@@ -1536,7 +1539,7 @@ mod tests {
         assert_eq!(listener.status, "Enabled");
         assert_eq!(
             listener.warning.as_deref(),
-            Some(crate::linux_input::ESCAPE_CANCEL_WARNING),
+            Some(crate::linux::input::ESCAPE_CANCEL_WARNING),
         );
         assert!(received.operation_error.is_none());
 
@@ -1808,12 +1811,15 @@ mod tests {
         assert!(host.shortcut_route().is_none());
         host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
         let route = host.shortcut_route().unwrap();
-        linux_service::route_shortcut(Some(&route), crate::linux_input::ShortcutCommand::PasteLast)
-            .unwrap();
+        linux_service::route_shortcut(
+            Some(&route),
+            crate::linux::input::ShortcutCommand::PasteLast,
+        )
+        .unwrap();
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
             [ListenerCommand::from(
-                crate::linux_input::ShortcutCommand::PasteLast
+                crate::linux::input::ShortcutCommand::PasteLast
             )]
         );
     }

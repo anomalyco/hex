@@ -137,9 +137,9 @@ pub(crate) fn limitation() -> Option<String> {
         .is_some_and(|hud| hud.availability() == Availability::Unavailable);
     let unavailable = rune_refused
         || *NO_OVERLAY.get_or_init(|| {
-            let no_layer_shell = crate::linux_session::LinuxSession::detect().is_wayland()
+            let no_layer_shell = crate::linux::session::LinuxSession::detect().is_wayland()
                 && wayland_reachable()
-                && !crate::linux_paste::wayland_offers(LAYER_SHELL);
+                && !crate::linux::paste::wayland_offers(LAYER_SHELL);
             if no_layer_shell && xwayland() {
                 tracing::info!("HUD shows on XWayland: compositor has no layer-shell");
             }

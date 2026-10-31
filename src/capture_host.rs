@@ -104,7 +104,7 @@ pub use sink::{CaptureAudio, CaptureSinkClosed};
 pub struct Environment;
 
 #[cfg(target_os = "linux")]
-type Quiet = crate::linux_audio_control::AudioSuppressor;
+type Quiet = crate::linux::audio_control::AudioSuppressor;
 
 #[cfg(target_os = "linux")]
 impl Environment {
@@ -3196,16 +3196,16 @@ fn summary(bundle: &Path) -> anyhow::Result<String> {
 /// for as long as it lives, so a copied capture stays pasteable.
 #[cfg(target_os = "linux")]
 fn with_linux_paster(
-    use_it: impl FnOnce(&mut crate::linux_paste::LinuxPaster) -> Result<()>,
+    use_it: impl FnOnce(&mut crate::linux::paste::LinuxPaster) -> Result<()>,
 ) -> anyhow::Result<()> {
-    static PASTER: Mutex<Option<crate::linux_paste::LinuxPaster>> = Mutex::new(None);
+    static PASTER: Mutex<Option<crate::linux::paste::LinuxPaster>> = Mutex::new(None);
     let mut paster = PASTER.lock().unwrap_or_else(|error| error.into_inner());
     if paster.is_none() {
         let shift = crate::app_settings::AppSettings::load()
             .map(|settings| settings.paste_with_shift)
             .unwrap_or(false);
         *paster = Some(
-            crate::linux_paste::LinuxPaster::new(
+            crate::linux::paste::LinuxPaster::new(
                 Arc::default(),
                 Arc::new(AtomicBool::new(shift)),
                 Default::default(),

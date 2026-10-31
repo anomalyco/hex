@@ -14,11 +14,11 @@ use crate::control::{PrintReply, PrintedTranscript};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
-use crate::linux_input::{
+use crate::linux::input::{
     CommandQueue, HotkeyEvent, HotkeyOptions, HotkeyStatus, LinuxHotkey, LinuxHotkeyMonitor,
 };
-use crate::linux_paste::LinuxPaster;
-use crate::linux_rune_hud::LinuxIndicator;
+use crate::linux::paste::LinuxPaster;
+use crate::linux::rune_hud::LinuxIndicator;
 use crate::local_transcriber::LocalTranscriber;
 use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
 
@@ -154,7 +154,7 @@ impl DictationOutput {
         inference_ms: u64,
         started: Instant,
     ) -> Result<String> {
-        let context = crate::linux_context::capture();
+        let context = crate::linux::context::capture();
         let processed = if raw {
             crate::dictation_processor::Processed::unchanged(raw_text.trim())
         } else {
@@ -238,7 +238,7 @@ pub(crate) fn run(
     let mut shortcuts_suspended = false;
     let mut indicator = LinuxIndicator::new(settings.indicator_position);
     let mut suppressor =
-        crate::linux_audio_control::AudioSuppressor::dictation(settings.recording_audio_behavior);
+        crate::linux::audio_control::AudioSuppressor::dictation(settings.recording_audio_behavior);
     let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
@@ -413,7 +413,7 @@ pub(crate) fn run(
                     indicator = LinuxIndicator::new(next.indicator_position);
                 }
                 if next.recording_audio_behavior != settings.recording_audio_behavior {
-                    suppressor = crate::linux_audio_control::AudioSuppressor::dictation(
+                    suppressor = crate::linux::audio_control::AudioSuppressor::dictation(
                         next.recording_audio_behavior,
                     );
                 }

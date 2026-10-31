@@ -33,7 +33,7 @@ if [[ "${1:-}" == --inside ]]; then
     sleep 0.05
   done
   test -f "$HEX_WAYLAND_PASTE_OUTPUT.ready"
-  "$HEX_WAYLAND_TEST_BINARY" --exact linux_paste::tests::native_wayland_clipboard_shortcut \
+  "$HEX_WAYLAND_TEST_BINARY" --exact linux::paste::tests::native_wayland_clipboard_shortcut \
     --ignored --nocapture --test-threads=1
   kill "$target"
   wait "$target" 2>/dev/null || true
@@ -85,7 +85,7 @@ if [[ "${1:-}" == --inside ]]; then
     sleep 0.05
   done
   test -f "$HEX_WAYLAND_PASTE_OUTPUT.ready"
-  "$HEX_WAYLAND_TEST_BINARY" --exact linux_paste::tests::native_wayland_clipboard_shortcut \
+  "$HEX_WAYLAND_TEST_BINARY" --exact linux::paste::tests::native_wayland_clipboard_shortcut \
     --ignored --nocapture --test-threads=1
   kill -0 "$service"
   kill "$target"

@@ -19,7 +19,7 @@ use x11rb::rust_connection::RustConnection;
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
 use crate::desktop_host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts};
-use crate::linux_session::LinuxSession;
+use crate::linux::session::LinuxSession;
 
 /// Temporary pointer grab while Settings records a shortcut. Keyboard input
 /// stays with Rune; Escape, focus loss, saving and closing all drop the grab.
@@ -586,7 +586,7 @@ impl ShortcutKeys {
 /// else the one Hex asked for.
 fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool {
     match granted.map(str::trim).filter(|trigger| !trigger.is_empty()) {
-        Some(trigger) => crate::linux_portal::readable_trigger(trigger).contains('+'),
+        Some(trigger) => crate::linux::portal::readable_trigger(trigger).contains('+'),
         None => requested.control || requested.alt || requested.shift || requested.super_key,
     }
 }
@@ -623,19 +623,19 @@ fn project_grants(
     desktop_assigns: bool,
 ) -> Vec<DesktopGrantedShortcut> {
     let cancel = granted
-        .get(crate::linux_portal::CANCEL_ID)
+        .get(crate::linux::portal::CANCEL_ID)
         .and_then(Option::as_deref)
         .map(|trigger| DesktopGrantedShortcut {
-            name: crate::linux_portal::CANCEL_DESCRIPTION.into(),
-            trigger: Some(crate::linux_portal::readable_trigger(trigger)),
+            name: crate::linux::portal::CANCEL_DESCRIPTION.into(),
+            trigger: Some(crate::linux::portal::readable_trigger(trigger)),
             unconfirmed: false,
         });
     requested
         .iter()
         .flatten()
         .map(|(shortcut, _)| {
-            let trigger =
-                granted_trigger(granted, ids, *shortcut).map(crate::linux_portal::readable_trigger);
+            let trigger = granted_trigger(granted, ids, *shortcut)
+                .map(crate::linux::portal::readable_trigger);
             DesktopGrantedShortcut {
                 name: shortcut.portal_id().1.into(),
                 unconfirmed: desktop_assigns && trigger.is_none(),
@@ -1071,7 +1071,7 @@ impl Backend {
         binding: LinuxHotkey,
         options: HotkeyOptions,
     ) -> Result<()> {
-        match crate::linux_portal::Portal::connect(&self.stop)? {
+        match crate::linux::portal::Portal::connect(&self.stop)? {
             Some(portal) => self.run_portal(portal, dispatcher, binding, options),
             None => {
                 tracing::info!("no GlobalShortcuts portal; dictation follows the hex commands");
@@ -1095,7 +1095,7 @@ impl Backend {
 
     fn run_portal(
         self,
-        mut portal: crate::linux_portal::Portal,
+        mut portal: crate::linux::portal::Portal,
         mut dispatcher: Dispatcher,
         binding: LinuxHotkey,
         options: HotkeyOptions,
@@ -1124,7 +1124,7 @@ impl Backend {
             let trigger = key.portal_trigger()?;
             let id = portal_shortcut_id(base, &trigger);
             ids[shortcut.index()] = Some(id.clone());
-            shortcuts.push(crate::linux_portal::Shortcut {
+            shortcuts.push(crate::linux::portal::Shortcut {
                 id,
                 description,
                 trigger: Some(trigger),
@@ -1132,7 +1132,7 @@ impl Backend {
         }
         // Every shortcut, cancel included, goes in this one bind: a second
         // bind would replace the set on KDE.
-        shortcuts.push(crate::linux_portal::Shortcut::cancel());
+        shortcuts.push(crate::linux::portal::Shortcut::cancel());
         if let Err(error) = portal.forget_legacy_kde_shortcuts() {
             tracing::warn!(
                 error = format!("{error:#}"),
@@ -1140,7 +1140,7 @@ impl Backend {
             );
         }
         let granted = portal.bind(&shortcuts, &self.stop)?;
-        let desktop_assigns = crate::linux_portal::desktop_assigns_triggers();
+        let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             project_grants(granted, &requested, &ids, desktop_assigns)
         };
@@ -1170,7 +1170,7 @@ impl Backend {
                 }
                 // Hex suggests no key for Cancel dictation, so one the
                 // desktop kept takes that key from every app.
-                Some(trigger) if shortcut.name == crate::linux_portal::CANCEL_DESCRIPTION => {
+                Some(trigger) if shortcut.name == crate::linux::portal::CANCEL_DESCRIPTION => {
                     tracing::warn!(%trigger, "the desktop gave Cancel dictation a key");
                 }
                 Some(_) => {}
@@ -1189,12 +1189,12 @@ impl Backend {
         while !self.stopping() {
             for event in portal.events() {
                 let input = match event {
-                    crate::linux_portal::Event::Pressed(id)
-                        if id == crate::linux_portal::CANCEL_ID =>
+                    crate::linux::portal::Event::Pressed(id)
+                        if id == crate::linux::portal::CANCEL_ID =>
                     {
                         Input::Escape
                     }
-                    crate::linux_portal::Event::Pressed(id) => match shortcut_for(&id) {
+                    crate::linux::portal::Event::Pressed(id) => match shortcut_for(&id) {
                         Some(shortcut) => {
                             if with_modifiers[shortcut.index()] {
                                 dispatcher.keys.pressed(shortcut);
@@ -1203,7 +1203,7 @@ impl Backend {
                         }
                         None => continue,
                     },
-                    crate::linux_portal::Event::Released(id) => match shortcut_for(&id) {
+                    crate::linux::portal::Event::Released(id) => match shortcut_for(&id) {
                         Some(shortcut) => {
                             if with_modifiers[shortcut.index()] {
                                 dispatcher.keys.released(shortcut);
@@ -1212,13 +1212,13 @@ impl Backend {
                         }
                         None => continue,
                     },
-                    crate::linux_portal::Event::Changed(changed) => {
+                    crate::linux::portal::Event::Changed(changed) => {
                         with_modifiers = modifiers(&changed);
                         self.status
                             .set_shortcuts(DesktopShortcuts::Portal(project(&changed)));
                         continue;
                     }
-                    crate::linux_portal::Event::Closed => {
+                    crate::linux::portal::Event::Closed => {
                         dispatcher.keys.released_all();
                         dispatcher.input(Input::Lost);
                         let _ = dispatcher.flush();
@@ -1826,7 +1826,7 @@ mod tests {
                 "dictation-ALT-space".to_string(),
                 Some("Alt+Space".to_string()),
             ),
-            (crate::linux_portal::CANCEL_ID.to_string(), None),
+            (crate::linux::portal::CANCEL_ID.to_string(), None),
         ]);
         let names = |grants: Vec<DesktopGrantedShortcut>| {
             grants
@@ -1839,7 +1839,7 @@ mod tests {
             [("Dictation".to_string(), Some("Alt+Space".to_string()))]
         );
         granted.insert(
-            crate::linux_portal::CANCEL_ID.to_string(),
+            crate::linux::portal::CANCEL_ID.to_string(),
             Some("Esc".to_string()),
         );
         assert_eq!(
@@ -1862,7 +1862,7 @@ mod tests {
         ids[Shortcut::Dictation.index()] = Some("dictation-ALT-space".into());
         let granted = std::collections::HashMap::from([
             ("dictation-ALT-space".to_string(), None),
-            (crate::linux_portal::CANCEL_ID.to_string(), None),
+            (crate::linux::portal::CANCEL_ID.to_string(), None),
         ]);
         let unconfirmed = |desktop_assigns| {
             project_grants(&granted, &requested, &ids, desktop_assigns)

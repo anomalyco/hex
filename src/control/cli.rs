@@ -371,7 +371,7 @@ pub fn run(command: ControlCli) -> u8 {
                 return start(output);
             }
             #[cfg(target_os = "linux")]
-            if let Err(error) = crate::linux_service::prepare_restart() {
+            if let Err(error) = crate::linux::service::prepare_restart() {
                 return print(ControlReply::error("failed", format!("{error:#}")), output);
             }
             #[cfg(target_os = "macos")]
@@ -744,7 +744,7 @@ pub fn capture(command: CaptureCommand) -> u8 {
         CaptureCommand::Undo { output } => (C::ScrawlCaptureUndo, output),
         #[cfg(target_os = "linux")]
         CaptureCommand::Draw { output } => {
-            return print(crate::linux_service::capture_draw(), output);
+            return print(crate::linux::service::capture_draw(), output);
         }
     };
     #[cfg(not(hex_capture))]
@@ -767,12 +767,12 @@ pub fn capture(command: CaptureCommand) -> u8 {
                 capture,
                 to,
                 always,
-            } => Ok(crate::linux_service::capture_send(capture, to, always)),
-            C::ScrawlCaptureUndo => Ok(crate::linux_service::capture_undo()),
+            } => Ok(crate::linux::service::capture_send(capture, to, always)),
+            C::ScrawlCaptureUndo => Ok(crate::linux::service::capture_undo()),
             C::ScrawlCaptureRoute { capture, ask_jev } => {
                 crate::capture_host::explain_capture(&capture, ask_jev)
             }
-            C::ScrawlCapture { action } => Ok(crate::linux_service::capture(action)),
+            C::ScrawlCapture { action } => Ok(crate::linux::service::capture(action)),
             _ => unreachable!("only capture commands"),
         };
         print(reply.unwrap_or_else(ControlReply::from), output)
@@ -1008,7 +1008,7 @@ fn reopen_after_restart() -> ControlReply {
     use std::time::{Duration, Instant};
 
     #[cfg(target_os = "linux")]
-    if crate::linux_service::supervised() {
+    if crate::linux::service::supervised() {
         return ControlReply::done("Restarting Hex");
     }
     let started = Instant::now();

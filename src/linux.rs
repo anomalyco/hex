@@ -1,3 +1,24 @@
+pub(crate) mod app;
+pub(crate) mod atspi;
+pub(crate) mod audio_control;
+pub(crate) mod clipboard;
+pub(crate) mod context;
+pub(crate) mod dictation;
+pub(crate) mod icons;
+// Keep `linux_input::tests` in the test path for check-linux.yml's Xvfb filter.
+#[path = "linux/input.rs"]
+pub(crate) mod linux_input;
+pub(crate) use linux_input as input;
+pub(crate) mod input_route;
+pub(crate) mod login_item;
+pub(crate) mod paste;
+pub(crate) mod portal;
+pub(crate) mod remote_desktop;
+pub(crate) mod rune_hud;
+pub(crate) mod service;
+pub(crate) mod session;
+pub(crate) mod tray;
+
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -5,7 +26,7 @@ use clap::{Parser, Subcommand};
 use color_eyre::Result;
 
 use crate::control::cli::ControlCli;
-use crate::linux_service::{Activation, Launch};
+use crate::linux::service::{Activation, Launch};
 
 #[derive(Parser)]
 #[command(
@@ -58,8 +79,8 @@ enum Command {
 }
 
 pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
-    let activation = crate::linux_service::Activation::take_from_environment();
-    crate::linux_service::refresh_x_authority();
+    let activation = crate::linux::service::Activation::take_from_environment();
+    crate::linux::service::refresh_x_authority();
     color_eyre::install()?;
     let command = Cli::parse().command.unwrap_or(Command::App {
         hidden: false,
@@ -89,9 +110,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             crate::local_api::run_service(&log_dir, event_path, true, shutdown)
         }
         Command::Service { embedded: false } => {
-            match crate::linux_app::run(event_path, shutdown, None) {
+            match crate::linux::app::run(event_path, shutdown, None) {
                 // A unit start that lost the race to another launch has nothing to do.
-                Err(_) if crate::linux_service::another_instance_answers() => Ok(()),
+                Err(_) if crate::linux::service::another_instance_answers() => Ok(()),
                 result => result,
             }
         }
@@ -99,13 +120,13 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
             let _instance = crate::instance::acquire("listener")?;
             crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
-            crate::linux_dictation::initialize_feedback(&settings);
-            crate::linux_dictation::run(
+            crate::linux::dictation::initialize_feedback(&settings);
+            crate::linux::dictation::run(
                 &event_path,
                 device.as_deref(),
                 shutdown,
                 &settings,
-                crate::linux_dictation::DictationOutput::from_settings(
+                crate::linux::dictation::DictationOutput::from_settings(
                     &settings,
                     crate::history::History::open_default(settings.history_retention).ok(),
                 ),
@@ -134,17 +155,17 @@ fn launch(
     shutdown: &'static AtomicBool,
 ) -> Result<()> {
     loop {
-        match crate::linux_service::launch(activation, show)? {
+        match crate::linux::service::launch(activation, show)? {
             Launch::Forwarded => return Ok(()),
             Launch::BecomeInstance => {}
         }
-        match crate::linux_app::run(
+        match crate::linux::app::run(
             event_path.clone(),
             shutdown,
             show.then(|| activation.clone()),
         ) {
             // Another launch claimed the data root first; forward to it.
-            Err(_) if crate::linux_service::another_instance_answers() => continue,
+            Err(_) if crate::linux::service::another_instance_answers() => continue,
             result => return result,
         }
     }

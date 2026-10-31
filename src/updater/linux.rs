@@ -172,7 +172,7 @@ pub fn restart_into(staged: &Staged) -> Result<()> {
     if !staged.0.is_file() {
         bail!("the prepared Hex update is no longer installed");
     }
-    crate::linux_service::schedule_restart()
+    crate::linux::service::schedule_restart()
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {
