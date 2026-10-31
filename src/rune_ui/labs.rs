@@ -323,8 +323,11 @@ struct Feature {
     pane: Option<Pane>,
     /// The feature's own switch, off by default, for one with side effects
     /// and no pane of its own: whether it is on, and what flips it.
-    switch: Option<(bool, fn(&mut Ui))>,
+    switch: Option<FeatureSwitch>,
 }
+
+/// Whether a feature's own switch is on, and what flips it.
+type FeatureSwitch = (bool, fn(&mut Ui));
 
 fn features(ui: &Ui) -> Vec<Feature> {
     let caps = ui.platform.caps;
