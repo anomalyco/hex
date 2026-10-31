@@ -85,7 +85,7 @@ mod platform {
 mod platform {
     use std::time::Duration;
 
-    use zbus::zvariant::OwnedFd;
+    use zbus::OwnedFd;
 
     const TIMEOUT: Duration = Duration::from_millis(500);
 

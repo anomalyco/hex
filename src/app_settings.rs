@@ -2427,7 +2427,6 @@ pub fn transcription_selection() -> (u64, TranscriptionSelection) {
     (state.revision, state.selection.clone())
 }
 
-#[cfg(target_os = "macos")]
 pub fn recording_duck_volume() -> f32 {
     f32::from_bits(RECORDING_DUCK_VOLUME.load(Ordering::Relaxed))
 }
