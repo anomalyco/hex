@@ -83,7 +83,7 @@ private struct GlobeKeyRepresentable: UIViewRepresentable {
             systemName: "globe",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         )
-        config.baseForegroundColor = UIColor(white: 0.90, alpha: 1)
+        config.baseForegroundColor = .label
         button.configuration = config
         button.accessibilityLabel = "Next keyboard"
         if let controller {
@@ -107,15 +107,15 @@ private struct RepeatDeleteKey: View {
     var body: some View {
         Image(systemName: "delete.left")
             .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(HexTheme.textBase)
+            .foregroundStyle(KeyboardPalette.text)
             .frame(width: 52, height: 40)
             .background(
-                isPressing ? HexTheme.layer02 : HexTheme.layer01,
+                isPressing ? KeyboardPalette.keyPressed : KeyboardPalette.key,
                 in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
-                    .stroke(HexTheme.borderWeak, lineWidth: 1)
+                    .stroke(KeyboardPalette.keyEdge, lineWidth: 0.5)
             )
             .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             .gesture(
@@ -156,6 +156,33 @@ extension View {
     }
 }
 
+/// Colours for controls drawn on the system keyboard backdrop. They follow the
+/// keyboard's light or dark appearance; the backdrop itself is the system's.
+enum KeyboardPalette {
+    static let text = Color(uiColor: .label)
+    static let textMuted = Color(uiColor: .secondaryLabel)
+
+    static let key = dynamic(light: UIColor(white: 1, alpha: 0.82), dark: UIColor(white: 1, alpha: 0.17))
+    static let keyPressed = dynamic(light: UIColor(white: 0.70, alpha: 0.62), dark: UIColor(white: 1, alpha: 0.32))
+    static let keyEdge = dynamic(light: UIColor(white: 0, alpha: 0.07), dark: UIColor(white: 1, alpha: 0.05))
+    static let chip = dynamic(light: UIColor(white: 0, alpha: 0.06), dark: UIColor(white: 1, alpha: 0.11))
+    static let chipActive = dynamic(light: UIColor(white: 1, alpha: 0.9), dark: UIColor(white: 1, alpha: 0.24))
+
+    /// The Dot Scope draws light dots, so its well stays dark in both appearances.
+    static let stage = dynamic(
+        light: UIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 0.9),
+        dark: UIColor(white: 0, alpha: 0.32)
+    )
+    static let stageEdge = dynamic(light: UIColor(white: 0, alpha: 0.08), dark: UIColor(white: 1, alpha: 0.08))
+
+    static let contrast = Color(uiColor: .label)
+    static let textContrast = Color(uiColor: .systemBackground)
+
+    private static func dynamic(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
+}
+
 enum KeyboardSetupCopy {
     static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
 }
@@ -178,12 +205,10 @@ struct KeyboardSurfaceView: View {
             primaryStage
             utilityRow
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(HexTheme.bgDeep)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Top Bar (26 pt)
@@ -201,10 +226,10 @@ struct KeyboardSurfaceView: View {
                     } label: {
                         Text(candidate.label)
                             .font(.system(size: 12, weight: active ? .semibold : .medium))
-                            .foregroundStyle(active ? HexTheme.textBase : HexTheme.textMuted)
+                            .foregroundStyle(active ? KeyboardPalette.text : KeyboardPalette.textMuted)
                             .padding(.horizontal, 10)
                             .frame(height: 26)
-                            .background(active ? HexTheme.layer02 : HexTheme.layer01, in: Capsule())
+                            .background(active ? KeyboardPalette.chipActive : KeyboardPalette.chip, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
@@ -247,7 +272,7 @@ struct KeyboardSurfaceView: View {
                 HexStatusDot(color: HexTheme.warmMic, size: 6)
                 Text(KeyboardSetupCopy.fullAccessPath)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(HexTheme.textMuted)
+                    .foregroundStyle(KeyboardPalette.textMuted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -261,7 +286,7 @@ struct KeyboardSurfaceView: View {
                     Text(HexTheme.formatClock(model.snapshot.recordingElapsed(at: model.now)))
                         .font(.system(size: 12, weight: .semibold))
                         .monospacedDigit()
-                        .foregroundStyle(HexTheme.textBase)
+                        .foregroundStyle(KeyboardPalette.text)
                 }
             case .transcribing:
                 EmptyView()
@@ -271,7 +296,7 @@ struct KeyboardSurfaceView: View {
                         HexStatusDot(color: HexTheme.danger, size: 6)
                         Text(message)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(HexTheme.textMuted)
+                            .foregroundStyle(KeyboardPalette.textMuted)
                             .lineLimit(1)
                     }
                 }
@@ -279,7 +304,7 @@ struct KeyboardSurfaceView: View {
                 if let message = model.snapshot.message, !message.isEmpty {
                     Text(message)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
+                        .foregroundStyle(KeyboardPalette.textMuted)
                         .lineLimit(1)
                 } else {
                     HStack(spacing: 5) {
@@ -287,7 +312,7 @@ struct KeyboardSurfaceView: View {
                         Text(HexTheme.formatRemaining(model.snapshot.expiresAt - model.now))
                             .font(.system(size: 12, weight: .medium))
                             .monospacedDigit()
-                            .foregroundStyle(HexTheme.textMuted)
+                            .foregroundStyle(KeyboardPalette.textMuted)
                     }
                 }
             }
@@ -301,11 +326,10 @@ struct KeyboardSurfaceView: View {
                     Text(model.selectedReturnApp?.name ?? "Swipe")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .foregroundStyle(HexTheme.textMuted)
+                .foregroundStyle(KeyboardPalette.textMuted)
                 .padding(.horizontal, 9)
                 .frame(height: 26)
-                .background(HexTheme.layer01, in: Capsule())
-                .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
+                .background(KeyboardPalette.chip, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Return app")
@@ -321,13 +345,12 @@ struct KeyboardSurfaceView: View {
                     .font(.system(size: 12, weight: .medium))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(HexTheme.textMuted)
+                    .foregroundStyle(KeyboardPalette.textMuted)
             }
-            .foregroundStyle(HexTheme.textBase)
+            .foregroundStyle(KeyboardPalette.text)
             .padding(.horizontal, 10)
             .frame(height: 26)
-            .background(HexTheme.layer01, in: Capsule())
-            .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
+            .background(KeyboardPalette.chip, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Style: \(model.style.label)")
@@ -341,10 +364,10 @@ struct KeyboardSurfaceView: View {
         } label: {
             Text(label)
                 .font(.system(size: 12, weight: active ? .semibold : .medium))
-                .foregroundStyle(active ? HexTheme.textBase : HexTheme.textMuted)
+                .foregroundStyle(active ? KeyboardPalette.text : KeyboardPalette.textMuted)
                 .padding(.horizontal, 10)
                 .frame(height: 26)
-                .background(active ? HexTheme.layer02 : HexTheme.layer01, in: Capsule())
+                .background(active ? KeyboardPalette.chipActive : KeyboardPalette.chip, in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -355,9 +378,9 @@ struct KeyboardSurfaceView: View {
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(HexTheme.textMuted)
+                .foregroundStyle(KeyboardPalette.textMuted)
                 .frame(width: 26, height: 26)
-                .background(HexTheme.layer01, in: Circle())
+                .background(KeyboardPalette.chip, in: Circle())
         }
         .buttonStyle(.plain)
     }
@@ -370,12 +393,19 @@ struct KeyboardSurfaceView: View {
 
         return ZStack {
             Capsule()
-                .fill(HexTheme.bgBase)
-                .overlay(
-                    Capsule()
-                        .stroke(isStageActive ? HexTheme.borderStrong : HexTheme.borderWeak, lineWidth: 1)
-                )
+                .fill(KeyboardPalette.stage)
+                .overlay(Capsule().stroke(KeyboardPalette.stageEdge, lineWidth: 0.5))
 
+            stageContent(showRecordingControls: showRecordingControls)
+                .environment(\.colorScheme, .dark)
+        }
+        .frame(height: 52)
+        .animation(.spring(duration: 0.30, bounce: 0.12), value: isStageActive)
+    }
+
+    @ViewBuilder
+    private func stageContent(showRecordingControls: Bool) -> some View {
+        ZStack {
             DotScopeView(
                 phase: model.dotScopePhase,
                 tuning: .keyboard,
@@ -394,9 +424,9 @@ struct KeyboardSurfaceView: View {
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(HexTheme.textMuted)
+                                .foregroundStyle(KeyboardPalette.textMuted)
                                 .frame(width: 38, height: 38)
-                                .background(HexTheme.layer02, in: Circle())
+                                .background(KeyboardPalette.key, in: Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Cancel dictation")
@@ -408,10 +438,10 @@ struct KeyboardSurfaceView: View {
                         } label: {
                             Text("Done")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(HexTheme.textContrast)
+                                .foregroundStyle(KeyboardPalette.textContrast)
                                 .padding(.horizontal, 16)
                                 .frame(height: 38)
-                                .background(HexTheme.bgContrast, in: Capsule())
+                                .background(KeyboardPalette.contrast, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -443,8 +473,6 @@ struct KeyboardSurfaceView: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(height: 52)
-        .animation(.spring(duration: 0.30, bounce: 0.12), value: isStageActive)
     }
 
     private func idleTrailingTrigger(icon: String, title: String) -> some View {
@@ -456,11 +484,11 @@ struct KeyboardSurfaceView: View {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
             }
-            .foregroundStyle(HexTheme.textContrast)
+            .foregroundStyle(KeyboardPalette.textContrast)
             .padding(.leading, 14)
             .padding(.trailing, 16)
             .frame(height: 38)
-            .background(HexTheme.bgContrast, in: Capsule())
+            .background(KeyboardPalette.contrast, in: Capsule())
         }
         .padding(.horizontal, 7)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -475,12 +503,12 @@ struct KeyboardSurfaceView: View {
                 GlobeKeyRepresentable(controller: model.inputViewController)
                     .frame(width: 44, height: 40)
                     .background(
-                        HexTheme.layer01,
+                        KeyboardPalette.key,
                         in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
-                            .stroke(HexTheme.borderWeak, lineWidth: 1)
+                            .stroke(KeyboardPalette.keyEdge, lineWidth: 0.5)
                     )
             }
 
@@ -489,16 +517,16 @@ struct KeyboardSurfaceView: View {
             } label: {
                 Text("space")
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(HexTheme.textMuted)
+                    .foregroundStyle(KeyboardPalette.textMuted)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
                     .background(
-                        HexTheme.layer01,
+                        KeyboardPalette.key,
                         in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
-                            .stroke(HexTheme.borderWeak, lineWidth: 1)
+                            .stroke(KeyboardPalette.keyEdge, lineWidth: 0.5)
                     )
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
@@ -513,15 +541,15 @@ struct KeyboardSurfaceView: View {
             } label: {
                 Image(systemName: "return")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(HexTheme.textBase)
+                    .foregroundStyle(KeyboardPalette.text)
                     .frame(width: 56, height: 40)
                     .background(
-                        HexTheme.layer01,
+                        KeyboardPalette.key,
                         in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
-                            .stroke(HexTheme.borderWeak, lineWidth: 1)
+                            .stroke(KeyboardPalette.keyEdge, lineWidth: 0.5)
                     )
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }

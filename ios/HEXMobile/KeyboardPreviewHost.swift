@@ -15,6 +15,15 @@ struct KeyboardSnapshotStage: View {
         return value.hasPrefix("keyboard-") ? value : nil
     }
 
+    /// `--snap-appearance light` renders the keyboard as it looks in a light-mode app.
+    private static var keyboardScheme: ColorScheme {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: "--snap-appearance"), idx + 1 < args.count else {
+            return .dark
+        }
+        return args[idx + 1] == "light" ? .light : .dark
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -42,8 +51,11 @@ struct KeyboardSnapshotStage: View {
             Divider()
                 .overlay(HexTheme.borderWeak)
 
+            // Stand-in for the system keyboard backdrop, which the surface leaves clear.
             KeyboardSurfaceView(model: viewModel)
                 .frame(height: 148)
+                .background(.regularMaterial)
+                .environment(\.colorScheme, Self.keyboardScheme)
         }
         .background(Color(red: 0x07 / 255.0, green: 0x08 / 255.0, blue: 0x09 / 255.0).ignoresSafeArea())
         .preferredColorScheme(.dark)

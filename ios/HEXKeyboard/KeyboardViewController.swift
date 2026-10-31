@@ -9,6 +9,7 @@ final class KeyboardViewController: UIInputViewController {
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
     private var lastFullAccessNote: TimeInterval = 0
+    private var hostingView: UIView?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -41,7 +42,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureView() {
-        view.backgroundColor = UIColor(red: 0x0A / 255.0, green: 0x0B / 255.0, blue: 0x0D / 255.0, alpha: 1)
+        // Clear, so the system keyboard backdrop (Liquid Glass on iOS 26) shows through.
+        view.backgroundColor = .clear
         preferredContentSize.height = 148
 
         viewModel.inputViewController = self
@@ -69,6 +71,7 @@ final class KeyboardViewController: UIInputViewController {
         let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         hosting.view.backgroundColor = .clear
+        hostingView = hosting.view
         addChild(hosting)
         view.addSubview(hosting.view)
         hosting.didMove(toParent: self)
@@ -156,6 +159,14 @@ final class KeyboardViewController: UIInputViewController {
 
     private func updateKeyboardTraits() {
         viewModel.needsGlobeKey = needsInputModeSwitchKey
+        let style: UIUserInterfaceStyle = switch textDocumentProxy.keyboardAppearance {
+        case .dark: .dark
+        case .light: .light
+        default: .unspecified
+        }
+        if hostingView?.overrideUserInterfaceStyle != style {
+            hostingView?.overrideUserInterfaceStyle = style
+        }
         switch textDocumentProxy.returnKeyType {
         case .send: viewModel.returnKeyLabel = "Send"
         case .search: viewModel.returnKeyLabel = "Search"
