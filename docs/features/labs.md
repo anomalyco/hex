@@ -11,8 +11,8 @@ setup again.
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
 ├── Meetings (beta) yes   meetings.enabled             (macOS)   Meetings joins the sidebar: call detection, recording, transcripts
 ├── Voice Filter    yes   experimental.hex_microphone  (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
-├── Playground      yes   labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser (restart)
-├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating (restart)
+├── Playground      yes   labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
+├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
@@ -31,7 +31,7 @@ Settings › Labs                          // labs.page
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature: name, on/off, description, its hex settings key
-├── on <feature> | off <feature> -> save it; print the restart hint
+├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver
 └── hex experiments … -> points at hex labs
 
@@ -43,9 +43,15 @@ ignored, and every feature keeps its own toggle. `hex status` lists the
 features on (`Labs` line on macOS, `labs` array in the macOS and Linux JSON,
 `labs\t…` on Windows).
 
-Live text and the playground are read at launch and apply after a restart;
-Live chapters are read when a recording starts; the others apply at once.
-Nothing starts at launch for a feature that is off.
+Every toggle applies at once, from the window or `hex labs on|off` (issue
+568, from @maharshi365): Live text is asked as each dictation starts and its
+plate is always installed (prewarmed only when Live text is on at launch);
+the window always attaches the playground with Rune's own ⇧⌘D off, and its
+sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
+the toggle is on. Live chapters are read when a recording starts. Nothing
+starts at launch for a feature that is off. Limit: the macOS window's fixed
+size is chosen when it is created, so it becomes resizable for the
+playground only after Hex restarts.
 
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
@@ -95,7 +101,7 @@ Terminal paste.
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
   OS; see [Streaming Finish](dictation.md#streaming-finish)). Its toggle
-  is `labs.live_text` (off by default), read at launch. The
+  is `labs.live_text` (off by default), asked as each dictation starts. The
   gate, `labs::live_text()`, is where the work starts: with it off, the engine gives a hotkey capture's
   live stream no partial slot and never reads the model's text between
   feeds, and no host adds the line's overlay. Each dictation's `finished
@@ -121,7 +127,7 @@ Terminal paste.
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
-  (off by default, read at launch). While on, a **Playground** sidebar item,
+  (off by default, applied at once). While on, a **Playground** sidebar item,
   ⇧⌘D (View › Playground on macOS), or Ctrl+Shift+D swaps the window for a list of
   folded groups, nested by path:
 
@@ -145,9 +151,9 @@ Terminal paste.
   Tab, Esc, `/` to filter) and ⇧⌘D; every other key, ⌘-chords and digits
   included, reaches the open story. Each
   story starts from a fresh fixture; the real window keeps running
-  underneath. While it is on, the window resizes everywhere (Linux and the
-  macOS tour otherwise keep one fixed size), so the stage beside the
-  playground's columns has room. Off, nothing is attached: no shortcut, menu item, or scene list.
+  underneath. With it on at launch, the macOS window resizes, so the stage
+  beside the playground's columns has room. Off, no shortcut, menu item,
+  sidebar item, or link opens it.
   Headless renders take `--playground [story]` while it is on, e.g.
   `hex app -- --snap out.png --playground "Window/General/Settings"`. Checks: `every_scene_but_live_has_a_path_under_a_group`,
   `the_playgrounds_keys_work_with_a_story_open`, and
