@@ -81,40 +81,6 @@ mod keyboard_model_switching;
 mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
-mod linux_app;
-#[cfg(target_os = "linux")]
-mod linux_atspi;
-#[cfg(target_os = "linux")]
-mod linux_audio_control;
-#[cfg(target_os = "linux")]
-mod linux_clipboard;
-#[cfg(target_os = "linux")]
-mod linux_context;
-#[cfg(target_os = "linux")]
-mod linux_dictation;
-#[cfg(target_os = "linux")]
-mod linux_icons;
-#[cfg(target_os = "linux")]
-mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_input_route;
-#[cfg(target_os = "linux")]
-mod linux_login_item;
-#[cfg(target_os = "linux")]
-mod linux_paste;
-#[cfg(target_os = "linux")]
-mod linux_portal;
-#[cfg(target_os = "linux")]
-mod linux_remote_desktop;
-#[cfg(target_os = "linux")]
-mod linux_rune_hud;
-#[cfg(target_os = "linux")]
-mod linux_service;
-#[cfg(target_os = "linux")]
-mod linux_session;
-#[cfg(target_os = "linux")]
-mod linux_tray;
 mod live_text;
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -125,13 +91,6 @@ mod login_item;
 mod macos_rune;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod meeting_detection;
-mod meeting_mcp;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-mod meeting_runtime;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod meeting_watcher;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -158,6 +117,7 @@ mod rune_hud;
 mod rune_ui;
 mod speech_detector;
 mod spoken_formatting;
+mod spoken_symbols;
 mod spring;
 #[cfg(target_os = "macos")]
 mod status_item;
@@ -184,22 +144,6 @@ mod vocabulary;
 mod voice_filter;
 #[cfg(target_os = "windows")]
 mod windows;
-#[cfg(target_os = "windows")]
-mod windows_app;
-#[cfg(target_os = "windows")]
-mod windows_audio_control;
-#[cfg(target_os = "windows")]
-mod windows_context;
-#[cfg(target_os = "windows")]
-mod windows_dictation;
-#[cfg(target_os = "windows")]
-mod windows_input;
-#[cfg(target_os = "windows")]
-mod windows_login_item;
-#[cfg(target_os = "windows")]
-mod windows_paste;
-#[cfg(target_os = "windows")]
-mod windows_rune;
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
@@ -615,7 +559,7 @@ fn main() -> Result<()> {
         #[cfg(debug_assertions)]
         Command::Meeting {
             command: MeetingCommand::Probe,
-        } => meeting_watcher::probe(),
+        } => meeting::watcher::probe(),
         #[cfg(debug_assertions)]
         Command::Meeting {
             command: MeetingCommand::Transcribe { id },
@@ -716,7 +660,7 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
     hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
-        meeting_watcher::ListenerConfig { event_path, device },
+        meeting::watcher::ListenerConfig { event_path, device },
     )
 }
 
@@ -982,7 +926,7 @@ mod tests {
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
-    linux_input_route::mark_streams();
+    linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 
@@ -990,6 +934,7 @@ fn main() -> Result<()> {
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
     windows::restrict_dll_search();
+    windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
     windows::run(&SHUTDOWN)

@@ -13,7 +13,7 @@ const CORE_KEYBOARD: xkb::DeviceSpec = 0x0100;
 
 /// X11 sessions only.
 pub(crate) fn available() -> bool {
-    !crate::linux_session::LinuxSession::detect().is_wayland()
+    !crate::linux::session::LinuxSession::detect().is_wayland()
 }
 
 pub(crate) fn current() -> Option<String> {

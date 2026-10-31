@@ -22,8 +22,11 @@ enum HexTheme {
     static let warmMic = Color(red: 0xFF / 255.0, green: 0x95 / 255.0, blue: 0x00 / 255.0)
     static let success = Color(red: 0x34 / 255.0, green: 0xC7 / 255.0, blue: 0x59 / 255.0)
 
-    static let cardRadius: CGFloat = 18
-    static let controlRadius: CGFloat = 12
+    static let warmPearl = Color(red: 0.96, green: 0.94, blue: 0.89)
+    static let agentBlue = Color(red: 0.78, green: 0.86, blue: 0.97)
+
+    static let cardRadius: CGFloat = 16
+    static let controlRadius: CGFloat = 10
 
     static func formatClock(_ seconds: TimeInterval) -> String {
         let clamped = max(0, Int(seconds))
@@ -45,7 +48,7 @@ enum HexTheme {
 
 struct HexStatusDot: View {
     var color: Color
-    var size: CGFloat = 8
+    var size: CGFloat = 7
 
     var body: some View {
         Circle()
@@ -54,31 +57,53 @@ struct HexStatusDot: View {
     }
 }
 
-/// Minimal tactile bar meter inspired by Hex's desktop Dot Scope HUD.
-struct DotScopeBar: View {
-    var level: Float
-    var barCount: Int = 18
-    var active: Bool = true
-    var height: CGFloat = 20
-
-    private static let envelope: [CGFloat] = [
-        0.22, 0.34, 0.52, 0.72, 0.90, 1.0, 0.84, 0.66, 0.94,
-        0.78, 1.0, 0.86, 0.68, 0.92, 0.64, 0.48, 0.32, 0.20,
-    ]
+/// Static braided dot-matrix glyph for WidgetKit / Live Activity surfaces
+/// where SpringBoard renders archived display lists rather than Metal drawables.
+struct HexDotMatrixBadge: View {
+    var columns: Int = 21
+    var rows: Int = 7
+    var pitch: CGFloat = 2.6
+    var cooling: Bool = false
 
     var body: some View {
-        let clamped = CGFloat(max(0, min(1, level)))
-        HStack(spacing: 3) {
-            ForEach(0..<barCount, id: \.self) { index in
-                let weight = Self.envelope[index % Self.envelope.count]
-                let signal = active ? max(0.16, min(1, clamped * (0.45 + 0.75 * weight) + 0.08 * weight)) : 0.16
-                Capsule()
-                    .fill(active ? HexTheme.textBase.opacity(0.28 + 0.72 * Double(signal)) : HexTheme.textFaint.opacity(0.5))
-                    .frame(width: 2.5, height: max(3, height * signal))
+        Canvas { context, size in
+            let midX = size.width * 0.5
+            let midY = size.height * 0.5
+            let halfRows = CGFloat(rows - 1) * 0.5
+            let halfCols = CGFloat(columns - 1) * 0.5
+            let tint = cooling
+                ? SIMD3<Double>(0.76, 0.85, 0.98)
+                : SIMD3<Double>(0.96, 0.93, 0.87)
+
+            for i in 0..<columns {
+                let xn = Double(i) / Double(max(1, columns - 1))
+                let edge = sin(.pi * xn)
+                let amp = (0.35 + 0.65 * sin(.pi * xn)) * Double(halfRows * 0.82)
+                let yA = Double(halfRows) + amp * sin(2.0 * .pi * 1.45 * xn - 0.5)
+                let yB = Double(halfRows) - amp * sin(2.0 * .pi * 1.45 * xn - 0.5)
+
+                for j in 0..<rows {
+                    let dA = abs(Double(j) - yA)
+                    let dB = abs(Double(j) - yB)
+                    let litA = exp(-(dA * dA) / 0.42)
+                    let litB = exp(-(dB * dB) / 0.42)
+                    let power = min(1.0, (1.0 - (1.0 - litA) * (1.0 - litB)) * (0.25 + 0.75 * edge))
+                    let alpha = 0.07 * edge + 0.89 * pow(power, 0.9)
+                    let r = (0.26 + 0.16 * pow(power, 0.6)) * Double(pitch)
+                    let cx = midX + (CGFloat(i) - halfCols) * pitch
+                    let cy = midY + (CGFloat(j) - halfRows) * pitch
+                    let rect = CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
+                    context.fill(
+                        Path(ellipseIn: rect),
+                        with: .color(Color(red: tint.x, green: tint.y, blue: tint.z, opacity: alpha))
+                    )
+                }
             }
         }
-        .frame(height: height)
-        .animation(.easeOut(duration: 0.09), value: level)
+        .frame(
+            width: CGFloat(columns - 1) * pitch + 8,
+            height: CGFloat(rows - 1) * pitch + 8
+        )
         .accessibilityHidden(true)
     }
 }

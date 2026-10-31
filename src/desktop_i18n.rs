@@ -221,6 +221,7 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Hex can't listen until the speech model has downloaded", ["Hex nie może słuchać, dopóki model mowy się nie pobierze", "语音模型下载完成前，Hex 无法聆听", "音声モデルのダウンロードが終わるまで、Hex は聞き取れません", "Hex kann erst zuhören, wenn das Sprachmodell heruntergeladen ist", "Hex no puede escuchar hasta que se descargue el modelo de voz", "Hex не може слухати, доки мовна модель не завантажиться"]),
     ("Don't switch", ["Nie zmieniaj", "不切换", "切り替えない", "Nicht wechseln", "No cambiar", "Не перемикати"]),
     ("Your desktop assigns this key itself, so Hex can't confirm it", ["Twój pulpit sam przypisuje ten klawisz, więc Hex nie może tego potwierdzić", "你的桌面自行分配此按键，因此 Hex 无法确认", "デスクトップがこのキーを独自に割り当てるため、Hex では確認できません", "Dein Desktop weist diese Taste selbst zu, daher kann Hex sie nicht bestätigen", "Tu escritorio asigna esta tecla por su cuenta, así que Hex no puede confirmarla", "Ваша стільниця сама призначає цю клавішу, тож Hex не може це підтвердити"]),
     ("Not installed", ["Nie zainstalowano", "未安装", "未インストール", "Nicht installiert", "No instalado", "Не встановлено"]),
@@ -256,6 +257,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Put the dictation on the clipboard instead of pasting it", ["Umieszcza dyktowanie w schowku zamiast je wklejać", "将听写内容放到剪贴板，而不粘贴", "音声入力を貼り付けずにクリップボードに入れます", "Legt das Diktat in die Zwischenablage, statt es einzufügen", "Pone el dictado en el portapapeles en lugar de pegarlo", "Кладе диктування в буфер обміну замість вставлення"]),
     ("Spoken formatting", ["Formatowanie głosem", "语音格式命令", "音声での書式指定", "Gesprochene Formatierung", "Formato por voz", "Голосове форматування"]),
     ("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks", ["Powiedz „new line”, „new paragraph”, „open quote” lub „close quote”, aby wstawić podział wiersza, akapit lub cudzysłów", "说“new line”“new paragraph”“open quote”或“close quote”即可插入换行和引号", "「new line」「new paragraph」「open quote」「close quote」と言うと、改行や引用符を入力します", "Sag „new line“, „new paragraph“, „open quote“ oder „close quote“, um Zeilenumbrüche und Anführungszeichen einzufügen", "Di «new line», «new paragraph», «open quote» o «close quote» para insertar saltos de línea y comillas", "Скажіть «new line», «new paragraph», «open quote» або «close quote», щоб вставити розриви рядків і лапки"]),
+    ("Spoken symbols", ["Symbole głosem", "语音符号", "音声での記号入力", "Gesprochene Symbole", "Símbolos por voz", "Голосові символи"]),
+    ("Say \"comma\", \"colon\", \"hashtag\", \"underscore\", or \"slash\" to insert the symbol joined to its words", ["Powiedz „comma”, „colon”, „hashtag”, „underscore” lub „slash”, aby wstawić symbol połączony z sąsiednimi słowami", "说“comma”“colon”“hashtag”“underscore”或“slash”即可插入与相邻词连接的符号", "「comma」「colon」「hashtag」「underscore」「slash」と言うと、前後の語につなげて記号を入力します", "Sag „comma“, „colon“, „hashtag“, „underscore“ oder „slash“, um das Symbol direkt an seine Wörter angefügt einzufügen", "Di «comma», «colon», «hashtag», «underscore» o «slash» para insertar el símbolo unido a sus palabras", "Скажіть «comma», «colon», «hashtag», «underscore» або «slash», щоб вставити символ, приєднаний до сусідніх слів"]),
     ("Remove filler words", ["Usuwaj wtrącenia", "移除口头填充词", "つなぎ言葉を削除", "Füllwörter entfernen", "Quitar muletillas", "Прибирати слова-паразити"]),
     ("Remove filler words such as um and uh from dictations, without an AI model", ["Usuwa z dyktowania wtrącenia takie jak „um” i „uh”, bez modelu AI", "从听写中移除“um”“uh”等填充词，无需 AI 模型", "AI モデルを使わずに、音声入力から「um」「uh」などのつなぎ言葉を削除します", "Entfernt Füllwörter wie „um“ und „uh“ aus Diktaten, ohne KI-Modell", "Quita muletillas como «um» y «uh» de los dictados, sin un modelo de IA", "Прибирає з диктувань слова-паразити на кшталт «um» і «uh», без моделі ШІ"]),
     ("Subtitle export", ["Eksport napisów", "字幕导出", "字幕の書き出し", "Untertitel-Export", "Exportar subtítulos", "Експорт субтитрів"]),
@@ -430,10 +433,17 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("SpongeBob case", ["Styl SpongeBoba", "海绵宝宝大小写", "スポンジ・ボブ表記", "SpongeBob-Schreibweise", "Estilo Bob Esponja", "Стиль Губки Боба"]),
     ("aLtErNaTeS every letter", ["nAp RzEmIeNnIe litery", "字母大小写交替", "文字を交互に大小にします", "wEcHsElT jeden Buchstaben", "aLtErNa cada letra", "чЕрГуЄ кожну літеру"]),
     ("Copied. Paste it into your agent and say what you want", ["Skopiowano. Wklej to swojemu agentowi i powiedz, czego chcesz", "已复制。粘贴给你的智能体，说出你想要的", "コピーしました。エージェントに貼り付けて、望むことを伝えてください", "Kopiert. Füge es bei deinem Agenten ein und sag, was du willst", "Copiado. Pégalo en tu agente y di lo que quieres", "Скопійовано. Вставте це своєму агентові й скажіть, чого хочете"]),
-    ("all lowercase", ["same małe litery", "全部小写", "すべて小文字", "alles kleingeschrieben", "todo en minúsculas", "усе малими літерами"]),
-    ("all caps", ["same wielkie litery", "全部大写", "すべて大文字", "alles in Großbuchstaben", "todo en mayúsculas", "усе великими літерами"]),
-    ("Ask an agent to change these steps", ["Poproś agenta, żeby zmienił te kroki", "让智能体修改这些步骤", "エージェントにこれらのステップを変えてもらいましょう", "Lass einen Agenten diese Schritte ändern", "Pide a un agente que cambie estos pasos", "Попросіть агента змінити ці кроки"]),
-    ("no final period in Slack", ["bez kropki na końcu w Slacku", "在 Slack 里句末不加句号", "Slack では文末に句点なし", "kein Schlusspunkt in Slack", "sin punto final en Slack", "без крапки в кінці у Slack"]),
+    ("Tell your agent how Hex should write", ["Powiedz agentowi, jak Hex ma pisać", "告诉你的智能体 Hex 该怎么写", "Hex の書き方をエージェントに伝えましょう", "Sag deinem Agenten, wie Hex schreiben soll", "Dile a tu agente cómo debe escribir Hex", "Скажіть агенту, як має писати Hex"]),
+    ("Use all lowercase in my messaging apps", ["Pisz małymi literami w komunikatorach", "在聊天应用里全部用小写", "メッセージアプリではすべて小文字で", "Schreib in Messengern alles klein", "Usa todo en minúsculas en mis apps de mensajes", "Пиши малими літерами в месенджерах"]),
+    ("Use all caps when I sound excited", ["Pisz wielkimi literami, gdy brzmię na podekscytowanego", "我一激动就全部大写", "興奮しているときはすべて大文字で", "Schreib alles groß, wenn ich aufgeregt klinge", "Usa mayúsculas cuando suene emocionado", "Пиши великими літерами, коли я схвильований"]),
+    ("Use SpongeBob case when I’m being sarcastic", ["Pisz jak SpongeBob, gdy jestem sarkastyczny", "我阴阳怪气时用海绵宝宝体", "皮肉を言うときはスポンジ・ボブ書きで", "Schreib im SpongeBob-Stil, wenn ich sarkastisch bin", "Usa el estilo de Bob Esponja cuando sea sarcástico", "Пиши як Губка Боб, коли я саркастичний"]),
+    ("Use Title Case for my email subjects", ["Każde Słowo Wielką Literą w tematach maili", "邮件主题每个单词首字母大写", "メールの件名は単語の頭を大文字に", "Jedes Wort groß in Betreffzeilen", "Cada Palabra En Mayúscula en los asuntos de correo", "Кожне Слово З Великої в темах листів"]),
+    ("Spell it “Kubernetes”, not “Cooper Netties”", ["Pisz „Kubernetes”, a nie „Cooper Netties”", "要写“Kubernetes”，不是“Cooper Netties”", "「Cooper Netties」ではなく「Kubernetes」と書いて", "Schreib „Kubernetes“, nicht „Cooper Netties“", "Escribe «Kubernetes», no «Cooper Netties»", "Пиши «Kubernetes», а не «Cooper Netties»"]),
+    ("Delete every “um” and “like”", ["Usuwaj każde „yyy” i „no wiesz”", "删掉所有的“嗯”和“就是”", "「えーと」と「なんか」は全部消して", "Streich jedes „äh“ und „halt“", "Borra cada «eh» y «o sea»", "Прибирай усі «е-е» і «типу»"]),
+    ("Turn “let’s circle back” into “no”", ["Zamieniaj „wrócimy do tego” na „nie”", "把“我们回头再说”改成“不行”", "「また今度検討します」は「無理です」に", "Mach aus „Lass uns das später aufgreifen“ einfach „Nein“", "Convierte «lo retomamos luego» en «no»", "Заміняй «повернемося до цього» на «ні»"]),
+    ("Talk like a pirate on Fridays", ["W piątki mów jak pirat", "每周五用海盗腔说话", "金曜日は海賊口調で", "Rede freitags wie ein Pirat", "Habla como un pirata los viernes", "По п'ятницях говори як пірат"]),
+    ("Write my commit messages like Shakespeare", ["Pisz moje commity jak Szekspir", "用莎士比亚的口吻写提交信息", "コミットメッセージはシェイクスピア風に", "Schreib meine Commit-Nachrichten wie Shakespeare", "Escribe mis commits como Shakespeare", "Пиши мої коміти як Шекспір"]),
+    ("Make “per my last email” sound friendly", ["Niech „jak pisałem w poprzednim mailu” brzmi miło", "让“如我上封邮件所说”听起来友好点", "「前回のメールの通り」を優しい言い方に", "Lass „wie in meiner letzten Mail erwähnt“ freundlich klingen", "Haz que «como dije en mi último correo» suene amable", "Зроби «як я писав у попередньому листі» дружнім"]),
     ("Open file", ["Otwórz plik", "打开文件", "ファイルを開く", "Datei öffnen", "Abrir archivo", "Відкрити файл"]),
     ("Edit with agent", ["Edytuj z agentem", "用智能体编辑", "エージェントで編集", "Mit Agent bearbeiten", "Editar con agente", "Редагувати з агентом"]),
     ("No steps yet. Hex pastes your words as it heard them", ["Brak kroków. Hex wkleja twoje słowa tak, jak je usłyszał", "还没有步骤。Hex 会按听到的内容粘贴", "まだステップはありません。Hex は聞き取ったとおりに貼り付けます", "Noch keine Schritte. Hex fügt deine Worte so ein, wie es sie gehört hat", "Aún no hay pasos. Hex pega tus palabras tal como las oyó", "Кроків ще немає. Hex вставляє ваші слова так, як їх почув"]),
@@ -1096,8 +1106,8 @@ mod tests {
         include_str!("rune_ui/windows_host.rs"),
         include_str!("tray_menu.rs"),
         include_str!("rune_ui/meetings_host.rs"),
-        include_str!("windows_app.rs"),
-        include_str!("windows_rune.rs"),
+        include_str!("windows/app.rs"),
+        include_str!("windows/rune.rs"),
     ];
 
     /// The string literals passed to `tr`, `tr_fill`, and `tr_named`.

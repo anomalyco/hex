@@ -41,12 +41,12 @@ use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription_models::TranscriptionModelId;
 use crate::tray_menu::{TrayCommand, TrayView};
-use crate::windows_app::WindowsDesktopHost;
+use crate::windows::app::WindowsDesktopHost;
 
 /// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
 /// a light taskbar ([`tray_icon_pixels`]).
 const TRAY_ICON_SIZE: u32 = 32;
-const TRAY_ICON_RGBA: &[u8] = include_bytes!("../resources/windows/tray-32.rgba");
+const TRAY_ICON_RGBA: &[u8] = include_bytes!("../../resources/windows/tray-32.rgba");
 /// How often the runtime refreshes the listener while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
 
@@ -113,7 +113,7 @@ struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
     /// Where `hex` dictation commands go while a listener runs.
-    listener: Mutex<Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>>>,
+    listener: Mutex<Option<mpsc::Sender<crate::windows::dictation::ListenerCommand>>>,
 }
 
 /// The window's connection to the runtime thread.
@@ -157,7 +157,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
-    let Some(instance) = crate::windows_app::AppInstance::claim(start_hidden)? else {
+    let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
     crate::labs::log_launch();
@@ -175,8 +175,14 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let history = History::open_default(settings.history_retention)
         .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
         .ok();
+    crate::windows::gpu_fallback::arm();
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
+        .on_frame_encoded(|frame| {
+            if frame.outcome() == rune::FrameOutcome::Drawn {
+                crate::windows::gpu_fallback::disarm();
+            }
+        })
         .on_window(|window| {
             let _ = window.with_raw_handle(|handle| {
                 if let rune::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() {
@@ -208,7 +214,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     // The capture capsule, picker, and ink.
     let _capture_overlays =
         crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
-    let meetings = crate::meeting_runtime::Meetings::install(&mut app, shutdown)
+    let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
         .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
         .ok();
     let (requests, receiver) = mpsc::channel();
@@ -256,6 +262,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     });
     // Returns on Quit, or when the window closes without a tray.
     app.run();
+    crate::windows::gpu_fallback::disarm();
     shutdown.store(true, Ordering::Relaxed);
     drop(requests);
     let _ = runtime.join();
@@ -286,9 +293,15 @@ fn run_runtime(
     let mut tray_view = None;
     let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
+    let hud = indicator.clone();
     let mut host =
         WindowsDesktopHost::new(event_path, settings, settings_error, history, indicator);
     loop {
+        // A HUD frame counts as this launch's first drawing too, for a
+        // launch that never opens the window.
+        if crate::windows::gpu_fallback::armed() && hud.presented() {
+            crate::windows::gpu_fallback::disarm();
+        }
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
             Ok(request) => Some(request),
             Err(RecvTimeoutError::Timeout) => None,
@@ -319,7 +332,7 @@ fn run_runtime(
                 wake();
             }
         }
-        let meetings = crate::meeting_runtime::tray_state();
+        let meetings = crate::meeting::runtime::tray_state();
         if let Some(tray) = tray
             && (changed || tray_view.is_none() || tray_meetings != meetings)
         {
@@ -366,7 +379,7 @@ impl WindowsControl {
 
     fn listener(
         &self,
-        command: crate::windows_dictation::ListenerCommand,
+        command: crate::windows::dictation::ListenerCommand,
     ) -> std::result::Result<(), ControlError> {
         let listener = lock(&self.shared.listener).clone().ok_or_else(|| {
             ControlError::new(
@@ -402,7 +415,7 @@ impl crate::control::host::Host for WindowsControl {
         print: Option<crate::control::PrintReply>,
         raw: bool,
     ) -> std::result::Result<(), ControlError> {
-        use crate::windows_dictation::ListenerCommand;
+        use crate::windows::dictation::ListenerCommand;
         self.listener(match print {
             Some(print) => ListenerCommand::StopAndPrint(print),
             None => ListenerCommand::Dictation { action, raw },
@@ -410,7 +423,7 @@ impl crate::control::host::Host for WindowsControl {
     }
 
     fn paste_last(&self) -> std::result::Result<(), ControlError> {
-        self.listener(crate::windows_dictation::ListenerCommand::PasteLast)
+        self.listener(crate::windows::dictation::ListenerCommand::PasteLast)
     }
 
     fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
@@ -477,9 +490,9 @@ impl crate::control::host::Host for WindowsControl {
     fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
         let format = |error: color_eyre::Report| format!("{error:#}");
         Some(match enabled {
-            None => crate::windows_login_item::is_enabled().map_err(format),
-            Some(enabled) => crate::windows_login_item::set_enabled(enabled)
-                .and_then(|()| crate::windows_login_item::is_enabled())
+            None => crate::windows::login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::windows::login_item::set_enabled(enabled)
+                .and_then(|()| crate::windows::login_item::is_enabled())
                 .map_err(format),
         })
     }
@@ -541,7 +554,7 @@ impl crate::control::host::Host for WindowsControl {
 /// What the tray shows for what the runtime published.
 fn tray_view_for(published: &Published) -> TrayView {
     TrayView {
-        meetings: crate::meeting_runtime::tray_state(),
+        meetings: crate::meeting::runtime::tray_state(),
         ..TrayView::new(
             published.listener.running,
             published.state,
@@ -675,12 +688,12 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                 use crate::meeting::MeetingRequest;
                 let result = match command {
                     TrayCommand::RecordMeeting => {
-                        crate::meeting_runtime::request(MeetingRequest::Start { title: None })
+                        crate::meeting::runtime::request(MeetingRequest::Start { title: None })
                     }
                     TrayCommand::StopMeeting => {
-                        crate::meeting_runtime::request(MeetingRequest::Stop)
+                        crate::meeting::runtime::request(MeetingRequest::Stop)
                     }
-                    _ => crate::meeting_runtime::copy_last_transcript(),
+                    _ => crate::meeting::runtime::copy_last_transcript(),
                 };
                 if let Err(error) = result {
                     tracing::warn!(%error, ?command, "the tray action failed");

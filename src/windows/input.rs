@@ -138,7 +138,7 @@ impl WindowsHotkey {
         if key.trim().is_empty() {
             return Err(eyre!("Windows dictation shortcut key cannot be empty"));
         }
-        crate::windows_input::virtual_key(key)?;
+        crate::windows::input::virtual_key(key)?;
         let function_key = key
             .strip_prefix('f')
             .or_else(|| key.strip_prefix('F'))

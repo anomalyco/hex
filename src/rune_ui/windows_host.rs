@@ -16,9 +16,9 @@ use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::HotkeyBinding;
 use crate::desktop_i18n::tr;
-use crate::windows_input::{ChordCapture, ChordPoll, WindowsHotkey};
-use crate::windows_rune::RuntimeHandle;
-pub(super) use crate::windows_rune::{Request, ShortcutTarget};
+use crate::windows::input::{ChordCapture, ChordPoll, WindowsHotkey};
+use crate::windows::rune::RuntimeHandle;
+pub(super) use crate::windows::rune::{Request, ShortcutTarget};
 
 /// The window saves a recorded shortcut; the runtime restarts the listener.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = false;
@@ -46,7 +46,7 @@ pub(super) struct Backend {
 
 impl Backend {
     pub(super) fn connect(_: Connect, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
-        let runtime = crate::windows_rune::runtime();
+        let runtime = crate::windows::rune::runtime();
         if let Some(runtime) = &runtime {
             runtime.subscribe(wake.clone());
         }
@@ -135,7 +135,7 @@ struct ChordWatch {
 
 impl ChordWatch {
     fn start(wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self> {
-        crate::windows_input::set_capture_inhibited(true);
+        crate::windows::input::set_capture_inhibited(true);
         let (sender, results) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -149,7 +149,7 @@ impl ChordWatch {
                     std::thread::sleep(CHORD_POLL);
                     // Keys typed into another application never rebind a
                     // shortcut.
-                    if !crate::windows_input::app_is_foreground() {
+                    if !crate::windows::input::app_is_foreground() {
                         continue;
                     }
                     let chord = match capture.poll() {
@@ -184,7 +184,7 @@ impl ChordWatch {
                 worker: Some(worker),
             }),
             Err(error) => {
-                crate::windows_input::set_capture_inhibited(false);
+                crate::windows::input::set_capture_inhibited(false);
                 Err(error.into())
             }
         }
@@ -197,7 +197,7 @@ impl Drop for ChordWatch {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        crate::windows_input::set_capture_inhibited(false);
+        crate::windows::input::set_capture_inhibited(false);
     }
 }
 
@@ -220,7 +220,7 @@ pub(super) fn history(
     _: &Connect,
     retention: crate::history::HistoryRetention,
 ) -> Option<crate::history::History> {
-    match crate::windows_rune::runtime() {
+    match crate::windows::rune::runtime() {
         Some(runtime) => runtime.history(),
         None => crate::history::History::open_default(retention)
             .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
@@ -235,10 +235,10 @@ pub(super) fn focused_application_known() -> bool {
 
 /// The current-user Run key is the source of truth, never `settings.json`.
 pub(super) fn launch_at_login() -> Option<Result<bool, String>> {
-    Some(crate::windows_login_item::is_enabled().map_err(|error| format!("{error:#}")))
+    Some(crate::windows::login_item::is_enabled().map_err(|error| format!("{error:#}")))
 }
 
 pub(super) fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
-    crate::windows_login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
-    crate::windows_login_item::is_enabled().map_err(|error| format!("{error:#}"))
+    crate::windows::login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
+    crate::windows::login_item::is_enabled().map_err(|error| format!("{error:#}"))
 }

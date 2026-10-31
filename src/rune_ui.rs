@@ -130,23 +130,23 @@ static SCRAWL_ICON: Icon = Icon {
 /// closing it keeps the app, its state, and the host running.
 #[cfg(target_os = "linux")]
 pub(crate) fn run_app(
-    host: crate::linux_app::HostHandle,
-    requests: std::sync::mpsc::Receiver<crate::linux_service::Control>,
-    first: Option<crate::linux_service::Activation>,
+    host: crate::linux::app::HostHandle,
+    requests: std::sync::mpsc::Receiver<crate::linux::service::Control>,
+    first: Option<crate::linux::service::Activation>,
     shutdown: &'static std::sync::atomic::AtomicBool,
 ) {
-    use crate::linux_service::{Activation, Control};
-    rune::set_app_id(crate::linux_portal::APP_ID);
+    use crate::linux::service::{Activation, Control};
+    rune::set_app_id(crate::linux::portal::APP_ID);
     let mut app = self::app(Some(host.clone()))
         .args(Vec::new())
         .windowless()
         .float_on_open();
-    crate::linux_rune_hud::install(&mut app);
+    crate::linux::rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
     let _capture_overlays =
         crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
-    let meetings = crate::meeting_runtime::Meetings::install(&mut app, shutdown)
+    let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
         .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
         .ok();
     let handle = app.handle();
@@ -816,6 +816,7 @@ impl Ui {
             });
         }
         ui.history = history::HistoryPane::shared(store);
+        ui.output = output::OutputPane::shuffled();
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
@@ -1270,6 +1271,9 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);
+    if ui.pane == Pane::Output && !ui.labs_open {
+        changed |= output::poll(ui, clock, tx);
+    }
     // Mode rows show their applications' icons, which the catalog locates.
     if matches!(ui.pane, Pane::Modes | Pane::Output)
         && ui
@@ -1372,13 +1376,13 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // The native title bar takes the window's background, so it follows a
     // system theme switch along with the rest of the window.
     #[cfg(target_os = "windows")]
-    crate::windows_rune::match_title_bar(p.k.c.bg_deep);
+    crate::windows::rune::match_title_bar(p.k.c.bg_deep);
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
         _ if ui.labs_open => (Vec::new(), labs::page(ui, p)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
-        Pane::Output => (Vec::new(), output::pane(ui, p)),
+        Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),

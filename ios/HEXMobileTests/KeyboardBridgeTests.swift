@@ -132,20 +132,37 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 
-    func testAppIntentMetadataContainsNoApplePlatformNames() {
-        let texts = [
+    func testAppIntentMetadataContainsNoApplePlatformNames() throws {
+        var texts = [
             String(localized: DictateWithHexIntent.title),
             String(localized: WarmHexKeyboardIntent.title),
             String(localized: ToggleHexControlIntent.title),
             String(localized: StopHexDictationIntent.title),
             String(localized: CancelHexDictationIntent.title),
-            "Starts recording on first press, then transcribes locally and copies to the clipboard on second press.",
-            "Starts Hex's warm microphone session so the keyboard can dictate without switching apps.",
-            "Starts or finishes on-device dictation and copies the transcript.",
-            "Stops recording, transcribes on device, and copies the text.",
-            "Discards the active Hex recording.",
+            String(localized: DictateWithHexIntent.description.descriptionText),
+            String(localized: WarmHexKeyboardIntent.description.descriptionText),
+            String(localized: ToggleHexControlIntent.description.descriptionText),
+            String(localized: StopHexDictationIntent.description.descriptionText),
+            String(localized: CancelHexDictationIntent.description.descriptionText),
         ]
-        let forbidden = ["iphone", "ipad", "apple", "siri", "macos", "ios"]
+
+        // Shortcut phrases, short titles, and control names are not readable at runtime,
+        // so read the string literals from the files that declare them.
+        let ios = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for file in [
+            "HEXMobile/HexIntents.swift",
+            "HEXActivity/HexActivityAttributes.swift",
+            "HEXActivity/HexControlIntents.swift",
+            "HEXWidgets/HexDictationControl.swift",
+        ] {
+            let source = try String(contentsOf: ios.appendingPathComponent(file), encoding: .utf8)
+            for line in source.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                texts.append(contentsOf: line.split(separator: "\"", omittingEmptySubsequences: false)
+                    .enumerated().filter { $0.offset % 2 == 1 }.map { String($0.element) })
+            }
+        }
+
+        let forbidden = ["iphone", "ipad", "apple", "siri", "macos", "ios", "watch", "airpods", "vision"]
         for text in texts {
             let lower = text.lowercased()
             for word in forbidden {

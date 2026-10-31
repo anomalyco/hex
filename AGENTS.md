@@ -186,7 +186,7 @@ substitute for source inspection or a second roadmap.
   (`control::cli`), which each OS's `main` flattens beside its own commands.
   The transport on every OS is the local API's `/control`.
   `control::host` carries commands out on Linux and Windows through a thin
-  adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`);
+  adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`);
   `macos_rune::control` is macOS's host. What an OS can't do answers
   `unsupported` at runtime. Contract: `docs/cli.md`.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
@@ -217,8 +217,8 @@ substitute for source inspection or a second roadmap.
   plus native macOS capture. Browser host is the domain concept. macOS
   reads the front tab of a table of scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
-  `AXURL`; `windows_context` reads any browser through UI Automation and
-  `linux_atspi` through AT-SPI.
+  `AXURL`; `windows/context` reads any browser through UI Automation and
+  `linux/atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
   shortcuts, App Paths, and open windows, Linux `.desktop` entries.
@@ -241,21 +241,21 @@ substitute for source inspection or a second roadmap.
   kernel driver), the lock-free capture-to-sink ring buffer, real-time
   voice-filter DSP presets, and the offline WAV renderer behind
   `hex dev voice-filter render`.
-- `linux`, `linux_app`, `linux_dictation`, `linux_paste`:
+- `linux`, `linux/app`, `linux/dictation`, `linux/paste`:
   the Linux beta CLI (including the `hex dictation` and
   `hex paste-last` keybinding commands and launch forwarding), the one Linux
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last,
   and paste.
-- `linux_clipboard`: the clipboard a Linux paste restores: every format of the
+- `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (wlr-data-control on Wayland, its own selection owner with INCR on
   X11) until another client takes it.
-- `linux_input`: the one shortcut state machine (hold, double-tap lock, toggle,
+- `linux/input`: the one shortcut state machine (hold, double-tap lock, toggle,
   double-tap only, Escape, Paste Last, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
   or, without the portal, the `hex` commands alone.
-- `linux_portal`: Hex's Linux app id `anomaly.hex` (reverse-DNS, #579; the
+- `linux/portal`: Hex's Linux app id `anomaly.hex` (reverse-DNS, #579; the
   windows' Wayland app_id and X11 WM_CLASS, and the `anomaly.hex.desktop`
   entry installs ship), the move of a managed pre-#579 `hex.desktop` to that
   name, the portal bus (a private zbus connection, `Register("anomaly.hex")`
@@ -263,30 +263,30 @@ substitute for source inspection or a second roadmap.
   sessions) and the GlobalShortcuts client on it: one session binding all of
   Hex's shortcuts once, Cancel dictation included, granted-trigger descriptions, ShortcutsChanged, ConfigureShortcuts, and
   session-closed reporting.
-- `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
+- `linux/remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
   persisted owner-only restore token, and Ctrl+V as keysyms.
-- `linux_context`: the focused application for modes: the X11 active
+- `linux/context`: the focused application for modes: the X11 active
   window's process, or on Wayland the activated `zwlr_foreign_toplevel`
   window's app ID named by its `.desktop` entry (none on GNOME and KDE).
-- `linux_atspi`: the focused window's page address through AT-SPI on X11 and
+- `linux/atspi`: the focused window's page address through AT-SPI on X11 and
   Wayland, matched by title and process and bounded by a deadline. Chromium
   exposes pages only with renderer accessibility on.
-- `linux_audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
+- `linux/audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
   audio through `output_ducking`, and MPRIS pause over D-Bus (zbus),
   restoring only what it changed, plus idle-sleep prevention for dictations.
-- `linux_input_route`: System default's Bluetooth avoidance on Linux. ALSA's
+- `linux/input_route`: System default's Bluetooth avoidance on Linux. ALSA's
   default cannot name another PipeWire source, so Hex marks its ALSA streams
   (`PIPEWIRE_ALSA`: `state.restore-target = false` and its PID, set on the
   main thread at startup) and moves them off a Bluetooth default source to
   the built-in (PCI) input, else the first other hardware input.
-- `linux_session`: display-backend selection matching winit's (Rune's)
+- `linux/session`: display-backend selection matching winit's (Rune's)
   nonempty `WAYLAND_DISPLAY` rule, independent of persisted preferences.
-- `linux_service`: the single-instance lock and owner-only, same-user Unix
+- `linux/service`: the single-instance lock and owner-only, same-user Unix
   socket that forwards `Activate` (with the activation token), shortcut
   commands, `Status`, and `Quit` to the one Hex process, plus the per-user
   systemd lifecycle (`Type=notify` readiness, `session.env`, start/restart).
-- `linux_rune_hud`: the Linux side of `rune_hud`: `LinuxIndicator` turns the
+- `linux/rune_hud`: the Linux side of `rune_hud`: `LinuxIndicator` turns the
   listener's capture, meter, and pending-output reports into HUD events and
   never waits on the HUD; it shows once the window's app runs, whether or not
   the window is open (layer-shell on Wayland, override-redirect on X11, and
@@ -298,14 +298,14 @@ substitute for source inspection or a second roadmap.
   through `hud_placement` (below the menu bar, in it, or out of the notch);
   Linux and Windows place it at the top or bottom edge.
   `rune_hud_frames` renders a fixed dictation through the shaders offscreen.
-- `linux_tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
+- `linux/tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
   with a dbusmenu built by `tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
 - `tray_menu`: the tray menu Linux and Windows share (recording state, Show
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
   lists too. Each tray maps a `TrayCommand` onto its own runtime.
-- `linux_login_item`: Launch at login on Linux, the managed XDG autostart
+- `linux/login_item`: Launch at login on Linux, the managed XDG autostart
   entry the installer also writes; the file is the only state.
 - `updater`: the in-app updater on every OS, a client of the Anomaly release
   service (`docs/plans/release-service.md`). `updater/protocol` is the
@@ -315,8 +315,8 @@ substitute for source inspection or a second roadmap.
   size- and SHA-256-checked downloads; `updater/{linux,macos,windows}` detect
   the install method, verify (OS code signature on macOS and Windows), stage,
   and restart into an update.
-- `windows`, `windows_app`, `windows_rune`, `windows_dictation`,
-  `windows_input`, `windows_paste`, `windows_context`, `windows_audio_control`, `windows_login_item`: the Windows
+- `windows`, `windows/app`, `windows/rune`, `windows/dictation`,
+  `windows/input`, `windows/paste`, `windows/context`, `windows/audio_control`, `windows/login_item`: the Windows
   beta CLI, the runtime host (`WindowsDesktopHost`: listener, model
   preparation, OpenCode catalog, transformations, updater) and single-instance
   claim, the tray app on `rune::App` (tray, window icon, and runtime thread;
@@ -383,64 +383,64 @@ substitute for source inspection or a second roadmap.
   jobs, and Dot scope (the one HUD look: a plate of dots lit by a braided,
   auto-levelled oscilloscope trace), the same on every OS and drawn by
   `rune_hud`; `spring` holds the frame-rate-independent springs.
-- `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
+- `meeting`: explicit capture through `meeting/capture`, owner-only WAV and transcript
   artifacts, final local-model publication, the user-facing Markdown copy, and
-  recovery, on every OS. Its `os` adapter (`meeting_macos`, `meeting_linux`,
-  `meeting_windows`) owns the system audio source and its consent, idle-sleep
+  recovery, on every OS. Its `os` adapter (`meeting/macos`, `meeting/linux`,
+  `meeting/windows`) owns the system audio source and its consent, idle-sleep
   prevention while recording, and reveal and Trash.
-- `meeting_capture`: independent self-healing microphone (cpal) and system
+- `meeting/capture`: independent self-healing microphone (cpal) and system
   audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
   Linux: `pw-record` of the default output's monitor; Windows: WASAPI
   loopback); one failing never stops the other, and resumed audio is padded
   onto the timeline.
-- `meeting_runtime`: the Linux and Windows apps' meeting controller thread,
+- `meeting/runtime`: the Linux and Windows apps' meeting controller thread,
   capsules, recording state, and tray items (macOS runs the same controller
   from `macos_rune`).
 - `durable`: crash-safe writes on every OS (`write`, `sync_file`,
   `sync_directory`). Windows flushes only through a writable handle and
   cannot open a directory, so file syncs and directory syncs go through it.
-- `meeting_generator`: who writes notes and live chapters: Apple
+- `meeting/generator`: who writes notes and live chapters: Apple
   Intelligence on a Mac that has it, else OpenCode when
   `meetings.summarize_with_opencode` is on (off by default; it sends the
   transcript excerpt).
 - `dictation_activity`: whether dictation is capturing or transcribing, so
   meeting chunks and the local API yield, and the background priority they
   run at, on every OS.
-- `meeting_transcript`: streaming 16 kHz resampling, short pause-aware
+- `meeting/transcript`: streaming 16 kHz resampling, short pause-aware
   overlapping chunks transcribed as background work on the dictation engine's
   loaded model (a process without the engine, such as the CLI, loads its own),
   seam deduplication, echo suppression, the rolling in-call transcript and its
   `TranscriptReader`, and Markdown rendering.
-- `meeting_echo`: 20 ms energy envelopes of both tracks and the signal-level
+- `meeting/echo`: 20 ms energy envelopes of both tracks and the signal-level
   bleed/local classification of microphone segments.
-- `meeting_notes`: a bounded provisional title while recording, then one
+- `meeting/notes`: a bounded provisional title while recording, then one
   post-publication call over a bounded transcript excerpt for the final title
   and a two-sentence summary, with deadline, manifest storage, and
   marker-delimited in-place Markdown updates.
-- `meeting_chapters`: live chapters (Labs): one
+- `meeting/chapters`: live chapters (Labs): one
   on-device pass per ~3 minutes of rolling transcript while recording, with
   Rust deciding topic changes, the per-boundary fix-up after publication,
   chapter-extended titles that never touch a user-typed one, and section
   Markdown for Copy section.
-- `meeting_query`: read-only meeting queries for agents (`meeting::query`):
+- `meeting/query`: read-only meeting queries for agents (`meeting::query`):
   lock-aware listing, in-memory BM25 full-text search with stemming and fuzzy
   matching, transcript paging, stored notes, and Markdown rendering. It never
   writes to the meetings folder.
-- `meeting_mcp`: the thin `rmcp` stdio adapter behind `hex mcp`, exposing
-  `meeting_query` as read-only tools and `hex-meeting://` resources.
+- `meeting/mcp`: the thin `rmcp` stdio adapter behind `hex mcp`, exposing
+  `meeting/query` as read-only tools and `hex-meeting://` resources.
 - `apple_intelligence`: the weak-linked FoundationModels Swift bridge:
   availability, context size, and guided-generation notes at utility priority.
 - `microphone_activity`: permission-light observation of which apps use the
   microphone: CoreAudio processes (macOS), a `pw-dump --monitor` of PipeWire
   capture streams (Linux), audio sessions on capture devices (Windows). No
   samples are read.
-- `meeting_detection`: pure provider classification, debounce, per-call snooze,
+- `meeting/detection`: pure provider classification, debounce, per-call snooze,
   and call-ended presence.
 - `calendar`: calendar meetings on every OS as a pure model (which events
   count as meetings, call-link parsing, the wall-clock reminder scheduler),
   plus the macOS EventKit bridge (`calendar.swift`): access, the change
   counter, bounded event reads, and the Settings snapshot.
-- `meeting_watcher`: the meeting controller loop: call detection, offers,
+- `meeting/watcher`: the meeting controller loop: call detection, offers,
   calendar reminders, recording workers, call-ended presence, notes, and the
   menu-bar meeting state. The capsules that show its events are
   `rune_ui::meeting_capsules`.
@@ -472,16 +472,16 @@ substitute for source inspection or a second roadmap.
   headers, and muxes and reads movies with the `ffmpeg`/`ffprobe`
   executables; without VA-API it copies frames and encodes with x264.
   Host-side, Linux differs only in where the audio comes from
-  (`capture_host::ListenerTimeline`, fed by `linux_dictation`'s
+  (`capture_host::ListenerTimeline`, fed by `linux/dictation`'s
   microphone), "While dictating" (`Environment`: an `AudioSuppressor` per
   capture), words (`LocalTranscriber::transcribe_words` as one foreground
-  job on the listener's engine), the clipboard and paste (`linux_paste`),
-  and the shortcut (`linux_input`'s `Shortcut::Capture`). Windows records
+  job on the listener's engine), the clipboard and paste (`linux/paste`),
+  and the shortcut (`linux/input`'s `Shortcut::Capture`). Windows records
   with Windows.Graphics.Capture (`crates/capture/src/win/media.rs`) and
-  shares Linux's host side (`ListenerTimeline` fed by `windows_dictation`,
+  shares Linux's host side (`ListenerTimeline` fed by `windows/dictation`,
   the same words path) except "While dictating" (`Environment`: a
-  `windows_audio_control::AudioSuppressor` per capture), paste and copy
-  (the engine's own Ctrl+V and clipboard), and input: `windows_input`'s
+  `windows::audio_control::AudioSuppressor` per capture), paste and copy
+  (the engine's own Ctrl+V and clipboard), and input: `windows/input`'s
   hooks give the Annotate key (`HotkeyAction::Capture`/`CaptureUp`), Escape
   while drawing, and, while a capture records, every pointer move, click,
   wheel turn, and modifier change in physical pixels
@@ -506,7 +506,7 @@ substitute for source inspection or a second roadmap.
   (Labs › Scrawl) and `CaptureSettings` its `capture.*` settings;
   `hex capture` is `control::cli::capture` (macOS through the running app;
   Linux reads the folder itself and hands start/stop/cancel to the
-  listener over `linux_service`; Windows sends every `hex annotate` command
+  listener over `linux/service`; Windows sends every `hex annotate` command
   to the running Hex).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
@@ -1017,8 +1017,8 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Hex runs as one long-lived process per user and data root on every OS: a
   menu-bar process on macOS (`macos_rune`, native `NSStatusItem`, native Metal
   `NSPanel` HUD, Rune meeting-capsule overlays), a tray process on Windows
-  (`windows_rune`, named-event single instance, Rune overlay HUD), and a
-  single-instance process on Linux (`linux_app`, socket + lock in the data
+  (`windows/rune`, named-event single instance, Rune overlay HUD), and a
+  single-instance process on Linux (`linux/app`, socket + lock in the data
   root, Rune overlay HUD). Closing the window never stops the runtime, listener,
   HUD, or accepted work.
 - Updates follow the release protocol's client rules exactly (the shared
@@ -1118,7 +1118,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   while something records or Annotate draws. Modifier-only shortcuts stay
   unsupported on Linux.
 - Every Linux shortcut source (X11 grabs, portal presses, `hex` commands) feeds
-  the same `linux_input` state machine and emits the same events. Commands are
+  the same `linux/input` state machine and emits the same events. Commands are
   idempotent: starting while recording or stopping while idle does nothing.
   They talk only to a running, listening Hex and fail with a clear error
   otherwise; they never start one. The control host hands them straight to

@@ -33,9 +33,9 @@ use super::controls::{Paint, PushSize, pulsing_dot, status_dot};
 use crate::app_settings::{MeetingIndicatorCorner, MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CalendarMeeting;
 use crate::desktop_i18n::{tr, tr_fill};
+use crate::meeting::detection::MeetingCandidate;
+use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
-use crate::meeting_detection::MeetingCandidate;
-use crate::meeting_watcher::{ControllerCommand, ControllerEvent};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -1095,7 +1095,7 @@ mod tests {
     use rune::{Env, Runtime};
 
     use super::*;
-    use crate::meeting_detection::MeetingSource;
+    use crate::meeting::detection::MeetingSource;
 
     type Chosen = Arc<Mutex<Vec<MeetingProviderChoice>>>;
 

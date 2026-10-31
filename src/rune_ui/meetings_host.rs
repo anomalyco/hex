@@ -36,11 +36,11 @@ impl LocalMeetings {
         let failed = |error: color_eyre::Report| format!("{error:#}");
         match request {
             MeetingRequest::Start => {
-                crate::meeting_runtime::request(Controller::Start { title: None })
+                crate::meeting::runtime::request(Controller::Start { title: None })
             }
-            MeetingRequest::Stop => crate::meeting_runtime::request(Controller::Stop),
+            MeetingRequest::Stop => crate::meeting::runtime::request(Controller::Stop),
             MeetingRequest::Summarize(id) => {
-                crate::meeting_runtime::request(Controller::Summarize(id))
+                crate::meeting::runtime::request(Controller::Summarize(id))
             }
             MeetingRequest::Rename { id, title } => crate::meeting::rename(&id, &title)
                 .map(|_| ())

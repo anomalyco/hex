@@ -337,6 +337,37 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertGreaterThan(audioFile.length, 4_000)
     }
 
+    func testSelectWarmDurationWarmsAndEndsWithoutSeparateButton() async throws {
+        let now = 12_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+
+        controller.setWarmDuration(.off)
+        XCTAssertFalse(controller.keyboardSessionEnabled)
+
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+        XCTAssertTrue(controller.keyboardSessionEnabled)
+        XCTAssertTrue(audio.isKeepaliveRunning)
+        XCTAssertEqual(controller.warmDuration, .fifteenMinutes)
+
+        controller.selectWarmDuration(.off)
+        XCTAssertFalse(controller.keyboardSessionEnabled)
+        XCTAssertFalse(audio.isKeepaliveRunning)
+    }
+
     private func settle() async throws {
         for _ in 0..<8 {
             try await Task.sleep(for: .milliseconds(25))

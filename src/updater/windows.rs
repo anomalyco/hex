@@ -94,7 +94,7 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
         let _ = fs::remove_file(&staging);
     }
     let executable = activation?;
-    if let Err(error) = crate::windows_login_item::repoint(&executable) {
+    if let Err(error) = crate::windows::login_item::repoint(&executable) {
         tracing::warn!(%error, "could not repoint Launch at login to the updated Hex");
     }
     if let Err(error) = repoint_start_menu_shortcut(&executable) {

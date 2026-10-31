@@ -26,6 +26,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks (#630)
+├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks" (#678)
 ├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
@@ -158,6 +159,31 @@ recognized. Dictate without processing, meetings, and live text are
 unchanged, and with the toggle off processing is exactly as before. Checks:
 the tests in [spoken_formatting.rs](../../src/spoken_formatting.rs);
 `spoken_formatting_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation with the toggle on; the Labs page goldens need regenerating on
+Linux with the new row.
+
+Spoken symbols (`spoken-symbols`, issue 678, every OS): while on,
+`Profiles::process_cancellable` in
+[dictation_processor.rs](../../src/dictation_processor.rs) reads
+`labs::spoken_symbols()` as each dictation's processing starts and runs
+`spoken_symbols::apply` right after spoken formatting and before filler
+words, the mode's corrections, OpenCode rewriting, and transformations.
+Whole English words, ignoring case, become symbols joined to their
+neighbours: "hashtag" and "hash sign" become `#` and "at sign" `@`, joined to
+the next word ("hashtag release" → "#release"); "underscore" `_`, "hyphen"
+`-`, and "slash" `/` join both words ("my underscore variable" →
+"my_variable"); "comma" `,`, "colon" `:`, and "semicolon" `;` join the
+previous word and leave one space before the next ("done comma thanks" →
+"done, thanks"). The commas, periods, and spaces the model puts around a
+spoken symbol go with it. Words such as "commas", "hashtags", "slashed", or
+"colonel" stay as they are, and the word list is fixed (no per-user symbol
+sets yet). Dictate without processing, meetings, and live text are
+unchanged, and with the toggle off processing is exactly as before. Checks:
+the tests in [spoken_symbols.rs](../../src/spoken_symbols.rs);
+`spoken_symbols_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real

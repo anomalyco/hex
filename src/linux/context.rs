@@ -21,7 +21,7 @@ use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, Window};
 
 use crate::context::ContextSnapshot;
-use crate::linux_atspi::WindowHint;
+use crate::linux::atspi::WindowHint;
 
 /// The focused window as the display server reports it.
 #[derive(Debug, Default)]
@@ -32,7 +32,7 @@ struct FocusedWindow {
 }
 
 pub(crate) fn capture() -> ContextSnapshot {
-    let window = if crate::linux_session::LinuxSession::detect().is_wayland() {
+    let window = if crate::linux::session::LinuxSession::detect().is_wayland() {
         wayland_focused_window()
     } else {
         x11_focused_window()
@@ -40,7 +40,7 @@ pub(crate) fn capture() -> ContextSnapshot {
     let Some(window) = window else {
         return ContextSnapshot::default();
     };
-    let accessible = crate::linux_atspi::focused_window(&WindowHint {
+    let accessible = crate::linux::atspi::focused_window(&WindowHint {
         pid: window.pid,
         title: window.title.clone(),
     });

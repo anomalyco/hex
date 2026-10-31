@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use crate::desktop_host::DesktopAction;
-use crate::linux_app::{HostHandle, HostRequest, HostSnapshot};
-use crate::linux_input::ShortcutCommand;
-use crate::linux_service::{Activation, Control, Published};
+use crate::linux::app::{HostHandle, HostRequest, HostSnapshot};
+use crate::linux::input::ShortcutCommand;
+use crate::linux::service::{Activation, Control, Published};
 use crate::tray_menu::{TrayCommand, TrayView};
 
 /// The white Hex mark the Windows tray uses, raw 32×32 RGBA.
-const ICON_RGBA: &[u8] = include_bytes!("../resources/windows/tray-32.rgba");
+const ICON_RGBA: &[u8] = include_bytes!("../../resources/windows/tray-32.rgba");
 const ICON_SIZE: u32 = 32;
 
 /// Shows the tray icon until the returned tray drops.
@@ -56,7 +56,7 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
     let result = match command {
         TrayCommand::PasteLast => {
             let route = published.shortcuts.lock().unwrap().clone();
-            crate::linux_service::route_shortcut(route.as_ref(), ShortcutCommand::PasteLast)
+            crate::linux::service::route_shortcut(route.as_ref(), ShortcutCommand::PasteLast)
         }
         TrayCommand::UseModel(model) => host.request(HostRequest::ChooseModel {
             model,
@@ -76,14 +76,14 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
             }))
         }
         TrayCommand::RecordMeeting => {
-            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Start { title: None })
+            crate::meeting::runtime::request(crate::meeting::MeetingRequest::Start { title: None })
                 .map_err(|error| color_eyre::eyre::eyre!(error))
         }
         TrayCommand::StopMeeting => {
-            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Stop)
+            crate::meeting::runtime::request(crate::meeting::MeetingRequest::Stop)
                 .map_err(|error| color_eyre::eyre::eyre!(error))
         }
-        TrayCommand::CopyLastMeeting => crate::meeting_runtime::copy_last_transcript()
+        TrayCommand::CopyLastMeeting => crate::meeting::runtime::copy_last_transcript()
             .map_err(|error| color_eyre::eyre::eyre!(error)),
         TrayCommand::Show | TrayCommand::Quit => Ok(()),
     };
@@ -100,7 +100,7 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
 pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
     let desktop = &snapshot.desktop;
     TrayView {
-        meetings: crate::meeting_runtime::tray_state(),
+        meetings: crate::meeting::runtime::tray_state(),
         ..TrayView::new(
             desktop.listener.running,
             desktop.activity.state,

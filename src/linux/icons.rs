@@ -11,14 +11,14 @@ use std::path::Path;
 
 use color_eyre::eyre::{Result, WrapErr};
 
-use crate::linux_portal::APP_ID;
+use crate::linux::portal::APP_ID;
 
 macro_rules! icon {
     ($size:literal) => {
         (
             $size,
             include_bytes!(concat!(
-                "../packaging/linux/icons/hicolor/",
+                "../../packaging/linux/icons/hicolor/",
                 $size,
                 "x",
                 $size,
@@ -50,7 +50,7 @@ pub(crate) fn install() -> Result<()> {
     let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.into());
     let own = canonical(&home);
     // Some profiles list the user's own data directory in XDG_DATA_DIRS too.
-    let packaged = crate::linux_portal::system_data_dirs()
+    let packaged = crate::linux::portal::system_data_dirs()
         .iter()
         .filter(|dir| canonical(dir) != own)
         .any(|dir| icon_path(dir, "48").exists());

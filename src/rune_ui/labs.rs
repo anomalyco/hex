@@ -242,6 +242,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks"),
     ));
     rows.push(row(
+        Feature::SpokenSymbols,
+        &HINTS,
+        tr("Spoken symbols"),
+        tr("Say \"comma\", \"colon\", \"hashtag\", \"underscore\", or \"slash\" to insert the symbol joined to its words"),
+    ));
+    rows.push(row(
         Feature::FillerWords,
         &HINTS,
         tr("Remove filler words"),
@@ -288,6 +294,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::SmartSpacing => "lab-smart-spacing",
+        Feature::SpokenSymbols => "lab-spoken-symbols",
     }
 }
 
