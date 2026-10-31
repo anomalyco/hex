@@ -167,7 +167,7 @@ substitute for source inspection or a second roadmap.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard.
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
-  dictation controls, Smart Turn, workers, and observations. It does not own the
+  dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.
 - `personal_commands`: the user's `hex.config.ts` (or `.js`) in
   `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
@@ -756,7 +756,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   no undo. There is no separate draw shortcut and no send-to list
   shortcut; Send to… is a capsule click. `hex annotate draw` toggles the
   pen for desktops without the portal. While a capture records, the
-  dictation and Voice Action shortcuts start nothing on either OS. Sends
+  dictation shortcut starts nothing on either OS. Sends
   carry the contact sheet and keyframes as inline `data:` image parts, never
   a local path. The Linux capsule doesn't open suggestions by itself.
   `validate-app.sh` requires

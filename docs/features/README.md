@@ -1104,14 +1104,14 @@ Linux beta                               // not macOS feature parity
 │   │   │   the desktop's own dialog; ShortcutsChanged updates each row
 │   │   │   // a desktop may keep an older binding over a new preferred_trigger (KDE)
 │   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
-│   │       under that shortcut's own row (Dictation, Output, Voice Action pane);
+│   │       under that shortcut's own row (Dictation, Output);
 │   │       the rest keep working
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
 │   │   └── General hides shortcut rows and lists the commands
 │   └── Listener starting or stopped -> `hex status` reports Unregistered,
 │       never the X11 mode
-├── hex dictation start|stop|toggle|cancel, hex voice-action start|stop|toggle,
-│   hex paste-last -> Same events as a shortcut       // linux.commands
+├── hex dictation start|stop|toggle|cancel, hex paste-last
+│   -> Same events as a shortcut                     // linux.commands
 │   ├── Idempotent: start while recording / stop while idle -> Nothing
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
@@ -1119,8 +1119,6 @@ Linux beta                               // not macOS feature parity
 │   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
 │   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
 │       the user assigns one, idle presses do nothing (#482)
-├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
-│   └── Selected text from the primary selection -> OpenCode -> Paste the reply
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
@@ -1143,7 +1141,10 @@ Linux beta                               // not macOS feature parity
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
-├── Microphone failure -> Listener exits, not macOS automatic recovery
+├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
+│   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
+│   ├── Startup open fails -> Retry with backoff; the listener keeps running
+│   └── Released while idle, on-demand open fails -> Failed entry; stays released
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
 │   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
@@ -1207,7 +1208,7 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Another release (unmanaged install) -> Tray, sidebar footer: Download update
 ├── Another channel chosen -> Tray, sidebar footer: Switch to Stable 2.3.1 (confirm)
 ├── Otherwise -> Sidebar footer: Check for updates
-└── Modes, Voice Action, History, Activity, transformations -> as on macOS
+└── Modes, History, Activity, transformations -> as on macOS
 ```
 
 Windows updates follow `maintain.updates` ([updater.rs](../../src/updater.rs),
@@ -1256,7 +1257,7 @@ closing it leaves the same process answering.
 
 Shortcut rules are pure and tested once for every source in
 [linux_input.rs](../../src/linux_input.rs): hold, double-tap lock, toggle,
-double-tap only, Escape, Paste Last, Voice Action, and command idempotence,
+double-tap only, Escape, Paste Last, and command idempotence,
 plus X11 auto-repeat filtering and a portal release that never arrives
 (Hyprland's Lua binds drop it when the modifier comes up first; see
 [dictation.md](dictation.md)). The X11 grab tests run on an isolated display in
@@ -1298,7 +1299,7 @@ Linux process                            // maintain.linux-service
 │   ├── No Hex, no unit or custom data dir -> This process becomes Hex
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
-├── hex dictation|voice-action|paste-last -> Socket worker -> Listener queue (never the UI thread)
+├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
 ├── Open the window -> Maps at 980×760 (min = max), tiling WMs float it -> Resizable from 860×560
 ├── Close the window -> Keep microphone, accepted jobs, model preparation, and HUD
@@ -1394,7 +1395,7 @@ Capture                                  // hex app and hex dictate
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
 │       nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
-├── Dictation or Voice Action pasted -> Done sound; failures stay silent
+├── Dictation pasted -> Done sound; failures stay silent
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
 ```
 
@@ -1482,7 +1483,7 @@ macOS debug runtime                      // not release navigation
 `hex app -- --snap OUT --scene NAME` -> Rendered fixtures    // not proof capture/download/update happened
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Calls the host directly: saves settings through it; woken on host changes
-├── Sidebar: General, Modes, Voice Action, History
+├── Sidebar: General, Modes, History
 ├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
 ├── First-run setup -> onboarding::Flow without permissions or practice
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
@@ -1535,8 +1536,7 @@ best-effort deletion is not guaranteed deletion.
 `dev.rune-ui` lives in [rune_ui.rs](../../src/rune_ui.rs) and its pane modules;
 its tests drive the Rune runtime headlessly (navigation; General rows per
 shortcut source, fitting the default window with Advanced collapsed, Double-tap to lock folding under the rows below, saves through the host, Quit Hex, microphone-release
-confirmation, shortcut recording and Escape, conflicts; Voice Action opt-in
-and its conflict refusal, model choice; History select, delete, two-step
+confirmation, shortcut recording and Escape, conflicts; History select, delete, two-step
 clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
 on release), application conflicts, a chosen file joining the mode, arrow
 keys in the model and application searches; the picker's ChooseModel/CancelModel; setup's download; draft
@@ -1553,7 +1553,7 @@ Windows requests are recorded, never performed; the macOS native host
 (`dev.rune-ui-macos`) has no automated test of its own. They skip the goldens without a GPU
 adapter and do not prove a real window, input method, or physical shortcut.
 Before the single-process change, a headless script against an isolated
-service saved a new mode, a correction, and Voice Action. See
+service saved a new mode and a correction. See
 [the Rune port plan](../plans/rune-ui.md) for what was observed.
 
 `dev.rune-ui-macos` lives in [macos_rune.rs](../../src/macos_rune.rs) and
