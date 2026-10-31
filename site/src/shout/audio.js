@@ -3,6 +3,8 @@
 // builds every play() is logged (time, file, gain, rate, pan, bus) so a recording can be mixed
 // offline without playing anything aloud.
 
+import { ArrivalGate, arrivalVoice, scheduleArrival } from "./arrival.js"
+
 const URLS = import.meta.glob("./audio/*.mp3", { query: "?url", import: "default", eager: true })
 const urlOf = (file) => URLS[`./audio/${file}`]
 
@@ -16,6 +18,7 @@ export class AudioEngine {
     this.muted = false
     this.hidden = false
     this.duck = 0
+    this.arrivals = new ArrivalGate()
   }
 
   // The context is created by the caller inside the start gesture (or later, on unmute).
@@ -152,6 +155,19 @@ export class AudioEngine {
   sfx(name, opts = {}) {
     const file = this.manifest?.sfx[name]
     if (file) this.play(file, { bus: "ui", ...opts })
+  }
+
+  // A soft synthesized arrival sound for a notification card, matched to its app. Rides the ui bus,
+  // so it ducks under the explosion and voice like every other interface sound.
+  arrive(kind, { gain = 1, rate = 1, pan = 0 } = {}) {
+    const voice = arrivalVoice(kind)
+    const g = this.arrivals.admit(this.clock()) * gain
+    if (g <= 0) return
+    this.log?.push({ t: +this.clock().toFixed(4), file: `synth-arrive-${voice}`, kind, bus: "ui", gain: +g.toFixed(3), rate: +rate.toFixed(3), pan: +pan.toFixed(3), i: +(this.i ?? 0).toFixed(3), duck: +this.duck.toFixed(3) })
+    if (!this.on || !this.buses?.ui) return
+    try {
+      scheduleArrival(this.ctx, this.buses.ui, voice, this.ctx.currentTime, { gain: g, rate, pan })
+    } catch {}
   }
 
   // Immediate synthesized mechanical key bottom-out + sub-bass detonation on click (zero network wait).

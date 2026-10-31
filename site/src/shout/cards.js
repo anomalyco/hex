@@ -766,25 +766,59 @@ Object.assign(DRAW, {
       ctx.fillRect(caret.x, caret.y - 10, 1.5, 15)
     }
     if (!c.reply) c.caret = { x: caret.x + 4, y: caret.y - 3 }
-    // bottom row
+    // bottom row: left cluster (+, model, effort) flows from the left, the shortcut hint hangs off the
+    // send button, and whatever does not fit is dropped (the hint first, then the provider prefix)
+    // instead of overlapping.
     const by = cy + ch - 20
+    const sx = w - 34
+    const gap = 10
+    const chevron = (x, color) => {
+      ctx.beginPath()
+      ctx.moveTo(x - 3, by - 1.5)
+      ctx.lineTo(x, by + 1.5)
+      ctx.lineTo(x + 3, by - 1.5)
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.3
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.stroke()
+    }
     ctx.textBaseline = "middle"
+    ctx.textAlign = "left"
     ctx.font = `400 15px ${SANS}`
     ctx.fillStyle = "#8e8e94"
-    ctx.fillText("+", 22, by)
+    ctx.fillText("+", 24, by)
     ctx.font = `500 11px ${SANS}`
-    ctx.fillStyle = "#8e8e94"
-    const model = "Anthropic / Claude Opus 5.5  ⌄"
-    ctx.fillText(model, 40, by)
-    const mw = ctx.measureText(model).width
-    ctx.fillStyle = "#6a6a70"
-    ctx.fillText("High  ⌄", 52 + mw, by)
-    const sx = w - 34
+    const textW = (t) => ctx.measureText(t).width
+    const chevW = 6
+    const hint = "Queue ⌘↵"
     ctx.font = `500 10.5px ${SANS}`
+    const hintW = textW(hint)
+    ctx.font = `500 11px ${SANS}`
+    const effortW = textW("High") + 5 + chevW
+    const leftStart = 42
+    const rightEdge = sx - 12 - 8
+    let showHint = true
+    let model = "Anthropic / Claude Opus 5.5"
+    const fits = () => leftStart + textW(model) + 5 + chevW + gap + effortW <= (showHint ? rightEdge - hintW - gap : rightEdge)
+    if (!fits()) model = "Claude Opus 5.5"
+    if (!fits()) showHint = false
+    if (!fits()) model = ellipsize(ctx, model, Math.max(40, rightEdge - leftStart - 5 - chevW - gap - effortW))
+    ctx.fillStyle = "#8e8e94"
+    ctx.fillText(model, leftStart, by)
+    let x = leftStart + textW(model) + 5
+    chevron(x + chevW / 2, "#8e8e94")
+    x += chevW + gap
     ctx.fillStyle = "#6a6a70"
-    ctx.textAlign = "right"
-    ctx.fillText("Queue ⌘↵", sx - 20, by)
-    ctx.textAlign = "left"
+    ctx.fillText("High", x, by)
+    chevron(x + textW("High") + 5 + chevW / 2, "#6a6a70")
+    if (showHint) {
+      ctx.font = `500 10.5px ${SANS}`
+      ctx.fillStyle = "#6a6a70"
+      ctx.textAlign = "right"
+      ctx.fillText(hint, rightEdge, by)
+      ctx.textAlign = "left"
+    }
     if (c.pulse > 0) {
       ctx.beginPath()
       ctx.arc(sx, by, 13 + 10 * (1 - c.pulse), 0, Math.PI * 2)
