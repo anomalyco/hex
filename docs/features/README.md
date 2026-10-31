@@ -308,6 +308,13 @@ empty; `hex app -- --scene onboarding-hero` (`-still` for Reduce Motion) runs
 it live, and `--video` records it. Its springs passed motion-lint as level
 channels; native visual review is still by eye. The guide
 beside System Settings is [permission_guide.m](../../native/permission_guide.m).
+On Windows the setup step adds a Microphone row only while the microphone
+switch in Settings › Privacy & security is off (device, user, or desktop
+apps; `CapabilityAccessManager\ConsentStore\microphone` says `Deny`). Allow
+opens `ms-settings:privacy-microphone`, the row describes the "Let desktop apps
+access your microphone" switch, and setup finishes once it is on
+(`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`; the
+registry read is cross-compiled only, not run on a Windows PC).
 Unit tests (`onboarding::tests`) cover step order, the download starting on the
 welcome screen and retrying from any step, permissions-only setup with the
 model waiting for practice, the auto-advance beat, live row flips, a refused
@@ -1201,6 +1208,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   └── Theme read when the tray is created; a later switch applies at the next launch
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
+├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
+├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
 │   └── Windows default input changes -> Switch once capture is idle // cpal's default-device report
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless

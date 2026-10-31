@@ -201,7 +201,7 @@ impl Drop for ChordWatch {
     }
 }
 
-/// The keyboard hook cannot tell a single modifier from ordinary typing,
+/// A dictation shortcut needs a modifier, a function key, or a mouse button,
 /// and Paste Last fires on a key press.
 pub(super) fn validate_hotkey(
     target: ShortcutTarget,
@@ -212,7 +212,7 @@ pub(super) fn validate_hotkey(
     }
     WindowsHotkey::from(binding)
         .validate()
-        .map_err(|_| tr("Use two modifiers or add a key"))
+        .map_err(|_| tr("Add a modifier"))
 }
 
 /// The listener's retained history, shared with the window.
