@@ -72,6 +72,32 @@ pub(crate) fn unsupported(message: impl Into<String>) -> ControlReply {
     ControlReply::error("unsupported", message)
 }
 
+/// Answers the local API's `POST /control` calls until it stops, each on
+/// a thread of its own: a printing stop waits up to a minute.
+pub(crate) fn serve(
+    calls: std::sync::mpsc::Receiver<super::ControlCall>,
+    host: std::sync::Arc<dyn Host + Send + Sync>,
+) {
+    let spawned = std::thread::Builder::new()
+        .name("hex-control".into())
+        .spawn(move || {
+            for super::ControlCall { request, reply } in calls {
+                let host = host.clone();
+                let answered = std::thread::Builder::new()
+                    .name("hex-control-call".into())
+                    .spawn(move || {
+                        let _ = reply.send(answer(host.as_ref(), request));
+                    });
+                if let Err(error) = answered {
+                    tracing::warn!(%error, "could not answer a control command");
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "`hex` control commands will not reach this Hex");
+    }
+}
+
 /// Answers one request on the transport's thread.
 pub(crate) fn answer(host: &dyn Host, request: ControlRequest) -> ControlResponse {
     match super::check_version(&request) {

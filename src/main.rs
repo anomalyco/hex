@@ -180,8 +180,6 @@ mod windows_audio_control;
 #[cfg(target_os = "windows")]
 mod windows_context;
 #[cfg(target_os = "windows")]
-mod windows_control;
-#[cfg(target_os = "windows")]
 mod windows_dictation;
 #[cfg(target_os = "windows")]
 mod windows_input;

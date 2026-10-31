@@ -184,9 +184,8 @@ start|stop|cancel|toggle` (with `stop --print`), `paste-last`, `settings`,
 `model`, `window`, `vocabulary`, `history clear`, `check-for-updates`,
 `launch-at-login` (the Run key), `onboarding reset`, `logs`, and `commands
 init|check`, `annotate`, `meetings record|stop|copy-last`, `history`, and
-`mcp`. They reach it over a named pipe, `\\.\pipe\anomaly.hex.control.<your
-SID>`, whose DACL grants only your account and which refuses remote clients;
-the client checks the process serving it runs as you. Dictation commands go
+`mcp`. They reach it through its local API (`local-api.json` in
+`%APPDATA%\hex` and the bearer-authenticated `POST /control`). Dictation commands go
 to the listener's own loop as a shortcut press would, and `annotate`
 start, stop, cancel, and status wait for its capture host. `history`,
 `meetings`, and `mcp` work as on macOS. `hex restart`
@@ -216,7 +215,7 @@ fixtures without starting anything: `hex app -- --snap out.png --scene modes`.
 hex app
 ├── named event already held -> signal it (the running app shows its window) -> exit
 └── becomes the app                                   // windows_rune::open
-    ├── serves the control pipe (windows_control) -> control::host::answer
+    ├── the local API's POST /control -> control::host::answer
     ├── runtime thread: WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater), publishes every 250 ms
     ├── main thread: rune::App's winit loop and the window; rune::Tray runs on its own thread
     ├── --hidden -> windowless start; close -> hide (keep_running)

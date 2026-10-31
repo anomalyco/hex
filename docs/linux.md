@@ -92,9 +92,9 @@ one (quit it first).
 The socket is owner-only in Hex's data directory, with same-user peer
 credentials, versioned bounded frames, bounded queues, and I/O deadlines. It is
 not a network API or the macOS embedded transcription SDK service. It carries
-`Activate`, `Status`, Annotate's commands, and every `hex` control command as
-one versioned `ControlRequest`; dictation commands go straight from the
-socket to the listener, never through the window.
+`Activate`, `Status`, and Annotate's recording commands. The `hex` control
+commands reach Hex through its local API's `POST /control`; dictation
+commands go straight from there to the listener, never through the window.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
