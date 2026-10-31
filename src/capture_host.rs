@@ -2375,17 +2375,23 @@ struct LiveInput(Arc<Mutex<InputState>>);
 
 static SHARED_INPUT: Mutex<Option<LiveInput>> = Mutex::new(None);
 
+/// The recording capture's [`InkSource`], kept apart from [`LiveInput`]'s
+/// lock: the `capture-input` thread holds that lock while a pen release ends
+/// its stroke ([`end_stroke`]), which reads the pointer from here, so reading
+/// it through that lock deadlocked the thread and, with it, every view that
+/// asks for the ink.
+static INK: Mutex<Option<InkSource>> = Mutex::new(None);
+
+fn set_ink(source: Option<InkSource>) {
+    *INK.lock().unwrap_or_else(|error| error.into_inner()) = source;
+}
+
 /// The recording capture's ink, laser, and pointer, for the ink overlay to
 /// draw: `None` until its engine started, and once it ended.
 pub fn ink_source() -> Option<InkSource> {
-    let shared = SHARED_INPUT
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let state = shared.as_ref()?.state();
-    state.target.as_ref().map(|target| InkSource {
-        telemetry: target.sink.telemetry().clone(),
-        t0: target.t0,
-    })
+    INK.lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
 }
 
 /// Where a recording capture keeps its strokes, and its clock.
@@ -2450,6 +2456,7 @@ impl LiveInput {
         let mut state = self.state();
         state.recording = bundle.map(Path::to_path_buf);
         state.target = None;
+        set_ink(None);
         TAP_RECORDING.store(false, Ordering::Release);
         let dropped = DROPPED_INPUT.swap(0, Ordering::Relaxed);
         if dropped > 0 {
@@ -2472,6 +2479,10 @@ impl LiveInput {
         if state.recording.as_deref() != Some(bundle) {
             return;
         }
+        set_ink(Some(InkSource {
+            telemetry: sink.telemetry().clone(),
+            t0,
+        }));
         state.target = Some(InputTarget {
             bundle: bundle.to_path_buf(),
             sink,
@@ -2491,6 +2502,7 @@ impl LiveInput {
             .is_some_and(|target| target.bundle == bundle)
         {
             state.target = None;
+            set_ink(None);
             TAP_RECORDING.store(false, Ordering::Release);
             reset_drawing();
         }
@@ -3585,6 +3597,26 @@ impl AudioTimeline for WavTimeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pen release on the `capture-input` thread ends its stroke while
+    /// that thread holds the input target's lock; reading the ink must not
+    /// take that lock again (#572: Windows hung on the first stroke).
+    #[test]
+    fn ending_a_stroke_while_the_input_target_is_locked_does_not_deadlock() {
+        let live = LiveInput::shared().expect("the capture-input thread starts");
+        let (done, finished) = mpsc::channel();
+        let held = thread::spawn(move || {
+            let _state = live.state();
+            end_stroke();
+            let _ = ink_source();
+            let _ = done.send(());
+        });
+        assert!(
+            finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "ending a stroke under the input lock deadlocked"
+        );
+        held.join().expect("the thread finishes");
+    }
 
     /// The capsule is one 640×424 panel above everything, but only its pill
     /// takes clicks: a click elsewhere on the panel, or under the
