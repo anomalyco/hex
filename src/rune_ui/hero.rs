@@ -24,6 +24,7 @@ use rune::compose::{Compositor, Frame};
 use rune::{Color, El, el};
 
 use super::Ui;
+use super::onboarding_kit::game_fx::{GameFx, is_game_mark};
 use super::onboarding_kit::gpu_stage::{OnboardingGpu, is_onboard_mark};
 
 /// The stage's key, found by the compositor each frame.
@@ -99,6 +100,8 @@ pub(super) fn stage() -> El {
 pub(crate) struct HeroCompositor {
     gpu: Option<Gpu>,
     onboarding: Option<OnboardingGpu>,
+    /// The practice game's strike and burn, painted at its effect slots.
+    game: Option<GameFx>,
     /// Rune's clock when the stage appeared: the entrance starts there.
     since: Option<f64>,
     shown: bool,
@@ -127,7 +130,11 @@ impl Compositor<Ui> for HeroCompositor {
     }
 
     fn render(&mut self, f: &mut Frame<'_, Ui>) {
-        if self.onboarding.is_some() || f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
+        if f.rt.marks.iter().any(|&m| is_game_mark(m)) {
+            self.game
+                .get_or_insert_with(|| GameFx::new(f.device))
+                .render(f);
+        } else if self.onboarding.is_some() || f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
             if self
                 .onboarding
                 .as_ref()
