@@ -460,6 +460,8 @@ fn main() -> Result<()> {
                 id: id.clone(),
                 md: true,
                 json: false,
+                srt: false,
+                vtt: false,
                 from: None,
                 to: None,
                 chapter: None,
