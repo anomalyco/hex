@@ -1156,6 +1156,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         stopping: thread_stopping,
         urgent: thread_urgent,
         frames: thread_frames,
+        failure: _,
     } = sampler;
     // While the host's own windows are recorded, nothing of its is left out.
     let hidden = |shown: bool| {
