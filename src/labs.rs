@@ -79,10 +79,11 @@ pub enum Feature {
     SecondDictationShortcut,
     SmartSpacing,
     SpokenSymbols,
+    PickerSortFilter,
 }
 
 impl Feature {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -104,6 +105,7 @@ impl Feature {
         Self::SecondDictationShortcut,
         Self::SmartSpacing,
         Self::SpokenSymbols,
+        Self::PickerSortFilter,
     ];
 
     /// The features this OS and build have.
@@ -147,7 +149,8 @@ impl Feature {
             | Self::SubtitleExport
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
-            | Self::SpokenSymbols => Audience::Everyone,
+            | Self::SpokenSymbols
+            | Self::PickerSortFilter => Audience::Everyone,
         }
     }
 
@@ -183,6 +186,7 @@ impl Feature {
             | Self::RestoreShortcutDefault
             | Self::SpokenFormatting
             | Self::SpokenSymbols
+            | Self::PickerSortFilter
             | Self::FillerWords => true,
         }
     }
@@ -211,6 +215,7 @@ impl Feature {
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::SmartSpacing => "smart-spacing",
             Self::SpokenSymbols => "spoken-symbols",
+            Self::PickerSortFilter => "picker-sort-filter",
         }
     }
 
@@ -238,6 +243,7 @@ impl Feature {
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::SmartSpacing => "labs.smart_spacing",
             Self::SpokenSymbols => "labs.spoken_symbols",
+            Self::PickerSortFilter => "labs.picker_sort_filter",
         }
     }
 
@@ -288,6 +294,9 @@ impl Feature {
             Self::SpokenSymbols => {
                 "Turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words"
             }
+            Self::PickerSortFilter => {
+                "Sort the Local transcription picker by size or name and show only models for the saved language"
+            }
         }
     }
 
@@ -319,6 +328,7 @@ impl Feature {
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
             Self::SpokenSymbols => settings.labs.spoken_symbols,
+            Self::PickerSortFilter => settings.labs.picker_sort_filter,
         }
     }
 
@@ -345,6 +355,7 @@ impl Feature {
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
             Self::SpokenSymbols => settings.labs.spoken_symbols = on,
+            Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
         }
     }
 }
