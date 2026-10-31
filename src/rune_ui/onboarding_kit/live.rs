@@ -380,15 +380,20 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
     }
 }
 
-/// What the practice dictation's last try needs said, under the field.
-pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
-    let copy = match live.practice {
+/// What the practice dictation's last try needs said.
+pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
+    Some(match live.practice {
         Practice::TooShort => "Hold the shortcut a little longer while you speak.",
         Practice::NothingHeard => "Hex didn't hear any words. Try again a little louder.",
         Practice::Failed => "That didn't work. Try again.",
         Practice::Transcribing => "Typing what you said…",
         _ => return None,
-    };
+    })
+}
+
+/// [`hint_copy`] under the practice field.
+pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
+    let copy = hint_copy(live)?;
     Some(
         text(copy)
             .key("practice-hint")

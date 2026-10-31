@@ -124,6 +124,10 @@ pub(crate) struct Onboard {
     pub(crate) dictated: Dictated,
     /// A story's stand-in for a real dictation on the interactive try.
     pub(crate) rehearsal: Option<Rehearsal>,
+    /// The interactive try as the practice game (`game`).
+    pub(crate) game: Option<super::game::Session>,
+    /// The interactive try as the plain practice field, not the game.
+    pub(crate) practice_field: bool,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -231,6 +235,8 @@ impl Onboard {
             live: None,
             dictated: Dictated::default(),
             rehearsal: None,
+            game: None,
+            practice_field: false,
         }
     }
 
@@ -310,6 +316,9 @@ impl Onboard {
     /// Called when the interactive `"Your turn"` [`TextArea`] changes (e.g. a
     /// real dictation paste from Hex lands or the user types).
     pub(crate) fn on_practice_change(&mut self, _: &mut Tx) {
+        if super::game::changed(self) {
+            return;
+        }
         self.dictated.changed(&self.practice.text, self.now);
         let has_words = !self.practice.text.trim().is_empty();
         self.hud_landed |= has_words;
@@ -418,6 +427,7 @@ impl Onboard {
         self.practice = TextEdit::default();
         self.practice.focused = self.interactive_try();
         self.dictated.reset();
+        self.game = None;
         if let Some(rehearsal) = self.rehearsal.as_mut() {
             *rehearsal = Rehearsal::new(rehearsal.streams);
             rehearsal.from = self.now;
@@ -549,6 +559,10 @@ fn first_run() -> Story<Onboard> {
     })
     .variant("Your turn, model doesn't stream", |s| {
         s.rehearsal = Some(Rehearsal::new(false));
+    })
+    .variant("Your turn, practice field", |s| {
+        s.rehearsal = Some(Rehearsal::new(true));
+        s.practice_field = true;
     })
     .variant("Quick motion", |s| {
         s.motion.enter = 0.28;
@@ -805,7 +819,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
 }
 
 #[cfg(target_os = "macos")]
-fn physical_shortcut_held(caps: &[String]) -> bool {
+pub(super) fn physical_shortcut_held(caps: &[String]) -> bool {
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
         fn CGEventSourceFlagsState(state_id: u32) -> u64;
@@ -833,7 +847,7 @@ fn physical_shortcut_held(caps: &[String]) -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn physical_shortcut_held(_: &[String]) -> bool {
+pub(super) fn physical_shortcut_held(_: &[String]) -> bool {
     false
 }
 
@@ -862,7 +876,10 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         s.auto_due_at = first_run_next(s, now).map(|secs| now + secs);
     }
 
-    if s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard) {
+    let trying = s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard);
+    if trying && super::game::step(s, now) {
+        s.hud.clear();
+    } else if trying {
         // The real first run follows Hex's own dictation, which sounds its
         // own tones; a rehearsal plays one without them.
         let real = match s.rehearsal {
@@ -912,6 +929,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             s.reduced.get(),
         );
     } else {
+        s.game = None;
         s.live_hold_from = None;
         s.hud.clear();
     }
