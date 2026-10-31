@@ -110,6 +110,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
     /// Any cold-start recording handoff older than 10 seconds warms the session instead of surprise-recording.
     static let handoffWindow: TimeInterval = 10.0
 
+    /// Opens Hex's keyboard setup screen without starting a session.
+    case setup
     case startSession(requestedAt: TimeInterval?, returnAppID: String?)
     case startRecording(
         jobID: String,
@@ -135,6 +137,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         let style = value("style").flatMap(DictationStyle.init(rawValue:))
 
         switch url.path {
+        case "/setup":
+            self = .setup
         case "/start":
             self = .startSession(requestedAt: requestedAt, returnAppID: returnAppID)
         case "/record":
@@ -152,6 +156,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
     var requestedAt: TimeInterval? {
         switch self {
+        case .setup:
+            nil
         case .startSession(let ts, _), .startRecording(_, let ts, _, _):
             ts
         }
@@ -159,6 +165,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
     var returnAppID: String? {
         switch self {
+        case .setup:
+            nil
         case .startSession(_, let appID), .startRecording(_, _, _, let appID):
             appID
         }
@@ -176,6 +184,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
         var items: [URLQueryItem] = []
         switch self {
+        case .setup:
+            components.path = "/setup"
+
         case .startSession(let requestedAt, let returnAppID):
             components.path = "/start"
             if let requestedAt {
@@ -293,6 +304,7 @@ struct KeyboardBridge {
         static let returnAppID = "settings.returnAppID"
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
+        static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
     }
 
     private let defaults: UserDefaults?
@@ -391,6 +403,22 @@ struct KeyboardBridge {
         }
         nonmutating set {
             defaults?.set(newValue, forKey: Key.lastInsertedResultID)
+        }
+    }
+
+    /// When the keyboard last ran with Full Access. Without Full Access the keyboard
+    /// cannot write to the App Group at all, so only the keyboard sets this.
+    var fullAccessSeenAt: TimeInterval? {
+        get {
+            let value = defaults?.double(forKey: Key.fullAccessSeenAt) ?? 0
+            return value > 0 ? value : nil
+        }
+        nonmutating set {
+            if let newValue {
+                defaults?.set(newValue, forKey: Key.fullAccessSeenAt)
+            } else {
+                defaults?.removeObject(forKey: Key.fullAccessSeenAt)
+            }
         }
     }
 

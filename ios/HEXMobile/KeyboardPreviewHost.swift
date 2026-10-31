@@ -93,6 +93,10 @@ struct KeyboardSnapshotStage: View {
             viewModel.snapshot = .offline
             viewModel.style = .polished
 
+        case "keyboard-no-access":
+            viewModel.hasFullAccess = false
+            viewModel.snapshot = .offline
+
         case "keyboard-warm":
             viewModel.style = .casual
             viewModel.snapshot = KeyboardSnapshot(

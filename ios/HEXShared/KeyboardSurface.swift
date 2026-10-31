@@ -38,6 +38,7 @@ final class KeyboardViewModel: ObservableObject {
     var onSpace: (() -> Void)?
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
+    var onOpenURL: ((URL) -> Void)?
     weak var inputViewController: UIInputViewController?
 
     var isWarmAvailable: Bool {
@@ -125,6 +126,10 @@ private struct RepeatDeleteKey: View {
     }
 }
 
+enum KeyboardSetupCopy {
+    static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
+}
+
 struct KeyboardSurfaceView: View {
     @ObservedObject var model: KeyboardViewModel
 
@@ -206,23 +211,25 @@ struct KeyboardSurfaceView: View {
                     .accessibilityLabel("Return app after cold start")
                 }
 
-                Button {
-                    model.activeTray = .style
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(model.style.label)
-                            .font(.system(size: 12, weight: .medium))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
+                if model.hasFullAccess {
+                    Button {
+                        model.activeTray = .style
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(model.style.label)
+                                .font(.system(size: 12, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(HexTheme.textBase)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(HexTheme.layer01, in: Capsule())
+                        .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
                     }
-                    .foregroundStyle(HexTheme.textBase)
-                    .padding(.horizontal, 10)
-                    .frame(height: 26)
-                    .background(HexTheme.layer01, in: Capsule())
-                    .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dictation style: \(model.style.label)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dictation style: \(model.style.label)")
             }
             .frame(height: 30)
         }
@@ -262,11 +269,14 @@ struct KeyboardSurfaceView: View {
         if !model.hasFullAccess {
             HStack(spacing: 6) {
                 HexStatusDot(color: HexTheme.warmMic, size: 7)
-                Text("Allow Full Access in Settings")
+                Text(KeyboardSetupCopy.fullAccessPath)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(HexTheme.textMuted)
+                    .foregroundStyle(HexTheme.textBase)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
         } else if model.isWarmAvailable {
             switch model.snapshot.state {
             case .recording:
@@ -324,7 +334,9 @@ struct KeyboardSurfaceView: View {
     @ViewBuilder
     private var primaryStage: some View {
         if !model.hasFullAccess {
-            Link(destination: KeyboardLaunchRequest.startSession(requestedAt: model.now, returnAppID: nil).url) {
+            Button {
+                model.onOpenURL?(KeyboardLaunchRequest.setup.url)
+            } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.up.forward.app.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -337,7 +349,9 @@ struct KeyboardSurfaceView: View {
             }
             .buttonStyle(.plain)
         } else if !model.isWarmAvailable || model.snapshot.state == .failed {
-            Link(destination: model.coldStartURL) {
+            Button {
+                model.onOpenURL?(model.coldStartURL)
+            } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 14, weight: .semibold))

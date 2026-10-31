@@ -3,8 +3,11 @@ import UIKit
 
 struct ContentView: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var dictation: DictationController
     @Binding var openedFromKeyboard: Bool
+    @Binding var showSetup: Bool
+    @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var practiceText = ""
     @FocusState private var practiceFocused: Bool
 
@@ -31,6 +34,11 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 headerRow
+
+                if showSetup || !setupComplete {
+                    KeyboardSetupCard(dictation: dictation, monitor: setupMonitor)
+                }
+
                 dictationStageCard
 
                 if !dictation.transcript.isEmpty {
@@ -51,6 +59,23 @@ struct ContentView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
+        .task {
+            while !Task.isCancelled {
+                setupMonitor.refresh()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                setupMonitor.refresh()
+            }
+        }
+    }
+
+    private var setupComplete: Bool {
+        setupMonitor.keyboardReady
+            && setupMonitor.microphone == .granted
+            && dictation.isModelReady
     }
 
     private var headerRow: some View {
@@ -823,6 +848,7 @@ struct ContentView: View {
 #Preview {
     ContentView(
         dictation: DictationController.shared,
-        openedFromKeyboard: .constant(false)
+        openedFromKeyboard: .constant(false),
+        showSetup: .constant(false)
     )
 }

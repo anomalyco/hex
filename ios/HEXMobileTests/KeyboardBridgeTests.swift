@@ -73,6 +73,25 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
     }
 
+    func testKeyboardSetupLaunchRoundTripsWithoutAHandoff() {
+        let request = KeyboardLaunchRequest.setup
+        XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/setup")
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        XCTAssertFalse(request.isHandoffExpired(at: 1_000_000))
+    }
+
+    @MainActor
+    func testFullAccessSeenAtIsStoredInTheAppGroup() {
+        let suiteName = "hex.tests.fullAccess.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+
+        XCTAssertNil(bridge.fullAccessSeenAt)
+        bridge.fullAccessSeenAt = 1_234
+        XCTAssertEqual(KeyboardBridge(defaults: defaults).fullAccessSeenAt, 1_234)
+    }
+
     func testKeyboardRecordingLaunchRequiresAJob() {
         let url = URL(string: "hex-dictation://keyboard/record")!
         XCTAssertNil(KeyboardLaunchRequest(url: url))
