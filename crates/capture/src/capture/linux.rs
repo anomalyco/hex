@@ -246,6 +246,14 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         Ok(movie) => movie,
         Err(error) => {
             scrawl_log(format!("Screen capture failed: {error:#}"));
+            // The host ends the capture: nothing more of the screen will come.
+            if !sampler.stopping.load(Ordering::Acquire) {
+                *sampler
+                    .failure
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(format!("{error:#}"));
+            }
             None
         }
     }
