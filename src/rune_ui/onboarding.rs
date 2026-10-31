@@ -542,11 +542,17 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
         .gap(28.0)
         .child(if permissions {
             title(p, tr("Let Hex hear you and type for you"), None)
-        } else if view.rows.iter().any(|row| row.item == SetupItem::Microphone) {
+        } else if view
+            .rows
+            .iter()
+            .any(|row| row.item == SetupItem::Microphone)
+        {
             title(
                 p,
                 tr("Let Hex hear you"),
-                Some(tr("Windows has the microphone turned off for desktop apps.")),
+                Some(tr(
+                    "Windows has the microphone turned off for desktop apps.",
+                )),
             )
         } else {
             title(

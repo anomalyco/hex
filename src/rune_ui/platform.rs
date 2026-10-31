@@ -595,8 +595,10 @@ impl PlatformHost {
                         PermissionKind::Microphone,
                     ))
                 {
-                    crate::opencode_catalog::open_url(crate::onboarding::WINDOWS_MICROPHONE_SETTINGS)
-                        .map_err(|error| format!("{error:#}"))?;
+                    crate::opencode_catalog::open_url(
+                        crate::onboarding::WINDOWS_MICROPHONE_SETTINGS,
+                    )
+                    .map_err(|error| format!("{error:#}"))?;
                 }
                 Ok(())
             }
