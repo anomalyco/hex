@@ -8,10 +8,7 @@ use std::thread;
 use std::time::Instant;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use transcribe_cpp::{
-    Backend, ExtSlot, Model, ModelOptions, RunExtension, RunOptions, TimestampKind, Transcript,
-    WhisperRunOptions, sys::TRANSCRIBE_EXT_KIND_WHISPER_RUN,
-};
+use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
 use crate::context::ContextSnapshot;
 use crate::dictation::{DictationClip, pad_for_parakeet};
@@ -1161,11 +1158,12 @@ impl Parakeet {
         Ok(parakeet)
     }
 
-    /// Streams decode like offline runs, without Whisper's prompt extension
-    /// and at segment timestamps: only the text of a stream is used.
+    /// Streams decode like offline runs, without the recognition hints'
+    /// prompt and at segment timestamps: only the text of a stream is used.
     fn stream_run_options(&self) -> RunOptions {
         RunOptions {
             family: None,
+            prompt: None,
             timestamps: match self.options.timestamps {
                 TimestampKind::Word | TimestampKind::Token => TimestampKind::Segment,
                 timestamps => timestamps,
@@ -1235,8 +1233,14 @@ impl Parakeet {
             "loaded transcription model"
         );
         let capabilities = model.capabilities()?;
-        let mut language = None;
-        let mut family = None;
+        let mut options = RunOptions {
+            timestamps: match capabilities.max_timestamp_kind {
+                TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
+                TimestampKind::Auto | TimestampKind::Segment => TimestampKind::Segment,
+                TimestampKind::None => TimestampKind::None,
+            },
+            ..Default::default()
+        };
         if let (Some(selection), Some(definition)) = (selection, definition) {
             let runtime_language = crate::gguf_session::validate_gguf_artifact(
                 model_path,
@@ -1259,35 +1263,19 @@ impl Parakeet {
                     crate::transcription_models::language_name(&selection.language)
                 ));
             }
-            if definition.supports_recognition_hints {
-                if !model.accepts_ext(ExtSlot::Run, TRANSCRIBE_EXT_KIND_WHISPER_RUN) {
-                    return Err(eyre!(
-                        "{} does not accept Whisper recognition hints",
-                        definition.name
-                    ));
-                }
-                family = Some(RunExtension::Whisper(WhisperRunOptions {
-                    initial_prompt: (!selection.recognition_hints.trim().is_empty())
-                        .then(|| selection.recognition_hints.trim().to_string()),
-                    ..Default::default()
-                }));
-            }
-            language = runtime_language;
+            crate::gguf_session::apply_recognition_hints(
+                &mut options,
+                &model,
+                definition,
+                &selection.recognition_hints,
+            )?;
+            options.language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
         let weights_bytes = std::fs::metadata(model_path).map_or(0, |meta| meta.len() as usize);
         Ok(Self {
             session,
-            options: RunOptions {
-                timestamps: match capabilities.max_timestamp_kind {
-                    TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
-                    TimestampKind::Auto | TimestampKind::Segment => TimestampKind::Segment,
-                    TimestampKind::None => TimestampKind::None,
-                },
-                language,
-                family,
-                ..Default::default()
-            },
+            options,
             name,
             selection: selection.cloned(),
             max_audio_samples: crate::transcription_models::max_audio_chunk_samples(

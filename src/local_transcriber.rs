@@ -145,16 +145,21 @@ impl LocalTranscriber {
             selection,
             capabilities.supports_language_detect,
         )?;
-        // Recognition hints softly prime Whisper's decoder as its initial
-        // prompt; validate() already rejects hints on unsupported models.
-        let recognition_hints = selection.recognition_hints.trim();
-        let family =
-            (definition.supports_recognition_hints && !recognition_hints.is_empty()).then(|| {
-                transcribe_cpp::RunExtension::Whisper(transcribe_cpp::WhisperRunOptions {
-                    initial_prompt: Some(recognition_hints.to_string()),
-                    ..Default::default()
-                })
-            });
+        let mut options = RunOptions {
+            timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
+                TimestampKind::None
+            } else {
+                TimestampKind::Segment
+            },
+            language,
+            ..Default::default()
+        };
+        crate::gguf_session::apply_recognition_hints(
+            &mut options,
+            &model,
+            definition,
+            &selection.recognition_hints,
+        )?;
         let device_label = format!("{} ({})", device.description, device.kind);
         tracing::info!(
             backend = device.kind,
@@ -166,16 +171,7 @@ impl LocalTranscriber {
         let mut transcriber = Self {
             session,
             selection: selection.clone(),
-            options: RunOptions {
-                timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
-                    TimestampKind::None
-                } else {
-                    TimestampKind::Segment
-                },
-                language,
-                family,
-                ..Default::default()
-            },
+            options,
             device_label,
             max_audio_samples: crate::transcription_models::max_audio_chunk_samples(
                 &architecture,
@@ -198,11 +194,12 @@ impl LocalTranscriber {
         Ok(transcriber)
     }
 
-    /// Streams decode exactly as offline; a run-slot family extension
-    /// (Whisper's prompt) does not apply to a stream.
+    /// Streams decode exactly as offline, without the recognition hints'
+    /// prompt (Whisper's run-slot extension or the context prompt).
     fn stream_run_options(&self) -> RunOptions {
         RunOptions {
             family: None,
+            prompt: None,
             ..self.options.clone()
         }
     }
