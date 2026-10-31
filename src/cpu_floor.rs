@@ -32,24 +32,14 @@ pub fn require() {
         return;
     }
     eprintln!("{MESSAGE}");
-    // Under a service manager (hex.service: Restart=on-failure), a failure
-    // exit would restart Hex and repeat the message forever; the journal
-    // keeps the message, and a clean exit ends it.
-    let supervised =
-        std::env::var_os("INVOCATION_ID").is_some() || std::env::var_os("NOTIFY_SOCKET").is_some();
-    if !supervised && !interactive(&arguments) {
+    // `hex service` never opens windows; its stderr reaches the journal.
+    if arguments
+        .get(1)
+        .is_none_or(|argument| argument != "service")
+    {
         show();
     }
-    std::process::exit(if supervised { 0 } else { 1 });
-}
-
-/// A terminal already shows stderr, and `hex service` never opens windows.
-fn interactive(arguments: &[std::ffi::OsString]) -> bool {
-    use std::io::IsTerminal;
-    std::io::stderr().is_terminal()
-        || arguments
-            .get(1)
-            .is_some_and(|argument| argument == "service")
+    std::process::exit(1);
 }
 
 #[cfg(target_os = "windows")]
@@ -69,11 +59,18 @@ fn show() {
 }
 
 /// For Hex opened from the launcher, where nobody sees stderr: a desktop
-/// dialog when one of these tools is installed and a display is up.
+/// dialog when one of these tools is installed and a display is up. A
+/// terminal already shows stderr, and a unit under a service manager
+/// (hex.service sets NOTIFY_SOCKET) must not block on a dialog that its
+/// restarts would repeat.
 #[cfg(target_os = "linux")]
 fn show() {
+    use std::io::IsTerminal;
     use std::process::{Command, Stdio};
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    if std::io::stderr().is_terminal()
+        || std::env::var_os("NOTIFY_SOCKET").is_some()
+        || (std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none())
+    {
         return;
     }
     let attempts: [(&str, &[&str]); 3] = [
