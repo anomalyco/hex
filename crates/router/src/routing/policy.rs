@@ -292,7 +292,9 @@ impl RuleKind {
 pub struct OfferRule {
     pub kind: RuleKind,
     pub key: String,
-    pub folder: String,
+    /// The session the picks agreed on.
+    #[serde(alias = "folder")]
+    pub target: String,
 }
 
 /// The rule key a pick teaches: the tab's origin (never a loopback one), else the app's bundle
@@ -306,23 +308,6 @@ pub fn rule_key(url: Option<&str>, bundle_id: Option<&str>) -> Option<(RuleKind,
     (!is_general_app(id)).then(|| (RuleKind::App, id.to_owned()))
 }
 
-/// The folder a rule for `candidate` would name: its repository's main checkout, else its
-/// project. Never the home folder.
-pub fn rule_folder(candidate: &Candidate) -> Option<PathBuf> {
-    match (&candidate.repo, &candidate.directory) {
-        (Some(repo), _) => Some(repo.clone()).filter(|f| !super::smart::is_home_or_root(f)),
-        (None, Some(dir)) => rule_folder_of(dir),
-        (None, None) => None,
-    }
-}
-
-/// [`rule_folder`] for a session folder alone.
-pub fn rule_folder_of(dir: &Path) -> Option<PathBuf> {
-    let folder = super::look::folder_of(dir);
-    let folder = folder.repo.unwrap_or(folder.root);
-    (!super::smart::is_home_or_root(&folder)).then_some(folder)
-}
-
 /// Picks counted per key, in `learned.json`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Learned {
@@ -332,33 +317,36 @@ struct Learned {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Picks {
-    folder: String,
+    #[serde(alias = "folder")]
+    target: String,
     count: u32,
 }
 
 /// Picks that must agree before a rule is offered.
 const AGREEING: u32 = 2;
 
-/// A pick [`learn`] counted (`learned.json`'s key and folder), so an undo can take it back.
+/// A pick [`learn`] counted (`learned.json`'s key and session), so an undo can take it back.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counted {
     pub key: String,
-    pub folder: String,
+    #[serde(alias = "folder")]
+    pub target: String,
 }
 
-/// Counts a pick of `folder` for `key` in `file` and returns the rule to offer once
-/// [`AGREEING`] picks in a row agree. Nothing is offered for a key that already has a rule
+/// Counts a pick of `session` for `key` in `file` and returns the rule to offer once
+/// [`AGREEING`] picks in a row agree. Picks count per session, never per repository: a
+/// worktree's session and its main checkout's are different picks. Nothing is offered for a key that already has a rule
 /// (`ruled`) or that Kit refused (`refused`).
 #[cfg(test)]
 pub fn learn(
     file: &Path,
     kind: RuleKind,
     key: &str,
-    folder: &Path,
+    session: &str,
     refused: &[String],
     ruled: bool,
 ) -> Result<Option<OfferRule>> {
-    Ok(learn_counted(file, kind, key, folder, refused, ruled)?.1)
+    Ok(learn_counted(file, kind, key, session, refused, ruled)?.1)
 }
 
 /// [`learn`], also saying what it counted.
@@ -366,7 +354,7 @@ pub fn learn_counted(
     file: &Path,
     kind: RuleKind,
     key: &str,
-    folder: &Path,
+    session: &str,
     refused: &[String],
     ruled: bool,
 ) -> Result<(Option<Counted>, Option<OfferRule>)> {
@@ -380,23 +368,23 @@ pub fn learn_counted(
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
-    let folder = folder.display().to_string();
+    let target = session.trim().to_owned();
     let counted = Counted {
         key: format!("{}:{key}", config_kind(kind)),
-        folder: folder.clone(),
+        target: target.clone(),
     };
     let entry = learned
         .picks
         .entry(counted.key.clone())
         .or_insert_with(|| Picks {
-            folder: folder.clone(),
+            target: target.clone(),
             count: 0,
         });
-    if entry.folder == folder {
+    if entry.target == target {
         entry.count += 1;
     } else {
         *entry = Picks {
-            folder: folder.clone(),
+            target: target.clone(),
             count: 1,
         };
     }
@@ -405,7 +393,7 @@ pub fn learn_counted(
     let offer = (count >= AGREEING).then(|| OfferRule {
         kind,
         key: key.to_owned(),
-        folder,
+        target,
     });
     Ok((Some(counted), offer))
 }
@@ -426,7 +414,7 @@ fn write_learned(file: &Path, learned: &Learned) -> Result<()> {
 }
 
 /// Takes back a pick an undone send counted: one fewer for its key, while the key still
-/// points at the same folder. Whether it changed anything.
+/// points at the same session. Whether it changed anything.
 pub fn unlearn(file: &Path, counted: &Counted) -> Result<bool> {
     let Some(mut learned) = std::fs::read(file)
         .ok()
@@ -437,7 +425,7 @@ pub fn unlearn(file: &Path, counted: &Counted) -> Result<bool> {
     let Some(entry) = learned.picks.get_mut(&counted.key) else {
         return Ok(false);
     };
-    if entry.folder != counted.folder || entry.count == 0 {
+    if entry.target != counted.target || entry.count == 0 {
         return Ok(false);
     }
     entry.count -= 1;
@@ -480,13 +468,13 @@ pub fn has_rule(kind: RuleKind, key: &str) -> bool {
         .any(|(k, _)| k.trim().eq_ignore_ascii_case(key.trim()))
 }
 
-/// Counts a pick of `folder` (a [`rule_folder`]) for `url` or `bundle_id` in the learned file,
+/// Counts a pick of `session` for `url` or `bundle_id` in the learned file,
 /// with config's refusals and rules: what it counted, and the rule to offer, when there is one.
 /// Errors are logged.
 pub fn learn_pick(
     url: Option<&str>,
     bundle_id: Option<&str>,
-    folder: &Path,
+    session: &str,
 ) -> (Option<Counted>, Option<OfferRule>) {
     let Some((kind, key)) = rule_key(url, bundle_id) else {
         return (None, None);
@@ -495,7 +483,7 @@ pub fn learn_pick(
         return (None, None);
     };
     let refused = crate::env::get().config.refused_rules.clone();
-    match learn_counted(&file, kind, &key, folder, &refused, has_rule(kind, &key)) {
+    match learn_counted(&file, kind, &key, session, &refused, has_rule(kind, &key)) {
         Ok((counted, offer)) => {
             if let Some(offer) = &offer {
                 crate::env::log(format!(
@@ -775,32 +763,34 @@ mod tests {
     fn the_second_agreeing_pick_offers_a_rule() {
         let base = temp("learn");
         let file = base.join("learned.json");
-        let folder = Path::new("/code/board");
+        let session = "ses_board";
         let site = "https://board.example.com";
-        let learn = |folder: &Path, refused: &[String], ruled: bool| {
-            learn(&file, RuleKind::Site, site, folder, refused, ruled).unwrap()
+        let learn = |session: &str, refused: &[String], ruled: bool| {
+            learn(&file, RuleKind::Site, site, session, refused, ruled).unwrap()
         };
-        assert_eq!(learn(folder, &[], false), None);
-        let offer = learn(folder, &[], false).unwrap();
+        assert_eq!(learn(session, &[], false), None);
+        let offer = learn(session, &[], false).unwrap();
         assert_eq!(
             serde_json::to_value(&offer).unwrap(),
-            json!({"kind": "site", "key": site, "folder": "/code/board"})
+            json!({"kind": "site", "key": site, "target": "ses_board"})
         );
-        // A different folder starts over.
-        assert_eq!(learn(Path::new("/code/other"), &[], false), None);
-        assert_eq!(
-            learn(Path::new("/code/other"), &[], false).unwrap().folder,
-            "/code/other"
-        );
+        // A different session starts over.
+        assert_eq!(learn("ses_other", &[], false), None);
+        assert_eq!(learn("ses_other", &[], false).unwrap().target, "ses_other");
         // Refused or already a rule: never offered.
-        assert_eq!(
-            learn(Path::new("/code/other"), &[site.to_owned()], false),
-            None
-        );
-        assert_eq!(learn(Path::new("/code/other"), &[], true), None);
+        assert_eq!(learn("ses_other", &[site.to_owned()], false), None);
+        assert_eq!(learn("ses_other", &[], true), None);
         // General-purpose apps are never learned.
         assert_eq!(
-            super::learn(&file, RuleKind::App, "com.apple.finder", folder, &[], false).unwrap(),
+            super::learn(
+                &file,
+                RuleKind::App,
+                "com.apple.finder",
+                session,
+                &[],
+                false
+            )
+            .unwrap(),
             None
         );
         let _ = std::fs::remove_dir_all(&base);
@@ -810,10 +800,10 @@ mod tests {
     fn an_undone_send_takes_its_pick_back() {
         let base = temp("unlearn");
         let file = base.join("learned.json");
-        let folder = Path::new("/code/board");
+        let session = "ses_board";
         let site = "https://board.example.com";
         let (counted, offer) =
-            learn_counted(&file, RuleKind::Site, site, folder, &[], false).unwrap();
+            learn_counted(&file, RuleKind::Site, site, session, &[], false).unwrap();
         assert_eq!(offer, None);
         let counted = counted.unwrap();
         assert_eq!(counted.key, format!("site:{site}"));
@@ -824,19 +814,11 @@ mod tests {
         );
         // So the next pick is the first again, not the second.
         assert_eq!(
-            learn(&file, RuleKind::Site, site, folder, &[], false).unwrap(),
+            learn(&file, RuleKind::Site, site, session, &[], false).unwrap(),
             None
         );
         // A key since pointed elsewhere is left alone.
-        learn(
-            &file,
-            RuleKind::Site,
-            site,
-            Path::new("/code/other"),
-            &[],
-            false,
-        )
-        .unwrap();
+        learn(&file, RuleKind::Site, site, "ses_other", &[], false).unwrap();
         assert!(!unlearn(&file, &counted).unwrap());
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -855,11 +837,6 @@ mod tests {
             Some((RuleKind::App, "com.example.tool".to_owned()))
         );
         assert_eq!(rule_key(None, Some("com.mitchellh.ghostty")), None);
-        let home = dirs::home_dir().unwrap();
-        let mut c = candidate("ses_h", &home.display().to_string());
-        assert_eq!(rule_folder(&c), None, "never the home folder");
-        c.repo = Some(PathBuf::from("/code/main"));
-        assert_eq!(rule_folder(&c), Some(PathBuf::from("/code/main")));
     }
 
     #[test]

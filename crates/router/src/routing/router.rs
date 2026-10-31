@@ -920,8 +920,7 @@ fn deliver_with(
     let (counted, offer_rule) = found
         .as_ref()
         .and_then(|(_, saved)| saved.directory_of(to))
-        .and_then(|dir| policy::rule_folder_of(&dir))
-        .map(|folder| policy::learn_pick(present(&item.url), item.app_id(), &folder))
+        .map(|_| policy::learn_pick(present(&item.url), item.app_id(), to))
         .unwrap_or_default();
     origin.learned = counted;
     let sent = match posted {
