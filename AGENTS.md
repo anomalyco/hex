@@ -856,7 +856,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   migration turns it on once for older settings). It is not an experiment.
   Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
-  dialog at its first Screen capture; Windows asks nothing. Default shortcuts
+  dialog at its first Wayland Screen capture (X11 reads the screen from the
+  X server, with no portal or dialog); Windows asks nothing. Default shortcuts
   share no key with the other defaults: ⌥⇧S on macOS, F9 on Linux and
   Windows. One key does everything:
   a tap (under `DRAW_HOLD`) starts and stops; held while recording, the
@@ -878,7 +879,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   `scrawl-helper` and the camera description in a macOS bundle. Linux
   never links PipeWire, VA-API, or FFmpeg: the first two load when a
   capture starts and `ffmpeg` runs as a child, so a missing one fails that
-  capture with a reason and nothing else. With `capture.enabled` off, the
+  capture with a reason and nothing else. On X11 (never XWayland) Screen
+  and Area are captured natively (`scrawl_capture::linux::x11`: MIT-SHM,
+  XFixes cursor, x264), so desktops without a ScreenCast backend record; a
+  Window still needs the portal and fails with why rather than widening to
+  the screen. With `capture.enabled` off, the
   listener builds no capture host: no engine, sink, thread, bundle folder,
   or work. Scrawl's engine
   records the screen, runs with `SharedResources::none()` (Hex never calls

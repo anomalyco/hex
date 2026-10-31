@@ -3191,6 +3191,7 @@ mod tests {
             Some(Movie::written(worker_path, 120))
         });
         let session = ScreenCaptureSession {
+            failure: Arc::default(),
             started_at: Instant::now(),
             stopping,
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
@@ -3736,6 +3737,7 @@ mod tests {
         buf.push(RgbaFrame::new(0, 20, 10, vec![40; 20 * 10 * 4]), false);
         buf.push(RgbaFrame::new(500, 20, 10, vec![80; 20 * 10 * 4]), true);
         let screen_session = ScreenCaptureSession {
+            failure: Arc::default(),
             started_at: Instant::now(),
             stopping: Arc::new(AtomicBool::new(false)),
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
@@ -3859,6 +3861,7 @@ mod tests {
             host_narration: false,
             source: InnerSource::Screen {
                 session: ScreenCaptureSession {
+                    failure: Arc::default(),
                     started_at: Instant::now(),
                     stopping: Arc::clone(&stopping1),
                     urgent_snapshot: Arc::new(AtomicBool::new(false)),
@@ -3897,6 +3900,7 @@ mod tests {
             host_narration: false,
             source: InnerSource::Screen {
                 session: ScreenCaptureSession {
+                    failure: Arc::default(),
                     started_at: Instant::now(),
                     stopping: Arc::new(AtomicBool::new(false)),
                     urgent_snapshot: Arc::new(AtomicBool::new(false)),

@@ -41,8 +41,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureView() {
-        view.backgroundColor = UIColor(red: 0x0A / 255.0, green: 0x0B / 255.0, blue: 0x0D / 255.0, alpha: 1)
-        preferredContentSize.height = 148
+        view.backgroundColor = .clear
+        preferredContentSize.height = 140
 
         viewModel.inputViewController = self
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
@@ -73,7 +73,7 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(hosting.view)
         hosting.didMove(toParent: self)
 
-        let heightConstraint = view.heightAnchor.constraint(equalToConstant: 148)
+        let heightConstraint = view.heightAnchor.constraint(equalToConstant: 140)
         heightConstraint.priority = UILayoutPriority(999)
 
         NSLayoutConstraint.activate([
@@ -88,10 +88,17 @@ final class KeyboardViewController: UIInputViewController {
     private func syncFromBridge() {
         let now = Date().timeIntervalSince1970
         viewModel.now = now
-        viewModel.hasFullAccess = hasFullAccess
         updateKeyboardTraits()
 
-        guard hasFullAccess else { return }
+        #if targetEnvironment(simulator)
+        let simSnap = bridge.snapshot()
+        let effectiveFullAccess = hasFullAccess || simSnap.isAvailable(at: now)
+        #else
+        let effectiveFullAccess = hasFullAccess
+        #endif
+
+        viewModel.hasFullAccess = effectiveFullAccess
+        guard effectiveFullAccess else { return }
 
         if now - lastFullAccessNote >= 5 {
             lastFullAccessNote = now
@@ -167,7 +174,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func startWarmDictation() {
         let now = Date().timeIntervalSince1970
-        guard hasFullAccess, viewModel.snapshot.isAvailable(at: now) else { return }
+        guard viewModel.hasFullAccess, viewModel.snapshot.isAvailable(at: now) else { return }
         let jobID = UUID().uuidString
         viewModel.pendingCommand = KeyboardViewModel.PendingCommand(
             kind: .start,

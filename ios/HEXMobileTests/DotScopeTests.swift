@@ -102,4 +102,61 @@ final class DotScopeTests: XCTestCase {
         XCTAssertGreaterThan(sim.pose.opacity, 0.99)
         XCTAssertEqual(sim.pose.width, DotScopeTuning.keyboard.idleWidth, accuracy: 0.25)
     }
+
+    func testBarTuningFitsFullWidthDrawableWithPixelSnappedPitchAndOddRows() {
+        let fitted = DotScopeTuning.bar(leadingInset: 49, trailingInset: 79, fade: 16, spacing: 3.2)
+            .fitted(pixelWidth: 373 * 3, pixelHeight: 52 * 3, scale: 3.0)
+
+        XCTAssertTrue(fitted.fitsBounds)
+        XCTAssertEqual(fitted.width, 373.0, accuracy: 0.01)
+        XCTAssertEqual(fitted.height, 52.0, accuracy: 0.01)
+        XCTAssertGreaterThan(fitted.columns, 100)
+        XCTAssertEqual(fitted.rows % 2, 1)
+
+        let pxPitch = fitted.spacing * 3.0
+        XCTAssertEqual(pxPitch, pxPitch.rounded(), accuracy: 1e-4)
+
+        let sim = DotScopeSimulation(tuning: fitted)
+        sim.restart(reduceMotion: false)
+        for _ in 0..<48 {
+            sim.advance(dt: 1.0 / 60.0, stage: .recording, visible: true, loudness: -29.0, reduceMotion: false)
+        }
+
+        let pose = sim.pose
+        XCTAssertEqual(pose.width, 373.0, accuracy: 0.01)
+        XCTAssertEqual(pose.activeSpan, 373.0 - 49.0 - 79.0, accuracy: 0.5)
+        XCTAssertEqual(pose.activeCenter, (49.0 - 79.0) * 0.5, accuracy: 0.25)
+
+        // When recording finishes and buttons clear, processing spans the full bar end to end.
+        let fullBar = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 16, spacing: 3.2)
+            .fitted(pixelWidth: 373 * 3, pixelHeight: 52 * 3, scale: 3.0)
+        sim.tune(fullBar)
+        for _ in 0..<48 {
+            sim.advance(dt: 1.0 / 60.0, stage: .processing, visible: true, loudness: -120.0, reduceMotion: false)
+        }
+        XCTAssertEqual(sim.pose.activeSpan, 373.0, accuracy: 1.0)
+        XCTAssertEqual(sim.pose.activeCenter, 0.0, accuracy: 0.5)
+    }
+
+    func testBarIdleSettlesAndRewakesWhenInsetsChange() {
+        let idleBar = DotScopeTuning.bar(leadingInset: 0, trailingInset: 105, fade: 16, spacing: 3.2)
+            .fitted(pixelWidth: 373 * 3, pixelHeight: 52 * 3, scale: 3.0)
+        let sim = DotScopeSimulation(tuning: idleBar)
+        sim.restart(reduceMotion: false)
+
+        for _ in 0..<36 {
+            sim.advance(dt: 1.0 / 60.0, stage: .idle, visible: true, loudness: -120.0, reduceMotion: false)
+        }
+        XCTAssertTrue(sim.isIdleSettled)
+
+        var widerTrigger = idleBar
+        widerTrigger.trailingInset = 142
+        sim.tune(widerTrigger)
+        XCTAssertFalse(sim.isIdleSettled)
+
+        for _ in 0..<48 {
+            sim.advance(dt: 1.0 / 60.0, stage: .idle, visible: true, loudness: -120.0, reduceMotion: false)
+        }
+        XCTAssertTrue(sim.isIdleSettled)
+    }
 }

@@ -2,7 +2,10 @@
 //! stream, VA-API scales and encodes it on the GPU (`crate::linux`), and `ffmpeg` muxes the
 //! movie. Wayland gives an app no global pointer, key state, window list, or synthetic input,
 //! so those answer nothing here: the host (Hex) owns shortcuts and pasting, and the portal's
-//! own picker stands in for the window list. X11 sessions use the same portal.
+//! own picker stands in for the window list. On X11 the screen and an area are read from the
+//! X server itself (`crate::linux::x11`: MIT-SHM, the pointer from XFixes) and encoded with
+//! x264, so desktops without a ScreenCast backend (i3) record too; a window still needs the
+//! portal's picker.
 //!
 //! Frames are pixels; a recording is never upscaled (`MAX_CAPTURE_SCALE`).
 
@@ -264,8 +267,19 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         CaptureMode::Window => Source::Window,
         _ => Source::Screen,
     };
-    pipewire::available()?;
-    let mut cast = portal::start(source, &sampler.stopping)?;
+    let x11 = crate::linux::x11::session();
+    if x11 && source == Source::Screen {
+        return record_x11(sampler);
+    }
+    let portal = pipewire::available().and_then(|()| portal::start(source, &sampler.stopping));
+    let mut cast = match portal {
+        Ok(cast) => cast,
+        // No silent widening to the whole screen: a window on X11 is the portal's to pick.
+        Err(error) if x11 => bail!(
+            "recording a window on X11 needs the desktop's ScreenCast portal ({error:#}); record the screen or an area instead"
+        ),
+        Err(error) => return Err(error),
+    };
     let remote = cast
         .remote
         .take()
@@ -387,6 +401,103 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         Encoding::Software { movie, .. } => movie,
     };
     let (Some(movie), Some(path), Some((_, offset_ms))) = (movie, path, first) else {
+        return Ok(None);
+    };
+    movie.finish()?;
+    Ok(Some(super::Movie::written(path, offset_ms)))
+}
+
+/// A screen or area on X11, read from the X server and encoded with x264 (see the module
+/// doc). Fails at once, with why, when the display can't be read or there's no encoder, so
+/// the capsule says so instead of writing a capture with no picture.
+fn record_x11(sampler: &Sampler) -> Result<Option<super::Movie>> {
+    use crate::linux::x11::{Grabber, Rect};
+    let area = (sampler.target.mode == CaptureMode::Region).then(|| {
+        let f = sampler.target.frame;
+        let scale = f.scale.max(1.0);
+        Rect {
+            x: (f.x * scale).round() as i16,
+            y: (f.y * scale).round() as i16,
+            width: (f.width * scale).round().clamp(2.0, f64::from(u16::MAX)) as u16,
+            height: (f.height * scale).round().clamp(2.0, f64::from(u16::MAX)) as u16,
+        }
+    });
+    let mut grabber = Grabber::open(area).context("could not read the X11 screen")?;
+    let rect = grabber.rect;
+    let format = VideoFormat {
+        pixel: PixelFormat::Bgrx,
+        width: u32::from(rect.width),
+        height: u32::from(rect.height),
+        dmabuf: false,
+    };
+    if area.is_none() {
+        *RECORDED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((format.width, format.height));
+    }
+    let out = fit(format.width, format.height, SCREEN_EDGE, 2);
+    let small = fit(out.0, out.1, CANDIDATE_EDGE as u32, 2);
+    let path = sampler.video_output_path.clone();
+    let movie = match path.as_deref() {
+        Some(path) => Some(
+            Writer::x264(path, "bgr0", (format.width, format.height), out)
+                .context("could not start ffmpeg's x264 encoder")?,
+        ),
+        None => None,
+    };
+    scrawl_log(format!(
+        "Recording {}x{} of {}x{} at {},{} (X11)",
+        out.0, out.1, format.width, format.height, rect.x, rect.y
+    ));
+    let mut encoding = Encoding::Software {
+        pixels: Vec::new(),
+        movie,
+    };
+    crate::log::start_metric("sck_ready_ms", sampler.started_at);
+    let tick = Duration::from_secs(1) / FPS;
+    let start = Instant::now();
+    let offset_ms = sampler.started_at.elapsed().as_millis() as u64;
+    let mut written = 0_u64;
+    let mut last_sample: Option<Instant> = None;
+    while !sampler.stopping.load(Ordering::Acquire) {
+        if let Encoding::Software { pixels, .. } = &mut encoding {
+            grabber
+                .grab(pixels)
+                .context("the X server stopped giving the screen")?;
+        }
+        let due = (start.elapsed().as_secs_f64() * f64::from(FPS)) as u64 + 1;
+        while written < due {
+            encode(&mut encoding).context("ffmpeg stopped taking frames")?;
+            written += 1;
+        }
+        let urgent = sampler.urgent.swap(false, Ordering::AcqRel);
+        let interval = sampler
+            .frames
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .interval();
+        if urgent || last_sample.is_none_or(|at| at.elapsed() >= interval) {
+            last_sample = Some(Instant::now());
+            let t_ms = sampler.started_at.elapsed().as_millis() as u64;
+            if let Some(frame) = candidate(&encoding, &format, small, t_ms) {
+                sampler
+                    .frames
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(frame, urgent);
+            }
+        }
+        let next = start + tick * u32::try_from(written).unwrap_or(u32::MAX);
+        std::thread::park_timeout(next.saturating_duration_since(Instant::now()));
+    }
+    let Encoding::Software {
+        movie: Some(movie), ..
+    } = encoding
+    else {
+        return Ok(None);
+    };
+    let Some(path) = path else {
         return Ok(None);
     };
     movie.finish()?;

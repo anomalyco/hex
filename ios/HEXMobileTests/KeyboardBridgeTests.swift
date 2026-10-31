@@ -146,19 +146,68 @@ final class KeyboardBridgeTests: XCTestCase {
             String(localized: CancelHexDictationIntent.description.descriptionText),
         ]
 
-        // Shortcut phrases, short titles, and control names are not readable at runtime,
-        // so read the string literals from the files that declare them.
+        // Read user-facing strings from compiled Metadata.appintents inside HEX.app and HEXWidgets.appex,
+        // plus source literals when #filePath is not CAS prefix-mapped (/^wt).
+        let userKeys: Set<String> = ["title", "shortTitle", "description", "key", "phrases", "basePhrases", "template"]
+        func collectUserStrings(_ node: Any) {
+            if let dict = node as? [String: Any] {
+                for (k, v) in dict {
+                    if userKeys.contains(k) {
+                        if let s = v as? String {
+                            texts.append(s)
+                        } else if let arr = v as? [String] {
+                            texts.append(contentsOf: arr)
+                        } else {
+                            collectUserStrings(v)
+                        }
+                    } else {
+                        collectUserStrings(v)
+                    }
+                }
+            } else if let arr = node as? [Any] {
+                for item in arr {
+                    collectUserStrings(item)
+                }
+            }
+        }
+
+        var metadataFilesRead = 0
+        var metadataRoots: [URL] = [
+            Bundle.main.bundleURL.appendingPathComponent("Metadata.appintents"),
+        ]
+        if let plugIns = Bundle.main.builtInPlugInsURL {
+            metadataRoots.append(
+                plugIns.appendingPathComponent("HEXWidgets.appex/Metadata.appintents")
+            )
+        }
+        for root in metadataRoots where FileManager.default.fileExists(atPath: root.path) {
+            if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
+                for case let url as URL in enumerator {
+                    guard ["json", "actionsdata", "phrasesdata"].contains(url.pathExtension),
+                          let data = try? Data(contentsOf: url),
+                          let obj = try? JSONSerialization.jsonObject(with: data) else {
+                        continue
+                    }
+                    metadataFilesRead += 1
+                    collectUserStrings(obj)
+                }
+            }
+        }
+        XCTAssertGreaterThan(metadataFilesRead, 0, "Expected compiled Metadata.appintents in host bundle")
+
         let ios = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        for file in [
-            "HEXMobile/HexIntents.swift",
-            "HEXActivity/HexActivityAttributes.swift",
-            "HEXActivity/HexControlIntents.swift",
-            "HEXWidgets/HexDictationControl.swift",
-        ] {
-            let source = try String(contentsOf: ios.appendingPathComponent(file), encoding: .utf8)
-            for line in source.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
-                texts.append(contentsOf: line.split(separator: "\"", omittingEmptySubsequences: false)
-                    .enumerated().filter { $0.offset % 2 == 1 }.map { String($0.element) })
+        if FileManager.default.fileExists(atPath: ios.appendingPathComponent("HEXMobile/HexIntents.swift").path) {
+            for file in [
+                "HEXMobile/HexIntents.swift",
+                "HEXActivity/HexActivityAttributes.swift",
+                "HEXActivity/HexControlIntents.swift",
+                "HEXWidgets/HexDictationControl.swift",
+            ] {
+                let source = try String(contentsOf: ios.appendingPathComponent(file), encoding: .utf8)
+                for line in source.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                    texts.append(contentsOf: line.split(separator: "\"", omittingEmptySubsequences: false)
+                        .enumerated().filter { $0.offset % 2 == 1 }.map { String($0.element) })
+                }
             }
         }
 

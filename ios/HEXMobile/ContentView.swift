@@ -9,7 +9,15 @@ struct ContentView: View {
     @Binding var showSetup: Bool
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var practiceText = ""
+    @State private var idleTriggerWidth: CGFloat = 98
+    @State private var doneButtonWidth: CGFloat = 70
     @FocusState private var practiceFocused: Bool
+
+    private static var autoFocusPracticeField: Bool {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count else { return false }
+        return args[idx + 1].hasPrefix("hosted-keyboard")
+    }
 
     var body: some View {
         ZStack {
@@ -103,7 +111,12 @@ struct ContentView: View {
     }
 
     private var headerRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 9) {
+            HexMarkView(
+                size: 20,
+                color: dictation.isRecording ? HexTheme.warmPearl : HexTheme.textBase
+            )
+
             Text("Hex")
                 .font(.system(size: 20, weight: .semibold))
                 .tracking(-0.3)
@@ -149,6 +162,12 @@ struct ContentView: View {
     private var stageBar: some View {
         let isActive = scopePhase != .hidden
         let showScope = stageScopePhase != .hidden
+        let leadInset: Float = (isActive && dictation.isRecording) ? 52.0 : 0.0
+        let trailInset: Float = if isActive {
+            dictation.isRecording ? Float(doneButtonWidth + 12.0) : 0.0
+        } else {
+            Float(idleTriggerWidth + 12.0)
+        }
 
         return ZStack {
             Capsule()
@@ -161,12 +180,10 @@ struct ContentView: View {
             if showScope {
                 DotScopeView(
                     phase: stageScopePhase,
-                    tuning: .keyboard,
+                    tuning: .bar(leadingInset: leadInset, trailingInset: trailInset, fade: 16.0, spacing: 3.2),
                     drawPlate: false
                 )
-                .frame(width: 168, height: 38)
-                .padding(.leading, isActive ? 0 : 14)
-                .frame(maxWidth: .infinity, alignment: isActive ? .center : .leading)
+                .clipShape(Capsule())
                 .allowsHitTesting(false)
             }
 
@@ -198,6 +215,7 @@ struct ContentView: View {
                                 .background(HexTheme.bgContrast, in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { doneButtonWidth = $0 }
                     }
                     .padding(.horizontal, 8)
                 }
@@ -229,6 +247,7 @@ struct ContentView: View {
                         .padding(.trailing, 18)
                         .frame(height: 40)
                         .background(HexTheme.bgContrast, in: Capsule())
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idleTriggerWidth = $0 }
                     }
                     .padding(.horizontal, 8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,7 +257,7 @@ struct ContentView: View {
             }
         }
         .frame(height: 56)
-        .animation(.spring(duration: 0.30, bounce: 0.12), value: isActive)
+        .animation(.spring(duration: 0.28, bounce: 0.0), value: isActive)
     }
 
     private var transcriptCard: some View {
@@ -419,13 +438,25 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
                     .stroke(practiceFocused ? HexTheme.borderStrong : HexTheme.borderWeak, lineWidth: 1)
             )
+            .onAppear {
+                if Self.autoFocusPracticeField {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        practiceFocused = true
+                    }
+                }
+            }
     }
 
     // MARK: - Cold-Start Handoff Screen
 
     private var keyboardHandoffView: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: 9) {
+                HexMarkView(
+                    size: 20,
+                    color: dictation.isRecording ? HexTheme.warmPearl : HexTheme.textBase
+                )
+
                 Text("Hex")
                     .font(.system(size: 20, weight: .semibold))
                     .tracking(-0.3)
@@ -454,7 +485,8 @@ struct ContentView: View {
                         tuning: .handoff,
                         drawPlate: true
                     )
-                    .frame(width: 220, height: 54)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 64)
                 } else if case .failed = dictation.phase {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 24))
@@ -512,12 +544,12 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .frame(maxWidth: 340)
+            .frame(maxWidth: .infinity)
 
             Spacer()
 
             if dictation.isRecording || dictation.keyboardSessionEnabled {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(HostAppCatalog.quickChips) { app in
@@ -549,20 +581,24 @@ struct ContentView: View {
                     .contentMargins(.horizontal, 20, for: .scrollContent)
                     .padding(.horizontal, -20)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .semibold))
+                    VStack(spacing: 7) {
                         Text("Swipe bottom edge to return")
                             .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(HexTheme.textMuted)
+
+                        DotSwipeCueView()
+                            .frame(maxWidth: 248)
+                            .frame(height: 18)
                     }
-                    .foregroundStyle(HexTheme.textMuted)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 2)
                 }
             }
         }
+        .frame(maxWidth: 500)
         .padding(.horizontal, 20)
         .padding(.top, 14)
         .padding(.bottom, 16)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Pieces
