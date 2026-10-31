@@ -1,6 +1,6 @@
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{Cursor, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
@@ -9,13 +9,21 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
 mod dictation;
+mod discovery;
+mod http;
 mod streams;
 
+#[cfg(debug_assertions)]
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub use discovery::call_developer;
+use discovery::*;
+pub use discovery::{call_control, running_pid};
+use http::*;
 const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 const ACCEPT_INTERVAL: Duration = Duration::from_millis(10);
@@ -50,15 +58,6 @@ pub struct LocalApi {
     _instance: Option<crate::desktop::instance::InstanceLock>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DiscoveryDocument {
-    port: u16,
-    token: String,
-    api_version: String,
-    pid: u32,
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddedEndpoint {
@@ -68,29 +67,6 @@ pub struct EmbeddedEndpoint {
     pub token: String,
     pub api_version: String,
     pub pid: u32,
-}
-
-struct DiscoveryLease {
-    path: PathBuf,
-    document: DiscoveryDocument,
-}
-
-struct HttpRequest {
-    method: String,
-    path: String,
-    authorization: Option<String>,
-    dictation_token: Option<String>,
-    stream_token: Option<String>,
-    content_type: Option<String>,
-    content_length: Option<usize>,
-    body_prefix: Vec<u8>,
-}
-
-struct HttpResponse {
-    status: u16,
-    reason: &'static str,
-    content_type: Option<&'static str>,
-    body: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -394,25 +370,6 @@ impl Drop for LocalApi {
     }
 }
 
-impl DiscoveryLease {
-    fn remove_if_owned(&self) {
-        remove_discovery_if_owned(&self.path, &self.document);
-    }
-}
-
-fn remove_discovery_if_owned(path: &Path, expected: &DiscoveryDocument) {
-    let owned = fs::read(path)
-        .ok()
-        .and_then(|data| serde_json::from_slice::<DiscoveryDocument>(&data).ok())
-        .is_some_and(|document| document == *expected);
-    if owned
-        && let Err(error) = fs::remove_file(path)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::error!(%error, path = %path.display(), "could not remove local API discovery file");
-    }
-}
-
 fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
     if observed.swap(true, Ordering::AcqRel) {
         return;
@@ -424,12 +381,6 @@ fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
         .and_then(|()| events.flush())
     {
         tracing::error!(%error, "could not record local API shutdown");
-    }
-}
-
-impl Drop for DiscoveryLease {
-    fn drop(&mut self) {
-        self.remove_if_owned();
     }
 }
 
@@ -933,19 +884,6 @@ fn control(
     }
 }
 
-fn body_read_response(error: BodyReadError) -> HttpResponse {
-    match error {
-        BodyReadError::ResourceExhausted => HttpResponse::code(413, "resource-exhausted"),
-        BodyReadError::Invalid => HttpResponse::code(400, "invalid-body"),
-        BodyReadError::Deadline => HttpResponse::code(408, "request-timeout"),
-        BodyReadError::Shutdown => HttpResponse::code(503, "shutting-down"),
-        BodyReadError::Io(error) => {
-            tracing::debug!(%error, "could not read request body");
-            HttpResponse::code(400, "invalid-body")
-        }
-    }
-}
-
 fn transcription_selection(
     path: &str,
 ) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
@@ -1103,64 +1041,6 @@ fn client_aborted(stream: &TcpStream) -> bool {
         }
         Err(_) => true,
     }
-}
-
-enum BodyReadError {
-    ResourceExhausted,
-    Invalid,
-    Deadline,
-    Shutdown,
-    Io(std::io::Error),
-}
-
-fn read_body_bounded(
-    stream: &mut TcpStream,
-    content_length: usize,
-    body: &mut Vec<u8>,
-    shutdown: &AtomicBool,
-    maximum: usize,
-    timeout: Duration,
-) -> std::result::Result<(), BodyReadError> {
-    if content_length > maximum {
-        return Err(BodyReadError::ResourceExhausted);
-    }
-    if body.len() > content_length {
-        return Err(BodyReadError::Invalid);
-    }
-    body.try_reserve_exact(content_length - body.len())
-        .map_err(|_| BodyReadError::ResourceExhausted)?;
-    let deadline = Instant::now() + timeout;
-    let mut buffer = [0_u8; 16 * 1024];
-    while body.len() < content_length {
-        if shutdown.load(Ordering::Acquire) {
-            return Err(BodyReadError::Shutdown);
-        }
-        if Instant::now() >= deadline {
-            return Err(BodyReadError::Deadline);
-        }
-        let remaining = content_length - body.len();
-        let read_length = remaining.min(buffer.len());
-        let read = match stream.read(&mut buffer[..read_length]) {
-            Ok(read) => read,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                continue;
-            }
-            Err(error) => return Err(BodyReadError::Io(error)),
-        };
-        if Instant::now() >= deadline {
-            return Err(BodyReadError::Deadline);
-        }
-        if read == 0 {
-            return Err(BodyReadError::Invalid);
-        }
-        body.extend_from_slice(&buffer[..read]);
-    }
-    Ok(())
 }
 
 fn model_prepare_path(path: &str) -> Option<&str> {
@@ -1388,25 +1268,6 @@ fn model_prepare_error(code: &str, message: &str) -> serde_json::Value {
     })
 }
 
-fn write_sse_headers(stream: &mut TcpStream) -> std::io::Result<()> {
-    write_stream_headers(stream, "text/event-stream")
-}
-
-fn write_stream_headers(stream: &mut TcpStream, content_type: &str) -> std::io::Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n"
-    )?;
-    stream.flush()
-}
-
-fn write_sse(stream: &mut TcpStream, value: &impl Serialize) -> std::io::Result<()> {
-    stream.write_all(b"data: ")?;
-    serde_json::to_writer(&mut *stream, value)?;
-    stream.write_all(b"\n\n")?;
-    stream.flush()
-}
-
 impl AuthObservationLimiter {
     fn observe(&self, events: &EventLog, method: &str, path: &str) {
         let now = Instant::now();
@@ -1424,76 +1285,6 @@ impl AuthObservationLimiter {
             tracing::error!(%error, "could not record local API authentication failure");
         }
     }
-}
-
-impl HttpResponse {
-    fn empty(status: u16) -> Self {
-        Self {
-            status,
-            reason: reason(status),
-            content_type: None,
-            body: Vec::new(),
-        }
-    }
-
-    fn json<T: Serialize>(status: u16, value: &T) -> Self {
-        match serde_json::to_vec(value) {
-            Ok(body) => Self {
-                status,
-                reason: reason(status),
-                content_type: Some("application/json"),
-                body,
-            },
-            Err(error) => {
-                tracing::error!(%error, "could not serialize local API response");
-                Self::empty(500)
-            }
-        }
-    }
-
-    fn code(status: u16, code: &str) -> Self {
-        Self::json(status, &serde_json::json!({ "code": code }))
-    }
-}
-
-fn reason(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        201 => "Created",
-        204 => "No Content",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        408 => "Request Timeout",
-        409 => "Conflict",
-        411 => "Length Required",
-        413 => "Content Too Large",
-        415 => "Unsupported Media Type",
-        429 => "Too Many Requests",
-        431 => "Request Header Fields Too Large",
-        500 => "Internal Server Error",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => unreachable!("local API responses use a fixed status set"),
-    }
-}
-
-impl HttpRequest {
-    fn has_content_type(&self, mime: &str) -> bool {
-        self.content_type
-            .as_deref()
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case(mime))
-    }
-}
-
-#[derive(Debug)]
-enum RequestReadError {
-    TooLarge,
-    Invalid,
-    Deadline,
-    Shutdown,
-    Io(std::io::Error),
 }
 
 enum RequestAction {
@@ -1558,377 +1349,10 @@ struct ModelInfo {
     supports_language_detection: bool,
 }
 
-fn read_request(
-    stream: &mut TcpStream,
-    shutdown: &AtomicBool,
-) -> std::result::Result<HttpRequest, RequestReadError> {
-    read_request_until(stream, shutdown, Instant::now() + HEADER_DEADLINE)
-}
-
-fn read_request_until(
-    stream: &mut TcpStream,
-    shutdown: &AtomicBool,
-    deadline: Instant,
-) -> std::result::Result<HttpRequest, RequestReadError> {
-    let mut data = Vec::with_capacity(1024);
-    let mut buffer = [0_u8; 1024];
-    let header_end = loop {
-        if shutdown.load(Ordering::Acquire) {
-            return Err(RequestReadError::Shutdown);
-        }
-        if Instant::now() >= deadline {
-            return Err(RequestReadError::Deadline);
-        }
-        let read = match stream.read(&mut buffer) {
-            Ok(read) => read,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                continue;
-            }
-            Err(error) => return Err(RequestReadError::Io(error)),
-        };
-        if Instant::now() >= deadline {
-            return Err(RequestReadError::Deadline);
-        }
-        if read == 0 {
-            return Err(RequestReadError::Invalid);
-        }
-        if data.len() + read > MAX_HEADER_BYTES {
-            return Err(RequestReadError::TooLarge);
-        }
-        data.extend_from_slice(&buffer[..read]);
-        if let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") {
-            break end;
-        }
-    };
-    let header = std::str::from_utf8(&data[..header_end]).map_err(|_| RequestReadError::Invalid)?;
-    let mut lines = header.split("\r\n");
-    let mut request_line = lines
-        .next()
-        .ok_or(RequestReadError::Invalid)?
-        .split_ascii_whitespace();
-    let method = request_line.next().ok_or(RequestReadError::Invalid)?;
-    let path = request_line.next().ok_or(RequestReadError::Invalid)?;
-    let version = request_line.next().ok_or(RequestReadError::Invalid)?;
-    if request_line.next().is_some()
-        || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
-        || !path.starts_with('/')
-        || path.len() > MAX_PATH_BYTES
-    {
-        return Err(RequestReadError::Invalid);
-    }
-    let mut authorization = None;
-    let mut dictation_token = None;
-    let mut stream_token = None;
-    let mut content_type = None;
-    let mut content_length = None;
-    for (index, line) in lines.enumerate() {
-        if index >= MAX_HEADERS {
-            return Err(RequestReadError::TooLarge);
-        }
-        let (name, value) = line.split_once(':').ok_or(RequestReadError::Invalid)?;
-        if name.eq_ignore_ascii_case("authorization") {
-            authorization = Some(value.trim().to_owned());
-        } else if name.eq_ignore_ascii_case("x-hex-dictation-token") {
-            if dictation_token.is_some() {
-                return Err(RequestReadError::Invalid);
-            }
-            dictation_token = Some(value.trim().to_owned());
-        } else if name.eq_ignore_ascii_case("x-hex-stream-token") {
-            if stream_token.is_some() {
-                return Err(RequestReadError::Invalid);
-            }
-            stream_token = Some(value.trim().to_owned());
-        } else if name.eq_ignore_ascii_case("content-type") {
-            content_type = Some(value.trim().to_owned());
-        } else if name.eq_ignore_ascii_case("content-length") {
-            if content_length.is_some() {
-                return Err(RequestReadError::Invalid);
-            }
-            content_length = Some(
-                value
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| RequestReadError::Invalid)?,
-            );
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err(RequestReadError::Invalid);
-        }
-    }
-    let body_prefix = data[header_end + 4..].to_vec();
-    if content_length.is_some_and(|length| body_prefix.len() > length) {
-        return Err(RequestReadError::Invalid);
-    }
-    Ok(HttpRequest {
-        method: method.into(),
-        path: path.into(),
-        authorization,
-        dictation_token,
-        stream_token,
-        content_type,
-        content_length,
-        body_prefix,
-    })
-}
-
-fn write_response(stream: &mut TcpStream, response: HttpResponse) -> std::io::Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n",
-        response.status,
-        response.reason,
-        response.body.len()
-    )?;
-    if let Some(content_type) = response.content_type {
-        write!(stream, "Content-Type: {content_type}\r\n")?;
-    }
-    stream.write_all(b"\r\n")?;
-    stream.write_all(&response.body)?;
-    stream.flush()
-}
-
 fn current_health() -> HealthResponse {
     HealthResponse {
         version: crate::VERSION,
         api_version: API_VERSION,
-    }
-}
-
-#[cfg(debug_assertions)]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn call_developer(
-    command: &crate::control::developer_control::DeveloperCommand,
-) -> Result<crate::control::developer_control::DeveloperReply> {
-    let body = serde_json::to_vec(command)?;
-    let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
-    if status != 200 {
-        bail!(
-            "Hex developer control failed: {}",
-            error_code(status, &body)
-        );
-    }
-    serde_json::from_slice(&body).wrap_err("Hex developer response is invalid")
-}
-
-/// Sends one `hex` control request to the running app.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn call_control(
-    request: &crate::control::ControlRequest,
-) -> Result<crate::control::ControlResponse> {
-    let body = serde_json::to_vec(request)?;
-    // The app answers within the command's deadline or the server replies 504.
-    let (status, body) = post_json(
-        "/control",
-        &body,
-        request.command.deadline() + Duration::from_secs(5),
-        1024 * 1024,
-    )?;
-    if status != 200 {
-        let code = error_code(status, &body);
-        bail!(match code.as_str() {
-            "control-unavailable" => {
-                "the running Hex doesn't accept control commands; update Hex".to_string()
-            }
-            "control-busy" => "Hex is busy with other control commands; try again".into(),
-            "control-timeout" => "Hex didn't answer in time; check `hex status`".into(),
-            "invalid-control-command" => {
-                "the running Hex doesn't know this command; update Hex".into()
-            }
-            _ => format!("Hex refused the request ({code})"),
-        });
-    }
-    serde_json::from_slice(&body).wrap_err("Hex sent an invalid control reply")
-}
-
-/// The running app's process id, if its local API is live.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn running_pid() -> Option<u32> {
-    live_discovery().ok().map(|document| document.pid)
-}
-
-fn live_discovery() -> Result<DiscoveryDocument> {
-    let path = crate::app_paths::local_api_discovery_file()?;
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            bail!("Hex is not running")
-        }
-        Err(error) => {
-            return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
-        }
-    };
-    let document: DiscoveryDocument =
-        serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
-    if !valid_discovery(&document) || !discovery_is_live(&document) {
-        bail!("Hex is not running");
-    }
-    Ok(document)
-}
-
-fn post_json(
-    path: &str,
-    body: &[u8],
-    read_timeout: Duration,
-    max_response: usize,
-) -> Result<(u16, Vec<u8>)> {
-    let document = live_discovery()?;
-    let address = SocketAddr::from(([127, 0, 0, 1], document.port));
-    let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
-        .wrap_err("could not connect to Hex's local API")?;
-    stream.set_read_timeout(Some(read_timeout))?;
-    stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
-    write!(
-        stream,
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        document.token,
-        body.len(),
-    )?;
-    stream.write_all(body)?;
-    stream.flush()?;
-
-    let mut response = Vec::new();
-    (&mut stream)
-        .take(max_response as u64 + 1)
-        .read_to_end(&mut response)
-        .wrap_err("Hex didn't answer")?;
-    if response.len() > max_response {
-        bail!("Hex's response is too large");
-    }
-    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        bail!("Hex's response is malformed");
-    };
-    let headers = std::str::from_utf8(&response[..header_end])?;
-    let status = headers
-        .lines()
-        .next()
-        .and_then(|line| line.split_ascii_whitespace().nth(1))
-        .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| eyre!("Hex's response has no HTTP status"))?;
-    Ok((status, response.split_off(header_end + 4)))
-}
-
-fn error_code(status: u16, body: &[u8]) -> String {
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
-        .unwrap_or_else(|| format!("http-{status}"))
-}
-
-fn generate_token() -> Result<String> {
-    let mut random = [0_u8; 32];
-    getrandom::fill(&mut random).map_err(|error| eyre!("could not generate API token: {error}"))?;
-    let mut token = String::with_capacity(68);
-    token.push_str("hex_");
-    for byte in random {
-        use std::fmt::Write as _;
-        write!(token, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    Ok(token)
-}
-
-fn prepare_discovery_path(path: &Path) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        bail!("local API discovery path has no parent");
-    };
-    fs::create_dir_all(parent)?;
-    let existing = match fs::read(path) {
-        Ok(data) => serde_json::from_slice::<DiscoveryDocument>(&data).ok(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    if existing
-        .as_ref()
-        .is_some_and(|document| valid_discovery(document) && discovery_is_live(document))
-    {
-        bail!("another local API service appears to be running");
-    }
-    Ok(())
-}
-
-fn valid_discovery(document: &DiscoveryDocument) -> bool {
-    document.api_version == API_VERSION && valid_token(&document.token)
-}
-
-fn valid_token(token: &str) -> bool {
-    token.len() == 68
-        && token.starts_with("hex_")
-        && token[4..]
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
-fn discovery_is_live(document: &DiscoveryDocument) -> bool {
-    document.port != 0
-        && document.pid != 0
-        && process_is_alive(document.pid)
-        && TcpStream::connect_timeout(
-            &SocketAddr::from(([127, 0, 0, 1], document.port)),
-            LIVE_PROBE_TIMEOUT,
-        )
-        .is_ok()
-}
-
-fn write_discovery(path: &Path, document: &DiscoveryDocument) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| eyre!("local API discovery path has no parent"))?;
-    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    if let Err(error) = fs::remove_file(&temporary)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        return Err(error.into());
-    }
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    // The token lets any reader drive Hex, so only the owner may read it. On
-    // Windows the file inherits the per-user Application Support folder's
-    // ACL (the user, SYSTEM and Administrators).
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(&temporary)?;
-    let mut data = serde_json::to_vec(document)?;
-    data.push(b'\n');
-    file.write_all(&data)?;
-    file.sync_all()?;
-    #[cfg(unix)]
-    fs::set_permissions(
-        &temporary,
-        std::os::unix::fs::PermissionsExt::from_mode(0o600),
-    )?;
-    fs::rename(&temporary, path)?;
-    crate::durable::sync_directory(parent)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only checks that the process exists.
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-#[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-    use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    // SAFETY: the handle is checked before use and closed once.
-    unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return false;
-        }
-        let mut code = 0;
-        let alive = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
-        CloseHandle(process);
-        alive
     }
 }
 
