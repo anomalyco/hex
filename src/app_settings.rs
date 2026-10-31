@@ -26,6 +26,7 @@ static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
+static MEETING_RETENTION: AtomicU8 = AtomicU8::new(MeetingRetention::Forever as u8);
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
 static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
@@ -1104,6 +1105,51 @@ pub struct MeetingSettings {
     /// Reminders before calendar meetings (macOS). Off until the user
     /// connects a calendar.
     pub calendar: CalendarSettings,
+    /// How long finished meetings are kept before they move to the Trash.
+    pub retention: MeetingRetention,
+}
+
+/// How long a finished meeting is kept, counted from when it ended.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingRetention {
+    Day,
+    Week,
+    Month,
+    #[default]
+    Forever,
+}
+
+impl MeetingRetention {
+    pub const ALL: [Self; 4] = [Self::Day, Self::Week, Self::Month, Self::Forever];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Day => "24 hours",
+            Self::Week => "7 days",
+            Self::Month => "30 days",
+            Self::Forever => "Forever",
+        }
+    }
+
+    pub const fn max_age_ms(self) -> Option<u64> {
+        const DAY_MS: u64 = 24 * 60 * 60 * 1_000;
+        match self {
+            Self::Day => Some(DAY_MS),
+            Self::Week => Some(7 * DAY_MS),
+            Self::Month => Some(30 * DAY_MS),
+            Self::Forever => None,
+        }
+    }
+
+    const fn decode(value: u8) -> Self {
+        match value {
+            0 => Self::Day,
+            1 => Self::Week,
+            2 => Self::Month,
+            _ => Self::Forever,
+        }
+    }
 }
 
 /// The connected calendar and its meeting reminders.
@@ -1211,6 +1257,7 @@ impl Default for MeetingSettings {
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
             calendar: CalendarSettings::default(),
+            retention: MeetingRetention::default(),
         }
     }
 }
@@ -2166,6 +2213,7 @@ impl AppSettings {
             self.meetings.recording_indicator_corner as u8,
             Ordering::Release,
         );
+        MEETING_RETENTION.store(self.meetings.retention as u8, Ordering::Release);
         *MEETING_OUTPUT_FOLDER
             .get_or_init(Default::default)
             .write()
@@ -2622,6 +2670,11 @@ pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
 
 /// The connected calendar's reminder settings, as last applied.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// [`MeetingSettings::retention`] for the running meeting controller.
+pub fn meeting_retention() -> MeetingRetention {
+    MeetingRetention::decode(MEETING_RETENTION.load(Ordering::Acquire))
+}
+
 pub fn calendar_settings() -> CalendarSettings {
     CALENDAR_SETTINGS
         .get_or_init(Default::default)

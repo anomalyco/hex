@@ -471,6 +471,102 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
     fs::remove_dir_all(base).unwrap();
 }
 
+fn retention_manifest(
+    id: &str,
+    status: MeetingStatus,
+    created_at_ms: u64,
+    ended_at_ms: Option<u64>,
+) -> MeetingManifest {
+    MeetingManifest {
+        schema_version: 1,
+        id: id.into(),
+        title: id.into(),
+        status,
+        created_at_ms,
+        ended_at_ms,
+        duration_ms: None,
+        system: TrackManifest::default(),
+        microphone: TrackManifest::default(),
+        live_transcription_error: None,
+        error: None,
+        app: None,
+        export_path: None,
+        export_error: None,
+        echo_suppressed_utterances: 0,
+        provisional_title: None,
+        notes: None,
+        notes_error: None,
+        calendar: None,
+        title_source: None,
+        chapters: Vec::new(),
+        chapters_refined: false,
+    }
+}
+
+#[test]
+fn retention_expires_meetings_by_when_they_ended_and_skips_active_ones() {
+    use crate::app_settings::MeetingRetention;
+    let day = MeetingRetention::Day.max_age_ms().unwrap();
+    let now = 100 * day;
+    let meetings = [
+        // Started long ago but ended an hour ago: kept.
+        retention_manifest(
+            "long-call",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - day / 24),
+        ),
+        retention_manifest(
+            "old",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        // No end recorded: its start counts.
+        retention_manifest("no-end", MeetingStatus::Failed, now - 2 * day, None),
+        retention_manifest(
+            "recent-start",
+            MeetingStatus::Interrupted,
+            now - 1_000,
+            None,
+        ),
+        retention_manifest("recording", MeetingStatus::Recording, now - 5 * day, None),
+        retention_manifest(
+            "transcribing",
+            MeetingStatus::Transcribing,
+            now - 5 * day,
+            Some(now - 4 * day),
+        ),
+        retention_manifest(
+            "pending",
+            MeetingStatus::Interrupted,
+            now - 5 * day,
+            Some(now - 4 * day),
+        ),
+        // Exactly at the cutoff: kept.
+        retention_manifest("edge", MeetingStatus::Complete, now - day, Some(now - day)),
+    ];
+    let pending = vec!["pending".to_string()];
+
+    assert_eq!(
+        expired_meetings(&meetings, day, &pending, now),
+        ["old", "no-end"]
+    );
+    let week = MeetingRetention::Week.max_age_ms().unwrap();
+    assert!(expired_meetings(&meetings, week, &pending, now).is_empty());
+}
+
+#[test]
+fn forever_retention_moves_nothing_and_is_the_default() {
+    use crate::app_settings::{MeetingRetention, MeetingSettings};
+    assert_eq!(
+        MeetingSettings::default().retention,
+        MeetingRetention::Forever
+    );
+    assert_eq!(MeetingRetention::Forever.max_age_ms(), None);
+    assert_eq!(expire(MeetingRetention::Forever).unwrap(), 0);
+}
+
 #[test]
 fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {

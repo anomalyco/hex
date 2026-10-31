@@ -321,6 +321,11 @@ const KEYS: &[Key] = &[
         "Screen corner of the meeting recording indicator",
     ),
     key(
+        "meetings.retention",
+        Kind::Choice(&["day", "week", "month", "forever"]),
+        "How long finished meetings are kept before they move to the Trash",
+    ),
+    key(
         "meetings.providers",
         Kind::Json,
         "Per-app call choices, as a JSON array of {key, label, policy: ask|always_record|never_offer}",

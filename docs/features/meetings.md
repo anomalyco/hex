@@ -809,6 +809,28 @@ Scenes: `meetings`, `meetings-recording`, `meetings-actions`,
 Checks: `markdown_lists_metadata_and_labeled_turns` and
 `export_never_overwrites_and_uses_safe_names`.
 
+### Retention
+
+```ts
+Meetings › Settings -> Keep meetings: 24 hours / 7 days / 30 days / Forever
+│   (default Forever; `meetings.retention` day|week|month|forever)
+Meeting controller, while Meetings is on        // meetings.retention
+├── At launch, hourly, and soon after the setting changes
+├── Age from ended_at_ms, else created_at_ms; older than the setting
+│   -> the same path as Delete: exported Markdown, then the recording folder,
+│      to the Trash (never removed outright)
+├── Skips recording, transcribing, writing-notes, and final.pending
+│   meetings; a later pass retries them
+└── Forever reads nothing from disk; nothing expires while Hex is not running
+```
+
+Sources: `expire` / `expired_meetings` in [meeting.rs](../../src/meeting.rs),
+`MeetingExpiry` in [meeting_watcher.rs](../../src/meeting_watcher.rs), the row
+in [rune_ui/platform_settings.rs](../../src/rune_ui/platform_settings.rs).
+Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`
+and `forever_retention_moves_nothing_and_is_the_default`. No live run of an
+expiry pass against a real Trash has been observed.
+
 ### Titles And Summary (Apple Intelligence)
 
 ```ts
