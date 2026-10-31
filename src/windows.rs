@@ -115,6 +115,27 @@ impl SelectionArgs {
     }
 }
 
+/// Loads DLLs only from System32 and Hex's own folder, never the current
+/// folder or PATH. Another app's incompatible `dxcompiler.dll` on PATH
+/// crashed Hex at its first shader compile (#587), and a DLL planted on PATH
+/// must not load into Hex. Hex's own imports (vulkan-1.dll included) loaded
+/// before this; Windows, the GPU drivers, and COM load theirs by full path.
+pub(crate) fn restrict_dll_search() {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+    };
+    // SAFETY: changes this process's DLL search order; no pointers.
+    if unsafe {
+        SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
+    } == 0
+    {
+        eprintln!(
+            "hex: SetDefaultDllDirectories failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
 pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     color_eyre::install()?;
     // Parse first so `--version` and `--help` exit without creating app data.

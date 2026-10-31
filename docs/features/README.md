@@ -1298,6 +1298,8 @@ real Hyprland session.
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> Setup.exe or install-windows.ps1 -> hex.exe + install.json receipt
+├── Launch -> DLLs load from System32 and Hex's folder only, never PATH (#587)
+│   └── DX12 compiles shaders with FXC (System32), never a dxcompiler.dll on PATH
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
