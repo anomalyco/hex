@@ -32,10 +32,10 @@ use objc2_core_foundation::{CFRetained, CFString};
 use objc2_foundation::NSString;
 
 #[cfg(target_os = "linux")]
-#[path = "microphone_activity_linux.rs"]
+#[path = "microphone_activity/linux.rs"]
 mod os;
 #[cfg(target_os = "windows")]
-#[path = "microphone_activity_windows.rs"]
+#[path = "microphone_activity/windows.rs"]
 mod os;
 #[cfg(not(target_os = "macos"))]
 pub use os::active_microphone_applications;
