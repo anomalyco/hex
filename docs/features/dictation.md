@@ -570,7 +570,9 @@ Model advertises streaming, GPU device             // dictate.streaming
     -> Open one live stream; feed the 16 kHz backlog, then every 160 ms
        // same audio as the final clip, pre-roll included; never blocks capture
   Release -> Collect the 200 ms tail -> Finish with the complete clip
-    -> Feed any unfed remainder -> Finalize -> Final text
+    -> Feed any unfed remainder
+    -> macOS Unified English: feed 400 ms of silence, as the whole clip gets
+    -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
@@ -764,7 +766,17 @@ The macOS `Transcriber` owns backend input padding for ordinary
 transcription. `short_unified_input_is_minimum_padded_before_trailing_context`
 in [transcription.rs](../../src/transcription.rs) checks minimum-duration padding
 followed by Unified English's additional trailing silence. This is a pure sample
-policy check, not native inference-quality proof. Padding is now included in
+policy check, not native inference-quality proof.
+
+**Fixed October 31, 2026 (issue 657):** with Unified English on macOS,
+dictated sentences and questions pasted without their closing full stop or
+question mark. Streamed dictations (the Metal path) finalized with no
+trailing silence at all, and whole clips got only 200 ms. Both now get
+400 ms of silence after the clip (`UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES`;
+the stream hears it through `PauseCap` just before finalizing). Check:
+`a_dictation_stream_hears_trailing_silence_before_it_finalizes` in
+transcription_engine.rs (a fake stream). Not measured on the real model or a
+microphone; Linux and Windows streams are unchanged. Padding is now included in
 `inference_ms`; `prepare_ms` covers clip conversion and diagnostic retention.
 
 ```ts
