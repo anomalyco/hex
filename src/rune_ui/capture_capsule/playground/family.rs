@@ -24,8 +24,8 @@ use super::super::notch;
 use super::super::surface::{MEDIUM, SMALL, STRONG, TIMER, corner, measure};
 use super::super::tuning;
 use super::Paint;
-use crate::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness, palette};
-use crate::hud_placement::{self, ISLAND_PAD, Rect, Screen};
+use crate::rune_hud::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness, palette};
+use crate::rune_hud::hud_placement::{self, ISLAND_PAD, Rect, Screen};
 
 /// The plate's height at full size, one line: both siblings'.
 const H: f32 = 28.0;

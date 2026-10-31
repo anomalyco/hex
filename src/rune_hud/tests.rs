@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::dot_scope::Tuning;
+use crate::rune_hud::dot_scope::Tuning;
 
 #[test]
 fn dot_uniform_layout_matches_wgsl() {
@@ -65,15 +65,15 @@ fn schedule(model: &mut IndicatorModel, start: Instant) -> Vec<DotFrame> {
 }
 
 /// A 1512 × 982 point 14-inch MacBook Pro: a 32 pt notch 185 pt wide.
-fn macbook() -> crate::hud_placement::Screen {
-    crate::hud_placement::Screen {
-        frame: crate::hud_placement::Rect {
+fn macbook() -> crate::rune_hud::hud_placement::Screen {
+    crate::rune_hud::hud_placement::Screen {
+        frame: crate::rune_hud::hud_placement::Rect {
             x: 0.0,
             y: 0.0,
             width: 1512.0,
             height: 982.0,
         },
-        visible: crate::hud_placement::Rect {
+        visible: crate::rune_hud::hud_placement::Rect {
             x: 0.0,
             y: 0.0,
             width: 1512.0,
@@ -88,15 +88,15 @@ fn macbook() -> crate::hud_placement::Screen {
 
 /// An Apple Studio Display at its default 2560 × 1440 points: no notch, a
 /// 24 pt menu bar.
-fn studio_display() -> crate::hud_placement::Screen {
-    crate::hud_placement::Screen {
-        frame: crate::hud_placement::Rect {
+fn studio_display() -> crate::rune_hud::hud_placement::Screen {
+    crate::rune_hud::hud_placement::Screen {
+        frame: crate::rune_hud::hud_placement::Rect {
             x: 0.0,
             y: 0.0,
             width: 2560.0,
             height: 1440.0,
         },
-        visible: crate::hud_placement::Rect {
+        visible: crate::rune_hud::hud_placement::Rect {
             x: 0.0,
             y: 0.0,
             width: 2560.0,
@@ -108,12 +108,15 @@ fn studio_display() -> crate::hud_placement::Screen {
 }
 
 /// Where `screen` puts the capture window for `tuning`'s placement.
-fn place_on(screen: &crate::hud_placement::Screen, tuning: Tuning) -> crate::hud_placement::Placed {
+fn place_on(
+    screen: &crate::rune_hud::hud_placement::Screen,
+    tuning: Tuning,
+) -> crate::rune_hud::hud_placement::Placed {
     let (width, height) = CAPTURE_DOT_WINDOW;
-    crate::hud_placement::place(
+    crate::rune_hud::hud_placement::place(
         tuning.placement,
         screen,
-        crate::hud_placement::Content {
+        crate::rune_hud::hud_placement::Content {
             window: (f64::from(width), f64::from(height)),
             plate: (f64::from(width) - 24.0, f64::from(dot_scope::PLATE_HEIGHT)),
             island_spread: f64::from(tuning.island_spread),
@@ -134,8 +137,8 @@ struct Backdrop {
 }
 
 fn backdrop(
-    screen: &crate::hud_placement::Screen,
-    placed: &crate::hud_placement::Placed,
+    screen: &crate::rune_hud::hud_placement::Screen,
+    placed: &crate::rune_hud::hud_placement::Placed,
 ) -> Backdrop {
     Backdrop {
         drop: (screen.frame.y + screen.frame.height - placed.top_left.1) as f32,

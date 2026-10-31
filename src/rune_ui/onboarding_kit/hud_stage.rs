@@ -14,8 +14,8 @@ use rune::{El, effect};
 use super::fixture::Take;
 use super::gpu_stage::{hud_mark, update_hud};
 use crate::dictation::indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
-use crate::dot_scope::{Tuning, demo_level};
 use crate::rune_hud::WINDOW;
+use crate::rune_hud::dot_scope::{Tuning, demo_level};
 
 const STEP: f32 = 1.0 / 60.0;
 /// Integrate all the way to the presentation clock, including between 60 Hz

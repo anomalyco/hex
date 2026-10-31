@@ -329,7 +329,7 @@ pub(super) enum HudDemo {
 /// state.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct HudLab {
-    pub(super) tuning: crate::dot_scope::Tuning,
+    pub(super) tuning: crate::rune_hud::dot_scope::Tuning,
     pub(super) demo: HudDemo,
 }
 
@@ -533,7 +533,7 @@ pub(super) enum PlatformRequest {
     EndHudDemo,
     /// Save Dot scope's tuning as `dot-scope.json`, which the HUD loads at
     /// launch.
-    SaveDotScope(crate::dot_scope::Tuning),
+    SaveDotScope(crate::rune_hud::dot_scope::Tuning),
     #[cfg(hex_capture)]
     Scrawl(ScrawlRequest),
 }

@@ -832,7 +832,7 @@ impl Ui {
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.hud.tuning = crate::dot_scope::lab();
+        ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
         ui

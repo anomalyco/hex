@@ -489,7 +489,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn every_hud_story_and_variant_opens_from_its_link() {
-        crate::dot_scope::set_lab(crate::dot_scope::Tuning::default());
+        crate::rune_hud::dot_scope::set_lab(crate::rune_hud::dot_scope::Tuning::default());
         let app = attach(App::new(spec(super::super::spec())));
         let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
         rt.frame(0.0);
