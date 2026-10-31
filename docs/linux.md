@@ -316,7 +316,8 @@ dictation rules:
   focused application. **Disable** (General or the tray) keeps Hex disabled
   across restarts until you enable it again. On GNOME, Disable also removes
   Hex's entries from Settings › Keyboard › Global Shortcuts; Enable then asks
-  you to approve them again.
+  you to approve them again. Hex also removes the duplicate list that versions
+  before `anomaly.hex` left under the id `hex`.
 - **Hyprland** has the portal but takes every shortcut without a key, so
   nothing happens until you bind one in your config, and the key Settings
   records is not used. Hex can't tell whether your config binds it. Prefer
