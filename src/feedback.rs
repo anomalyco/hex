@@ -13,6 +13,8 @@ use rodio::cpal::BufferSize;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
 use serde::{Deserialize, Serialize};
 
+mod imessage;
+
 /// Auditionable key-sound styles for the onboarding typing demo.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum KeySoundStyle {
@@ -49,6 +51,28 @@ impl KeySoundStyle {
     }
 }
 
+/// A Messages tapback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Tapback {
+    Heart,
+    ThumbsUp,
+    ThumbsDown,
+    Haha,
+    Exclamation,
+    Question,
+}
+
+impl Tapback {
+    pub const ALL: [Self; 6] = [
+        Self::Heart,
+        Self::ThumbsUp,
+        Self::ThumbsDown,
+        Self::Haha,
+        Self::Exclamation,
+        Self::Question,
+    ];
+}
+
 /// Soft, varied tactile and motion cues for first-run onboarding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OnboardingTone {
@@ -78,8 +102,8 @@ pub enum OnboardingTone {
     Read,
     /// The comedy winding back to before it went wrong.
     Rewind,
-    /// A tapback landing on a message: one tiny tick.
-    Tapback,
+    /// A tapback landing on a message, each kind with its own sound.
+    Tapback(Tapback),
     /// One low heartbeat under panicked typing.
     Heartbeat,
     /// The heartbeat stretched lower in slow motion.
@@ -727,7 +751,7 @@ struct OnboardingSounds {
     chat_sent: SamplesBuffer,
     chat_read: SamplesBuffer,
     chat_rewind: SamplesBuffer,
-    chat_tapback: SamplesBuffer,
+    chat_tapbacks: [SamplesBuffer; 6],
     heartbeat: SamplesBuffer,
     heartbeat_slow: SamplesBuffer,
     slow_down: SamplesBuffer,
@@ -739,6 +763,7 @@ struct OnboardingSounds {
 
 impl OnboardingSounds {
     fn load() -> Result<Self> {
+        let tapback = decode_wav(bundled_sound!("onboarding", "chat_tapback"))?;
         Ok(Self {
             felt_keys: [
                 decode_wav(bundled_sound!("onboarding", "key_1"))?,
@@ -774,11 +799,18 @@ impl OnboardingSounds {
             panel_escape: decode_wav(bundled_sound!("onboarding", "panel_escape"))?,
             permission_tick: decode_wav(bundled_sound!("onboarding", "permission_tick"))?,
             almost_ready: decode_wav(bundled_sound!("onboarding", "almost_ready"))?,
-            chat_incoming: decode_wav(bundled_sound!("onboarding", "chat_incoming"))?,
-            chat_sent: decode_wav(bundled_sound!("onboarding", "chat_sent"))?,
+            chat_incoming: imessage::or_bundled(
+                imessage::RECEIVED,
+                &decode_wav(bundled_sound!("onboarding", "chat_incoming"))?,
+            ),
+            chat_sent: imessage::or_bundled(
+                imessage::SENT,
+                &decode_wav(bundled_sound!("onboarding", "chat_sent"))?,
+            ),
             chat_read: decode_wav(bundled_sound!("onboarding", "chat_read"))?,
             chat_rewind: decode_wav(bundled_sound!("onboarding", "chat_rewind"))?,
-            chat_tapback: decode_wav(bundled_sound!("onboarding", "chat_tapback"))?,
+            chat_tapbacks: Tapback::ALL
+                .map(|kind| imessage::or_bundled(imessage::tapback(kind), &tapback)),
             heartbeat: decode_wav(bundled_sound!("onboarding", "heartbeat"))?,
             heartbeat_slow: decode_wav(bundled_sound!("onboarding", "heartbeat_slow"))?,
             slow_down: decode_wav(bundled_sound!("onboarding", "slow_down"))?,
@@ -819,7 +851,7 @@ impl OnboardingSounds {
             OnboardingTone::Sent => &self.chat_sent,
             OnboardingTone::Read => &self.chat_read,
             OnboardingTone::Rewind => &self.chat_rewind,
-            OnboardingTone::Tapback => &self.chat_tapback,
+            OnboardingTone::Tapback(kind) => &self.chat_tapbacks[kind as usize],
             OnboardingTone::Heartbeat => &self.heartbeat,
             OnboardingTone::HeartbeatSlow => &self.heartbeat_slow,
             OnboardingTone::SlowDown => &self.slow_down,
@@ -1401,11 +1433,8 @@ mod tests {
             OnboardingTone::PanelEscape,
             OnboardingTone::PermissionTick,
             OnboardingTone::AlmostReady,
-            OnboardingTone::Incoming,
-            OnboardingTone::Sent,
             OnboardingTone::Read,
             OnboardingTone::Rewind,
-            OnboardingTone::Tapback,
             OnboardingTone::Heartbeat,
         ] {
             let buf = sounds
@@ -1413,14 +1442,21 @@ mod tests {
                 .expect("onboarding cue present");
             assert!(buf.total_duration().unwrap() <= Duration::from_millis(400));
         }
-        // The slow-motion and comic-hit cues ring longer, but not for long.
+        // The slow-motion and comic-hit cues, and the Messages sounds, ring
+        // longer, but not for long.
+        let tapbacks = Tapback::ALL.map(OnboardingTone::Tapback);
         for cue in [
+            OnboardingTone::Incoming,
+            OnboardingTone::Sent,
             OnboardingTone::HeartbeatSlow,
             OnboardingTone::SlowDown,
             OnboardingTone::Slam,
-        ] {
+        ]
+        .iter()
+        .chain(&tapbacks)
+        {
             let buf = sounds
-                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .get(SoundSet::Signature, Tone::Onboarding(*cue))
                 .expect("onboarding cue present");
             assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
         }

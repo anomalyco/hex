@@ -649,7 +649,7 @@ fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
     )
 }
 
-/// The red pill under the header, from the first frame, flaring at scene
+/// The red pill in the header, from the first frame, flaring at scene
 /// time `t`.
 fn banner(p: Paint, s: &Onboard, t: f64) -> Option<El> {
     script()
@@ -909,14 +909,11 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     // The field waits, unfocused, until the shortcut goes down.
     let listening = s.step >= Step::Hearing && !sent;
     let cleared = t.is_some_and(|t| t >= beats.send + CLEAR);
-    // The pill can change as the payoff lands; gone, it keeps its row.
-    let banner =
-        script().pill.map(
-            |_| match beats.pill(t.unwrap_or(f64::NEG_INFINITY), script().pill) {
-                (Some(copy), flare) => presenting(p, copy, s.now, flare),
-                (None, _) => el().key("presenting"),
-            },
-        );
+    // The pill can change, or go, as the payoff lands.
+    let banner = match beats.pill(t.unwrap_or(f64::NEG_INFINITY), script().pill) {
+        (Some(copy), flare) => Some(presenting(p, copy, s.now, flare)),
+        (None, _) => None,
+    };
     chat(
         p,
         &room,

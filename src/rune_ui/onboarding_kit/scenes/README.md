@@ -11,7 +11,7 @@ reports errors with their line numbers.
 - `group Jay, you, and 3 investors`: makes it a group chat, with that subtitle. Leave it out for a one-on-one.
 - `boss Jay amber`: the main other person, with an optional colour (`amber apple blue cobalt coral ember lilac mint solaris yuzu`). Initials come from the name.
 - `side Priya`: up to three side characters, each with an optional colour.
-- `pill Jay is presenting`: the red status pill under the header (optional).
+- `pill Jay is presenting`: the red status pill at the right of the header, level with the title (optional).
 - `lead Investors are waiting. One quick reply by hand.`: the line under the title.
 
 **Without Hex.** Lines before `start` are already in the thread when the scene opens. `end` is the last line.

@@ -211,15 +211,11 @@ pub(crate) fn chat_height(lines: usize) -> f32 {
     2.0 * CARD_PAD + HEADER_H + 10.0 + THREAD_H + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
 }
 
-/// The banner's row over a thread, and the space under it.
-const BANNER_H: f32 = 20.0;
-const BANNER_GAP: f32 = 6.0;
-
 /// A Messages conversation with `n.from` (a group when `n.place` names its
 /// members): header, the newest of `thread`'s lines (older ones scroll up
 /// under a soft edge), and the reply field.
-/// `banner`, such as [`presenting`], keeps its own row, centred at the
-/// thread's top.
+/// `banner`, such as [`presenting`], sits at the header's right end, level
+/// with the title, where Messages puts a live call.
 pub(crate) fn chat(
     p: Paint,
     n: &Notice,
@@ -229,6 +225,23 @@ pub(crate) fn chat(
     field_opacity: f32,
 ) -> El {
     let k = p.k;
+    let title = text(n.from)
+        .key("title")
+        .font(TextStyle {
+            weight: if k.dark { 560.0 } else { 600.0 },
+            ..k.ty.ui_medium
+        })
+        .color(p.text());
+    let title = match banner {
+        Some(banner) => row()
+            .key("title-row")
+            .w_full()
+            .gap(8.0)
+            .center_y()
+            .child(col().key("name").grow(1.0).child(title))
+            .child(banner),
+        None => title,
+    };
     let head = row()
         .key("head")
         .h(HEADER_H)
@@ -236,54 +249,21 @@ pub(crate) fn chat(
         .center_y()
         .child(app_icon(p, n.app))
         .child(
-            col()
-                .key("who")
-                .grow(1.0)
-                .child(
-                    text(n.from)
-                        .key("title")
-                        .font(TextStyle {
-                            weight: if k.dark { 560.0 } else { 600.0 },
-                            ..k.ty.ui_medium
-                        })
-                        .color(p.text()),
-                )
-                .child(
-                    text(n.place.unwrap_or(n.field))
-                        .key("app")
-                        .font(k.ty.small)
-                        .color(p.faint()),
-                ),
+            col().key("who").grow(1.0).child(title).child(
+                text(n.place.unwrap_or(n.field))
+                    .key("app")
+                    .font(k.ty.small)
+                    .color(p.faint()),
+            ),
         );
-    // A banner keeps its own row at the top, so lines fade out before
-    // they'd pass under it.
-    let lines = |h: f32| {
-        col()
-            .key("thread")
-            .w_full()
-            .h(h)
-            .justify_end()
-            .gap(6.0)
-            .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
-            .children(thread)
-    };
-    let thread = match banner {
-        Some(banner) => col()
-            .key("thread-wrap")
-            .w_full()
-            .h(THREAD_H)
-            .gap(BANNER_GAP)
-            .child(
-                row()
-                    .key("banner")
-                    .h(BANNER_H)
-                    .justify_center()
-                    .center_y()
-                    .child(banner),
-            )
-            .child(lines(THREAD_H - BANNER_H - BANNER_GAP)),
-        None => lines(THREAD_H),
-    };
+    let thread = col()
+        .key("thread")
+        .w_full()
+        .h(THREAD_H)
+        .justify_end()
+        .gap(6.0)
+        .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
+        .children(thread);
     let (fill, rim) = material(p);
     let card = col()
         .key(n.key)
@@ -464,7 +444,7 @@ pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced
     )
 }
 
-/// A small red pill saying who is sharing their screen, its dot pulsing
+/// A small red pill in a chat's header saying who is sharing their screen, its dot pulsing
 /// like a recording light at `now`; `flare` (`0..=1`) swells it for a beat.
 pub(crate) fn presenting(p: Paint, copy: &str, now: f64, flare: f32) -> El {
     let danger = &p.k.c.danger;
@@ -473,11 +453,11 @@ pub(crate) fn presenting(p: Paint, copy: &str, now: f64, flare: f32) -> El {
         .key("presenting")
         .scale(1.0 + 0.12 * flare)
         .shadow(0.0, 14.0 * flare, danger.fg.alpha(0.45 * flare))
-        .h(20.0)
-        .px(8.0)
+        .h(18.0)
+        .px(7.0)
         .gap(5.0)
         .center_y()
-        .radius(10.0)
+        .radius(9.0)
         .continuous_corners()
         .fill(danger.bg)
         .border(p.hair, danger.border)

@@ -20,11 +20,24 @@ use std::path::Path;
 use super::fixture::Take;
 use super::hud_stage::DONE_DELAY;
 use super::{permissions, scene_script, triumph, typing};
-use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tone};
+use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tapback, Tone};
 
 /// The heartbeat's level, in percent, calm and in full panic.
 const HEART_QUIET: f32 = 30.0;
 const HEART_LOUD: f32 = 75.0;
+
+/// The sound of the tapback drawn as `glyph`.
+fn tapback(glyph: typing::Glyph) -> Tone {
+    use typing::Glyph;
+    Tone::Onboarding(OnboardingTone::Tapback(match glyph {
+        Glyph::Heart => Tapback::Heart,
+        Glyph::ThumbsUp => Tapback::ThumbsUp,
+        Glyph::ThumbsDown => Tapback::ThumbsDown,
+        Glyph::Haha => Tapback::Haha,
+        Glyph::Bang => Tapback::Exclamation,
+        Glyph::Question => Tapback::Question,
+    }))
+}
 
 #[derive(Default)]
 pub(crate) struct SfxTrack {
@@ -170,7 +183,7 @@ impl SfxTrack {
             self.push(from + at, Tone::Onboarding(OnboardingTone::Read));
         }
         for tap in scene.all_taps() {
-            self.push(from + tap.at, Tone::Onboarding(OnboardingTone::Tapback));
+            self.push(from + tap.at, tapback(tap.glyph));
         }
         // The heartbeat rises under the clicks and stops dead at the removal.
         for beat in scene.heartbeats() {
@@ -200,8 +213,8 @@ impl SfxTrack {
     /// first celebration, each with its own sound.
     pub(crate) fn on_hex_reply(&mut self, from: f64, beats: &triumph::HexBeats) {
         self.push(from + beats.send, Tone::Onboarding(OnboardingTone::Sent));
-        for &(at, _) in &beats.taps {
-            self.push(from + at, Tone::Onboarding(OnboardingTone::Tapback));
+        for &(at, glyph) in &beats.taps {
+            self.push(from + at, tapback(glyph));
         }
         for (at, said) in &beats.lines {
             let tone = match said {
@@ -399,7 +412,8 @@ mod tests {
                 .filter(|&&(_, t, _)| t == Tone::Onboarding(cue))
                 .count()
         };
-        assert_eq!(count(OnboardingTone::Tapback), scene.all_taps().len());
+        let taps = Tapback::ALL.map(|k| count(OnboardingTone::Tapback(k)));
+        assert_eq!(taps.iter().sum::<usize>(), scene.all_taps().len());
         assert_eq!(count(OnboardingTone::Slam), scene.slams().count());
         let removal = scene.removal().unwrap();
         let hearts: Vec<&(f64, Tone, u8)> = track
