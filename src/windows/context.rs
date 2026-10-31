@@ -44,7 +44,7 @@ pub struct PendingContext {
 /// submitted; `finish` collects the browser host after inference, hiding
 /// the UIA walk behind it.
 pub fn begin_capture() -> PendingContext {
-    let application = crate::windows_input::foreground_process_stem();
+    let application = crate::windows::input::foreground_process_stem();
     let url = application
         .as_deref()
         .filter(|stem| BROWSER_STEMS.contains(stem))

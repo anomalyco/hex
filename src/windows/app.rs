@@ -29,7 +29,7 @@ use crate::events::{EventReader, TranscriptPhase, VoiceEvent};
 use crate::history::History;
 use crate::transcription_models::{ModelPreparationStage, TranscriptionModelId};
 use crate::transcription_preparation::TranscriptionPreparation;
-use crate::windows_rune::{Published, Request};
+use crate::windows::rune::{Published, Request};
 
 type ListenerResult = std::result::Result<(), String>;
 
@@ -41,7 +41,7 @@ struct RunningListener {
     updates: mpsc::Sender<Box<AppSettings>>,
     swap_failures: Receiver<crate::local_transcriber::SwapFailed>,
     /// The tray's and `hex` commands, handled as the shortcut would be.
-    commands: mpsc::Sender<crate::windows_dictation::ListenerCommand>,
+    commands: mpsc::Sender<crate::windows::dictation::ListenerCommand>,
 }
 
 impl RunningListener {
@@ -242,7 +242,7 @@ impl WindowsDesktopHost {
                     self.foreground.activate();
                     let _ = listener
                         .commands
-                        .send(crate::windows_dictation::ListenerCommand::PasteLast);
+                        .send(crate::windows::dictation::ListenerCommand::PasteLast);
                 }
             }
             Request::Quit => return true,
@@ -376,7 +376,7 @@ impl WindowsDesktopHost {
         let (commands, command_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let selection = self.runtime_selection();
-        let config = crate::windows_dictation::WindowsDictationConfig {
+        let config = crate::windows::dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
             commands: Some(command_receiver),
             history: self.history.clone(),
@@ -384,13 +384,13 @@ impl WindowsDesktopHost {
             indicator: Some(self.indicator.clone()),
             mode_runtime: self.mode_runtime.clone(),
             transformations: self.transformations.clone(),
-            ..crate::windows_dictation::WindowsDictationConfig::from_settings(&self.settings)
+            ..crate::windows::dictation::WindowsDictationConfig::from_settings(&self.settings)
         };
         let worker = std::thread::Builder::new()
             .name("windows-listener".into())
             .spawn(move || {
                 let result = crate::instance::acquire("windows-listener").and_then(|_instance| {
-                    crate::windows_dictation::run(
+                    crate::windows::dictation::run(
                         &event_path,
                         &selection,
                         config,
@@ -640,7 +640,7 @@ impl WindowsDesktopHost {
     /// them late).
     pub(crate) fn listener_commands(
         &self,
-    ) -> Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>> {
+    ) -> Option<mpsc::Sender<crate::windows::dictation::ListenerCommand>> {
         self.listener
             .as_ref()
             .filter(|_| !self.awaiting_session_start)

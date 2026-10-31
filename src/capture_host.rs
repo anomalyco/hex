@@ -122,7 +122,7 @@ impl Environment {
 pub struct Environment;
 
 #[cfg(target_os = "windows")]
-type Quiet = crate::windows_audio_control::AudioSuppressor;
+type Quiet = crate::windows::audio_control::AudioSuppressor;
 
 #[cfg(target_os = "windows")]
 impl Environment {

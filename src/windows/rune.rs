@@ -41,12 +41,12 @@ use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription_models::TranscriptionModelId;
 use crate::tray_menu::{TrayCommand, TrayView};
-use crate::windows_app::WindowsDesktopHost;
+use crate::windows::app::WindowsDesktopHost;
 
 /// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
 /// a light taskbar ([`tray_icon_pixels`]).
 const TRAY_ICON_SIZE: u32 = 32;
-const TRAY_ICON_RGBA: &[u8] = include_bytes!("../resources/windows/tray-32.rgba");
+const TRAY_ICON_RGBA: &[u8] = include_bytes!("../../resources/windows/tray-32.rgba");
 /// How often the runtime refreshes the listener while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
 
@@ -113,7 +113,7 @@ struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
     /// Where `hex` dictation commands go while a listener runs.
-    listener: Mutex<Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>>>,
+    listener: Mutex<Option<mpsc::Sender<crate::windows::dictation::ListenerCommand>>>,
 }
 
 /// The window's connection to the runtime thread.
@@ -157,7 +157,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
-    let Some(instance) = crate::windows_app::AppInstance::claim(start_hidden)? else {
+    let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
     crate::labs::log_launch();
@@ -175,12 +175,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let history = History::open_default(settings.history_retention)
         .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
         .ok();
-    crate::windows_gpu_fallback::arm();
+    crate::windows::gpu_fallback::arm();
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
         .on_frame_encoded(|frame| {
             if frame.outcome() == rune::FrameOutcome::Drawn {
-                crate::windows_gpu_fallback::disarm();
+                crate::windows::gpu_fallback::disarm();
             }
         })
         .on_window(|window| {
@@ -262,7 +262,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     });
     // Returns on Quit, or when the window closes without a tray.
     app.run();
-    crate::windows_gpu_fallback::disarm();
+    crate::windows::gpu_fallback::disarm();
     shutdown.store(true, Ordering::Relaxed);
     drop(requests);
     let _ = runtime.join();
@@ -299,8 +299,8 @@ fn run_runtime(
     loop {
         // A HUD frame counts as this launch's first drawing too, for a
         // launch that never opens the window.
-        if crate::windows_gpu_fallback::armed() && hud.presented() {
-            crate::windows_gpu_fallback::disarm();
+        if crate::windows::gpu_fallback::armed() && hud.presented() {
+            crate::windows::gpu_fallback::disarm();
         }
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
             Ok(request) => Some(request),
@@ -379,7 +379,7 @@ impl WindowsControl {
 
     fn listener(
         &self,
-        command: crate::windows_dictation::ListenerCommand,
+        command: crate::windows::dictation::ListenerCommand,
     ) -> std::result::Result<(), ControlError> {
         let listener = lock(&self.shared.listener).clone().ok_or_else(|| {
             ControlError::new(
@@ -415,7 +415,7 @@ impl crate::control::host::Host for WindowsControl {
         print: Option<crate::control::PrintReply>,
         raw: bool,
     ) -> std::result::Result<(), ControlError> {
-        use crate::windows_dictation::ListenerCommand;
+        use crate::windows::dictation::ListenerCommand;
         self.listener(match print {
             Some(print) => ListenerCommand::StopAndPrint(print),
             None => ListenerCommand::Dictation { action, raw },
@@ -423,7 +423,7 @@ impl crate::control::host::Host for WindowsControl {
     }
 
     fn paste_last(&self) -> std::result::Result<(), ControlError> {
-        self.listener(crate::windows_dictation::ListenerCommand::PasteLast)
+        self.listener(crate::windows::dictation::ListenerCommand::PasteLast)
     }
 
     fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
@@ -490,9 +490,9 @@ impl crate::control::host::Host for WindowsControl {
     fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
         let format = |error: color_eyre::Report| format!("{error:#}");
         Some(match enabled {
-            None => crate::windows_login_item::is_enabled().map_err(format),
-            Some(enabled) => crate::windows_login_item::set_enabled(enabled)
-                .and_then(|()| crate::windows_login_item::is_enabled())
+            None => crate::windows::login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::windows::login_item::set_enabled(enabled)
+                .and_then(|()| crate::windows::login_item::is_enabled())
                 .map_err(format),
         })
     }
