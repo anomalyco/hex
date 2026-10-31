@@ -97,7 +97,10 @@ const FLASH: std::time::Duration = std::time::Duration::from_millis(1400);
 /// A deep link: the Labs page, scrolled to `name`'s row with a pulse. It
 /// never turns the feature on. An unknown name, or one this OS has no row
 /// for, opens the page and is logged.
-#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+#[cfg_attr(
+    not(any(target_os = "macos", all(test, target_os = "linux"))),
+    allow(dead_code)
+)]
 pub(super) fn reveal(ui: &mut Ui, name: Option<&str>, tx: &mut Tx) {
     super::show(ui, super::Destination::Settings, tx);
     open(ui, tx);
