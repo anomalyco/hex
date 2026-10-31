@@ -36,7 +36,6 @@ const FIRST_RUN_SECS: f64 = 23.0;
 const SLOW_SECS: f64 = 31.0;
 const DOWNLOAD_HOLD: f64 = 2.8;
 const PERMISSIONS_WAIT: f64 = 0.6;
-const TYPING_LEAD: f64 = 1.15;
 const CLOSE_SECS: f64 = 0.65;
 const WORD_SECS: f64 = 0.22;
 const EXAMPLE_START: f64 = 0.6;
@@ -95,6 +94,12 @@ pub(crate) struct Onboard {
     pub(crate) take_from: Option<f64>,
     /// How many `"Without Hex"` bubbles have flown out of the field so far.
     sent_seen: usize,
+    /// Whether `"With Hex"`'s reply has flown out of the field.
+    hex_seen: bool,
+    /// Every pause and the key pace of `"Without Hex"`, tunable live.
+    pub(crate) timing: typing::Timing,
+    /// `"Without Hex"` as [`Self::timing`] times it.
+    pub(crate) scene: typing::Scene,
     pub(crate) partial: &'static str,
     pub(crate) take: &'static Take,
     pub(crate) meter: (f32, f32),
@@ -208,6 +213,9 @@ impl Onboard {
             hud_from: None,
             take_from: None,
             sent_seen: 0,
+            hex_seen: false,
+            timing: typing::Timing::default(),
+            scene: typing::Scene::default(),
             partial: "",
             take: &ANSWER_JAY,
             meter: (0.0, 0.0),
@@ -387,16 +395,35 @@ impl Onboard {
         self.practice.focused = false;
         self.live_hold_from = None;
         self.ensure_download(false);
-        self.step = Step::Parked;
-        self.parked_from = Some(self.now);
-        let tf = self.now + TYPING_LEAD;
-        self.typing_from = Some(tf);
         self.voice_from = None;
         self.hud_from = None;
         self.take_from = None;
         self.partial = "";
-        self.sfx.on_without_hex(self.now, tf, self.had_model);
-        self.auto_due_at = Some(tf + typing::duration() + 1.15);
+        self.auto_due_at = None;
+        park(self, self.now);
+    }
+
+    /// `"Watch what happens"`: plays `"Without Hex"` from the top, then the
+    /// story moves on by itself.
+    pub(crate) fn start_scene(&mut self) {
+        if self.step != Step::Parked || self.typing_from.is_some() {
+            return;
+        }
+        self.manual_override = true;
+        self.typing_from = Some(self.now);
+        self.sfx.on_without_hex(self.now, &self.scene);
+        self.auto_due_at = Some(self.now + self.scene.duration());
+    }
+
+    /// Rebuilds [`Self::scene`] after a change to [`Self::timing`].
+    fn retime(&mut self) {
+        self.scene = typing::Scene::build(&self.timing);
+        if self.step == Step::Parked && self.typing_from.is_some() {
+            // A scene already playing starts over, waiting for the button.
+            self.typing_from = None;
+            self.auto_due_at = None;
+            self.sfx.clear();
+        }
     }
 
     pub(crate) fn jump_to_permissions(&mut self) {
@@ -441,7 +468,7 @@ impl Onboard {
     /// The real first run sets these as the story would at its start.
     pub(super) fn begin_live(&mut self, now: f64) {
         self.manual_override = true;
-        self.auto_due_at = Some(now + begin_first_run(self, now));
+        self.auto_due_at = begin_first_run(self, now).map(|secs| now + secs);
     }
 
     /// The real first run's `"Almost ready"`, for a run resumed past the
@@ -630,14 +657,23 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
 }
 
 fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
-    let delay = begin_first_run(s, play.now());
-    play.after(delay, advance);
+    if let Some(delay) = begin_first_run(s, play.now()) {
+        play.after(delay, advance);
+    }
     play.wake_after(Duration::ZERO);
 }
 
+/// `"Without Hex"`, waiting for `"Watch what happens"`.
+fn park(s: &mut Onboard, now: f64) {
+    s.step = Step::Parked;
+    s.parked_from = Some(now);
+    s.typing_from = None;
+    s.sfx.on_parked(now, s.had_model);
+}
+
 /// Starts the first run at `now`; the story's next beat is due after the
-/// returned seconds.
-pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> f64 {
+/// returned seconds, or waits for `"Watch what happens"`.
+pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> Option<f64> {
     s.now = now;
     s.flow_hud = FlowHud::default();
     s.examples_from = Some(now);
@@ -649,83 +685,93 @@ pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> f64 {
         s.download_from = None;
         s.closed = 1.0;
         s.closed_from = None;
-        s.step = Step::Parked;
-        s.parked_from = Some(now);
-        let tf = now + TYPING_LEAD;
-        s.typing_from = Some(tf);
-        s.sfx.on_without_hex(now, tf, true);
-        TYPING_LEAD + typing::duration() + 1.15
+        park(s, now);
+        None
     } else {
         s.sfx.on_download_start(now);
-        DOWNLOAD_HOLD
+        Some(DOWNLOAD_HOLD)
     }
 }
 
 fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
-    const WAIT: f64 = 0.25;
     if s.manual_override {
         return;
     }
     s.now = play.now();
-    if s.flow == Flow::FirstRun {
-        if let Some(secs) = first_run_next(s, play.now()) {
-            play.after(secs, advance);
-        }
-        play.wake_after(Duration::ZERO);
-        return;
+    if let Some(secs) = next_beat(s, play.now()) {
+        play.after(secs, advance);
     }
-    let next = match s.step {
+    play.wake_after(Duration::ZERO);
+}
+
+/// Moves the story one beat on at `now`; the next is due after the returned
+/// seconds, or waits for the user.
+fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
+    const WAIT: f64 = 0.25;
+    if s.flow == Flow::FirstRun {
+        return first_run_next(s, now);
+    }
+    match s.step {
         Step::Pick => {
             s.pick(s.wants);
-            s.sfx.on_download_start(play.now());
+            s.sfx.on_download_start(now);
             Some(if s.flow == Flow::Shout { 0.6 } else { 0.9 })
+        }
+        Step::Started if s.flow == Flow::Versus => {
+            park(s, now);
+            None
         }
         Step::Started => {
             s.step = Step::Parked;
-            s.parked_from = Some(play.now());
-            if s.flow == Flow::Versus {
-                let tf = play.now() + TYPING_LEAD;
-                s.typing_from = Some(tf);
-                s.sfx.on_without_hex(play.now(), tf, false);
-                Some(TYPING_LEAD + typing::duration() + 1.0)
-            } else {
-                Some(0.5)
-            }
+            s.parked_from = Some(now);
+            Some(0.5)
         }
+        Step::Parked if s.typing_from.is_none() => None,
         Step::Parked if s.can_hear() => {
             s.step = Step::YourTurn;
-            s.voice_from = Some(play.now());
-            s.hud_from = Some(play.now());
-            Some(1.1)
+            s.voice_from = Some(now);
+            s.hud_from = Some(now);
+            Some(1.4)
         }
         Step::Parked => Some(WAIT),
         Step::YourTurn => {
             s.step = Step::Hearing;
-            s.take_from = Some(play.now());
-            s.sfx.on_voice_take(play.now(), &ANSWER_JAY);
+            hear(s, now);
             Some(ANSWER_JAY.release + 0.1)
+        }
+        Step::Hearing if s.flow == Flow::Versus => {
+            s.step = Step::Heard;
+            Some(versus::reply_secs(s))
         }
         Step::Hearing => {
             s.step = Step::Heard;
-            Some(if s.flow == Flow::Versus { 1.6 } else { 1.2 })
+            Some(1.2)
         }
         Step::Heard if s.downloaded() => {
             s.step = Step::Done;
-            Some(1.2)
+            Some(SCORE_HOLD)
         }
         Step::Heard => Some(WAIT),
         Step::Done => {
             s.step = Step::Ready;
-            s.ready_from = Some(play.now());
-            s.sfx.on_ready(play.now());
+            s.ready_from = Some(now);
+            s.sfx.on_ready(now);
             None
         }
         _ => None,
-    };
-    if let Some(secs) = next {
-        play.after(secs, advance);
     }
-    play.wake_after(Duration::ZERO);
+}
+
+/// How long the score holds before the story moves on.
+const SCORE_HOLD: f64 = 4.5;
+
+/// `"With Hex"`: the shortcut goes down and Jay's answer is spoken.
+fn hear(s: &mut Onboard, now: f64) {
+    s.take = &ANSWER_JAY;
+    s.take_from = Some(now);
+    s.sfx.on_voice_take(now, &ANSWER_JAY);
+    let beats = versus::hex_beats(s.streams(), &s.timing);
+    s.sfx.on_hex_reply(now + beats.send, now + beats.reply);
 }
 
 pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
@@ -736,33 +782,28 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             Some(WAIT)
         }
         Step::Pick | Step::Started => {
-            s.step = Step::Parked;
-            s.parked_from = Some(now);
-            let tf = now + TYPING_LEAD;
-            s.typing_from = Some(tf);
-            s.sfx.on_without_hex(now, tf, s.had_model);
-            Some(TYPING_LEAD + typing::duration() + 1.15)
+            park(s, now);
+            None
         }
+        Step::Parked if s.typing_from.is_none() => None,
         Step::Parked => {
             s.step = Step::YourTurn;
             s.voice_from = Some(now);
             s.hud_from = Some(now);
-            Some(1.15)
+            Some(1.4)
         }
         Step::YourTurn => {
             s.step = Step::Hearing;
-            s.take = &ANSWER_JAY;
-            s.take_from = Some(now);
-            s.sfx.on_voice_take(now, &ANSWER_JAY);
+            hear(s, now);
             Some(ANSWER_JAY.release + 0.1)
         }
         Step::Hearing => {
             s.step = Step::Heard;
-            Some(1.5)
+            Some(versus::reply_secs(s))
         }
         Step::Heard => {
             s.step = Step::Done;
-            Some(1.3)
+            Some(SCORE_HOLD)
         }
         Step::Done if !s.granted => {
             s.step = Step::Permissions;
@@ -869,11 +910,17 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         tx.launch("typed/line0", format!("sent-bubble-{i}"));
     }
     s.sent_seen = sent;
+    // `"With Hex"`'s answer lifts out of the field from its first word.
+    let hex_sent = versus::hex_sent(s);
+    if hex_sent && !s.hex_seen {
+        tx.launch("w0", "hex-bubble");
+    }
+    s.hex_seen = hex_sent;
     if s.manual_override
         && let Some(due) = s.auto_due_at
         && now >= due
     {
-        s.auto_due_at = first_run_next(s, now).map(|secs| now + secs);
+        s.auto_due_at = next_beat(s, now).map(|secs| now + secs);
     }
 
     let trying = s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard);
@@ -1122,6 +1169,10 @@ fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
     }
 
     if matches!(s.flow, Flow::FirstRun | Flow::Versus) {
+        out = out.child(scene_controls(p, s));
+    }
+
+    if matches!(s.flow, Flow::FirstRun | Flow::Versus) {
         let sound_items = KeySoundStyle::ALL
             .into_iter()
             .enumerate()
@@ -1211,6 +1262,113 @@ fn motion_controls(p: Paint, s: &Onboard) -> El {
         ))
 }
 
+/// One `"Without Hex"` timing: a field of [`typing::Timing`] and its range.
+struct Knob {
+    key: &'static str,
+    label: &'static str,
+    min: f64,
+    max: f64,
+    field: fn(&mut typing::Timing) -> &mut f64,
+}
+
+const SCENE_KNOBS: &[Knob] = &[
+    Knob {
+        key: "t-arrive",
+        label: "First message",
+        min: 0.0,
+        max: 1.5,
+        field: |t| &mut t.arrive,
+    },
+    Knob {
+        key: "t-read",
+        label: "Read per word",
+        min: 0.05,
+        max: 0.45,
+        field: |t| &mut t.read_word,
+    },
+    Knob {
+        key: "t-dots",
+        label: "Jay typing",
+        min: 0.3,
+        max: 2.5,
+        field: |t| &mut t.jay_typing,
+    },
+    Knob {
+        key: "t-pace",
+        label: "Key pace",
+        min: 0.08,
+        max: 0.32,
+        field: |t| &mut t.pace,
+    },
+    Knob {
+        key: "t-panic",
+        label: "Panic pace",
+        min: 0.035,
+        max: 0.16,
+        field: |t| &mut t.panic_pace,
+    },
+    Knob {
+        key: "t-freeze",
+        label: "Freeze before Read",
+        min: 0.3,
+        max: 3.5,
+        field: |t| &mut t.freeze,
+    },
+    Knob {
+        key: "t-punch",
+        label: "Before the punchline",
+        min: 0.4,
+        max: 3.5,
+        field: |t| &mut t.punch,
+    },
+    Knob {
+        key: "t-fired",
+        label: "Hold on removed",
+        min: 0.8,
+        max: 5.0,
+        field: |t| &mut t.fired,
+    },
+    Knob {
+        key: "t-send",
+        label: "Hex: words to send",
+        min: 0.3,
+        max: 2.0,
+        field: |t| &mut t.hex_send,
+    },
+    Knob {
+        key: "t-reply",
+        label: "Hex: send to reply",
+        min: 0.5,
+        max: 3.0,
+        field: |t| &mut t.hex_reply,
+    },
+];
+
+/// Live sliders for every pause and the key pace. A change applies from the
+/// next play.
+fn scene_controls(p: Paint, s: &Onboard) -> El {
+    use super::super::lists::slider_in;
+    let mut out = col().key("scene-controls").gap(10.0);
+    for (i, knob) in SCENE_KNOBS.iter().enumerate() {
+        let mut timing = s.timing;
+        let value = *(knob.field)(&mut timing);
+        out = out.child(slider_in(
+            p,
+            knob.key,
+            knob.label,
+            ((value - knob.min) / (knob.max - knob.min)) as f32,
+            format!("{value:.2} s"),
+            SIDE_W,
+            move |s: &mut Onboard, v, _| {
+                let knob = &SCENE_KNOBS[i];
+                *(knob.field)(&mut s.timing) = knob.min + f64::from(v) * (knob.max - knob.min);
+                s.retime();
+            },
+        ));
+    }
+    side_section(p, "scene-sec", "Without Hex timing (seconds)", vec![out])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,24 +1438,50 @@ mod tests {
     }
 
     #[test]
+    fn without_hex_waits_for_watch_what_happens() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.had_model = true;
+        s.begin_live(0.0);
+        let mut tx = Tx::default();
+        poll(&mut s, 30.0, &mut tx);
+        assert_eq!(s.step, Step::Parked);
+        assert!(versus::waiting_to_start(&s));
+        s.start_scene();
+        let end = 30.0 + s.scene.duration();
+        poll(&mut s, end - 0.05, &mut tx);
+        assert_eq!(s.step, Step::Parked);
+        poll(&mut s, end + 0.01, &mut tx);
+        assert_eq!(s.step, Step::YourTurn);
+    }
+
+    #[test]
+    fn a_retimed_scene_plays_at_its_new_length() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        let before = s.scene.duration();
+        s.timing.freeze += 1.0;
+        s.retime();
+        assert!((s.scene.duration() - before - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn reduced_motion_does_not_suppress_onboarding_sounds() {
         let simulate = |reduced: bool| -> Vec<(f64, crate::feedback::Tone)> {
             let mut s = Onboard::new(Flow::FirstRun);
             s.speech = Speech::AfterDownload;
             s.scripted_try = true;
             s.reduced.set(reduced);
-            s.pick(s.wants);
-            s.sfx.on_download_start(0.0);
-            let mut now = DOWNLOAD_HOLD;
+            s.begin_live(0.0);
             let mut tx = Tx::default();
-            for _ in 0..20 {
+            let mut now = 0.0;
+            while now < 90.0 && s.step != Step::Ready {
+                if versus::waiting_to_start(&s) {
+                    s.start_scene();
+                }
                 poll(&mut s, now, &mut tx);
-                let Some(wait) = first_run_next(&mut s, now) else {
-                    poll(&mut s, now + 0.3, &mut tx);
-                    break;
-                };
-                now += wait;
+                now += 0.05;
             }
+            poll(&mut s, now + 0.3, &mut tx);
+            assert_eq!(s.step, Step::Ready);
             s.sfx.fired_cues().to_vec()
         };
         let full = simulate(false);
