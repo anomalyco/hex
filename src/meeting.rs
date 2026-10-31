@@ -787,11 +787,17 @@ fn write_tracks(
 fn finalize_track(path: PathBuf, writer: Option<WavWriter<BufWriter<File>>>) -> Result<()> {
     if let Some(writer) = writer {
         writer.finalize()?;
-        File::open(path)?.sync_all()?;
-        Ok(())
+        sync_file(&path)
     } else {
         create_empty_track(path)
     }
+}
+
+/// Flushes a finished file to disk. Windows refuses to flush a read-only
+/// handle (os error 5), so the file is opened for writing.
+fn sync_file(path: &Path) -> Result<()> {
+    OpenOptions::new().write(true).open(path)?.sync_all()?;
+    Ok(())
 }
 
 fn create_empty_track(path: PathBuf) -> Result<()> {
@@ -806,8 +812,7 @@ fn create_empty_track(path: PathBuf) -> Result<()> {
     )?
     .finalize()?;
     set_owner_only(&path, false)?;
-    File::open(path)?.sync_all()?;
-    Ok(())
+    sync_file(&path)
 }
 
 fn transcribe(
