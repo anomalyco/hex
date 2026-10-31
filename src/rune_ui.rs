@@ -1895,6 +1895,7 @@ const SCENES: &[Scene] = &[
                 DesktopShortcuts::Portal(vec![crate::desktop_host::DesktopGrantedShortcut {
                     name: "Dictation".into(),
                     trigger: None,
+                    unconfirmed: false,
                 }]);
         }
     }),
@@ -2633,10 +2634,12 @@ fn portal_fixture() -> Ui {
         DesktopGrantedShortcut {
             name: "Dictation".into(),
             trigger: Some("F12".into()),
+            unconfirmed: false,
         },
         DesktopGrantedShortcut {
             name: "Paste last dictation".into(),
             trigger: Some("Ctrl+Alt+V".into()),
+            unconfirmed: false,
         },
     ]))
 }

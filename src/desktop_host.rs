@@ -54,8 +54,14 @@ pub(crate) enum DesktopShortcuts {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopGrantedShortcut {
     pub(crate) name: String,
-    /// The trigger the desktop granted; `None` when it refused.
+    /// The trigger the desktop granted; `None` when it refused, or, with
+    /// `unconfirmed`, when it names none.
     pub(crate) trigger: Option<String>,
+    /// The desktop assigns the key in its own configuration and its portal
+    /// describes no trigger (Hyprland), so a missing trigger is not a
+    /// refusal: Hex cannot confirm which key, if any, runs it.
+    #[serde(default)]
+    pub(crate) unconfirmed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

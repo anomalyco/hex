@@ -153,6 +153,7 @@ fn a_refused_portal_shortcut_says_how_to_free_it() {
         view.listener.shortcuts = DesktopShortcuts::Portal(vec![DesktopGrantedShortcut {
             name: "Dictation".into(),
             trigger: None,
+            unconfirmed: false,
         }]);
     }
     rt.invalidate();
@@ -170,6 +171,34 @@ fn a_refused_portal_shortcut_says_how_to_free_it() {
     assert!(rt.find("output/card/refused").is_none());
 }
 
+/// #635: Hyprland's portal names no trigger, since its config binds the
+/// keys, so the row says Hex can't confirm it and shows no refusal.
+#[test]
+fn an_unconfirmed_portal_shortcut_is_not_called_refused() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    if let Some(view) = &mut rt.state.view {
+        view.listener.shortcuts = DesktopShortcuts::Portal(vec![DesktopGrantedShortcut {
+            name: "Dictation".into(),
+            trigger: None,
+            unconfirmed: true,
+        }]);
+    }
+    rt.invalidate();
+    rt.frame(0.0);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Your desktop assigns this key itself, so Hex can't confirm it")
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text == "Your desktop did not grant this shortcut")
+    );
+    assert!(rt.find("basics/refused").is_none());
+}
+
 #[test]
 fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
@@ -178,10 +207,12 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
             DesktopGrantedShortcut {
                 name: "Dictation".into(),
                 trigger: Some("F12".into()),
+                unconfirmed: false,
             },
             DesktopGrantedShortcut {
                 name: "Paste last dictation".into(),
                 trigger: None,
+                unconfirmed: false,
             },
         ]);
     }

@@ -874,6 +874,15 @@ fn gnome() -> bool {
     desktop_is("GNOME")
 }
 
+/// Whether the desktop assigns portal shortcuts their keys in its own
+/// configuration and describes no trigger in the portal's answer. Hyprland's
+/// portal returns an empty description for every shortcut, bound or not
+/// (`bind = …, global, anomaly.hex:…` in its config), so an empty one there
+/// is no refusal.
+pub(crate) fn desktop_assigns_triggers() -> bool {
+    desktop_is("Hyprland")
+}
+
 fn desktop_is(name: &str) -> bool {
     std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
         desktops
