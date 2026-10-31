@@ -1,15 +1,18 @@
-//! `"Without Hex"` as one timeline, in the `"Launch Room"` group. Jay (CEO)
-//! is presenting to the investors and asks whether we're ready to ship. You
-//! type the answer by hand, slow and shaky, then frantic; every fix makes it
-//! worse until Jay removes you from the group mid-word.
+//! `"Without Hex"` as one timeline, played from a [`Script`]: a scene file
+//! in `scenes/` (syntax in `scenes/README.md`). In the shipping scene Jay
+//! (CEO) is presenting to the investors and asks whether we're ready to
+//! ship; you type the answer by hand, slow and shaky, then frantic, and every
+//! fix makes it worse until he removes you from the group mid-word.
 //!
-//! Jay's question is already there before `"Watch what happens"`: lines
-//! before [`Op::Start`] sit at negative times, shown while the stage waits.
+//! Lines before `start` are already there before `"Watch what happens"`:
+//! they sit at negative times, shown while the stage waits.
 //!
 //! [`Timing`] holds every pause and the key pace, so the playground can tune
-//! them live; [`Scene::build`] turns the script into strokes, chat lines,
-//! tapbacks, a read receipt, typing dots, slow motion, the autocorrect hit,
+//! them live; [`Scene::play`] turns the script into strokes, chat lines,
+//! tapbacks, read receipts, typing dots, slow motion, the autocorrect hit,
 //! the heartbeat, and one focus at each moment.
+
+use super::scene_script::{self, Ending, Op, Script, Speaker, Wait};
 
 /// Every pause and pace in the scene, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,7 +21,7 @@ pub(crate) struct Timing {
     pub(crate) arrive: f64,
     /// Reading time per word of each of Jay's messages, after a fixed beat.
     pub(crate) read_word: f64,
-    /// How long Jay's typing dots pulse before most replies.
+    /// How long the boss's typing dots pulse, for a plain `dots`.
     pub(crate) jay_typing: f64,
     /// The gap between keys at a calm, shaky pace.
     pub(crate) pace: f64,
@@ -26,13 +29,13 @@ pub(crate) struct Timing {
     pub(crate) panic_pace: f64,
     /// The silence after the accidental send, before `"Read"`.
     pub(crate) freeze: f64,
-    /// Jay's typing dots before the punchline.
-    pub(crate) punch: f64,
+    /// `"With Hex"`: how far apart the cheers land.
+    pub(crate) cheer: f64,
     /// How long the removal holds before `"With Hex"`.
     pub(crate) fired: f64,
     /// `"With Hex"`: from the words landing to the reply sending.
     pub(crate) hex_send: f64,
-    /// `"With Hex"`: from the send to Jay's reply.
+    /// `"With Hex"`: from the send to a first reply that types first.
     pub(crate) hex_reply: f64,
 }
 
@@ -45,7 +48,7 @@ impl Default for Timing {
             pace: 0.25,
             panic_pace: 0.068,
             freeze: 1.5,
-            punch: 1.25,
+            cheer: 0.35,
             fired: 2.0,
             hex_send: 0.7,
             hex_reply: 1.3,
@@ -54,28 +57,10 @@ impl Default for Timing {
 }
 
 impl Timing {
-    /// How long one of Jay's messages holds so it can be read.
+    /// How long a message holds so it can be read.
     pub(crate) fn read(&self, text: &str) -> f64 {
         0.75 + self.read_word * text.split_whitespace().count() as f64
     }
-}
-
-#[derive(Clone, Copy)]
-enum Gap {
-    Arrive,
-    Freeze,
-    Fired,
-    Beat(f64),
-}
-
-/// How a reply went out.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Sent {
-    Clean,
-    /// Sent with a typo in it.
-    Typo,
-    /// The finger slipped onto Return: a typo, and Return flashes.
-    Slip,
 }
 
 /// A tapback's mark, drawn as text or a vector, never an emoji font.
@@ -89,134 +74,27 @@ pub(crate) enum Glyph {
     Heart,
 }
 
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-enum Op {
-    /// Before the button: Jay's line at this many seconds before it.
-    Before(&'static str, f64),
-    /// The button: the scene's clock starts here.
-    Start,
-    Wait(Gap),
-    /// Jay's typing dots, `x` times [`Timing::jay_typing`].
-    Dots(f64),
-    /// Jay's dots starting `after` seconds from now for `x` times
-    /// [`Timing::jay_typing`], while what follows goes on.
-    DotsAt(f64, f64),
-    Punch,
-    Jay(&'static str),
-    /// One of Jay's lines, held this long instead of its reading time.
-    JayFor(&'static str, f64),
-    /// Anyone's line, held this long.
-    Says(Who, &'static str, f64),
-    /// A line that lands `after` seconds from now while what follows goes
-    /// on, such as Jay cutting in while you type.
-    Cut(Who, &'static str, f64),
-    /// Typed by hand, panic rising from the first to the second level.
-    Type(&'static str, f64, f64),
-    Hesitate(f64),
-    Back(usize),
-    Send(Sent),
-    Read,
-    /// A tapback on the line `back` lines before the newest (`0` is the
-    /// newest), `after` seconds from now.
-    Tap(Glyph, usize, f64),
-    /// An elbow lands on Caps Lock and its neighbours; Caps Lock toggles.
-    Elbow,
-    /// Time slows hard as Return starts down; the next send ends it.
-    Slow,
-    /// Autocorrect swaps the last `from` in the draft for `to`, under its
-    /// underline.
-    Autocorrect(&'static str, &'static str),
-    /// The keyboard shudders this hard, in points.
-    Shudder(f32),
-    /// You're removed: the line lands mid-keystroke and the draft is gone.
-    System(&'static str),
-}
-
-use Glyph::{Bang, Haha, Heart, Question, ThumbsDown, ThumbsUp};
-
-/// Provisional: the final lines come from the script arena. Every engine
-/// beat is exercised so the stills and tests have something to hold.
-const SCRIPT: &[Op] = &[
-    Op::Before("The investors are in the room.", 0.9),
-    Op::Before("Are we ready to ship?", 0.5),
-    Op::Start,
-    Op::Wait(Gap::Arrive),
-    Op::JayFor("they're asking right now", 0.35),
-    Op::Cut(Who::Jay, "??", 1.75),
-    Op::Type("sorry j", 0.0, 0.15),
-    Op::Hesitate(0.55),
-    Op::Back(7),
-    Op::Hesitate(0.35),
-    Op::Type("Yse, we're deady", 0.15, 0.6),
-    // Long enough to read `"deady"`.
-    Op::Hesitate(0.40),
-    Op::Back(1),
-    // `"dead"` sits there a moment; reaching for delete again, the finger
-    // lands on Return.
-    Op::Hesitate(0.23),
-    Op::Send(Sent::Slip),
-    Op::Wait(Gap::Freeze),
-    Op::Read,
-    Op::Tap(Bang, 0, 0.55),
-    Op::Wait(Gap::Beat(1.1)),
-    Op::Dots(0.7),
-    Op::JayFor("what??", 0.45),
-    Op::Cut(Who::Jay, "WHAT", 0.75),
-    Op::Type("oh god *reayd", 0.7, 0.9),
-    Op::Send(Sent::Typo),
-    Op::Wait(Gap::Beat(0.3)),
-    Op::Dots(0.55),
-    Op::Wait(Gap::Beat(0.45)),
-    Op::Dots(0.85),
-    Op::Jay("ready or dead?"),
-    Op::Type("yes", 0.9, 0.9),
-    Op::Send(Sent::Clean),
-    Op::Tap(Question, 0, 0.3),
-    Op::Wait(Gap::Beat(0.4)),
-    Op::Type("sorry fart fingers", 0.85, 1.0),
-    Op::Send(Sent::Typo),
-    Op::Tap(Haha, 0, 0.45),
-    Op::Tap(Haha, 0, 0.8),
-    Op::Wait(Gap::Beat(1.0)),
-    Op::Elbow,
-    Op::Wait(Gap::Beat(0.45)),
-    Op::Type("I'M SO SORRY", 1.0, 1.0),
-    Op::Slow,
-    Op::Wait(Gap::Beat(0.5)),
-    Op::Autocorrect("SORRY", "BABE"),
-    Op::Wait(Gap::Beat(0.7)),
-    Op::Send(Sent::Typo),
-    Op::Tap(Haha, 0, 0.4),
-    Op::Tap(Heart, 0, 0.65),
-    Op::Cut(Who::Investor(1), "who is babe", 0.9),
-    Op::Wait(Gap::Beat(1.0)),
-    Op::Dots(0.7),
-    Op::JayFor("they can see my screen", 1.3),
-    Op::Punch,
-    Op::JayFor("Clear your desk.", 0.55),
-    Op::Tap(ThumbsUp, 0, 0.0),
-    Op::Tap(Bang, 0, 0.25),
-    Op::Tap(Haha, 0, 0.5),
-    Op::Tap(ThumbsDown, 0, 0.75),
-    // `"wait no i meant ready"`, cut off.
-    Op::Type("wait no i mea", 1.0, 1.0),
-    Op::Wait(Gap::Beat(0.12)),
-    Op::System("Jay removed you from \u{201c}Launch Room\u{201d}"),
-    Op::Wait(Gap::Fired),
-];
-
-/// The red pill under the chat's header from the first frame.
-pub(crate) const PRESENTING: Option<&str> = Some("Jay is presenting");
-
-/// The investors, by the names a group shows over their lines.
-pub(crate) const INVESTORS: [&str; 3] = ["Priya", "Marcus", "Dana"];
+/// How long autocorrect's slow motion holds before the swap, and after it
+/// before the send.
+const SLOW_BEFORE: f64 = 0.6;
+const SLOW_AFTER: f64 = 0.8;
+/// Lines before the button sit this far apart, the last this long before it.
+const BEFORE_STEP: f64 = 0.4;
+const BEFORE_LAST: f64 = 0.5;
+/// An untimed tapback lands this long after the last, the first this long
+/// after its command.
+const TAP_STEP: f64 = 0.2;
+const TAP_FIRST: f64 = 0.3;
 
 const HOLD: f64 = 0.072;
 const MODIFIER_LEAD: f64 = 0.052;
 const SINK: f64 = 0.022;
 /// Keys come back up slowly enough to catch in peripheral vision.
 const RISE: f64 = 0.11;
+/// How long the presenting pill flares.
+const FLARE: f64 = 0.9;
+/// How hard careful keys are struck: soft.
+const CAREFUL: f64 = 0.2;
 /// How long Return flashes after the finger slips onto it.
 const FLASH: f64 = 0.28;
 /// How far into panic a stroke has to be for the harder clack.
@@ -249,22 +127,13 @@ pub(crate) struct Stroke {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Who {
-    Jay,
-    /// One of [`INVESTORS`].
-    Investor(u8),
+    /// Someone in [`Script::people`]: `0` is the boss.
+    Them(u8),
     You,
+    /// The ending: you're cut off.
     System,
-}
-
-impl Who {
-    /// The name a group shows over their first line in a run.
-    pub(crate) fn name(self) -> Option<&'static str> {
-        match self {
-            Who::Jay => Some("Jay"),
-            Who::Investor(i) => INVESTORS.get(usize::from(i)).copied(),
-            Who::You | Who::System => None,
-        }
-    }
+    /// A neutral notice, such as the thread being renamed.
+    Status,
 }
 
 pub(crate) struct Line {
@@ -315,11 +184,18 @@ struct Mark {
 }
 
 pub(crate) struct Scene {
+    script: &'static Script<'static>,
     strokes: Vec<Stroke>,
     lines: Vec<Line>,
     taps: Vec<Tap>,
     dots: Vec<(f64, f64)>,
-    read: Option<(f64, usize)>,
+    /// Each `"Read"` and the line it reads; the newest one shows.
+    reads: Vec<(f64, usize)>,
+    /// The pill flaring.
+    flares: Vec<f64>,
+    /// The thread's new names.
+    renames: Vec<(f64, &'static str)>,
+    ending: Ending,
     focus: Vec<(f64, Focus)>,
     knocks: Vec<(f64, f32)>,
     shudders: Vec<(f64, f32)>,
@@ -383,13 +259,22 @@ impl Default for Scene {
 }
 
 impl Scene {
+    /// The scene this run plays ([`Script::chosen`]), timed by `t`.
     pub(crate) fn build(t: &Timing) -> Self {
+        Self::play(t, Script::chosen())
+    }
+
+    pub(crate) fn play(t: &Timing, script: &'static Script<'static>) -> Self {
         let mut s = Scene {
+            script,
             strokes: Vec::new(),
             lines: Vec::new(),
             taps: Vec::new(),
             dots: Vec::new(),
-            read: None,
+            reads: Vec::new(),
+            flares: Vec::new(),
+            renames: Vec::new(),
+            ending: Ending::Removed,
             focus: vec![(0.0, Focus::Waiting)],
             knocks: Vec::new(),
             shudders: Vec::new(),
@@ -403,7 +288,13 @@ impl Scene {
             typing: 0.0,
             end: 0.0,
         };
-        let mut at = 0.0;
+        let before = script
+            .ops
+            .iter()
+            .take_while(|op| **op != Op::Start)
+            .filter(|op| matches!(op, Op::Says { .. }))
+            .count();
+        let mut at = -(BEFORE_LAST + BEFORE_STEP * before as f64);
         let mut text = String::new();
         let mut caret = 0;
         let mut n = 0;
@@ -411,8 +302,12 @@ impl Scene {
         let mut caps = false;
         let mut slow: Option<f64> = None;
         let mut swapped: Option<f64> = None;
-        // Lines that land while what follows goes on, waiting their turn.
-        let mut pending: Vec<Line> = Vec::new();
+        // Lines that land while what follows goes on, waiting their turn,
+        // with the name a tapback finds them by.
+        let mut pending: Vec<(Line, Option<&str>)> = Vec::new();
+        let mut labels: Vec<(&str, usize)> = Vec::new();
+        // Tapbacks, placed once every line is: when, on what, which.
+        let mut taps: Vec<(f64, Option<&str>, Glyph)> = Vec::new();
         let stroke = |s: &mut Scene, at: f64, gap: f64, key, modifier, text: &str, caret, panic| {
             s.strokes.push(Stroke {
                 at,
@@ -427,89 +322,88 @@ impl Scene {
         };
         // Every line goes in in time order, so any cut-in due first goes
         // ahead of it.
-        let push = |s: &mut Scene, pending: &mut Vec<Line>, line: Line| -> usize {
-            pending.sort_by(|a, b| a.at.total_cmp(&b.at));
-            while pending.first().is_some_and(|p| p.at <= line.at) {
-                s.lines.push(pending.remove(0));
+        let push = |s: &mut Scene,
+                    pending: &mut Vec<(Line, Option<&'static str>)>,
+                    labels: &mut Vec<(&'static str, usize)>,
+                    line: Line,
+                    label: Option<&'static str>|
+         -> usize {
+            pending.sort_by(|a, b| a.0.at.total_cmp(&b.0.at));
+            while pending.first().is_some_and(|p| p.0.at <= line.at) {
+                let (cut, name) = pending.remove(0);
+                labels.extend(name.map(|name| (name, s.lines.len())));
+                s.lines.push(cut);
             }
+            labels.extend(label.map(|name| (name, s.lines.len())));
             s.lines.push(line);
             s.lines.len() - 1
         };
+        let who = |speaker: Speaker| match speaker {
+            Speaker::Them(i) => Who::Them(i),
+            Speaker::You => Who::You,
+        };
+        let mut title = script.title;
         let mut panic = 0.0;
-        for op in SCRIPT {
+        for op in &script.ops {
             match *op {
-                Op::Before(line, secs) => s.lines.push(Line {
-                    at: -secs,
-                    who: Who::Jay,
-                    text: line.to_string(),
-                }),
-                Op::Start => at = 0.0,
-                Op::Wait(gap) => {
-                    at += match gap {
-                        Gap::Arrive => t.arrive,
-                        Gap::Freeze => t.freeze,
-                        Gap::Fired => t.fired,
-                        Gap::Beat(secs) => secs,
+                Op::Says {
+                    who: speaker,
+                    text: line,
+                    hold,
+                    label,
+                } => {
+                    let started = at >= 0.0 || s.lines.len() >= before;
+                    if !started {
+                        at += BEFORE_STEP;
+                    }
+                    let i = push(
+                        &mut s,
+                        &mut pending,
+                        &mut labels,
+                        Line {
+                            at,
+                            who: who(speaker),
+                            text: line.to_string(),
+                        },
+                        label,
+                    );
+                    if started {
+                        s.focus.push((at, Focus::Line(i)));
+                        at += hold.unwrap_or_else(|| t.read(line));
                     }
                 }
-                Op::Dots(x) => {
-                    s.focus.push((at, Focus::Dots));
-                    s.dots.push((at, at + t.jay_typing * x));
-                    at += t.jay_typing * x;
+                Op::Start => at = t.arrive,
+                Op::Cut {
+                    after,
+                    who: speaker,
+                    text: line,
+                    label,
+                } => pending.push((
+                    Line {
+                        at: at + after,
+                        who: who(speaker),
+                        text: line.to_string(),
+                    },
+                    label,
+                )),
+                Op::Wait(Wait::Secs(secs)) => at += secs,
+                Op::Wait(Wait::Freeze) => at += t.freeze,
+                Op::Dots { secs, after } => {
+                    let length = t.jay_typing * secs.unwrap_or(1.0);
+                    match after {
+                        Some(after) => s.dots.push((at + after, at + after + length)),
+                        None => {
+                            s.focus.push((at, Focus::Dots));
+                            s.dots.push((at, at + length));
+                            at += length;
+                        }
+                    }
                 }
-                Op::DotsAt(after, x) => {
-                    s.dots.push((at + after, at + after + t.jay_typing * x));
-                }
-                Op::Punch => {
-                    s.focus.push((at, Focus::Dots));
-                    s.dots.push((at, at + t.punch));
-                    at += t.punch;
-                }
-                Op::Jay(line) => {
-                    let i = push(
-                        &mut s,
-                        &mut pending,
-                        Line {
-                            at,
-                            who: Who::Jay,
-                            text: line.to_string(),
-                        },
-                    );
-                    s.focus.push((at, Focus::Line(i)));
-                    at += t.read(line);
-                }
-                Op::JayFor(line, hold) | Op::Says(Who::Jay, line, hold) => {
-                    let i = push(
-                        &mut s,
-                        &mut pending,
-                        Line {
-                            at,
-                            who: Who::Jay,
-                            text: line.to_string(),
-                        },
-                    );
-                    s.focus.push((at, Focus::Line(i)));
-                    at += hold;
-                }
-                Op::Says(who, line, hold) => {
-                    let i = push(
-                        &mut s,
-                        &mut pending,
-                        Line {
-                            at,
-                            who,
-                            text: line.to_string(),
-                        },
-                    );
-                    s.focus.push((at, Focus::Line(i)));
-                    at += hold;
-                }
-                Op::Cut(who, line, after) => pending.push(Line {
-                    at: at + after,
-                    who,
-                    text: line.to_string(),
-                }),
-                Op::Type(chars, from, to) => {
+                Op::Type {
+                    text: chars,
+                    panic: level,
+                } => {
+                    let (from, to) = level.unwrap_or((panic, panic));
                     s.focus.push((at, Focus::Field));
                     // A beat to find the keys before the first one lands,
                     // shorter in a panic.
@@ -557,8 +451,39 @@ impl Scene {
                         );
                     }
                 }
-                Op::Hesitate(secs) => at += secs,
-                Op::Back(count) => {
+                Op::Careful {
+                    text: chars,
+                    pace: gap,
+                } => {
+                    s.focus.push((at, Focus::Field));
+                    // A breath first.
+                    at += 0.45;
+                    for (i, c) in chars.chars().enumerate() {
+                        n += 1;
+                        let (key, shift) = key_for(c, caps);
+                        text.insert(caret, c);
+                        caret += c.len_utf8();
+                        let step = if i == 0 {
+                            0.0
+                        } else {
+                            gap * (0.92 + 0.16 * noise(n, 2.0)) + if shift { 0.035 } else { 0.0 }
+                        };
+                        at += step;
+                        began.get_or_insert(at);
+                        stroke(
+                            &mut s,
+                            at,
+                            step.max(gap),
+                            key,
+                            shift.then_some("shift"),
+                            &text,
+                            caret,
+                            CAREFUL,
+                        );
+                    }
+                }
+                Op::Flare => s.flares.push(at),
+                Op::Delete(count) => {
                     for _ in 0..count {
                         n += 1;
                         caret -= text[..caret].chars().last().map_or(1, char::len_utf8);
@@ -572,31 +497,32 @@ impl Scene {
                         }
                     }
                 }
-                Op::Send(how) => {
-                    let gap = if how == Sent::Slip { 0.11 } else { 0.16 };
+                Op::Send { slip, meant } => {
+                    let gap = if slip { 0.11 } else { 0.16 };
                     at += gap;
                     let sent = std::mem::take(&mut text);
                     caret = 0;
                     stroke(&mut s, at, gap, "return", None, "", 0, panic.max(HARD));
+                    s.typos += meant.map_or(usize::from(swapped.is_some()), |meant| {
+                        scene_script::typos(&sent, meant)
+                    });
                     let i = push(
                         &mut s,
                         &mut pending,
+                        &mut labels,
                         Line {
                             at,
                             who: Who::You,
                             text: sent,
                         },
+                        None,
                     );
                     s.focus.push((at, Focus::Line(i)));
-                    s.knocks
-                        .push((at, if how == Sent::Slip { 6.0 } else { 3.5 }));
-                    if how == Sent::Slip {
+                    s.knocks.push((at, if slip { 6.0 } else { 3.5 }));
+                    if slip {
                         s.slip.get_or_insert(i);
                         s.flashes.push(at);
                         s.shudders.push((at, 3.0));
-                    }
-                    if how != Sent::Clean || swapped.is_some() {
-                        s.typos += 1;
                     }
                     if let Some(from) = slow.take() {
                         s.slows.push((from, at));
@@ -614,16 +540,17 @@ impl Scene {
                 Op::Read => {
                     let line = s.lines.iter().rposition(|l| l.who == Who::You).unwrap_or(0);
                     s.focus.push((at, Focus::Read(line)));
-                    s.read = Some((at, line));
+                    s.reads.push((at, line));
                 }
-                Op::Tap(glyph, back, after) => {
-                    let when = at + after;
-                    let shown = s.lines.iter().take_while(|l| l.at <= when).count();
-                    s.taps.push(Tap {
-                        at: when,
-                        line: shown.saturating_sub(1 + back),
-                        glyph,
-                    });
+                Op::Tap {
+                    line,
+                    taps: ref glyphs,
+                } => {
+                    let mut last = at + TAP_FIRST - TAP_STEP;
+                    for &(glyph, after) in glyphs {
+                        last = after.map_or(last + TAP_STEP, |after| at + after);
+                        taps.push((last, line, glyph));
+                    }
                 }
                 Op::Elbow => {
                     n += 1;
@@ -634,11 +561,12 @@ impl Scene {
                     }
                     s.shudders.push((at, 4.0));
                 }
-                Op::Slow => {
+                Op::Autocorrect { from, to } => {
+                    // Time slows hard as Return starts down, and the next
+                    // send ends it.
                     s.focus.push((at, Focus::Field));
                     slow = Some(at);
-                }
-                Op::Autocorrect(from, to) => {
+                    at += SLOW_BEFORE;
                     if let Some(start) = text.rfind(from) {
                         s.marks.push(Mark {
                             from: at - MARK_LEAD,
@@ -657,31 +585,86 @@ impl Scene {
                         });
                         swapped = Some(at);
                     }
+                    at += SLOW_AFTER;
                 }
-                Op::Shudder(amp) => s.shudders.push((at, amp)),
-                Op::System(line) => {
-                    // A draft cut off mid-word was never sent.
-                    began = None;
+                Op::Status(copy) | Op::Rename(copy) => {
+                    let copy = if matches!(op, Op::Rename(_)) {
+                        s.renames.push((at, copy));
+                        title = copy;
+                        renamed(script.boss(), copy)
+                    } else {
+                        copy.to_string()
+                    };
+                    let hold = t.read(&copy);
                     let i = push(
                         &mut s,
                         &mut pending,
+                        &mut labels,
+                        Line {
+                            at,
+                            who: Who::Status,
+                            text: copy,
+                        },
+                        None,
+                    );
+                    s.focus.push((at, Focus::Line(i)));
+                    at += hold;
+                }
+                Op::End { ending, text: copy } => {
+                    // A draft cut off mid-word was never sent.
+                    began = None;
+                    s.ending = ending;
+                    let i = push(
+                        &mut s,
+                        &mut pending,
+                        &mut labels,
                         Line {
                             at,
                             who: Who::System,
-                            text: line.to_string(),
+                            text: copy
+                                .map_or_else(|| ending.line(script.boss(), title), str::to_string),
                         },
+                        None,
                     );
                     s.focus.push((at, Focus::Line(i)));
                     s.knocks.push((at, 4.0));
+                    at += t.fired;
                 }
             }
         }
         // Anyone cutting in after the removal is never heard.
         drop(pending);
+        for (when, label, glyph) in taps {
+            let line = match label {
+                Some(name) => labels.iter().find(|(n, _)| *n == name).map(|&(_, i)| i),
+                None => s.lines.iter().rposition(|l| l.at <= when),
+            };
+            if let Some(line) = line {
+                s.taps.push(Tap {
+                    at: when,
+                    line,
+                    glyph,
+                });
+            }
+        }
         s.focus.sort_by(|a, b| a.0.total_cmp(&b.0));
         s.taps.sort_by(|a, b| a.at.total_cmp(&b.at));
         s.end = at;
         s
+    }
+
+    /// The thread's name at `t`.
+    pub(crate) fn title(&self, t: f64) -> &'static str {
+        self.renames
+            .iter()
+            .take_while(|&&(at, _)| at <= t)
+            .last()
+            .map_or(self.script.title, |&(_, name)| name)
+    }
+
+    /// Why the field is gone once you're cut off.
+    pub(crate) fn locked(&self) -> String {
+        self.ending.locked(self.script.boss())
     }
 
     pub(crate) fn strokes(&self) -> &[Stroke] {
@@ -746,13 +729,33 @@ impl Scene {
         self.dots.iter().position(|&(a, b)| (a..b).contains(&t))
     }
 
-    /// When `"Read"` shows, from the start.
-    pub(crate) fn read_at(&self) -> Option<f64> {
-        self.read.map(|(at, _)| at)
+    /// When each `"Read"` shows, from the start.
+    pub(crate) fn reads(&self) -> impl Iterator<Item = f64> + '_ {
+        self.reads.iter().map(|&(at, _)| at)
     }
 
+    /// The line the newest `"Read"` sits under at `t`.
     pub(crate) fn read(&self, t: f64) -> Option<usize> {
-        self.read.filter(|&(at, _)| at <= t).map(|(_, line)| line)
+        self.reads
+            .iter()
+            .take_while(|&&(at, _)| at <= t)
+            .last()
+            .map(|&(_, line)| line)
+    }
+
+    /// The presenting pill's flare at `t`, `0..=1`.
+    pub(crate) fn flare(&self, t: f64) -> f32 {
+        self.flares
+            .iter()
+            .map(|&at| {
+                let u = (t - at) / FLARE;
+                if (0.0..1.0).contains(&u) {
+                    ((1.0 - u) * (1.0 - u)) as f32
+                } else {
+                    0.0
+                }
+            })
+            .fold(0.0, f32::max)
     }
 
     pub(crate) fn focus(&self, t: f64) -> Focus {
@@ -831,8 +834,7 @@ impl Scene {
         self.removed(t)
             || self.slow(t) > 0.0
             || match self.focus(t) {
-                Focus::Read(_) => true,
-                Focus::Line(i) => Some(i) == self.slip,
+                Focus::Read(i) | Focus::Line(i) => Some(i) == self.slip,
                 _ => false,
             }
     }
@@ -946,8 +948,45 @@ impl Scene {
     }
 }
 
+/// How long `"Without Hex"` may run, and how many tapbacks a line holds.
+#[cfg(test)]
+pub(crate) const LENGTH: std::ops::RangeInclusive<f64> = 26.0..=36.0;
+#[cfg(test)]
+pub(crate) const MAX_TAPS: usize = 4;
+
+/// What a parsed scene breaks once it's played with `t`: its length and its
+/// tapbacks. The payoff's limits are [`super::triumph::check`]'s.
+#[cfg(test)]
+pub(crate) fn check(t: &Timing, script: &'static Script<'static>) -> Vec<String> {
+    let scene = Scene::play(t, script);
+    let mut problems = Vec::new();
+    if !LENGTH.contains(&scene.duration()) {
+        problems.push(format!(
+            "\"Without Hex\" runs {:.1} s; keep it between {} and {} s",
+            scene.duration(),
+            LENGTH.start(),
+            LENGTH.end()
+        ));
+    }
+    for (i, line) in scene.lines().iter().enumerate() {
+        let taps = scene.all_taps().iter().filter(|tap| tap.line == i).count();
+        if taps > MAX_TAPS {
+            problems.push(format!(
+                "{taps} tapbacks on \"{}\"; a line holds {MAX_TAPS}",
+                line.text
+            ));
+        }
+    }
+    problems
+}
+
 fn removed_at(lines: &[Line]) -> Option<f64> {
     lines.iter().find(|l| l.who == Who::System).map(|l| l.at)
+}
+
+/// The notice when `who` renames the thread.
+pub(crate) fn renamed(who: &str, name: &str) -> String {
+    format!("{who} named the conversation \u{201c}{name}\u{201d}")
 }
 
 /// A decaying shake from each `(at, amplitude)` at `hz`.
@@ -1031,17 +1070,96 @@ mod tests {
 
     #[test]
     fn the_score_counts_what_went_out_wrong() {
-        let scene = Scene::default();
-        let sent = sent(&scene);
-        assert!(scene.typos() >= 1 && scene.typos() <= sent.len());
-        let clean = sent.len() - scene.typos();
-        assert!(clean >= 1, "something went out as typed: {sent:?}");
+        // "Yse, we're dead" 2, "*reayd" 1, "fart" 1, the autocorrect 1.
+        assert_eq!(Scene::default().typos(), 5);
+    }
+
+    /// Every check a scene file gets: parsing, its limits, and the payoff's.
+    fn validate(src: &'static str) -> Vec<String> {
+        let script: &'static Script = match scene_script::parse(src) {
+            Ok(script) => Box::leak(Box::new(script)),
+            Err(errors) => return errors.0.iter().map(ToString::to_string).collect(),
+        };
+        let t = Timing::default();
+        let send = super::super::versus::send_at(script.take(), true, &t);
+        let mut problems = check(&t, script);
+        problems.extend(super::super::triumph::check(script, send, &t));
+        problems
+    }
+
+    #[test]
+    fn every_scene_plays_in_its_window_and_scores_what_it_shows() {
+        let t = Timing::default();
+        for (name, src) in scene_script::SCENES {
+            let problems = validate(src);
+            // C is the v3 control, kept at v3's approved 22 seconds.
+            let problems: Vec<_> = problems
+                .into_iter()
+                .filter(|p| !(name == "C-v3.scene" && p.contains("runs") && p.contains("Without")))
+                .collect();
+            assert!(problems.is_empty(), "{name}: {problems:#?}");
+            let script: &'static Script = Box::leak(Box::new(scene_script::bundled(name)));
+            let scene = Scene::play(&t, script);
+            assert!(scene.removed(scene.duration()), "{name} ends cut off");
+            let typed = scene_script::fill(
+                script.with.typed,
+                script.take().release,
+                scene.score_secs(),
+                scene.typos(),
+            );
+            let typos = scene_script::counted(scene.typos(), "typo", "typos");
+            assert!(
+                !script.with.typed.contains("{typos}") || typed.contains(&typos),
+                "{name}: {typed}"
+            );
+        }
+        let a = Scene::play(
+            &t,
+            Box::leak(Box::new(scene_script::bundled("A-incontinence.scene"))),
+        );
+        assert_eq!(a.typos(), 5);
+    }
+
+    /// `HEX_VALIDATE_SCENES=<folder> scripts/check validate_scene_folder
+    /// -- --nocapture` checks every `.scene` in a folder and prints a verdict
+    /// each; without it, nothing runs.
+    #[test]
+    fn validate_scene_folder() {
+        let Ok(dir) = std::env::var("HEX_VALIDATE_SCENES") else {
+            return;
+        };
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == "scene"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            let src: &'static str =
+                Box::leak(std::fs::read_to_string(&path).unwrap().into_boxed_str());
+            let problems = validate(src);
+            let name = path.file_name().unwrap().to_string_lossy();
+            if problems.is_empty() {
+                let script = Box::leak(Box::new(scene_script::parse(src).unwrap()));
+                let scene = Scene::play(&Timing::default(), script);
+                println!(
+                    "PASS {name} {:.1}s typos={}",
+                    scene.duration(),
+                    scene.typos()
+                );
+            } else {
+                println!("FAIL {name}");
+                for p in problems {
+                    println!("  {p}");
+                }
+            }
+        }
     }
 
     #[test]
     fn every_joke_has_time_to_land() {
         let scene = Scene::default();
-        let read = scene.read.unwrap().0;
+        let read = scene.reads().next().unwrap();
         let slip = scene.lines().iter().find(|l| l.who == Who::You).unwrap().at;
         assert!(read - slip >= 1.0, "a silence before Read");
         assert!(
@@ -1082,7 +1200,7 @@ mod tests {
         assert_eq!(scene.focus(first + 0.01), Focus::Line(2));
         let typing = scene.strokes()[0].at;
         assert_eq!(scene.focus(typing), Focus::Field);
-        let (read_at, line) = scene.read.unwrap();
+        let (read_at, line) = scene.reads[0];
         assert_eq!(scene.focus(read_at + 0.01), Focus::Read(line));
     }
 

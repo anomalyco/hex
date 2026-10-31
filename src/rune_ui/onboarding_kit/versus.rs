@@ -19,11 +19,11 @@ use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, te
 
 use super::super::controls::Paint;
 use super::cards::{
-    CHAT_W, Caption, FIELD_FONT, LAUNCH_ROOM, Reply, Side, bubble, chat, chat_height,
+    App, CHAT_W, Caption, FIELD_FONT, Notice, Notify, Reply, Side, bubble, chat, chat_height,
     field_text_origin, presenting, system_line, typing_dots,
 };
 use super::field_text::{self, CHAT};
-use super::fixture::ANSWER_JAY;
+use super::fixture::Take;
 use super::flight::{Flight, flicker, flying, typeset};
 use super::flows::continue_button;
 use super::hud_stage::voice_or_idle_slot;
@@ -31,8 +31,10 @@ use super::keyboard::{self, keyboard_lit};
 use super::landing::{LEAD, UI_SPRING, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
 use super::pill::{pill, slot};
+use super::scene_script::{Script, fill};
 use super::stories::{Flow, Onboard, Step};
-use super::typing::{Focus, Glyph, Line, PRESENTING, Timing, Who};
+use super::triumph::{self, HexBeats, Said};
+use super::typing::{Focus, Glyph, Line, Timing, Who};
 
 const STAGE_W: f32 = 500.0;
 const STAGE_H: f32 = 540.0;
@@ -98,15 +100,22 @@ const TYPING: f32 = 0.92;
 /// The shortcut's ember on the score.
 const EMBER: f32 = 0.22;
 
-/// The least time Jay's delighted reply holds before the score.
-const REPLY_HOLD: f64 = 1.75;
 /// How long a landed word takes to settle into the field.
 const SETTLE: f64 = 0.15;
-/// Jay, delighted.
-pub(crate) const HEX_REPLY: &str = "perfect. they're actually clapping";
+
+/// The scene this run plays; it's chosen once, so the stage's geometry can
+/// be worked out without an [`Onboard`].
+fn script() -> &'static Script<'static> {
+    Script::chosen()
+}
+
+/// Your spoken line in `"With Hex"`.
+fn take() -> &'static Take {
+    script().take()
+}
 
 fn reply_lines() -> usize {
-    CHAT.wrap(ANSWER_JAY.text()).len()
+    CHAT.wrap(take().text()).len()
 }
 
 fn card_bottom(lines: usize) -> f32 {
@@ -141,28 +150,36 @@ pub(crate) fn waiting_to_start(s: &Onboard) -> bool {
     s.step == Step::Parked && s.typing_from.is_none()
 }
 
-pub(crate) fn heard_at(streams: bool) -> Vec<f64> {
-    let count = ANSWER_JAY.text().split_whitespace().count();
+/// When each of `take`'s words is heard after the shortcut.
+fn heard_for(take: &'static Take, streams: bool) -> Vec<f64> {
+    let count = take.text().split_whitespace().count();
     (0..count)
         .map(|i| {
             if streams {
-                ANSWER_JAY
-                    .updates
+                take.updates
                     .iter()
                     .find(|(_, partial)| partial.split_whitespace().count() > i)
-                    .map_or(ANSWER_JAY.release, |(at, _)| *at)
+                    .map_or(take.release, |(at, _)| *at)
             } else {
-                ANSWER_JAY.release + i as f64 * BURST
+                take.release + i as f64 * BURST
             }
         })
         .collect()
 }
 
 fn flights_from(streams: bool, from: f64) -> Vec<(Flight, field_text::Slot<'static>)> {
+    flights_for(take(), streams, from)
+}
+
+fn flights_for(
+    take: &'static Take,
+    streams: bool,
+    from: f64,
+) -> Vec<(Flight, field_text::Slot<'static>)> {
     let origin = field_origin();
-    CHAT.slots(ANSWER_JAY.text())
+    CHAT.slots(take.text())
         .into_iter()
-        .zip(heard_at(streams))
+        .zip(heard_for(take, streams))
         .enumerate()
         .map(|(i, (slot, at))| {
             let to = [origin[0] + slot.centre[0], origin[1] + slot.centre[1]];
@@ -179,33 +196,24 @@ fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
         .map_or_else(Vec::new, |from| flights_from(s.streams(), from))
 }
 
-/// `"With Hex"`'s beats after the shortcut goes down: the answer sends, Jay
-/// replies, and his reply has been read.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct HexBeats {
-    pub(crate) send: f64,
-    pub(crate) reply: f64,
-    pub(crate) done: f64,
+/// `"With Hex"`'s beats after the shortcut goes down: the answer sends once
+/// its words have landed, then the scene's cheers ([`HexBeats::plan`]).
+pub(crate) fn hex_beats(streams: bool, timing: &Timing) -> HexBeats {
+    HexBeats::plan(script(), send_at(take(), streams, timing), timing)
 }
 
-pub(crate) fn hex_beats(streams: bool, timing: &Timing) -> HexBeats {
-    let landed = flights_from(streams, 0.0)
+/// When `take` leaves the field after the shortcut: once its words land.
+pub(crate) fn send_at(take: &'static Take, streams: bool, timing: &Timing) -> f64 {
+    let landed = flights_for(take, streams, 0.0)
         .iter()
         .map(|(f, _)| f.arrives())
-        .fold(ANSWER_JAY.release, f64::max);
-    let send = landed + timing.hex_send;
-    let reply = send + timing.hex_reply;
-    HexBeats {
-        send,
-        reply,
-        // Long enough for the applause to land.
-        done: reply + timing.read(HEX_REPLY).max(REPLY_HOLD),
-    }
+        .fold(take.release, f64::max);
+    landed + timing.hex_send
 }
 
 /// From `Heard` to the score.
 pub(crate) fn reply_secs(s: &Onboard) -> f64 {
-    hex_beats(s.streams(), &s.timing).done - (ANSWER_JAY.release + 0.1)
+    hex_beats(s.streams(), &s.timing).done - (take().release + 0.1)
 }
 
 /// Seconds since the shortcut went down on `"With Hex"`.
@@ -338,10 +346,7 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         Step::Parked if !scene_over(s) || s.demo_hears() => (
             "without",
             "Without Hex".to_string(),
-            line(
-                "lead-usual",
-                "Investors are waiting. One quick reply by hand.".into(),
-            ),
+            line("lead-usual", script().lead.to_string()),
         ),
         Step::Parked => (
             "with",
@@ -352,18 +357,22 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             ),
         ),
         Step::YourTurn | Step::Hearing | Step::Heard => ("with", "With Hex".to_string(), hold()),
-        _ if s.flow == Flow::FirstRun || s.flow == Flow::Versus => (
-            "score",
-            format!("{:.1} seconds, no typos", ANSWER_JAY.release),
-            line(
-                "lead-score",
-                format!(
-                    "Typing: {} seconds, {} typos, and one job.",
-                    s.scene.score_secs().round(),
-                    s.scene.typos()
-                ),
-            ),
-        ),
+        _ if s.flow == Flow::FirstRun || s.flow == Flow::Versus => {
+            let with = &script().with;
+            let filled = |template| {
+                fill(
+                    template,
+                    take().release,
+                    s.scene.score_secs(),
+                    s.scene.typos(),
+                )
+            };
+            (
+                "score",
+                filled(with.score),
+                line("lead-score", filled(with.typed)),
+            )
+        }
         _ => (
             "heard",
             "That's it".to_string(),
@@ -445,7 +454,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let pocket_u = melt_u
         * (1.0
             - take_time(s).map_or(0.0, |take| {
-                smoothstep(((take - ANSWER_JAY.release - HUD_GONE) / REFILL) as f32)
+                smoothstep(((take - self::take().release - HUD_GONE) / REFILL) as f32)
             }));
     let deck = [(STAGE_W - kw) * 0.5, STAGE_H - kh];
     let pocket = [HUD_CENTRE[0] - deck[0], HUD_CENTRE[1] - deck[1]];
@@ -492,7 +501,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 HUD_CENTRE,
                 HUD_SCALE,
                 s.step == Step::YourTurn,
-                &ANSWER_JAY,
+                take(),
                 s.take_from,
                 s,
             )
@@ -532,6 +541,15 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .child(card)
         .child(words(p, s, nudge))
         .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
+        .children(take_time(s).and_then(|t| {
+            triumph::effects(
+                p,
+                &hex_beats(s.streams(), &s.timing),
+                t,
+                [STAGE_W, STAGE_H],
+                reduced,
+            )
+        }))
 }
 
 /// Caps Lock's light once it's on.
@@ -631,13 +649,36 @@ fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
     )
 }
 
-/// The red pill under the header, from the first frame.
-fn banner(p: Paint, s: &Onboard) -> Option<El> {
-    PRESENTING.map(|copy| presenting(p, copy, s.now))
+/// The red pill under the header, from the first frame, flaring at scene
+/// time `t`.
+fn banner(p: Paint, s: &Onboard, t: f64) -> Option<El> {
+    script()
+        .pill
+        .map(|copy| presenting(p, copy, s.now, s.scene.flare(t)))
 }
 
-/// Why the field is gone once Jay removes you.
-const NO_LONGER: &str = "You are no longer in this conversation.";
+/// The conversation's header, named `title`.
+fn room(title: &'static str) -> Notice {
+    Notice {
+        key: "room",
+        app: App::Messages,
+        from: title,
+        place: script().group,
+        body: "",
+        field: "iMessage",
+    }
+}
+
+/// A name over the first of a run of theirs, in a group.
+fn caption(who: u8, named: bool) -> Caption<'static> {
+    let script = script();
+    if named && script.group.is_some() {
+        let person = script.person(who);
+        Caption::From(person.name, person.colour)
+    } else {
+        Caption::None
+    }
+}
 
 /// `"Without Hex"`'s thread at `t`: every line so far, each at
 /// `opacity(line index, line)` with `"Read"` under the one it reads, and
@@ -657,17 +698,14 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
             .map(|tap| tap.glyph)
             .collect();
         thread.push(match line.who {
-            Who::Jay | Who::Investor(_) => {
+            Who::Them(who) => {
                 // The sender's name over the first of a run, as in a group.
                 let named = i == 0 || lines[i - 1].who != line.who;
                 bubble(
                     p,
                     format!("l{i}"),
                     Side::Them,
-                    match line.who.name() {
-                        Some(name) if named => Caption::From(name),
-                        _ => Caption::None,
-                    },
+                    caption(who, named),
                     &line.text,
                     &taps,
                     o,
@@ -691,7 +729,8 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
                     reduced,
                 )
             }
-            Who::System => system_line(p, format!("l{i}"), &line.text, o, reduced),
+            Who::System => system_line(p, format!("l{i}"), &line.text, Notify::Danger, o, reduced),
+            Who::Status => system_line(p, format!("l{i}"), &line.text, Notify::Status, o, reduced),
         });
     }
     if scene.dots(t).is_some() {
@@ -708,7 +747,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
     let shown = scene.shown(t);
     let answering = scene.lines()[..shown]
         .iter()
-        .rposition(|l| matches!(l.who, Who::Jay | Who::Investor(_)));
+        .rposition(|l| matches!(l.who, Who::Them(_)));
     let removed = scene.removed(t);
     let slow = scene.slow(t) > 0.0;
     let opacity = |i: usize, line: &Line| match focus {
@@ -728,13 +767,15 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
         _ => OLDER,
     };
     let thread = thread_at(p, s, t, opacity);
+    let room = room(scene.title(t));
     if removed {
+        let locked = scene.locked();
         return chat(
             p,
-            &LAUNCH_ROOM,
-            banner(p, s),
+            &room,
+            banner(p, s, t),
             thread,
-            Reply::Locked(NO_LONGER),
+            Reply::Locked(&locked),
             1.0,
         );
     }
@@ -748,8 +789,8 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
         .is_some_and(|l| t - l.at < CLEAR);
     chat(
         p,
-        &LAUNCH_ROOM,
-        banner(p, s),
+        &room,
+        banner(p, s, t),
         thread,
         Reply::Lines {
             text: draft,
@@ -771,9 +812,12 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let reduced = s.reduced.get();
     let beats = hex_beats(s.streams(), &s.timing);
     let t = take_time(s);
-    let sent = t.is_some_and(|t| t >= beats.send);
-    let replied = t.is_some_and(|t| t >= beats.reply);
-    let typing = t.is_some_and(|t| t >= beats.send + 0.4 && t < beats.reply);
+    let at = |when: f64| t.is_some_and(|t| t >= when);
+    let sent = at(beats.send);
+    let replied = beats.lines.first().is_some_and(|&(when, _)| at(when));
+    let typing = beats
+        .dots
+        .is_some_and(|(from, until)| at(from) && !at(until));
     let composing = !sent;
     let asked = s.scene.lines().iter().filter(|l| l.at < 0.0).count();
     let rewinding = since < REWIND && !reduced;
@@ -788,13 +832,19 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         thread_at(p, s, -1e-3, |_, _| question)
     };
     if sent {
+        let taps: Vec<Glyph> = beats
+            .taps
+            .iter()
+            .filter(|&&(when, _)| at(when))
+            .map(|&(_, glyph)| glyph)
+            .collect();
         thread.push(bubble(
             p,
             "hex-bubble".into(),
             Side::You,
             Caption::None,
-            ANSWER_JAY.text(),
-            &[],
+            take().text(),
+            &taps,
             if replied { RECENT } else { 1.0 },
             reduced,
         ));
@@ -802,18 +852,40 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     if typing {
         thread.push(typing_dots(p, "dots".into(), s.now, 1.0, reduced));
     }
-    if replied {
-        thread.push(bubble(
-            p,
-            "hex-reply".into(),
-            Side::Them,
-            Caption::From("Jay"),
-            HEX_REPLY,
-            &[],
-            1.0,
-            reduced,
-        ));
+    let mut last: Option<u8> = None;
+    for (i, (_, said)) in beats
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, (when, _))| at(*when))
+    {
+        let key = format!("cheer-{i}");
+        thread.push(match *said {
+            Said::Them(who, copy) => {
+                let named = last != Some(who);
+                last = Some(who);
+                bubble(
+                    p,
+                    key,
+                    Side::Them,
+                    caption(who, named),
+                    copy,
+                    &[],
+                    1.0,
+                    reduced,
+                )
+            }
+            Said::You(copy) => {
+                last = None;
+                bubble(p, key, Side::You, Caption::None, copy, &[], 1.0, reduced)
+            }
+            Said::Pill(ref copy) => {
+                last = None;
+                system_line(p, key, copy, Notify::Cheer, 1.0, reduced)
+            }
+        });
     }
+    let room = room(beats.title(t.unwrap_or(f64::NEG_INFINITY), script().title));
     let flights = flights(s);
     let started = flights.iter().any(|(f, _)| s.now >= f.start());
     // The field grows a line only once a word heads for it.
@@ -824,12 +896,13 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         .max()
         .unwrap_or(1);
     if rewinding && since < UNLOCK {
+        let locked = s.scene.locked();
         return chat(
             p,
-            &LAUNCH_ROOM,
-            banner(p, s),
+            &room,
+            banner(p, s, -1e-3),
             thread,
-            Reply::Locked(NO_LONGER),
+            Reply::Locked(&locked),
             1.0,
         );
     }
@@ -838,8 +911,8 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let cleared = t.is_some_and(|t| t >= beats.send + CLEAR);
     chat(
         p,
-        &LAUNCH_ROOM,
-        banner(p, s),
+        &room,
+        banner(p, s, -1e-3),
         thread,
         Reply::Lines {
             text: "",
@@ -924,7 +997,7 @@ fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
         // It cools to an ember that stays through the score.
         Step::Heard => {
             let fade = s.take_from.map_or(0.0, |from| {
-                1.0 - smoothstep(((s.now - from - ANSWER_JAY.release) / 0.45) as f32)
+                1.0 - smoothstep(((s.now - from - take().release) / 0.45) as f32)
             });
             EMBER + (0.70 - EMBER) * fade
         }
@@ -1004,13 +1077,13 @@ mod tests {
 
     #[test]
     fn streamed_words_leave_within_one_and_a_half_seconds() {
-        let at = heard_at(true);
+        let at = heard_for(take(), true);
         assert_eq!(at.len(), 7);
         assert_eq!(at[0], 0.16);
         assert!(at.windows(2).all(|w| w[0] <= w[1]));
-        assert!(*at.last().unwrap() <= ANSWER_JAY.release);
-        let burst = heard_at(false);
-        assert_eq!(burst[0], ANSWER_JAY.release);
+        assert!(*at.last().unwrap() <= take().release);
+        let burst = heard_for(take(), false);
+        assert_eq!(burst[0], take().release);
     }
 
     #[test]
@@ -1038,7 +1111,9 @@ mod tests {
             .map(|(f, _)| f.arrives())
             .fold(0.0, f64::max);
         assert!(beats.send > landed);
-        assert!(beats.reply > beats.send + 0.4);
-        assert!(beats.done > beats.reply + 1.0);
+        let reply = beats.lines[0].0;
+        assert!(reply > beats.send + 0.4);
+        assert!(beats.done > reply + 1.0);
+        assert!(beats.done <= 8.0, "{}", beats.done);
     }
 }

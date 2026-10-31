@@ -88,6 +88,12 @@ pub enum OnboardingTone {
     SlowDown,
     /// A comic title slamming onto the stage: a heavy bass hit.
     Slam,
+    /// Confetti bursting over `"With Hex"`: a popper and falling paper.
+    Confetti,
+    /// Fireworks over `"With Hex"`: a whistle, a boom, and crackle.
+    Fireworks,
+    /// The triumphant sting as `"With Hex"` peaks.
+    Triumph,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -726,6 +732,9 @@ struct OnboardingSounds {
     heartbeat_slow: SamplesBuffer,
     slow_down: SamplesBuffer,
     slam: SamplesBuffer,
+    confetti: SamplesBuffer,
+    fireworks: SamplesBuffer,
+    triumph: SamplesBuffer,
 }
 
 impl OnboardingSounds {
@@ -774,6 +783,9 @@ impl OnboardingSounds {
             heartbeat_slow: decode_wav(bundled_sound!("onboarding", "heartbeat_slow"))?,
             slow_down: decode_wav(bundled_sound!("onboarding", "slow_down"))?,
             slam: decode_wav(bundled_sound!("onboarding", "slam"))?,
+            confetti: decode_wav(bundled_sound!("onboarding", "confetti"))?,
+            fireworks: decode_wav(bundled_sound!("onboarding", "fireworks"))?,
+            triumph: decode_wav(bundled_sound!("onboarding", "triumph"))?,
         })
     }
 
@@ -812,6 +824,9 @@ impl OnboardingSounds {
             OnboardingTone::HeartbeatSlow => &self.heartbeat_slow,
             OnboardingTone::SlowDown => &self.slow_down,
             OnboardingTone::Slam => &self.slam,
+            OnboardingTone::Confetti => &self.confetti,
+            OnboardingTone::Fireworks => &self.fireworks,
+            OnboardingTone::Triumph => &self.triumph,
         })
     }
 }
@@ -1408,6 +1423,17 @@ mod tests {
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");
             assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
+        }
+        // The celebration rings longest of all.
+        for cue in [
+            OnboardingTone::Confetti,
+            OnboardingTone::Fireworks,
+            OnboardingTone::Triumph,
+        ] {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1600));
         }
 
         let k0: Vec<f32> = sounds.onboarding.felt_keys[0].clone().collect();

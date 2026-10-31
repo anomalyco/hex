@@ -59,6 +59,7 @@ pub(crate) fn downloaded(total: u64, elapsed: f64, seconds: f64) -> u64 {
     (total as f64 * eased.clamp(0.0, 1.0)).round() as u64
 }
 
+#[derive(Debug)]
 pub(crate) struct Take {
     pub(crate) updates: &'static [(f64, &'static str)],
     pub(crate) release: f64,

@@ -18,6 +18,12 @@ library only, so it runs anywhere:
   (a band of noise 1.8 kHz -> 160 Hz over a falling tone).
 - `slam`: a comic title hitting the stage, a short crack over a saturated
   bass drop (120 -> 36 Hz).
+- `confetti`: a party popper, a crack and a shower of tiny bright ticks
+  that thin out as the paper falls.
+- `fireworks`: a quiet whistle rising (900 Hz -> 2.2 kHz), a soft boom and
+  the crackle after it.
+- `triumph`: a short brass-ish sting, a quick C major arpeggio up into a
+  held chord.
 
 Peaks are set to sit with the other onboarding cues (about -14 dBFS)."""
 
@@ -157,6 +163,48 @@ def main():
     add(slam, 0.0, thump(1.0, 120.0, 36.0, 0.32, h2=0.5, attack=0.002))
     slam = [math.tanh(2.2 * v) for v in slam]
     write("slam", finish(slam, -11.0, fade=0.08))
+
+    confetti = silence(0.95)
+    add(confetti, 0.0, [0.9 * v for v in noise_burst(0.05, 0.01)])
+    add(confetti, 0.0, [0.5 * v for v in thump(0.12, 260.0, 120.0, 0.03, h2=0.3)])
+    for i in range(34):
+        at = 0.03 + 0.85 * (i / 34) ** 1.6 + rng.uniform(-0.01, 0.01)
+        hz = rng.uniform(2600.0, 5200.0)
+        loud = 0.55 * (1.0 - i / 40)
+        add(confetti, at, [loud * v for v in pip(hz, 0.03, 0.005, attack=0.0005)])
+    write("confetti", finish(confetti, -15.0, fade=0.02))
+
+    fireworks = silence(1.5)
+    whistle = []
+    phase = 0.0
+    for i in range(int(0.38 * SR)):
+        t = i / SR
+        f = 900.0 + 1300.0 * (t / 0.38) ** 1.4
+        phase += 2 * math.pi * f / SR
+        whistle.append(0.18 * min(1.0, t / 0.05) * math.sin(phase))
+    add(fireworks, 0.0, whistle)
+    add(fireworks, 0.38, [0.6 * v for v in noise_burst(0.08, 0.02, hp=0.5)])
+    add(fireworks, 0.38, thump(0.8, 95.0, 40.0, 0.22, h2=0.35, attack=0.003))
+    for i in range(40):
+        at = 0.45 + rng.uniform(0.0, 0.95) * (i / 40) ** 0.7
+        add(fireworks, at, [0.35 * (1.0 - i / 48) * v for v in noise_burst(0.006, 0.0015, hp=0.95)])
+    write("fireworks", finish([math.tanh(1.6 * v) for v in fireworks], -14.0, fade=0.1))
+
+    triumph = silence(1.2)
+    def horn(hz, secs, start_amp=1.0):
+        out = []
+        for i in range(int(secs * SR)):
+            t = i / SR
+            env = min(1.0, t / 0.012) * math.exp(-t / (secs * 0.55))
+            vib = 1.0 + 0.004 * math.sin(2 * math.pi * 5.5 * t) * min(1.0, t / 0.2)
+            x = sum(math.sin(2 * math.pi * hz * vib * k * t) / k ** 1.3 for k in range(1, 7))
+            out.append(start_amp * env * x)
+        return out
+    for at, hz in [(0.0, 523.25), (0.07, 659.25), (0.14, 783.99)]:
+        add(triumph, at, [0.5 * v for v in horn(hz, 0.16)])
+    for hz in (523.25, 659.25, 783.99, 1046.5):
+        add(triumph, 0.21, [0.45 * v for v in horn(hz, 0.98)])
+    write("triumph", finish([math.tanh(1.3 * v) for v in triumph], -13.0, fade=0.12))
 
 
 if __name__ == "__main__":

@@ -11,11 +11,10 @@ use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, col, el, ro
 
 use super::super::controls::Paint;
 use super::dictated::Dictated;
-use super::fixture::{
-    ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
-};
+use super::fixture::{ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded};
 use super::hud_stage::{FlowHud, LiveHud};
 use super::live::Live;
+use super::scene_script::Script;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
 use crate::desktop::onboarding::Practice;
@@ -217,7 +216,7 @@ impl Onboard {
             timing: typing::Timing::default(),
             scene: typing::Scene::default(),
             partial: "",
-            take: &ANSWER_JAY,
+            take: Script::chosen().take(),
             meter: (0.0, 0.0),
             examples_from: None,
             closed_from: None,
@@ -753,7 +752,7 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
         Step::YourTurn => {
             s.step = Step::Hearing;
             hear(s, now);
-            Some(ANSWER_JAY.release + 0.1)
+            Some(Script::chosen().take().release + 0.1)
         }
         Step::Hearing if s.flow == Flow::Versus => {
             s.step = Step::Heard;
@@ -785,11 +784,11 @@ const SCORE_HOLD: f64 = 4.5;
 
 /// `"With Hex"`: the shortcut goes down and Jay's answer is spoken.
 fn hear(s: &mut Onboard, now: f64) {
-    s.take = &ANSWER_JAY;
+    s.take = Script::chosen().take();
     s.take_from = Some(now);
-    s.sfx.on_voice_take(now, &ANSWER_JAY);
+    s.sfx.on_voice_take(now, s.take);
     let beats = versus::hex_beats(s.streams(), &s.timing);
-    s.sfx.on_hex_reply(now + beats.send, now + beats.reply);
+    s.sfx.on_hex_reply(now, &beats);
 }
 
 pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
@@ -814,7 +813,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         Step::YourTurn => {
             s.step = Step::Hearing;
             hear(s, now);
-            Some(ANSWER_JAY.release + 0.1)
+            Some(Script::chosen().take().release + 0.1)
         }
         Step::Hearing => {
             s.step = Step::Heard;
@@ -1336,11 +1335,11 @@ const SCENE_KNOBS: &[Knob] = &[
         field: |t| &mut t.freeze,
     },
     Knob {
-        key: "t-punch",
-        label: "Before the punchline",
-        min: 0.4,
-        max: 3.5,
-        field: |t| &mut t.punch,
+        key: "t-cheer",
+        label: "Hex: cheers apart",
+        min: 0.1,
+        max: 1.0,
+        field: |t| &mut t.cheer,
     },
     Knob {
         key: "t-fired",
@@ -1392,6 +1391,7 @@ fn scene_controls(p: Paint, s: &Onboard) -> El {
 
 #[cfg(test)]
 mod tests {
+    use super::super::fixture::ANSWER_JAY;
     use super::*;
 
     fn run(flow: Flow, speech: Speech) -> Onboard {

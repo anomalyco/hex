@@ -19,7 +19,7 @@ use std::path::Path;
 
 use super::fixture::Take;
 use super::hud_stage::DONE_DELAY;
-use super::{permissions, typing};
+use super::{permissions, scene_script, triumph, typing};
 use crate::feedback::{self, KeySoundStyle, OnboardingTone, SoundSet, Tone};
 
 /// The heartbeat's level, in percent, calm and in full panic.
@@ -159,14 +159,14 @@ impl SfxTrack {
         for line in scene.lines().iter().filter(|l| l.at >= 0.0) {
             let at = from + line.at;
             match line.who {
-                typing::Who::Jay | typing::Who::Investor(_) => {
+                typing::Who::Them(_) | typing::Who::Status => {
                     self.push(at, Tone::Onboarding(OnboardingTone::Incoming))
                 }
                 typing::Who::You => self.push(at + 0.03, Tone::Onboarding(OnboardingTone::Sent)),
                 typing::Who::System => self.push(at, Tone::Error),
             }
         }
-        if let Some(at) = scene.read_at() {
+        for at in scene.reads() {
             self.push(from + at, Tone::Onboarding(OnboardingTone::Read));
         }
         for tap in scene.all_taps() {
@@ -195,10 +195,31 @@ impl SfxTrack {
         self.push(now, Tone::Onboarding(OnboardingTone::Rewind));
     }
 
-    /// `"With Hex"`'s answer sending at `send`, and Jay's reply at `reply`.
-    pub(crate) fn on_hex_reply(&mut self, send: f64, reply: f64) {
-        self.push(send, Tone::Onboarding(OnboardingTone::Sent));
-        self.push(reply, Tone::Onboarding(OnboardingTone::Incoming));
+    /// `"With Hex"`'s payoff from the shortcut at `from`: the answer
+    /// sending, each tapback and reply, and a triumphant sting under the
+    /// first celebration, each with its own sound.
+    pub(crate) fn on_hex_reply(&mut self, from: f64, beats: &triumph::HexBeats) {
+        self.push(from + beats.send, Tone::Onboarding(OnboardingTone::Sent));
+        for &(at, _) in &beats.taps {
+            self.push(from + at, Tone::Onboarding(OnboardingTone::Tapback));
+        }
+        for (at, said) in &beats.lines {
+            let tone = match said {
+                triumph::Said::You(_) => OnboardingTone::Sent,
+                _ => OnboardingTone::Incoming,
+            };
+            self.push(from + at, Tone::Onboarding(tone));
+        }
+        if let Some(&(at, _)) = beats.effects.first() {
+            self.push(from + at, Tone::Onboarding(OnboardingTone::Triumph));
+        }
+        for &(at, effect) in &beats.effects {
+            let tone = match effect {
+                scene_script::Effect::Confetti => OnboardingTone::Confetti,
+                scene_script::Effect::Fireworks => OnboardingTone::Fireworks,
+            };
+            self.push(from + at, Tone::Onboarding(tone));
+        }
     }
 
     /// `"With Hex"` or scripted `"Your turn"` dictation: physical shortcut
@@ -361,7 +382,7 @@ mod tests {
             .count();
         assert_eq!(back_count, deletes + slips);
         assert_eq!(sent, scene.sent(scene.duration()));
-        assert_eq!(read, 1);
+        assert_eq!(read, scene.reads().count());
         assert!(track.fired_cues().iter().any(|&(_, t, _)| t == Tone::Error));
     }
 

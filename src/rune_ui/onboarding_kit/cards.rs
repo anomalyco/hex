@@ -72,15 +72,6 @@ pub(crate) const JAY: Notice = Notice {
     body: "The investors are in the room. Are we ready to ship?",
     field: "iMessage",
 };
-/// The group `"Without Hex"` plays out in: Jay and the investors.
-pub(crate) const LAUNCH_ROOM: Notice = Notice {
-    key: "launch-room",
-    app: App::Messages,
-    from: "Launch Room",
-    place: Some("Jay, you, and 3 investors"),
-    body: "The investors are in the room. Are we ready to ship?",
-    field: "iMessage",
-};
 pub(crate) const DAX: Notice = Notice {
     key: "dax",
     app: App::Slack,
@@ -315,8 +306,9 @@ pub(crate) enum Side {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Caption<'a> {
     None,
-    /// The sender's name over the first of theirs in a group.
-    From(&'a str),
+    /// The sender's name over the first of theirs in a group, in their
+    /// colour: an OpenCode theme scale such as `"cobalt"`.
+    From(&'a str, &'a str),
     /// `"Read"` under one of yours, moving with it.
     Read,
 }
@@ -372,7 +364,7 @@ pub(crate) fn bubble(
     };
     match caption {
         Caption::None => line.child(bubble.shrink()),
-        Caption::From(from) => line.child(
+        Caption::From(from, colour) => line.child(
             col()
                 .key("named")
                 .gap(2.0)
@@ -380,8 +372,8 @@ pub(crate) fn bubble(
                 .child(
                     text(from.to_string())
                         .key("from")
-                        .font(k.ty.small)
-                        .color(p.faint())
+                        .font(k.ty.small_medium)
+                        .color(rune_theme_opencode::scale(colour, k.dark, 11))
                         .ml(11.0),
                 )
                 .child(bubble.shrink()),
@@ -463,12 +455,14 @@ pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced
 }
 
 /// A small red pill saying who is sharing their screen, its dot pulsing
-/// like a recording light at `now`.
-pub(crate) fn presenting(p: Paint, copy: &str, now: f64) -> El {
+/// like a recording light at `now`; `flare` (`0..=1`) swells it for a beat.
+pub(crate) fn presenting(p: Paint, copy: &str, now: f64, flare: f32) -> El {
     let danger = &p.k.c.danger;
     let pulse = 0.5 + 0.5 * (now * std::f64::consts::TAU / 1.6).cos();
     row()
         .key("presenting")
+        .scale(1.0 + 0.12 * flare)
+        .shadow(0.0, 14.0 * flare, danger.fg.alpha(0.45 * flare))
         .h(20.0)
         .px(8.0)
         .gap(5.0)
@@ -597,10 +591,31 @@ fn heart(color: Color) -> Shape {
     Shape::new().view_box(16.0, 16.0).fill_path(&path, color)
 }
 
-/// A centred system notice, such as someone removing you, in a tinted
-/// pill with the weight of a message.
-pub(crate) fn system_line(p: Paint, key: String, copy: &str, opacity: f32, reduced: bool) -> El {
-    let danger = &p.k.c.danger;
+/// What a [`system_line`] is: someone cutting you off, a neutral notice,
+/// or a celebration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Notify {
+    Danger,
+    Status,
+    Cheer,
+}
+
+/// A centred system notice, such as someone removing you, in a pill
+/// tinted for its [`Notify`], with the weight of a message.
+pub(crate) fn system_line(
+    p: Paint,
+    key: String,
+    copy: &str,
+    notify: Notify,
+    opacity: f32,
+    reduced: bool,
+) -> El {
+    let c = &p.k.c;
+    let danger = match notify {
+        Notify::Danger => &c.danger,
+        Notify::Status => &c.info,
+        Notify::Cheer => &c.success,
+    };
     line(key, Side::Them, opacity, reduced)
         .justify_center()
         .child(
