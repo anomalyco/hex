@@ -6,6 +6,7 @@
 /.local-corpus/
 /dist
 /.wrangler
+.wrangler/
 node_modules/
 __pycache__/
 *.py[cod]
