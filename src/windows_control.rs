@@ -32,9 +32,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeServerProcessId, PIPE_READMODE_BYTE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-    WaitNamedPipeW,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
+    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+    PIPE_WAIT, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -52,6 +52,10 @@ pub(crate) type Handler = Arc<dyn Fn(ControlRequest) -> ControlResponse + Send +
 
 /// Serves the pipe on its own thread while Hex runs. Fails when another
 /// process already serves this user's pipe.
+///
+/// One unconnected instance always exists: the next is created before a
+/// connected one is handed off or dropped, so the pipe's name never goes
+/// away while Hex runs and nobody else can recreate it with their own DACL.
 pub(crate) fn serve(handler: Handler) -> Result<()> {
     let name = pipe_name()?;
     let security = Security::current_user()?;
@@ -60,25 +64,21 @@ pub(crate) fn serve(handler: Handler) -> Result<()> {
         .name("hex-control".into())
         .spawn(move || {
             let busy = Arc::new(AtomicUsize::new(0));
-            let mut next = Some(first);
+            let mut listening = first;
             loop {
-                let pipe = match next.take() {
-                    Some(pipe) => pipe,
-                    None => match create_instance(&name, &security, false) {
-                        Ok(pipe) => pipe,
-                        Err(error) => {
-                            tracing::warn!(%error, "`hex` control commands stopped");
-                            return;
-                        }
-                    },
-                };
-                // SAFETY: `pipe` is a valid pipe instance this thread owns.
-                let connected = unsafe { ConnectNamedPipe(pipe.raw(), std::ptr::null_mut()) } != 0
+                // SAFETY: `listening` is a valid pipe instance this thread owns.
+                let connected = unsafe { ConnectNamedPipe(listening.raw(), std::ptr::null_mut()) }
+                    != 0
                     || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-                if !connected {
-                    continue;
-                }
-                if busy.load(Ordering::Acquire) >= CLIENTS {
+                let next = match create_instance(&name, &security, false) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        tracing::warn!(%error, "`hex` control commands stopped");
+                        return;
+                    }
+                };
+                let pipe = std::mem::replace(&mut listening, next);
+                if !connected || busy.load(Ordering::Acquire) >= CLIENTS {
                     continue;
                 }
                 let handler = handler.clone();
@@ -102,6 +102,10 @@ pub(crate) fn serve(handler: Handler) -> Result<()> {
 }
 
 fn answer(pipe: Pipe, handler: &Handler) {
+    // The DACL admits only this user; check the client too.
+    if !client_is_this_user(pipe.raw()).unwrap_or(false) {
+        return;
+    }
     let mut file = pipe.into_file();
     let response = match read_frame(&mut file, MAX_REQUEST)
         .and_then(|body| Ok(serde_json::from_slice::<serde_json::Value>(&body)?))
@@ -217,21 +221,38 @@ fn served_by_this_user(pipe: HANDLE) -> Result<bool> {
             std::io::Error::last_os_error()
         ));
     }
+    process_is_this_user(pid)
+}
+
+fn client_is_this_user(pipe: HANDLE) -> Result<bool> {
+    let mut pid = 0;
+    // SAFETY: `pipe` is a connected server end; `pid` is a valid out pointer.
+    if unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } == 0 {
+        return Err(eyre!(
+            "couldn't identify the client: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    process_is_this_user(pid)
+}
+
+/// Whether process `pid` runs as the user this process runs as.
+fn process_is_this_user(pid: u32) -> Result<bool> {
     // SAFETY: plain process query; the handle is closed by `OwnedHandle`.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         return Err(eyre!(
-            "couldn't identify Hex: {}",
+            "couldn't identify a process: {}",
             std::io::Error::last_os_error()
         ));
     }
     // SAFETY: a fresh handle this function owns.
     let process = unsafe { OwnedHandle::from_raw_handle(process) };
-    let server = token_user(raw(&process))?;
+    let other = token_user(raw(&process))?;
     // SAFETY: the pseudo-handle of this process needs no closing.
     let ours = token_user(unsafe { GetCurrentProcess() })?;
     // SAFETY: both buffers hold a TOKEN_USER whose SID points inside them.
-    Ok(unsafe { EqualSid(sid(&server), sid(&ours)) } != 0)
+    Ok(unsafe { EqualSid(sid(&other), sid(&ours)) } != 0)
 }
 
 /// The process's TOKEN_USER, in a buffer the SID it holds points into.
