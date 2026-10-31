@@ -47,7 +47,7 @@ leaves runtime settings, models, and retained data intact.
 Download Hex                              // setup.download-recovery
 ├── anoma.ly/hex names the visitor's platform  // setup.download-button
 │   ├── Mac -> DMG | Intel Mac -> disabled, "needs Apple silicon"
-│   ├── Windows x64 / ARM64 (UA-CH) -> Hex-Setup-<version>-windows-<arch>.exe + SmartScreen note
+│   ├── Windows x64 / ARM64 (UA-CH) -> hex-setup-<version>-windows-<arch>.exe + SmartScreen note
 │   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
 │   ├── Phone -> Send yourself the link
 │   └── Other platforms -> every build, Homebrew, the GitHub release

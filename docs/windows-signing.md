@@ -12,7 +12,7 @@ installing an update.
 
 ```ts
 build (build-desktop.yml; x64 and ARM64 runners)   // compiles; no environment or secrets
-└── build-windows-<arch>: Hex-<v>-windows-<x64|arm64>.exe (+ SHA256SUMS, digest output)
+└── build-windows-<arch>: hex-<v>-windows-<x64|arm64>.exe (+ SHA256SUMS, digest output)
 sign-windows (release env, .github/release only)
 ├── verify the artifacts' digests
 ├── azure/login (OIDC, no client secret)
@@ -21,7 +21,7 @@ sign-windows (release env, .github/release only)
 installers (windows-installers.yml)            // no secrets
 ├── build-windows-installer.ps1 x64 + arm64   // Inno embeds the signed bytes
 └── test-windows-installer.ps1 on native x64 and ARM64
-sign-windows-installers (release env)          // signs and checks both Hex-Setup-*.exe
+sign-windows-installers (release env)          // signs and checks both hex-setup-*.exe
 publish                                       // stable requires the signatures
 ```
 

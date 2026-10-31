@@ -398,8 +398,8 @@ jobs:
           digests: sign-macos=${{ needs.sign-macos.outputs.digest }}
       - name: Check the signed app and DMG
         run: |
-          dmg="$RUNNER_TEMP/in/sign-macos/Hex-$HEX_VERSION-macos-arm64.dmg"
-          zip="$RUNNER_TEMP/in/sign-macos/Hex-$HEX_VERSION-macos-arm64.zip"
+          dmg="$RUNNER_TEMP/in/sign-macos/hex-$HEX_VERSION-macos-arm64.dmg"
+          zip="$RUNNER_TEMP/in/sign-macos/hex-$HEX_VERSION-macos-arm64.zip"
           xcrun stapler validate "$dmg"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
           check=$(mktemp -d)

@@ -1,6 +1,6 @@
 name: Windows installer
 
-# Builds and silently tests Hex-Setup-<version>-windows-<x64|arm64>.exe
+# Builds and silently tests hex-setup-<version>-windows-<x64|arm64>.exe
 # around the executables of the stable release on anoma.ly/release, so
 # installer changes are tested on real Windows runners without a full
 # release. Before the first stable release on the service there is nothing to
@@ -49,7 +49,7 @@ jobs:
           mkdir -p dist
           for label in x64 arm64; do
             url="${release%/release}$(jq -er --arg t "windows-$label" '.release.targets[$t].url' manifest.json)"
-            file="dist/Hex-$version-windows-$label.exe"
+            file="dist/hex-$version-windows-$label.exe"
             curl --fail --silent --show-error --proto '=https' "$url" -o "$file"
             test "$(sha256sum < "$file" | cut -d' ' -f1)" = "$(jq -r --arg t "windows-$label" '.release.targets[$t].sha256' manifest.json)"
           done
@@ -91,12 +91,12 @@ jobs:
       - name: Build the installer
         shell: pwsh
         run: |
-          $exe = (Resolve-Path "published/Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe").Path
+          $exe = (Resolve-Path "published/hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe").Path
           "HEX_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           scripts/build-windows-installer.ps1 -Executable $exe -Version $env:HEX_VERSION -Arch ${{ matrix.arch }} -OutDir installers
       - name: Install, reinstall, install over another version, and uninstall silently
         shell: pwsh
-        run: scripts/test-windows-installer.ps1 -Installer "installers/Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
+        run: scripts/test-windows-installer.ps1 -Installer "installers/hex-setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
       - name: Upload installer logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

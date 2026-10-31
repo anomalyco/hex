@@ -8,8 +8,8 @@ access to the repository.
 
 ```ts
 hex-test-<commit>-macos-arm64       // Hex-Test-<commit>-arm64.dmg
-hex-test-<commit>-windows-x86_64    // Hex-Setup-<version>-windows-x64.exe + bare Hex-<version>-windows-x64.exe
-hex-test-<commit>-windows-aarch64   // Hex-Setup-<version>-windows-arm64.exe + bare Hex-<version>-windows-arm64.exe
+hex-test-<commit>-windows-x86_64    // hex-setup-<version>-windows-x64.exe + bare hex-<version>-windows-x64.exe
+hex-test-<commit>-windows-aarch64   // hex-setup-<version>-windows-arm64.exe + bare hex-<version>-windows-arm64.exe
 hex-test-<commit>-linux-x86_64      // hex-<version>-linux-x64
 ```
 
@@ -53,10 +53,10 @@ The installer and executable are unsigned, so SmartScreen warns: choose **More
 info**, then **Run anyway**.
 
 1. Quit Hex from its tray icon.
-2. Run `Hex-Setup-<version>-windows-<x64|arm64>.exe`. It replaces an installed Hex of
+2. Run `hex-setup-<version>-windows-<x64|arm64>.exe`. It replaces an installed Hex of
    the same or an older version in the usual per-user layout, and refuses to
    replace a newer one: uninstall that first from Apps & Features (settings are
-   kept). Or skip the installer and run the bare `Hex-<version>-windows-<arch>.exe` from any folder.
+   kept). Or skip the installer and run the bare `hex-<version>-windows-<arch>.exe` from any folder.
 3. The test build never self-updates. To return to the release, run the
    release installer from <https://anoma.ly/hex>.
 

@@ -5,8 +5,8 @@
 ```ts
 anoma.ly/release/hex/                      the Anomaly release service (docs/releasing.md)
 ├── index.json, desktop/stable.json        what the site, installers, and apps read
-└── files/<sha256>/<name>                  Hex-<v>-macos-arm64.{zip,dmg}, Hex-<v>-windows-<arch>.exe,
-                                           Hex-Setup-<v>-windows-<arch>.exe,
+└── files/<sha256>/<name>                  hex-<v>-macos-arm64.{zip,dmg}, hex-<v>-windows-<arch>.exe,
+                                           hex-setup-<v>-windows-<arch>.exe,
                                            hex-<v>-linux-<x64|arm64>{,.deb,.rpm}
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
 ├── download/<target>                      302 to anoma.ly/release/hex/desktop/stable/<target> once stable.json

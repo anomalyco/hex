@@ -29,7 +29,7 @@ Published names carry no version or target: each file lives at
 `/release/hex/files/<sha256>/<name>`, which tells them apart, and the service
 serves it with `Content-Disposition: attachment; filename="<name>"`, so a
 download is saved as `hex`, `Hex.dmg`, and so on. The builds and the GitHub
-release mirror keep versioned names (`Hex-<v>-macos-arm64.dmg`, …), which
+release mirror keep versioned names (`hex-<v>-macos-arm64.dmg`, …), which
 must be unique there; `.github/release/release-service.sh` maps them.
 (`HexSetup.exe`, not `Hex Setup.exe`: the service's file names allow no
 spaces.)

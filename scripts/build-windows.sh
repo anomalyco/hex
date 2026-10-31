@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build one Windows release executable, dist/Hex-<version>-windows-<x64|arm64>.exe,
+# Build one Windows release executable, dist/hex-<version>-windows-<x64|arm64>.exe,
 # from Git Bash on Windows: HEX_WINDOWS_ARCH=x86_64 (default; Vulkan SDK
 # required) or aarch64 (clang-cl and Ninja, best on an ARM64 host). CI then
 # Authenticode-signs it and wraps it in the Setup.exe installer; the Release
@@ -67,7 +67,7 @@ fi
 # Cargo reads .cargo/config.toml (the static Windows runtime) from the
 # working directory, not from --manifest-path.
 (cd "$root" && TRANSCRIBE_CMAKE_ARGS="$cmake_args" cargo build --locked --release --target "$triple")
-executable="$dist/Hex-$version-windows-$label.exe"
+executable="$dist/hex-$version-windows-$label.exe"
 cp "$target_dir/$triple/release/hex.exe" "$executable"
 test "$(head -c 2 "$executable")" = MZ
 # An executable for the other architecture cannot run here; the installer

@@ -5,16 +5,16 @@ set -eu
 # Developer ID of HEX_TEAM_ID, notarizes and staples the app and
 # its DMG, and leaves the two release files the Release workflow publishes
 # to the Anomaly release service (docs/plans/release-service.md):
-#   dist/Hex-<version>-macos-arm64.dmg   download (target macos-arm64-dmg)
-#   dist/Hex-<version>-macos-arm64.zip   in-app update, root Hex.app (target macos-arm64)
+#   dist/hex-<version>-macos-arm64.dmg   download (target macos-arm64-dmg)
+#   dist/hex-<version>-macos-arm64.zip   in-app update, root Hex.app (target macos-arm64)
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 : "${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}"
 . "$root/scripts/macos-signing.sh"
 version=$(hex_version "$root")
 build_number=$(hex_build_number "$version")
 dist="$root/dist"
-dmg="$dist/Hex-$version-macos-arm64.dmg"
-zip="$dist/Hex-$version-macos-arm64.zip"
+dmg="$dist/hex-$version-macos-arm64.dmg"
+zip="$dist/hex-$version-macos-arm64.zip"
 
 if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != prepare ]; }; then
   echo "Usage: $0 [prepare]" >&2

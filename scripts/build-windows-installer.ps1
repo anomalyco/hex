@@ -1,4 +1,4 @@
-# Builds Hex-Setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
+# Builds hex-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
 # installer, around an already-built (and signed) release hex.exe. Installs
 # Inno Setup 6 when ISCC is missing. The installer embeds the executable byte
 # for byte.
@@ -46,6 +46,6 @@ if (-not $iscc) {
 
 & $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" "/DOutputDir=$OutDir" $script
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE." }
-$installer = Join-Path $OutDir "Hex-Setup-$Version-windows-$label.exe"
+$installer = Join-Path $OutDir "hex-setup-$Version-windows-$label.exe"
 if (-not (Test-Path $installer)) { throw "ISCC did not produce $installer." }
 Write-Output $installer

@@ -70,22 +70,31 @@ const DOWNLOAD_TARGETS = new Set([
   "linux-arm64-deb",
   "linux-x64-rpm",
   "linux-arm64-rpm",
+  // The bare updater files.
+  "macos-arm64",
+  "windows-x64",
+  "windows-arm64",
 ])
 
-// Redirects a download button to the release service's alias for <target>:
-// the stable channel once it has a release, the dev channel until then. The
-// decision happens per request, so the site switches to stable by itself.
-async function download(request: Request, target: string): Promise<Response> {
+// Redirects /hex/download/<target> to the release service's alias for
+// <target> on the stable channel (the dev channel while there is no stable
+// release, decided per request), and /hex/download/dev/<target> to the dev
+// channel's.
+async function download(request: Request, path: string): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } })
   }
+  const dev = path.startsWith("dev/")
+  const target = dev ? path.slice("dev/".length) : path
   if (!DOWNLOAD_TARGETS.has(target)) return new Response("Not found", { status: 404 })
   let channel = "dev"
-  try {
-    const stable = await fetch(`${RELEASE_SERVICE}/hex/desktop/stable.json`, { headers: { "User-Agent": "hex-site" }, cache: "no-store" })
-    if (stable.ok) channel = "stable"
-  } catch {
-    // The service is unreachable: the dev alias fails the same way, visibly.
+  if (!dev) {
+    try {
+      const stable = await fetch(`${RELEASE_SERVICE}/hex/desktop/stable.json`, { headers: { "User-Agent": "hex-site" }, cache: "no-store" })
+      if (stable.ok) channel = "stable"
+    } catch {
+      // The service is unreachable: the dev alias fails the same way, visibly.
+    }
   }
   const headers = new Headers({ Location: `${RELEASE_SERVICE}/hex/desktop/${channel}/${target}`, "Cache-Control": "no-store" })
   secure(headers)
