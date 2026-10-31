@@ -99,12 +99,17 @@ impl HudSender {
     #[cfg(target_os = "windows")]
     pub(crate) fn failure(&self) -> Option<String> {
         let reason = self.overlay.failure()?;
-        let mut logged = self.logged.lock().unwrap_or_else(|error| error.into_inner());
+        let mut logged = self
+            .logged
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if logged.as_deref() != Some(reason.as_str()) {
             tracing::error!(%reason, "dictation HUD can't show");
             *logged = Some(reason.clone());
         }
-        Some(format!("The recording HUD can't show ({reason}). Dictation still works."))
+        Some(format!(
+            "The recording HUD can't show ({reason}). Dictation still works."
+        ))
     }
 
     /// The overlay, to ask whether the platform could show it.
