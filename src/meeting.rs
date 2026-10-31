@@ -20,18 +20,18 @@ const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
 /// saved and its final transcript runs at the next launch.
 const FINAL_PENDING_FILE: &str = "final.pending";
 
-#[path = "meeting_capture.rs"]
 mod capture;
-#[path = "meeting_chapters.rs"]
 mod chapters;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod detection;
 #[cfg(target_os = "linux")]
-#[path = "meeting_linux.rs"]
+#[path = "meeting/linux.rs"]
 mod os;
 #[cfg(target_os = "macos")]
-#[path = "meeting_macos.rs"]
+#[path = "meeting/macos.rs"]
 mod os;
 #[cfg(target_os = "windows")]
-#[path = "meeting_windows.rs"]
+#[path = "meeting/windows.rs"]
 mod os;
 pub(crate) use os::reveal;
 #[cfg(target_os = "macos")]
@@ -39,16 +39,16 @@ pub(crate) use os::{
     SystemAudioAuthorization, create_tap_aggregate, request_system_audio_access,
     screen_recording_permitted, system_audio_authorization, system_audio_ready,
 };
-#[path = "meeting_echo.rs"]
 mod echo;
-#[path = "meeting_generator.rs"]
 pub(crate) mod generator;
-#[path = "meeting_notes.rs"]
+pub(crate) mod mcp;
 mod notes;
-#[path = "meeting_query.rs"]
 pub mod query;
-#[path = "meeting_transcript.rs"]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) mod runtime;
 mod transcript;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod watcher;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
@@ -1550,13 +1550,10 @@ fn set_owner_only(_path: &Path, _directory: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "meeting_tests.rs"]
 mod tests;
 
 #[cfg(all(test, target_os = "macos"))]
-#[path = "meeting_echo_replay_tests.rs"]
 mod echo_replay_tests;
 
 #[cfg(all(test, target_os = "macos"))]
-#[path = "meeting_live_replay_tests.rs"]
 mod live_replay_tests;

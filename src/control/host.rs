@@ -148,7 +148,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         ),
         ControlCommand::MeetingRecord { title } => meeting(false, title),
         ControlCommand::MeetingStop => meeting(true, None),
-        ControlCommand::MeetingCopyLast => match crate::meeting_runtime::copy_last_transcript() {
+        ControlCommand::MeetingCopyLast => match crate::meeting::runtime::copy_last_transcript() {
             Ok(()) => ControlReply::done("Copied the last meeting transcript"),
             Err(error) => ControlReply::error("failed", format!("couldn't copy it: {error}")),
         },
@@ -252,12 +252,12 @@ fn dictation_message(action: CaptureAction) -> &'static str {
 
 /// What the meeting recorder is doing (`meeting_runtime`).
 fn meeting_report() -> MeetingReport {
-    use crate::meeting_watcher::MeetingMenuState;
+    use crate::meeting::watcher::MeetingMenuState;
     let state = |state: &str| MeetingReport {
         state: state.into(),
         ..Default::default()
     };
-    match crate::meeting_runtime::state() {
+    match crate::meeting::runtime::state() {
         MeetingMenuState::Idle => state("idle"),
         MeetingMenuState::Starting => state("starting"),
         MeetingMenuState::Recording { started, title, .. } => MeetingReport {
@@ -273,14 +273,14 @@ fn meeting_report() -> MeetingReport {
 /// the recorder to confirm.
 fn meeting(stop: bool, title: Option<String>) -> ControlReply {
     use crate::meeting::MeetingRequest;
-    use crate::meeting_watcher::MeetingMenuState;
+    use crate::meeting::watcher::MeetingMenuState;
     if !crate::app_settings::meetings_enabled() {
         return ControlReply::error(
             "feature-off",
             "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
         );
     }
-    let request = match (crate::meeting_runtime::state(), stop) {
+    let request = match (crate::meeting::runtime::state(), stop) {
         (MeetingMenuState::Recording { title, .. }, false) => {
             return ControlReply::unchanged(format!("Already recording “{title}”"));
         }
@@ -306,13 +306,13 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
             MeetingRequest::Stop
         }
     };
-    if let Err(error) = crate::meeting_runtime::request(request) {
+    if let Err(error) = crate::meeting::runtime::request(request) {
         return ControlReply::error("unavailable", error);
     }
     let started = Instant::now();
     while started.elapsed() < CONFIRM_WAIT {
         std::thread::sleep(Duration::from_millis(100));
-        match (crate::meeting_runtime::state(), stop) {
+        match (crate::meeting::runtime::state(), stop) {
             (MeetingMenuState::Recording { title, .. }, false) => {
                 return ControlReply::done(format!(
                     "Recording “{title}”; `hex meetings stop` stops and transcribes it"

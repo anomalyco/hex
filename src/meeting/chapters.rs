@@ -1081,5 +1081,5 @@ pub fn chapters_file(path: &Path) -> Result<String> {
 }
 
 #[cfg(test)]
-#[path = "meeting_chapters_tests.rs"]
+#[path = "chapters_tests.rs"]
 mod tests;

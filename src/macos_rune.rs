@@ -46,7 +46,7 @@ use crate::desktop_host::{
 };
 use crate::dictation_indicator::DictationIndicatorEvent;
 use crate::meeting::MeetingRequest;
-use crate::meeting_watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
+use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
@@ -331,7 +331,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let controller = thread::Builder::new()
         .name("hex-meetings".into())
         .spawn(move || {
-            if let Err(error) = crate::meeting_watcher::controller_loop(
+            if let Err(error) = crate::meeting::watcher::controller_loop(
                 shutdown,
                 controller_events_sender.clone(),
                 controller_command_receiver,
@@ -433,7 +433,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let _ = WINDOW.set(window.clone());
     // The status item is created inside the loop; Hex can't run without a
     // way back to its window, so a failed item opens the window there.
-    let open_at_launch = crate::meeting_watcher::should_open_app_on_launch(
+    let open_at_launch = crate::meeting::watcher::should_open_app_on_launch(
         settings.show_dock_icon,
         setup_ready,
         onboarding_completed,

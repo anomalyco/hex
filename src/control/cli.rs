@@ -622,7 +622,7 @@ fn mcp(meetings_dir: Option<std::path::PathBuf>) -> color_eyre::Result<()> {
         Some(directory) => directory,
         None => crate::meeting::root()?,
     };
-    crate::meeting_mcp::run(root)
+    crate::meeting::mcp::run(root)
 }
 
 /// `hex annotate` (alias `hex capture`).
