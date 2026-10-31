@@ -428,6 +428,9 @@ fn main() -> Result<()> {
     // the rest of launch runs; its first window takes them, and Rune drops
     // them when the app opens none.
     if opens_app(cli.command.as_ref(), bundled_watcher) {
+        #[cfg(target_os = "macos")]
+        rune::prewarm_gpu_on(rune::GpuBackend::Metal);
+        #[cfg(not(target_os = "macos"))]
         rune::prewarm_gpu();
     }
     // A window of its own: no data folder, log, lock, or settings, so it
