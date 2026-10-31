@@ -162,6 +162,26 @@ Checks in [suppression.rs](../../src/suppression.rs):
 Proof limit: reducer response to a supplied interruption, not macOS disabling
 and re-enabling a real tap.
 
+`recover.tap-health`: macOS can disable a tap (callback timeout, user input)
+or silently disable or invalidate it while Hex idles, after sleep, secure
+input, or an Accessibility change. The tap thread repairs all three taps (key,
+modifier, HID) and logs each repair to `process.log`.
+
+```ts
+disable event (timeout | user input)
+  -> re-enable every tap                    // "macOS disabled the event tap; re-enabled it"
+  -> recover.tap-interruption
+every 5 s on the tap thread
+  ├── tap disabled without notice -> re-enable  // "event tap was disabled without notice"
+  ├── tap invalidated or re-enable fails -> recreate  // "recreated event tap"
+  └── creation fails -> retry next check    // "could not recreate event tap", logged once
+  -> key or modifier gap -> recover.tap-interruption
+tap thread holds a user-initiated activity  // App Nap cannot throttle it; idle sleep allowed
+```
+Source: `TapSet::check`, `reenable_disabled_taps`, and `AppNapOptOut` in
+[suppression.rs](../../src/suppression.rs). No check: it needs macOS to disable
+a real tap. Proof limit: reported field failure (#612), not reproduced.
+
 The [2.1.11 release notes](../releases/2.1.11.md) describe the shipped navigation
 and missed-release fix; they are historical context, not a current-tree test.
 
