@@ -167,7 +167,7 @@ impl Tour {
     }
 }
 
-fn progress(ui: &Ui) -> (bool, ModelProgress) {
+pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
     let installed = ui.picker.selected_installed(&ui.settings);
     let selected = crate::transcription_models::validate(&ui.settings.transcription).ok();
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
@@ -235,6 +235,16 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     }
     remember_step(ui, step);
     let after = ui.tour.as_ref().map(|tour| tour.flow.view());
+    // Done waited for the model: the success chime sounds once it is ready.
+    if ui.live()
+        && before.step == Step::Done
+        && !before.dictation_ready
+        && after
+            .as_ref()
+            .is_some_and(|after| after.step == Step::Done && after.dictation_ready)
+    {
+        crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
+    }
     changed || after.as_ref() != Some(&before)
 }
 
@@ -251,14 +261,14 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
 }
 
 /// Saves a new step so a tour quit part-way resumes there, and sounds the
-/// success chime on reaching the last one.
+/// success chime on reaching the last one once dictation can run.
 fn remember_step(ui: &Ui, before: Step) {
     if let Some(tour) = &ui.tour
         && tour.flow.step() != before
         && ui.live()
     {
         crate::onboarding::record_step(tour.flow.step());
-        if tour.flow.step() == Step::Done {
+        if tour.flow.step() == Step::Done && tour.flow.view().dictation_ready {
             crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
         }
     }
@@ -322,7 +332,7 @@ pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
         Step::Welcome => welcome(ui, p),
         Step::Setup => setup(ui, p, &view),
         Step::TryIt => try_it(ui, p, tour, &view, layer),
-        Step::Done => done(ui, p),
+        Step::Done => done(ui, p, &view),
     };
     let primary = match view.step {
         Step::Welcome => Some((tr("Get started"), true, Input::Continue)),
@@ -332,6 +342,7 @@ pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             Some((tr("Continue"), true, Input::Continue))
         }
         Step::TryIt => None,
+        Step::Done if !view.dictation_ready => Some((tr("Continue"), true, Input::Continue)),
         Step::Done => Some((tr("Start using Hex"), true, Input::Continue)),
     };
     // Until setup is ready the next setup row carries the accent, so
@@ -410,7 +421,8 @@ pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
         .center_y()
         .justify_end()
         .children(
-            (view.show_download && !waiting_for_model(&view)).then(|| download(p, view.model)),
+            (view.show_download && !waiting_for_model(&view) && !done_shows_progress(&view))
+                .then(|| download(p, view.model)),
         );
     Some(
         col()
@@ -674,6 +686,14 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
 /// downloading, or its download stopped. Permissions are ready by then.
 fn waiting_for_model(view: &View) -> bool {
     view.step == Step::TryIt && !view.reopen && !view.dictation_ready
+}
+
+/// Done while the model still downloads: its progress shows in the ring,
+/// not the corner. A stopped download keeps its Retry in the corner.
+fn done_shows_progress(view: &View) -> bool {
+    view.step == Step::Done
+        && !view.dictation_ready
+        && matches!(view.model, ItemStatus::Downloading(_))
 }
 
 fn holds(ui: &Ui) -> bool {
@@ -964,7 +984,8 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
     line.child(hint(&copy, color))
 }
 
-fn done(ui: &Ui, p: Paint) -> El {
+fn done(ui: &Ui, p: Paint, view: &View) -> El {
+    let ready = view.dictation_ready;
     let shortcut = ui.settings.dictation_hotkey.keycaps().join("+");
     let mut tips = Vec::new();
     if let Some(binding) = &ui.settings.paste_last_hotkey {
@@ -998,31 +1019,48 @@ fn done(ui: &Ui, p: Paint) -> El {
         ),
     };
     let c = &p.k.c;
+    let badge = row().key("badge").size(72.0, 72.0).radius(36.0).center();
+    // Until dictation can run, the badge stays neutral and shows how far
+    // the speech model has downloaded.
+    let badge = if ready {
+        badge.fill(c.success.bg).child(
+            rune::icon(p.k.glyph.check_small, 40.0)
+                .key("check")
+                .color(p.success()),
+        )
+    } else {
+        let inner = match view.model {
+            ItemStatus::Downloading(fraction) => text(format!("{}%", (fraction * 100.0).round()))
+                .key("percent")
+                .font(p.k.ty.ui_medium.features("'tnum' 1"))
+                .color(p.muted()),
+            _ => rune::icon(&glyphs::SPARKLE, 32.0)
+                .key("model")
+                .color(p.muted()),
+        };
+        badge.fill(c.bg_button_neutral).child(inner)
+    };
     let art = row().key("art").h(ART_HEIGHT).w_full().center().child(
         row()
             .key("ring")
             .padding(16.0)
             .radius(52.0)
             .border(1.0, c.border_base.alpha(0.3))
-            .child(
-                row()
-                    .key("badge")
-                    .size(72.0, 72.0)
-                    .radius(36.0)
-                    .center()
-                    .fill(c.success.bg)
-                    .child(
-                        rune::icon(p.k.glyph.check_small, 40.0)
-                            .key("check")
-                            .color(p.success()),
-                    ),
-            ),
+            .child(badge),
     );
+    let (heading, body) = if ready {
+        (tr("You're all set"), send_off)
+    } else {
+        (
+            tr("Almost ready"),
+            tr("Hex starts listening once the speech model has downloaded.").to_string(),
+        )
+    };
     col()
         .key("done")
         .gap(24.0)
         .children((ui.platform.caps.os == Os::Macos).then_some(art))
-        .child(title(p, tr("You're all set"), Some(&send_off)))
+        .child(title(p, heading, Some(&body)))
         .child(
             col()
                 .key("more")
@@ -1251,5 +1289,40 @@ mod tests {
             },
         ));
         assert!(!waiting_for_model(&flow.view()));
+    }
+
+    #[test]
+    fn done_waits_for_the_model_after_a_skipped_practice() {
+        let downloading = crate::onboarding::SetupStatus {
+            microphone: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            transcription_model: false,
+        };
+        let progress = ModelProgress {
+            downloading: Some(0.4),
+            ..ModelProgress::default()
+        };
+        let mut flow = Flow::new(Step::TryIt, downloading, true, true);
+        flow.on(Input::Status(downloading, progress));
+        flow.on(Input::Skip);
+        let view = flow.view();
+        assert_eq!(view.step, Step::Done);
+        assert!(!view.dictation_ready, "Done must not claim Hex is ready");
+        assert!(done_shows_progress(&view));
+
+        let ready = crate::onboarding::SetupStatus {
+            transcription_model: true,
+            ..downloading
+        };
+        flow.on(Input::Status(
+            ready,
+            ModelProgress {
+                installed: true,
+                ..ModelProgress::default()
+            },
+        ));
+        let view = flow.view();
+        assert!(view.dictation_ready);
+        assert!(!done_shows_progress(&view));
     }
 }

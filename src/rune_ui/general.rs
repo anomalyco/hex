@@ -96,20 +96,69 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
         rows.extend(cancel_shortcut_row(ui, p).map(CardRow::from));
     }
+    let picker_button = value_button(
+        p,
+        "transcription-control",
+        model.name,
+        &rune_theme_opencode::icons::CHEVRON_RIGHT,
+        super::picker::open,
+    );
+    let (description, control) = match missing_model(ui) {
+        // Hex can't listen without the selected model: say so, with the
+        // download's progress, or a Download button when none runs.
+        Some(progress) => {
+            let error = ui
+                .view
+                .as_ref()
+                .and_then(|view| view.transcription.error.clone())
+                .filter(|_| progress.downloading.is_none());
+            let description = match error {
+                Some(error) => (error, p.danger()),
+                None => (
+                    tr("Hex can't listen until the speech model has downloaded").to_string(),
+                    p.muted(),
+                ),
+            };
+            let action = match progress.downloading {
+                Some(fraction) => rune_kit::Progress::new(Some(fraction))
+                    .show_value()
+                    .build(p.k)
+                    .key("transcription-progress")
+                    .w(120.0),
+                None => button(
+                    p,
+                    "transcription-download",
+                    tr("Download"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| {
+                        let selection = ui.settings.transcription.clone();
+                        ui.send(Request::ChooseModel {
+                            model: selection.model,
+                            language: selection.language,
+                        });
+                    },
+                ),
+            };
+            (
+                Some(description),
+                row()
+                    .key("transcription-controls")
+                    .gap(8.0)
+                    .center_y()
+                    .child(action)
+                    .child(picker_button),
+            )
+        }
+        None => (s::transcription_status(ui, p), picker_button),
+    };
     rows.push(
         icon_described_row(
             p,
             "transcription",
             &WAVE,
             tr("Speech model"),
-            s::transcription_status(ui, p),
-            value_button(
-                p,
-                "transcription-control",
-                model.name,
-                &rune_theme_opencode::icons::CHEVRON_RIGHT,
-                super::picker::open,
-            ),
+            description,
+            control,
         )
         .into(),
     );
@@ -135,6 +184,17 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     rows.extend(microphone_rows(ui, p, layer));
     rows.extend(launch_at_login_rows(ui, p));
     card(p, "basics", rows)
+}
+
+/// The selected speech model's download, while it is not installed, so
+/// Hex can't listen yet. Fixtures that name no installed models say nothing,
+/// so their rows never depend on this machine's models.
+fn missing_model(ui: &Ui) -> Option<crate::onboarding::ModelProgress> {
+    if !ui.live() && ui.picker.installed.is_none() {
+        return None;
+    }
+    let (installed, progress) = super::onboarding::progress(ui);
+    (!installed).then_some(progress)
 }
 
 /// A shortcut's row with what a shortcuts portal granted, and the note when
