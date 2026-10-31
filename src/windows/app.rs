@@ -71,7 +71,7 @@ pub(crate) struct WindowsDesktopHost {
     history: Option<History>,
     last_dictation: Arc<Mutex<Option<String>>>,
     indicator: crate::rune_hud::HudSender,
-    mode_runtime: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
+    mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     transformations: Arc<crate::personal_commands::TransformationClient>,
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
@@ -168,7 +168,7 @@ impl WindowsDesktopHost {
         activity.refresh(&mut event_reader);
         let last_completed_at = last_completed_at(event_reader.events().iter());
         let mode_runtime = Arc::new(RwLock::new(
-            crate::dictation_modes::ModeRuntime::from_settings(&settings),
+            crate::dictation::modes::ModeRuntime::from_settings(&settings),
         ));
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
@@ -482,7 +482,7 @@ impl WindowsDesktopHost {
                 .mode_runtime
                 .write()
                 .unwrap_or_else(|error| error.into_inner()) =
-                crate::dictation_modes::ModeRuntime::from_settings(current);
+                crate::dictation::modes::ModeRuntime::from_settings(current);
         }
         if previous.ui_language != current.ui_language {
             crate::desktop_i18n::apply(current.ui_language.as_deref());

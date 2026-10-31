@@ -13,7 +13,7 @@ use std::time::Duration;
 use url::Url;
 
 use crate::context::ContextSnapshot;
-use crate::dictation_modes::normalize_host;
+use crate::dictation::modes::normalize_host;
 
 /// Executable stems whose foreground document exposes the page URL.
 const BROWSER_STEMS: &[&str] = &[
@@ -190,7 +190,7 @@ fn read_foreground_document_url() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dictation_modes::canonical_host;
+    use crate::dictation::modes::canonical_host;
 
     fn capture() -> ContextSnapshot {
         begin_capture().finish()

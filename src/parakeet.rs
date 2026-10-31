@@ -11,8 +11,8 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
 use crate::context::ContextSnapshot;
+use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
-use crate::dictation_processor::ProcessingObservation;
 use crate::gguf_session::OfflineGgufSession;
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
@@ -420,7 +420,7 @@ impl DictationWorker {
         let stream = clip.take_stream();
         let _capture = clip.take_capture_marker();
         let samples = clip.into_transcription_samples();
-        crate::dictation_diagnostics::persist(&samples);
+        crate::dictation::diagnostics::persist(&samples);
         let prepare_ms = submitted_at.elapsed().as_millis();
         let offline = {
             let control = control.clone();
@@ -666,9 +666,9 @@ fn run_processor_worker(
 /// Select processing when the worker reaches the job; the stage precedes processing.
 fn process_job_text(
     job: &ProcessorJob,
-    profiles: impl FnOnce() -> crate::dictation_processor::Profiles,
+    profiles: impl FnOnce() -> crate::dictation::processor::Profiles,
     processing: impl FnOnce(),
-) -> crate::dictation_processor::Processed {
+) -> crate::dictation::processor::Processed {
     let profiles = profiles();
     if profiles.processes(&job.context) {
         processing();
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations() {
-        use crate::dictation_processor::{Profile, Profiles};
+        use crate::dictation::processor::{Profile, Profiles};
         use std::cell::Cell;
 
         for transformations in [vec![], vec!["fixture-transform".to_string()]] {
@@ -2031,11 +2031,11 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "dictation_tail_tests.rs"]
+#[path = "dictation/tail_tests.rs"]
 mod dictation_tail_tests;
 
 #[cfg(test)]
-#[path = "dictation_corpus_tests.rs"]
+#[path = "dictation/corpus_tests.rs"]
 mod dictation_corpus_tests;
 
 /// Loads a GGUF model file directly, for opt-in harnesses that replay

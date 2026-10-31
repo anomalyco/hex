@@ -1,6 +1,6 @@
 //! Hex's real recording indicator (`Dot scope` phosphor HUD) inside onboarding:
 //!
-//! Steps [`crate::dictation_indicator::IndicatorModel`] with the real listener
+//! Steps [`crate::dictation::indicator::IndicatorModel`] with the real listener
 //! events (`Started`, `Meter`, `Submitted` + `Transcribing`, `JobCompleted`),
 //! and paints the resulting [`DotFrame`] over the stage with
 //! [`crate::rune_hud::Painter`] (`rune_hud.wgsl`), identical to `#292`'s Sounds
@@ -13,7 +13,7 @@ use rune::{El, effect};
 
 use super::fixture::Take;
 use super::gpu_stage::{hud_mark, update_hud};
-use crate::dictation_indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
+use crate::dictation::indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
 use crate::dot_scope::{Tuning, demo_level};
 use crate::rune_hud::WINDOW;
 

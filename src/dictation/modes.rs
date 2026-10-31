@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use url::Url;
 
 use crate::app_settings::{AppSettings, DictationMode};
-use crate::dictation_processor::{PostProcessingSettings, Processed, Profile, Profiles};
+use crate::dictation::processor::{PostProcessingSettings, Processed, Profile, Profiles};
 use crate::text_replacements::ReplacementSet;
 
 /// Live mode-processing snapshot. The output worker clones it before any

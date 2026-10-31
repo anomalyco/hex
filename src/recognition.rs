@@ -9,9 +9,9 @@ use color_eyre::Result;
 use crate::audio::CaptureInstant;
 use crate::context::{ContextMonitor, ContextSnapshot};
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
+use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
+use crate::dictation::indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
-use crate::dictation_audio::{DictationAudio, DictationAudioEvent, LostCapture};
-use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{
@@ -1866,7 +1866,7 @@ fn finish_dictation_with(
             return Ok(match finish {
                 Finish::Discard => FinishResult::Discarded,
                 Finish::Transcribe(clip) => {
-                    crate::dictation_diagnostics::persist_near_silent(
+                    crate::dictation::diagnostics::persist_near_silent(
                         &clip.into_transcription_samples(),
                     );
                     FinishResult::Silent

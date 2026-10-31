@@ -77,7 +77,7 @@ pub struct WindowsDictationConfig {
     pub history: Option<crate::history::History>,
     pub last_dictation: Arc<Mutex<Option<String>>>,
     pub indicator: Option<crate::rune_hud::HudSender>,
-    pub mode_runtime: Arc<RwLock<crate::dictation_modes::ModeRuntime>>,
+    pub mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     pub transformations: Arc<crate::personal_commands::TransformationClient>,
     pub fallback_to_default_device: bool,
     /// Terminal paste: Ctrl+Shift+V instead of Ctrl+V.
@@ -133,7 +133,7 @@ impl WindowsDictationConfig {
             last_dictation: Arc::new(Mutex::new(None)),
             indicator: None,
             mode_runtime: Arc::new(RwLock::new(
-                crate::dictation_modes::ModeRuntime::from_settings(settings),
+                crate::dictation::modes::ModeRuntime::from_settings(settings),
             )),
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
             fallback_to_default_device: true,
@@ -806,7 +806,7 @@ fn process_dictation_job(
     paster: &mut Result<WindowsPaster>,
     history: Option<&crate::history::History>,
     last_dictation: &Mutex<Option<String>>,
-    mode_runtime: &RwLock<crate::dictation_modes::ModeRuntime>,
+    mode_runtime: &RwLock<crate::dictation::modes::ModeRuntime>,
     transformations: &crate::personal_commands::TransformationClient,
 ) -> JobResult {
     let started = Instant::now();
@@ -831,7 +831,7 @@ fn process_dictation_job(
             return Err("transcription was empty".into());
         }
         let processed = if job.raw {
-            crate::dictation_processor::Processed::unchanged(raw_text.trim())
+            crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             let mode_runtime = mode_runtime
                 .read()
@@ -855,7 +855,7 @@ fn process_dictation_job(
                 .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
         }
         if let Some(history) = history {
-            let mut draft = crate::dictation_modes::history_draft(
+            let mut draft = crate::dictation::modes::history_draft(
                 raw_text,
                 &processed,
                 application.clone(),

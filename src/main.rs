@@ -43,15 +43,6 @@ mod dev_build;
 mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
-#[cfg(target_os = "macos")]
-mod dictation_audio;
-#[cfg(target_os = "macos")]
-mod dictation_diagnostics;
-mod dictation_indicator;
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-mod dictation_modes;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod dictation_processor;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod dot_scope;
 mod durable;
