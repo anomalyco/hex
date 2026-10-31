@@ -235,7 +235,7 @@ Checks in [audio.rs](../../src/audio.rs):
 `a_closed_lid_passes_over_the_built_in_microphone`,
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`;
-[dictation_audio.rs](../../src/dictation_audio.rs):
+[dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
 `microphone_loss_with_only_pre_roll_keeps_nothing`,
@@ -276,7 +276,7 @@ gap in the microphone timeline (any OS, warm or cold)
   ├── 50–250 ms -> filled with silence, capture continues // logged, #619
   └── over 250 ms -> fail as a capture discontinuity
 ```
-Checks in [dictation_audio.rs](../../src/dictation_audio.rs):
+Checks in [dictation/audio.rs](../../src/dictation/audio.rs):
 `cold_capture_restart_rejects_late_open_results_and_closes_after_finish`,
 `enabling_warm_microphone_preserves_pending_capture_and_recovers_after_cancellation`,
 `cold_stream_failure_before_hold_threshold_reopens_for_the_same_press`,
@@ -324,7 +324,7 @@ start capture B -> new generation                     // fences obsolete notific
   ├── late failure/ready A -> cannot finish, fail, or activate B
   └── B's own audio -> finish B -> expected output
 ```
-Checks in [dictation_audio.rs](../../src/dictation_audio.rs):
+Checks in [dictation/audio.rs](../../src/dictation/audio.rs):
 `capture_failures_survive_terminal_controls_but_not_a_new_capture`,
 `boundary_drain_preserves_finish_failure_but_does_not_fail_a_new_capture`.
 Proof limit: error delivery across capture boundaries, not arbitrary
@@ -356,7 +356,7 @@ microphone timeline
 
 command recovery -> next fresh dictation still works  // not just an emptied queue
 ```
-Sources: [dictation_audio.rs](../../src/dictation_audio.rs),
+Sources: [dictation/audio.rs](../../src/dictation/audio.rs),
 `overflow_recognition` and `forward_recognition`;
 [recognition.rs](../../src/recognition.rs), discontinuity handling.
 Proof limit: source-backed contract only. A whole-path native stall check must

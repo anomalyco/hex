@@ -56,8 +56,8 @@ The same controller, recorder, transcript pipeline, store, pane, capsules,
 and notes run on Linux and Windows (beta, in Labs, off by default). Only these
 adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 [meeting/windows.rs](../../src/meeting/windows.rs),
-[microphone_activity_linux.rs](../../src/microphone_activity_linux.rs),
-[microphone_activity_windows.rs](../../src/microphone_activity_windows.rs),
+[microphone_activity/linux.rs](../../src/microphone_activity/linux.rs),
+[microphone_activity/windows.rs](../../src/microphone_activity/windows.rs),
 [meeting/runtime.rs](../../src/meeting/runtime.rs)):
 
 ```ts

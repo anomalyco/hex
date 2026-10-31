@@ -708,7 +708,7 @@ Sources: [capture_host.rs](../../src/capture_host.rs), the tap in
 [app_settings.rs](../../src/app_settings.rs), the pane in
 [rune_ui/scrawl.rs](../../src/rune_ui/scrawl.rs), the input rules in
 [hosted_input.rs](../../crates/capture/src/hosted_input.rs), the sink in
-[dictation_audio.rs](../../src/dictation_audio.rs),
+[dictation/audio.rs](../../src/dictation/audio.rs),
 `transcribe_with_words` in [parakeet.rs](../../src/parakeet.rs), routing in
 [capture_host/routing.rs](../../src/capture_host/routing.rs), the CLI's reads in
 [capture_host/library.rs](../../src/capture_host/library.rs), the phone finish
@@ -720,7 +720,7 @@ Checks:
 - Gate: `the_host_is_absent_while_the_experiment_is_off` in capture_host.rs;
   [test-app-identity.sh](../../scripts/test-app-identity.sh) for the
   release-path refusals.
-- Sink, in dictation_audio.rs: `capture_sink_shares_the_timeline_with_dictation`,
+- Sink, in dictation/audio.rs: `capture_sink_shares_the_timeline_with_dictation`,
   `a_full_capture_sink_drops_audio_as_a_gap_and_never_stalls_dictation`,
   `capture_sink_records_microphone_gaps`,
   `capture_sink_holds_a_released_microphone_open_until_it_closes`,
@@ -729,7 +729,7 @@ Checks:
 - Words, in parakeet.rs: `chunked_word_transcription_keeps_word_times_across_chunks`
   and `word_transcription_is_a_foreground_request_on_the_shared_engine`;
   `foreground_work_waits_for_an_open_stream_instead_of_interrupting_it` in
-  [transcription_engine.rs](../../src/transcription_engine.rs).
+  [transcription/engine.rs](../../src/transcription/engine.rs).
 - Host, in capture_host.rs (a fake engine that writes through Scrawl's real
   `finalize_capture_bundle_with_flags`, without a screen):
   `controls_are_idempotent_and_stop_writes_a_scrawl_bundle`,

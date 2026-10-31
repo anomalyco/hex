@@ -217,7 +217,7 @@ The [fixture guide](../../tests/fixtures/vocabulary/README.md) describes
 the synthetic set, public guard download, and ignored private manifest path.
 This is offline evaluation coverage, not a shipped vocabulary feature or proof
 of recognition quality on a microphone. Metric checks live in
-`transcription_benchmark::tests`; inference results belong in the research report.
+`transcription::benchmark::tests`; inference results belong in the research report.
 
 ### Hold And Short Taps
 
@@ -512,9 +512,9 @@ Source: `DictationCapture` in [dictation.rs](../../src/dictation.rs); checks:
 streamed and not, with the tail). These cover sample-buffer/timestamp logic, not
 a microphone recording. The physical release stays exact; the 200 ms tail is an
 explicit extension of the trim boundary. The opt-in `release_boundary_harness`
-([dictation_tail_tests.rs](../../src/dictation_tail_tests.rs); `HEX_TAIL_MODEL`,
+([dictation/tail_tests.rs](../../src/dictation/tail_tests.rs); `HEX_TAIL_MODEL`,
 `HEX_TAIL_WAVS`) and `evaluate_dictation_corpus`
-([dictation_corpus_tests.rs](../../src/dictation_corpus_tests.rs);
+([dictation/corpus_tests.rs](../../src/dictation/corpus_tests.rs);
 [`scripts/dictation-corpus.sh`](../../scripts/dictation-corpus.sh),
 `HEX_DICTATION_CORPUS_DIR`) replay recordings through the capture timeline at
 release offsets (`-300 ms` to `+200 ms`) and onset offsets (`-300 ms` to
@@ -528,7 +528,7 @@ pre-roll lost initial syllables when speech preceded readiness by `150–300 ms`
 The since-removed pause chunking on or off, and 1 versus default decoder
 threads, gave identical tail results. The harnesses now apply the tail; they have not been re-run with it. The
 tail also keeps any key-up or click sound made at release; no filtering is applied.
-The owner in [dictation_audio.rs](../../src/dictation_audio.rs) has
+The owner in [dictation/audio.rs](../../src/dictation/audio.rs) has
 `cold_capture_restart_rejects_late_open_results_and_closes_after_finish` and
 `pending_open_uses_physical_press_for_intentional_threshold`: controlled opening
 and ownership transitions, not physical device startup latency. Tail checks there
@@ -608,7 +608,7 @@ Model advertises streaming, GPU device             // dictate.streaming
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```
 
-Source: [transcription_engine.rs](../../src/transcription_engine.rs) (one thread
+Source: [transcription/engine.rs](../../src/transcription/engine.rs) (one thread
 owns the model on every OS; streams, finishes, offline runs, and macOS model
 loads and switches share its FIFO because a live stream holds the model's
 compute lease), `probe_stream` and `with_stream` in
@@ -618,7 +618,7 @@ compute lease), `probe_stream` and `with_stream` in
 [dictation.rs](../../src/dictation.rs): the capture owns its stream, feeds it as
 audio arrives, cancels it with the recording, and hands it to the finished clip.
 macOS streams hotkey captures from the audio owner in
-[dictation_audio.rs](../../src/dictation_audio.rs); `DictationWorker::transcribe`
+[dictation/audio.rs](../../src/dictation/audio.rs); `DictationWorker::transcribe`
 hands the clip to the engine when it is submitted, so its stream finishes before
 a later capture opens one, and the job then waits for its text in order. Linux
 ([linux/dictation.rs](../../src/linux/dictation.rs)) and Windows
@@ -636,7 +636,7 @@ Checks: `recorded_audio_is_a_prefix_of_the_finished_clip` (16, 44.1, and
 and not), `a_stream_starts_with_the_backlog_and_feeds_in_blocks`,
 `live_text_follows_the_recording_and_never_outlives_it`, and
 `short_taps_cancellation_and_unstreamable_models_end_the_stream` in dictation.rs;
-`hotkey_captures_stream_once_intentional_and_others_do_not` in dictation_audio.rs;
+`hotkey_captures_stream_once_intentional_and_others_do_not` in dictation/audio.rs;
 `hold_streams_after_the_threshold_and_toggle_streams_from_the_press`,
 `a_release_finishes_its_stream_with_the_complete_clip`,
 `escape_and_short_taps_cancel_the_stream_and_submit_nothing`, and
@@ -646,7 +646,7 @@ linux/dictation.rs; `source_labels_distinguish_fallbacks`,
 engine thread without a model) `a_finish_without_a_stream_transcribes_the_clip_offline`,
 `an_unusable_stream_falls_back_to_the_complete_clip`,
 `work_runs_in_order_and_failures_reach_the_caller`, and
-`dropping_the_engine_stops_despite_an_open_stream` in transcription_engine.rs.
+`dropping_the_engine_stops_despite_an_open_stream` in transcription/engine.rs.
 These use synthetic audio and recorded engine commands. The Linux CI fixture
 [`scripts/test-linux-dictation.sh`](../../scripts/test-linux-dictation.sh)
 replays the same speech through a virtual microphone twice with the real model:
@@ -739,7 +739,7 @@ Chunking bounds inference, not capture duration. No silence is removed.
 ```
 
 The shared `max_audio_chunk_samples` policy in
-[transcription_models.rs](../../src/transcription_models.rs) is used by
+[transcription/models.rs](../../src/transcription/models.rs) is used by
 [parakeet.rs](../../src/parakeet.rs) and
 [local_transcriber.rs](../../src/local_transcriber.rs). Cohere's pinned backend
 reports a 400-second encoder capacity, while its reference processor uses a
@@ -775,7 +775,7 @@ trailing silence at all, and whole clips got only 200 ms. Both now get
 400 ms of silence after the clip (`UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES`;
 the stream hears it through `PauseCap` just before finalizing). Check:
 `a_dictation_stream_hears_trailing_silence_before_it_finalizes` in
-transcription_engine.rs (a fake stream). Not measured on the real model or a
+transcription/engine.rs (a fake stream). Not measured on the real model or a
 microphone; Linux and Windows streams are unchanged. Padding is now included in
 `inference_ms`; `prepare_ms` covers clip conversion and diagnostic retention.
 
@@ -863,7 +863,7 @@ The threshold is conservative, so speech is not dropped; a noisy room, the start
 tone, or a key click can lift a capture above it. Those captures then go to the
 Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
 which discards them when it finds no speech. The detector (1.2 MB, pinned
-revision and checksum in [transcription_models.rs](../../src/transcription_models.rs))
+revision and checksum in [transcription/models.rs](../../src/transcription/models.rs))
 downloads in the background whenever a transcription model is downloaded or
 activated, and at the first dictation, so an installed model still activates at
 once offline; a failed download is retried at the next dictation. Model
@@ -1021,7 +1021,7 @@ The sheet is a modal like the shortcut explainer, opened from a
 `dot_scope_turns_coral_on_failure`,
 `the_sound_sets_sheet_plays_and_chooses_sets` (Linux), and the `sound-sets`,
 and `sound-sets-playing` goldens. The stage
-replays Hex's HUD on the sheet's clock: `dictation_indicator`'s model, drawn
+replays Hex's HUD on the sheet's clock: `dictation/indicator`'s model, drawn
 by the window's compositor with `rune_hud`'s painter and `rune_hud.wgsl`, as
 the real overlay draws it. It is a preview, not the overlay: Dot scope's
 in-bar and notch placements show below the menu bar, the voice is HUD Lab's
@@ -1153,7 +1153,7 @@ At the top position the HUD sits 6 pt below the menu bar (`hud_placement::TOP_OF
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
 and normal Spaces keep their position. Check: `scripts/check
-dictation_indicator::tests::top_capsule` covers the math only; placement over a
+dictation::indicator::tests::top_capsule` covers the math only; placement over a
 fullscreen app on a notched Mac is not yet observed.
 
 ### Dot scope
@@ -1281,7 +1281,7 @@ every component.
 
 Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
 Reduce Motion, the stages, auto level, each processing
-look settling dark), `scripts/check dictation_indicator` (phases, the
+look settling dark), `scripts/check dictation::indicator` (phases, the
 processing minimum, failure and cancel, a hot microphone still moving),
 `scripts/check hud_placement` (each placement on flat and notched screens),
 and `rune_hud::tests::rune_hud_frames` (ignored; renders a fixed

@@ -104,7 +104,7 @@ exit codes, output, and `hex start`'s `open`
 arguments; `onboarding::tests::relaunch_forwards_only_the_hex_environment`
 pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;
-`dictation_audio::tests::marked_captures_are_intentional_without_a_hold`
+`dictation::audio::tests::marked_captures_are_intentional_without_a_hold`
 covers the immediate stream and `ReadyIntentional`; `recognition::tests`
 cover the stop replies and the idle-cancel and paste-last refusals; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,

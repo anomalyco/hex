@@ -91,7 +91,7 @@ settings load (macOS), with a one-time note in General
 
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
 on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
-`transcription_engine`'s worker unloads a loaded GGUF model once no command
+`transcription/engine`'s worker unloads a loaded GGUF model once no command
 has reached it for that long and nothing records (`idle_sleep::held()`: a
 dictation past its hold or a meeting; a macOS capture from its press via
 `dictation_busy`), freeing its RAM and VRAM; between commands no request
@@ -155,7 +155,7 @@ dictation on a Mac with the toggle on.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_formatting()` as each dictation's processing starts and runs
 `spoken_formatting::apply` before the mode's corrections, OpenCode
 rewriting, and transformations (on Windows and Linux, after the Global
@@ -176,7 +176,7 @@ Linux with the new row.
 
 Spoken symbols (`spoken-symbols`, issue 678, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_symbols()` as each dictation's processing starts and runs
 `spoken_symbols::apply` right after spoken formatting and before filler
 words, the mode's corrections, OpenCode rewriting, and transformations.
@@ -201,7 +201,7 @@ Linux with the new row.
 
 Remove filler words (`filler-words`, issue 631, every OS): while on,
 `Profiles::process_cancellable` in
-[dictation_processor.rs](../../src/dictation_processor.rs) reads
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::filler_words()` as each dictation's processing starts and runs
 `filler_words::apply` right after spoken formatting and before the mode's
 corrections, OpenCode rewriting, and transformations. It is rule-based, with
@@ -339,7 +339,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `without_live_text_a_dictation_stream_publishes_nothing`,
   `each_dictation_stream_has_its_own_text`, and
   `a_failed_feed_clears_the_text_and_stops_publishing` in
-  [transcription_engine.rs](../../src/transcription_engine.rs);
+  [transcription/engine.rs](../../src/transcription/engine.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
   [live_text.rs](../../src/live_text.rs) (a recording's end clears only its
