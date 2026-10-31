@@ -961,8 +961,13 @@ impl LinuxDesktopHost {
     /// A layout change not yet polled counts as before this choice, so it
     /// cannot later undo it.
     fn manual_choice(&mut self) {
-        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll()) {
-            self.keyboard_switcher.source_changed(source, Instant::now());
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+        {
+            self.keyboard_switcher
+                .source_changed(source, Instant::now());
         }
         self.keyboard_switcher.manual_choice();
         self.supersede_automatic();
@@ -990,8 +995,13 @@ impl LinuxDesktopHost {
             if self.input_sources.is_none() {
                 self.input_sources = crate::keyboard_input_sources::Watcher::connect();
             }
-            if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll())
-                && self.keyboard_switcher.source_changed(source, Instant::now())
+            if let Some(source) = self
+                .input_sources
+                .as_mut()
+                .and_then(|watcher| watcher.poll())
+                && self
+                    .keyboard_switcher
+                    .source_changed(source, Instant::now())
             {
                 self.supersede_automatic();
             }

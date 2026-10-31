@@ -77,14 +77,7 @@ pub(crate) fn enabled() -> Vec<InputSource> {
 fn locale_name(language: u32) -> Option<String> {
     let mut buffer = [0u16; LOCALE_NAME_MAX_LENGTH];
     // SAFETY: the buffer holds LOCALE_NAME_MAX_LENGTH characters.
-    let length = unsafe {
-        LCIDToLocaleName(
-            language,
-            buffer.as_mut_ptr(),
-            buffer.len() as i32,
-            0,
-        )
-    };
+    let length = unsafe { LCIDToLocaleName(language, buffer.as_mut_ptr(), buffer.len() as i32, 0) };
     wide(&buffer, length)
 }
 
