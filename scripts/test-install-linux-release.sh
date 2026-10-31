@@ -141,10 +141,12 @@ test ! -e "$support_dir/versions/$version/source-build"
 test "$(jq -c . "$support_dir/install.json")" = \
   "$(jq -cn --arg root "$support_dir" '{app: "hex", artifact: "desktop", channel: "stable", method: "direct", root: $root}')"
 
-mkdir -p "$home/.local/share/icons/hicolor/48x48/apps"
-printf 'png' > "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
+mkdir -p "$home/.local/share/icons/hicolor/48x48/apps" "$home/.local/share/icons/hicolor/64x64/apps"
+printf 'png X-Hex-Managed=true' > "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
+printf 'mine' > "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
 install uninstall
 test ! -e "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
+test -f "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
 test ! -e "$install_dir/hex"
 test ! -e "$support_dir/versions"
 test ! -e "$support_dir/install.json"

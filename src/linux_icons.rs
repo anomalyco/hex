@@ -2,9 +2,11 @@
 //! desktop entries and window app id use. Packages install it under
 //! `/usr/share/icons`; a direct or source install and a downloaded executable
 //! have no package, so Hex writes the same PNGs into the user's icon theme at
-//! startup (#652).
+//! startup (#652). Each PNG carries an `X-Hex-Managed=true` text chunk, so
+//! Hex replaces, and the installer removes, only icons Hex wrote: a user's own
+//! `anomaly.hex.png` or a symlink stays.
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 
 use color_eyre::eyre::{Result, WrapErr};
@@ -45,8 +47,12 @@ pub(crate) fn install() -> Result<()> {
     let Some(home) = dirs::data_dir() else {
         return Ok(());
     };
+    let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.into());
+    let own = canonical(&home);
+    // Some profiles list the user's own data directory in XDG_DATA_DIRS too.
     let packaged = crate::linux_portal::system_data_dirs()
         .iter()
+        .filter(|dir| canonical(dir) != own)
         .any(|dir| icon_path(dir, "48").exists());
     if packaged {
         return Ok(());
@@ -54,15 +60,42 @@ pub(crate) fn install() -> Result<()> {
     install_in(&home)
 }
 
+const MANAGED_MARK: &[u8] = b"X-Hex-Managed=true";
+
 fn install_in(data: &Path) -> Result<()> {
+    let mut wrote = false;
     for (size, bytes) in ICONS {
         let path = icon_path(data, size);
-        if std::fs::read(&path).is_ok_and(|current| current == bytes) {
-            continue;
+        let replace = match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => true,
+            Err(error) => {
+                return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
+            }
+            Ok(metadata) if metadata.is_file() => {
+                let current = std::fs::read(&path)
+                    .wrap_err_with(|| format!("could not read {}", path.display()))?;
+                current != bytes && managed(&current)
+            }
+            Ok(_) => false,
+        };
+        if replace {
+            write(&path, bytes).wrap_err_with(|| format!("could not write {}", path.display()))?;
+            wrote = true;
         }
-        write(&path, bytes).wrap_err_with(|| format!("could not write {}", path.display()))?;
+    }
+    if wrote {
+        // Icon caches watch the theme directory itself, not its subdirectories.
+        let theme = data.join("icons/hicolor");
+        std::fs::File::open(&theme)
+            .and_then(|theme| theme.set_modified(std::time::SystemTime::now()))
+            .wrap_err_with(|| format!("could not touch {}", theme.display()))?;
     }
     Ok(())
+}
+
+fn managed(png: &[u8]) -> bool {
+    png.windows(MANAGED_MARK.len())
+        .any(|window| window == MANAGED_MARK)
 }
 
 fn icon_path(data: &Path, size: &str) -> std::path::PathBuf {
@@ -75,7 +108,14 @@ fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         .ok_or_else(|| color_eyre::eyre::eyre!("{} has no directory", path.display()))?;
     std::fs::create_dir_all(directory)?;
     let staged = directory.join(format!(".{APP_ID}.png.{}", std::process::id()));
-    let mut file = std::fs::File::create(&staged)?;
+    match std::fs::remove_file(&staged) {
+        Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
+    let mut file = std::fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(&staged)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     std::fs::rename(&staged, path)?;
@@ -97,6 +137,35 @@ mod tests {
                 (size.into(), size.into())
             );
         }
+    }
+
+    #[test]
+    fn every_icon_carries_the_managed_mark() {
+        assert!(ICONS.iter().all(|(_, bytes)| managed(bytes)));
+    }
+
+    #[test]
+    fn icons_hex_did_not_write_stay() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data = std::env::temp_dir().join(format!("hex-icons-own-{unique}"));
+        let own = data.join("icons/hicolor/48x48/apps/anomaly.hex.png");
+        let linked = data.join("icons/hicolor/64x64/apps/anomaly.hex.png");
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        std::fs::write(&own, b"mine").unwrap();
+        std::os::unix::fs::symlink(&own, &linked).unwrap();
+        // An older icon Hex wrote is replaced.
+        let older = data.join("icons/hicolor/32x32/apps/anomaly.hex.png");
+        std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+        std::fs::write(&older, b"old X-Hex-Managed=true").unwrap();
+        install_in(&data).unwrap();
+        assert_eq!(std::fs::read(&own).unwrap(), b"mine");
+        assert!(linked.is_symlink());
+        assert_eq!(std::fs::read(&older).unwrap(), ICONS[2].1);
+        std::fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

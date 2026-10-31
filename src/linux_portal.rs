@@ -601,7 +601,7 @@ fn write_entry(applications: &Path, entry: &Path, contents: &str) -> Result<()> 
 }
 
 /// `entry` with every `Icon=` naming Hex's icon (`anomaly.hex` in hicolor).
-fn with_icon(entry: &str) -> String {
+pub(crate) fn with_icon(entry: &str) -> String {
     let mut named = String::with_capacity(entry.len());
     for line in entry.lines() {
         if line.trim_start().starts_with("Icon=") {

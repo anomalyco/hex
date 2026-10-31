@@ -325,8 +325,8 @@ pub(crate) fn run(
     if let Err(error) = crate::linux_portal::forget_legacy_gnome_shortcuts() {
         tracing::warn!(%error, "could not remove Hex's old GNOME shortcuts");
     }
-    if let Err(error) = crate::linux_login_item::move_legacy_entry() {
-        tracing::warn!(%error, "could not move Hex's autostart entry");
+    if let Err(error) = crate::linux_login_item::tidy() {
+        tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
     crate::labs::log_launch();
     crate::hex_microphone::host_service();
