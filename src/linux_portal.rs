@@ -401,8 +401,7 @@ pub(crate) fn tidy_desktop_entries() -> Result<()> {
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
     match DesktopEntries::current() {
         Some(entries) => {
-            let executable =
-                std::env::current_exe().wrap_err("could not find Hex's executable")?;
+            let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
             let executable = executable
                 .to_str()
                 .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
@@ -521,8 +520,12 @@ impl DesktopEntries {
                 read_entry(&self.applications.join(LEGACY_ENTRY))?,
                 Entry::Missing
             );
-        write_entry(&self.applications, &entry, &desktop_entry(executable, hidden))
-            .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+        write_entry(
+            &self.applications,
+            &entry,
+            &desktop_entry(executable, hidden),
+        )
+        .wrap_err_with(|| format!("could not write {}", entry.display()))?;
         tracing::info!(entry = %entry.display(), "wrote a desktop entry for the portal");
         Ok(Some(entry))
     }
@@ -768,7 +771,8 @@ mod tests {
         (root, entries)
     }
 
-    const OLD: &str = "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
+    const OLD: &str =
+        "[Desktop Entry]\nName=Hex\nExec=\"/home/a/.local/bin/hex\"\nX-Hex-Managed=true\n";
 
     #[test]
     fn an_old_managed_entry_moves_to_the_app_id() {
@@ -807,12 +811,24 @@ mod tests {
         let (root, entries) = entries("fallback");
         // The user's own directory listed in XDG_DATA_DIRS is not a package.
         assert_eq!(entries.system.len(), 1);
-        std::fs::write(entries.applications.join("hex.desktop"), "[Desktop Entry]\n").unwrap();
+        std::fs::write(
+            entries.applications.join("hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
         assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
-        assert!(std::fs::read_to_string(entries.entry()).unwrap().contains("NoDisplay=true"));
+        assert!(
+            std::fs::read_to_string(entries.entry())
+                .unwrap()
+                .contains("NoDisplay=true")
+        );
         assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
         assert!(entries.entry().exists());
-        std::fs::write(entries.system[0].join("anomaly.hex.desktop"), "[Desktop Entry]\n").unwrap();
+        std::fs::write(
+            entries.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
         entries.tidy().unwrap();
         assert!(!entries.entry().exists());
         std::fs::remove_dir_all(root).unwrap();

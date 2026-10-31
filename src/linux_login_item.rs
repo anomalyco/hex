@@ -179,7 +179,11 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let legacy = directory.join("hex.desktop");
         let entry = directory.join("anomaly.hex.desktop");
-        fs::write(&legacy, "[Desktop Entry]\nExec=hex start\nX-Hex-Managed=true\n").unwrap();
+        fs::write(
+            &legacy,
+            "[Desktop Entry]\nExec=hex start\nX-Hex-Managed=true\n",
+        )
+        .unwrap();
         move_legacy_entry_in(&directory).unwrap();
         assert!(!legacy.exists());
         assert!(starts(&fs::read_to_string(&entry).unwrap()));
