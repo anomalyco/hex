@@ -21,8 +21,12 @@ use hound::WavReader;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::StreamingResampler;
+#[cfg(not(target_os = "macos"))]
+use crate::local_transcriber::LocalTranscriber as Transcriber;
 use crate::pause_segmenter::PauseSegmenter;
-use crate::transcription::{Transcriber, Transcript, TranscriptSegment};
+use crate::transcript::{Transcript, TranscriptSegment};
+#[cfg(target_os = "macos")]
+use crate::transcription::Transcriber;
 use crate::transcription_models::TranscriptionSelection;
 
 use super::echo::{EchoEnvelope, Signal};
@@ -674,7 +678,7 @@ fn source_index(source: MeetingSource) -> usize {
 
 fn wait_for_dictation() {
     let started = Instant::now();
-    while crate::parakeet::dictation_busy()
+    while crate::transcription_engine::dictation_busy()
         && !crate::process_exit::quitting()
         && started.elapsed() < DICTATION_WAIT
     {
@@ -775,18 +779,16 @@ impl ChunkModel {
         }
         let ran = engine.background(move |model| {
             // A capture that began after the meeting checked comes first.
-            if crate::parakeet::dictation_busy() {
+            if crate::transcription_engine::dictation_busy() {
                 return Shared::Busy;
             }
-            // Apple Speech runs outside this process, so a meeting keeps its
-            // own rather than queue dictation behind it.
-            match model.active() {
-                Some(transcriber @ Transcriber::Gguf(_)) => {
-                    Shared::Ran(crate::parakeet::at_background_priority(|| {
+            match engine_model(model) {
+                Some(transcriber) => {
+                    Shared::Ran(crate::background_priority::at_background_priority(|| {
                         transcriber.transcribe_segments(samples)
                     }))
                 }
-                _ => Shared::NoModel,
+                None => Shared::NoModel,
             }
         });
         match ran {
@@ -809,6 +811,22 @@ impl ChunkModel {
     }
 }
 
+/// The engine's model when meetings can share it. Apple Speech runs outside
+/// this process, so a meeting keeps its own rather than queue dictation
+/// behind it.
+#[cfg(target_os = "macos")]
+fn engine_model(model: &mut crate::transcription_engine::Model) -> Option<&mut Transcriber> {
+    match model.active() {
+        Some(transcriber @ Transcriber::Gguf(_)) => Some(transcriber),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn engine_model(model: &mut crate::transcription_engine::Model) -> Option<&mut Transcriber> {
+    Some(model)
+}
+
 /// What the rolling worker transcribes chunks with: [`ChunkModel`], or a
 /// fake in tests.
 trait ChunkTranscriber {
@@ -829,7 +847,11 @@ fn load_model<'a>(
     if model.is_none() {
         #[cfg(test)]
         tests::MODEL_LOADS.fetch_add(1, Ordering::SeqCst);
-        *model = Some(Transcriber::load_selection(selection)?);
+        #[cfg(target_os = "macos")]
+        let loaded = Transcriber::load_selection(selection)?;
+        #[cfg(not(target_os = "macos"))]
+        let loaded = Transcriber::load(selection)?;
+        *model = Some(loaded);
     }
     model
         .as_mut()
@@ -1196,7 +1218,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
             if give_up(self.model_failed) {
                 return;
             }
-            if crate::parakeet::dictation_busy() {
+            if crate::transcription_engine::dictation_busy() {
                 wait();
             } else if self.transcribe_next() {
                 self.write_snapshot();
@@ -1225,7 +1247,7 @@ impl<'a, M: ChunkTranscriber> RollingWorker<'a, M> {
                         if give_up(false) {
                             return;
                         }
-                        if crate::parakeet::dictation_busy() {
+                        if crate::transcription_engine::dictation_busy() {
                             wait();
                             continue;
                         }
@@ -1288,7 +1310,7 @@ fn run_rolling(
     receiver: Receiver<RollingInput>,
     incomplete: &[AtomicBool; 2],
 ) -> RollingOutcome {
-    crate::parakeet::deprioritize_background_thread();
+    crate::background_priority::deprioritize_background_thread();
     let mut worker = RollingWorker::new(directory, ChunkModel::new(selection.clone()));
     loop {
         let mut disconnected = false;
@@ -1318,7 +1340,7 @@ fn run_rolling(
         if !worker.pending.is_empty()
             && !worker.model_failed
             && !crate::process_exit::quitting()
-            && !crate::parakeet::dictation_busy()
+            && !crate::transcription_engine::dictation_busy()
             && worker.transcribe_next()
         {
             worker.write_snapshot();
@@ -1738,7 +1760,7 @@ pub(super) fn transcribe(
     selection: &TranscriptionSelection,
     rolling: Option<RollingOutcome>,
 ) -> Result<(Vec<TranscriptEntry>, u64)> {
-    crate::parakeet::deprioritize_background_thread();
+    crate::background_priority::deprioritize_background_thread();
     let (mut rolled, mut cuts, mut envelope, mut model) = match rolling {
         Some(outcome) => (
             outcome.tracks,
@@ -1989,9 +2011,17 @@ pub(super) struct LocalTime {
 impl LocalTime {
     pub(super) fn from_ms(milliseconds: u64) -> Self {
         let seconds = (milliseconds / 1_000) as libc::time_t;
-        // SAFETY: `localtime_r` writes only into the provided zeroed `tm`.
+        // SAFETY: `localtime_r` and `localtime_s` write only into the
+        // provided zeroed `tm`.
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe { libc::localtime_r(&seconds, &mut tm) };
+        #[cfg(unix)]
+        unsafe {
+            libc::localtime_r(&seconds, &mut tm)
+        };
+        #[cfg(windows)]
+        unsafe {
+            libc::localtime_s(&mut tm, &seconds)
+        };
         Self {
             year: tm.tm_year + 1_900,
             month: (tm.tm_mon + 1) as u32,
@@ -2009,6 +2039,15 @@ impl LocalTime {
         };
         let period = if self.hour < 12 { "AM" } else { "PM" };
         format!("{hour}:{:02} {period}", self.minute)
+    }
+
+    /// `2026-10-30T14:05:00`, as the Trash records a deletion.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(super) fn iso(&self) -> String {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:00",
+            self.year, self.month, self.day, self.hour, self.minute
+        )
     }
 
     /// `(year, month, day)`, for grouping meetings by local day.
@@ -2962,6 +3001,8 @@ mod tests {
         );
     }
 
+    // Busy without an engine is macOS's capture marker.
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_copy_waits_out_dictation_and_a_preempted_chunk() {
         let mut call = Call::new("dictation");

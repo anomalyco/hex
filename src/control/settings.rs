@@ -274,6 +274,11 @@ const KEYS: &[Key] = &[
         "Title and summarize meetings with Apple Intelligence",
     ),
     key(
+        "meetings.summarize_with_opencode",
+        Kind::Bool,
+        "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
+    ),
+    key(
         "meetings.show_recording_indicator",
         Kind::Bool,
         "Show the floating recording indicator during meetings",

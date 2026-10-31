@@ -137,6 +137,13 @@ pub(super) fn available(ui: &Ui) -> bool {
     ui.settings.meetings.enabled || ui.platform.developer
 }
 
+/// Whether something can write a meeting's notes: Apple Intelligence on a
+/// Mac that has it, or OpenCode once turned on.
+fn notes_available(ui: &Ui) -> bool {
+    (ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available())
+        || ui.settings.meetings.summarize_with_opencode
+}
+
 #[derive(Default)]
 pub(super) struct MeetingsPane {
     pub(super) view: View,
@@ -155,6 +162,8 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// Where Linux and Windows perform meeting requests.
+    pub(super) local: super::meetings_host::LocalMeetings,
 }
 
 /// `42 min`, `1 h 05 min`, or `< 1 min`.
@@ -1068,7 +1077,7 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
         );
         items += 1;
     }
-    if meeting.status == Status::Complete && ui.platform.notes.is_available() {
+    if meeting.status == Status::Complete && notes_available(ui) {
         if meeting.notes_running {
             menu = menu.item(MenuItem::new(tr("Summarizing…")).disabled(true));
         } else {

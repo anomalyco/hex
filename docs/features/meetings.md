@@ -4,7 +4,8 @@ Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls from a website or app set to Always record, and never stops
-automatically. This map covers macOS; Linux has no meetings.
+automatically. This map describes macOS; [Linux and Windows](#linux-and-windows)
+lists where they differ.
 
 Linked checks are locators unless an executed result is recorded below.
 
@@ -23,7 +24,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping capsule),
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
-│   │   Advanced), Summarize with Apple Intelligence (on by default)
+│   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
+│   │   with OpenCode (off by default; when Apple Intelligence is off or missing)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime (always listed)
@@ -43,6 +45,53 @@ Recording alone still works through the ScreenCaptureKit fallback. The opt-in is
 `meetings.recording_indicator_corner` (default `top_right`)
 ([app_settings.rs](../../src/app_settings.rs) `MeetingSettings`). Recording
 refuses to start without either grant and asks macOS for System Audio Recording.
+
+## Linux and Windows
+
+The same controller, recorder, transcript pipeline, store, pane, capsules,
+and notes run on Linux and Windows (beta, in Labs, off by default). Only these
+adapters differ ([meeting_linux.rs](../../src/meeting_linux.rs),
+[meeting_windows.rs](../../src/meeting_windows.rs),
+[microphone_activity_linux.rs](../../src/microphone_activity_linux.rs),
+[microphone_activity_windows.rs](../../src/microphone_activity_windows.rs),
+[meeting_runtime.rs](../../src/meeting_runtime.rs)):
+
+```ts
+System audio                                      // meetings.system-audio
+├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
+│   the session manager follows a changed default; no pw-record -> recording
+│   refuses with "Install PipeWire's pw-record"
+└── Windows -> WASAPI loopback of the default output (cpal); silence while
+    nothing plays is padded on resume; a changed default reopens it
+Call detection                                    // meetings.detect
+├── Linux -> one pw-dump --monitor: running Stream/Input/Audio nodes that are
+│   not monitor captures, by application.process.binary (node or client)
+└── Windows -> active IAudioSessionManager2 sessions on every capture device,
+    by process image name
+    └── executables map to the macOS keys (zoom -> us.zoom.xos, chrome ->
+        com.google.Chrome, ms-teams.exe -> com.microsoft.teams2, ...)
+Browser calls -> offered as "Call in <browser>": no site is read yet
+Permissions -> none asked; the System Audio Recording row is macOS-only
+Calendar -> none (no Connect calendar row)
+Notes and live chapters -> Summarize with OpenCode (off by default); it sends
+    the transcript excerpt to the OpenCode model
+Idle sleep -> systemd-inhibit idle:sleep (Linux),
+    SetThreadExecutionState (Windows) while recording
+Tray -> Record meeting, Stop & transcribe, Copy last meeting transcript
+    while Meetings is on
+Quit while recording -> audio kept; the transcript finishes at the next launch
+Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
+    freedesktop Trash or the Recycle Bin
+```
+
+Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
+Copy section from the tray, dragging the recording capsule to another corner,
+the `hex meetings` and `hex mcp` commands (shared-control), and website names
+for browser calls. Verified: Linux and Windows x64 build and lint
+(`cargo clippy`, `cargo xwin clippy`); the PipeWire monitor capture and
+pw-dump parsing were checked by hand on Arch/niri. Not verified: a recorded
+call end to end on either OS, Windows loopback and session detection on
+hardware.
 
 ## Sub-features
 

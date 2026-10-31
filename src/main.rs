@@ -14,6 +14,7 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
+mod background_priority;
 mod background_process;
 #[cfg(target_os = "macos")]
 mod browser_media;
@@ -113,15 +114,17 @@ mod local_transcriber;
 mod login_item;
 #[cfg(target_os = "macos")]
 mod macos_rune;
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting;
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting_detection;
 #[cfg(target_os = "macos")]
 mod meeting_mcp;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod meeting_runtime;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod meeting_watcher;
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod onboarding;
@@ -136,7 +139,7 @@ mod pause_segmenter;
 mod permission_guide;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod personal_commands;
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod process_exit;
 #[cfg(target_os = "macos")]
 mod recognition;
@@ -151,6 +154,7 @@ mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
 mod text_replacements;
+mod transcript;
 #[cfg(target_os = "macos")]
 mod transcript_cli;
 #[cfg(target_os = "macos")]

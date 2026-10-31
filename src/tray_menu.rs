@@ -1,7 +1,7 @@
 //! What the tray menu offers: the downloaded models the macOS menu bar and
 //! the Linux and Windows trays list, and the tray menu those two share
-//! (status, Show Hex, Paste last dictation, the model picker, the update,
-//! Enable / Disable Hex, Quit Hex). Each tray maps a picked [`TrayCommand`]
+//! (status, Show Hex, Paste last dictation, the meeting items, the model
+//! picker, the update, Enable / Disable Hex, Quit Hex). Each tray maps a picked [`TrayCommand`]
 //! onto its own runtime.
 
 use crate::app_settings::AppSettings;
@@ -60,6 +60,10 @@ mod tray {
         Update,
         ToggleListening,
         Quit,
+        RecordMeeting,
+        /// Stop & transcribe the recording meeting.
+        StopMeeting,
+        CopyLastMeeting,
     }
 
     impl TrayCommand {
@@ -71,9 +75,21 @@ mod tray {
                 "update" => Self::Update,
                 "toggle" => Self::ToggleListening,
                 "quit" => Self::Quit,
+                "meeting-record" => Self::RecordMeeting,
+                "meeting-stop" => Self::StopMeeting,
+                "meeting-copy-last" => Self::CopyLastMeeting,
                 _ => Self::UseModel(id.strip_prefix("model:")?.parse().ok()?),
             })
         }
+    }
+
+    /// The meeting recorder, as the tray shows it.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum MeetingTray {
+        Idle,
+        Starting,
+        Recording,
+        Transcribing,
     }
 
     /// Everything the tray shows.
@@ -83,6 +99,8 @@ mod tray {
         pub(crate) state: Option<VoiceState>,
         pub(crate) update: Option<String>,
         pub(crate) models: Vec<ModelMenuEntry>,
+        /// `None` while Meetings is off.
+        pub(crate) meetings: Option<MeetingTray>,
     }
 
     impl TrayView {
@@ -97,6 +115,7 @@ mod tray {
                 state: state.filter(|_| listening),
                 update: update_label(update),
                 models,
+                meetings: None,
             }
         }
 
@@ -138,6 +157,25 @@ mod tray {
             menu.push(
                 TrayItem::action("paste-last", tr("Paste last dictation")).enabled(self.listening),
             );
+            if let Some(meetings) = self.meetings {
+                menu.push(TrayItem::Separator);
+                menu.push(match meetings {
+                    MeetingTray::Idle => TrayItem::action("meeting-record", tr("Record meeting")),
+                    MeetingTray::Starting => {
+                        TrayItem::action("meeting-record", tr("Starting…")).enabled(false)
+                    }
+                    MeetingTray::Recording => {
+                        TrayItem::action("meeting-stop", tr("Stop & transcribe"))
+                    }
+                    MeetingTray::Transcribing => {
+                        TrayItem::action("meeting-stop", tr("Transcribing…")).enabled(false)
+                    }
+                });
+                menu.push(TrayItem::action(
+                    "meeting-copy-last",
+                    tr("Copy last meeting transcript"),
+                ));
+            }
             if !self.models.is_empty() {
                 menu.push(TrayItem::Separator);
                 menu.push(TrayItem::action("models", tr("Speech model")).enabled(false));
@@ -275,6 +313,27 @@ mod tests {
         );
         assert_eq!(TrayCommand::from_id("status"), None);
         assert_eq!(view.tooltip(), "Hex Dictation: recording");
+        // Meetings on adds its items after Paste last dictation.
+        let meeting = TrayView {
+            meetings: Some(MeetingTray::Recording),
+            ..view.clone()
+        };
+        let menu = meeting.menu();
+        let ids: Vec<&str> = menu
+            .iter()
+            .filter_map(|item| match item {
+                rune::TrayItem::Action { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids[2..5],
+            ["paste-last", "meeting-stop", "meeting-copy-last"]
+        );
+        assert_eq!(
+            TrayCommand::from_id("meeting-stop"),
+            Some(TrayCommand::StopMeeting)
+        );
         let stopped = TrayView::new(
             false,
             Some(VoiceState::Dictating),

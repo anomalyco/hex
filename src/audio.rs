@@ -1399,7 +1399,6 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
 
 /// Opens the microphone a meeting records, resolved like dictation's, or
 /// keeps the open one named `keep` when it resolves to that again.
-#[cfg(target_os = "macos")]
 pub fn open_meeting_input(selected_device: Option<&str>, keep: Option<&str>) -> Result<Opened> {
     open_configured_input(&OpenRequest {
         device_override: None,

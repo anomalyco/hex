@@ -75,6 +75,16 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
                 DesktopAction::StartListening
             }))
         }
+        TrayCommand::RecordMeeting => {
+            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Start { title: None })
+                .map_err(|error| color_eyre::eyre::eyre!(error))
+        }
+        TrayCommand::StopMeeting => {
+            crate::meeting_runtime::request(crate::meeting::MeetingRequest::Stop)
+                .map_err(|error| color_eyre::eyre::eyre!(error))
+        }
+        TrayCommand::CopyLastMeeting => crate::meeting_runtime::copy_last_transcript()
+            .map_err(|error| color_eyre::eyre::eyre!(error)),
         TrayCommand::Show | TrayCommand::Quit => Ok(()),
     };
     if let Err(error) = result {
@@ -89,16 +99,19 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
 /// What the tray shows for `snapshot`.
 pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
     let desktop = &snapshot.desktop;
-    TrayView::new(
-        desktop.listener.running,
-        desktop.activity.state,
-        &desktop.update_status,
-        crate::tray_menu::model_menu_entries(
-            &snapshot.settings,
-            desktop.transcription.preparing.is_some(),
-            crate::transcription_models::is_installed,
-        ),
-    )
+    TrayView {
+        meetings: crate::meeting_runtime::tray_state(),
+        ..TrayView::new(
+            desktop.listener.running,
+            desktop.activity.state,
+            &desktop.update_status,
+            crate::tray_menu::model_menu_entries(
+                &snapshot.settings,
+                desktop.transcription.preparing.is_some(),
+                crate::transcription_models::is_installed,
+            ),
+        )
+    }
 }
 
 /// Shows `view` in `tray`.
