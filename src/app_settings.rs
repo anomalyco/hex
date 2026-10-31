@@ -1301,7 +1301,7 @@ impl MeetingSettings {
 #[serde(default)]
 pub struct ExperimentalSettings {
     pub hex_microphone: bool,
-    pub hex_microphone_mode: crate::voice_filter::VoiceFilterMode,
+    pub hex_microphone_mode: crate::audio::voice_filter::VoiceFilterMode,
     pub hex_microphone_comfort_noise: bool,
     pub hex_microphone_strength: f32,
 }
@@ -1310,7 +1310,7 @@ impl Default for ExperimentalSettings {
     fn default() -> Self {
         Self {
             hex_microphone: false,
-            hex_microphone_mode: crate::voice_filter::VoiceFilterMode::Muffled,
+            hex_microphone_mode: crate::audio::voice_filter::VoiceFilterMode::Muffled,
             hex_microphone_comfort_noise: true,
             hex_microphone_strength: 1.0,
         }
@@ -2298,7 +2298,7 @@ impl AppSettings {
             CAPSULE_FLOW.store(flow as u8, Ordering::Release);
         }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
-        crate::hex_microphone::sync_from_settings(
+        crate::audio::hex_microphone::sync_from_settings(
             self.experimental.hex_microphone_mode,
             self.experimental.hex_microphone_comfort_noise,
             self.experimental.hex_microphone_strength,
@@ -2760,7 +2760,7 @@ pub fn hex_microphone_enabled() -> bool {
     crate::labs::Feature::VoiceFilter.shipped()
         && voice_filter_enabled(
             HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-            crate::hex_microphone::driver_bundle_installed(),
+            crate::audio::hex_microphone::driver_bundle_installed(),
         )
 }
 

@@ -331,7 +331,7 @@ pub(crate) fn run(
         tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
     crate::labs::log_launch();
-    crate::hex_microphone::host_service();
+    crate::audio::hex_microphone::host_service();
     let (settings, error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (

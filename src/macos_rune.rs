@@ -509,7 +509,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 tracing::error!("{name} worker panicked during shutdown");
             }
         }
-        crate::recording_environment::wait_until_restored(Duration::from_secs(2));
+        crate::audio::recording_environment::wait_until_restored(Duration::from_secs(2));
         if let Err(error) = drained_event_log.flush_within(Duration::from_millis(500)) {
             tracing::warn!(%error, "could not flush the event log before quitting");
         }

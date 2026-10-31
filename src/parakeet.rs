@@ -946,8 +946,8 @@ pub(crate) fn dictation_busy_for_test() -> DictationBusyForTest {
 /// and release tail, before the clip needs the model.
 pub(crate) fn dictation_busy() -> bool {
     DICTATION_INFERENCE.load(Ordering::Acquire) > 0
-        || crate::recording_environment::capture_active()
-        || crate::recording_environment::intentional_recording_active()
+        || crate::audio::recording_environment::capture_active()
+        || crate::audio::recording_environment::intentional_recording_active()
 }
 
 /// Runs `work` at utility QoS on the dictation inference thread, then

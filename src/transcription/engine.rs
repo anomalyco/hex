@@ -816,7 +816,7 @@ impl TranscriptionEngine {
 /// both hold idle-sleep prevention while they record, and a macOS capture
 /// counts from its press.
 fn recording() -> bool {
-    crate::idle_sleep::held() || dictation_busy()
+    crate::audio::idle_sleep::held() || dictation_busy()
 }
 
 /// The model `selection` loads into, prewarmed, as the engine held it.

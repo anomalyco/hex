@@ -56,6 +56,10 @@ use scrawl_capture::transcribe::AppleTranscriber;
 use scrawl_capture::transcribe::Transcriber;
 
 use crate::audio::CaptureInstant;
+#[cfg(target_os = "macos")]
+pub use crate::audio::recording_environment::RecordingEnvironmentController as Environment;
+#[cfg(target_os = "macos")]
+use crate::audio::recording_environment::RecordingEnvironmentSession as Quiet;
 use crate::control::{
     ControlReply, ScrawlCaptureAction, ScrawlCaptureOutcome, ScrawlCaptureReport,
     ScrawlCaptureState,
@@ -63,10 +67,6 @@ use crate::control::{
 use crate::dictation::StreamingResampler;
 #[cfg(target_os = "macos")]
 use crate::dictation::audio::DictationAudio;
-#[cfg(target_os = "macos")]
-pub use crate::recording_environment::RecordingEnvironmentController as Environment;
-#[cfg(target_os = "macos")]
-use crate::recording_environment::RecordingEnvironmentSession as Quiet;
 use crate::transcription::engine::TranscriptionEngine;
 use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
 
@@ -3516,7 +3516,7 @@ pub fn replay(wavs: &[PathBuf]) -> Result<PathBuf> {
     let mut samples = Vec::new();
     let mut sample_rate = None;
     for wav in wavs {
-        let (audio, rate) = crate::voice_filter::read_wav_mono_f32(wav)
+        let (audio, rate) = crate::audio::voice_filter::read_wav_mono_f32(wav)
             .map_err(|error| eyre!("{}: {error}", wav.display()))?;
         if *sample_rate.get_or_insert(rate) != rate {
             return Err(eyre!(
@@ -4734,8 +4734,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn a_capture_stays_quiet_until_it_stops_is_cancelled_or_hex_quits() {
-        use crate::recording_environment::Effect::Mute;
-        use crate::recording_environment::observed::{
+        use crate::audio::recording_environment::Effect::Mute;
+        use crate::audio::recording_environment::observed::{
             self,
             Event::{Held, Restored},
         };

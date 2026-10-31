@@ -9,10 +9,10 @@
 //! and are tested on Linux; a native host fills the same data on its own OS.
 
 use super::meetings::Meeting;
-use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
-use crate::hex_microphone::{
+use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
 };
+use crate::calendar::{CalendarAccess, CalendarInfo, CallProvider};
 use crate::login_item::{LoginItemResult, LoginItemStatus};
 use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState, SetupStatus};
 
@@ -482,7 +482,7 @@ impl PlatformState {
                 } else {
                     Vec::new()
                 },
-                action_state: crate::hex_microphone::DriverActionState::Idle,
+                action_state: crate::audio::hex_microphone::DriverActionState::Idle,
             });
             state.demo = Some(super::fun::preview_demo(false, None));
         }
@@ -541,7 +541,7 @@ pub(super) enum PlatformRequest {
 /// Performs a Voice Filter request on the Hex Microphone in this process.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn voice_filter_request(request: PlatformRequest) {
-    use crate::hex_microphone as mic;
+    use crate::audio::hex_microphone as mic;
     match request {
         PlatformRequest::InstallHexMicrophone => mic::install_driver_async(),
         PlatformRequest::UninstallHexMicrophone => mic::uninstall_driver_async(),
@@ -563,7 +563,7 @@ pub(super) fn voice_filter_request(request: PlatformRequest) {
 /// Voice Filter is off.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn poll_voice_filter(state: &mut PlatformState, refresh: bool) -> bool {
-    use crate::hex_microphone as mic;
+    use crate::audio::hex_microphone as mic;
     let mut changed = false;
     let on = crate::app_settings::hex_microphone_enabled();
     if on
@@ -610,7 +610,7 @@ pub(super) trait NativeHost {
     /// The microphone's latest peak, 0 to 1; silence when no audio arrived
     /// lately. The tour reads it only while a practice dictation records.
     fn practice_level(&self) -> f32 {
-        crate::input_level::recent().unwrap_or(0.0)
+        crate::audio::input_level::recent().unwrap_or(0.0)
     }
 }
 
@@ -696,7 +696,7 @@ impl PlatformHost {
     pub(super) fn practice_level(&self) -> f32 {
         match self {
             Self::Native(host) => host.practice_level(),
-            Self::Local(_) => crate::input_level::recent().unwrap_or(0.0),
+            Self::Local(_) => crate::audio::input_level::recent().unwrap_or(0.0),
             Self::Fixture(_) => 0.0,
         }
     }

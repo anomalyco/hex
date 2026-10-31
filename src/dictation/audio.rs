@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{ClipSource, DictationCapture, DictationClip, Finish};
 use crate::feedback::{self, Tone};
-use crate::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::suppression::PendingInputEvents;
 use crate::transcription::engine::TranscriptionEngine;
 
@@ -800,7 +800,7 @@ impl Owner {
                 self.state
                     .captured_through
                     .store(captured_through.as_nanos(), Ordering::Release);
-                crate::input_level::record(&samples);
+                crate::audio::input_level::record(&samples);
                 if padding > 0 {
                     let mut padded = vec![0.0; padding];
                     padded.extend_from_slice(&samples);

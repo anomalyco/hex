@@ -2379,10 +2379,10 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-voice-filter-muted", |ui| {
         *ui = mac_fixture();
-        ui.platform.tuning.mode = crate::voice_filter::VoiceFilterMode::Muted;
+        ui.platform.tuning.mode = crate::audio::voice_filter::VoiceFilterMode::Muted;
         ui.platform.demo = Some(fun::preview_demo(
             false,
-            Some(crate::hex_microphone::DemoPlaybackTrack::CallHears),
+            Some(crate::audio::hex_microphone::DemoPlaybackTrack::CallHears),
         ));
         ui.pane = Pane::VoiceFilter;
     }),
@@ -2410,7 +2410,7 @@ const SCENES: &[Scene] = &[
         ui.host = platform::PlatformHost::Fixture(Vec::new());
         if let Some(source) = &mut ui.platform.hex_microphone {
             source.driver_loaded = false;
-            source.action_state = crate::hex_microphone::DriverActionState::Failed(
+            source.action_state = crate::audio::hex_microphone::DriverActionState::Failed(
                 "pw-cat was not found; Hex Microphone needs PipeWire".into(),
             );
         }

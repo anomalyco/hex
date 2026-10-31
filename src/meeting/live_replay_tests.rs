@@ -293,7 +293,7 @@ fn meeting_live_replay() {
                     continue;
                 }
                 next += DICTATION_EVERY;
-                let marker = crate::recording_environment::CaptureMarker::new();
+                let marker = crate::audio::recording_environment::CaptureMarker::new();
                 let mut stream = engine.begin();
                 let feeding = Instant::now();
                 let held = clip.len().saturating_sub(3_200);

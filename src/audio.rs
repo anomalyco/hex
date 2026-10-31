@@ -1,3 +1,15 @@
+#[cfg(target_os = "macos")]
+pub(crate) mod browser_media;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod hex_microphone;
+pub(crate) mod idle_sleep;
+pub(crate) mod input_level;
+pub(crate) mod output_ducking;
+#[cfg(target_os = "macos")]
+pub(crate) mod recording_environment;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod voice_filter;
+
 use std::ops::Add;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
@@ -311,7 +323,7 @@ pub struct AudioInput {
     stream_errors: Receiver<String>,
     watch_service_restarts: bool,
     restart_generation: u64,
-    hex_microphone: crate::hex_microphone::CaptureFeedSwitch,
+    hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
 }
 
 pub enum AudioInputEvent {
@@ -515,7 +527,7 @@ impl AudioInput {
                 selection: Selection::InUse,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
-                hex_microphone: crate::hex_microphone::capture_feed(48_000).1,
+                hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
             },
             sender,
         )
@@ -574,7 +586,7 @@ impl AudioInput {
             sender: error_sender,
             default_name: follows_default.then(|| device_name.clone()),
         };
-        let (feed, hex_microphone) = crate::hex_microphone::capture_feed(sample_rate);
+        let (feed, hex_microphone) = crate::audio::hex_microphone::capture_feed(sample_rate);
 
         let stream = match sample_format {
             SampleFormat::F32 => build_stream(
@@ -1055,7 +1067,7 @@ fn resolve_input(
     transport: impl Fn(usize) -> Transport,
     route: Route,
 ) -> std::result::Result<InputPlan, String> {
-    let is_hex = crate::hex_microphone::is_hex_virtual_device_name;
+    let is_hex = crate::audio::hex_microphone::is_hex_virtual_device_name;
     let position = |name: &str| names.iter().position(|listed| listed == name);
     let is_built_in = |index: usize| transport(index) == Transport::BuiltIn;
     let avoided = |index: usize| route.avoid_bluetooth && transport(index) == Transport::Bluetooth;
@@ -1463,7 +1475,7 @@ pub fn input_devices() -> Result<InputDevices> {
     let default = default_input_of(&host).map(|(_, name)| name);
     let default_is_hex_microphone = default
         .as_deref()
-        .is_some_and(crate::hex_microphone::is_hex_virtual_device_name);
+        .is_some_and(crate::audio::hex_microphone::is_hex_virtual_device_name);
     let transports = devices.iter().map(transport).collect::<Vec<_>>();
     let route = current_route();
     let off_with_lid_closed = (0..devices.len())
@@ -1508,7 +1520,7 @@ pub fn input_devices() -> Result<InputDevices> {
     };
     let mut names = listed
         .into_iter()
-        .filter(|name| !crate::hex_microphone::is_hex_virtual_device_name(name))
+        .filter(|name| !crate::audio::hex_microphone::is_hex_virtual_device_name(name))
         .collect::<Vec<_>>();
     names.sort_by_key(|name| name.to_lowercase());
     names.dedup();
@@ -1700,7 +1712,7 @@ fn build_stream<T: SizedSample>(
     channels: usize,
     sender: Sender<(Vec<f32>, CaptureInstant)>,
     reporter: StreamErrorReporter,
-    mut feed: crate::hex_microphone::CaptureFeed,
+    mut feed: crate::audio::hex_microphone::CaptureFeed,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<Stream> {
     let sample_rate = config.sample_rate;

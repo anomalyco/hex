@@ -675,7 +675,7 @@ pub fn run(
                 captured_through: chunk_captured_through,
             } => {
                 captured_through = chunk_captured_through;
-                crate::input_level::record(&samples);
+                crate::audio::input_level::record(&samples);
                 timeline.feed(&samples, input.sample_rate(), captured_through);
                 if !audio_ready {
                     capture = DictationCapture::new(input.sample_rate());

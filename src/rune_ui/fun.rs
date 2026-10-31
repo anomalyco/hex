@@ -16,12 +16,12 @@ use super::controls::{
 };
 use super::lists::{Tone, slider, small_button, tone_tag};
 use super::platform::{DemoRequest, PlatformRequest};
-use crate::desktop::i18n::{tr, tr_fill};
-use crate::hex_microphone::{
+use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, DriverActionState, HexMicrophoneStatus,
     TunedFilterConfig,
 };
-use crate::voice_filter::{DictationSpan, VoiceFilterMode};
+use crate::audio::voice_filter::{DictationSpan, VoiceFilterMode};
+use crate::desktop::i18n::{tr, tr_fill};
 
 const SLIDER_WIDTH: f32 = 300.0;
 const WAVE_HEIGHT: f32 = 28.0;
