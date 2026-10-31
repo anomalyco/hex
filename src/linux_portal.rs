@@ -31,8 +31,12 @@ const DESKTOP_PATH: &str = "/org/freedesktop/portal/desktop";
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 const REQUEST: &str = "org.freedesktop.portal.Request";
 const SESSION: &str = "org.freedesktop.portal.Session";
-/// The portal names host apps by their desktop entry, `hex.desktop`.
-const APP_ID: &str = "hex";
+/// The portal names host apps by their desktop entry, `anomaly.hex.desktop`.
+/// GNOME's shortcuts provider before 51 rejects ids that are not
+/// reverse-DNS (#579), so this matches the macOS bundle identifier.
+const APP_ID: &str = "anomaly.hex";
+/// The launcher entry installs write; its presence hides Hex's own entry.
+const LAUNCHER_ENTRY: &str = "hex.desktop";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// A request can wait for the user to approve a desktop dialog.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -233,7 +237,7 @@ impl PortalBus {
             &(APP_ID, HashMap::<&str, Variant<'_>>::new()),
         ) && !unknown(&error)
         {
-            // The portal finds the app id through hex.desktop and the caller's
+            // The portal finds the app id through anomaly.hex.desktop and the caller's
             // /proc entry, which setgid wrappers such as newgrp make unreadable.
             let fix = match written {
                 Some(entry) => format!(
@@ -381,9 +385,11 @@ impl Drop for PortalBus {
     }
 }
 
-/// The portal identifies a host app by its desktop entry. A loose binary
-/// has none, so Hex writes a minimal `hex.desktop` that runs it, marked
-/// managed so an install may replace it. Returns the entry it wrote.
+/// The portal identifies a host app by a desktop entry named for its id.
+/// Without `anomaly.hex.desktop` in the XDG data dirs, Hex writes a minimal
+/// one that runs it, marked managed so a package may ship its own. It is
+/// hidden from launchers when an installed `hex.desktop` already shows Hex.
+/// Returns the entry it wrote.
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
     let Some(home) = dirs::data_dir() else {
         return Ok(None);
@@ -392,43 +398,57 @@ fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
         .ok()
         .filter(|dirs| !dirs.is_empty())
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    let installed = std::iter::once(home.clone())
+    let data_dirs = std::iter::once(home.clone())
         .chain(
             system
                 .split(':')
                 .filter(|dir| !dir.is_empty())
                 .map(PathBuf::from),
         )
-        .any(|dir| dir.join("applications/hex.desktop").exists());
-    if installed {
+        .collect::<Vec<_>>();
+    let exists = |name: &str| {
+        data_dirs
+            .iter()
+            .any(|dir| dir.join("applications").join(name).exists())
+    };
+    let name = format!("{APP_ID}.desktop");
+    if exists(name.as_str()) {
         return Ok(None);
     }
+    let hidden = exists(LAUNCHER_ENTRY);
     let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
     let applications = home.join("applications");
-    let entry = applications.join("hex.desktop");
-    write_desktop_entry(&applications, &entry, &executable)
+    let entry = applications.join(&name);
+    write_desktop_entry(&applications, &entry, &executable, hidden)
         .wrap_err_with(|| format!("could not write {}", entry.display()))?;
     tracing::info!(entry = %entry.display(), "wrote a desktop entry for the portal");
     Ok(Some(entry))
 }
 
-fn write_desktop_entry(applications: &Path, entry: &Path, executable: &Path) -> Result<()> {
+fn write_desktop_entry(
+    applications: &Path,
+    entry: &Path,
+    executable: &Path,
+    hidden: bool,
+) -> Result<()> {
     let executable = executable
         .to_str()
         .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
     std::fs::create_dir_all(applications)?;
-    let staged = applications.join(format!(".hex.desktop.{}", std::process::id()));
+    let staged = applications.join(format!(".{APP_ID}.desktop.{}", std::process::id()));
     let mut file = std::fs::File::create(&staged)?;
-    file.write_all(desktop_entry(executable).as_bytes())?;
+    file.write_all(desktop_entry(executable, hidden).as_bytes())?;
     file.sync_all()?;
     std::fs::rename(&staged, entry)?;
     Ok(())
 }
 
-fn desktop_entry(executable: &str) -> String {
+/// `NoDisplay`, not `Hidden`: the portal refuses an app whose entry is Hidden.
+fn desktop_entry(executable: &str, hidden: bool) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Hex\nComment=Local voice dictation\nExec={}\nIcon=audio-input-microphone\nTerminal=false\nCategories=Utility;Accessibility;\nX-Hex-Managed=true\n",
-        exec_argument(executable)
+        "[Desktop Entry]\nType=Application\nName=Hex\nComment=Local voice dictation\nExec={}\nIcon=audio-input-microphone\nTerminal=false\nCategories=Utility;Accessibility;\n{}X-Hex-Managed=true\n",
+        exec_argument(executable),
+        if hidden { "NoDisplay=true\n" } else { "" }
     )
 }
 
@@ -588,7 +608,24 @@ mod tests {
             exec_argument("/tmp/my $dir/100%/a\"b\\c"),
             r#""/tmp/my \\$dir/100%%/a\\"b\\\\c""#
         );
-        assert!(desktop_entry("/opt/hex").contains("\nExec=\"/opt/hex\"\n"));
+        assert!(desktop_entry("/opt/hex", false).contains("\nExec=\"/opt/hex\"\n"));
+        assert!(!desktop_entry("/opt/hex", false).contains("NoDisplay"));
+        assert!(desktop_entry("/opt/hex", true).contains("\nNoDisplay=true\n"));
+    }
+
+    /// GNOME before 51 refuses a portal app id that is not reverse-DNS (#579).
+    #[test]
+    fn the_portal_app_id_is_reverse_dns() {
+        let parts = APP_ID.split('.').collect::<Vec<_>>();
+        assert!(parts.len() >= 2);
+        assert!(parts.iter().all(|part| {
+            part.chars()
+                .next()
+                .is_some_and(|first| !first.is_ascii_digit())
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        }));
     }
 
     #[test]
