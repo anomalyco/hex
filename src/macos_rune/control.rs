@@ -226,6 +226,9 @@ impl Pump {
             ControlCommand::SettingsSet { key, value } => {
                 Some(reply_with(self.set_setting(&key, &value)))
             }
+            ControlCommand::SettingsApply { values } => {
+                Some(reply_with(self.apply_settings(&values)))
+            }
             ControlCommand::ModelList => {
                 Some(reply_with(load().map(|settings| ControlReply::Models {
                     models: control::model_infos(&settings.transcription),
@@ -447,8 +450,29 @@ impl Pump {
         }
         let before = load()?;
         let change = settings::apply(&before, key, value, &crate::rune_ui::shortcut_rules())?;
-        if !change.changed(&before) {
-            return Ok(ControlReply::unchanged(format!("{key} is already {value}")));
+        self.commit(&before, change, || format!("{key} is already {value}"))
+    }
+
+    fn apply_settings(
+        &mut self,
+        values: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<ControlReply, ControlError> {
+        let before = load()?;
+        let change = settings::apply_all(&before, values, &crate::rune_ui::shortcut_rules())?;
+        self.commit(&before, change, || {
+            "Every setting already has its value".into()
+        })
+    }
+
+    /// Saves a validated change, reloads it, and carries out its effects.
+    fn commit(
+        &mut self,
+        before: &AppSettings,
+        change: settings::Change,
+        unchanged: impl FnOnce() -> String,
+    ) -> Result<ControlReply, ControlError> {
+        if !change.changed(before) {
+            return Ok(ControlReply::unchanged(unchanged()));
         }
         change
             .settings

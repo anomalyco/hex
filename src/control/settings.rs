@@ -721,6 +721,85 @@ pub fn apply(
     })
 }
 
+/// Validates every `key: value` in `values` against `settings` and returns
+/// the settings to save, all or none (`hex settings apply`, the Home Manager
+/// module). Values are JSON: booleans, numbers, `null` for `none`, objects
+/// and arrays for json settings, text for the rest. `transcription.model`
+/// and `transcription.language` select a model, as `hex model use` would,
+/// without needing it installed. Keys that depend on each other (a
+/// double-tap-only start and its shortcut) apply in any order.
+pub fn apply_all(
+    settings: &AppSettings,
+    values: &serde_json::Map<String, Value>,
+    shortcuts: &ShortcutRules,
+) -> Result<Change, ControlError> {
+    let mut candidate = settings.clone();
+    let model = values.get("transcription.model");
+    let language = values.get("transcription.language");
+    if model.is_some() || language.is_some() {
+        let text = |name: &str, value: Option<&Value>| match value {
+            None => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text.clone())),
+            Some(_) => Err(invalid(name, "expected text")),
+        };
+        let model = text("transcription.model", model)?
+            .unwrap_or_else(|| candidate.transcription.model.as_str().to_owned());
+        let language = text("transcription.language", language)?;
+        candidate.transcription = super::model_selection(&candidate, &model, language.as_deref())?;
+    }
+    let mut pending = Vec::new();
+    for (name, value) in values {
+        if matches!(
+            name.as_str(),
+            "transcription.model" | "transcription.language"
+        ) {
+            continue;
+        }
+        if let Some(error) = unavailable(name) {
+            return Err(error);
+        }
+        let key = keys()
+            .find(|key| key.key == name)
+            .ok_or_else(|| unknown(name))?;
+        let raw = match (key.kind, value) {
+            (Kind::Json, value) => value.to_string(),
+            (_, Value::String(text)) => text.clone(),
+            (_, Value::Null) => "none".into(),
+            (_, value) => value.to_string(),
+        };
+        pending.push((name.as_str(), raw));
+    }
+    let mut effects = Vec::new();
+    while !pending.is_empty() {
+        let tried = pending.len();
+        let mut failed = Vec::new();
+        let mut first_error = None;
+        for (name, raw) in pending.drain(..) {
+            match apply(&candidate, name, &raw, shortcuts) {
+                Ok(change) => {
+                    candidate = change.settings;
+                    effects.extend(change.effects);
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    failed.push((name, raw));
+                }
+            }
+        }
+        if let Some(error) = first_error
+            && failed.len() == tried
+        {
+            return Err(error);
+        }
+        pending = failed;
+    }
+    Ok(Change {
+        settings: candidate,
+        effects,
+        message: format!("Applied {} settings", values.len()),
+    })
+}
+
 fn invalid(name: &str, why: &str) -> ControlError {
     ControlError::new(
         "invalid-value",
@@ -1280,5 +1359,41 @@ mod tests {
         assert!(change.settings.double_tap_only);
         let change = apply(&change.settings, "double_tap_lock", "off", &rules()).unwrap();
         assert!(!change.settings.double_tap_only);
+    }
+
+    #[test]
+    fn many_settings_apply_together_or_not_at_all() {
+        let settings = AppSettings {
+            dictation_hotkey: parse_hotkey("option", rules().key_named).unwrap(),
+            ..AppSettings::default()
+        };
+        let values = |json: &str| serde_json::from_str::<serde_json::Map<_, _>>(json).unwrap();
+        let change = apply_all(
+            &settings,
+            &values(
+                r#"{"double_tap_only": true, "double_tap_lock": true,
+                    "dictation_hotkey": "option+space", "sound_effect_volume": 0.4,
+                    "microphone": null, "transcription.model": "parakeet_v3",
+                    "transcription.language": "de"}"#,
+            ),
+            &rules(),
+        )
+        .unwrap();
+        assert!(change.settings.double_tap_only);
+        assert_eq!(
+            format_hotkey(&change.settings.dictation_hotkey),
+            "option+space"
+        );
+        assert_eq!(change.settings.sound_effect_volume, 0.4);
+        assert_eq!(change.settings.transcription.model.as_str(), "parakeet_v3");
+        assert_eq!(change.settings.transcription.language, "de");
+
+        for refused in [
+            r#"{"sound_effects": false, "no_such_setting": 1}"#,
+            r#"{"sound_effects": false, "sound_effect_volume": 7}"#,
+            r#"{"transcription.model": "no_such_model"}"#,
+        ] {
+            assert!(apply_all(&settings, &values(refused), &rules()).is_err());
+        }
     }
 }

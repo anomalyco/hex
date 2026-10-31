@@ -23,6 +23,24 @@ let
   };
   manual = home { enable = true; };
   disabled = home { enable = false; };
+  declared = home {
+    enable = true;
+    shortcut = "control+option+space";
+    model = "parakeet_v3";
+    installModel = true;
+    settings = {
+      sound_effect_volume = 0.4;
+      microphone = null;
+      "transcription.language" = "de";
+    };
+  };
+  declaredSettings = (pkgs.formats.json { }).generate "hex-settings.json" {
+    dictation_hotkey = "control+option+space";
+    "transcription.model" = "parakeet_v3";
+    "transcription.language" = "de";
+    sound_effect_volume = 0.4;
+    microphone = null;
+  };
   custom = home {
     enable = true;
     autostart = true;
@@ -86,15 +104,23 @@ in
     assert enabled.systemd.user.services.hex.Service.NotifyAccess == "main";
     assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/hex"
       enabled.systemd.user.services.hex.Service.Environment;
-    assert
-      custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];
+    assert custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];
     assert lib.all (name: custom.systemd.user.services.hex.Unit.${name} == [ "sway-session.target" ]) [
       "After"
       "PartOf"
     ];
     assert custom.systemd.user.services.hex.Install.WantedBy == [ "sway-session.target" ];
+    assert !(enabled.home.activation ? hexSettings);
+    assert !(enabled.systemd.user.services ? hex-model);
+    assert lib.hasInfix (builtins.unsafeDiscardStringContext "settings apply ${declaredSettings}") (
+      builtins.unsafeDiscardStringContext declared.home.activation.hexSettings.data
+    );
+    assert lib.elem "reloadSystemd" declared.home.activation.hexSettings.after;
+    assert declared.systemd.user.services.hex-model.Service.Type == "exec";
+    assert declared.systemd.user.services.hex-model.Install.WantedBy == [ "default.target" ];
     pkgs.runCommand "hex-module-check" { } ''
       bash -n ${enabled.systemd.user.services.hex.Service.ExecStartPre}
+      bash -n ${toString declared.systemd.user.services.hex-model.Service.ExecStart}
       touch "$out"
     '';
 

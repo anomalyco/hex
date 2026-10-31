@@ -117,6 +117,47 @@ systemctl --user status hex.service
 journalctl --user -u hex.service
 ```
 
+### Declarative Settings
+
+```nix
+{
+  programs.hex = {
+    enable = true;
+    shortcut = "control+option+space"; # dictation_hotkey
+    model = "parakeet_v3";
+    language = "de";
+    installModel = true;
+    settings = {
+      shortcut_mode = "toggle";
+      sound_effect_volume = 0.4;
+      paste_with_shift = true;
+      "meetings.enabled" = true;
+    };
+  };
+}
+```
+
+`settings` takes the dotted keys `hex settings list` shows, with JSON values:
+booleans, numbers, text such as shortcuts and choices, `null` to clear an
+optional setting, and attribute sets or lists for its `json` settings. The
+`shortcut`, `model`, and `language` options are shorthands for
+`dictation_hotkey`, `transcription.model`, and `transcription.language`.
+
+Every activation merges them into Hex with `hex settings apply`, after
+systemd units reload. Declared keys overwrite Hex's values; anything you
+change in the window that isn't declared keeps its value until you declare
+it. A running Hex saves and adopts the settings at once, so it never writes
+older values back from memory; with Hex stopped they go straight into
+`settings.json`. `settings.json` stays an ordinary writable file. An unknown
+key or invalid value applies nothing and prints a warning, without failing
+the switch.
+
+Declaring a model only selects it; activation never downloads. With
+`installModel = true`, the `hex-model` user service runs `hex model install`
+for the selected model at login, once the system's `network-online.target`
+is reached (or after two minutes), and retries a failed download. A switch
+does not wait for it.
+
 ## Wayland Shortcuts
 
 Hex reads no input devices, so neither module adds users to the `input`
@@ -157,3 +198,5 @@ marked ignored because they require a desktop or installed model remain
 ignored; the Nix build does not download models or exercise live input.
 
 The initial packaging design builds on [PR #29](https://github.com/anomalyco/hex/pull/29).
+Declarative settings follow
+[@SymphonySimper's request in #588](https://github.com/anomalyco/hex/issues/588).
