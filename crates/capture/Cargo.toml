@@ -42,6 +42,7 @@ screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 
 # The screen-cast portal over D-Bus; PipeWire and VA-API are loaded at run time.
 [target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.14.0", features = ["shm", "xfixes", "randr"] }
 futures-util = { version = "0.3", default-features = false }
 tokio = { version = "1", features = ["rt", "time"] }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }

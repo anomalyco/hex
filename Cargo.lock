@@ -4950,6 +4950,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "windows 0.61.3",
+ "x11rb 0.14.0",
  "zbus",
 ]
 

@@ -630,6 +630,11 @@ fn mcp(meetings_dir: Option<std::path::PathBuf>) -> color_eyre::Result<()> {
 pub enum CaptureCommand {
     /// Start recording a capture.
     Start {
+        /// Linux: record this area instead of the screen, as X,Y,WIDTH,HEIGHT in pixels (on
+        /// X11; Wayland's portal records the screen).
+        #[cfg(target_os = "linux")]
+        #[arg(long, value_delimiter = ',', value_name = "X,Y,W,H")]
+        area: Option<Vec<f64>>,
         #[command(flatten)]
         output: Output,
     },
@@ -716,7 +721,23 @@ pub enum CaptureCommand {
 pub fn capture(command: CaptureCommand) -> u8 {
     use crate::control::{ControlCommand as C, ScrawlCaptureAction as A};
     let (command, output) = match command {
-        CaptureCommand::Start { output } => (C::ScrawlCapture { action: A::Start }, output),
+        #[cfg(target_os = "linux")]
+        CaptureCommand::Start {
+            area: Some(area),
+            output,
+        } => {
+            let [x, y, width, height] = area[..] else {
+                return print(
+                    ControlReply::error("invalid", "--area takes X,Y,WIDTH,HEIGHT"),
+                    output,
+                );
+            };
+            return print(
+                crate::linux::service::capture_area([x, y, width, height]),
+                output,
+            );
+        }
+        CaptureCommand::Start { output, .. } => (C::ScrawlCapture { action: A::Start }, output),
         CaptureCommand::Stop { output } => (C::ScrawlCapture { action: A::Stop }, output),
         CaptureCommand::Cancel { output } => (C::ScrawlCapture { action: A::Cancel }, output),
         CaptureCommand::Status { output } => (C::ScrawlCapture { action: A::Status }, output),
