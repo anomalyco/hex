@@ -177,6 +177,11 @@ const PATHS: &[(&str, &str)] = &[
         "mac-voice-filter-driver-missing",
         "Window/Voice Filter/Driver missing",
     ),
+    ("voice-filter", "Window/Voice Filter/Linux"),
+    (
+        "voice-filter-unavailable",
+        "Window/Voice Filter/Linux unavailable",
+    ),
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-production", "Window/General/Production build"),
