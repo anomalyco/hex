@@ -729,8 +729,8 @@ fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[
 /// switching rows. The window lists them itself on Windows and Linux.
 #[cfg(not(target_os = "macos"))]
 pub(super) fn poll_input_sources(ui: &mut Ui, clock: f64) -> bool {
-    let switching = ui.platform.caps.keyboard_model_switching
-        && ui.settings.keyboard_model_switching.enabled;
+    let switching =
+        ui.platform.caps.keyboard_model_switching && ui.settings.keyboard_model_switching.enabled;
     if !switching {
         let changed = !ui.platform.input_sources.is_empty();
         ui.platform.input_sources.clear();

@@ -333,8 +333,13 @@ impl WindowsDesktopHost {
     /// A layout change not yet polled counts as before this choice, so it
     /// cannot later undo it.
     fn manual_choice(&mut self) {
-        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll()) {
-            self.keyboard_switcher.source_changed(source, Instant::now());
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+        {
+            self.keyboard_switcher
+                .source_changed(source, Instant::now());
         }
         self.keyboard_switcher.manual_choice();
         if self.automatic_preparation {
@@ -359,8 +364,13 @@ impl WindowsDesktopHost {
         if enabled != self.input_sources.is_some() {
             self.input_sources = enabled.then(Default::default);
         }
-        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll())
-            && self.keyboard_switcher.source_changed(source, Instant::now())
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+            && self
+                .keyboard_switcher
+                .source_changed(source, Instant::now())
         {
             self.supersede_automatic();
         }
@@ -470,10 +480,10 @@ impl WindowsDesktopHost {
     /// listener reads changes in place; anything the listener captured at
     /// start restarts a running listener.
     fn apply_settings(&mut self, settings: &AppSettings) {
-        if self.keyboard_switcher.configure(
-            settings.keyboard_model_switching.clone(),
-            Instant::now(),
-        ) {
+        if self
+            .keyboard_switcher
+            .configure(settings.keyboard_model_switching.clone(), Instant::now())
+        {
             self.supersede_automatic();
         }
         let previous = std::mem::replace(&mut self.settings, settings.clone());

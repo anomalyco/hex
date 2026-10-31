@@ -191,7 +191,10 @@ mod tests {
             [Some("us".into()), Some("ru".into()), Some("de(neo)".into())]
         );
         assert_eq!(layouts("pc+gb+inet(evdev)"), [Some("gb".into())]);
-        assert_eq!(layouts("pc+us+de:3"), [Some("us".into()), None, Some("de".into())]);
+        assert_eq!(
+            layouts("pc+us+de:3"),
+            [Some("us".into()), None, Some("de".into())]
+        );
     }
 
     #[test]
