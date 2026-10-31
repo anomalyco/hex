@@ -526,7 +526,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   Short tap, Escape, chord discard, microphone failure -> Drop the stream
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is pasted or reaches the focused app until the final text exists
-  live-text experiment -> After each feed the stream publishes its text   // dictate.live-text
+  Labs + labs.live_text -> After each feed the stream publishes its text   // dictate.live-text
   ├── Stable (committed) and tentative text, per capture; a new capture starts empty
   ├── One click-through line just past the HUD, on the HUD's screen
   │   ├── macOS: beside the plate the HUD placed (under the menu bar, over the Dock,

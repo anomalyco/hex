@@ -837,8 +837,9 @@ Before: map-reduce over 8 chunks, 9 calls, 51-minute call  96 s
 
 ### Live Chapters (Labs)
 
-Part of [Labs](labs.md), on by default; `hex labs off` and a relaunch turn it
-off. Off, nothing below starts, and meetings behave as without it.
+Part of [Labs](labs.md), with its own switch, off by default: Live chapters
+on its Labs row (`labs.live_chapters`, read when a recording starts). Off, or
+with Labs off, nothing below starts, and meetings behave as without it.
 
 ```ts
 Recording starts, Labs on                             // meetings.chapters.live

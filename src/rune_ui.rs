@@ -545,17 +545,9 @@ impl Pane {
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings,
-            Pane::VoiceFilter => {
-                caps.fun
-                    && crate::app_settings::voice_filter_enabled(
-                        ui.settings.experimental.hex_microphone,
-                        ui.settings.labs.enabled,
-                        ui.platform
-                            .hex_microphone
-                            .as_ref()
-                            .is_some_and(|status| status.driver_bundle_installed),
-                    )
-            }
+            // Labs shows the pane; its own switch or a driver apps already
+            // use also keeps it, so nobody loses those controls.
+            Pane::VoiceFilter => caps.fun && (ui.settings.labs.enabled || fun::running(ui)),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.dev_build && ui.platform.scrawl.is_some(),
             _ => true,
