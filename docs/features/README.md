@@ -1338,6 +1338,9 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Microphone -> System default or a saved device
 │   └── Windows default input changes -> Switch once capture is idle // cpal's default-device report
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
+│   └── Ctrl+V carries scan codes from the foreground layout, so Chromium apps
+│       see KeyboardEvent.code: VS Code's terminal takes it as Paste instead of
+│       sending ^V to a TUI inside it (#618; from VS Code's source, not run)
 ├── Update staged (managed install) -> Tray, sidebar footer: Restart to update
 ├── Another release (unmanaged install) -> Tray, sidebar footer: Download update
 ├── Another channel chosen -> Tray, sidebar footer: Switch to Stable 2.3.1 (confirm)

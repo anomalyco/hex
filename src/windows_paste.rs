@@ -8,9 +8,11 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
-    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+    GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
+    VK_RWIN, VK_SHIFT, VK_V,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
 
@@ -183,24 +185,43 @@ fn wait_for_conflicting_modifiers() {
 /// Ctrl plus `key` (Ctrl+Shift plus `key` with `shift`), leaving a Ctrl the
 /// user physically holds (`control_held`) untouched: synthesizing its
 /// release would leave Windows thinking it is up while the user holds it.
-/// Shift goes down after Ctrl and comes up before it.
-fn control_chord(key: u16, shift: bool, control_held: bool) -> Vec<INPUT> {
+/// Shift goes down after Ctrl and comes up before it. Each key carries its
+/// scan code (`scan`), as a physical press does.
+fn control_chord(
+    key: u16,
+    shift: bool,
+    control_held: bool,
+    scan: impl Fn(u16) -> u16,
+) -> Vec<INPUT> {
+    let input = |key, flags| keyboard_input(key, scan(key), flags);
     let mut inputs = Vec::with_capacity(6);
     if !control_held {
-        inputs.push(keyboard_input(VK_CONTROL, 0));
+        inputs.push(input(VK_CONTROL, 0));
     }
     if shift {
-        inputs.push(keyboard_input(VK_SHIFT, 0));
+        inputs.push(input(VK_SHIFT, 0));
     }
-    inputs.push(keyboard_input(key, 0));
-    inputs.push(keyboard_input(key, KEYEVENTF_KEYUP));
+    inputs.push(input(key, 0));
+    inputs.push(input(key, KEYEVENTF_KEYUP));
     if shift {
-        inputs.push(keyboard_input(VK_SHIFT, KEYEVENTF_KEYUP));
+        inputs.push(input(VK_SHIFT, KEYEVENTF_KEYUP));
     }
     if !control_held {
-        inputs.push(keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP));
+        inputs.push(input(VK_CONTROL, KEYEVENTF_KEYUP));
     }
     inputs
+}
+
+/// The scan code of `key` in the foreground window's keyboard layout.
+/// Chromium apps derive `KeyboardEvent.code` from it, and VS Code matches
+/// its keybindings by that code: without one, its terminal never saw Ctrl+V
+/// as Paste and sent ^V to the program inside it (#618).
+fn foreground_scan_code(key: u16) -> u16 {
+    // SAFETY: plain Win32 queries; a null process-ID pointer is allowed.
+    unsafe {
+        let thread = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+        MapVirtualKeyExW(u32::from(key), MAPVK_VK_TO_VSC, GetKeyboardLayout(thread)) as u16
+    }
 }
 
 fn key_down(key: u16) -> bool {
@@ -208,7 +229,7 @@ fn key_down(key: u16) -> bool {
 }
 
 fn send_paste_shortcut(shift: bool) -> Result<()> {
-    let inputs = control_chord(VK_V, shift, key_down(VK_CONTROL));
+    let inputs = control_chord(VK_V, shift, key_down(VK_CONTROL), foreground_scan_code);
     let sent = send_inputs(&inputs);
     if sent != inputs.len() as u32 {
         // Release only what this chord pressed; never a key the user holds.
@@ -236,13 +257,13 @@ fn send_inputs(inputs: &[INPUT]) -> u32 {
     }
 }
 
-fn keyboard_input(key: u16, flags: u32) -> INPUT {
+fn keyboard_input(key: u16, scan: u16, flags: u32) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: key,
-                wScan: 0,
+                wScan: scan,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: crate::windows_input::HEX_INJECTED,
@@ -270,6 +291,25 @@ mod tests {
         ));
     }
 
+    /// US-layout scan codes for the chord's keys.
+    fn scan(key: u16) -> u16 {
+        match key {
+            VK_CONTROL => 0x1D,
+            VK_SHIFT => 0x2A,
+            VK_V => 0x2F,
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn paste_chords_carry_each_keys_scan_code() {
+        let inputs = control_chord(VK_V, true, false, scan);
+        assert!(inputs.iter().all(|input| {
+            let ki = unsafe { input.Anonymous.ki };
+            ki.wScan == scan(ki.wVk) && ki.wScan != 0
+        }));
+    }
+
     fn keys(inputs: &[INPUT]) -> Vec<(u16, bool)> {
         inputs
             .iter()
@@ -283,7 +323,7 @@ mod tests {
     #[test]
     fn paste_chords_press_shift_inside_control_and_leave_a_held_control_alone() {
         assert_eq!(
-            keys(&control_chord(VK_V, false, false)),
+            keys(&control_chord(VK_V, false, false, scan)),
             [
                 (VK_CONTROL, false),
                 (VK_V, false),
@@ -292,11 +332,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys(&control_chord(VK_V, false, true)),
+            keys(&control_chord(VK_V, false, true, scan)),
             [(VK_V, false), (VK_V, true)]
         );
         assert_eq!(
-            keys(&control_chord(VK_V, true, false)),
+            keys(&control_chord(VK_V, true, false, scan)),
             [
                 (VK_CONTROL, false),
                 (VK_SHIFT, false),
@@ -307,7 +347,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys(&control_chord(VK_V, true, true)),
+            keys(&control_chord(VK_V, true, true, scan)),
             [
                 (VK_SHIFT, false),
                 (VK_V, false),
