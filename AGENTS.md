@@ -28,18 +28,21 @@ and keep consequential behavior explicit. Deterministic personal transcript
 transformations live in the explicit TypeScript user config (`~/.config/hex/hex.config.ts`). User-facing
 runtime settings persist in Application Support.
 
-The distributed production release (`!experiments::is_dev_build()`) shows
-General, Output, and History, plus Labs on macOS with only the opt-in
-`Meetings (beta)` switch (`meetings.enabled`, default off: no call detection or
-EventKit reads while off); it ignores `HEX_EXPERIMENTS` and
-`~/.config/hex/experiments` and keeps Annotate, Voice Filter, and every
-experiment dormant. Dev, local, and test builds (`experiments::is_dev_build()`)
-add Annotate and every experiment (`Voice Filter`, `Live text`,
-`Live chapters`, `Playground`) to Labs, writing `~/.config/hex/experiments` and
-applying live where supported. HUD Lab's live Dot scope tuning lives inside
-Playground (`⇧⌘D`, `Prototypes/HUD/*`). `DEVELOPER_FEATURES_ENABLED` keeps
-Meetings available by default in debug builds and keeps the meeting CLI
-debug-only.
+Every build shows General, Output, History, and Labs. Labs holds features
+we're unsure about, especially ones people asked for that we built: **new or
+user-requested features land in Labs, off by default, not on by default.**
+Labs has no master switch; Settings › Labs is one flat list of rows (name,
+description, toggle), each off by default, plus Send feedback and Run setup
+again. A feature with its own pane joins the sidebar as a normal item while
+on and is hidden while off; a behaviour-only feature is just its toggle. Today:
+Meetings (beta), Voice Filter (locked on while its macOS driver is
+installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
+model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
+pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
+and Terminal paste (Windows). Externally contributed features land there too.
+Annotate is a normal feature in every build, stable included, on macOS,
+Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
+`DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
 
 ## Feature Map
 
@@ -73,6 +76,10 @@ substitute for source inspection or a second roadmap.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
+- `keyboard_input_sources`, `keyboard_model_switching`: keyboard input-source
+  observation (macOS TIS, Windows foreground-window layout, X11 XKB groups;
+  Wayland has no general protocol) and the shared debounced policy that turns a
+  mapped source into an installed-only model-picker choice.
 - `dictation`, `dictation_diagnostics`: warm pre-roll, growable capture, 16 kHz
   local-transcription resampling, and owner-only diagnostic WAV retention when
   `HEX_RETAIN_DICTATION_AUDIO` is set.
@@ -87,8 +94,17 @@ substitute for source inspection or a second roadmap.
   each OS's audio owner and read by the window's level bars (General and the
   practice dictation); a stale peak reads as no audio.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior, each held
-  from the first dictation or capture session that wants it to the last.
+  output muting and lowering, and supported media-player pause/resume
+  behavior on macOS, each held from the first dictation or capture session
+  that wants it to the last.
+- `output_ducking`: the shared Lower audio ramp (relative, channel-preserving,
+  respecting manual changes, rolled back on failure) over each OS's volume
+  adapter: CoreAudio output channels, the Linux default sink's channels
+  (`pactl`, else `wpctl`), and other apps' WASAPI session volumes.
+- `idle_sleep`: idle-sleep prevention while a dictation records: an IOKit
+  assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
+  polkit refuses a process outside the seat session) on Linux, and a
+  system-required power request on Windows.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -125,8 +141,12 @@ substitute for source inspection or a second roadmap.
   whole-clip runs, and (macOS) model loads and switches. The capture owns its
   `LiveStream` and hands it to the finished clip; finishing returns a
   `PendingTranscript` whose wait enforces the stream deadline and falls back to
-  the whole clip. On macOS it also runs background work (meeting chunks) that
-  yields to any dictation request sent before it starts.
+  the whole clip. It also runs background work (meeting chunks, local API
+  host audio) that yields to any dictation request sent before it starts. The
+  listener shares its engine (`TranscriptionEngine::share`) on every OS;
+  `transcription_engine::dictation_busy` is the press-to-paste capture state
+  on macOS, and on Linux and Windows only the engine's dictation streams and
+  finishes, so a host clip can start during a CPU-only capture's hold.
 - `transcription_preparation`: application-owned model preparation shared by
   Settings and the menu bar on macOS and by the Windows runtime, with one
   worker, latest-choice pending admission, cancellation fences, and an
@@ -136,7 +156,8 @@ substitute for source inspection or a second roadmap.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
-  service loads its own, released after a long clip when the engine holds it.
+  service loads its own (`WarmTranscriber` on macOS, `local_transcriber::WarmLocal`
+  on Linux and Windows), released after a long clip when the engine holds it.
 - `transcription_stream`: live `/streams` transcription of another app's
   pushed audio on the engine's loaded model: pause-cut windows fed through
   yielding engine streams that any dictation request closes, a bounded
@@ -148,13 +169,23 @@ substitute for source inspection or a second roadmap.
   [`docs/streams.md`](docs/streams.md)), plus the always-on authenticated
   `POST /control`, and `GET /profile/vitals` (process footprint and CPU from
   Rune's `procwatch`, sampled by `macos_rune`; debug builds also count the heap
-  and report the `speech.model_weights` gauge from `parakeet`).
-- `control`: the release `hex` control surface: the versioned
+  and report the `speech.model_weights` gauge from `parakeet`). The running
+  app serves it on every OS, as does `hex service [--embedded]`; the discovery
+  file is `local-api.json` in the data folder (mode 0600 on Unix, the per-user
+  `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
+  the macOS recognition loop only; elsewhere it answers
+  `service-capture-unavailable` at runtime, and `/profile/vitals` answers 503.
+  `/control` carries the `hex` control commands on every OS (`control`).
+- `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
-  rules), and the CLI client (`control::cli`). `macos_rune::control` is the
-  one host that carries the commands out on macOS; Linux and Windows report
-  "not supported on this OS" for now. Contract: `docs/cli.md`.
+  rules and the capability each needs), and the one CLI tree and client
+  (`control::cli`), which each OS's `main` flattens beside its own commands.
+  The transport on every OS is the local API's `/control`.
+  `control::host` carries commands out on Linux and Windows through a thin
+  adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`);
+  `macos_rune::control` is macOS's host. What an OS can't do answers
+  `unsupported` at runtime. Contract: `docs/cli.md`.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `developer_control`: the typed debug-only command/reply protocol the local
@@ -164,7 +195,7 @@ substitute for source inspection or a second roadmap.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard.
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
-  dictation controls, Smart Turn, workers, and observations. It does not own the
+  dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.
 - `personal_commands`: the user's `hex.config.ts` (or `.js`) in
   `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
@@ -180,9 +211,11 @@ substitute for source inspection or a second roadmap.
   replacements applied longest-match-first to transcripts.
 - `config`: dictation profiles.
 - `context`: the foreground context snapshot and selectors for modes,
-  plus native macOS capture. Browser host is the domain concept;
-  Brave AppleScript is the first macOS adapter and `windows_context` reads any
-  browser through UI Automation.
+  plus native macOS capture. Browser host is the domain concept. macOS
+  reads the front tab of a table of scriptable browsers (Safari and Chromium
+  dictionaries) through AppleScript and any other app's focused AXWebArea
+  `AXURL`; `windows_context` reads any browser through UI Automation and
+  `linux_atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
   shortcuts, App Paths, and open windows, Linux `.desktop` entries.
@@ -199,9 +232,11 @@ substitute for source inspection or a second roadmap.
 - `onboarding`, `permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
-- `hex_microphone`, `voice_filter`: the experimental macOS CoreAudio virtual
-  microphone (`Hex Microphone`), lock-free capture-to-sink ring buffer,
-  real-time voice-filter DSP presets, and the offline WAV renderer behind
+- `hex_microphone`, `voice_filter`: the experimental virtual microphone
+  (`Hex Microphone`: a CoreAudio driver on macOS, a PipeWire virtual source
+  fed through `pw-cat` on Linux, none on Windows, which would need a signed
+  kernel driver), the lock-free capture-to-sink ring buffer, real-time
+  voice-filter DSP presets, and the offline WAV renderer behind
   `hex dev voice-filter render`.
 - `linux`, `linux_app`, `linux_dictation`, `linux_paste`:
   the Linux beta CLI (including the `hex dictation` and
@@ -225,9 +260,20 @@ substitute for source inspection or a second roadmap.
 - `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
   persisted owner-only restore token, and Ctrl+V as keysyms.
-- `linux_context`: the frontmost X11 application for modes; Wayland has none.
-- `linux_audio_control`: While-dictating mute through `wpctl`/`pactl` and
-  MPRIS pause over D-Bus (zbus), restoring only what it changed.
+- `linux_context`: the focused application for modes: the X11 active
+  window's process, or on Wayland the activated `zwlr_foreign_toplevel`
+  window's app ID named by its `.desktop` entry (none on GNOME and KDE).
+- `linux_atspi`: the focused window's page address through AT-SPI on X11 and
+  Wayland, matched by title and process and bounded by a deadline. Chromium
+  exposes pages only with renderer accessibility on.
+- `linux_audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
+  audio through `output_ducking`, and MPRIS pause over D-Bus (zbus),
+  restoring only what it changed, plus idle-sleep prevention for dictations.
+- `linux_input_route`: System default's Bluetooth avoidance on Linux. ALSA's
+  default cannot name another PipeWire source, so Hex marks its ALSA streams
+  (`PIPEWIRE_ALSA`: `state.restore-target = false` and its PID, set on the
+  main thread at startup) and moves them off a Bluetooth default source to
+  the built-in (PCI) input, else the first other hardware input.
 - `linux_session`: display-backend selection matching winit's (Rune's)
   nonempty `WAYLAND_DISPLAY` rule, independent of persisted preferences.
 - `linux_service`: the single-instance lock and owner-only, same-user Unix
@@ -247,8 +293,14 @@ substitute for source inspection or a second roadmap.
   Linux and Windows place it at the top or bottom edge.
   `rune_hud_frames` renders a fixed dictation through the shaders offscreen.
 - `linux_tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
-  with a dbusmenu: Show Hex, Quit Hex). It registers whenever a tray host
+  with a dbusmenu built by `tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
+- `tray_menu`: the tray menu Linux and Windows share (recording state, Show
+  Hex, Paste last dictation, the downloaded-model picker, the update item,
+  Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
+  lists too. Each tray maps a `TrayCommand` onto its own runtime.
+- `linux_login_item`: Launch at login on Linux, the managed XDG autostart
+  entry the installer also writes; the file is the only state.
 - `updater`: the in-app updater on every OS, a client of the Anomaly release
   service (`docs/plans/release-service.md`). `updater/protocol` is the
   protocol's strict SemVer, lenient manifest parsing, and client rules (the
@@ -263,9 +315,10 @@ substitute for source inspection or a second roadmap.
   preparation, OpenCode catalog, transformations, updater) and single-instance
   claim, the tray app on `rune::App` (tray, window icon, and runtime thread;
   `rune_ui/windows_host.rs` is the window's host), the WASAPI dictation loop,
-  low-level keyboard hook, clipboard paste, UI Automation context, audio ducking, and the
-  login item.
-- `live_text`: the `live-text` experiment's text of the recording in
+  low-level keyboard hook, clipboard paste, UI Automation context, While
+  dictating (mute, lower, or pause other apps' audio) with idle-sleep
+  prevention, and the login item.
+- `live_text`: Labs' live text of the recording in
   progress: the recording's `Publisher` shows it and its drop clears it, and
   each OS's host installs `rune_ui::live_text`, one click-through line just
   past the HUD, as a watcher, placed where `rune_hud` last showed the HUD
@@ -279,8 +332,9 @@ substitute for source inspection or a second roadmap.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata only, never audio.
-- `transcript_cli`: read-only macOS release commands `hex history` and
-  `hex meetings list|show|search`, versioned JSON projections and filters.
+- `transcript_cli`: read-only release commands `hex history` and
+  `hex meetings list|show|search` on every OS, versioned JSON projections and
+  filters.
   Reads history snapshots without opening the writable store, and shares
   meeting selection, search, and Markdown with `meeting::query` / MCP.
 - `events`, `dashboard`: bounded asynchronous append-only NDJSON observations
@@ -295,13 +349,13 @@ substitute for source inspection or a second roadmap.
   `rune-kit` and the OpenCode theme: General, Output, and History, then in dev
   builds the opt-in Meetings once on (each feature owns its
   settings, rarer ones in the pane's Advanced fold), and under Labs (`labs`:
-  the opt-in and experiment switches) Annotate and the Voice Filter, plus in
+  the Labs switch and the opt-ins) Annotate and the Voice Filter, plus in
   Playground (`⇧⌘D`) HUD Lab's live Dot scope sliders (`hud_stories`), the transcription
   picker, the Sounds sheet (its stage replays `rune_hud`'s HUD, drawn by the
   window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
   meeting capsules, the `--snap`
   fixture scenes, and the macOS `hex://story/…` playground links
-  (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist;
+  (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist (and, through `rune_ui::capabilities`, which `hex settings` keys act and what `hex status` reports); every difference between the OSes names a reason in `platform::DIFFERENCES` (an OS pattern, impossible, or pending), which `parity_tests` enforce;
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to
   each OS's host. Keep shared UI in the pane modules and only OS behavior in
   the hosts.
@@ -324,11 +378,25 @@ substitute for source inspection or a second roadmap.
   auto-levelled oscilloscope trace), the same on every OS and drawn by
   `rune_hud`; `spring` holds the frame-rate-independent springs.
 - `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
-  artifacts, Screen Recording permission checks, final local-model publication,
-  the user-facing Markdown copy, and recovery.
+  artifacts, final local-model publication, the user-facing Markdown copy, and
+  recovery, on every OS. Its `os` adapter (`meeting_macos`, `meeting_linux`,
+  `meeting_windows`) owns the system audio source and its consent, idle-sleep
+  prevention while recording, and reveal and Trash.
 - `meeting_capture`: independent self-healing microphone (cpal) and system
-  audio (Core Audio process tap, ScreenCaptureKit fallback) sources; one
-  failing never stops the other, and resumed audio is padded onto the timeline.
+  audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
+  Linux: `pw-record` of the default output's monitor; Windows: WASAPI
+  loopback); one failing never stops the other, and resumed audio is padded
+  onto the timeline.
+- `meeting_runtime`: the Linux and Windows apps' meeting controller thread,
+  capsules, recording state, and tray items (macOS runs the same controller
+  from `macos_rune`).
+- `meeting_generator`: who writes notes and live chapters: Apple
+  Intelligence on a Mac that has it, else OpenCode when
+  `meetings.summarize_with_opencode` is on (off by default; it sends the
+  transcript excerpt).
+- `dictation_activity`: whether dictation is capturing or transcribing, so
+  meeting chunks and the local API yield, and the background priority they
+  run at, on every OS.
 - `meeting_transcript`: streaming 16 kHz resampling, short pause-aware
   overlapping chunks transcribed as background work on the dictation engine's
   loaded model (a process without the engine, such as the CLI, loads its own),
@@ -340,7 +408,7 @@ substitute for source inspection or a second roadmap.
   post-publication call over a bounded transcript excerpt for the final title
   and a two-sentence summary, with deadline, manifest storage, and
   marker-delimited in-place Markdown updates.
-- `meeting_chapters`: live chapters (experiment `live-chapters`): one
+- `meeting_chapters`: live chapters (Labs): one
   on-device pass per ~3 minutes of rolling transcript while recording, with
   Rust deciding topic changes, the per-boundary fix-up after publication,
   chapter-extended titles that never touch a user-typed one, and section
@@ -353,7 +421,10 @@ substitute for source inspection or a second roadmap.
   `meeting_query` as read-only tools and `hex-meeting://` resources.
 - `apple_intelligence`: the weak-linked FoundationModels Swift bridge:
   availability, context size, and guided-generation notes at utility priority.
-- `microphone_activity`: permission-light CoreAudio process input observation.
+- `microphone_activity`: permission-light observation of which apps use the
+  microphone: CoreAudio processes (macOS), a `pw-dump --monitor` of PipeWire
+  capture streams (Linux), audio sessions on capture devices (Windows). No
+  samples are read.
 - `meeting_detection`: pure provider classification, debounce, per-call snooze,
   and call-ended presence.
 - `calendar`: calendar meetings on every OS as a pure model (which events
@@ -368,18 +439,20 @@ substitute for source inspection or a second roadmap.
   "Choose a file…", the macOS meetings folder) through `rune::FileDialogs` on
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
-- `experiments`: the compiled list of unsupported experiments and the
-  launch snapshot of `HEX_EXPERIMENTS` and `~/.config/hex/experiments`
-  behind `experiments::enabled` and `hex experiments`.
+- `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
+  description), the runtime gates (`labs::live_text`, `live_chapters`,
+  `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
+  `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
+  or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in
   `crates/capture`, copied from Scrawl's `engine/split` at `e351ddb` and
   kept out of the workspace; `scripts/check` names it on macOS) hosted in
   Hex as Annotate (its user-facing name; code keeps `capture`;
   `docs/plans/capture-in-hex.md`),
-  compiled as `cfg(hex_capture)` into every macOS and Linux build
+  compiled as `cfg(hex_capture)` into every macOS, Linux, and Windows build
   (`scripts/build-app.sh` bundles and signs `scrawl-helper` beside `hex`).
-  Everything here is shared by both OSes; the engine's own platform
-  adapter (`crates/capture/src/capture/{macos,linux}.rs`) is the seam for
+  Everything here is shared by every OS; the engine's own platform
+  adapter (`crates/capture/src/capture/{macos,linux,windows}.rs`) is the seam for
   the screen, window and area source, cursor, permission flow, and encoder.
   The Linux adapter (`crates/capture/src/linux/`) asks the ScreenCast
   portal over `zbus` (a screen keeps the portal's restore token at
@@ -394,7 +467,18 @@ substitute for source inspection or a second roadmap.
   microphone), "While dictating" (`Environment`: an `AudioSuppressor` per
   capture), words (`LocalTranscriber::transcribe_words` as one foreground
   job on the listener's engine), the clipboard and paste (`linux_paste`),
-  and the shortcut (`linux_input`'s `Shortcut::Capture`). Hex's `Host`,
+  and the shortcut (`linux_input`'s `Shortcut::Capture`). Windows records
+  with Windows.Graphics.Capture (`crates/capture/src/win/media.rs`) and
+  shares Linux's host side (`ListenerTimeline` fed by `windows_dictation`,
+  the same words path) except "While dictating" (`Environment`: a
+  `windows_audio_control::AudioSuppressor` per capture), paste and copy
+  (the engine's own Ctrl+V and clipboard), and input: `windows_input`'s
+  hooks give the Annotate key (`HotkeyAction::Capture`/`CaptureUp`), Escape
+  while drawing, and, while a capture records, every pointer move, click,
+  wheel turn, and modifier change in physical pixels
+  (`capture_host::report_input`, as the macOS tap does). The overlays lay
+  out in the primary display's points, so the picker and ink convert with
+  `capture_host::pixels_per_point`. Hex's `Host`,
   `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
   listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
   its 16 kHz gap-padded timeline handed to the engine as `AudioIn::External`,
@@ -413,7 +497,8 @@ substitute for source inspection or a second roadmap.
   (Labs › Scrawl) and `CaptureSettings` its `capture.*` settings;
   `hex capture` is `control::cli::capture` (macOS through the running app;
   Linux reads the folder itself and hands start/stop/cancel to the
-  listener over `linux_service`).
+  listener over `linux_service`; Windows sends every `hex annotate` command
+  to the running Hex).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -453,6 +538,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   macOS and Windows match sides (device flags, the low-level hook); Linux
   binds a key with side-less modifiers only, and its recorder says so when
   modifiers are pressed alone.
+- Windows accepts one modifier alone (Right Alt, Right Ctrl) as a dictation
+  shortcut. Any key or mouse button joining a held modifier-only shortcut
+  ends it as a chord (Cancel only while it records). Releasing Alt or Windows
+  after a modifier-only shortcut held them is swallowed and replayed after a
+  tap of unassigned VK 0xE8, so the menu bar and Start stay closed (not with
+  Share shortcut). Hex marks every event it injects with `HEX_INJECTED` and its
+  hook skips them, so a paste's Ctrl never presses a Ctrl-alone shortcut.
+- Windows onboarding adds a Microphone row only while Settings' microphone
+  switch (device, user, or "Let desktop apps access your microphone") is off;
+  Allow opens `ms-settings:privacy-microphone`, and setup waits for it.
 - GUI startup must successfully call `keyboard::initialize_layout` on the OS
   main thread before settings, keyboard-using workers, or Rune start. That
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
@@ -553,7 +648,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   and last 0.3 s (Parakeet drops words after pauses past its left context),
   the finish always carries the complete clip, and a failed, empty, overfed, late, or interrupted stream
   falls back to the whole clip. Nothing pastes or reaches the focused app
-  before the final text. With the `live-text` experiment a hotkey capture's
+  before the final text. With Labs › Live text on, a hotkey capture's
   stream publishes its provisional text for Hex's own HUD only; it is never
   pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live
   stream holds the model's compute lease. Streams run only on GPU devices
@@ -590,10 +685,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   else the first real input, logged and shown in Settings. With a MacBook's
   lid closed (`AppleClamshellState`), the built-in microphone is off in
   hardware but still listed, so it is passed over the same way, and with no
-  other input Hex reports why instead of recording silence. On macOS, with
+  other input Hex reports why instead of recording silence. With
   `avoid_bluetooth_microphone` on (the default; General › Advanced), a
-  Bluetooth default (CoreAudio transport Bluetooth or Bluetooth LE) is passed
-  over the same way, so the headset never drops into call audio, but kept when
+  Bluetooth default is passed over the same way (macOS: CoreAudio transport
+  Bluetooth or Bluetooth LE; Windows: WASAPI enumerator `BTHENUM`, or a
+  headset/handset of unknown bus such as a `BTHHFENUM` hands-free endpoint;
+  Linux: a `bluez5` default source, whose stream Hex moves after opening), so the headset never drops into call audio, but kept when
   no other usable input exists; a saved Bluetooth microphone and `--device`
   are always honoured, and a change to the setting re-resolves like a
   device-list change. Settings names the stand-in. A saved microphone
@@ -663,7 +760,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   owner; searches never return expired entries while waiting for disk cleanup.
   The hard caps are 10,000 entries and 16 MiB of raw + final text (oldest evicted
   first), with existing per-entry metadata and text limits. There is no archive.
-- `hex history` and `hex meetings` are read-only, release-available on macOS,
+- `hex history` and `hex meetings` are read-only, release-available on every OS,
   independent of feature opt-ins. Dispatch before process
   logging, the instance lock, local API, GUI, permissions, or Hex Microphone.
   History reads one open
@@ -720,26 +817,30 @@ CoreAudio formats, AppleScript details, or event serialization.
   Option-Control-V, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
   can replace; after Stop they read the final transcript.
-- Meeting system audio uses a Core Audio process tap (System Audio Recording
-  consent), never requiring a display; ScreenCaptureKit is only the fallback.
+- Meeting system audio uses a Core Audio process tap on macOS (System Audio
+  Recording consent), never requiring a display; ScreenCaptureKit is only the
+  fallback. Linux records the default output's PipeWire monitor through
+  `pw-record` and Windows its WASAPI loopback; neither asks for consent.
   Losing either source never stops the other or the meeting: it retries until
   Stop, and resumed audio is padded with silence so WAV positions stay on the
   shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
-- Apple Intelligence meeting notes run only after final publication, on a
+- Meeting notes (Apple Intelligence, or OpenCode only once the user turns on
+  Summarize with OpenCode) run only after final publication, on a
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes never rename the file and rewrite only the heading Hex wrote
   and the `<!-- hex:notes -->` block.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
-  every macOS and Linux build and on by default (`capture.enabled`, the
-  pane's switch; the `annotate-on-by-default` migration turns it on once
-  for older settings). It is not an experiment; Windows never compiles `scrawl-capture`
-  and shows no pane. Nothing asks for a screen permission until the first
+  every macOS, Linux, and Windows build and on by default in every build,
+  stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
+  migration turns it on once for older settings). It is not an experiment.
+  Nothing asks for a screen permission until the first
   capture: macOS's Screen Recording at its first capture, Linux's portal
-  dialog at its first Screen capture. Default shortcuts share no key with
-  the other defaults: ⌥⇧S on macOS, F9 on Linux. One key does everything:
+  dialog at its first Screen capture; Windows asks nothing. Default shortcuts
+  share no key with the other defaults: ⌥⇧S on macOS, F9 on Linux and
+  Windows. One key does everything:
   a tap (under `DRAW_HOLD`) starts and stops; held while recording, the
   pointer draws with no click until it comes up (Linux: portal
   Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
@@ -752,7 +853,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   no undo. There is no separate draw shortcut and no send-to list
   shortcut; Send to… is a capsule click. `hex annotate draw` toggles the
   pen for desktops without the portal. While a capture records, the
-  dictation and Voice Action shortcuts start nothing on either OS. Sends
+  dictation shortcut starts nothing on either OS. Sends
   carry the contact sheet and keyframes as inline `data:` image parts, never
   a local path. The Linux capsule doesn't open suggestions by itself.
   `validate-app.sh` requires
@@ -832,10 +933,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   the meetings folder; runs no model; and makes no network request. Stdout
   carries only MCP messages.
 - `hex` control commands (`status`, `quit`, `dictation`, `meetings record`,
-  `settings set`, `model use`, `window show`, …) are release-available and
-  drive only the one running Hex through the owner-only discovery file and
-  bearer-authenticated `POST /control` (64 KiB request, 1 MiB reply, 10 s
-  in-app deadline). They dispatch before process logging,
+  `settings set`, `model use`, `window show`, …) are release-available on
+  every OS and drive only the one running Hex through the owner-only
+  discovery file and bearer-authenticated `POST /control` (64 KiB request,
+  1 MiB reply, 10 s in-app deadline). A command an OS can't do answers `unsupported` at runtime. They dispatch before process logging,
   or the instance lock, and never launch Hex; only `hex start` and
   `hex restart` open it. Every command is carried out by the app's own paths
   (the menu bar's meeting request, the window's settings save followed by
@@ -979,8 +1080,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   the same `linux_input` state machine and emits the same events. Commands are
   idempotent: starting while recording or stopping while idle does nothing.
   They talk only to a running, listening Hex and fail with a clear error
-  otherwise; they never start one. The socket hands them straight to the
-  listener's queue, never through the window's thread.
+  otherwise; they never start one. The control host hands them straight to
+  the listener's queue, never through the window's thread.
 - One Linux Hex process per user and data root owns the microphone, model
   workers, saved settings, History, the HUD, and the window. The window is
   optional and opened on demand; closing it never stops capture, accepted
@@ -1083,13 +1184,13 @@ git diff --check
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
-Unfinished features land on `dev` dormant behind an experiment
-([docs/features/experiments.md](docs/features/experiments.md)): add a variant to
-`Experiment` in `src/experiments.rs` and gate where the feature's work starts
-(worker, thread, capture), not just its UI. Turn one on for yourself with
-`hex experiments enable <name>` or `HEX_EXPERIMENTS=<name>`; it applies at the
-next launch. Experiments are unsupported and never on by default, in debug
-builds too; remove the variant when the feature ships or is dropped.
+New, unproven, user-requested, and externally contributed features
+(including ones the issue pipeline builds) land in Labs, off by default
+([docs/features/labs.md](docs/features/labs.md)): add a `labs::Feature` with
+its settings key and description, a row on the Labs page, and a
+`hex settings` key; gate where the feature's work starts (worker, thread,
+capture), not just its UI. Never add a master switch or ship such a feature
+on by default. Remove it from Labs when it graduates or is dropped.
 
 Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
 tests through cargo-nextest (`brew install cargo-nextest`) with

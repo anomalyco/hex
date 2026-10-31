@@ -40,6 +40,8 @@ struct RunningListener {
     /// Saved settings the listener applies in place.
     updates: mpsc::Sender<Box<AppSettings>>,
     swap_failures: Receiver<crate::local_transcriber::SwapFailed>,
+    /// The tray's and `hex` commands, handled as the shortcut would be.
+    commands: mpsc::Sender<crate::windows_dictation::ListenerCommand>,
 }
 
 impl RunningListener {
@@ -74,7 +76,16 @@ pub(crate) struct WindowsDesktopHost {
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
     preparation: TranscriptionPreparation,
+    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    /// Present only while keyboard model switching is on.
+    input_sources: Option<crate::keyboard_input_sources::Watcher>,
+    /// The preparation running is a keyboard switch, which a manual choice
+    /// or a later source change supersedes.
+    automatic_preparation: bool,
     updater: crate::updater::Updater,
+    /// The newest foreground window of another app, where the tray's Paste
+    /// last dictation goes once its menu has taken the foreground.
+    foreground: ForeignWindow,
 }
 
 /// Names the event that marks the running Hex app in this login session.
@@ -159,6 +170,16 @@ impl WindowsDesktopHost {
         let mode_runtime = Arc::new(RwLock::new(
             crate::dictation_modes::ModeRuntime::from_settings(&settings),
         ));
+        // Known before the first poll, so launching keeps the saved model
+        // instead of applying the current layout's mapping.
+        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+            settings.keyboard_model_switching.clone(),
+            settings
+                .keyboard_model_switching
+                .enabled
+                .then(crate::keyboard_input_sources::current)
+                .flatten(),
+        );
         let mut host = Self {
             event_path,
             event_reader,
@@ -180,7 +201,11 @@ impl WindowsDesktopHost {
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             preparation: TranscriptionPreparation::default(),
+            keyboard_switcher,
+            input_sources: None,
+            automatic_preparation: false,
             updater: crate::updater::Updater::start(),
+            foreground: ForeignWindow::default(),
         };
         crate::transcription_models::delete_set_aside();
         host.refresh_personal_commands_host();
@@ -207,7 +232,18 @@ impl WindowsDesktopHost {
                 }
             }
             Request::ChooseModel { model, language } => self.choose_model(model, language),
-            Request::CancelModel => self.preparation.cancel(),
+            Request::CancelModel => {
+                self.manual_choice();
+                self.preparation.cancel();
+            }
+            Request::PasteLast => {
+                if let Some(listener) = &self.listener {
+                    self.foreground.activate();
+                    let _ = listener
+                        .commands
+                        .send(crate::windows_dictation::ListenerCommand::PasteLast);
+                }
+            }
             Request::Quit => return true,
             Request::ReloadSettings => match AppSettings::load() {
                 Ok(settings) => self.apply_settings(&settings),
@@ -241,6 +277,7 @@ impl WindowsDesktopHost {
     }
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
+        self.manual_choice();
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -253,6 +290,70 @@ impl WindowsDesktopHost {
             },
         };
         self.preparation.start(selection, false);
+    }
+
+    /// A layout change not yet polled counts as before this choice, so it
+    /// cannot later undo it.
+    fn manual_choice(&mut self) {
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+        {
+            self.keyboard_switcher
+                .source_changed(source, Instant::now());
+        }
+        self.keyboard_switcher.manual_choice();
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
+    }
+
+    /// A layout being cycled through cancels only automatic work; a manual
+    /// operation is superseded once the debounced choice is due.
+    fn supersede_automatic(&mut self) {
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
+    }
+
+    /// Follows the foreground layout while switching is on, and starts the
+    /// installed-only preparation of a mapping once it is due.
+    fn switch_with_keyboard(&mut self) {
+        let enabled = self.settings.keyboard_model_switching.enabled;
+        if enabled != self.input_sources.is_some() {
+            self.input_sources = enabled.then(Default::default);
+        }
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+            && self
+                .keyboard_switcher
+                .source_changed(source, Instant::now())
+        {
+            self.supersede_automatic();
+        }
+        let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) else {
+            return;
+        };
+        let selection = crate::transcription_models::TranscriptionSelection {
+            language: choice.language,
+            ..self.settings.transcription_for_model(choice.model)
+        };
+        if selection.model != self.settings.transcription.model
+            || selection.language != self.settings.transcription.language
+        {
+            self.preparation.start(selection, true);
+            self.automatic_preparation = true;
+        } else {
+            // The current model stays, but an older manual preparation must
+            // not replace it.
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
     }
 
     fn model_ready(&self) -> bool {
@@ -275,10 +376,12 @@ impl WindowsDesktopHost {
         let (result_sender, result_receiver) = mpsc::channel();
         let (updates, update_receiver) = mpsc::channel();
         let (swap_failure_sender, swap_failures) = mpsc::channel();
+        let (commands, command_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let selection = self.runtime_selection();
         let config = crate::windows_dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
+            commands: Some(command_receiver),
             history: self.history.clone(),
             last_dictation: self.last_dictation.clone(),
             indicator: Some(self.indicator.clone()),
@@ -308,6 +411,7 @@ impl WindowsDesktopHost {
                     worker,
                     updates,
                     swap_failures,
+                    commands,
                 });
                 self.session_before_start = self.activity.session_started_at;
                 self.awaiting_session_start = true;
@@ -341,6 +445,12 @@ impl WindowsDesktopHost {
     /// listener reads changes in place; anything the listener captured at
     /// start restarts a running listener.
     fn apply_settings(&mut self, settings: &AppSettings) {
+        if self
+            .keyboard_switcher
+            .configure(settings.keyboard_model_switching.clone(), Instant::now())
+        {
+            self.supersede_automatic();
+        }
         let previous = std::mem::replace(&mut self.settings, settings.clone());
         let current = settings;
         crate::feedback::set_enabled(current.sound_effects);
@@ -443,7 +553,9 @@ impl WindowsDesktopHost {
     }
 
     pub(crate) fn refresh(&mut self) {
+        self.switch_with_keyboard();
         if let Some(result) = self.preparation.poll() {
+            self.automatic_preparation = false;
             let result = result.and_then(|selection| {
                 crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut candidate = self.settings.clone();
@@ -503,6 +615,7 @@ impl WindowsDesktopHost {
             self.start();
         }
 
+        self.foreground.track();
         self.activity.refresh(&mut self.event_reader);
         self.last_completed_at = last_completed_at(self.event_reader.events().iter());
         if self.awaiting_session_start
@@ -518,9 +631,22 @@ impl WindowsDesktopHost {
         }
     }
 
+    /// Where `hex` dictation commands go: the running listener, once its
+    /// session started (a listener still loading its model would replay
+    /// them late).
+    pub(crate) fn listener_commands(
+        &self,
+    ) -> Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>> {
+        self.listener
+            .as_ref()
+            .filter(|_| !self.awaiting_session_start)
+            .map(|listener| listener.commands.clone())
+    }
+
     pub(crate) fn publish(&self) -> Published {
         let preparation = self.preparation.status();
         Published {
+            activity: self.activity.state,
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
@@ -540,6 +666,7 @@ impl WindowsDesktopHost {
             },
             update_status: self.updater.status(),
             settings: self.settings.clone(),
+            state: self.activity.state.filter(|_| self.is_running()),
         }
     }
 }
@@ -573,6 +700,45 @@ fn last_completed_at<'a>(events: impl DoubleEndedIterator<Item = &'a VoiceEvent>
 
 /// The newest failure, hidden once a later dictation completed, so a silent
 /// failure still reaches the Settings window without sticking around.
+/// The newest foreground window another process owns, polled with the
+/// runtime's refresh.
+#[derive(Default)]
+struct ForeignWindow(Option<isize>);
+
+impl ForeignWindow {
+    fn track(&mut self) {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId,
+        };
+        // SAFETY: plain queries; a null window owns no process.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return;
+            }
+            let mut process_id = 0;
+            GetWindowThreadProcessId(window, &mut process_id);
+            if process_id != GetCurrentProcessId() {
+                self.0 = Some(window as isize);
+            }
+        }
+    }
+
+    /// Brings that window back to the foreground, where a paste lands.
+    fn activate(&self) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+        let Some(window) = self.0 else { return };
+        let window = window as windows_sys::Win32::Foundation::HWND;
+        // SAFETY: `IsWindow` vets a handle that may have closed since.
+        unsafe {
+            if IsWindow(window) != 0 {
+                SetForegroundWindow(window);
+            }
+        }
+    }
+}
+
 fn visible_failure(activity: &DesktopActivity, last_completed_at: Option<u64>) -> Option<String> {
     activity
         .last_failure

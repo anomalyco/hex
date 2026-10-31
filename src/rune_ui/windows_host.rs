@@ -23,8 +23,9 @@ pub(super) use crate::windows_rune::{Request, ShortcutTarget};
 /// The window saves a recorded shortcut; the runtime restarts the listener.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = false;
 pub(super) const RECORDS_KEY_EVENTS: bool = false;
-/// Windows pastes with Ctrl+V, or Ctrl+Shift+V with Terminal paste on.
-pub(super) const TERMINAL_PASTE: bool = true;
+/// Windows' Terminal paste (Ctrl+Shift+V) is a Labs feature, not a row in
+/// General.
+pub(super) const TERMINAL_PASTE: bool = false;
 /// The window offers Quit Hex beside the tray's.
 pub(super) const QUIT_IN_WINDOW: bool = true;
 
@@ -200,7 +201,7 @@ impl Drop for ChordWatch {
     }
 }
 
-/// The keyboard hook cannot tell a single modifier from ordinary typing,
+/// A dictation shortcut needs a modifier, a function key, or a mouse button,
 /// and Paste Last fires on a key press.
 pub(super) fn validate_hotkey(
     target: ShortcutTarget,
@@ -211,7 +212,7 @@ pub(super) fn validate_hotkey(
     }
     WindowsHotkey::from(binding)
         .validate()
-        .map_err(|_| tr("Use two modifiers or add a key"))
+        .map_err(|_| tr("Add a modifier"))
 }
 
 /// The listener's retained history, shared with the window.

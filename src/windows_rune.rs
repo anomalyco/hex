@@ -31,14 +31,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::app_settings::AppSettings;
+use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
 use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_i18n::tr_fill;
 use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription_models::TranscriptionModelId;
+use crate::tray_menu::{TrayCommand, TrayView};
 use crate::windows_app::WindowsDesktopHost;
 
 /// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
@@ -72,6 +74,8 @@ pub(crate) enum Request {
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
     ToggleListening,
+    /// The tray's Paste last dictation, into the app its menu covered.
+    PasteLast,
     /// The window's Quit Hex: stop the listener, then end the app.
     Quit,
 }
@@ -82,16 +86,22 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     PasteLast,
+    /// Annotate (the `capture` experiment).
+    Capture,
 }
 
 /// What the runtime last published for the window.
 #[derive(Clone, PartialEq)]
 pub(crate) struct Published {
+    /// What the listener last reported doing, from the event log.
+    pub(crate) activity: Option<crate::events::VoiceState>,
     pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
     pub(crate) settings: AppSettings,
+    /// The running listener's state, for the tray.
+    pub(crate) state: Option<crate::events::VoiceState>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -100,6 +110,8 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
+    /// Where `hex` dictation commands go while a listener runs.
+    listener: Mutex<Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>>>,
 }
 
 /// The window's connection to the runtime thread.
@@ -146,7 +158,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let Some(instance) = crate::windows_app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
-    crate::experiments::log_launch();
+    crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
     let (settings, settings_error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
@@ -191,6 +203,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
+    // The capture capsule, picker, and ink.
+    let _capture_overlays =
+        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
+    let meetings = crate::meeting_runtime::Meetings::install(&mut app, shutdown)
+        .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
+        .ok();
     let (requests, receiver) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     RUNTIME
@@ -200,8 +218,11 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             history: history.clone(),
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
+    let (control_calls, control_receiver) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let quit = window.clone();
     let runtime_tray = tray.clone();
+    let runtime_shared = shared.clone();
     let runtime = std::thread::Builder::new()
         .name("hex-runtime".into())
         .spawn(move || {
@@ -211,13 +232,21 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 settings_error,
                 history,
                 receiver,
-                &shared,
+                &runtime_shared,
                 shutdown,
                 hud,
                 runtime_tray.as_deref(),
             );
             quit.quit();
         })?;
+    crate::control::host::serve(
+        control_receiver,
+        Arc::new(WindowsControl {
+            runtime: runtime_handle(),
+            shared,
+            window: Mutex::new(window.clone()),
+        }),
+    );
     let relaunch = window.clone();
     instance.forward_launches(move || {
         relaunch.open();
@@ -228,6 +257,11 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     shutdown.store(true, Ordering::Relaxed);
     drop(requests);
     let _ = runtime.join();
+    // A recording stops, keeping its audio for the next launch.
+    if let Some(meetings) = meetings {
+        meetings.join();
+    }
+    drop(local_api);
     drop(tray);
     Ok(())
 }
@@ -247,7 +281,8 @@ fn run_runtime(
     indicator: crate::rune_hud::HudSender,
     tray: Option<&rune::Tray>,
 ) {
-    let mut tray_update = None;
+    let mut tray_view = None;
+    let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
     let mut host =
         WindowsDesktopHost::new(event_path, settings, settings_error, history, indicator);
@@ -276,50 +311,245 @@ fn run_runtime(
             }
             changed
         };
+        *lock(&shared.listener) = host.listener_commands();
         if changed {
             for wake in lock(&shared.wakers).iter() {
                 wake();
             }
         }
+        let meetings = crate::meeting_runtime::tray_state();
         if let Some(tray) = tray
-            && tray_update.as_ref() != Some(&published.update_status)
+            && (changed || tray_view.is_none() || tray_meetings != meetings)
         {
-            tray_update = Some(published.update_status.clone());
-            show_update_in_tray(tray, &published.update_status);
+            tray_meetings = meetings;
+            let view = tray_view_for(&published);
+            if tray_view.as_ref() != Some(&view) {
+                tray.set_tooltip(view.tooltip());
+                tray.set_menu(view.menu());
+                tray_view = Some(view);
+            }
         }
     }
     host.stop();
 }
 
+fn runtime_handle() -> RuntimeHandle {
+    RUNTIME
+        .get()
+        .cloned()
+        .expect("the runtime is set before control starts")
+}
+
+/// The Windows adapter `hex` control commands from the local API run
+/// through ([`crate::control::host`]).
+struct WindowsControl {
+    runtime: RuntimeHandle,
+    shared: Arc<Shared>,
+    window: Mutex<rune::AppHandle<Ui>>,
+}
+
+/// Lets the local API write the reply before Hex quits.
+const QUIT_GRACE: Duration = Duration::from_millis(250);
+
+impl WindowsControl {
+    fn window(&self) -> rune::AppHandle<Ui> {
+        lock(&self.window).clone()
+    }
+
+    fn send(&self, request: Request) -> std::result::Result<(), ControlError> {
+        self.runtime
+            .send(request)
+            .map_err(|error| ControlError::new("unavailable", format!("{error:#}")))
+    }
+
+    fn listener(
+        &self,
+        command: crate::windows_dictation::ListenerCommand,
+    ) -> std::result::Result<(), ControlError> {
+        let listener = lock(&self.shared.listener).clone().ok_or_else(|| {
+            ControlError::new(
+                "not-ready",
+                "Hex is not listening; turn it on in the tray or the window",
+            )
+        })?;
+        listener
+            .send(command)
+            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))
+    }
+}
+
+impl crate::control::host::Host for WindowsControl {
+    fn state(&self) -> std::result::Result<crate::control::host::HostState, ControlError> {
+        let published = self
+            .runtime
+            .published()
+            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+        Ok(crate::control::host::HostState {
+            settings: published.settings.clone(),
+            listener: published.listener.clone(),
+            transcription: published.transcription.clone(),
+            update: published.update_status.clone(),
+            capture: crate::control::host::capture_from_state(published.activity),
+            window_open: self.window().is_visible(),
+        })
+    }
+
+    fn dictation(
+        &self,
+        action: CaptureAction,
+        print: Option<crate::control::PrintReply>,
+    ) -> std::result::Result<(), ControlError> {
+        use crate::windows_dictation::ListenerCommand;
+        self.listener(match print {
+            Some(print) => ListenerCommand::StopAndPrint(print),
+            None => ListenerCommand::Dictation(action),
+        })
+    }
+
+    fn paste_last(&self) -> std::result::Result<(), ControlError> {
+        self.listener(crate::windows_dictation::ListenerCommand::PasteLast)
+    }
+
+    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
+        settings
+            .save()
+            .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
+        self.send(Request::ReloadSettings)
+    }
+
+    fn history(&self) -> Option<History> {
+        self.runtime.history()
+    }
+
+    fn show_window(&self, pane: Option<Pane>) -> std::result::Result<(), ControlError> {
+        let window = self.window();
+        window.open();
+        window.update(move |ui, tx| {
+            crate::rune_ui::show(ui, crate::rune_ui::destination(pane), tx);
+        });
+        Ok(())
+    }
+
+    fn hide_window(&self) -> bool {
+        let window = self.window();
+        let open = window.is_visible();
+        if open {
+            window.close();
+        }
+        open
+    }
+
+    fn onboarding_reset(&self) -> ControlReply {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let window = self.window();
+        window.open();
+        window.update(move |ui, tx| {
+            let _ = sender.send(crate::rune_ui::restart_onboarding(ui, tx));
+        });
+        match receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => ControlReply::done("Opened onboarding"),
+            Ok(Err(why)) => ControlReply::error("unsupported", why),
+            Err(_) => ControlReply::error("unavailable", "the window didn't answer; try again"),
+        }
+    }
+
+    fn choose_model(
+        &self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) -> std::result::Result<(), ControlError> {
+        self.send(Request::ChooseModel {
+            model: selection.model,
+            language: selection.language,
+        })
+    }
+
+    fn cancel_model(&self) {
+        let _ = self.runtime.send(Request::CancelModel);
+    }
+
+    fn check_for_updates(&self) -> std::result::Result<(), ControlError> {
+        self.send(Request::Desktop(DesktopAction::CheckForUpdates))
+    }
+
+    fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
+        let format = |error: color_eyre::Report| format!("{error:#}");
+        Some(match enabled {
+            None => crate::windows_login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::windows_login_item::set_enabled(enabled)
+                .and_then(|()| crate::windows_login_item::is_enabled())
+                .map_err(format),
+        })
+    }
+
+    /// `hex restart` opens Hex again once this one has gone.
+    fn quit(&self, _restart: bool) -> std::result::Result<(), ControlError> {
+        let runtime = self.runtime.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(QUIT_GRACE);
+            let _ = runtime.send(Request::Quit);
+        });
+        Ok(())
+    }
+
+    fn shortcut_rules(&self) -> crate::control::settings::ShortcutRules {
+        crate::rune_ui::shortcut_rules()
+    }
+
+    /// `hex annotate`: recording commands wait for the listener's capture
+    /// host; the captures folder is read here.
+    fn annotate(&self, command: crate::control::ControlCommand) -> ControlReply {
+        use crate::capture_host::{self as capture, CaptureCommand, CaptureControl};
+        use crate::control::ControlCommand as C;
+        let result = match command {
+            C::ScrawlCapture { action } => {
+                let (sender, receiver) = mpsc::sync_channel(1);
+                capture::send_to_listener(CaptureControl::Reply(action, sender))
+                    .map_err(|error| ControlError::new("not-ready", format!("{error:#}")))
+                    .and_then(|()| {
+                        receiver.recv_timeout(Duration::from_secs(5)).map_err(|_| {
+                            ControlError::new("unavailable", "the listener didn't answer")
+                        })
+                    })
+            }
+            C::ScrawlCaptureList { limit } => capture::list_captures(limit),
+            C::ScrawlCaptureShow { capture } => capture::show_capture(&capture),
+            C::ScrawlCaptureSend {
+                capture,
+                to,
+                always,
+            } => capture::send_capture(&capture, to, always),
+            C::ScrawlCaptureUndo => {
+                capture::send_to_listener(CaptureControl::Command(CaptureCommand::Undo))
+                    .map(|()| ControlReply::done("Asked Hex to take the newest send back"))
+                    .map_err(|error| ControlError::new("not-ready", format!("{error:#}")))
+            }
+            C::ScrawlCaptureRoute { capture, ask_jev } => {
+                capture::explain_capture(&capture, ask_jev)
+            }
+            _ => unreachable!("only Annotate's commands"),
+        };
+        result.unwrap_or_else(ControlReply::from)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The tray and the window icon
 
-/// The tray's menu, with the update the window's sidebar offers below Show
-/// Hex: Restart to update once a managed install has staged it, or Download
-/// update for an install that cannot apply it itself.
-fn tray_menu(update: Option<String>) -> Vec<rune::TrayItem> {
-    let mut menu = vec![rune::TrayItem::action("show", tr("Show Hex"))];
-    menu.extend(update.map(|label| rune::TrayItem::action("update", label)));
-    menu.push(rune::TrayItem::action("toggle", tr("Enable / Disable Hex")));
-    menu.push(rune::TrayItem::action("quit", tr("Quit Hex")));
-    menu
-}
-
-fn show_update_in_tray(tray: &rune::Tray, status: &DesktopUpdateStatus) {
-    let label = match status {
-        DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update").to_owned()),
-        DesktopUpdateStatus::Available => Some(tr("Download update").to_owned()),
-        DesktopUpdateStatus::SwitchAvailable { channel, version } => {
-            Some(crate::updater::switch_label(channel, version))
-        }
-        _ => None,
-    };
-    tray.set_tooltip(if label.is_some() {
-        tr("Hex Dictation: update available")
-    } else {
-        tr("Hex Dictation")
-    });
-    tray.set_menu(tray_menu(label));
+/// What the tray shows for what the runtime published.
+fn tray_view_for(published: &Published) -> TrayView {
+    TrayView {
+        meetings: crate::meeting_runtime::tray_state(),
+        ..TrayView::new(
+            published.listener.running,
+            published.state,
+            &published.update_status,
+            crate::tray_menu::model_menu_entries(
+                &published.settings,
+                published.transcription.preparing.is_some(),
+                crate::transcription_models::is_installed,
+            ),
+        )
+    }
 }
 
 /// Gives the window the executable's embedded icon (resource 1, see
@@ -424,36 +654,65 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
         TRAY_ICON_SIZE,
         tray_icon_pixels(taskbar_is_light()),
     );
+    let view = TrayView::default();
     let spec = rune::TraySpec::new("hex", "Hex", icon)
-        .tooltip(tr("Hex Dictation"))
-        .menu(tray_menu(None));
+        .tooltip(view.tooltip())
+        .menu(view.menu());
     let tray = rune::Tray::new(spec, move |event| match event {
         // Left click shows the window; right click opens the menu.
         rune::TrayEvent::Activate { .. } => window.open(),
-        rune::TrayEvent::Menu(id) => match id.as_str() {
-            "show" => window.open(),
-            "update" => {
-                let Some(runtime) = runtime() else { return };
-                let action = match runtime
-                    .published()
-                    .map(|published| published.update_status.clone())
-                {
-                    Some(DesktopUpdateStatus::ReadyToRestart) => DesktopAction::RestartIntoUpdate,
-                    Some(DesktopUpdateStatus::Available) => DesktopAction::OpenUpdate,
-                    Some(DesktopUpdateStatus::SwitchAvailable { .. }) => {
-                        DesktopAction::ConfirmUpdateSwitch
+        rune::TrayEvent::Menu(id) => match TrayCommand::from_id(&id) {
+            Some(TrayCommand::Show) => window.open(),
+            Some(TrayCommand::Quit) => window.quit(),
+            Some(
+                command @ (TrayCommand::RecordMeeting
+                | TrayCommand::StopMeeting
+                | TrayCommand::CopyLastMeeting),
+            ) => {
+                use crate::meeting::MeetingRequest;
+                let result = match command {
+                    TrayCommand::RecordMeeting => {
+                        crate::meeting_runtime::request(MeetingRequest::Start { title: None })
                     }
-                    _ => return,
+                    TrayCommand::StopMeeting => {
+                        crate::meeting_runtime::request(MeetingRequest::Stop)
+                    }
+                    _ => crate::meeting_runtime::copy_last_transcript(),
                 };
-                let _ = runtime.send(Request::Desktop(action));
-            }
-            "toggle" => {
-                if let Some(runtime) = runtime() {
-                    let _ = runtime.send(Request::ToggleListening);
+                if let Err(error) = result {
+                    tracing::warn!(%error, ?command, "the tray action failed");
                 }
             }
-            "quit" => window.quit(),
-            _ => {}
+            Some(command) => {
+                let Some(runtime) = runtime() else { return };
+                let published = runtime.published();
+                let request = match command {
+                    TrayCommand::PasteLast => Request::PasteLast,
+                    TrayCommand::ToggleListening => Request::ToggleListening,
+                    TrayCommand::UseModel(model) => {
+                        let Some(published) = published else { return };
+                        Request::ChooseModel {
+                            model,
+                            language: published.settings.transcription_for_model(model).language,
+                        }
+                    }
+                    TrayCommand::Update => {
+                        let Some(action) = published.and_then(|published| {
+                            crate::tray_menu::update_action(&published.update_status)
+                        }) else {
+                            return;
+                        };
+                        Request::Desktop(action)
+                    }
+                    TrayCommand::Show
+                    | TrayCommand::Quit
+                    | TrayCommand::RecordMeeting
+                    | TrayCommand::StopMeeting
+                    | TrayCommand::CopyLastMeeting => return,
+                };
+                let _ = runtime.send(request);
+            }
+            None => {}
         },
         _ => {}
     })?;

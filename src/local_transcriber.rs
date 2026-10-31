@@ -6,35 +6,23 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::gguf_session::OfflineGgufSession;
-#[cfg(target_os = "linux")]
-use crate::transcription_models::{ModelDefinition, TranscriptionModelId, definition};
 use crate::transcription_models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
 
 /// A word or segment's start and end (ms from the clip's start) and text.
-#[cfg(target_os = "linux")]
 pub type TimedSpan = (i64, i64, String);
 
 pub struct LocalTranscriber {
     session: OfflineGgufSession,
+    selection: TranscriptionSelection,
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
     stream: Option<transcribe_cpp::StreamOptions>,
-    /// The finest timestamps the model gives, for a capture's word times.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    /// The finest timestamps the model gives, for a capture's or a
+    /// meeting's word times.
     finest_timestamps: TimestampKind,
-}
-
-#[cfg(target_os = "linux")]
-pub fn default_model() -> &'static ModelDefinition {
-    definition(TranscriptionModelId::default())
-}
-
-#[cfg(target_os = "linux")]
-pub fn install_default(canceled: &AtomicBool) -> Result<()> {
-    install(&TranscriptionSelection::default(), canceled)
 }
 
 pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Result<()> {
@@ -89,11 +77,6 @@ pub fn initialize_backends() {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub fn transcribe_wav(path: &Path) -> Result<String> {
-    transcribe_wav_with_selection(path, &TranscriptionSelection::default())
-}
-
 pub fn transcribe_wav_with_selection(
     path: &Path,
     selection: &TranscriptionSelection,
@@ -130,11 +113,6 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
 }
 
 impl LocalTranscriber {
-    #[cfg(target_os = "linux")]
-    pub fn load_default() -> Result<Self> {
-        Self::load(&TranscriptionSelection::default())
-    }
-
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
         transcribe_cpp::init_logging();
         transcribe_cpp::init_backends_default()
@@ -187,6 +165,7 @@ impl LocalTranscriber {
         let session = OfflineGgufSession::new(model)?;
         let mut transcriber = Self {
             session,
+            selection: selection.clone(),
             options: RunOptions {
                 timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
                     TimestampKind::None
@@ -243,6 +222,33 @@ impl LocalTranscriber {
             .with_stream(&options, stream_options, cancel, drive)
     }
 
+    /// The selection this model was loaded for, so the transcription engine
+    /// can say which model it holds.
+    pub(crate) fn gguf_selection(&self) -> Option<&TranscriptionSelection> {
+        Some(&self.selection)
+    }
+
+    pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
+        &self.selection == selection
+    }
+
+    /// Brings an idle model's weights back before audio arrives, as loading
+    /// does; a model that ran recently is already warm.
+    pub(crate) fn prewarm(&mut self) -> Result<()> {
+        if self.session.ran_recently() {
+            return Ok(());
+        }
+        self.transcribe(&vec![0.0; 24_000])
+            .wrap_err("could not prewarm transcription model")
+            .map(drop)
+    }
+
+    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
+    pub(crate) fn transcribe_clip(&mut self, mut samples: Vec<f32>) -> Result<String> {
+        crate::dictation::pad_for_parakeet(&mut samples);
+        self.transcribe(&samples)
+    }
+
     pub fn device_label(&self) -> &str {
         &self.device_label
     }
@@ -250,15 +256,49 @@ impl LocalTranscriber {
     /// Text and word times (ms from the clip's start) for a capture, in
     /// chunks the model takes whole. A model without word times gives its
     /// segments instead.
-    #[cfg(target_os = "linux")]
     pub fn transcribe_words(&mut self, samples: &[f32]) -> Result<(String, Vec<TimedSpan>)> {
+        let transcript = self.timed(samples)?;
+        let spans = if transcript.words.is_empty() {
+            transcript.segments
+        } else {
+            transcript.words
+        };
+        let words = spans
+            .into_iter()
+            .map(|word| (word.start_ms, word.end_ms, word.text))
+            .collect();
+        Ok((transcript.text, words))
+    }
+
+    /// One meeting chunk with segment and word timings, padded as dictation
+    /// pads a clip.
+    pub(crate) fn transcribe_segments(
+        &mut self,
+        mut samples: Vec<f32>,
+    ) -> Result<crate::transcript::Transcript> {
+        crate::dictation::pad_for_parakeet(&mut samples);
+        self.timed(&samples)
+    }
+
+    /// Text, segments, and words, in chunks the model takes whole.
+    fn timed(&mut self, samples: &[f32]) -> Result<crate::transcript::Transcript> {
+        use crate::transcript::TranscriptSegment;
         const CHUNK: usize = 30 * 16_000;
         let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
         let options = RunOptions {
             timestamps: self.finest_timestamps,
             ..self.options.clone()
         };
-        let (mut texts, mut words) = (Vec::new(), Vec::new());
+        let span = |offset: i64, t0: i64, t1: i64, text: String| {
+            let text = text.trim().to_owned();
+            (!text.is_empty()).then(|| TranscriptSegment {
+                start_ms: t0.max(0) + offset,
+                end_ms: t1.max(t0) + offset,
+                text,
+            })
+        };
+        let mut timed = crate::transcript::Transcript::default();
+        let mut texts = Vec::new();
         for (index, part) in samples.chunks(chunk.max(1)).enumerate() {
             let offset = (index * chunk / 16) as i64;
             let transcript = self
@@ -269,30 +309,58 @@ impl LocalTranscriber {
             if !text.is_empty() {
                 texts.push(text.to_owned());
             }
-            let spans = if transcript.words.is_empty() {
+            timed.segments.extend(
                 transcript
                     .segments
                     .into_iter()
-                    .map(|s| (s.t0_ms, s.t1_ms, s.text))
-                    .collect::<Vec<_>>()
-            } else {
+                    .filter_map(|s| span(offset, s.t0_ms, s.t1_ms, s.text)),
+            );
+            timed.words.extend(
                 transcript
                     .words
                     .into_iter()
-                    .map(|w| (w.t0_ms, w.t1_ms, w.text))
-                    .collect()
-            };
-            words.extend(spans.into_iter().filter_map(|(t0, t1, text)| {
-                let text = text.trim().to_owned();
-                (!text.is_empty()).then(|| (t0.max(0) + offset, t1.max(t0) + offset, text))
-            }));
+                    .filter_map(|w| span(offset, w.t0_ms, w.t1_ms, w.text)),
+            );
         }
-        Ok((texts.join(" "), words))
+        timed.text = texts.join(" ");
+        Ok(timed)
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
         self.session
             .transcribe_chunked(samples, &self.options, self.max_audio_samples)
+    }
+}
+
+/// The local API's own model, loaded for the selection a host asks for
+/// when the dictation engine holds another one.
+#[derive(Default)]
+pub(crate) struct WarmLocal {
+    active: Option<LocalTranscriber>,
+}
+
+impl WarmLocal {
+    /// The loaded model, without switching or loading one.
+    pub(crate) fn active(&mut self) -> Option<&mut LocalTranscriber> {
+        self.active.as_mut()
+    }
+
+    pub(crate) fn activate(
+        &mut self,
+        selection: &TranscriptionSelection,
+    ) -> Result<&mut LocalTranscriber> {
+        if !self
+            .active
+            .as_ref()
+            .is_some_and(|model| model.matches_selection(selection))
+        {
+            self.active = None;
+            self.active = Some(LocalTranscriber::load(selection)?);
+        }
+        Ok(self
+            .active
+            .as_mut()
+            .expect("activated transcriber must be available"))
     }
 }
 

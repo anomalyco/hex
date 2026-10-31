@@ -123,7 +123,8 @@ cargo run -- devices
 cargo run -- model devices
 ```
 
-Install the default English model, load it, and transcribe a WAV file:
+Install the selected model (with Hex stopped, `model install` downloads in
+this process), load it, and transcribe a WAV file:
 
 ```powershell
 cargo run -- model install
@@ -131,12 +132,12 @@ cargo run -- model check
 cargo run -- model transcribe .\sample.wav
 ```
 
-For Polish, select the multilingual Parakeet model explicitly:
+For Polish, name the multilingual Parakeet model:
 
 ```powershell
-cargo run -- model install --model parakeet_v3 --language pl
-cargo run -- model check --model parakeet_v3 --language pl
-cargo run -- capture --model parakeet_v3 --language pl --copy
+cargo run -- model install parakeet_v3 --language pl
+cargo run -- model check parakeet_v3 --language pl
+cargo run -- record --model parakeet_v3 --language pl --copy
 ```
 
 Open the desktop application after the model is installed:
@@ -162,7 +163,7 @@ by the app:
 cargo run -- listen --model parakeet_v3 --language pl
 ```
 
-`capture` prewarms the selected model and opens the microphone before prompting.
+`record` prewarms the selected model and opens the microphone before prompting.
 Press Enter once to start, then again to stop. Captures shorter than 300 ms are
 discarded. `--device` accepts a case-insensitive fragment from `devices`.
 
@@ -174,6 +175,21 @@ launch, so it has no stdout or stderr.
 Successful pasted dictations are retained, subject to the selected retention
 window and hard size limits, in `history.json`. Captured audio is never retained
 by default.
+
+## Control commands
+
+The `hex` control commands ([docs/cli.md](cli.md)) drive the running tray app
+as they do on macOS: `status`, `start`, `quit`, `restart`, `dictation
+start|stop|cancel|toggle` (with `stop --print`), `paste-last`, `settings`,
+`model`, `window`, `vocabulary`, `history clear`, `check-for-updates`,
+`launch-at-login` (the Run key), `onboarding reset`, `logs`, and `commands
+init|check`, `annotate`, `meetings record|stop|copy-last`, `history`, and
+`mcp`. They reach it through its local API (`local-api.json` in
+`%APPDATA%\hex` and the bearer-authenticated `POST /control`). Dictation commands go
+to the listener's own loop as a shortcut press would, and `annotate`
+start, stop, cancel, and status wait for its capture host. `history`,
+`meetings`, and `mcp` work as on macOS. `hex restart`
+quits, waits for the drain, and starts `hex app --hidden` again.
 
 ## Custom Transformations
 
@@ -199,6 +215,7 @@ fixtures without starting anything: `hex app -- --snap out.png --scene modes`.
 hex app
 ├── named event already held -> signal it (the running app shows its window) -> exit
 └── becomes the app                                   // windows_rune::open
+    ├── the local API's POST /control -> control::host::answer
     ├── runtime thread: WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater), publishes every 250 ms
     ├── main thread: rune::App's winit loop and the window; rune::Tray runs on its own thread
     ├── --hidden -> windowless start; close -> hide (keep_running)
@@ -287,7 +304,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Application picker in Modes | Implemented; lists Start menu shortcuts, App Paths, and apps with an open window, with each executable's icon; "Choose a file…" opens the native dialog through `rune::FileDialogs` |
 | Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, Spanish, and Ukrainian |
-| Resident tray and Launch at login | Implemented |
+| Resident tray and Launch at login | Implemented; the tray menu (shared with Linux) has Paste last dictation, the speech-model picker, and the recording state |
 | Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |

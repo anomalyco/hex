@@ -1,5 +1,5 @@
 //! What the dictation being recorded has said so far, for the HUDs (the
-//! `live-text` experiment) and the first run's practice field, which
+//! Labs feature live text) and the first run's practice field, which
 //! [`demand`]s it while it shows and reads it with [`current`].
 //!
 //! The capture loop publishes through its recording's [`Publisher`], which

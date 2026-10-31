@@ -1,6 +1,6 @@
-//! The Voice Filter pane (macOS, under Experiments while the `voice-filter`
-//! experiment is on or the Hex Microphone is already in use): the
-//! virtual microphone's driver, the filter mode and its key sliders, comfort
+//! The Voice Filter pane (macOS and Linux, in Labs, or while the Hex
+//! Microphone driver is installed): the virtual microphone (macOS's driver,
+//! or Linux's PipeWire source), the filter mode and its key sliders, comfort
 //! noise, and "Try it": record five seconds or use the example clip, then
 //! compare your voice with what the call hears on two waveforms drawn with
 //! Rune shapes. The driver, the live filter, and the demo audio stay with the
@@ -18,7 +18,8 @@ use super::lists::{Tone, slider, small_button, tone_tag};
 use super::platform::{DemoRequest, PlatformRequest};
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::hex_microphone::{
-    DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, DriverActionState, TunedFilterConfig,
+    DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, DriverActionState, HexMicrophoneStatus,
+    TunedFilterConfig,
 };
 use crate::voice_filter::{DictationSpan, VoiceFilterMode};
 
@@ -192,6 +193,10 @@ fn header_status(ui: &Ui, p: Paint) -> El {
     let Some(status) = &ui.platform.hex_microphone else {
         return tone_tag(p, "driver-status", tr("Checking…"), Tone::Neutral);
     };
+    if !ui.platform.caps.hex_microphone {
+        let (label, tone) = source_state(status);
+        return tone_tag(p, "driver-status", label, tone);
+    }
     let (label, tone) = match &status.action_state {
         DriverActionState::Installing => (tr("Installing…").to_string(), Tone::Neutral),
         DriverActionState::Uninstalling => (tr("Uninstalling…").to_string(), Tone::Neutral),
@@ -217,6 +222,45 @@ fn header_status(ui: &Ui, p: Paint) -> El {
     tone_tag(p, "driver-status", &label, tone)
 }
 
+/// Hex Microphone's state where Hex creates it rather than a driver
+/// (`Capabilities::hex_microphone` off): starting, available, or failed.
+fn source_state(status: &HexMicrophoneStatus) -> (&'static str, Tone) {
+    match &status.action_state {
+        DriverActionState::Failed(_) => (tr("Unavailable"), Tone::Danger),
+        _ if status.driver_loaded => (tr("Available"), Tone::Success),
+        _ => (tr("Starting…"), Tone::Neutral),
+    }
+}
+
+/// Hex Microphone as a virtual input Hex creates (Linux): what to do with
+/// it, or why it could not start. The header shows its state.
+fn source_row(ui: &Ui, p: Paint) -> El {
+    let title = tr("Virtual microphone");
+    let Some(status) = &ui.platform.hex_microphone else {
+        return setting_row(
+            p,
+            "hex-mic-source",
+            title,
+            Some(tr("Checking…")),
+            row().key("none"),
+        );
+    };
+    let description = match &status.action_state {
+        DriverActionState::Failed(reason) => tr_fill("Could not start Hex Microphone: {}", reason),
+        _ if status.driver_loaded => {
+            tr("Choose Hex Microphone as your input in Slack, Zoom, or Discord").to_string()
+        }
+        _ => tr("Starting Hex Microphone…").to_string(),
+    };
+    setting_row(
+        p,
+        "hex-mic-source",
+        title,
+        Some(&description),
+        row().key("none"),
+    )
+}
+
 fn tunable(ui: &Ui, p: Paint, which: Tunable, label: &str) -> El {
     let (position, display) = which.position(&ui.platform.tuning);
     slider(
@@ -235,6 +279,21 @@ fn tunable(ui: &Ui, p: Paint, which: Tunable, label: &str) -> El {
             );
         },
     )
+}
+
+/// Whether the Voice Filter runs (`app_settings::voice_filter_enabled`): its
+/// switch is on, or the host found its driver installed.
+pub(super) fn running(ui: &Ui) -> bool {
+    ui.settings.experimental.hex_microphone || driver_installed(ui)
+}
+
+/// The Hex Microphone driver is installed: apps may use it, so the Voice
+/// Filter stays on until it is uninstalled.
+pub(super) fn driver_installed(ui: &Ui) -> bool {
+    ui.platform
+        .hex_microphone
+        .as_ref()
+        .is_some_and(|status| status.driver_bundle_installed)
 }
 
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
@@ -345,7 +404,12 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .child(tunable(ui, p, Tunable::MuffledLevel, tr("Level"))),
         );
     }
-    let mut rows = vec![super::platform_settings::driver_row(ui, p), tuning];
+    let microphone = if ui.platform.caps.hex_microphone {
+        super::platform_settings::driver_row(ui, p)
+    } else {
+        source_row(ui, p)
+    };
+    let mut rows = vec![microphone, tuning];
     if mode == VoiceFilterMode::Muted {
         rows.push(toggle_row(
             p,

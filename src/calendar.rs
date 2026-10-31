@@ -475,7 +475,6 @@ pub fn wall_clock_ms() -> i64 {
         .unwrap_or_default()
 }
 
-#[cfg(target_os = "macos")]
 pub use native::*;
 
 #[cfg(target_os = "macos")]
@@ -603,6 +602,38 @@ mod native {
     /// Opens a meeting's call link in its app or the browser.
     pub fn open_link(url: &str) {
         if let Err(error) = std::process::Command::new("/usr/bin/open").arg(url).spawn() {
+            tracing::warn!(%error, "could not open the meeting link");
+        }
+    }
+}
+
+/// Linux and Windows read no calendar: reminders stay off there (Settings
+/// has no Connect calendar), and only call links open.
+#[cfg(not(target_os = "macos"))]
+mod native {
+    use color_eyre::eyre::Result;
+
+    use super::CalendarMeeting;
+    use crate::app_settings::CalendarSettings;
+
+    pub fn change_count() -> u64 {
+        0
+    }
+
+    pub fn read_meetings(
+        _settings: &CalendarSettings,
+        _now_ms: i64,
+    ) -> Result<Vec<CalendarMeeting>> {
+        Ok(Vec::new())
+    }
+
+    /// Opens a meeting's call link in its app or the browser.
+    pub fn open_link(url: &str) {
+        #[cfg(target_os = "linux")]
+        let opened = std::process::Command::new("xdg-open").arg(url).spawn();
+        #[cfg(target_os = "windows")]
+        let opened = std::process::Command::new("explorer.exe").arg(url).spawn();
+        if let Err(error) = opened {
             tracing::warn!(%error, "could not open the meeting link");
         }
     }

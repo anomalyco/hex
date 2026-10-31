@@ -640,7 +640,7 @@ pub fn write_test_movie(
 }
 
 /// The recording thread: see `crate::capture::Sampler`.
-pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
+pub(crate) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     media_startup();
     let Sampler {
         target,

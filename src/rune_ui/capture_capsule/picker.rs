@@ -74,7 +74,8 @@ pub(crate) struct Window {
 impl Window {
     fn from_target(target: &scrawl_capture::model::TargetInfo) -> Option<Self> {
         let f = target.frame;
-        let frame = [f.x, f.y, f.width, f.height].map(|v| v as f32);
+        let scale = crate::capture_host::pixels_per_point();
+        let frame = [f.x, f.y, f.width, f.height].map(|v| (v / scale) as f32);
         Some(Self {
             id: target.window_id?,
             label: window_label(target.app.as_deref(), target.window_title.as_deref(), frame),
@@ -273,7 +274,7 @@ impl Aim {
     /// with no drag.
     pub(crate) fn target(&self) -> Option<CaptureTarget> {
         let at = self.global(self.pointer.unwrap_or([0.0, 0.0]));
-        match self.mode {
+        let target = match self.mode {
             Mode::Window => {
                 self.windows.as_ref()?;
                 Some(match self.hovered() {
@@ -289,15 +290,18 @@ impl Aim {
                 })
             }
             Mode::Screen | Mode::Iphone => Some(CaptureTarget::Display { at }),
-        }
+        };
+        target.map(in_engine_units)
     }
 
     /// What the capture shortcut records: what a click would, else (an
     /// area not yet dragged) the display, as Scrawl's shortcut does.
     pub(crate) fn shortcut(&self) -> Option<CaptureTarget> {
         self.target().or_else(|| {
-            (self.mode == Mode::Area).then(|| CaptureTarget::Display {
-                at: self.global(self.pointer.unwrap_or([0.0, 0.0])),
+            (self.mode == Mode::Area).then(|| {
+                in_engine_units(CaptureTarget::Display {
+                    at: self.global(self.pointer.unwrap_or([0.0, 0.0])),
+                })
             })
         })
     }
@@ -730,13 +734,32 @@ impl PickerState {
     }
 }
 
-/// The global frame of the display under the pointer, and the pointer.
+/// The global frame of the display under the pointer, and the pointer, in
+/// the overlay's points.
 fn pointer_display() -> Option<([f32; 4], [f32; 2])> {
     use scrawl_capture::screens;
     let pointer = screens::pointer()?;
     let displays = screens::displays();
     let display = &displays[screens::index_at(&displays, pointer)?];
-    Some((display.frame.map(|v| v as f32), pointer.map(|v| v as f32)))
+    let scale = crate::capture_host::pixels_per_point();
+    Some((
+        display.frame.map(|v| (v / scale) as f32),
+        pointer.map(|v| (v / scale) as f32),
+    ))
+}
+
+/// `target`, picked in the overlay's points, in the engine's units.
+fn in_engine_units(target: CaptureTarget) -> CaptureTarget {
+    let scale = crate::capture_host::pixels_per_point();
+    match target {
+        CaptureTarget::Display { at } => CaptureTarget::Display {
+            at: at.map(|v| v * scale),
+        },
+        CaptureTarget::Area { rect } => CaptureTarget::Area {
+            rect: rect.map(|v| v * scale),
+        },
+        target => target,
+    }
 }
 
 pub(crate) fn poll(s: &mut PickerState, now: f64, tx: &mut Tx) -> bool {
@@ -801,9 +824,13 @@ pub(crate) fn poll(s: &mut PickerState, now: f64, tx: &mut Tx) -> bool {
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
-            super::set_shown(overlay, shown, |s: &PickerState| !s.shown);
-            if !shown && (s.want.is_none() || s.want == Some(Mode::Iphone)) {
-                s.aim = None;
+            if shown {
+                overlay.show();
+            } else {
+                overlay.hide();
+                if s.want.is_none() || s.want == Some(Mode::Iphone) {
+                    s.aim = None;
+                }
             }
         }
     }
@@ -850,8 +877,7 @@ impl PickerOverlay {
                 display: DISPLAY,
                 // Under the capsule, so its chips still take clicks.
                 level: OverlayLevel::AboveStatus,
-                // Hidden until shown; `set_shown` excludes it then.
-                exclude_from_capture: false,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::All,
                 prewarm: true,
                 ..Default::default()
@@ -885,7 +911,7 @@ impl PickerOverlay {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the picker, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        super::follow_recordings(&self.overlay, shown, |s: &PickerState| s.shown);
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.

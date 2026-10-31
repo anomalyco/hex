@@ -213,6 +213,16 @@ impl CaptureInstant {
         Self(now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64)
     }
 
+    /// The monotonic clock, counted from its first read (one second in, so
+    /// it is never [`Self::ZERO`]). Windows' microphone streams keep their
+    /// own clock, so the capture timeline anchors them to this.
+    #[cfg(target_os = "windows")]
+    pub fn now() -> Self {
+        static ANCHOR: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+        let since = u64::try_from(ANCHOR.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        Self(since.saturating_add(1_000_000_000))
+    }
+
     #[cfg(target_os = "macos")]
     pub fn from_mach_ticks(ticks: u64) -> Self {
         let Some((numerator, denominator)) = mach_timebase() else {
@@ -1358,6 +1368,12 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         }
         let mut input = AudioInput::open_device(device, name, follows_default)?;
         input.selection = plan.selection;
+        // The ALSA default cannot name another PipeWire source, so Linux
+        // moves the opened stream off a Bluetooth default instead.
+        #[cfg(target_os = "linux")]
+        if follows_default && route.avoid_bluetooth {
+            crate::linux_input_route::move_streams_off_bluetooth();
+        }
         Ok(Opened::Input(Box::new(input)))
     };
     let plan = resolve(request.selected_device.as_deref())?;
@@ -1383,7 +1399,6 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
 
 /// Opens the microphone a meeting records, resolved like dictation's, or
 /// keeps the open one named `keep` when it resolves to that again.
-#[cfg(target_os = "macos")]
 pub fn open_meeting_input(selected_device: Option<&str>, keep: Option<&str>) -> Result<Opened> {
     open_configured_input(&OpenRequest {
         device_override: None,
@@ -1480,6 +1495,17 @@ pub fn input_devices() -> Result<InputDevices> {
             InputTarget::Named(index) | InputTarget::StandIn(index) => Some(listed[index].clone()),
         })
         .filter(|_| cfg!(not(target_os = "linux")));
+    // Linux names the sound server's sources instead, and only when it
+    // passes over a Bluetooth default.
+    #[cfg(target_os = "linux")]
+    let (system_default, bluetooth_default_passed_over) = match route
+        .avoid_bluetooth
+        .then(crate::linux_input_route::bluetooth_stand_in)
+        .flatten()
+    {
+        Some(stand_in) => (Some(stand_in.input), Some(stand_in.bluetooth)),
+        None => (system_default, bluetooth_default_passed_over),
+    };
     let mut names = listed
         .into_iter()
         .filter(|name| !crate::hex_microphone::is_hex_virtual_device_name(name))
@@ -1501,10 +1527,37 @@ pub fn input_device_names() -> Result<Vec<String>> {
     input_devices().map(|devices| devices.names)
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-/// Linux and Windows don't tell built-in or Bluetooth inputs apart yet.
+/// ALSA devices carry no transport; Linux passes over a Bluetooth default
+/// through the sound server instead (`linux_input_route`).
+#[cfg(target_os = "linux")]
 fn transport(_device: &Device) -> Transport {
     Transport::Other
+}
+
+/// How WASAPI reports `device` connects, from its enumerator and form
+/// factor. cpal names only `BTHENUM` Bluetooth; a hands-free headset
+/// endpoint (`BTHHFENUM`) has no bus it knows, so a headset or handset of
+/// unknown bus counts as Bluetooth too.
+#[cfg(target_os = "windows")]
+fn transport(device: &Device) -> Transport {
+    use cpal::{DeviceType, InterfaceType};
+    let Ok(description) = device.description() else {
+        return Transport::Other;
+    };
+    match description.interface_type() {
+        InterfaceType::BuiltIn => Transport::BuiltIn,
+        InterfaceType::Bluetooth => Transport::Bluetooth,
+        InterfaceType::Virtual | InterfaceType::Aggregate => Transport::Virtual,
+        InterfaceType::Unknown
+            if matches!(
+                description.device_type(),
+                DeviceType::Headset | DeviceType::Handset
+            ) =>
+        {
+            Transport::Bluetooth
+        }
+        _ => Transport::Other,
+    }
 }
 
 /// How CoreAudio reports `device` connects: built in, such as a MacBook's

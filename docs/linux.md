@@ -8,7 +8,7 @@ inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your 
 or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes,
-and History. Website mode rules and meetings are macOS-only.
+and History. Meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
 protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
 elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts portal when it has one, otherwise
@@ -26,9 +26,11 @@ workers, sounds, paste, History, the recording pill, and the window. The window
 is optional: closing it stops neither dictation nor a model download, and
 launching Hex again opens it. When the desktop has a tray (a
 StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
-tray icon: click it to open the window, or use its menu's **Show Hex** and
-**Quit Hex**. Without a tray, quit with **Quit Hex** at the bottom of the
-window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
+tray icon: click it to open the window, or use its menu: **Show Hex**,
+**Paste last dictation**, the downloaded speech models, the update once one
+is ready (**Restart to update**), **Enable / Disable Hex**, and **Quit Hex**;
+while Hex records or transcribes, the menu and tooltip say so. Without a
+tray, quit with **Quit Hex** at the bottom of the window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window opens at 980×760 logical pixels and floats on tiling window
 managers with no window rule: it maps with its minimum size equal to its
@@ -42,16 +44,23 @@ and Windows use.
 ```sh
 hex                             # open the window, starting Hex if needed
 hex start                       # start Hex in the background; no window
-hex status                      # query the running Hex, not an old log entry
-hex quit                        # finish accepted work, release the microphone, exit
-hex restart                     # restart the systemd unit in this desktop's environment
+hex status [--json]             # query the running Hex, not an old log entry
+hex quit [--force]              # finish accepted work, release the microphone, exit
+hex restart [--force]           # restart the systemd unit in this desktop's environment
                                 # (over SSH: the one it last ran in)
+hex settings set sound_effects off   # every control command (docs/cli.md)
 journalctl --user -u hex.service # diagnostics of the supervised process
 ```
 
-`hex app` is the same as `hex`, `hex app --hidden` the same as `hex start`, and
-`hex stop` the same as `hex quit`; older desktop and autostart entries keep
-working after an update replaces only the executable.
+`hex app` is the same as `hex`, `hex start` runs `hex app --hidden` in the
+background and waits until Hex answers, and `hex stop` is the same as
+`hex quit`; older desktop and autostart entries keep working after an update
+replaces only the executable. `hex quit` and `hex restart` refuse while a
+dictation records or transcribes unless `--force`. Linux runs the same
+control commands as macOS ([docs/cli.md](cli.md)): `settings`, `model`,
+`window`, `vocabulary`, `history clear`, `check-for-updates`, `onboarding
+reset`, `annotate status`, `launch-at-login` (the XDG autostart entry),
+`logs`, `commands init|check`, `history`, `meetings`, and `mcp`.
 
 A launch first asks the running Hex over its socket. If one answers, it
 forwards `Activate` with the launcher's `XDG_ACTIVATION_TOKEN` or
@@ -83,8 +92,9 @@ one (quit it first).
 The socket is owner-only in Hex's data directory, with same-user peer
 credentials, versioned bounded frames, bounded queues, and I/O deadlines. It is
 not a network API or the macOS embedded transcription SDK service. It carries
-only `Activate`, the shortcut commands, `Status`, and `Quit`; shortcut commands
-go straight from the socket to the listener, never through the window.
+`Activate`, `Status`, and Annotate's recording commands. The `hex` control
+commands reach Hex through its local API's `POST /control`; dictation
+commands go straight from there to the listener, never through the window.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
@@ -92,7 +102,7 @@ with Hex's listener. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
 installed user unit; they forward to the Hex using that data directory or
 become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
-`hex status --lines 40` retains the explicit diagnostic-log view.
+`hex logs -n 40` is the diagnostic-log view (`hex status --lines` is gone).
 
 The window runs on Rune's app lifetime (`rune::App`): Hex starts it without a
 window, each `Activate` opens or focuses it with the forwarded token (on
@@ -141,6 +151,8 @@ The installer verifies the signed release feed, exact artifact size, and
 SHA-256 before installing. It uses no root access. It creates the managed
 version layout, `~/.local/bin/hex`, a desktop launcher, and an XDG autostart
 entry and a `hex.service` user unit. It does not start recording during installation.
+General › **Launch at login** turns that autostart entry on or off
+(`~/.config/autostart/hex.desktop`); Hex leaves an entry it did not write alone.
 
 Remove the application while preserving logs and settings with:
 
@@ -252,10 +264,21 @@ listener reads at start temporarily stops listening and restores the previous
 running state after the edit.
 
 Modes apply corrections, OpenCode rewriting, and transformations per
-application. On X11, Hex reads the frontmost application from the active
-window's process name (`code`, `firefox`); the application picker lists
-`.desktop` entries. Wayland doesn't report the focused window,
-so the Global mode applies there. Completed dictations are kept in History.
+application or website; the application picker lists `.desktop` entries. On
+X11, Hex reads the focused application from the active window's process name
+(`code`, `chrome`). On Wayland, compositors with the foreign-toplevel protocol
+(wlroots compositors such as Sway, niri, Hyprland) report the activated
+window's app ID, which Hex names by its `.desktop` entry
+(`google-chrome-stable`, `firefox`). GNOME and KDE don't report it, so the
+Global mode applies there.
+
+Website rules read the focused page's address through AT-SPI, the desktop
+accessibility bus, on X11 and Wayland. Firefox exposes it whenever the
+accessibility bus is running. Chrome and other Chromium browsers expose it
+only with accessibility turned on: launch them with
+`--force-renderer-accessibility` (for example in
+`~/.config/chrome-flags.conf`), or run a screen reader. Without it, the
+application rule applies. Completed dictations are kept in History.
 
 **Microphone mode** can release the microphone between dictations; it then opens
 on the shortcut press without pre-roll. **While dictating** can mute the default

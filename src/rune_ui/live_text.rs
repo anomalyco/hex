@@ -1,4 +1,4 @@
-//! The live text plate (the `live-text` experiment): one click-through line
+//! The live text plate (Labs): one click-through line
 //! beside the recording HUD with what the dictation has said so far, on
 //! every OS. It shows while a recording has text and hides when the
 //! recording ends ([`crate::live_text`]); `rune_hud` says where the HUD is,
@@ -65,9 +65,9 @@ impl Spot {
 /// appears, so it may read the screen.
 pub(crate) type Place = fn() -> Spot;
 
-/// Adds the plate to the app when the `live-text` experiment is on.
+/// Adds the plate to the app when Labs is on.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
-    if !crate::experiments::enabled(crate::experiments::Experiment::LiveText) {
+    if !crate::labs::live_text() {
         return;
     }
     let spec = OverlaySpec {

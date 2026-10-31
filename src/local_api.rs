@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -14,8 +12,8 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize};
 
 use crate::events::{EventLog, VoiceEvent, now_ms};
-use crate::recognition::RecognitionControl;
 
+mod dictation;
 mod streams;
 
 const API_VERSION: &str = "2";
@@ -35,7 +33,6 @@ const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_BYTES: usize = 64 * 1024;
-const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_DICTATION_SOURCE_BYTES: usize = 128;
 
 type HealthProvider = Arc<dyn Fn() -> HealthResponse + Send + Sync>;
@@ -89,11 +86,6 @@ struct HttpRequest {
     body_prefix: Vec<u8>,
 }
 
-struct DictationLevels {
-    owner_token: String,
-    receiver: Receiver<crate::recognition::DictationLevel>,
-}
-
 struct HttpResponse {
     status: u16,
     reason: &'static str,
@@ -116,8 +108,7 @@ struct HttpContext {
     transcription: crate::transcription_service::TranscriptionServiceHandle,
     developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
     control: Option<SyncSender<crate::control::ControlCall>>,
-    dictation_control: Option<SyncSender<RecognitionControl>>,
-    dictation_levels: Arc<Mutex<HashMap<u64, DictationLevels>>>,
+    dictations: dictation::Dictations,
     streams: Arc<crate::transcription_stream::Streams>,
     stream_engine: crate::transcription_stream::EngineSource,
 }
@@ -147,7 +138,9 @@ pub struct LocalApiOptions {
     pub developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
     /// The `hex` control commands (`POST /control`).
     pub control: Option<SyncSender<crate::control::ControlCall>>,
-    pub dictation_control: Option<SyncSender<RecognitionControl>>,
+    /// Running-app dictation (`/dictations`), which only the macOS
+    /// recognition loop drives so far.
+    pub dictation_control: Option<dictation::Control>,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription_stream::EngineSource>,
@@ -164,6 +157,31 @@ impl LocalApi {
             options,
             Some(instance),
         )
+    }
+
+    /// Start the running Linux or Windows app's local API. Hex runs on
+    /// without it, so a failure is only logged.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn start_for_app(
+        event_path: &Path,
+        control: SyncSender<crate::control::ControlCall>,
+    ) -> Option<Self> {
+        let started = EventLog::create(event_path)
+            .map_err(Into::into)
+            .and_then(|events| {
+                Self::start(
+                    events,
+                    LocalApiOptions {
+                        control: Some(control),
+                        ..Default::default()
+                    },
+                )
+            });
+        started
+            .inspect_err(
+                |error| tracing::warn!(error = %format!("{error:#}"), "local API is unavailable"),
+            )
+            .ok()
     }
 
     /// Start an unpublished API whose endpoint is handed directly to one host.
@@ -227,8 +245,7 @@ impl LocalApi {
             transcription,
             developer_control: options.developer_control,
             control: options.control,
-            dictation_control: options.dictation_control,
-            dictation_levels: Arc::new(Mutex::new(HashMap::new())),
+            dictations: dictation::Dictations::new(options.dictation_control),
             streams: Arc::default(),
             stream_engine: options
                 .stream_engine
@@ -304,6 +321,71 @@ impl LocalApi {
         observe_stopped(&self.events, &self.stop_observed);
         tracing::info!("local API stopped");
     }
+}
+
+/// Runs `hex service`: the local API without the app, until `shutdown`.
+/// Published, it is the one discoverable service. Embedded (`--embedded`,
+/// the TypeScript SDK's direct child), it prints its endpoint as one JSON line
+/// on stdout instead and exits when its host closes stdin.
+pub fn run_service(
+    log_dir: &Path,
+    event_path: PathBuf,
+    embedded: bool,
+    shutdown: &'static AtomicBool,
+) -> Result<()> {
+    let service_event_path = if embedded {
+        log_dir.join(format!("embedded-{}.ndjson", std::process::id()))
+    } else {
+        event_path
+    };
+    let events = EventLog::create(&service_event_path)?;
+    let local_api = if embedded {
+        let api = LocalApi::start_embedded(events)?;
+        thread::Builder::new()
+            .name("embedded-host-lease".into())
+            .spawn(move || {
+                let mut stdin = std::io::stdin().lock();
+                let mut buffer = [0_u8; 1];
+                loop {
+                    match stdin.read(&mut buffer) {
+                        Ok(0) => {
+                            shutdown.store(true, Ordering::Release);
+                            thread::sleep(Duration::from_secs(5));
+                            tracing::warn!(
+                                "forcing embedded service shutdown after host lease closed"
+                            );
+                            std::process::exit(0);
+                        }
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(error) => {
+                            tracing::warn!(%error, "embedded host lease failed");
+                            shutdown.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                }
+            })?;
+        let mut stdout = std::io::stdout().lock();
+        serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+        drop(stdout);
+        api
+    } else {
+        LocalApi::start(events, LocalApiOptions::default())?
+    };
+    while !shutdown.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(100));
+    }
+    drop(local_api);
+    if embedded
+        && let Err(error) = fs::remove_file(&service_event_path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, "could not remove embedded service event log");
+    }
+    Ok(())
 }
 
 impl Drop for LocalApi {
@@ -521,7 +603,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
             } => {
-                let response = dictation_start(&mut stream, content_length, body_prefix, &context);
+                let response = dictation::start(&mut stream, content_length, body_prefix, &context);
                 if let Err(error) = write_response(&mut stream, response) {
                     tracing::debug!(%error, "dictation client disconnected");
                 }
@@ -531,7 +613,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 owner_token,
                 action,
             } => {
-                handle_dictation(&mut stream, id, owner_token, action, &context);
+                dictation::handle(&mut stream, id, owner_token, action, &context);
             }
             RequestAction::Stream(action) => streams::handle(&mut stream, action, &context),
         }
@@ -573,7 +655,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
         return streams::route(request, id, &action, context);
     }
     if request.method == "POST" && path == "/dictations" {
-        return dictation_start_action(request, context.dictation_control.is_some());
+        return dictation_start_action(request, context.dictations.available());
     }
     if let Some((id, action)) = dictation_path(path) {
         let Some(owner_token) = request.dictation_token else {
@@ -588,7 +670,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             _ => None,
         };
         return match action {
-            Some(action) if context.dictation_control.is_some() => RequestAction::Dictation {
+            Some(action) if context.dictations.available() => RequestAction::Dictation {
                 id,
                 owner_token,
                 action,
@@ -604,7 +686,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &CapabilitiesResponse {
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
-                service_capture: context.dictation_control.is_some(),
+                service_capture: context.dictations.available(),
                 streams: true,
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
@@ -742,296 +824,6 @@ fn json_post_action(
         return RequestAction::Respond(HttpResponse::code(413, too_large_code));
     }
     build(content_length, request.body_prefix)
-}
-
-#[derive(Deserialize)]
-struct DictationStartRequest {
-    source: String,
-}
-
-fn dictation_start(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    context: &HttpContext,
-) -> HttpResponse {
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        &context.shutdown,
-        MAX_DICTATION_SOURCE_BYTES + 32,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let Ok(request) = serde_json::from_slice::<DictationStartRequest>(&body) else {
-        return HttpResponse::code(400, "invalid-request");
-    };
-    if request.source.trim().is_empty() || request.source.len() > MAX_DICTATION_SOURCE_BYTES {
-        return HttpResponse::code(400, "invalid-source");
-    }
-    let Some(controls) = &context.dictation_control else {
-        return HttpResponse::code(404, "service-capture-unavailable");
-    };
-    context
-        .dictation_levels
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .retain(|_, levels| !matches!(levels.receiver.try_recv(), Err(TryRecvError::Disconnected)));
-    let owner_token = match generate_token() {
-        Ok(token) => token,
-        Err(error) => {
-            tracing::error!(%error, "could not generate dictation owner token");
-            return HttpResponse::code(500, "token-generation-failed");
-        }
-    };
-    let (level_sender, levels) = mpsc::sync_channel(8);
-    let started = match call_recognition(
-        controls,
-        DEVELOPER_CONTROL_TIMEOUT,
-        HttpResponse::code(503, "service-capture-unavailable"),
-        |reply| RecognitionControl::StartDictation {
-            source: request.source,
-            owner_token: owner_token.clone(),
-            levels: level_sender,
-            reply,
-        },
-    ) {
-        Ok(started) => started,
-        Err(response) => return response,
-    };
-    context
-        .dictation_levels
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert(
-            started.id,
-            DictationLevels {
-                owner_token: owner_token.clone(),
-                receiver: levels,
-            },
-        );
-    HttpResponse::json(
-        201,
-        &serde_json::json!({
-            "id": started.id,
-            "ownerToken": owner_token,
-            "sampleRate": started.sample_rate,
-        }),
-    )
-}
-
-/// Sends one control to the recognition loop and waits for its typed reply.
-/// A full control queue is `503 service-capture-busy`; a rejected control is
-/// `409` with the recognizer's code; `on_timeout` covers a silent recognizer.
-fn call_recognition<T>(
-    controls: &SyncSender<RecognitionControl>,
-    timeout: Duration,
-    on_timeout: HttpResponse,
-    build: impl FnOnce(SyncSender<std::result::Result<T, String>>) -> RecognitionControl,
-) -> std::result::Result<T, HttpResponse> {
-    let (reply, response) = mpsc::sync_channel(1);
-    if controls.try_send(build(reply)).is_err() {
-        return Err(HttpResponse::code(503, "service-capture-busy"));
-    }
-    match response.recv_timeout(timeout) {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(code)) => Err(HttpResponse::code(409, &code)),
-        Err(_) => Err(on_timeout),
-    }
-}
-
-fn handle_dictation(
-    stream: &mut TcpStream,
-    id: u64,
-    owner_token: String,
-    action: DictationAction,
-    context: &HttpContext,
-) {
-    let Some(controls) = &context.dictation_control else {
-        let _ = write_response(
-            stream,
-            HttpResponse::code(404, "service-capture-unavailable"),
-        );
-        return;
-    };
-    let response = match action {
-        DictationAction::Levels => {
-            return stream_dictation_levels(stream, id, &owner_token, context);
-        }
-        DictationAction::Audio => {
-            return stream_dictation_audio(stream, id, owner_token, controls, context);
-        }
-        DictationAction::Finish => dictation_finish(id, owner_token, controls),
-        DictationAction::Cancel => dictation_cancel(id, owner_token, controls, context),
-        DictationAction::Heartbeat => dictation_heartbeat(id, owner_token, controls),
-    };
-    if let Err(error) = write_response(stream, response) {
-        tracing::debug!(%error, "dictation client disconnected");
-    }
-}
-
-fn dictation_finish(
-    id: u64,
-    owner_token: String,
-    controls: &SyncSender<RecognitionControl>,
-) -> HttpResponse {
-    match call_recognition(
-        controls,
-        DICTATION_CONTROL_TIMEOUT,
-        HttpResponse::code(504, "dictation-timeout"),
-        |reply| RecognitionControl::FinishDictation {
-            id,
-            owner_token,
-            reply,
-        },
-    ) {
-        Ok(result) => HttpResponse::json(
-            200,
-            &serde_json::json!({
-                "transcript": result.transcript,
-                "durationMs": result.duration_ms,
-            }),
-        ),
-        Err(response) => response,
-    }
-}
-
-fn dictation_cancel(
-    id: u64,
-    owner_token: String,
-    controls: &SyncSender<RecognitionControl>,
-    context: &HttpContext,
-) -> HttpResponse {
-    match call_recognition(
-        controls,
-        DEVELOPER_CONTROL_TIMEOUT,
-        HttpResponse::code(503, "service-capture-unavailable"),
-        |reply| RecognitionControl::CancelDictation {
-            id,
-            owner_token,
-            reply,
-        },
-    ) {
-        Ok(()) => {
-            context
-                .dictation_levels
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .remove(&id);
-            HttpResponse::empty(204)
-        }
-        Err(response) => response,
-    }
-}
-
-fn dictation_heartbeat(
-    id: u64,
-    owner_token: String,
-    controls: &SyncSender<RecognitionControl>,
-) -> HttpResponse {
-    match call_recognition(
-        controls,
-        DEVELOPER_CONTROL_TIMEOUT,
-        HttpResponse::code(503, "service-capture-unavailable"),
-        |reply| RecognitionControl::HeartbeatDictation {
-            id,
-            owner_token,
-            reply,
-        },
-    ) {
-        Ok(()) => HttpResponse::empty(204),
-        Err(response) => response,
-    }
-}
-
-fn stream_dictation_levels(
-    stream: &mut TcpStream,
-    id: u64,
-    owner_token: &str,
-    context: &HttpContext,
-) {
-    let levels = {
-        let mut levels = context
-            .dictation_levels
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        levels
-            .get(&id)
-            .is_some_and(|levels| levels.owner_token == owner_token)
-            .then(|| {
-                levels
-                    .remove(&id)
-                    .expect("dictation levels were checked")
-                    .receiver
-            })
-    };
-    let Some(levels) = levels else {
-        let _ = write_response(stream, HttpResponse::code(404, "dictation-not-found"));
-        return;
-    };
-    if write_sse_headers(stream).is_err() {
-        return;
-    }
-    while !context.shutdown.load(Ordering::Acquire) {
-        match levels.recv_timeout(Duration::from_millis(100)) {
-            Ok(level) => {
-                if write_sse(
-                    stream,
-                    &serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
-                )
-                .is_err()
-                {
-                    break;
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-    }
-}
-
-fn stream_dictation_audio(
-    stream: &mut TcpStream,
-    id: u64,
-    owner_token: String,
-    controls: &SyncSender<RecognitionControl>,
-    context: &HttpContext,
-) {
-    let (audio, chunks) = mpsc::sync_channel(4);
-    if let Err(response) = call_recognition(
-        controls,
-        DEVELOPER_CONTROL_TIMEOUT,
-        HttpResponse::code(503, "service-capture-unavailable"),
-        |reply| RecognitionControl::AttachDictationAudio {
-            id,
-            owner_token,
-            audio,
-            reply,
-        },
-    ) {
-        let _ = write_response(stream, response);
-        return;
-    }
-    if write_stream_headers(stream, "application/octet-stream").is_err() {
-        return;
-    }
-    while !context.shutdown.load(Ordering::Acquire) {
-        match chunks.recv_timeout(Duration::from_millis(100)) {
-            Ok(chunk) => {
-                let mut bytes = Vec::with_capacity(chunk.samples.len() * size_of::<f32>());
-                for sample in chunk.samples {
-                    bytes.extend_from_slice(&sample.to_le_bytes());
-                }
-                if stream.write_all(&bytes).is_err() || stream.flush().is_err() {
-                    break;
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-    }
 }
 
 fn dictation_path(path: &str) -> Option<(u64, &str)> {
@@ -1914,6 +1706,7 @@ fn current_health() -> HealthResponse {
 }
 
 #[cfg(debug_assertions)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn call_developer(
     command: &crate::developer_control::DeveloperCommand,
 ) -> Result<crate::developer_control::DeveloperReply> {
@@ -1929,6 +1722,7 @@ pub fn call_developer(
 }
 
 /// Sends one `hex` control request to the running app.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn call_control(
     request: &crate::control::ControlRequest,
 ) -> Result<crate::control::ControlResponse> {
@@ -1958,6 +1752,7 @@ pub fn call_control(
 }
 
 /// The running app's process id, if its local API is live.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn running_pid() -> Option<u32> {
     live_discovery().ok().map(|document| document.pid)
 }
@@ -2094,30 +1889,57 @@ fn write_discovery(path: &Path, document: &DiscoveryDocument) -> Result<()> {
     {
         return Err(error.into());
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    // The token lets any reader drive Hex, so only the owner may read it. On
+    // Windows the file inherits the per-user Application Support folder's
+    // ACL (the user, SYSTEM and Administrators).
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&temporary)?;
     let mut data = serde_json::to_vec(document)?;
     data.push(b'\n');
     file.write_all(&data)?;
     file.sync_all()?;
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+    #[cfg(unix)]
+    fs::set_permissions(
+        &temporary,
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )?;
     fs::rename(&temporary, path)?;
-    File::open(parent)?.sync_all()?;
+    #[cfg(unix)]
+    fs::File::open(parent)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = parent;
     Ok(())
 }
 
+#[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
-    unsafe { kill(pid, 0) == 0 }
+    // SAFETY: signal 0 only checks that the process exists.
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
-unsafe extern "C" {
-    fn kill(pid: i32, signal: i32) -> i32;
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: the handle is checked before use and closed once.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let mut code = 0;
+        let alive = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
+        CloseHandle(process);
+        alive
+    }
 }
 
 #[cfg(test)]
@@ -2129,6 +1951,7 @@ mod tests {
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     /// How long a test waits on another thread before failing instead of hanging.
+    #[cfg(target_os = "macos")]
     const TEST_WAIT: Duration = Duration::from_secs(5);
 
     #[test]
@@ -2167,10 +1990,16 @@ mod tests {
         assert_eq!(capabilities["control"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
         let vitals = request(document.port, Some(&document.token), "/profile/vitals");
-        assert!(vitals.starts_with("HTTP/1.1 200"));
-        let vitals: serde_json::Value = serde_json::from_str(response_body(&vitals)).unwrap();
-        assert!(vitals["footprint"].as_u64().unwrap() > 0);
-        assert!(vitals["heap"]["live"].as_u64().unwrap() > 0);
+        #[cfg(target_os = "macos")]
+        {
+            assert!(vitals.starts_with("HTTP/1.1 200"));
+            let vitals: serde_json::Value = serde_json::from_str(response_body(&vitals)).unwrap();
+            assert!(vitals["footprint"].as_u64().unwrap() > 0);
+            assert!(vitals["heap"]["live"].as_u64().unwrap() > 0);
+        }
+        // procwatch reads a process's footprint only on macOS.
+        #[cfg(not(target_os = "macos"))]
+        assert!(vitals.starts_with("HTTP/1.1 503"));
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
         assert_eq!(
@@ -2360,6 +2189,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
         let directory = temp_directory();
@@ -2627,8 +2457,12 @@ mod tests {
         fs::write(&discovery_path, b"not json").unwrap();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
         let api = start_published(discovery_path.clone(), events).unwrap();
-        let mode = fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
         drop(api);
         assert!(!discovery_path.exists());
         fs::remove_dir_all(directory).unwrap();
@@ -2815,8 +2649,7 @@ mod tests {
             transcription,
             developer_control: None,
             control: None,
-            dictation_control: None,
-            dictation_levels: Arc::new(Mutex::new(HashMap::new())),
+            dictations: dictation::Dictations::new(None),
             streams: Arc::default(),
             stream_engine: Arc::new(crate::transcription_stream::shared_engine),
         };
@@ -2988,6 +2821,7 @@ mod tests {
     }
 
     /// Like `raw_request_bytes`, signalling once the response contains `marker`.
+    #[cfg(target_os = "macos")]
     fn raw_request_signalling(
         port: u16,
         request: &str,
@@ -3013,6 +2847,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn request_with_dictation_token(
         port: u16,
         token: &str,
@@ -3028,6 +2863,7 @@ mod tests {
         )
     }
 
+    #[cfg(target_os = "macos")]
     fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
         raw_request_bytes(
             port,

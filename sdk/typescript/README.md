@@ -158,6 +158,13 @@ void (async () => {
 const { transcript, durationMs } = await recording.finish()
 ```
 
+`connect()` finds the running Hex on macOS, Linux, and Windows. Desktop capture
+(`hex.dictation`) is macOS-only so far: elsewhere `capabilities().serviceCapture`
+is `false` and its routes answer `service-capture-unavailable`, while model
+preparation, transcription, and live streams work. Outside macOS there is no
+packaged helper yet; pass `command: ["hex", "service", "--embedded"]` to
+`create()` to run an installed Hex as the direct child.
+
 Call `recording.cancel()` to discard; Escape doesn't cancel a recording, so the
 key stays with your app. If the microphone fails mid-recording, `finish()` still
 transcribes the audio captured before the failure, or rejects with remote code

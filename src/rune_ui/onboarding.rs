@@ -153,22 +153,17 @@ impl Tour {
         let completed = crate::onboarding::completion_recorded();
         let resume = crate::onboarding::take_resume();
         let saved = (!completed).then(crate::onboarding::saved_step).flatten();
-        // The new first run shows until it finishes, even when setup is
-        // already ready, so the whole story plays once.
-        let story = super::onboarding_kit::live::wanted_for(platform);
-        (resume.is_some() || (!completed && (story || !status.ready() || saved.is_some()))).then(
-            || {
-                Tour::new(
-                    Flow::new(
-                        resume.or(saved).unwrap_or(Step::Welcome),
-                        status,
-                        platform.caps.permissions,
-                        platform.caps.practice_dictation,
-                    ),
-                    completed,
-                )
-            },
-        )
+        (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
+            Tour::new(
+                Flow::new(
+                    resume.or(saved).unwrap_or(Step::Welcome),
+                    status,
+                    platform.caps.permissions,
+                    platform.caps.practice_dictation,
+                ),
+                completed,
+            )
+        })
     }
 }
 
@@ -547,6 +542,18 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
         .gap(28.0)
         .child(if permissions {
             title(p, tr("Let Hex hear you and type for you"), None)
+        } else if view
+            .rows
+            .iter()
+            .any(|row| row.item == SetupItem::Microphone)
+        {
+            title(
+                p,
+                tr("Let Hex hear you"),
+                Some(tr(
+                    "Windows has the microphone turned off for desktop apps.",
+                )),
+            )
         } else {
             title(
                 p,
@@ -583,6 +590,10 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             &glyphs::MIC,
             tr("Microphone"),
             match row.status {
+                ItemStatus::Denied | ItemStatus::Waiting if ui.platform.caps.os == Os::Windows => {
+                    tr("Turn on “Let desktop apps access your microphone” in Windows Settings.")
+                        .into()
+                }
                 ItemStatus::Denied => {
                     tr("Turned off earlier. Switch Hex on in System Settings.").into()
                 }

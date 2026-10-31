@@ -57,7 +57,7 @@ pub(super) struct Turn {
     pub(super) pause_before_ms: Option<u64>,
 }
 
-/// One topic of a meeting (experiment `live-chapters`), from `start_ms` to
+/// One topic of a meeting (Labs), from `start_ms` to
 /// the next chapter's start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Chapter {
@@ -137,6 +137,13 @@ pub(super) fn available(ui: &Ui) -> bool {
     ui.settings.meetings.enabled || ui.platform.developer
 }
 
+/// Whether something can write a meeting's notes: Apple Intelligence on a
+/// Mac that has it, or OpenCode once turned on.
+fn notes_available(ui: &Ui) -> bool {
+    (ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available())
+        || ui.settings.meetings.summarize_with_opencode
+}
+
 #[derive(Default)]
 pub(super) struct MeetingsPane {
     pub(super) view: View,
@@ -155,6 +162,9 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// Where Linux and Windows perform meeting requests.
+    #[cfg(not(target_os = "macos"))]
+    pub(super) local: super::meetings_host::LocalMeetings,
 }
 
 /// `42 min`, `1 h 05 min`, or `< 1 min`.
@@ -368,7 +378,7 @@ impl MeetingsPane {
         }
     }
 
-    /// The fixture with live chapters (experiment `live-chapters`) on the
+    /// The fixture with live chapters (Labs) on the
     /// meeting with notes, its title extended by them.
     pub(super) fn chapters_fixture() -> Self {
         let mut pane = Self::fixture();
@@ -1068,7 +1078,7 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
         );
         items += 1;
     }
-    if meeting.status == Status::Complete && ui.platform.notes.is_available() {
+    if meeting.status == Status::Complete && notes_available(ui) {
         if meeting.notes_running {
             menu = menu.item(MenuItem::new(tr("Summarizing…")).disabled(true));
         } else {

@@ -442,14 +442,11 @@ impl Pump {
     /// Saves one setting as the window would, then lets the runtime, the
     /// listener, and an open window adopt it.
     fn set_setting(&mut self, key: &str, value: &str) -> Result<ControlReply, ControlError> {
+        if let Some(error) = settings::unavailable(key) {
+            return Err(error);
+        }
         let before = load()?;
-        let rules = settings::ShortcutRules {
-            key_named: |name| crate::rune_ui::hotkey_key_named(name).map_err(str::to_owned),
-            rule: |slot, binding| {
-                crate::rune_ui::shortcut_rule(slot, binding).map_err(str::to_owned)
-            },
-        };
-        let change = settings::apply(&before, key, value, &rules)?;
+        let change = settings::apply(&before, key, value, &crate::rune_ui::shortcut_rules())?;
         if !change.changed(&before) {
             return Ok(ControlReply::unchanged(format!("{key} is already {value}")));
         }
@@ -860,21 +857,9 @@ fn status(
             open,
             pane: open.then(|| current_pane(window)).flatten(),
         },
-        update: match published.update_status {
-            DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
-            DesktopUpdateStatus::Available
-            | DesktopUpdateStatus::ReadyToRestart
-            | DesktopUpdateStatus::SwitchAvailable { .. }
-            | DesktopUpdateStatus::PackageUpdate { .. } => "available",
-            DesktopUpdateStatus::Unavailable
-            | DesktopUpdateStatus::Managed
-            | DesktopUpdateStatus::Failed => "unavailable",
-            DesktopUpdateStatus::Current
-            | DesktopUpdateStatus::SourceBuild
-            | DesktopUpdateStatus::PackageManager => "current",
-        }
-        .into(),
-        experiments: crate::experiments::active_names(),
+        update: control::update_label(&published.update_status).into(),
+        labs: crate::labs::active_names(settings),
+        capabilities: crate::rune_ui::capabilities(),
     })))
 }
 

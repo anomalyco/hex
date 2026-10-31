@@ -1,4 +1,5 @@
-//! Meeting titles and short summaries from Apple's on-device model. A
+//! Meeting titles and short summaries from the notes writer (`generator`:
+//! Apple Intelligence, or OpenCode when turned on). A
 //! provisional title is written while the meeting records; after final
 //! publication one call over a bounded excerpt writes the final title and a
 //! summary of at most two sentences. Agents read the transcript for detail.
@@ -14,11 +15,11 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::generator::{self, GeneratedNotes, GenerationError};
 use super::{
     MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
 };
-use crate::apple_intelligence::{self, GeneratedNotes, GenerationError};
 use crate::events::now_ms;
 
 /// Room left in the context for instructions, the schema, and the response.
@@ -510,7 +511,7 @@ impl ProvisionalTitles {
         if let Err(error) = thread::Builder::new()
             .name("meeting-title".into())
             .spawn(move || {
-                crate::parakeet::deprioritize_background_thread();
+                crate::background_priority::deprioritize_background_thread();
                 name_while_recording(&id, &stop, &latest);
             })
         {
@@ -560,9 +561,9 @@ fn name_while_recording(id: &str, stop: &AtomicBool, latest: &Mutex<Option<Strin
         let started = Instant::now();
         let result = provisional_title(
             &entries,
-            excerpt_budget(apple_intelligence::context_tokens(), TITLE_EXCERPT_CHARS),
+            excerpt_budget(generator::context_tokens(), TITLE_EXCERPT_CHARS),
             TITLE_TIMEOUT,
-            apple_intelligence::generate_title,
+            generator::generate_title,
         );
         if stop.load(Ordering::Relaxed) {
             return;
@@ -749,15 +750,14 @@ pub fn notes_in_progress(id: &str) -> bool {
 
 /// Whether finished meetings should be summarized automatically.
 pub fn notes_wanted() -> bool {
-    crate::app_settings::meeting_notes_enabled()
-        && apple_intelligence::availability().is_available()
+    generator::automatic()
 }
 
 /// Yields to dictation for at most `DICTATION_WAIT`. Returns false when
 /// `stop` was set meanwhile.
 pub(super) fn wait_for_dictation(stop: &AtomicBool) -> bool {
     let started = Instant::now();
-    while crate::parakeet::dictation_busy() && started.elapsed() < DICTATION_WAIT {
+    while crate::transcription_engine::dictation_busy() && started.elapsed() < DICTATION_WAIT {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -777,10 +777,7 @@ pub fn summarize(id: &str) -> Result<MeetingManifest> {
 
 /// Generates and records notes while holding this meeting's claim.
 fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
-    let availability = apple_intelligence::availability();
-    if !availability.is_available() {
-        return Err(eyre!("{}", availability.description()));
-    }
+    generator::available().map_err(|reason| eyre!("{reason}"))?;
     let directory = root()?.join(id);
     let manifest = read_manifest(&directory)?;
     if manifest.status != MeetingStatus::Complete {
@@ -788,18 +785,18 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     }
     let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);
-    if crate::experiments::enabled(crate::experiments::Experiment::LiveChapters) {
+    if crate::labs::live_chapters() {
         super::chapters::refine_meeting(&directory, &entries, &never);
     }
     let started = Instant::now();
     let result = summarize_with_calendar(
         &entries,
         manifest.calendar.as_ref(),
-        excerpt_budget(apple_intelligence::context_tokens(), FINAL_EXCERPT_CHARS),
+        excerpt_budget(generator::context_tokens(), FINAL_EXCERPT_CHARS),
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
             wait_for_dictation(&never);
-            apple_intelligence::generate_notes(instructions, prompt, timeout)
+            generator::generate_notes(instructions, prompt, timeout)
         },
     );
     // Re-read so concurrent manifest updates are not lost.
@@ -900,14 +897,11 @@ pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
 /// then the final title and summary. Debug CLI: `hex meeting summarize <path>`.
 #[cfg(debug_assertions)]
 pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<String> {
-    let availability = apple_intelligence::availability();
-    if !availability.is_available() {
-        return Err(eyre!("{}", availability.description()));
-    }
+    generator::available().map_err(|reason| eyre!("{reason}"))?;
     let text =
         fs::read_to_string(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
     let entries = entries_from_markdown(&text);
-    let context = apple_intelligence::context_tokens();
+    let context = generator::context_tokens();
     let mut report = String::new();
 
     let plan = TitlePlan::default();
@@ -920,7 +914,7 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
         &entries[..opening],
         excerpt_budget(context, TITLE_EXCERPT_CHARS),
         TITLE_TIMEOUT,
-        apple_intelligence::generate_title,
+        generator::generate_title,
     );
     report.push_str(&format!(
         "provisional title at {} ({} words, {}s of speech): {} · {:.1}s\n",
@@ -940,7 +934,7 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
         &entries,
         max_chars,
         started + TOTAL_DEADLINE,
-        apple_intelligence::generate_notes,
+        generator::generate_notes,
     )?;
     let elapsed = started.elapsed();
     let calls = summary.calls;
@@ -969,7 +963,7 @@ pub fn spawn_summary(
     thread::Builder::new()
         .name("meeting-notes".into())
         .spawn(move || {
-            crate::parakeet::deprioritize_background_thread();
+            crate::background_priority::deprioritize_background_thread();
             done(summarize_claimed(&id, claim));
         })
         .map_err(|error| tracing::error!(%error, "could not start meeting notes"))

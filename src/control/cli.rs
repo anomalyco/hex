@@ -95,7 +95,7 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: WindowCommand,
     },
-    /// Replay the first-run onboarding (dev, test, and local builds).
+    /// Replay the first-run onboarding (needs Labs on).
     Onboarding {
         #[command(subcommand)]
         command: OnboardingCommand,
@@ -117,6 +117,47 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: VocabularyCommand,
     },
+    /// Read retained dictation history without starting the app, or clear
+    /// it in the running Hex (`hex history clear --yes`).
+    #[command(args_conflicts_with_subcommands = true)]
+    History(crate::transcript_cli::HistoryArgs),
+    /// Read and search recorded meetings without starting the app; record
+    /// and stop them in the running Hex.
+    Meetings {
+        #[command(subcommand)]
+        command: crate::transcript_cli::MeetingsCommand,
+    },
+    /// Serve recorded meetings to agents over MCP (stdio). Read-only.
+    Mcp {
+        /// Read meetings from this folder instead of Application Support, such
+        /// as a mirrored copy on another computer.
+        #[arg(long)]
+        meetings_dir: Option<std::path::PathBuf>,
+    },
+    /// Manage the ~/.config/hex personal transformations workspace.
+    Commands {
+        #[command(subcommand)]
+        command: CommandsCommand,
+    },
+    /// List the Labs features, or turn one on or off.
+    Labs {
+        #[command(subcommand)]
+        command: Option<crate::labs::LabsCommand>,
+    },
+    /// Replaced by `hex labs`.
+    #[command(hide = true)]
+    Experiments {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Annotate: record your screen with drawing and narration in the
+    /// running Hex, then list and send what you recorded (`hex capture`
+    /// still works).
+    #[command(name = "annotate", alias = "capture")]
+    Annotate {
+        #[command(subcommand)]
+        command: CaptureCommand,
+    },
     /// Print Hex's recent log lines; works without Hex running.
     Logs {
         /// Read process.log (Rust and native diagnostics) instead of the
@@ -130,6 +171,15 @@ pub enum ControlCli {
         #[arg(short, long)]
         follow: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CommandsCommand {
+    /// Create ~/.config/hex with a starter config, or refresh its typings.
+    Init,
+    /// Load ~/.config/hex's config as Hex would and report what it registers
+    /// or why it fails.
+    Check,
 }
 
 #[derive(Subcommand, Debug)]
@@ -175,9 +225,10 @@ pub enum ModelCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Download a model, then switch to it.
+    /// Download a model, then switch to it. Without a model, the selected
+    /// one. On Linux and Windows it downloads here when Hex isn't running.
     Install {
-        model: String,
+        model: Option<String>,
         #[arg(long)]
         language: Option<String>,
         #[command(flatten)]
@@ -188,14 +239,36 @@ pub enum ModelCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Whether a model (the selected one unless given) is installed and
+    /// checksum-verified. Runs here; Linux and Windows.
+    Status {
+        model: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
+    },
+    /// The transcribe.cpp compute devices Hex can use. Linux and Windows.
+    Devices,
+    /// Load and prewarm an installed model here. Linux and Windows.
+    Check {
+        model: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
+    },
+    /// Transcribe a WAV file with an installed model here. Linux and Windows.
+    Transcribe {
+        wav: std::path::PathBuf,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum OnboardingCommand {
-    /// Open the first-run onboarding in the window now, as on a new Mac.
+    /// Open the first-run onboarding in the window now, as on a new install.
     ///
-    /// Turns the new onboarding on for this install and forgets that
-    /// onboarding finished. Settings, history, models, and permissions stay,
+    /// Forgets that onboarding finished. Settings, history, models, and permissions stay,
     /// so their steps pass at once.
     #[command(visible_alias = "restart")]
     Reset {
@@ -218,9 +291,8 @@ pub enum WindowCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Experiment: open the window on a playground story by its path, name,
-    /// or slug (`Prototypes/HUD/Processing`, `prototypes-hud-processing`; `hex experiments enable
-    /// playground`).
+    /// Labs: open the window on a playground story by its path, name, or
+    /// slug (`Prototypes/HUD/Processing`, `prototypes-hud-processing`).
     Story {
         story: String,
         /// The variant, by number from 1 or by name.
@@ -277,10 +349,23 @@ pub fn run(command: ControlCli) -> u8 {
         ControlCli::Start { output } => start(output),
         ControlCli::Quit { force, output } => send(ControlCommand::Quit { force }, output),
         ControlCli::Restart { force, output } => {
-            if running() {
-                send(ControlCommand::Restart { force }, output)
-            } else {
-                start(output)
+            if !running() {
+                return start(output);
+            }
+            #[cfg(target_os = "linux")]
+            if let Err(error) = crate::linux_service::prepare_restart() {
+                return print(ControlReply::error("failed", format!("{error:#}")), output);
+            }
+            #[cfg(target_os = "macos")]
+            return send(ControlCommand::Restart { force }, output);
+            #[cfg(not(target_os = "macos"))]
+            match call(ControlRequest::new(ControlCommand::Restart { force })) {
+                Ok(ControlResponse {
+                    reply: ControlReply::Done { .. },
+                    ..
+                }) => print(reopen_after_restart(), output),
+                Ok(response) => print(response.reply, output),
+                Err(reply) => print(reply, output),
             }
         }
         ControlCli::Dictation {
@@ -307,8 +392,9 @@ pub fn run(command: ControlCli) -> u8 {
                 model,
                 language,
                 output,
-            } => send(ControlCommand::ModelInstall { model, language }, output),
+            } => install_model(model, language, output),
             ModelCommand::Cancel { output } => send(ControlCommand::ModelCancel, output),
+            command => offline_model(command),
         },
         ControlCli::Window { command } => match command {
             WindowCommand::Show { pane, output } => {
@@ -361,12 +447,167 @@ pub fn run(command: ControlCli) -> u8 {
             lines,
             follow,
         } => logs(process, lines, follow),
+        ControlCli::History(crate::transcript_cli::HistoryArgs {
+            action: Some(crate::transcript_cli::HistoryAction::Clear { yes, output }),
+            ..
+        }) => clear_history(yes, output),
+        ControlCli::History(args) => report(crate::transcript_cli::history(&args)),
+        ControlCli::Meetings { command } => meetings(command),
+        ControlCli::Mcp { meetings_dir } => report(mcp(meetings_dir)),
+        ControlCli::Commands { command } => report(match command {
+            CommandsCommand::Init => crate::personal_commands::initialize_workspace()
+                .map(|workspace| println!("{}", workspace.display())),
+            CommandsCommand::Check => {
+                crate::personal_commands::check_workspace().map(|report| println!("{report}"))
+            }
+        }),
+        ControlCli::Labs { command } => report(crate::labs::run(command.as_ref())),
+        ControlCli::Experiments { .. } => report(crate::labs::run_retired_experiments()),
+        ControlCli::Annotate { command } => capture(command),
     }
 }
 
-/// `hex capture` (the `capture` experiment).
-#[cfg(hex_capture)]
-#[derive(Subcommand)]
+/// `hex model install`: the running Hex downloads in the background;
+/// without one, Linux and Windows download here.
+fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
+    let model = match model {
+        Some(model) => model,
+        None => match crate::app_settings::AppSettings::load() {
+            Ok(settings) => settings.transcription.model.as_str().to_owned(),
+            Err(error) => return fail(&format!("couldn't read settings: {error:#}")),
+        },
+    };
+    #[cfg(not(target_os = "macos"))]
+    if !running() {
+        return report(selection(Some(model), language).and_then(|selection| {
+            crate::local_transcriber::install(
+                &selection,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+        }));
+    }
+    send(ControlCommand::ModelInstall { model, language }, output)
+}
+
+/// The selection a local model command names: `model` with its remembered
+/// language unless `language` is given, or the selected model.
+#[cfg(not(target_os = "macos"))]
+fn selection(
+    model: Option<String>,
+    language: Option<String>,
+) -> color_eyre::Result<crate::transcription_models::TranscriptionSelection> {
+    let settings = crate::app_settings::AppSettings::load().unwrap_or_default();
+    let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
+    super::model_selection(&settings, &model, language.as_deref())
+        .map_err(|error| color_eyre::eyre::eyre!(error.message))
+}
+
+/// `hex model status|devices|check|transcribe`, run in this process.
+#[cfg(not(target_os = "macos"))]
+fn offline_model(command: ModelCommand) -> u8 {
+    use crate::transcription_models::{definition, is_installed, is_verified, model_path};
+    report((|| match command {
+        ModelCommand::Status { model, language } => {
+            let selection = selection(model, language)?;
+            let model = definition(selection.model);
+            let installed = is_installed(model, &selection.language);
+            println!(
+                "{}\t{}\t{}\t{}",
+                if installed { "installed" } else { "missing" },
+                if installed && is_verified(model) {
+                    "verified"
+                } else {
+                    "unverified"
+                },
+                model.name,
+                model_path(model)?.display()
+            );
+            Ok(())
+        }
+        ModelCommand::Devices => {
+            for device in crate::local_transcriber::devices()? {
+                println!("{device}");
+            }
+            Ok(())
+        }
+        ModelCommand::Check { model, language } => {
+            let transcriber =
+                crate::local_transcriber::LocalTranscriber::load(&selection(model, language)?)?;
+            println!("ready\t{}", transcriber.device_label());
+            Ok(())
+        }
+        ModelCommand::Transcribe {
+            wav,
+            model,
+            language,
+        } => {
+            println!(
+                "{}",
+                crate::local_transcriber::transcribe_wav_with_selection(
+                    &wav,
+                    &selection(model, language)?
+                )?
+            );
+            Ok(())
+        }
+        _ => unreachable!("Hex carries out the other model commands"),
+    })())
+}
+
+/// macOS runs models only inside the app.
+#[cfg(target_os = "macos")]
+fn offline_model(_: ModelCommand) -> u8 {
+    print(
+        ControlReply::error(
+            "unsupported",
+            "this `hex model` command is for Linux and Windows; use `hex model list`",
+        ),
+        Output::default(),
+    )
+}
+
+/// The exit code of a command that runs here rather than in Hex.
+fn report(result: color_eyre::Result<()>) -> u8 {
+    match result {
+        Ok(()) => 0,
+        Err(error) => fail(&format!("{error:#}")),
+    }
+}
+
+/// `hex meetings`: record, stop, and copy in the running Hex; the rest
+/// read the meetings folder here.
+fn meetings(command: crate::transcript_cli::MeetingsCommand) -> u8 {
+    use crate::transcript_cli::MeetingsCommand;
+    match command {
+        MeetingsCommand::Record { title, output } => {
+            send(ControlCommand::MeetingRecord { title }, output)
+        }
+        MeetingsCommand::Stop { output } => send(ControlCommand::MeetingStop, output),
+        MeetingsCommand::CopyLast { output } => send(ControlCommand::MeetingCopyLast, output),
+        command => report(crate::transcript_cli::meetings(&command)),
+    }
+}
+
+/// `hex mcp`: logs to stderr only (stdout carries MCP messages) and touches
+/// no app state.
+fn mcp(meetings_dir: Option<std::path::PathBuf>) -> color_eyre::Result<()> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_env("HEX_MCP_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .init();
+    let root = match meetings_dir {
+        Some(directory) => directory,
+        None => crate::meeting::root()?,
+    };
+    crate::meeting_mcp::run(root)
+}
+
+/// `hex annotate` (alias `hex capture`).
+#[derive(Subcommand, Debug)]
 pub enum CaptureCommand {
     /// Start recording a capture.
     Start {
@@ -450,8 +691,9 @@ pub enum CaptureCommand {
 
 /// Runs `hex capture`: on macOS through the running Hex; on Linux the
 /// folder reads (`list`, `show`, `route`, `send`) run here, and the
-/// recording commands go to the running Hex's listener.
-#[cfg(hex_capture)]
+/// recording commands go to the running Hex's listener; on Windows every
+/// command goes to the running Hex. A build without the capture engine
+/// answers `unsupported`.
 pub fn capture(command: CaptureCommand) -> u8 {
     use crate::control::{ControlCommand as C, ScrawlCaptureAction as A};
     let (command, output) = match command {
@@ -486,9 +728,17 @@ pub fn capture(command: CaptureCommand) -> u8 {
             return print(crate::linux_service::capture_draw(), output);
         }
     };
-    #[cfg(target_os = "macos")]
+    #[cfg(not(hex_capture))]
+    {
+        let _ = command;
+        print(
+            ControlReply::error("unsupported", "Annotate isn't available on this OS yet"),
+            output,
+        )
+    }
+    #[cfg(all(hex_capture, any(target_os = "macos", target_os = "windows")))]
     return send(command, output);
-    #[cfg(target_os = "linux")]
+    #[cfg(all(hex_capture, target_os = "linux"))]
     {
         let reply = match command {
             C::ScrawlCaptureList { limit } => crate::capture_host::list_captures(limit),
@@ -543,17 +793,12 @@ pub fn send(command: ControlCommand, output: Output) -> u8 {
     }
 }
 
-#[cfg(target_os = "macos")]
+/// Every OS reaches the running Hex through its local API's owner-only
+/// discovery file and bearer-authenticated `POST /control`.
 fn running() -> bool {
     crate::local_api::running_pid().is_some()
 }
 
-#[cfg(not(target_os = "macos"))]
-fn running() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
 fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
     if !running() {
         return Err(not_running());
@@ -562,21 +807,8 @@ fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
         .map_err(|error| ControlReply::error("transport", format!("{error:#}")))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn call(_request: ControlRequest) -> Result<ControlResponse, ControlReply> {
-    Err(unsupported())
-}
-
-fn not_running() -> ControlReply {
+pub(crate) fn not_running() -> ControlReply {
     ControlReply::error("not-running", "Hex is not running; run `hex start`")
-}
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn unsupported() -> ControlReply {
-    ControlReply::error(
-        "unsupported",
-        "this command is not supported on this OS yet; use the Hex window",
-    )
 }
 
 #[cfg(target_os = "macos")]
@@ -622,9 +854,74 @@ fn start(output: Output) -> u8 {
     )
 }
 
+/// `hex start` on Linux and Windows: a detached `hex app --hidden`, which
+/// forwards to the running Hex, starts its systemd unit, or becomes Hex,
+/// then waits until it answers.
 #[cfg(not(target_os = "macos"))]
 fn start(output: Output) -> u8 {
-    print(unsupported(), output)
+    print(start_reply(), output)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_reply() -> ControlReply {
+    use std::time::{Duration, Instant};
+
+    if running() {
+        return ControlReply::unchanged("Hex is already running");
+    }
+    let executable = match std::env::current_exe() {
+        Ok(executable) => executable,
+        Err(error) => return ControlReply::error("failed", format!("couldn't find hex: {error}")),
+    };
+    let mut command = std::process::Command::new(executable);
+    command
+        .args(["app", "--hidden"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "linux")]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console, and
+        // Ctrl-C in this terminal doesn't reach it.
+        command.creation_flags(0x0000_0008 | 0x0000_0200);
+    }
+    if let Err(error) = command.spawn() {
+        return ControlReply::error("failed", format!("couldn't start Hex: {error}"));
+    }
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(20) {
+        if running() {
+            return ControlReply::done("Started Hex");
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    ControlReply::done("Started Hex; it isn't answering yet (it may be loading its model)")
+}
+
+/// After a restart's quit on Linux and Windows: waits for the old Hex to
+/// go, then starts the new one. A Linux unit restarts by itself.
+#[cfg(not(target_os = "macos"))]
+fn reopen_after_restart() -> ControlReply {
+    use std::time::{Duration, Instant};
+
+    #[cfg(target_os = "linux")]
+    if crate::linux_service::supervised() {
+        return ControlReply::done("Restarting Hex");
+    }
+    let started = Instant::now();
+    while running() {
+        if started.elapsed() > Duration::from_secs(30) {
+            return ControlReply::error(
+                "failed",
+                "Hex is still finishing its work; run `hex start` once it quits",
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    start_reply()
 }
 
 /// `open` arguments for `hex start`: the caller's `HEX_*` environment, then
@@ -897,16 +1194,9 @@ fn human_capture_detail(detail: &super::ScrawlCaptureDetail) -> String {
 
 /// `2026-10-26 14:02` in local time where Hex knows it.
 fn local_minute(ms: u64) -> String {
-    #[cfg(target_os = "macos")]
-    {
-        let iso = crate::meeting::query::iso_local(ms);
-        iso.get(..16)
-            .map_or(iso.clone(), |minute| minute.replace('T', " "))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        format!("{ms} ms")
-    }
+    let iso = crate::meeting::query::iso_local(ms);
+    iso.get(..16)
+        .map_or(iso.clone(), |minute| minute.replace('T', " "))
 }
 
 pub fn exit_code(reply: &ControlReply) -> u8 {
@@ -945,7 +1235,9 @@ fn human_settings(settings: &[SettingValue]) -> String {
             format!(
                 "{:width$}  {value}{}\n",
                 setting.key,
-                if setting.writable {
+                if !setting.available {
+                    "  (not on this OS)"
+                } else if setting.writable {
                     ""
                 } else {
                     "  (read-only)"
@@ -1090,11 +1382,6 @@ fn human_status(report: &StatusReport) -> String {
         (None, true) => "open".into(),
         _ => "closed".into(),
     };
-    // Shown only when on: experiments are unsupported and off for nearly everyone.
-    let experiments = match report.experiments.as_slice() {
-        [] => String::new(),
-        names => format!("Experiments  {}\n", names.join(", ")),
-    };
     format!(
         "Hex {} (pid {}{memory})\n\
          Listener     {}\n\
@@ -1105,7 +1392,7 @@ fn human_status(report: &StatusReport) -> String {
          Permissions  {permission_line}\n\
          Window       {window}\n\
          Update       {}\n\
-         {experiments}",
+         Labs         {}\n",
         report.app_version,
         report.pid,
         if report.listener.running {
@@ -1117,6 +1404,10 @@ fn human_status(report: &StatusReport) -> String {
         on(features.release_microphone_while_idle),
         features.history_retention,
         report.update,
+        match report.labs.as_slice() {
+            [] => "none".to_string(),
+            names => names.join(", "),
+        },
     )
 }
 
@@ -1183,6 +1474,7 @@ mod tests {
             choices: vec![],
             writable: true,
             about: String::new(),
+            available: true,
         };
         assert_eq!(
             human_settings(&[setting("dictation_hotkey", "option".into())]),
@@ -1230,22 +1522,21 @@ mod tests {
         let text = human_status(&report);
         assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
         assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
-        assert!(!text.contains("Experiments"));
-
-        report.experiments = vec!["live-chapters".into(), "live-text".into()];
-        assert!(human_status(&report).ends_with("Experiments  live-chapters, live-text\n"));
+        assert!(text.ends_with("Labs         none\n"));
+        report.labs = vec!["live-text".into(), "meetings".into()];
+        assert!(human_status(&report).ends_with("Labs         live-text, meetings\n"));
     }
 
     #[test]
-    fn status_reports_experiments_and_reads_older_replies_without_them() {
+    fn status_reports_labs_and_reads_older_replies_without_it() {
         let report = StatusReport {
-            experiments: vec!["live-text".into()],
+            labs: vec!["live-text".into()],
             ..Default::default()
         };
         let mut json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["experiments"], serde_json::json!(["live-text"]));
-        json.as_object_mut().unwrap().remove("experiments");
+        assert_eq!(json["labs"], serde_json::json!(["live-text"]));
+        json.as_object_mut().unwrap().remove("labs");
         let older: StatusReport = serde_json::from_value(json).unwrap();
-        assert!(older.experiments.is_empty());
+        assert!(older.labs.is_empty());
     }
 }

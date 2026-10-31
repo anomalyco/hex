@@ -165,14 +165,6 @@ pub(super) fn shortcut_rows(
     rows
 }
 
-/// What other audio can do while dictating; Lower audio only where Hex can.
-fn audio_behaviors(ui: &Ui) -> Vec<RecordingAudioBehavior> {
-    RecordingAudioBehavior::ALL
-        .into_iter()
-        .filter(|behavior| *behavior != RecordingAudioBehavior::Duck || ui.platform.caps.duck_audio)
-        .collect()
-}
-
 /// The desktop's own dialog for the shortcuts its portal bound, where the
 /// user changes a trigger the desktop kept from an earlier binding.
 fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
@@ -197,26 +189,12 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
         })
 }
 
-/// "Also pause the browser", under Pause media on macOS. Hex hears the
-/// browser through System Audio Recording, so turning it on asks for that
-/// here: never while you dictate.
+/// Labs › Also pause the browser's permission, under Pause media on macOS:
+/// Hex hears the browser through System Audio Recording, asked for here,
+/// never while you dictate.
 fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
     let on = ui.settings.pause_browser_media;
-    let mut rows = vec![icon_toggle_row(
-        p,
-        "pause-browser",
-        &GLOBE,
-        tr("Also pause the browser"),
-        tr("YouTube and other tabs, resumed only if Hex paused them"),
-        on,
-        |ui: &mut Ui| {
-            let on = !ui.settings.pause_browser_media;
-            ui.update(|settings| settings.pause_browser_media = on);
-            if on && !ui.platform.system_audio {
-                ui.ask(PlatformRequest::SystemAudio);
-            }
-        },
-    )];
+    let mut rows = Vec::new();
     if on {
         let control = if ui.platform.system_audio {
             PermissionControl::Allowed
@@ -549,7 +527,8 @@ pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 }
 
 /// Launch at login, driven by the OS's login item: macOS's `SMAppService`
-/// (which may need approval) or Windows's `Run` key.
+/// (which may need approval), Windows's `Run` key, or Linux's XDG autostart
+/// entry.
 fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
     if !ui.platform.caps.launch_at_login {
         return Vec::new();
@@ -719,27 +698,8 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         "release-confirmation-fold",
         ui.confirm_release.then(|| s::release_confirmation(ui, p)),
     ));
+    // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "keyboard-model-switching",
-                &KEYBOARD,
-                tr("Switch model with keyboard language"),
-                tr(
-                    "Changing input source selects its mapped model and language; manual choices still work",
-                ),
-                settings.keyboard_model_switching.enabled,
-                |ui: &mut Ui| {
-                    ui.open = None;
-                    ui.update(|settings| {
-                        settings.keyboard_model_switching.enabled =
-                            !settings.keyboard_model_switching.enabled;
-                    });
-                },
-            )
-            .into(),
-        );
         rows.push(folding(
             "input-source-mappings",
             if settings.keyboard_model_switching.enabled {
@@ -749,40 +709,25 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             },
         ));
     }
-    if ui.platform.caps.os == super::platform::Os::Macos {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "avoid-bluetooth-microphone",
-                &BLUETOOTH,
-                tr("Use the Mac's microphone instead of Bluetooth"),
-                tr("Keeps AirPods and other headsets out of call-quality audio"),
-                settings.avoid_bluetooth_microphone,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.avoid_bluetooth_microphone;
-                    ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
-                },
-            )
-            .into(),
-        );
-    }
-    if ui.platform.caps.share_shortcut {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "share-dictation-shortcut",
-                &KEYBOARD,
-                tr("Share dictation shortcut with other apps"),
-                tr("Lets apps such as Discord detect the same key"),
-                settings.share_dictation_shortcut,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.share_dictation_shortcut;
-                    ui.update(|settings| settings.share_dictation_shortcut = enabled);
-                },
-            )
-            .into(),
-        );
-    }
+    rows.push(
+        icon_toggle_row(
+            p,
+            "avoid-bluetooth-microphone",
+            &BLUETOOTH,
+            if ui.platform.caps.os == super::platform::Os::Macos {
+                tr("Use the Mac's microphone instead of Bluetooth")
+            } else {
+                tr("Use another microphone instead of Bluetooth")
+            },
+            tr("Keeps AirPods and other headsets out of call-quality audio"),
+            settings.avoid_bluetooth_microphone,
+            |ui: &mut Ui| {
+                let enabled = !ui.settings.avoid_bluetooth_microphone;
+                ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
+            },
+        )
+        .into(),
+    );
     let model = transcription_models::definition(settings.transcription.model);
     if model.supports_recognition_hints {
         rows.push(
@@ -826,7 +771,7 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             None,
         ));
     }
-    let behaviors = audio_behaviors(ui);
+    let behaviors = RecordingAudioBehavior::ALL;
     rows.push(pick_row(
         ui,
         p,
@@ -840,18 +785,16 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         behaviors
             .iter()
             .position(|behavior| *behavior == settings.recording_audio_behavior)
-            .unwrap_or(2),
+            .unwrap_or(0),
         |ui, index| {
-            let behavior = audio_behaviors(ui)[index];
+            let behavior = RecordingAudioBehavior::ALL[index];
             if ui.settings.recording_audio_behavior != behavior {
                 ui.update(|settings| settings.recording_audio_behavior = behavior);
             }
         },
         layer,
     ));
-    if ui.platform.caps.duck_audio
-        && settings.recording_audio_behavior == RecordingAudioBehavior::Duck
-    {
+    if settings.recording_audio_behavior == RecordingAudioBehavior::Duck {
         let volume = ui
             .duck_volume_drag
             .unwrap_or(settings.recording_duck_volume);

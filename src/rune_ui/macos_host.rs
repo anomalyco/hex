@@ -22,11 +22,13 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
-use super::meetings::{Meeting, Status, Transcript, Turn};
+use super::meetings::Meeting;
+use super::meetings_host::MeetingFeed;
 use super::platform::{
-    CalendarRequest, CalendarView, DemoRequest, HudDemo, HudLab, MeetingRequest, NativeHost,
-    NotesAvailability, PlatformRequest, PlatformState, UpcomingMeeting,
+    CalendarRequest, CalendarView, HudDemo, HudLab, MeetingRequest, NativeHost, NotesAvailability,
+    PlatformRequest, PlatformState, UpcomingMeeting, poll_voice_filter, voice_filter_request,
 };
+use super::practice::PracticeFeed;
 use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::{
@@ -38,7 +40,7 @@ use crate::desktop_i18n::tr;
 use crate::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
-use crate::onboarding::{Input, Observation, PermissionAction, PermissionKind, PermissionState};
+use crate::onboarding::{Input, PermissionAction, PermissionKind, PermissionState};
 
 /// The window saves a recorded shortcut; the listener follows `settings.json`.
 pub(super) const HOST_SAVES_SHORTCUTS: bool = false;
@@ -181,11 +183,17 @@ impl ChordWatch {
                     )
                 }
                 NSEventType::FlagsChanged => capture.borrow_mut().flags_changed(flags),
+                // Mouse buttons record only with Labs › Mouse shortcuts on;
+                // otherwise the click reaches the window as usual.
                 NSEventType::LeftMouseDown
                 | NSEventType::RightMouseDown
-                | NSEventType::OtherMouseDown => capture
-                    .borrow_mut()
-                    .mouse_down(event_ref.buttonNumber(), flags),
+                | NSEventType::OtherMouseDown
+                    if crate::labs::mouse_shortcuts() =>
+                {
+                    capture
+                        .borrow_mut()
+                        .mouse_down(event_ref.buttonNumber(), flags)
+                }
                 // Key releases still reach the window so its key state
                 // stays balanced.
                 _ => return event.as_ptr(),
@@ -606,10 +614,10 @@ impl NativeHost for MacHost {
             PlatformRequest::OpenLoginItemSettings => {
                 let _ = self.request_login(LoginItemRequest::OpenSettings);
             }
-            PlatformRequest::InstallHexMicrophone => crate::hex_microphone::install_driver_async(),
-            PlatformRequest::UninstallHexMicrophone => {
-                crate::hex_microphone::uninstall_driver_async()
-            }
+            PlatformRequest::InstallHexMicrophone
+            | PlatformRequest::UninstallHexMicrophone
+            | PlatformRequest::SetTuning(_)
+            | PlatformRequest::HexMicrophoneDemo(_) => voice_filter_request(request),
             PlatformRequest::Meeting(request) => self.meeting(request)?,
             PlatformRequest::Calendar(CalendarRequest::Connect) => self.calendar.connect(),
             PlatformRequest::Calendar(CalendarRequest::OpenPrivacySettings) => {
@@ -626,18 +634,6 @@ impl NativeHost for MacHost {
                 }
                 crate::macos_rune::quit();
             }
-            PlatformRequest::SetTuning(tuning) => {
-                crate::hex_microphone::update_tuned_config(|current| *current = tuning);
-            }
-            PlatformRequest::HexMicrophoneDemo(request) => match request {
-                DemoRequest::Record => crate::hex_microphone::start_demo_recording(),
-                DemoRequest::StopRecording => crate::hex_microphone::stop_demo_recording(),
-                DemoRequest::SelectSource(source) => {
-                    crate::hex_microphone::select_demo_source(source)
-                }
-                DemoRequest::Play(track) => crate::hex_microphone::play_demo_track(track),
-                DemoRequest::StopPlayback => crate::hex_microphone::stop_demo_playback(),
-            },
             PlatformRequest::ConfigureHud(lab) => configure_hud(&self.runtime()?, lab),
             PlatformRequest::TuneHud(lab) => tune_hud(&self.runtime()?, lab),
             PlatformRequest::EndHudDemo => self
@@ -693,23 +689,10 @@ impl NativeHost for MacHost {
             }
             changed = true;
         }
-        // The Voice Filter pane's demo moves every frame while it records or
-        // plays; nothing decodes or renders while the Voice Filter is off.
-        let voice_filter = crate::app_settings::hex_microphone_enabled();
-        if voice_filter
-            && (state.demo.is_none()
-                || crate::hex_microphone::demo_is_busy()
-                || crate::hex_microphone::demo_recompute_is_running()
-                || state
-                    .demo
-                    .as_ref()
-                    .is_some_and(|demo| demo.is_recording || demo.playing.is_some()))
-        {
-            state.demo = Some(crate::hex_microphone::demo_snapshot());
-            changed = true;
-        }
+        let refresh = Instant::now() >= self.refresh_at;
+        changed |= poll_voice_filter(state, refresh);
         #[cfg(hex_capture)]
-        if state.dev_build {
+        {
             changed |= self.scrawl.poll(state, Instant::now() >= self.refresh_at);
         }
         if Instant::now() < self.refresh_at {
@@ -731,10 +714,6 @@ impl NativeHost for MacHost {
             );
         }
         changed |= self.calendar.poll(&mut state.calendar);
-        changed |= update(
-            &mut state.tuning,
-            crate::hex_microphone::current_tuned_config(),
-        );
         changed |= update(
             &mut state.accessibility_renamed,
             crate::permission_guide::list_name(PermissionKind::Accessibility) != "Accessibility",
@@ -762,10 +741,6 @@ impl NativeHost for MacHost {
         });
         changed |= state.permissions_asked.len() != asked_len;
         changed |= update(&mut state.login_item_checking, self.login_checking);
-        changed |= update(
-            &mut state.hex_microphone,
-            voice_filter.then(crate::hex_microphone::status),
-        );
         changed |= update(
             &mut state.notes,
             *self.notes.get_or_insert_with(notes_availability),
@@ -797,10 +772,6 @@ impl NativeHost for MacHost {
             inputs.extend(practice.observations().into_iter().map(Input::Dictation));
         }
         inputs
-    }
-
-    fn practice_level(&self) -> f32 {
-        crate::input_level::recent().unwrap_or(0.0)
     }
 }
 
@@ -1074,166 +1045,6 @@ fn save_calendar_connected() -> Result<(), String> {
     Ok(())
 }
 
-/// The Meetings pane's listing from the read-only store query, rescanned at
-/// most once a second; unchanged meeting folders come from its cache.
-#[derive(Default)]
-struct MeetingFeed {
-    library: Option<crate::meeting::query::Library>,
-    scan_at: Option<Instant>,
-    shown: Option<Result<Vec<Meeting>, String>>,
-}
-
-impl MeetingFeed {
-    fn poll(&mut self) -> Option<Result<Vec<Meeting>, String>> {
-        let now = Instant::now();
-        if self.scan_at.is_some_and(|at| now < at) {
-            return None;
-        }
-        self.scan_at = Some(now + PLATFORM_REFRESH);
-        let listed = self.scan();
-        if self.shown.as_ref() == Some(&listed) {
-            return None;
-        }
-        self.shown = Some(listed.clone());
-        Some(listed)
-    }
-
-    fn scan(&mut self) -> Result<Vec<Meeting>, String> {
-        let library = match &self.library {
-            Some(library) => library,
-            None => {
-                let root = crate::meeting::root().map_err(|error| format!("{error:#}"))?;
-                self.library
-                    .insert(crate::meeting::query::Library::new(root))
-            }
-        };
-        let scan = library.scan().map_err(|error| format!("{error:#}"))?;
-        let now_ms = crate::events::now_ms();
-        Ok(scan
-            .meetings
-            .iter()
-            .map(|meeting| pane_meeting(meeting, now_ms))
-            .collect())
-    }
-}
-
-/// A stored meeting as the pane shows it.
-fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meeting {
-    use crate::meeting::MeetingStatus;
-    let manifest = &meeting.manifest;
-    let transcript = if meeting.entries.is_empty() && !meeting.warnings.is_empty() {
-        Transcript::Unavailable(meeting.warnings.join("\n"))
-    } else {
-        Transcript::Loaded(turns(&meeting.entries))
-    };
-    Meeting {
-        id: meeting.id.clone(),
-        title: meeting.title(),
-        status: match meeting.status {
-            MeetingStatus::Starting => Status::Starting,
-            MeetingStatus::Recording => Status::Recording,
-            MeetingStatus::Transcribing => Status::Transcribing,
-            MeetingStatus::Complete => Status::Complete,
-            MeetingStatus::Interrupted => Status::Interrupted,
-            MeetingStatus::Failed => Status::Failed,
-        },
-        day: crate::meeting::day_label(meeting.start_ms(), now_ms),
-        clock: crate::meeting::clock(meeting.start_ms()),
-        duration_ms: meeting.duration_ms(now_ms),
-        app: manifest.app.clone(),
-        summary: manifest
-            .notes
-            .as_ref()
-            .map(|notes| notes.summary.clone())
-            .filter(|summary| !summary.is_empty()),
-        notes_running: crate::meeting::notes_in_progress(&meeting.id),
-        has_markdown: manifest
-            .export_path
-            .as_ref()
-            .is_some_and(|path| path.exists()),
-        error: manifest.error.clone(),
-        export_error: manifest.export_error.clone(),
-        notes_error: manifest.notes_error.clone(),
-        live_error: manifest.live_transcription_error.clone(),
-        transcript,
-        // Sections come from the transcript lines, not the merged turns, as
-        // the menu bar and `hex meetings show --chapter` read them.
-        chapters: meeting
-            .chapter_views(now_ms)
-            .iter()
-            .map(|view| super::meetings::Chapter {
-                title: view.chapter.title.clone(),
-                summary: view.chapter.summary.clone(),
-                start_ms: view.chapter.start_ms,
-                markdown: view.markdown(),
-            })
-            .collect(),
-    }
-}
-
-/// Speaker turns, marking silences of 30 s or more.
-fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
-    let mut previous_end: Option<u64> = None;
-    crate::meeting::coalesce_transcript(entries.iter().cloned())
-        .into_iter()
-        .map(|turn| {
-            let pause_before_ms = previous_end
-                .map(|end| turn.start_ms.saturating_sub(end))
-                .filter(|pause| *pause >= 30_000);
-            previous_end = Some(previous_end.map_or(turn.end_ms, |end| end.max(turn.end_ms)));
-            Turn {
-                mine: turn.source == crate::meeting::MeetingSource::Microphone,
-                start_ms: turn.start_ms,
-                text: turn.text,
-                pause_before_ms,
-            }
-        })
-        .collect()
-}
-
-/// The listener's dictation outcomes logged since the practice step began.
-struct PracticeFeed {
-    reader: crate::events::EventReader,
-    since_ms: u64,
-}
-
-impl PracticeFeed {
-    fn new(event_path: &std::path::Path) -> Self {
-        Self {
-            reader: crate::events::EventReader::open(event_path),
-            since_ms: crate::events::now_ms(),
-        }
-    }
-
-    fn observations(&mut self) -> Vec<Observation> {
-        use crate::events::{DictationPhase, VoiceEvent};
-        if let Err(error) = self.reader.refresh() {
-            tracing::warn!(%error, "could not read dictation events for practice");
-            return Vec::new();
-        }
-        let since_ms = self.since_ms;
-        self.reader
-            .drain()
-            .filter_map(|event| match event {
-                VoiceEvent::Dictation {
-                    timestamp_ms,
-                    phase,
-                    ..
-                } if timestamp_ms >= since_ms => Some(match phase {
-                    DictationPhase::Started => Observation::Started,
-                    DictationPhase::Transcribing => Observation::Transcribing,
-                    DictationPhase::Discarded => Observation::Discarded,
-                    DictationPhase::Cancelled => Observation::Cancelled,
-                    DictationPhase::Pasted | DictationPhase::Edited => Observation::Pasted,
-                    DictationPhase::Failed(_) => Observation::Failed,
-                    _ => return None,
-                }),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
 /// Opens the folder panel beside the window, starting at the current
 /// meetings folder.
 fn choose_folder() -> crate::file_dialog::Pending {
@@ -1461,138 +1272,6 @@ mod tests {
             .keycaps(),
             _ => panic!("not holding"),
         }
-    }
-
-    #[test]
-    fn the_meeting_feed_lists_stored_meetings_once_until_they_change() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
-        let mut feed = MeetingFeed {
-            library: Some(crate::meeting::query::Library::new(root)),
-            ..MeetingFeed::default()
-        };
-        let meetings = feed.poll().expect("the first poll lists").unwrap();
-        let ids: Vec<_> = meetings.iter().map(|meeting| meeting.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            [
-                "1790001000000-1003",
-                "1790000500000-1002",
-                "1790000000000-1001"
-            ],
-            "newest first, without the unreadable folder"
-        );
-        let standup = &meetings[0];
-        assert_eq!(standup.status, Status::Interrupted, "an unlocked recording");
-        let review = &meetings[1];
-        assert_eq!(review.title, "Roadmap review");
-        let Transcript::Loaded(turns) = &review.transcript else {
-            panic!("the roadmap review has a transcript");
-        };
-        assert!(!turns[0].mine && turns[1].mine);
-        assert_eq!(turns.last().unwrap().pause_before_ms, Some(42_000));
-        feed.scan_at = None;
-        assert!(
-            feed.poll().is_none(),
-            "an unchanged listing is not sent again"
-        );
-    }
-
-    #[test]
-    fn copy_section_matches_the_menu_bar_and_the_cli() {
-        let root = std::env::temp_dir().join(format!(
-            "hex-copy-section-{}-{}",
-            std::process::id(),
-            crate::events::now_ms()
-        ));
-        let id = "1790003000000-1005";
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/meetings-chapters")
-            .join(id);
-        let directory = root.join(id);
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::copy(
-            fixture.join("manifest.json"),
-            directory.join("manifest.json"),
-        )
-        .unwrap();
-        // One speaker's two lines join into one turn across the boundary
-        // at 06:30; the second line belongs to the chapter after.
-        let line = |start_ms: u64, end_ms: u64, text: &str| crate::meeting::TranscriptEntry {
-            source: crate::meeting::MeetingSource::Microphone,
-            start_ms,
-            end_ms,
-            text: text.into(),
-        };
-        let entries = [
-            line(181_000, 188_000, "Next, the motion lint."),
-            line(386_000, 389_000, "That settles the lint."),
-            line(390_500, 397_000, "Last thing: a name for the chat app."),
-        ];
-        let ndjson = entries
-            .iter()
-            .map(|entry| serde_json::to_string(entry).unwrap() + "\n")
-            .collect::<String>();
-        std::fs::write(directory.join("transcript.ndjson"), ndjson).unwrap();
-
-        let library = crate::meeting::query::Library::new(&root);
-        let meeting = library.meeting(id).unwrap();
-        let now_ms = crate::events::now_ms();
-        let pane = pane_meeting(&meeting, now_ms);
-        let chapters = &meeting.manifest.chapters;
-        for (index, chapter) in pane.chapters.iter().enumerate() {
-            // The menu bar's Copy Section (`meeting::section_for_id`).
-            let menu = crate::meeting::section_markdown(
-                &chapters[index],
-                &crate::meeting::chapter_entries(&entries, chapters, index),
-            );
-            assert_eq!(chapter.markdown, menu);
-            let cli = library.chapter_markdown(id, index + 1, now_ms).unwrap();
-            assert!(cli.ends_with(&format!("\n{menu}\n")), "{cli}");
-        }
-        assert!(pane.chapters[1].markdown.contains("That settles the lint."));
-        assert!(!pane.chapters[1].markdown.contains("Last thing"));
-        assert!(pane.chapters[2].markdown.contains("Last thing"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn practice_hears_dictations_logged_after_it_began() {
-        use crate::events::{DictationPhase, VoiceEvent};
-        let path = std::env::temp_dir().join(format!("hex-practice-{}.ndjson", std::process::id()));
-        let dictation = |timestamp_ms, phase| {
-            serde_json::to_string(&VoiceEvent::Dictation {
-                timestamp_ms,
-                phase,
-                text: String::new(),
-                processing: None,
-                reason: None,
-            })
-            .unwrap()
-                + "\n"
-        };
-        std::fs::write(&path, dictation(1, DictationPhase::Started)).unwrap();
-        let mut practice = PracticeFeed::new(&path);
-        let now = practice.since_ms;
-        let log = [
-            dictation(now, DictationPhase::Started),
-            dictation(now + 1, DictationPhase::Transcribing),
-            dictation(now + 2, DictationPhase::Logged),
-            dictation(now + 3, DictationPhase::Edited),
-        ];
-        std::fs::write(&path, dictation(1, DictationPhase::Started) + &log.concat()).unwrap();
-        assert_eq!(
-            practice.observations(),
-            [
-                Observation::Started,
-                Observation::Transcribing,
-                Observation::Pasted
-            ]
-        );
-        assert!(
-            practice.observations().is_empty(),
-            "each event is heard once"
-        );
-        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

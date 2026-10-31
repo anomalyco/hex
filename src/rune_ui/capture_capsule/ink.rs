@@ -10,7 +10,8 @@
 //! the app, and shows a pen cursor; the capsule stays clickable above it.
 //! On Linux the overlay covers the screen and leaves a hole where the
 //! capsule's pill is, and its pointer moves are the strokes
-//! (`capture_host::draw`); on the Mac the tap draws them.
+//! (`capture_host::draw`); on the Mac the tap draws them, and on Windows
+//! the keyboard and mouse hooks.
 //!
 //! [`Scene::at`] decides what shows from the capture's strokes and clock;
 //! the view only draws it, and the overlay asks for frames only while a
@@ -125,6 +126,28 @@ impl Scene {
         scene
     }
 
+    /// The scene in the overlay's points from one in the engine's units,
+    /// `scale` of them per point (`capture_host::pixels_per_point`).
+    fn in_points(mut self, scale: f32) -> Self {
+        if scale == 1.0 || scale <= 0.0 {
+            return self;
+        }
+        let point = |[x, y]: [f32; 2]| [x / scale, y / scale];
+        self.size = point(self.size);
+        self.tip = self.tip.map(point);
+        for (points, _) in &mut self.ink {
+            for (p, _) in points.iter_mut() {
+                *p = point(*p);
+            }
+        }
+        for points in &mut self.laser {
+            for (p, _) in points.iter_mut() {
+                *p = point(*p);
+            }
+        }
+        self
+    }
+
     /// Nothing shows, and nothing will until new input.
     fn is_empty(&self) -> bool {
         self.ink.is_empty() && self.laser.is_empty() && self.tip.is_none() && self.glow <= 0.0
@@ -205,7 +228,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             s.placed = None;
             s.scene = Scene::default();
             if let Some(overlay) = &s.overlay {
-                super::set_shown(overlay, false, |s: &InkState| !s.shown);
+                overlay.hide();
             }
             return true;
         }
@@ -219,10 +242,11 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     });
+    let scale = crate::capture_host::pixels_per_point() as f32;
     #[cfg(target_os = "linux")]
-    let mut scene = Scene::at(&ink, source.now_ms(), tip);
+    let mut scene = Scene::at(&ink, source.now_ms(), tip).in_points(scale);
     #[cfg(not(target_os = "linux"))]
-    let scene = Scene::at(&ink, source.now_ms(), tip);
+    let scene = Scene::at(&ink, source.now_ms(), tip).in_points(scale);
     // Linux learns the screen's size from the first stroke, so the start
     // glow would be drawn at a guess.
     #[cfg(target_os = "linux")]
@@ -230,7 +254,12 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         scene.glow = 0.0;
     }
     let frame = ink.target;
-    let rect = [frame.x as f32, frame.y as f32, scene.size[0], scene.size[1]];
+    let rect = [
+        frame.x as f32 / scale,
+        frame.y as f32 / scale,
+        scene.size[0],
+        scene.size[1],
+    ];
     let drawing = crate::capture_host::drawing();
     // The drawing surface's hit regions come from the view, so a change
     // must lay it out again even when no ink changed: without it, the
@@ -272,7 +301,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         }
         if !s.shown {
             s.shown = true;
-            super::set_shown(overlay, true, |s: &InkState| !s.shown);
+            overlay.show();
         }
     }
     tx.wake_after(FRAME);
@@ -322,8 +351,7 @@ impl InkOverlay {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DisplayTarget::Primary,
                 level: OverlayLevel::AboveStatus,
-                // Hidden until shown; `set_shown` excludes it then.
-                exclude_from_capture: false,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::None,
                 prewarm: true,
                 // Escape while drawing, asked for only then.
@@ -350,7 +378,7 @@ impl InkOverlay {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Lets screen recordings see the ink, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
-        super::follow_recordings(&self.overlay, shown, |s: &InkState| s.shown);
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Looks for a recording capture's strokes now; it keeps looking while

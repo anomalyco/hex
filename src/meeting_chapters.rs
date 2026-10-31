@@ -1,4 +1,4 @@
-//! Live chapters (experiment `live-chapters`). While a meeting records,
+//! Live chapters (Labs). While a meeting records,
 //! Apple's on-device model reads each ~3 minutes of settled transcript and
 //! says whether it is still the current chapter's topic or a new one, with a
 //! short name and one line. After Stop, one call per change labels the lines
@@ -16,11 +16,11 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, eyre};
 use serde::{Deserialize, Serialize};
 
+use super::generator::{self, GeneratedChapter, GenerationError};
 use super::{
     MeetingManifest, TranscriptEntry, TranscriptReader, coalesce_transcript, display_title,
     format_duration, read_manifest, write_manifest,
 };
-use crate::apple_intelligence::{self, GeneratedChapter, GenerationError};
 
 /// How often the worker looks at the transcript; passes are far rarer.
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -498,7 +498,7 @@ impl LiveChapters {
             Box::new(move || reader.read(&worker_id)),
             CHECK_INTERVAL,
             super::notes_wanted,
-            Box::new(apple_intelligence::generate_chapter),
+            Box::new(generator::generate_chapter),
         )
     }
 
@@ -518,7 +518,7 @@ impl LiveChapters {
         if let Err(error) = thread::Builder::new()
             .name("meeting-chapters".into())
             .spawn(move || {
-                crate::parakeet::deprioritize_background_thread();
+                crate::background_priority::deprioritize_background_thread();
                 chapter_while_recording(
                     &id,
                     read,
@@ -837,9 +837,9 @@ pub(super) fn refine_meeting(directory: &Path, entries: &[TranscriptEntry], stop
     refine_meeting_with(
         directory,
         entries,
-        super::notes::excerpt_budget(apple_intelligence::context_tokens(), REFINE_EXCERPT_CHARS),
+        super::notes::excerpt_budget(generator::context_tokens(), REFINE_EXCERPT_CHARS),
         || super::notes::wait_for_dictation(stop) && !crate::process_exit::quitting(),
-        apple_intelligence::generate_chapter_lines,
+        generator::generate_chapter_lines,
     );
 }
 
@@ -973,10 +973,7 @@ fn truncate_words(text: &str, max_chars: usize) -> String {
 #[cfg(debug_assertions)]
 pub fn chapters_file(path: &Path) -> Result<String> {
     use color_eyre::eyre::WrapErr;
-    let availability = apple_intelligence::availability();
-    if !availability.is_available() {
-        return Err(eyre!("{}", availability.description()));
-    }
+    generator::available().map_err(|reason| eyre!("{reason}"))?;
     let text = std::fs::read_to_string(path)
         .wrap_err_with(|| format!("could not read {}", path.display()))?;
     let entries = super::notes::entries_from_markdown(&text);
@@ -1013,8 +1010,7 @@ pub fn chapters_file(path: &Path) -> Result<String> {
             &window,
             &terms,
             |instructions, prompt, timeout| {
-                let generated =
-                    apple_intelligence::generate_chapter(instructions, prompt, timeout)?;
+                let generated = generator::generate_chapter(instructions, prompt, timeout)?;
                 said = format!(
                     "{} ({})",
                     generated.title,
@@ -1057,11 +1053,11 @@ pub fn chapters_file(path: &Path) -> Result<String> {
     let refinement = refine(
         &entries,
         &state.chapters,
-        super::notes::excerpt_budget(apple_intelligence::context_tokens(), REFINE_EXCERPT_CHARS),
+        super::notes::excerpt_budget(generator::context_tokens(), REFINE_EXCERPT_CHARS),
         REFINE_TIMEOUT,
         &terms,
         || true,
-        apple_intelligence::generate_chapter_lines,
+        generator::generate_chapter_lines,
     )?;
     report.push_str(&format!(
         "\nboundary pass · {:.1}s · {} calls · {} prompt chars · {} moved\n",

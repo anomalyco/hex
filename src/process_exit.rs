@@ -33,6 +33,13 @@ pub(crate) fn quitting() -> bool {
     QUITTING.load(Ordering::Acquire)
 }
 
+/// Marks the process as quitting without ending it: the Linux and Windows
+/// apps, which end by returning from `main` once their workers stop.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn begin_quitting() {
+    QUITTING.store(true, Ordering::Release);
+}
+
 #[cfg(test)]
 pub(crate) fn begin_quitting_for_test() {
     QUITTING.store(true, Ordering::Release);

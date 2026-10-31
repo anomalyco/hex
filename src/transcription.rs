@@ -1,8 +1,8 @@
 use color_eyre::eyre::Result;
-use serde::{Deserialize, Serialize};
 
 use crate::apple_speech::AppleSpeech;
 use crate::parakeet::Parakeet;
+pub use crate::transcript::{Transcript, TranscriptSegment};
 use crate::transcription_models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
 };
@@ -17,24 +17,6 @@ pub enum Transcriber {
 #[derive(Default)]
 pub struct WarmTranscriber {
     active: Option<Transcriber>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptSegment {
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub text: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Transcript {
-    pub text: String,
-    pub segments: Vec<TranscriptSegment>,
-    /// Word timings, when the model produces them.
-    #[serde(default)]
-    pub words: Vec<TranscriptSegment>,
 }
 
 impl Transcriber {

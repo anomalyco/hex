@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
+use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
@@ -25,10 +26,12 @@ use crate::desktop_host::{
 };
 use crate::events::EventReader;
 use crate::linux_dictation::ListenerUpdate;
-use crate::linux_input::{LinuxHotkey, ListenerCommand};
+use crate::linux_input::{LinuxHotkey, ListenerCommand, ShortcutCommand};
 use crate::linux_service::{self, Activation, Control, Published, ShortcutRoute, Status};
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
+/// How often the host asks X11 for the active keyboard group.
+const INPUT_SOURCE_POLL: Duration = Duration::from_millis(250);
 /// Left by "Update" so the restarted process shows the window again; a
 /// crash restart finds none and stays in the background.
 const REOPEN_MARKER: &str = "reopen-window";
@@ -57,6 +60,9 @@ struct TranscriptionPreparation {
     progress: Arc<AtomicU64>,
     stage: Arc<AtomicU8>,
     worker: JoinHandle<PreparationResult>,
+    /// A keyboard switch, which a manual choice or a later layout change
+    /// supersedes.
+    automatic: bool,
 }
 
 struct ShortcutEdit {
@@ -129,6 +135,12 @@ struct LinuxDesktopHost {
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
+    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    /// The XKB connection, only while keyboard model switching is on.
+    input_sources: Option<crate::keyboard_input_sources::Watcher>,
+    input_sources_polled_at: Instant,
+    /// A due keyboard switch waiting for the preparation it superseded to stop.
+    keyboard_switch: Option<crate::transcription_models::TranscriptionSelection>,
 }
 
 /// What the window shows of the host.
@@ -219,6 +231,7 @@ impl HostHandle {
                     host.choose_transcription(model, language)
                 }
                 HostRequest::CancelModel => {
+                    host.manual_choice();
                     host.cancel_transcription_preparation();
                     Ok(())
                 }
@@ -281,13 +294,13 @@ impl HostHandle {
         }
         Status {
             desktop,
+            labs: crate::labs::active_names(&snapshot.settings),
             settings: snapshot.settings,
             editing: snapshot.editing,
             hud_limitation,
             window_open: self.window_open(),
             pid: std::process::id(),
             session,
-            experiments: crate::experiments::active_names(),
         }
     }
 }
@@ -301,7 +314,8 @@ pub(crate) fn run(
     activation: Option<Activation>,
 ) -> Result<()> {
     let mut server = linux_service::Server::bind()?;
-    crate::experiments::log_launch();
+    crate::labs::log_launch();
+    crate::hex_microphone::host_service();
     let (settings, error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -312,6 +326,8 @@ pub(crate) fn run(
     crate::linux_dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::local_transcriber::initialize_backends();
+    let (control_calls, control_receiver) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
     let enable_on_launch = settings.enable_on_launch;
     let mut host = LinuxDesktopHost::new(
         event_path,
@@ -327,22 +343,43 @@ pub(crate) fn run(
     let published = Arc::new(Published::default());
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
     let (control, requests) = mpsc::sync_channel(8);
-    server.serve(published.clone(), control.clone(), shutdown);
-    let tray = crate::linux_tray::start(control.clone(), shutdown);
+    crate::control::host::serve(
+        control_receiver,
+        Arc::new(LinuxControl {
+            host: host.clone(),
+            published: Arc::downgrade(&published),
+            window: control.clone(),
+        }),
+    );
+    server.serve(published.clone(), control.clone());
+    let tray = crate::linux_tray::start(host.clone(), published.clone(), control.clone(), shutdown)
+        .map(Arc::new);
     linux_service::notify("READY=1");
     tracing::info!(pid = std::process::id(), "Hex instance ready");
 
     let worker = {
         let host = host.clone();
+        let tray = tray.clone();
         std::thread::Builder::new()
             .name("hex-host".into())
-            .spawn(move || run_host(host, published, server, control, session, shutdown))?
+            .spawn(move || {
+                run_host(
+                    host,
+                    published,
+                    server,
+                    control,
+                    session,
+                    tray.as_deref(),
+                    shutdown,
+                )
+            })?
     };
     let reopen = take_reopen_marker();
     let first = activation.or(reopen.then(Activation::default));
     run_window(&host, requests, first, shutdown);
     shutdown.store(true, Ordering::Release);
     let _ = worker.join();
+    drop(local_api);
     drop(tray);
     Ok(())
 }
@@ -355,10 +392,13 @@ fn run_host(
     server: linux_service::Server,
     control: mpsc::SyncSender<Control>,
     session: linux_service::Session,
+    tray: Option<&rune::Tray>,
     shutdown: &'static AtomicBool,
 ) {
     let mut stopping = false;
     let mut shown: Option<HostSnapshot> = None;
+    let mut tray_view = None;
+    let mut tray_meetings = None;
     loop {
         let (done, route, snapshot) = {
             let mut guard = host.lock();
@@ -379,7 +419,16 @@ fn run_host(
         };
         *published.shortcuts.lock().unwrap() = route;
         *published.status.lock().unwrap() = Some(host.status(snapshot.clone(), session.clone()));
-        if shown.as_ref() != Some(&snapshot) {
+        let meetings = crate::meeting_runtime::tray_state();
+        if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
+            tray_meetings = meetings;
+            if let Some(tray) = tray {
+                let view = crate::linux_tray::view(&snapshot);
+                if tray_view.as_ref() != Some(&view) {
+                    crate::linux_tray::show(tray, &view);
+                    tray_view = Some(view);
+                }
+            }
             shown = Some(snapshot);
             host.wake();
         }
@@ -403,7 +452,7 @@ fn run_window(
 ) {
     let app = host.clone();
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::rune_ui::run_app(app, requests, first)
+        crate::rune_ui::run_app(app, requests, first, shutdown)
     }))
     .is_err()
     {
@@ -455,6 +504,16 @@ impl LinuxDesktopHost {
                 .ok()
         };
         let output = crate::linux_dictation::DictationOutput::from_settings(&settings, history);
+        // Known before the first poll, so launching keeps the saved model
+        // instead of applying the current layout's mapping.
+        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+            settings.keyboard_model_switching.clone(),
+            settings
+                .keyboard_model_switching
+                .enabled
+                .then(crate::keyboard_input_sources::current)
+                .flatten(),
+        );
         let mut host = Self {
             event_reader,
             event_path,
@@ -475,6 +534,10 @@ impl LinuxDesktopHost {
             output,
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
+            keyboard_switcher,
+            input_sources: None,
+            input_sources_polled_at: Instant::now(),
+            keyboard_switch: None,
         };
         host.refresh_personal_commands();
         host
@@ -589,6 +652,7 @@ impl LinuxDesktopHost {
     }
 
     fn refresh(&mut self) {
+        self.switch_with_keyboard();
         // Restart to update asks systemd to restart Hex after the updater's
         // final check; only a failure needs showing.
         if let Some(Err(error)) = self.updater.take_restart() {
@@ -738,6 +802,12 @@ impl LinuxDesktopHost {
         if self.settings_valid && settings == self.settings {
             return;
         }
+        if self
+            .keyboard_switcher
+            .configure(settings.keyboard_model_switching.clone(), Instant::now())
+        {
+            self.supersede_automatic();
+        }
         let was_valid = self.settings_valid;
         self.settings = settings;
         self.settings_valid = true;
@@ -840,17 +910,7 @@ impl LinuxDesktopHost {
         model: crate::transcription_models::TranscriptionModelId,
         language: String,
     ) -> Result<()> {
-        if self.shortcut_edit.is_some() {
-            let error = "Finish the shortcut change before changing the model".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
-        if self.transcription_preparation.is_some() {
-            self.cancel_transcription_preparation();
-            let error = "The previous model preparation is still stopping".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
+        self.manual_choice();
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -862,7 +922,29 @@ impl LinuxDesktopHost {
                 String::new()
             },
         };
-        crate::transcription_models::validate(&selection)?;
+        self.prepare_transcription(selection, false)
+    }
+
+    /// Downloads (or, for a keyboard switch, only verifies) and loads a
+    /// model off the host thread.
+    fn prepare_transcription(
+        &mut self,
+        selection: crate::transcription_models::TranscriptionSelection,
+        automatic: bool,
+    ) -> Result<()> {
+        if self.shortcut_edit.is_some() {
+            let error = "Finish the shortcut change before changing the model".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
+        if self.transcription_preparation.is_some() {
+            self.cancel_transcription_preparation();
+            let error = "The previous model preparation is still stopping".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
+        let model = selection.model;
+        let definition = crate::transcription_models::validate(&selection)?;
         // A running listener keeps the current model until the new one is ready.
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
@@ -874,12 +956,16 @@ impl LinuxDesktopHost {
         let worker_stage = stage.clone();
         let worker = std::thread::spawn(move || {
             (|| {
-                crate::transcription_models::download_with_stage_progress(
-                    definition,
-                    &worker_canceled,
-                    &worker_progress,
-                    &worker_stage,
-                )?;
+                if automatic {
+                    crate::transcription_models::verify_installed(definition, &worker_canceled)?;
+                } else {
+                    crate::transcription_models::download_with_stage_progress(
+                        definition,
+                        &worker_canceled,
+                        &worker_progress,
+                        &worker_stage,
+                    )?;
+                }
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
@@ -901,9 +987,81 @@ impl LinuxDesktopHost {
             progress,
             stage,
             worker,
+            automatic,
         });
         self.transcription_error = None;
         Ok(())
+    }
+
+    /// A layout change not yet polled counts as before this choice, so it
+    /// cannot later undo it.
+    fn manual_choice(&mut self) {
+        if let Some(source) = self
+            .input_sources
+            .as_mut()
+            .and_then(|watcher| watcher.poll())
+        {
+            self.keyboard_switcher
+                .source_changed(source, Instant::now());
+        }
+        self.keyboard_switcher.manual_choice();
+        self.supersede_automatic();
+    }
+
+    /// Cancels only keyboard-switch work; a manual operation is superseded
+    /// once the debounced choice is due.
+    fn supersede_automatic(&mut self) {
+        self.keyboard_switch = None;
+        if let Some(preparation) = &self.transcription_preparation
+            && preparation.automatic
+        {
+            preparation.canceled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Follows the XKB group while switching is on, and prepares a
+    /// mapping's installed model once it is due.
+    fn switch_with_keyboard(&mut self) {
+        let enabled = self.settings.keyboard_model_switching.enabled;
+        if !enabled {
+            self.input_sources = None;
+        } else if self.input_sources_polled_at.elapsed() >= INPUT_SOURCE_POLL {
+            self.input_sources_polled_at = Instant::now();
+            if self.input_sources.is_none() {
+                self.input_sources = crate::keyboard_input_sources::Watcher::connect();
+            }
+            if let Some(source) = self
+                .input_sources
+                .as_mut()
+                .and_then(|watcher| watcher.poll())
+                && self
+                    .keyboard_switcher
+                    .source_changed(source, Instant::now())
+            {
+                self.supersede_automatic();
+            }
+        }
+        if let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) {
+            let selection = crate::transcription_models::TranscriptionSelection {
+                language: choice.language,
+                ..self.settings.transcription_for_model(choice.model)
+            };
+            // Whatever runs is superseded; the current model and language
+            // need no preparation.
+            if let Some(preparation) = &self.transcription_preparation {
+                preparation.canceled.store(true, Ordering::Relaxed);
+            }
+            self.keyboard_switch = (selection.model != self.settings.transcription.model
+                || selection.language != self.settings.transcription.language)
+                .then_some(selection);
+        }
+        if self.transcription_preparation.is_none()
+            && self.shortcut_edit.is_none()
+            && let Some(selection) = self.keyboard_switch.take()
+            && let Err(error) = self.prepare_transcription(selection, true)
+        {
+            self.transcription_error = Some(format!("{error:#}"));
+        }
     }
 
     fn cancel_transcription_preparation(&mut self) {
@@ -928,6 +1086,187 @@ impl Drop for LinuxDesktopHost {
         self.updater.stop();
         self.stop();
         self.cancel_transcription_preparation();
+    }
+}
+
+/// The Linux adapter `hex` control commands from the local API run through
+/// ([`crate::control::host`]).
+struct LinuxControl {
+    host: HostHandle,
+    published: std::sync::Weak<Published>,
+    window: mpsc::SyncSender<Control>,
+}
+
+impl LinuxControl {
+    fn published(&self) -> std::result::Result<Arc<Published>, ControlError> {
+        self.published
+            .upgrade()
+            .ok_or_else(|| ControlError::new("unavailable", "Hex is quitting"))
+    }
+
+    fn route(&self) -> std::result::Result<ShortcutRoute, ControlError> {
+        self.published()?
+            .shortcuts
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| {
+                ControlError::new(
+                    "not-ready",
+                    "Hex is not listening; enable it in Settings or run `hex start`",
+                )
+            })
+    }
+
+    fn shortcut(&self, command: ShortcutCommand) -> std::result::Result<(), ControlError> {
+        linux_service::route_shortcut(Some(&self.route()?), command)
+            .map_err(|error| ControlError::new("busy", format!("{error:#}")))
+    }
+
+    fn window(&self, control: Control) -> std::result::Result<(), ControlError> {
+        self.window
+            .try_send(control)
+            .map_err(|_| ControlError::new("busy", "Hex is busy; try again"))
+    }
+}
+
+impl crate::control::host::Host for LinuxControl {
+    fn state(&self) -> std::result::Result<crate::control::host::HostState, ControlError> {
+        let status = self
+            .published()?
+            .status
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+        Ok(crate::control::host::HostState {
+            capture: crate::control::host::capture_from_state(status.desktop.activity.state),
+            listener: status.desktop.listener,
+            transcription: status.desktop.transcription,
+            update: status.desktop.update_status,
+            settings: status.settings,
+            window_open: status.window_open,
+        })
+    }
+
+    fn dictation(
+        &self,
+        action: CaptureAction,
+        print: Option<crate::control::PrintReply>,
+    ) -> std::result::Result<(), ControlError> {
+        if let Some(print) = print {
+            return self
+                .route()?
+                .commands
+                .try_send(ListenerCommand::StopAndPrint(print))
+                .map_err(|_| ControlError::new("busy", "Hex is busy; try again"));
+        }
+        self.shortcut(match action {
+            CaptureAction::Start => ShortcutCommand::DictationStart,
+            CaptureAction::Stop => ShortcutCommand::DictationStop,
+            CaptureAction::Cancel => ShortcutCommand::DictationCancel,
+            CaptureAction::Toggle => ShortcutCommand::DictationToggle,
+        })
+    }
+
+    fn paste_last(&self) -> std::result::Result<(), ControlError> {
+        self.shortcut(ShortcutCommand::PasteLast)
+    }
+
+    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
+        self.host
+            .save_settings(settings)
+            .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))
+    }
+
+    fn history(&self) -> Option<crate::history::History> {
+        self.host.history()
+    }
+
+    fn show_window(&self, pane: Option<Pane>) -> std::result::Result<(), ControlError> {
+        self.window(Control::Show(pane))
+    }
+
+    fn hide_window(&self) -> bool {
+        self.host.window_open() && self.window(Control::Hide).is_ok()
+    }
+
+    fn onboarding_reset(&self) -> ControlReply {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        if let Err(error) = self.window(Control::OnboardingReset(sender)) {
+            return error.into();
+        }
+        match receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => ControlReply::done("Opened onboarding"),
+            Ok(Err(why)) => ControlReply::error("unsupported", why),
+            Err(_) => ControlReply::error("unavailable", "the window didn't answer; try again"),
+        }
+    }
+
+    fn choose_model(
+        &self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) -> std::result::Result<(), ControlError> {
+        self.host
+            .request(HostRequest::ChooseModel {
+                model: selection.model,
+                language: selection.language,
+            })
+            .map_err(|error| ControlError::new("failed", format!("{error:#}")))
+    }
+
+    fn cancel_model(&self) {
+        let _ = self.host.request(HostRequest::CancelModel);
+    }
+
+    fn check_for_updates(&self) -> std::result::Result<(), ControlError> {
+        self.host
+            .request(HostRequest::Desktop(DesktopAction::CheckForUpdates))
+            .map_err(|error| ControlError::new("unavailable", format!("{error:#}")))
+    }
+
+    fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
+        let format = |error: color_eyre::Report| format!("{error:#}");
+        Some(match enabled {
+            None => crate::linux_login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::linux_login_item::set_enabled(enabled)
+                .and_then(|()| crate::linux_login_item::is_enabled())
+                .map_err(format),
+        })
+    }
+
+    fn quit(&self, restart: bool) -> std::result::Result<(), ControlError> {
+        // A unit restarts by itself; otherwise `hex restart` reopens Hex
+        // once this one has drained.
+        if restart && linux_service::supervised() {
+            return linux_service::schedule_restart()
+                .map_err(|error| ControlError::new("failed", format!("{error:#}")));
+        }
+        self.host.quit();
+        Ok(())
+    }
+
+    fn shortcut_rules(&self) -> crate::control::settings::ShortcutRules {
+        crate::rune_ui::shortcut_rules()
+    }
+
+    fn annotate(&self, command: crate::control::ControlCommand) -> ControlReply {
+        match command {
+            crate::control::ControlCommand::ScrawlCapture {
+                action: crate::control::ScrawlCaptureAction::Status,
+            } => linux_service::capture_status(),
+            crate::control::ControlCommand::ScrawlCapture { action } => {
+                match crate::capture_host::send_to_listener(
+                    crate::capture_host::CaptureControl::Scrawl(action),
+                ) {
+                    Ok(()) => ControlReply::done("Sent to Hex"),
+                    Err(error) => ControlReply::error("failed", format!("{error:#}")),
+                }
+            }
+            _ => crate::control::host::unsupported(
+                "run this `hex annotate` command directly; it reads the captures folder itself",
+            ),
+        }
     }
 }
 
@@ -1230,6 +1569,7 @@ mod tests {
                     assert!(!panics, "fixture preparation panic");
                     Err("model unavailable".into())
                 }),
+                automatic: false,
             });
             if canceled {
                 host.cancel_transcription_preparation();
@@ -1484,6 +1824,7 @@ mod tests {
             progress: Arc::new(AtomicU64::new(0)),
             stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
             worker: std::thread::spawn(|| Err("fixture preparation".into())),
+            automatic: false,
         });
 
         host.dispatch(DesktopAction::StartListening).unwrap();

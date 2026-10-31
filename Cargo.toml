@@ -69,6 +69,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 transcribe-cpp = "=0.4.1"
 transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "e37c66b6df43af51fde8dec34f98a07aaf09564c", features = ["onnx"], optional = true }
+unicode-normalization = "0.1.25"
 unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
@@ -85,37 +86,34 @@ objc2-core-foundation = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
 ratatui = "0.30.2"
-rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
 screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
-tokio = { version = "1.53.1", features = ["rt", "io-std"] }
-unicode-normalization = "0.1.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ctrlc = { version = "3.5.2", features = ["termination"] }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.34", default-features = false }
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time"] }
 transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
 wayland-client = "0.31.15"
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 x11-clipboard = "0.9.3"
-x11rb = { version = "0.14.0", features = ["xtest"] }
+x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
 
-# The `capture` experiment (Scrawl's capture engine), compiled into every macOS
-# and Linux build and dormant until `hex experiments enable capture` and
-# `capture.enabled`. Windows has no host for it yet.
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# The desktop UI, and Annotate (Scrawl's capture engine), compiled into
+# every desktop build (`capture.enabled`).
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+# `hex mcp`.
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
 rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
-
-# The desktop UI.
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 pollster = "1.0.1"
+# The local API's `/profile/vitals`; it reports nothing off macOS.
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
 rune = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef", features = ["native-file-dialog"] }
 rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
 rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "ef320ad56dc71cb7153c0e8ae8311ff037f690ef" }
@@ -139,6 +137,7 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_DataExchange",
   "Win32_System_JobObjects",
   "Win32_System_Memory",
+  "Win32_System_Power",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",

@@ -203,7 +203,17 @@ export async function create(options: CreateOptions | TranscriberOptions = {}): 
   return startHost(options)
 }
 
-const defaultSupportDirectory = (): string => join(homedir(), "Library", "Application Support", "hex")
+// Where each OS's Hex keeps its data (`dirs::data_dir()` joined with `hex`).
+const defaultSupportDirectory = (): string => {
+  switch (process.platform) {
+    case "darwin":
+      return join(homedir(), "Library", "Application Support", "hex")
+    case "win32":
+      return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "hex")
+    default:
+      return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "hex")
+  }
+}
 
 export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
   const discoveryPath = options.discoveryPath

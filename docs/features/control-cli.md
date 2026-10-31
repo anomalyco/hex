@@ -1,16 +1,20 @@
 # Control the running app from a terminal
 
 ```ts
-Agent or terminal                                  // control.cli; macOS release
+Agent or terminal                                  // control.cli; every OS
+├── One tree and protocol over the local API's POST /control on every OS;
+│   OS can't do it -> unsupported at runtime, exit 1
 ├── hex status [--json] -> Listener, capture, meeting, model, features,
 │   permissions, window, update, version, pid, memory
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
-├── hex start -> Already running: nothing | else open Hex.app, wait ≤ 20 s
+├── hex start -> Already running: nothing | else open Hex.app (Linux and
+│   Windows: a detached `hex app --hidden`), wait ≤ 20 s
 │   └── The caller's HEX_* variables -> open --env (values never logged)
 ├── hex quit | restart [--force]
 │   ├── Meeting or dictation in progress, no --force -> refused, exit 1
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
-│   └── restart -> reopens with the running Hex's HEX_* variables
+│   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
+│       Linux unit -> systemctl restart; else waits for the drain, then start
 ├── hex dictation start|stop|cancel|toggle
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   ├── start -> intentional at once: tone once the mic is open, recording
@@ -37,32 +41,43 @@ Agent or terminal                                  // control.cli; macOS release
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
 │   └── Shortcut conflict -> refused, as the window's recorder would
-├── hex model list | use <id> | install <id> | cancel
-│   └── use -> installed models only; never downloads or repairs; keeps the
-│       model's remembered language and hints (--language overrides)
+├── hex model list | use <id> | install [id] | cancel
+│   ├── use -> installed models only; never downloads or repairs; keeps the
+│   │   model's remembered language and hints (--language overrides)
+│   └── Linux/Windows: install with Hex stopped downloads here; status,
+│       devices, check, transcribe run here (macOS: unsupported)
 ├── hex window show [pane] | hide
 │   ├── settings -> the General pane (status window.pane stays "settings")
 │   ├── meetings pane with Meetings off -> the pane's opt-in card
 │   └── story <story> [--variant V] [--play] -> a playground story, as a
-│       hex://story link opens (experiments.md); experiment off -> feature-off
+│       hex://story link opens (labs.md); playground off -> feature-off
 ├── hex history clear --yes -> without --yes refused before Hex is asked
 ├── hex check-for-updates -> The updater checks now
-├── hex launch-at-login [on|off] -> SMAppService; changes need Hex.app
+├── hex launch-at-login [on|off] -> SMAppService (changes need Hex.app);
+│   Windows Run key; Linux XDG autostart entry
 └── hex logs [--process] [-n N] [-f] -> local tail; works with Hex stopped
 ```
 
-Every command except `start`, `restart`, and `logs` talks only to the running
-Hex through the owner-only discovery file and the bearer-authenticated
-`POST /control` route; none of them launch Hex. Commands dispatch in `main`
-before logging, and the instance lock, so they never compete
-with the running app for its files. Opt-ins stay explicit settings: no command
-turns Meetings on as a side effect.
+Every command except `start`, `restart`, `logs`, and the read commands talks
+only to the running Hex; none of them launch Hex. Every OS reaches it through
+the local API's owner-only discovery file and the bearer-authenticated
+`POST /control` route. Commands dispatch before logging and the instance lock on every OS,
+so they never compete with the running app for its files. Opt-ins stay
+explicit settings: no command turns Meetings on as a side effect.
 
-Linux and Windows add only `hex settings`, which reports `unsupported`; the
-Linux service socket keeps its own `dictation`, `paste-last`,
-`status`, `quit`, and `restart`.
+On Linux and Windows `control::host::answer` carries every command out through
+the OS's adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`):
+dictation and paste-last go to the listener's own queue (Windows: the same
+hotkey loop, as a toggle press would), settings save and reload as the
+window's do, and `settings set` refuses a key whose capability the OS lacks
+(`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
+go to the meeting recorder (`meeting_runtime`) as the tray's items do;
+`window story` answers `unsupported`; Windows sends every `annotate`
+command to the running Hex. `hex history`, `hex meetings list|show|search`, and
+`hex mcp` read files on every OS.
 
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
+[control/host.rs](../../src/control/host.rs) (the Linux and Windows host),
 [control/settings.rs](../../src/control/settings.rs) (settings registry),
 [control/cli.rs](../../src/control/cli.rs) (clap, output, exit codes, start,
 logs), [macos_rune/control.rs](../../src/macos_rune/control.rs) (the macOS host),
@@ -85,10 +100,25 @@ covers the immediate stream and `ReadyIntentional`; `recognition::tests`
 cover the stop replies and the idle-cancel and paste-last refusals; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`
-covers parsing next to `history` and `meetings`.
+covers parsing next to `history` and `meetings`; `control::host::tests` cover
+the quit refusal, printing stops, and runtime `unsupported` replies;
+`linux::tests` parse the shared tree beside Linux's own commands;
+`rune_ui::platform::parity_tests` fail when a capability differs across OSes
+without a recorded reason; `settings_name_real_capabilities_and_keys` checks
+the settings-to-capability table.
+
+Observed (Oct 30, apollo, an isolated data root and `hex service` without a
+display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
+add/list/remove, model list/use/status, history clear, window hide,
+check-for-updates, commands check, quit, start, and restart all answered as
+documented. Windows compiled with `cargo xwin clippy` (x64 only; the ARM64
+cross-build fails in rquickjs-sys's build script, unrelated); it has not run
+on a Windows PC.
 
 Gaps: no command has run against a live app; the unit checks substitute the
 host. The control loop's start/stop wiring (tone timing, recording behavior)
 has no end-to-end test. A CLI volume change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
-no command. Linux socket and Windows hosts do not carry control commands yet.
+no command. Linux and Windows dictation through the CLI has not run with a
+microphone, and meeting recording through the CLI has not run on Linux or
+Windows.

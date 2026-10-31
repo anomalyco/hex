@@ -21,6 +21,7 @@ static MEETINGS_ENABLED: AtomicBool = AtomicBool::new(false);
 static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
 static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
+static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
@@ -1079,6 +1080,10 @@ pub struct MeetingSettings {
     /// Title meetings and write a two-sentence summary with Apple
     /// Intelligence when it is available.
     pub summarize_with_apple_intelligence: bool,
+    /// Title meetings and write a two-sentence summary with the OpenCode
+    /// model, which sends the transcript to it. On a Mac, only when Apple
+    /// Intelligence is unavailable or off.
+    pub summarize_with_opencode: bool,
     /// Show the floating recording indicator while a meeting is recording.
     pub show_recording_indicator: bool,
     /// Screen corner the floating recording indicator snaps to after dragging.
@@ -1193,6 +1198,7 @@ impl Default for MeetingSettings {
             enabled: false,
             output_folder: None,
             summarize_with_apple_intelligence: true,
+            summarize_with_opencode: false,
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
@@ -1235,20 +1241,33 @@ impl Default for ExperimentalSettings {
     }
 }
 
-impl ExperimentalSettings {
-    /// [`voice_filter_enabled`] with this setting.
-    pub fn voice_filter_enabled(&self, experiment: bool, driver_installed: bool) -> bool {
-        voice_filter_enabled(self.hex_microphone, experiment, driver_installed)
-    }
+/// The `labs` switches (`crate::labs`), every one off by default. Labs
+/// features that already had a home keep it: `meetings.enabled`,
+/// `experimental.hex_microphone`, `paste_with_shift`,
+/// `keyboard_model_switching.enabled`, `pause_browser_media`, and
+/// `share_dictation_shortcut`. An older
+/// `labs.enabled` master switch is read and ignored.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct LabsSettings {
+    /// Live text beside the HUD while dictating (applies on restart).
+    pub live_text: bool,
+    /// Live chapters while a meeting records.
+    pub live_chapters: bool,
+    /// The playground in the window (applies on restart).
+    pub playground: bool,
+    /// Parakeet transcription biased toward the vocabulary.
+    pub vocabulary_biasing: bool,
+    /// Mouse buttons may be recorded as shortcuts (macOS, issue 209).
+    pub mouse_shortcuts: bool,
 }
 
-/// Whether the Voice Filter is on: its pane shows and the listener streams
-/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), the
-/// `voice-filter` experiment, or an installed driver each turn it on, so a
-/// driver apps already use keeps receiving audio.
-pub fn voice_filter_enabled(setting: bool, experiment: bool, driver_installed: bool) -> bool {
-    crate::experiments::is_dev_build()
-        && (setting || env_hex_experimental_mic() || experiment || driver_installed)
+/// Whether the Voice Filter runs: the listener streams the Hex Microphone
+/// and Hex watches its driver. Its Labs toggle (`experimental.hex_microphone`,
+/// or `HEX_EXPERIMENTAL_MIC`) or an installed driver turns it on, so a driver
+/// apps already use keeps receiving audio.
+pub fn voice_filter_enabled(setting: bool, driver_installed: bool) -> bool {
+    setting || env_hex_experimental_mic() || driver_installed
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -1379,7 +1398,7 @@ impl Default for DictationPostProcessing {
     }
 }
 
-/// Annotate: Scrawl's captures inside Hex, on macOS and Linux
+/// Annotate: Scrawl's captures inside Hex, on macOS, Linux, and Windows
 /// (`capture_host`). On by default; off means no capture work at all.
 #[cfg(hex_capture)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1586,10 +1605,10 @@ pub struct AppSettings {
     pub sound_theme: crate::feedback::SoundSet,
     pub microphone: Option<String>,
     /// System default records from the built-in microphone, else another
-    /// real input, rather than a Bluetooth default (macOS).
+    /// real input, rather than a Bluetooth default.
     pub avoid_bluetooth_microphone: bool,
     pub recording_audio_behavior: RecordingAudioBehavior,
-    /// Fraction of the original output volume while ducking (macOS).
+    /// Fraction of the original output volume while ducking.
     pub recording_duck_volume: f32,
     /// With Pause media on macOS, also pause a browser that is audibly playing.
     pub pause_browser_media: bool,
@@ -1629,6 +1648,8 @@ pub struct AppSettings {
     pub capture_from_other_build: Option<serde_json::Value>,
     #[serde(default)]
     pub experimental: ExperimentalSettings,
+    /// The Labs features' own switches (`crate::labs`).
+    pub labs: LabsSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
     /// listener can be off).
     pub enable_on_launch: bool,
@@ -1637,6 +1658,10 @@ pub struct AppSettings {
     /// Let other apps see the dictation shortcut's key presses too
     /// (Windows), so a push-to-talk key can drive both.
     pub share_dictation_shortcut: bool,
+    /// A mouse-button shortcut went back to its default because Labs ›
+    /// Mouse shortcuts is off; the window says so once, then clears it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mouse_shortcut_notice: bool,
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
@@ -1725,9 +1750,11 @@ impl Default for AppSettings {
             #[cfg(not(hex_capture))]
             capture_from_other_build: None,
             experimental: ExperimentalSettings::default(),
+            labs: LabsSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
             share_dictation_shortcut: false,
+            mouse_shortcut_notice: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
             updates: UpdateSettings::default(),
@@ -1952,6 +1979,22 @@ impl AppSettings {
         }
     }
 
+    /// The saved `labs` switches, read without loading, normalizing, or
+    /// writing anything else.
+    pub fn saved_labs() -> LabsSettings {
+        #[derive(Deserialize)]
+        struct File {
+            #[serde(default)]
+            labs: LabsSettings,
+        }
+        path()
+            .ok()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|data| serde_json::from_slice::<File>(&data).ok())
+            .map(|file| file.labs)
+            .unwrap_or_default()
+    }
+
     /// The saved `updates.channel`, read without loading, normalizing, or
     /// writing anything else, so the updater thread never races a save.
     pub fn saved_update_channel() -> Option<UpdateChannel> {
@@ -1972,6 +2015,8 @@ impl AppSettings {
                 settings.validate_recording_duck_volume()?;
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.repair_bare_primary_clicks();
+                #[cfg(target_os = "macos")]
+                settings.repair_mouse_shortcuts();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
@@ -2062,6 +2107,7 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
+        crate::labs::apply(&self.labs);
         #[cfg(hex_capture)]
         {
             *CAPTURE_SETTINGS
@@ -2086,6 +2132,7 @@ impl AppSettings {
             self.meetings.summarize_with_apple_intelligence,
             Ordering::Release,
         );
+        MEETING_NOTES_OPENCODE.store(self.meetings.summarize_with_opencode, Ordering::Release);
         MEETING_INDICATOR_ENABLED.store(self.meetings.show_recording_indicator, Ordering::Release);
         MEETING_INDICATOR_CORNER.store(
             self.meetings.recording_indicator_corner as u8,
@@ -2285,15 +2332,41 @@ impl AppSettings {
         }
     }
 
-    /// Annotate is on: dev build and the person hasn't turned it off.
+    /// Annotate is on: the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
-        crate::experiments::is_dev_build() && self.capture.enabled
+        self.capture.enabled
     }
 
     /// A shortcut saved as a bare left click swallowed every click, so its
     /// owner couldn't change it in Settings. Such a shortcut goes back to its
     /// default when settings load.
+    /// With Labs › Mouse shortcuts off, a mouse-button shortcut (issue 209)
+    /// goes back to its default and the window notes it once.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn repair_mouse_shortcuts(&mut self) {
+        if self.labs.mouse_shortcuts {
+            return;
+        }
+        let mouse = |binding: &HotkeyBinding| binding.key.as_ref().is_some_and(HotkeyKey::is_mouse);
+        if mouse(&self.dictation_hotkey) {
+            self.dictation_hotkey = HotkeyBinding::default();
+            self.mouse_shortcut_notice = true;
+        }
+        if self.paste_last_hotkey.as_ref().is_some_and(mouse) {
+            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
+            self.mouse_shortcut_notice = true;
+        }
+        #[cfg(hex_capture)]
+        if mouse(&self.capture.hotkey) {
+            self.capture.hotkey = HotkeyBinding::capture_default();
+            self.mouse_shortcut_notice = true;
+        }
+        if self.mouse_shortcut_notice {
+            tracing::info!("reset mouse-button shortcuts: Labs › Mouse shortcuts is off");
+        }
+    }
+
     fn repair_bare_primary_clicks(&mut self) {
         if self.dictation_hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click dictation shortcut with the default");
@@ -2398,7 +2471,6 @@ pub fn transcription_selection() -> (u64, TranscriptionSelection) {
     (state.revision, state.selection.clone())
 }
 
-#[cfg(target_os = "macos")]
 pub fn recording_duck_volume() -> f32 {
     f32::from_bits(RECORDING_DUCK_VOLUME.load(Ordering::Relaxed))
 }
@@ -2468,13 +2540,19 @@ pub fn meetings_enabled() -> bool {
 pub fn hex_microphone_enabled() -> bool {
     voice_filter_enabled(
         HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
-        crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter),
         crate::hex_microphone::driver_bundle_installed(),
     )
 }
 
+/// Apple Intelligence may write meeting notes (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_notes_enabled() -> bool {
     MEETING_NOTES_ENABLED.load(Ordering::Acquire)
+}
+
+/// The OpenCode model may write meeting notes.
+pub fn meeting_notes_with_opencode() -> bool {
+    MEETING_NOTES_OPENCODE.load(Ordering::Acquire)
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2544,7 +2622,6 @@ pub fn save_meeting_provider(choice: MeetingProviderChoice) {
 }
 
 /// Saves the corner the recording capsule was dragged to.
-#[cfg(target_os = "macos")]
 pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
     match AppSettings::load() {
         Ok(mut settings) => {
@@ -2876,14 +2953,33 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_the_experiment_or_an_installed_driver_turns_the_voice_filter_on() {
+    fn the_setting_or_an_installed_driver_turns_the_voice_filter_on_and_labs_never_does() {
         if env_hex_experimental_mic() {
             return;
         }
-        assert!(!voice_filter_enabled(false, false, false));
-        assert!(voice_filter_enabled(true, false, false));
-        assert!(voice_filter_enabled(false, true, false));
-        assert!(voice_filter_enabled(false, false, true));
+        assert!(!voice_filter_enabled(false, false));
+        assert!(voice_filter_enabled(true, false));
+        assert!(voice_filter_enabled(false, true));
+    }
+
+    #[test]
+    fn mouse_shortcuts_go_back_to_their_default_while_their_labs_toggle_is_off() {
+        let mouse = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: HotkeyKey::mouse(3),
+        };
+        let mut settings = AppSettings {
+            dictation_hotkey: mouse.clone(),
+            ..Default::default()
+        };
+        settings.labs.mouse_shortcuts = true;
+        settings.repair_mouse_shortcuts();
+        assert_eq!(settings.dictation_hotkey, mouse);
+        assert!(!settings.mouse_shortcut_notice);
+        settings.labs.mouse_shortcuts = false;
+        settings.repair_mouse_shortcuts();
+        assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+        assert!(settings.mouse_shortcut_notice);
     }
 
     #[test]

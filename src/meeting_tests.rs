@@ -1,8 +1,10 @@
 use super::*;
 use hound::WavReader;
 
+#[cfg(target_os = "macos")]
 #[test]
 fn decodes_float_and_aligned_24_bit_integer_samples() {
+    use super::os::decode_samples;
     let float = [0.25_f32.to_le_bytes(), (-0.5_f32).to_le_bytes()].concat();
     assert_eq!(decode_samples(&float, 2, 4, 32, 1).unwrap(), [0.25, -0.5]);
 
@@ -14,8 +16,11 @@ fn decodes_float_and_aligned_24_bit_integer_samples() {
     assert_eq!(decode_samples(&integer, 2, 4, 24, 20).unwrap(), [0.5, -0.5]);
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn rejects_non_numeric_media_times() {
+    use super::os::media_time_us;
+    use screencapturekit::prelude::CMTime;
     assert_eq!(media_time_us(CMTime::new(3, 2)), Some(1_500_000));
     assert_eq!(media_time_us(CMTime::INVALID), None);
     assert_eq!(media_time_us(CMTime::positive_infinity()), None);
@@ -331,7 +336,7 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade planning");
     // Only live chapters read the title's source; with the experiment off
     // the manifest gains no field.
-    let live_chapters = crate::experiments::enabled(crate::experiments::Experiment::LiveChapters);
+    let live_chapters = crate::labs::live_chapters();
     assert_eq!(
         fs::read_to_string(directory.join("manifest.json"))
             .unwrap()

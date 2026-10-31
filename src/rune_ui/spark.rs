@@ -1,10 +1,12 @@
 //! A sparkle that flips on its vertical axis: four points with curved sides,
-//! bevelled so each point has a lit half and a shaded half, drawn in the
-//! theme's ink. It rests face-on, then turns half a turn with an ease in and
-//! out, which brings it back to the same face. Rune turns shapes only in the
-//! plane, so the turn is projected ahead of time into frames, each shown for
-//! its slot of the loop through a clock-driven opacity cycle: the renderer
-//! flips between them with no view rebuilds. Reduce Motion holds it face-on.
+//! each side rising from its edge to a peak at the centre, drawn in the
+//! theme's ink so the light rolls across each point as it turns. It rests
+//! face-on, then turns half a turn with an ease in and out, which brings it
+//! back to the same face, once per example of the agent card's copy, so the
+//! copy changes as it turns edge-on. Rune turns shapes only in the plane, so
+//! the turn is projected ahead of time into frames, each shown for its slot
+//! of the loop through a clock-driven opacity cycle: the renderer flips
+//! between them with no view rebuilds. Reduce Motion holds it face-on.
 
 use std::f32::consts::PI;
 
@@ -12,23 +14,27 @@ use rune::{Color, Cycle, El, Shape, canvas, col};
 
 use super::controls::Paint;
 
-/// Seconds for one rest and one flip.
-const PERIOD: f32 = 5.0;
+/// Seconds for one rest and one flip: one example of the card's copy.
+pub(super) const PERIOD: f32 = 3.6;
 /// The share of the loop it rests face-on.
-const REST: f32 = 0.62;
-/// Frames in the flip, the face-on frame included.
-const FRAMES: usize = 57;
+const REST: f32 = 0.6;
+/// Seconds into the loop it turns edge-on, halfway through the flip.
+pub(super) const EDGE_ON: f32 = PERIOD * (1.0 + REST) / 2.0;
+/// Frames in the flip, the face-on frame included: 60 a second.
+const FRAMES: usize = 86;
 /// How long each flip frame shows, as a share of the loop.
 const STEP: f32 = (1.0 - REST) / FRAMES as f32;
 /// How far the side points reach, against the vertical points' 1.
 const REACH: f32 = 0.8;
 /// How close each curved side passes to the centre: the smaller, the
 /// thinner the points.
-const PINCH: f32 = 0.05;
-/// How far the bevel's centre stands out of the sparkle's plane.
-const BEVEL: f32 = 0.22;
+const PINCH: f32 = 0.08;
+/// How far the peak stands out of the sparkle's plane.
+const BEVEL: f32 = 0.25;
 /// Points along each curved side.
-const SAMPLES: usize = 16;
+const SAMPLES: usize = 14;
+/// Rings of faces from the peak out to the edge.
+const RINGS: usize = 6;
 /// The face-on frame shows through the rest and one flip step; a hair more
 /// so rounding at a boundary never leaves a moment with no frame.
 const RESTING: [(f32, f32); 4] = [
@@ -88,98 +94,86 @@ fn ease(t: f32) -> f32 {
 
 type Point = [f32; 3];
 
-/// The sparkle turned `turn` radians about its vertical axis, as opaque
-/// bevel faces shaded from `ground` toward `ink`, painted back to front.
+/// The sparkle turned `turn` radians about its vertical axis: its outline in
+/// a middle shade, then the faces that look this way, shaded from `ground`
+/// toward `ink` and painted back to front inside it. The outline gives the
+/// tips one clean edge; the faces only shade what it covers.
 fn faces(turn: f32, size: f32, ground: Color, ink: Color, dark: bool) -> Shape {
-    // y points down; the tips go clockwise from the top.
+    let edge = boundary();
+    let (sin, cos) = turn.sin_cos();
+    let spin = |[x, y, z]: Point| [x * cos + z * sin, y, z * cos - x * sin];
+    let mut faces: Vec<(f32, Vec<Point>, Point)> = Vec::new();
+    for side in [1.0, -1.0] {
+        let at = |s: usize, k: usize| {
+            let r = k as f32 / RINGS as f32;
+            let b = edge[s % edge.len()];
+            [b[0] * r, b[1] * r, side * BEVEL * (1.0 - r).powf(1.5)]
+        };
+        for s in 0..edge.len() {
+            for k in 0..RINGS {
+                let face: Vec<Point> = if k == 0 {
+                    vec![at(s, 0), at(s, 1), at(s + 1, 1)]
+                } else {
+                    vec![at(s, k), at(s, k + 1), at(s + 1, k + 1), at(s + 1, k)]
+                };
+                let view: Vec<Point> = face.into_iter().map(spin).collect();
+                let normal = outward(&view);
+                if normal[2] <= 0.0 {
+                    continue;
+                }
+                let depth = view.iter().map(|v| v[2]).sum::<f32>() / view.len() as f32;
+                faces.push((depth, view, normal));
+            }
+        }
+    }
+    faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (scale, middle) = (size * 0.48, size / 2.0);
+    let place = |v: &Point| [middle + v[0] * scale, middle + v[1] * scale];
+    let outline: Vec<[f32; 2]> = edge.iter().map(|point| place(&spin(*point))).collect();
+    let base = if dark { 0.55 } else { 0.7 };
+    let mut shape = Shape::new().fill(outline, ground.mix(ink, base));
+    for (_, view, normal) in faces {
+        let light = shade(normal);
+        let amount = if dark {
+            0.3 + 0.7 * light
+        } else {
+            0.95 - 0.5 * light
+        };
+        let points: Vec<[f32; 2]> = view.iter().map(place).collect();
+        shape = shape.fill(points, ground.mix(ink, amount.clamp(0.0, 1.0)));
+    }
+    shape
+}
+
+/// The sparkle's edge in its own plane: four tips joined by curves that bow
+/// toward the centre, `SAMPLES` points per side, clockwise from the top
+/// (y points down).
+fn boundary() -> Vec<Point> {
     let tips: [Point; 4] = [
         [0.0, -1.0, 0.0],
         [REACH, 0.0, 0.0],
         [0.0, 1.0, 0.0],
         [-REACH, 0.0, 0.0],
     ];
-    let (sin, cos) = turn.sin_cos();
-    let spin = |[x, y, z]: Point| [x * cos + z * sin, y, z * cos - x * sin];
-    let mut halves: Vec<(f32, Vec<Point>, Point)> = Vec::new();
-    for side in [1.0, -1.0] {
-        let centre = [0.0, 0.0, BEVEL * side];
-        for i in 0..4 {
-            let curve = side_curve(tips[i], tips[(i + 1) % 4]);
-            let (first, second) = curve.split_at(SAMPLES / 2);
-            let mut lit: Vec<Point> = vec![centre];
-            lit.extend_from_slice(first);
-            lit.push(second[0]);
-            let mut shaded: Vec<Point> = vec![centre];
-            shaded.extend_from_slice(second);
-            shaded.push(tips[(i + 1) % 4]);
-            for half in [lit, shaded] {
-                let view: Vec<Point> = half.iter().map(|point| spin(*point)).collect();
-                let normal = outward(&view);
-                if normal[2] <= 0.0 {
-                    continue;
-                }
-                let depth = view.iter().map(|v| v[2]).sum::<f32>() / view.len() as f32;
-                halves.push((depth, view, normal));
-            }
-        }
-    }
-    halves.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let scale = size * 0.48;
-    let middle = size / 2.0;
-    let mut shape = Shape::new();
-    for (_, view, normal) in halves {
-        let light = shade(normal);
-        let amount = if dark {
-            0.28 + 0.72 * light
-        } else {
-            0.98 - 0.5 * light
-        };
-        let points: Vec<[f32; 2]> = view
-            .iter()
-            .map(|v| [middle + v[0] * scale, middle + v[1] * scale])
-            .collect();
-        shape = shape.fill(spread(points), ground.mix(ink, amount.clamp(0.0, 1.0)));
-    }
-    shape
-}
-
-/// The curved side from tip `a` to tip `b`, bowing in past the centre, as
-/// `SAMPLES` points starting at `a` (the end, `b`, is the next side's start).
-fn side_curve(a: Point, b: Point) -> Vec<Point> {
-    let toward = unit(add(a, b)).map(|c| c * PINCH);
-    (0..SAMPLES)
-        .map(|j| {
+    let mut points = Vec::with_capacity(SAMPLES * 4);
+    for i in 0..4 {
+        let (a, b) = (tips[i], tips[(i + 1) % 4]);
+        let toward = unit(add(a, b)).map(|c| c * PINCH);
+        for j in 0..SAMPLES {
             let t = j as f32 / SAMPLES as f32;
             let (u, v, w) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
-            [
+            points.push([
                 u * a[0] + v * toward[0] + w * b[0],
                 u * a[1] + v * toward[1] + w * b[1],
                 0.0,
-            ]
-        })
-        .collect()
-}
-
-/// The polygon grown a quarter point from its centroid, so neighbouring
-/// faces overlap instead of showing the card through their antialiased
-/// shared edges.
-fn spread(points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
-    let count = points.len() as f32;
-    let centre = points.iter().fold([0.0, 0.0], |a, p| {
-        [a[0] + p[0] / count, a[1] + p[1] / count]
-    });
+            ]);
+        }
+    }
     points
-        .into_iter()
-        .map(|[x, y]| {
-            let (dx, dy) = (x - centre[0], y - centre[1]);
-            let length = (dx * dx + dy * dy).sqrt().max(1e-6);
-            [x + dx / length * 0.25, y + dy / length * 0.25]
-        })
-        .collect()
 }
 
-/// The face's unit normal from its centre point and the two ends of its
-/// edge, pointing away from the sparkle's middle.
+/// The face's unit normal from its first point and its neighbours on
+/// either side, pointing away from the sparkle's middle.
 fn outward(points: &[Point]) -> Point {
     let sub = |a: Point, b: Point| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     let (u, v) = (

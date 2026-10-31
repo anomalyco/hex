@@ -88,6 +88,10 @@ pub fn entries() -> Vec<VocabularyEntry> {
 /// next one. `None` while the list is empty or the boost is off.
 pub(crate) fn transcription_bias()
 -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
+    // Labs › Vocabulary biasing: transcription takes the list only while on.
+    if !crate::labs::vocabulary_biasing() {
+        return None;
+    }
     let boost = VocabularyBoost::from_index(BOOST.load(Ordering::Relaxed));
     if boost == VocabularyBoost::Off {
         return None;

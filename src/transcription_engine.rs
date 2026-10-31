@@ -81,7 +81,7 @@ pub(crate) enum Command {
         /// Aborts this stream only.
         cancel: CancelToken,
         /// Where the stream publishes its text after each feed, when live
-        /// text is on (the `live-text` experiment).
+        /// text is on (Labs).
         partials: Option<Partials>,
     },
     Feed {
@@ -101,7 +101,6 @@ pub(crate) enum Command {
     /// interrupting it, such as a capture's word chunk or a `/streams`
     /// window. Like a finish it is a dictation request, so background work
     /// sent before it yields.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Foreground {
         clip: Vec<f32>,
         offline: Offline,
@@ -110,7 +109,6 @@ pub(crate) enum Command {
     /// A live stream that gives way to dictation (`/streams`): any dictation
     /// request closes it, and while a dictation stream is open it is refused
     /// instead of interrupting it.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     BeginYielding {
         stream: u64,
         cancel: CancelToken,
@@ -118,7 +116,6 @@ pub(crate) enum Command {
     },
     /// Finalizes a yielding stream, or answers [`PREEMPTED`] at once when it
     /// is no longer open. It never runs anything offline.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     FinishYielding {
         stream: u64,
         reply: SyncSender<Result<String, String>>,
@@ -126,7 +123,6 @@ pub(crate) enum Command {
     /// Work that needs the model itself, such as loading or switching it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Run(Box<dyn FnOnce(&mut Model) + Send>),
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Background {
         /// The dictation generation when the work was submitted.
         generation: u64,
@@ -219,7 +215,6 @@ impl Yielding {
 /// [`LiveStream`] it is not a dictation request: background work sent before
 /// it still runs, and any dictation request closes it. Feed it 16 kHz audio,
 /// then [`Self::finish`] it or drop it to cancel.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct YieldingStream {
     id: u64,
     cancel: CancelToken,
@@ -229,7 +224,6 @@ pub(crate) struct YieldingStream {
     commands: Sender<Command>,
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl YieldingStream {
     /// Whether the stream is still open on the engine. Once dictation closes
     /// it, its audio must be transcribed some other way.
@@ -388,17 +382,17 @@ pub struct TranscriptionEngine {
     /// Whether the loaded model can stream on its device.
     streams: Arc<AtomicBool>,
     /// Whether dictation streams publish their text as they go (the
-    /// `live-text` experiment); a [`crate::live_text::Demand`] also asks.
+    /// Labs); a [`crate::live_text::Demand`] also asks.
     live_text: bool,
-    #[cfg(target_os = "macos")]
     held: Held,
+    /// Whether the worker is running a dictation stream or finish.
+    dictating: Arc<AtomicBool>,
     next_stream: AtomicU64,
     deadlines: Deadlines,
     thread: Option<JoinHandle<()>>,
 }
 
 /// The GGUF selection the engine's model held after its last command.
-#[cfg(target_os = "macos")]
 type Held = Arc<Mutex<Option<crate::transcription_models::TranscriptionSelection>>>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
@@ -528,16 +522,16 @@ impl TranscriptionEngine {
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
-        #[cfg(target_os = "macos")]
         let held = Held::new(Mutex::new(model.gguf_selection().cloned()));
+        let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
             model,
             running: running.clone(),
             stalled: stalled.clone(),
             streams: streams.clone(),
             requests: requests.clone(),
-            #[cfg(target_os = "macos")]
             held: held.clone(),
+            dictating: dictating.clone(),
         };
         let thread = thread::Builder::new()
             .name("transcription-engine".into())
@@ -548,9 +542,9 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: crate::experiments::enabled(crate::experiments::Experiment::LiveText),
-            #[cfg(target_os = "macos")]
+            live_text: crate::labs::live_text(),
             held,
+            dictating,
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: Some(thread),
@@ -569,8 +563,8 @@ impl TranscriptionEngine {
             requests: Arc::default(),
             streams: Arc::new(AtomicBool::new(true)),
             live_text: false,
-            #[cfg(target_os = "macos")]
             held: Held::default(),
+            dictating: Arc::default(),
             next_stream: AtomicU64::new(0),
             deadlines: Deadlines::PRODUCTION,
             thread: None,
@@ -592,7 +586,7 @@ impl TranscriptionEngine {
         self
     }
 
-    /// Turns live text on, as the `live-text` experiment does.
+    /// Turns live text on, as Labs does.
     #[cfg(test)]
     pub(crate) fn with_live_text(mut self) -> Self {
         self.live_text = true;
@@ -627,7 +621,6 @@ impl TranscriptionEngine {
 
     /// Opens a stream that gives way to dictation, when the loaded model can
     /// stream on this device. See [`YieldingStream`].
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn begin_yielding(&self) -> Option<YieldingStream> {
         if !self.streams.load(Ordering::Acquire) {
             return None;
@@ -653,7 +646,6 @@ impl TranscriptionEngine {
     }
 
     /// Whether the loaded model can stream on its device.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn streams(&self) -> bool {
         self.streams.load(Ordering::Acquire)
     }
@@ -699,7 +691,6 @@ impl TranscriptionEngine {
     /// Transcribes `clip` offline after every command already sent, without
     /// ever interrupting a live stream: one open when it arrives finishes
     /// first. Background work sent before it yields, as to a finish.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn foreground(&self, clip: Vec<f32>, offline: Offline) -> Result<PendingTranscript> {
         self.request(clip.len(), None, |job| Command::Foreground {
             clip,
@@ -746,7 +737,6 @@ impl TranscriptionEngine {
     /// Runs `work` with the model unless a dictation request was sent first or
     /// a live stream is open, and returns `None` when one was. A request sent
     /// while `work` runs waits for it: transcribe.cpp cannot abort a Metal run.
-    #[cfg(target_os = "macos")]
     pub fn background<R: Send + 'static>(
         &self,
         work: impl FnOnce(&mut Model) -> R + Send + 'static,
@@ -779,13 +769,11 @@ impl TranscriptionEngine {
     }
 
     /// Makes this the engine that meeting transcription and the local API share.
-    #[cfg(target_os = "macos")]
     pub fn share(self: &Arc<Self>) {
         *SHARED.lock().unwrap_or_else(|error| error.into_inner()) = Arc::downgrade(self);
     }
 
     /// The running app's engine, when one is shared.
-    #[cfg(target_os = "macos")]
     pub fn shared() -> Option<Arc<Self>> {
         SHARED
             .lock()
@@ -795,7 +783,6 @@ impl TranscriptionEngine {
 
     /// Whether the model holds the GGUF `selection` as of its last finished
     /// command. Readable while dictation runs, unlike the model itself.
-    #[cfg(target_os = "macos")]
     pub(crate) fn holds(
         &self,
         selection: &crate::transcription_models::TranscriptionSelection,
@@ -808,7 +795,6 @@ impl TranscriptionEngine {
     }
 }
 
-#[cfg(target_os = "macos")]
 impl TranscriptionEngine {
     /// The GGUF selection the model held after its last finished command.
     pub(crate) fn held_selection(
@@ -821,9 +807,50 @@ impl TranscriptionEngine {
     }
 }
 
-#[cfg(target_os = "macos")]
 static SHARED: std::sync::Mutex<std::sync::Weak<TranscriptionEngine>> =
     std::sync::Mutex::new(std::sync::Weak::new());
+
+/// Whether dictation is capturing or transcribing, so host audio and
+/// background work give way to it. macOS counts a capture from its press;
+/// Linux and Windows count the shared engine's dictation streams and finishes.
+pub(crate) fn dictation_busy() -> bool {
+    #[cfg(target_os = "macos")]
+    let capturing = crate::parakeet::dictation_busy();
+    #[cfg(not(target_os = "macos"))]
+    let capturing = false;
+    capturing
+        || TranscriptionEngine::shared()
+            .is_some_and(|engine| engine.dictating.load(Ordering::Acquire))
+}
+
+/// A model the engine can hold: the GGUF transcriber on macOS, the one local
+/// GGUF model on Linux and Windows.
+#[cfg(target_os = "macos")]
+pub(crate) type HeldModel = crate::transcription::Transcriber;
+#[cfg(not(target_os = "macos"))]
+pub(crate) type HeldModel = crate::local_transcriber::LocalTranscriber;
+
+/// The engine's model when it is the GGUF `selection`, never loading or
+/// switching one.
+pub(crate) fn held<'a>(
+    model: &'a mut Model,
+    selection: &crate::transcription_models::TranscriptionSelection,
+) -> Option<&'a mut HeldModel> {
+    #[cfg(target_os = "macos")]
+    let model = model
+        .active()
+        .filter(|model| matches!(model, crate::transcription::Transcriber::Gguf(_)))?;
+    model.matches_selection(selection).then_some(model)
+}
+
+/// Transcribes a complete 16 kHz clip with a held model, padded as a
+/// dictation's clip is.
+pub(crate) fn transcribe_clip(model: &mut HeldModel, samples: Vec<f32>) -> Result<String> {
+    #[cfg(target_os = "macos")]
+    return model.transcribe(samples);
+    #[cfg(not(target_os = "macos"))]
+    model.transcribe_clip(samples)
+}
 
 impl Drop for TranscriptionEngine {
     fn drop(&mut self) {
@@ -851,8 +878,8 @@ struct Worker {
     stalled: Arc<AtomicBool>,
     streams: Arc<AtomicBool>,
     requests: Arc<AtomicU64>,
-    #[cfg(target_os = "macos")]
     held: Held,
+    dictating: Arc<AtomicBool>,
 }
 
 /// How a live stream ended inside the worker.
@@ -885,7 +912,9 @@ impl Worker {
                     cancel,
                     partials,
                 } => {
+                    self.dictating.store(true, Ordering::Release);
                     self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                    self.dictating.store(false, Ordering::Release);
                 }
                 Command::BeginYielding {
                     stream,
@@ -913,7 +942,9 @@ impl Worker {
                         Some(_) => Source::Fallback("the live stream was not available".into()),
                         None => Source::Offline,
                     };
+                    self.dictating.store(true, Ordering::Release);
                     self.run_offline(clip, offline, source, job);
+                    self.dictating.store(false, Ordering::Release);
                 }
                 Command::Foreground { clip, offline, job } => {
                     self.run_offline(clip, offline, Source::Offline, job);
@@ -931,14 +962,12 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
-            #[cfg(target_os = "macos")]
             self.publish_selection();
         }
     }
 
     /// Any command may load or switch the model (a dictation job activates
     /// its selection), so the held selection is refreshed after each.
-    #[cfg(target_os = "macos")]
     fn publish_selection(&self) {
         let current = self.model.gguf_selection();
         let mut held = self.held.lock().unwrap_or_else(|error| error.into_inner());

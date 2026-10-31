@@ -725,6 +725,31 @@ fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[
     setting_row(p, key, title, Some(description), lines)
 }
 
+/// Lists keyboard input sources every few seconds while General shows the
+/// switching rows. The window lists them itself on Windows and Linux.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn poll_input_sources(ui: &mut Ui, clock: f64) -> bool {
+    let switching =
+        ui.platform.caps.keyboard_model_switching && ui.settings.keyboard_model_switching.enabled;
+    if !switching {
+        let changed = !ui.platform.input_sources.is_empty();
+        ui.platform.input_sources.clear();
+        return changed;
+    }
+    if ui.pane != super::Pane::General
+        || !ui.live()
+        || !ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
+        || clock < ui.input_sources_listed_at + 2.0
+    {
+        return false;
+    }
+    ui.input_sources_listed_at = clock;
+    let listed = crate::keyboard_input_sources::enabled();
+    let changed = ui.platform.input_sources != listed;
+    ui.platform.input_sources = listed;
+    changed
+}
+
 /// One row per enabled input source: "Don't switch" or an installed model,
 /// then a language that model supports, as the Language row offers it.
 pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {

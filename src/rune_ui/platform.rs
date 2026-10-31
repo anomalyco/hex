@@ -29,7 +29,7 @@ pub(super) enum Os {
 pub(super) struct Capabilities {
     pub(super) os: Os,
     /// Meeting recording and its pane, with the recordings and their
-    /// settings (macOS beta).
+    /// settings (beta, in Labs).
     pub(super) meetings: bool,
     /// Calendar meeting reminders: the Calendar card under Meetings
     /// (macOS, EventKit).
@@ -40,45 +40,44 @@ pub(super) struct Capabilities {
     pub(super) dock_icon: bool,
     /// The listener can be off: the status card and Enable on launch.
     pub(super) listener_control: bool,
-    /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
+    /// The Terminal paste row in General (Linux; on Windows it is in Labs).
     pub(super) terminal_paste: bool,
     /// The dictation shortcut can pass through to other apps (Windows).
     pub(super) share_shortcut: bool,
-    /// The experimental Hex Microphone virtual driver (macOS).
+    /// Hex Microphone is a driver to install (macOS). Elsewhere with the
+    /// Voice Filter, Hex creates it while the filter is on (a PipeWire
+    /// virtual source on Linux).
     pub(super) hex_microphone: bool,
     /// The window sees dictation events, so the tour can end with a
     /// practice dictation into its own field.
     pub(super) practice_dictation: bool,
-    /// The Voice Filter pane: the Hex Microphone's driver, tuning, and
-    /// try-it demo (macOS, under Experiments).
+    /// The Voice Filter pane: Hex Microphone, its tuning, and the try-it
+    /// demo (macOS and Linux, in Labs).
     pub(super) fun: bool,
-    /// Modifier-only shortcuts can require the left or right key (macOS).
+    /// Modifier-only shortcuts can require the left or right key (macOS,
+    /// Windows; X11 grabs and the Wayland portal see no sides).
     pub(super) modifier_sides: bool,
-    pub(super) duck_audio: bool,
-    /// Input-source changes can operate the installed-model picker (macOS).
+    /// Input-source changes can operate the installed-model picker (macOS,
+    /// Windows, and Linux on X11; Wayland has no general layout protocol).
     pub(super) keyboard_model_switching: bool,
-    /// Failures play the sound set's error sound (macOS).
-    pub(super) error_sound: bool,
 }
 
 impl Capabilities {
     pub(super) const LINUX: Self = Self {
         os: Os::Linux,
-        meetings: false,
+        meetings: true,
         calendar: false,
         permissions: false,
-        launch_at_login: false,
+        launch_at_login: true,
         dock_icon: false,
         listener_control: true,
         terminal_paste: true,
         share_shortcut: false,
         hex_microphone: false,
-        practice_dictation: false,
-        fun: false,
+        practice_dictation: true,
+        fun: true,
         modifier_sides: false,
-        duck_audio: false,
-        keyboard_model_switching: false,
-        error_sound: false,
+        keyboard_model_switching: true,
     };
 
     pub(super) const MACOS: Self = Self {
@@ -95,28 +94,24 @@ impl Capabilities {
         practice_dictation: true,
         fun: true,
         modifier_sides: true,
-        duck_audio: true,
         keyboard_model_switching: true,
-        error_sound: true,
     };
 
     pub(super) const WINDOWS: Self = Self {
         os: Os::Windows,
-        meetings: false,
+        meetings: true,
         calendar: false,
         permissions: false,
         launch_at_login: true,
         dock_icon: false,
         listener_control: true,
-        terminal_paste: true,
+        terminal_paste: false,
         share_shortcut: true,
         hex_microphone: false,
-        practice_dictation: false,
+        practice_dictation: true,
         fun: false,
-        modifier_sides: false,
-        duck_audio: false,
-        keyboard_model_switching: false,
-        error_sound: false,
+        modifier_sides: true,
+        keyboard_model_switching: true,
     };
 
     /// This OS's capabilities, with the rows its window host decides.
@@ -130,6 +125,8 @@ impl Capabilities {
         };
         Self {
             terminal_paste: super::host::TERMINAL_PASTE,
+            keyboard_model_switching: os.keyboard_model_switching
+                && crate::keyboard_input_sources::available(),
             ..os
         }
     }
@@ -294,21 +291,12 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Dev, local, or test build (`crate::experiments::is_dev_build` on a
-    /// native host; `true` in fixtures except `"mac-production"`). Production
-    /// builds hide Labs and every experimental pane.
-    pub(super) dev_build: bool,
+    /// The window has the playground (Labs › Playground at launch): the
+    /// sidebar shows its item.
+    pub(super) playground: bool,
     /// Developer builds: keeps Meetings available without opt-in in debug builds
     /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
     pub(super) developer: bool,
-    /// The `playground` experiment.
-    pub(super) playground: bool,
-    /// The `voice-filter` experiment: the Voice Filter pane even before the
-    /// Hex Microphone is on (`crate::experiments::enabled` on a native host).
-    pub(super) voice_filter: bool,
-    /// Live per-experiment switch state for non-pane experiments (`live-text`,
-    /// `live-chapters`, …).
-    pub(super) experiments: [bool; crate::experiments::Experiment::ALL.len()],
     /// macOS 27 lists Accessibility as "Device Control and Data Access"
     /// (`permission_guide::list_name`); the permission rows use that name.
     pub(super) accessibility_renamed: bool,
@@ -376,11 +364,8 @@ impl PlatformState {
             meeting_folder_error: None,
             calendar: CalendarView::default(),
             relaunch_failed: false,
-            dev_build: true,
             developer: false,
             playground: false,
-            voice_filter: false,
-            experiments: [false; crate::experiments::Experiment::ALL.len()],
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),
             demo: None,
@@ -485,21 +470,24 @@ impl PlatformState {
         };
         state.system_audio = true;
         state.login_item = caps.launch_at_login.then_some(LoginItemStatus::Disabled);
-        if caps.hex_microphone {
+        if caps.fun {
             // Fixed, so the scenes' goldens don't change with the crate version.
             let version = "0.0.0".to_string();
+            let driver = caps.hex_microphone;
             state.hex_microphone = Some(HexMicrophoneStatus {
-                driver_bundle_installed: true,
+                driver_bundle_installed: driver,
                 driver_loaded: true,
-                installed_version: Some(version.clone()),
+                installed_version: driver.then(|| version.clone()),
                 bundled_version: version,
                 sink_streaming: true,
-                mic_in_use: true,
-                active_apps: vec!["Slack".into()],
+                mic_in_use: driver,
+                active_apps: if driver {
+                    vec!["Slack".into()]
+                } else {
+                    Vec::new()
+                },
                 action_state: crate::hex_microphone::DriverActionState::Idle,
             });
-        }
-        if caps.fun {
             state.demo = Some(super::fun::preview_demo(false, None));
         }
         state
@@ -554,6 +542,61 @@ pub(super) enum PlatformRequest {
     Scrawl(ScrawlRequest),
 }
 
+/// Performs a Voice Filter request on the Hex Microphone in this process.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(super) fn voice_filter_request(request: PlatformRequest) {
+    use crate::hex_microphone as mic;
+    match request {
+        PlatformRequest::InstallHexMicrophone => mic::install_driver_async(),
+        PlatformRequest::UninstallHexMicrophone => mic::uninstall_driver_async(),
+        PlatformRequest::SetTuning(tuning) => mic::update_tuned_config(|current| *current = tuning),
+        PlatformRequest::HexMicrophoneDemo(request) => match request {
+            DemoRequest::Record => mic::start_demo_recording(),
+            DemoRequest::StopRecording => mic::stop_demo_recording(),
+            DemoRequest::SelectSource(source) => mic::select_demo_source(source),
+            DemoRequest::Play(track) => mic::play_demo_track(track),
+            DemoRequest::StopPlayback => mic::stop_demo_playback(),
+        },
+        _ => {}
+    }
+}
+
+/// The Voice Filter pane's state from the Hex Microphone in this process:
+/// the demo every frame while it records or plays, and, when `refresh`, the
+/// tuning and Hex Microphone's status. Nothing decodes or renders while the
+/// Voice Filter is off.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(super) fn poll_voice_filter(state: &mut PlatformState, refresh: bool) -> bool {
+    use crate::hex_microphone as mic;
+    let mut changed = false;
+    let on = crate::app_settings::hex_microphone_enabled();
+    if on
+        && (state.demo.is_none()
+            || mic::demo_is_busy()
+            || mic::demo_recompute_is_running()
+            || state
+                .demo
+                .as_ref()
+                .is_some_and(|demo| demo.is_recording || demo.playing.is_some()))
+    {
+        state.demo = Some(mic::demo_snapshot());
+        changed = true;
+    }
+    if refresh {
+        let tuning = mic::current_tuned_config();
+        if state.tuning != tuning {
+            state.tuning = tuning;
+            changed = true;
+        }
+        let status = on.then(mic::status);
+        if state.hex_microphone != status {
+            state.hex_microphone = status;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// The host that performs [`PlatformRequest`]s and refreshes
 /// [`PlatformState`] on its own OS.
 // Only macOS has a native host.
@@ -571,13 +614,16 @@ pub(super) trait NativeHost {
     /// The microphone's latest peak, 0 to 1; silence when no audio arrived
     /// lately. The tour reads it only while a practice dictation records.
     fn practice_level(&self) -> f32 {
-        0.0
+        crate::input_level::recent().unwrap_or(0.0)
     }
 }
 
 pub(super) enum PlatformHost {
-    /// Linux: the service owns everything, so nothing is asked here.
-    None,
+    /// Linux and Windows: their runtimes own everything but the practice
+    /// dictation, which the window reads from the listener's event log. On
+    /// Linux the dictation host runs in this process, so Scrawl and the
+    /// Voice Filter are asked of it directly.
+    Local(super::practice::LocalPractice),
     /// Scenes and tests: requests are recorded, never performed.
     Fixture(Vec<PlatformRequest>),
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -588,14 +634,33 @@ impl PlatformHost {
     pub(super) fn send(&mut self, request: PlatformRequest) -> Result<(), String> {
         match self {
             #[cfg(target_os = "linux")]
-            Self::None => {
-                if let PlatformRequest::Scrawl(request) = request {
-                    linux_scrawl_request(request);
+            Self::Local(_) => {
+                match request {
+                    PlatformRequest::Scrawl(request) => scrawl_request(request),
+                    request => voice_filter_request(request),
                 }
                 Ok(())
             }
-            #[cfg(not(target_os = "linux"))]
-            Self::None => Ok(()),
+            // Windows: the one permission is the microphone switch in Settings.
+            #[cfg(target_os = "windows")]
+            Self::Local(_) => {
+                if request
+                    == PlatformRequest::Permission(PermissionAction::ShowGuide(
+                        PermissionKind::Microphone,
+                    ))
+                {
+                    crate::opencode_catalog::open_url(
+                        crate::onboarding::WINDOWS_MICROPHONE_SETTINGS,
+                    )
+                    .map_err(|error| format!("{error:#}"))?;
+                }
+                if let PlatformRequest::Scrawl(request) = request {
+                    scrawl_request(request);
+                }
+                Ok(())
+            }
+            #[cfg(target_os = "macos")]
+            Self::Local(_) => Ok(()),
             Self::Fixture(sent) => {
                 sent.push(request);
                 Ok(())
@@ -607,8 +672,12 @@ impl PlatformHost {
     pub(super) fn poll(&mut self, state: &mut PlatformState) -> bool {
         match self {
             Self::Native(host) => host.poll(state),
+            // Hex Microphone's status is a few atomics on Linux, so it
+            // refreshes every frame.
             #[cfg(target_os = "linux")]
-            Self::None => linux_scrawl_poll(state),
+            Self::Local(_) => scrawl_poll(state) | poll_voice_filter(state, true),
+            #[cfg(target_os = "windows")]
+            Self::Local(_) => scrawl_poll(state),
             _ => false,
         }
     }
@@ -623,14 +692,16 @@ impl PlatformHost {
     pub(super) fn tour_inputs(&mut self, practicing: bool) -> Vec<Input> {
         match self {
             Self::Native(host) => host.tour_inputs(practicing),
-            _ => Vec::new(),
+            Self::Local(practice) => practice.tour_inputs(practicing),
+            Self::Fixture(_) => Vec::new(),
         }
     }
 
     pub(super) fn practice_level(&self) -> f32 {
         match self {
             Self::Native(host) => host.practice_level(),
-            _ => 0.0,
+            Self::Local(_) => crate::input_level::recent().unwrap_or(0.0),
+            Self::Fixture(_) => 0.0,
         }
     }
 
@@ -639,12 +710,12 @@ impl PlatformHost {
     }
 }
 
-/// The Scrawl pane on Linux: it shows while the `capture` experiment is on.
-/// The desktop's portal asks for the screen at each capture, so nothing is
-/// granted ahead of time, and Scrawl's own app is macOS's.
-#[cfg(target_os = "linux")]
-fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
-    if !state.dev_build || state.scrawl.is_some() {
+/// The Annotate pane on Linux and Windows. Linux's portal asks for the screen at each capture and
+/// Windows asks nothing, so nothing is granted ahead of time, and Scrawl's
+/// own app is macOS's.
+#[cfg(not(target_os = "macos"))]
+fn scrawl_poll(state: &mut PlatformState) -> bool {
+    if state.scrawl.is_some() {
         return false;
     }
     state.scrawl = Some(ScrawlView::preview());
@@ -653,8 +724,8 @@ fn linux_scrawl_poll(state: &mut PlatformState) -> bool {
 
 /// Reveals the captures folder; choosing another is set in `settings.json`
 /// (`capture.folder`) for now.
-#[cfg(target_os = "linux")]
-fn linux_scrawl_request(request: ScrawlRequest) {
+#[cfg(not(target_os = "macos"))]
+fn scrawl_request(request: ScrawlRequest) {
     if request == ScrawlRequest::RevealFolder {
         let folder = crate::app_settings::capture_settings().captures_dir();
         if std::fs::create_dir_all(&folder).is_ok()
@@ -663,6 +734,152 @@ fn linux_scrawl_request(request: ScrawlRequest) {
             tracing::warn!(
                 error = format!("{error:#}"),
                 "could not reveal the captures folder"
+            );
+        }
+    }
+}
+
+/// Why a capability is on for some OSes and off for others. Every
+/// difference between [`Capabilities::LINUX`], [`Capabilities::MACOS`], and
+/// [`Capabilities::WINDOWS`] names one in [`DIFFERENCES`], so a Mac-only
+/// feature is a recorded, reviewed choice rather than drift.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+enum Difference {
+    /// Belongs to one OS's own pattern (the Dock, TCC, EventKit).
+    OsPattern(&'static str),
+    /// Can't be done there as policy stands.
+    Impossible(&'static str),
+    /// Can be done there; nobody has built the adapter yet.
+    Pending(&'static str),
+}
+
+#[cfg(test)]
+impl Difference {
+    fn why(self) -> &'static str {
+        match self {
+            Self::OsPattern(why) | Self::Impossible(why) | Self::Pending(why) => why,
+        }
+    }
+}
+
+#[cfg(test)]
+const DIFFERENCES: &[(&str, Difference)] = &[
+    (
+        "calendar",
+        Difference::OsPattern("EventKit; there is no cross-platform calendar source"),
+    ),
+    (
+        "permissions",
+        Difference::OsPattern("only macOS gates dictation on privacy permissions (TCC)"),
+    ),
+    (
+        "dock_icon",
+        Difference::OsPattern("the Dock; Windows and Linux have no dock policy"),
+    ),
+    (
+        "listener_control",
+        Difference::OsPattern("macOS listens once setup is ready; its menu bar is the control"),
+    ),
+    (
+        "terminal_paste",
+        Difference::OsPattern("macOS terminals take ⌘V; Windows keeps the row in Labs"),
+    ),
+    (
+        "share_shortcut",
+        Difference::Pending("a macOS event tap could pass the shortcut through too"),
+    ),
+    (
+        "hex_microphone",
+        Difference::OsPattern(
+            "only macOS installs a driver; Linux creates a PipeWire source while the filter is on",
+        ),
+    ),
+    (
+        "fun",
+        Difference::Impossible("a Windows virtual microphone needs a signed kernel driver"),
+    ),
+    (
+        "modifier_sides",
+        Difference::Impossible("X11 grabs and the Wayland portal see no sides"),
+    ),
+];
+
+impl Capabilities {
+    /// Every capability by name. Destructuring makes a new capability a
+    /// compile error here until it is named.
+    pub(super) fn fields(self) -> [(&'static str, bool); 13] {
+        let Self {
+            os: _,
+            meetings,
+            calendar,
+            permissions,
+            launch_at_login,
+            dock_icon,
+            listener_control,
+            terminal_paste,
+            share_shortcut,
+            hex_microphone,
+            practice_dictation,
+            fun,
+            modifier_sides,
+            keyboard_model_switching,
+        } = self;
+        [
+            ("meetings", meetings),
+            ("calendar", calendar),
+            ("permissions", permissions),
+            ("launch_at_login", launch_at_login),
+            ("dock_icon", dock_icon),
+            ("listener_control", listener_control),
+            ("terminal_paste", terminal_paste),
+            ("share_shortcut", share_shortcut),
+            ("hex_microphone", hex_microphone),
+            ("practice_dictation", practice_dictation),
+            ("fun", fun),
+            ("modifier_sides", modifier_sides),
+            ("keyboard_model_switching", keyboard_model_switching),
+        ]
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_differ_across_oses_only_for_a_recorded_reason() {
+        let [linux, macos, windows] = [
+            Capabilities::LINUX,
+            Capabilities::MACOS,
+            Capabilities::WINDOWS,
+        ]
+        .map(Capabilities::fields);
+        let reason = |name: &str| {
+            DIFFERENCES
+                .iter()
+                .find(|(field, _)| *field == name)
+                .map(|(_, why)| why.why())
+        };
+        for index in 0..linux.len() {
+            let (name, on_linux) = linux[index];
+            let (on_macos, on_windows) = (macos[index].1, windows[index].1);
+            let differs = !(on_linux == on_macos && on_macos == on_windows);
+            match (differs, reason(name)) {
+                (true, None) => panic!(
+                    "`{name}` is linux {on_linux}, macOS {on_macos}, windows {on_windows}; \
+                     port it or record why in DIFFERENCES"
+                ),
+                (false, Some(why)) => panic!(
+                    "`{name}` is the same on every OS now; drop its DIFFERENCES entry ({why})"
+                ),
+                _ => {}
+            }
+        }
+        for (name, _) in DIFFERENCES {
+            assert!(
+                linux.iter().any(|(field, _)| field == name),
+                "DIFFERENCES names `{name}`, which is no capability"
             );
         }
     }

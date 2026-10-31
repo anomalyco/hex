@@ -683,9 +683,12 @@ fn switching_panes_is_instant() {
     }
 }
 
-/// A frame of Output's turning spark, which moves on its own.
+/// A frame of Output's turning spark or a word of its cycling examples,
+/// which move on their own.
 fn spark(e: &rune::ElementInfo) -> bool {
-    e.key.as_deref().is_some_and(|key| key.starts_with("spark"))
+    e.key
+        .as_deref()
+        .is_some_and(|key| key.starts_with("spark") || key.starts_with("example"))
 }
 
 fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
@@ -711,7 +714,7 @@ fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
 type NavRow = (Pane, [f32; 4]);
 
 /// Neighbouring sidebar items with nothing but a gap between them: the
-/// Labs row splits the main panes from the experiments.
+/// Labs row sits below the panes.
 fn nav_neighbours(rt: &Runtime<Ui>) -> Vec<(NavRow, NavRow)> {
     let labs = rt
         .elements()
@@ -745,16 +748,18 @@ fn hovered_items(rt: &mut Runtime<Ui>, x: f32, y: f32) -> Vec<Pane> {
         .collect()
 }
 
-/// A sidebar with the Experiments group, as a developer sees it.
+/// A sidebar with Labs features turned on, as a developer sees it.
 fn grouped_sidebar() -> Runtime<Ui> {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     rt.state.platform.developer = true;
     rt.state.labs_open = true;
     rt.invalidate();
     settle(&mut rt);
-    let items = nav_items(&rt);
-    assert!(items.iter().any(|(pane, _)| pane.experimental()));
-    assert!(items.iter().any(|(pane, _)| !pane.experimental()));
+    assert!(
+        nav_items(&rt)
+            .iter()
+            .any(|(pane, _)| *pane == Pane::VoiceFilter)
+    );
     rt
 }
 
@@ -1727,6 +1732,8 @@ fn onboarding_downloads_the_model_through_the_service() {
     settle(&mut rt);
     std::thread::sleep(std::time::Duration::from_millis(750));
     settle(&mut rt);
+    // Setup moves on to the practice dictation, which can be skipped.
+    tap(&mut rt, "tour-skip");
     tap(&mut rt, "tour-continue");
     assert!(rt.state.tour.is_none(), "Start using Hex closes setup");
 }

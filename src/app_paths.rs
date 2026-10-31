@@ -86,7 +86,6 @@ pub fn opencode_workspace() -> Result<PathBuf> {
     Ok(support_dir()?.join("opencode"))
 }
 
-#[cfg(target_os = "macos")]
 pub fn local_api_discovery_file() -> Result<PathBuf> {
     Ok(support_dir()?.join("local-api.json"))
 }
@@ -99,13 +98,7 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
     user_config_dir()
 }
 
-/// The per-user `experiments` file (`crate::experiments`).
-pub fn experiments_file() -> Result<PathBuf> {
-    Ok(user_config_dir()?.join("experiments"))
-}
-
-/// The per-user config folder holding `hex.config.ts` and `experiments` on
-/// every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
+/// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
 fn user_config_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
     Ok(user_config_dir_in(&home, is_macos_test_build()))
@@ -121,7 +114,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn experiments_live_beside_hex_config_ts_in_each_builds_own_folder() {
+    fn each_build_has_its_own_config_folder() {
         let home = std::path::Path::new("/Users/kit");
         assert_eq!(
             user_config_dir_in(home, false),
@@ -130,13 +123,6 @@ mod tests {
         assert_eq!(
             user_config_dir_in(home, true),
             home.join(".config").join("hex-test")
-        );
-        let file = experiments_file().unwrap();
-        assert_eq!(file.parent(), personal_commands_workspace().ok().as_deref());
-        assert_eq!(
-            file,
-            user_config_dir_in(&dirs::home_dir().unwrap(), is_macos_test_build())
-                .join("experiments")
         );
     }
 }

@@ -22,6 +22,14 @@ pub struct SettingValue {
     pub choices: Vec<String>,
     pub writable: bool,
     pub about: String,
+    /// False where this OS's Hex lacks what the setting needs ([`needs`]):
+    /// it is kept, but does nothing here and `set` refuses it.
+    #[serde(default = "available")]
+    pub available: bool,
+}
+
+fn available() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -105,12 +113,12 @@ const KEYS: &[Key] = &[
     key(
         "keyboard_model_switching.enabled",
         Kind::Bool,
-        "Switch the model when the keyboard input source changes (macOS)",
+        "Labs: switch the model when the keyboard input source changes (macOS, Windows, X11)",
     ),
     key(
         "keyboard_model_switching.mappings",
         Kind::Json,
-        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS)",
+        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS, Windows, X11)",
     ),
     key(
         "release_microphone_while_idle",
@@ -148,7 +156,7 @@ const KEYS: &[Key] = &[
     key(
         "avoid_bluetooth_microphone",
         Kind::Bool,
-        "System default records from the Mac's microphone, not a Bluetooth headset's (macOS)",
+        "System default records from the built-in or another wired microphone, not a Bluetooth headset's",
     ),
     key(
         "recording_audio_behavior",
@@ -158,12 +166,12 @@ const KEYS: &[Key] = &[
     key(
         "recording_duck_volume",
         UNIT,
-        "Fraction of original output volume while lowering audio (macOS), from 0 to 1",
+        "Fraction of original output volume while lowering audio, from 0 to 1",
     ),
     key(
         "pause_browser_media",
         Kind::Bool,
-        "Also pause a playing browser tab while dictating (macOS, with Pause media)",
+        "Labs: also pause a playing browser tab while dictating (macOS, with Pause media)",
     ),
     key(
         "double_tap_lock",
@@ -239,9 +247,34 @@ const KEYS: &[Key] = &[
         "How long dictation history is kept",
     ),
     key(
+        "labs.live_text",
+        Kind::Bool,
+        "Labs: provisional words beside the HUD while dictating (applies on restart)",
+    ),
+    key(
+        "labs.live_chapters",
+        Kind::Bool,
+        "Labs: chapter meeting transcripts while recording",
+    ),
+    key(
+        "labs.playground",
+        Kind::Bool,
+        "Labs: the scene and story browser in the window (applies on restart)",
+    ),
+    key(
+        "labs.vocabulary_biasing",
+        Kind::Bool,
+        "Labs: bias Parakeet transcription toward the vocabulary",
+    ),
+    key(
+        "labs.mouse_shortcuts",
+        Kind::Bool,
+        "Labs: record mouse buttons as shortcuts (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
-        "Meetings (beta): call detection, recording, and transcripts",
+        "Labs: Meetings (beta), call detection, recording, and transcripts",
     ),
     optional(
         "meetings.output_folder",
@@ -252,6 +285,11 @@ const KEYS: &[Key] = &[
         "meetings.summarize_with_apple_intelligence",
         Kind::Bool,
         "Title and summarize meetings with Apple Intelligence",
+    ),
+    key(
+        "meetings.summarize_with_opencode",
+        Kind::Bool,
+        "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
     ),
     key(
         "meetings.show_recording_indicator",
@@ -292,7 +330,7 @@ const KEYS: &[Key] = &[
     key(
         "experimental.hex_microphone",
         Kind::Bool,
-        "The experimental Hex Microphone virtual device",
+        "Labs: the Voice Filter and its Hex Microphone virtual input",
     ),
     key(
         "experimental.hex_microphone_mode",
@@ -332,7 +370,7 @@ const KEYS: &[Key] = &[
     key(
         "share_dictation_shortcut",
         Kind::Bool,
-        "Let other apps see the dictation shortcut too (Windows)",
+        "Labs: let other apps see the dictation shortcut too (Windows)",
     ),
     optional(
         "ui_language",
@@ -406,6 +444,39 @@ const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 #[cfg(not(hex_capture))]
 const CAPTURE_KEYS: &[Key] = &[];
 
+/// Settings that act only where Hex has a capability (by its
+/// `rune_ui::capabilities` name), the same one that shows their row in the
+/// window. The first matching prefix decides.
+const NEEDS: &[(&str, &str)] = &[
+    ("meetings.calendar.", "calendar"),
+    ("meetings.", "meetings"),
+    ("labs.live_chapters", "meetings"),
+    ("experimental.hex_microphone", "fun"),
+    ("show_dock_icon", "dock_icon"),
+    ("keyboard_model_switching.", "keyboard_model_switching"),
+    ("enable_on_launch", "listener_control"),
+    ("share_dictation_shortcut", "share_shortcut"),
+];
+
+/// The capability `key` needs, if any.
+fn needs(key: &str) -> Option<&'static str> {
+    NEEDS
+        .iter()
+        .find(|(prefix, _)| key == *prefix || key.starts_with(prefix))
+        .map(|(_, capability)| *capability)
+}
+
+/// Why `hex settings set` refuses `name` on this OS, if it does.
+pub fn unavailable(name: &str) -> Option<ControlError> {
+    let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
+    Some(ControlError::new(
+        "unsupported",
+        format!(
+            "`{name}` does nothing on this OS: it needs {capability}, which Hex has only elsewhere"
+        ),
+    ))
+}
+
 /// Every key, in registry order.
 fn keys() -> impl Iterator<Item = &'static Key> {
     KEYS.iter().chain(CAPTURE_KEYS)
@@ -413,7 +484,7 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 
 /// Settings `hex settings` never shows: Hex's own bookkeeping.
 #[cfg(test)]
-const INTERNAL: &[&str] = &["migrations"];
+const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice"];
 
 /// Settings another `hex` command edits instead (`hex vocabulary`).
 #[cfg(test)]
@@ -510,6 +581,7 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
         },
         writable: key.read_only.is_none(),
         about: key.about.into(),
+        available: needs(key.key).is_none_or(crate::rune_ui::capability),
     }
 }
 
@@ -574,6 +646,15 @@ pub fn apply(
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };
             if let Some(binding) = binding {
+                if cfg!(target_os = "macos")
+                    && !candidate.labs.mouse_shortcuts
+                    && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
+                {
+                    return Err(invalid(
+                        name,
+                        "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
+                    ));
+                }
                 (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
                 if settings.hotkey_in_use(slot, binding) {
                     return Err(ControlError::new(
@@ -917,6 +998,21 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
+    }
+
+    #[test]
+    fn settings_name_real_capabilities_and_keys() {
+        let capabilities = crate::rune_ui::capabilities();
+        for (prefix, capability) in NEEDS {
+            assert!(
+                capabilities.contains_key(*capability),
+                "`{prefix}` needs `{capability}`, which is no capability"
+            );
+            assert!(
+                keys().any(|key| key.key == *prefix || key.key.starts_with(prefix)),
+                "`{prefix}` names no setting"
+            );
+        }
     }
 
     #[cfg(hex_capture)]

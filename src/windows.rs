@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,15 +15,23 @@ use windows_sys::Win32::System::Console::{
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::local_transcriber::LocalTranscriber;
-use crate::transcription_models::{
-    TranscriptionModelId, TranscriptionSelection, is_installed, is_verified, model_path, validate,
-};
+use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection, validate};
 
 const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
-#[command(version = crate::VERSION, about = "Local Hex dictation for Windows")]
+#[command(
+    name = "hex",
+    version = crate::VERSION,
+    about = "Local Hex dictation for Windows",
+    long_about = "Local Hex dictation for Windows.\n\n\
+        Control commands (status, dictation, settings, model, window, …) drive the one running \
+        Hex over its owner-only pipe and never launch it, except `start` and `restart`. Every \
+        one takes --json for a versioned reply (docs/cli.md). Exit codes: 0 done or nothing to \
+        change, 1 refused or failed, 2 usage, 3 Hex isn't running.",
+    after_help = "Run `hex <command> --help` for details, or `hex settings list` for every setting."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -31,6 +39,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(flatten)]
+    Control(crate::control::cli::ControlCli),
     /// Open the native Windows application.
     App {
         /// Start the resident listener without showing the Settings window.
@@ -49,7 +59,7 @@ enum Command {
         selection: SelectionArgs,
     },
     /// Record one microphone capture and transcribe it locally.
-    Capture {
+    Record {
         /// Select an input device by a case-insensitive name fragment.
         #[arg(long)]
         device: Option<String>,
@@ -59,56 +69,15 @@ enum Command {
         #[command(flatten)]
         selection: SelectionArgs,
     },
+    /// Run the headless local API service.
+    #[command(hide = true)]
+    Service {
+        /// Run as a direct child whose stdin is owned by the host application.
+        #[arg(long)]
+        embedded: bool,
+    },
     /// List microphone devices visible through WASAPI.
     Devices,
-    /// Print recent local observations.
-    Status {
-        /// Maximum number of observations to print.
-        #[arg(long, default_value_t = 40)]
-        lines: usize,
-    },
-    /// Install, inspect, and validate a local dictation model.
-    Model {
-        #[command(subcommand)]
-        command: ModelCommand,
-    },
-    /// Read and change settings (macOS only for now; use the Hex window).
-    Settings {
-        #[command(subcommand)]
-        command: crate::control::cli::SettingsCommand,
-    },
-    /// Turn unfinished, unsupported features on or off for your Hex.
-    Experiments {
-        #[command(subcommand)]
-        command: crate::experiments::ExperimentsCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum ModelCommand {
-    /// Show whether a model is installed and checksum-verified.
-    Status {
-        #[command(flatten)]
-        selection: SelectionArgs,
-    },
-    /// Download and checksum-verify a model.
-    Install {
-        #[command(flatten)]
-        selection: SelectionArgs,
-    },
-    /// List transcribe.cpp compute devices available to Hex.
-    Devices,
-    /// Load and prewarm an installed model.
-    Check {
-        #[command(flatten)]
-        selection: SelectionArgs,
-    },
-    /// Transcribe a WAV file with an installed model.
-    Transcribe {
-        wav: PathBuf,
-        #[command(flatten)]
-        selection: SelectionArgs,
-    },
     /// Compare live-stream and full-clip transcription of a WAV file.
     #[command(hide = true)]
     StreamBench {
@@ -153,12 +122,10 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         hidden: false,
         rune_args: Vec::new(),
     });
-    if let Command::Settings { command } = command {
-        crate::control::cli::finish(crate::control::cli::settings(command));
-    }
-    // Like a read command: no log, lock, or running Hex.
-    if let Command::Experiments { command } = &command {
-        return crate::experiments::run(command);
+    // Control and read commands talk to the running Hex or read files: no
+    // log, lock, or Hex of their own.
+    if let Command::Control(command) = command {
+        crate::control::cli::finish(crate::control::cli::run(command));
     }
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
 
@@ -177,7 +144,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::Listen { device, selection } => {
             shutdown.store(false, Ordering::Relaxed);
             let _instance = crate::instance::acquire("windows-listener")?;
-            crate::experiments::log_launch();
+            crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
             let config = crate::windows_dictation::WindowsDictationConfig {
@@ -194,7 +161,8 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                         )
                     })
                     .flatten();
-            // Settings a foreground listener loaded stay as they are.
+            // Settings a foreground listener loaded stay as they are, and
+            // only its shortcut drives it.
             crate::windows_dictation::run(
                 &event_path,
                 &selection.resolve()?,
@@ -203,7 +171,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 shutdown,
             )
         }
-        Command::Capture {
+        Command::Record {
             device,
             copy,
             selection,
@@ -214,16 +182,25 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             &selection.resolve()?,
             shutdown,
         ),
+        Command::Service { embedded } => {
+            shutdown.store(false, Ordering::Relaxed);
+            if !embedded {
+                crate::app_settings::AppSettings::load()?;
+            }
+            crate::local_api::run_service(&log_dir, event_path, embedded, shutdown)
+        }
         Command::Devices => {
             for device in crate::audio::input_device_names()? {
                 println!("{device}");
             }
             Ok(())
         }
-        Command::Status { lines } => print_status(&event_path, lines),
-        Command::Model { command } => run_model_command(command, shutdown),
-        Command::Settings { .. } => unreachable!("handled before logging"),
-        Command::Experiments { .. } => unreachable!("handled before logging"),
+        Command::StreamBench {
+            wav,
+            speed,
+            selection,
+        } => stream_bench(&wav, speed, &selection.resolve()?),
+        Command::Control(_) => unreachable!("handled before logging"),
     }
 }
 
@@ -247,57 +224,6 @@ fn detach_from_console() {
         for id in console_handles {
             SetStdHandle(id, std::ptr::null_mut());
         }
-    }
-}
-
-fn run_model_command(command: ModelCommand, shutdown: &AtomicBool) -> Result<()> {
-    match command {
-        ModelCommand::Status { selection } => {
-            let selection = selection.resolve()?;
-            let model = validate(&selection)?;
-            let installed = is_installed(model, &selection.language);
-            println!(
-                "{}\t{}\t{}\t{}",
-                if installed { "installed" } else { "missing" },
-                if installed && is_verified(model) {
-                    "verified"
-                } else {
-                    "unverified"
-                },
-                model.name,
-                model_path(model)?.display()
-            );
-            Ok(())
-        }
-        ModelCommand::Install { selection } => {
-            crate::local_transcriber::install(&selection.resolve()?, shutdown)
-        }
-        ModelCommand::Devices => {
-            for device in crate::local_transcriber::devices()? {
-                println!("{device}");
-            }
-            Ok(())
-        }
-        ModelCommand::Check { selection } => {
-            let transcriber = LocalTranscriber::load(&selection.resolve()?)?;
-            println!("ready\t{}", transcriber.device_label());
-            Ok(())
-        }
-        ModelCommand::Transcribe { wav, selection } => {
-            println!(
-                "{}",
-                crate::local_transcriber::transcribe_wav_with_selection(
-                    &wav,
-                    &selection.resolve()?
-                )?
-            );
-            Ok(())
-        }
-        ModelCommand::StreamBench {
-            wav,
-            speed,
-            selection,
-        } => stream_bench(&wav, speed, &selection.resolve()?),
     }
 }
 
@@ -521,25 +447,6 @@ fn emit_state(events: &EventLog, state: VoiceState, device: &str) -> Result<()> 
 fn fail_capture(events: &EventLog, device: &str, error: &str) -> Result<()> {
     events.dictation(DictationPhase::Failed(error.into()), "")?;
     emit_state(events, VoiceState::Stopping, device)
-}
-
-fn print_status(path: &Path, limit: usize) -> Result<()> {
-    // Read from the sources now; the running Hex read them at its launch.
-    let experiments = crate::experiments::active_names();
-    if !experiments.is_empty() {
-        println!("experiments\t{}", experiments.join(","));
-    }
-    if !path.exists() {
-        println!("No observations yet at {}", path.display());
-        return Ok(());
-    }
-    let lines = BufReader::new(std::fs::File::open(path)?)
-        .lines()
-        .collect::<std::io::Result<Vec<_>>>()?;
-    for line in lines.iter().skip(lines.len().saturating_sub(limit)) {
-        println!("{line}");
-    }
-    Ok(())
 }
 
 #[cfg(test)]

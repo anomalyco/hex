@@ -2003,18 +2003,50 @@ fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -
 
 // MARK: Time
 
+#[cfg(unix)]
+use libc::mktime;
+
+// The Universal CRT exports `mktime` only as its 64-bit form.
+#[cfg(windows)]
+unsafe extern "C" {
+    #[link_name = "_mktime64"]
+    fn mktime(tm: *mut libc::tm) -> libc::time_t;
+}
+
 fn local_tm(milliseconds: u64) -> libc::tm {
     let seconds = (milliseconds / 1_000) as libc::time_t;
-    // SAFETY: `localtime_r` writes only into the provided zeroed `tm`.
+    // SAFETY: `localtime_r` and `localtime_s` write only into the provided
+    // zeroed `tm`.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&seconds, &mut tm) };
+    #[cfg(unix)]
+    unsafe {
+        libc::localtime_r(&seconds, &mut tm)
+    };
+    #[cfg(windows)]
+    unsafe {
+        libc::localtime_s(&mut tm, &seconds)
+    };
     tm
 }
 
 /// Local time with its UTC offset, such as `2026-10-15T14:58:31-07:00`.
 pub fn iso_local(milliseconds: u64) -> String {
     let tm = local_tm(milliseconds);
+    #[cfg(unix)]
     let offset = tm.tm_gmtoff;
+    // The local wall clock read as UTC, less the instant itself.
+    #[cfg(windows)]
+    let offset = {
+        let wall = days_from_civil(
+            i64::from(tm.tm_year) + 1_900,
+            i64::from(tm.tm_mon) + 1,
+            i64::from(tm.tm_mday),
+        ) * 86_400
+            + i64::from(tm.tm_hour) * 3_600
+            + i64::from(tm.tm_min) * 60
+            + i64::from(tm.tm_sec);
+        wall - (milliseconds / 1_000) as i64
+    };
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
         tm.tm_year + 1_900,
@@ -2051,7 +2083,7 @@ fn local_to_ms(
     tm.tm_min = minute as i32;
     tm.tm_sec = second as i32;
     tm.tm_isdst = -1;
-    let seconds = unsafe { libc::mktime(&mut tm) };
+    let seconds = unsafe { mktime(&mut tm) };
     u64::try_from(seconds).ok().map(|seconds| seconds * 1_000)
 }
 
@@ -2084,7 +2116,7 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
         tm.tm_mon = today.tm_mon;
         tm.tm_mday = today.tm_mday - days_ago + i32::from(end);
         tm.tm_isdst = -1;
-        u64::try_from(unsafe { libc::mktime(&mut tm) })
+        u64::try_from(unsafe { mktime(&mut tm) })
             .ok()
             .map(|seconds| seconds * 1_000)
     };

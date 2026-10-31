@@ -12,7 +12,7 @@ use super::controls::{
     select, setting_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
-use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, PlatformRequest};
+use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
@@ -178,7 +178,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
     let meetings = &ui.settings.meetings;
     let mut rows = vec![meetings_toggle(ui, p)];
     let mut more = Vec::new();
-    if meetings.enabled {
+    // Only macOS asks before Hex may hear the other participants.
+    if meetings.enabled && ui.platform.caps.permissions {
         let permitted = ui.platform.system_audio;
         let system_audio = icon_row(
             p,
@@ -214,6 +215,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         } else {
             rows.push(system_audio);
         }
+    }
+    if meetings.enabled {
         more.push(icon_toggle_row(
             p,
             "meeting-indicator",
@@ -251,16 +254,36 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder)),
                 )),
         ));
+        if ui.platform.caps.os == Os::Macos {
+            more.push(icon_toggle_row(
+                p,
+                "meeting-notes",
+                &icons::SPARKLES,
+                tr("Summarize with Apple Intelligence"),
+                notes_description(ui.platform.notes),
+                meetings.summarize_with_apple_intelligence,
+                |ui: &mut Ui| {
+                    let enabled = !ui.settings.meetings.summarize_with_apple_intelligence;
+                    ui.update(|settings| {
+                        settings.meetings.summarize_with_apple_intelligence = enabled
+                    });
+                },
+            ));
+        }
         more.push(icon_toggle_row(
             p,
-            "meeting-notes",
+            "meeting-notes-opencode",
             &icons::SPARKLES,
-            tr("Summarize with Apple Intelligence"),
-            notes_description(ui.platform.notes),
-            meetings.summarize_with_apple_intelligence,
+            tr("Summarize with OpenCode"),
+            if ui.platform.caps.os == Os::Macos {
+                tr("When Apple Intelligence is off or unavailable. Sends the transcript to your OpenCode model")
+            } else {
+                tr("Meeting titles and short summaries. Sends the transcript to your OpenCode model")
+            },
+            meetings.summarize_with_opencode,
             |ui: &mut Ui| {
-                let enabled = !ui.settings.meetings.summarize_with_apple_intelligence;
-                ui.update(|settings| settings.meetings.summarize_with_apple_intelligence = enabled);
+                let enabled = !ui.settings.meetings.summarize_with_opencode;
+                ui.update(|settings| settings.meetings.summarize_with_opencode = enabled);
             },
         ));
         if let Some(error) = &ui.platform.meeting_folder_error {

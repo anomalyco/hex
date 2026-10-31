@@ -7,7 +7,7 @@
 //! It runs beside the installed Hex without touching it: no capture host,
 //! settings, captures, tap, or network. Nothing records and nothing sends;
 //! the fake host only answers the capsule's actions with the inputs a real
-//! capture would bring. With the `playground` experiment, the same states
+//! capture would bring. With Labs, the same states
 //! are stories in Hex's own window playground too ([`stories`]).
 
 use std::sync::{Arc, Mutex};

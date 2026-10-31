@@ -201,6 +201,8 @@ pub(crate) fn run(
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
     let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    // The local API transcribes host audio on this engine's model.
+    engine.share();
     // Drop audio/hotkeys and close the job queue before joining slow output on
     // every exit, including failures during startup or recording.
     let mut output = OutputWorker {
@@ -221,7 +223,7 @@ pub(crate) fn run(
     let mut shortcuts_suspended = false;
     let mut indicator = LinuxIndicator::new(settings.indicator_position);
     let mut suppressor =
-        crate::linux_audio_control::AudioSuppressor::new(settings.recording_audio_behavior);
+        crate::linux_audio_control::AudioSuppressor::dictation(settings.recording_audio_behavior);
     let paste_with_shift = Arc::new(AtomicBool::new(settings.paste_with_shift));
     let worker_paste_with_shift = paste_with_shift.clone();
     let paste_keys = hotkey_status.keys();
@@ -371,7 +373,7 @@ pub(crate) fn run(
             }
         }
         if let Some(failed) = model.poll() {
-            events.dictation(DictationPhase::Failed(failed.error), "")?;
+            fail(&events, failed.error)?;
         }
         if !capture.is_recording() && !start_pending && finishing.is_none() {
             let mut register = next_suspended.take().is_some_and(|suspended| {
@@ -386,7 +388,7 @@ pub(crate) fn run(
                     indicator = LinuxIndicator::new(next.indicator_position);
                 }
                 if next.recording_audio_behavior != settings.recording_audio_behavior {
-                    suppressor = crate::linux_audio_control::AudioSuppressor::new(
+                    suppressor = crate::linux_audio_control::AudioSuppressor::dictation(
                         next.recording_audio_behavior,
                     );
                 }
@@ -419,6 +421,7 @@ pub(crate) fn run(
             {
                 let old =
                     std::mem::replace(&mut engine, Arc::new(TranscriptionEngine::start(next)?));
+                engine.share();
                 crate::capture_host::use_engine(&engine);
                 // A capture still transcribing holds the old engine a moment.
                 if let Ok(old) = Arc::try_unwrap(old) {
@@ -454,6 +457,17 @@ pub(crate) fn run(
                 }
                 (Some(host), crate::capture_host::CaptureControl::Command(command)) => {
                     host.command(command, &timeline)
+                }
+                (host, crate::capture_host::CaptureControl::Reply(action, answer)) => {
+                    let report = match host {
+                        Some(host) => host.control(action, &timeline),
+                        None => crate::control::ControlReply::error(
+                            "feature-off",
+                            "Annotate is off; turn it on with `hex settings set capture.enabled on`",
+                        ),
+                    };
+                    let _ = answer.send(report);
+                    continue;
                 }
                 (None, _) => crate::control::ControlReply::error("feature-off", "captures are off"),
             };
@@ -630,7 +644,7 @@ pub(crate) fn run(
             // A repeated paste has no transcript and is not pending work.
             if kind == OutputKind::PasteLast {
                 if let Err(error) = result {
-                    events.dictation(DictationPhase::Failed(error), "")?;
+                    fail(&events, error)?;
                 }
                 continue;
             }
@@ -647,7 +661,7 @@ pub(crate) fn run(
                     })?;
                     events.dictation(phase, text)?;
                 }
-                Err(error) => events.dictation(DictationPhase::Failed(error), "")?,
+                Err(error) => fail(&events, error)?,
             }
             emit_state(
                 &mut events,
@@ -741,10 +755,7 @@ pub(crate) fn run(
                 // it and stay released rather than stopping the listener.
                 start_pending = false;
                 suppressor.restore();
-                events.dictation(
-                    DictationPhase::Failed(format!("could not open microphone: {error}")),
-                    "",
-                )?;
+                fail(&events, format!("could not open microphone: {error}"))?;
                 emit_state(&mut events, active_state(false, pending), &device_label)?;
             }
         }
@@ -868,8 +879,7 @@ fn submit_capture(
                     *pending += 1;
                     events.dictation(DictationPhase::Transcribing, "")?;
                 }
-                Err(TrySendError::Full(_)) => events
-                    .dictation(DictationPhase::Failed("dictation queue is full".into()), "")?,
+                Err(TrySendError::Full(_)) => fail(events, "dictation queue is full")?,
                 Err(TrySendError::Disconnected(_)) => {
                     return Err(eyre!("dictation worker is unavailable"));
                 }
@@ -887,6 +897,13 @@ fn active_state(recording: bool, pending: usize) -> VoiceState {
     } else {
         VoiceState::Listening
     }
+}
+
+/// Logs a failed dictation or paste with the sound set's error sound.
+fn fail(events: &EventLog, error: impl Into<String>) -> Result<()> {
+    feedback::play(Tone::Error);
+    events.dictation(DictationPhase::Failed(error.into()), "")?;
+    Ok(())
 }
 
 fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<()> {

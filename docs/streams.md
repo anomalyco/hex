@@ -1,6 +1,6 @@
 # Live transcription streams (`/streams`)
 
-`/streams` lets another app on this Mac transcribe its own audio live on Hex's
+`/streams` lets another app on this computer transcribe its own audio live on Hex's
 loaded dictation model. The app records the microphone (or anything else) and
 pushes 16 kHz mono samples; Hex sends partial text while it listens, one final
 segment per window, and the final text when the app finishes.
@@ -16,8 +16,8 @@ The code is `src/local_api/streams.rs` (routes) and `src/transcription_stream.rs
 
 ## Availability
 
-- macOS, in the running Hex app, with a GGUF model loaded by dictation. Linux
-  and Windows have no local API yet, so they have no `/streams`.
+- The running Hex app on macOS, Linux, and Windows, with a GGUF model loaded
+  by dictation (on Linux and Windows, once the listener is on).
 - `GET /capabilities` reports `"streams": true` when the routes exist.
 - Streams never load, download, or switch a model. They use whatever model
   and language dictation holds; if there is none, creating a stream answers
@@ -25,8 +25,9 @@ The code is `src/local_api/streams.rs` (routes) and `src/transcription_stream.rs
 
 ## Discovery and auth
 
-Read the owner-only discovery file
-`~/Library/Application Support/hex/local-api.json` (`port`, `token`,
+Read the owner-only discovery file `local-api.json` in Hex's data folder
+(`~/Library/Application Support/hex` on macOS, `$XDG_DATA_HOME/hex` or
+`~/.local/share/hex` on Linux, `%APPDATA%\hex` on Windows) (`port`, `token`,
 `apiVersion`), then call `http://127.0.0.1:<port>` with:
 
 | Header | On | Value |

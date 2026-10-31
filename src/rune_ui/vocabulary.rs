@@ -320,7 +320,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.muted())
                 .wrap(),
         );
-    if let Some(unused) = unused_note(ui) {
+    let unused = unused_note(ui).or_else(|| {
+        (!ui.settings.labs.vocabulary_biasing).then(|| {
+            tr("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do")
+                .to_string()
+        })
+    });
+    if let Some(unused) = unused {
         heading = heading.child(
             text(unused)
                 .key("unused")

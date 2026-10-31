@@ -4,12 +4,12 @@ use std::process::Command;
 fn main() {
     build_version();
     test_build_commit();
-    // `hex_capture`: the `capture` experiment's code, in every macOS and Linux
-    // build (`scrawl-capture` is their dependency); Windows has no host yet.
+    // `hex_capture`: the `capture` experiment's code, in every macOS, Linux,
+    // and Windows build (`scrawl-capture` is their dependency).
     println!("cargo::rustc-check-cfg=cfg(hex_capture)");
     if matches!(
         std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
-        Ok("macos" | "linux")
+        Ok("macos" | "linux" | "windows")
     ) {
         println!("cargo::rustc-cfg=hex_capture");
     }

@@ -6,6 +6,8 @@
 //! here or in the app's own setters.
 
 pub mod cli;
+#[cfg(not(target_os = "macos"))]
+pub(crate) mod host;
 pub mod settings;
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
@@ -114,7 +116,7 @@ pub enum ControlCommand {
     /// Replay the first-run onboarding in the window (dev, test, and local
     /// builds); settings, history, models, and permissions stay.
     OnboardingReset,
-    /// Open the window on a playground story (the `playground` experiment).
+    /// Open the window on a playground story (Labs).
     WindowStory {
         story: String,
         #[serde(default)]
@@ -390,8 +392,8 @@ impl ControlCommand {
 pub enum PrintedTranscript {
     Text(String),
     NoSpeech,
-    /// Only the Linux listener stops by itself without a recording.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    /// The Linux and Windows listeners stop by themselves without a recording.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     NotRecording,
     Failed(String),
 }
@@ -500,9 +502,31 @@ pub struct StatusReport {
     pub window: WindowReport,
     /// current, checking, available, or unavailable.
     pub update: String,
-    /// The experiments this Hex read at its launch (`crate::experiments`).
+    /// The Labs features turned on (`crate::labs`), by `hex labs` name.
     #[serde(default)]
-    pub experiments: Vec<String>,
+    pub labs: Vec<String>,
+    /// What this OS's Hex can do, by capability name (`rune_ui::platform`).
+    /// A command for one it can't do answers `unsupported`.
+    #[serde(default)]
+    pub capabilities: std::collections::BTreeMap<String, bool>,
+}
+
+/// `StatusReport::update` for an updater status.
+pub fn update_label(status: &crate::desktop_host::DesktopUpdateStatus) -> &'static str {
+    use crate::desktop_host::DesktopUpdateStatus;
+    match status {
+        DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
+        DesktopUpdateStatus::Available
+        | DesktopUpdateStatus::ReadyToRestart
+        | DesktopUpdateStatus::SwitchAvailable { .. }
+        | DesktopUpdateStatus::PackageUpdate { .. } => "available",
+        DesktopUpdateStatus::Unavailable
+        | DesktopUpdateStatus::Managed
+        | DesktopUpdateStatus::Failed => "unavailable",
+        DesktopUpdateStatus::Current
+        | DesktopUpdateStatus::SourceBuild
+        | DesktopUpdateStatus::PackageManager => "current",
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -996,6 +1020,7 @@ mod tests {
                     choices: vec![],
                     writable: true,
                     about: "Play tones".into(),
+                    available: true,
                 }],
             },
             ControlReply::Models { models: vec![] },

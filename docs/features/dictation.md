@@ -20,7 +20,8 @@ injects a failed shortcut save yet.
 **Shortcut:** Option by default, after macOS permissions and the selected local
 model are ready. Commands and OpenCode are not required. General > Dictation >
 Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
-standalone function-key bindings. On macOS, Windows and Linux/X11 it also accepts mouse buttons,
+standalone function-key bindings. On Windows and Linux/X11 it also accepts mouse buttons, and on
+macOS with Labs › Mouse shortcuts on (off by default; issue 209; see labs.md),
 alone or with modifiers: click Record, then press the desired mouse button.
 Mouse 1/2/3 are left/right/middle; Mouse 4 and higher are auxiliary buttons.
 Mouse 1 (left click) needs a modifier: alone it would swallow every click,
@@ -68,7 +69,7 @@ an isolated input-module harness; no full Windows app build or physical Windows
 mouse test was run. Xvfb does not establish physical Linux desktop behavior.
 
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
-the macOS side picker and the recorder; with no shortcut the tray reads Off.
+the side picker (macOS and Windows) and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed
 keys (`⌥ ⌘ …`); a key records them at once, and releasing them all records the
 most held. Saved shows for a second, then the recorder returns to Change
@@ -132,8 +133,26 @@ its side (`L⌥ R⌥ ⌘` on the Mac, `Left Alt` elsewhere), so an accidental ex
 key is visible before release. `hex settings` takes
 `left-option+right-option`. Settings store `{"keys": [...]}`; files with the
 old `modifiers`/`key` shape load as the same chord and are written back once.
-Windows matches sides through its low-level hook and accepts both Alts (two
-keys) as a modifier-only chord; one modifier alone stays refused there. Linux
+Windows matches sides through its low-level hook and accepts one modifier
+alone (Right Alt or Right Ctrl, [#508](https://github.com/anomalyco/hex/issues/508))
+as well as both Alts:
+
+```ts
+Windows modifier-only shortcut                           // dictate.windows-lone-modifier
+  ├── Press alone -> Down; release -> Up (hold, lock, Toggle as above)
+  ├── Any key or click joins while held -> Chord: Cancel if recording, else nothing
+  │   (the key reaches the app; locked and toggle captures keep recording)
+  ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
+  │   -> No menu bar or Start menu; Share shortcut skips the mask
+  └── Hex's own injected keys (paste, mask) -> Skipped by the hook (HEX_INJECTED)
+```
+
+On layouts where Right Alt is AltGr, Windows adds a Left Ctrl press, so Right
+Alt alone never matches there; bind Right Ctrl instead. Checks:
+`one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
+`a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
+[windows_input.rs](../../src/windows_input.rs), cross-compiled only; the menu
+mask and AltGr behavior have not run on a Windows PC. Linux
 binds what the portal and X11 grabs take, a key with modifiers and no side:
 releasing modifiers pressed alone in the recorder says Linux needs a key (or
 can't bind both sides) and suggests adding one, such as Space.
@@ -526,7 +545,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   Short tap, Escape, chord discard, microphone failure -> Drop the stream
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is pasted or reaches the focused app until the final text exists
-  live-text experiment -> After each feed the stream publishes its text   // dictate.live-text
+  Labs + labs.live_text -> After each feed the stream publishes its text   // dictate.live-text
   ├── Stable (committed) and tentative text, per capture; a new capture starts empty
   ├── One click-through line just past the HUD, on the HUD's screen
   │   ├── macOS: beside the plate the HUD placed (under the menu bar, over the Dock,
@@ -860,8 +879,8 @@ differently from a paste. Remove the typing path once Chrome 157 is the floor.
 **Windows paste (issue 477):** Windows puts the transcript on the clipboard,
 waits for Shift, Alt, and Win to come up, sends Ctrl+V, and restores the
 previous clipboard 500 ms later unless a newer paste or another app changed it.
-General › Advanced › Output › Terminal paste (`paste_with_shift`, off by
-default; shared with Linux) sends Ctrl+Shift+V instead, for apps that ignore
+Labs › Terminal paste (`paste_with_shift`, off by default; on Linux it is a
+General › Advanced row) sends Ctrl+Shift+V instead, for apps that ignore
 a synthetic Ctrl+V (the herdr desktop app). Shift goes down after Ctrl and up
 before it; a Ctrl the user still holds is never pressed or released by Hex. A
 saved change applies to the next paste without restarting the listener.
@@ -907,7 +926,9 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Dictation pasted >= 2 s after the stop tone -> Done tone      // dictate.done-tone
      -> Pasted sooner (the usual case) -> Stop tone only; `DONE_MIN_AFTER_STOP`
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
-  Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
+  Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
+     -> Classic has none: macOS Basso, Signature's error on Windows and Linux
+     -> Linux/Windows microphone interruption -> Cancel tone only
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
@@ -987,8 +1008,10 @@ audible sample. Every sound is normalized to one loudness per kind (start
 -25.5 LUFS max momentary, stop and done -27, cancel and error -26.5, success
 -25), so a volume sounds the same in every set. Classic's start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples) and its
-cancel, once 15 dB louder than the rest, comes down. Windows and Linux play
-start, stop, done, and cancel; their failures stay silent as before. Checks:
+cancel, once 15 dB louder than the rest, comes down. Every OS plays the
+error sound for a failed dictation or paste (`fail` in `linux_dictation.rs`
+and `windows_dictation.rs`), including an empty transcript, which macOS
+treats as nothing pasted. Checks:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget; every start, and every synthesized sound, audible within 1 ms),
 `every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`. The

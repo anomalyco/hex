@@ -4,14 +4,22 @@ use std::fs;
 use std::path::PathBuf;
 
 const NOW: u64 = 1_792_700_000_000;
+
+/// The shared command tree every OS's `hex` flattens.
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<ControlCli>,
+}
+
+use crate::control::cli::ControlCli;
 const FIXTURE: &str = include_str!("../tests/fixtures/history.json");
 
 fn args(extra: &[&str]) -> HistoryArgs {
     let cli =
-        crate::Cli::try_parse_from(["hex", "history"].into_iter().chain(extra.iter().copied()))
-            .unwrap();
+        Cli::try_parse_from(["hex", "history"].into_iter().chain(extra.iter().copied())).unwrap();
     match cli.command.unwrap() {
-        crate::Command::History(args) => args,
+        ControlCli::History(args) => args,
         _ => panic!("expected history"),
     }
 }
@@ -147,9 +155,7 @@ fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
         )
         .is_err()
     );
-    assert!(
-        crate::Cli::try_parse_from(["hex", "history", "--search", "x", "--oldest-first"]).is_err()
-    );
+    assert!(Cli::try_parse_from(["hex", "history", "--search", "x", "--oldest-first"]).is_err());
 }
 
 #[test]
@@ -345,9 +351,8 @@ fn meeting_show_ranges_filter_json_entries_and_markdown() {
 
     assert!(OffsetRange::parse(Some("0:14"), Some("0:06")).is_err());
     assert!(OffsetRange::parse(Some("0:06"), Some("0:06")).is_err());
-    let cli =
-        crate::Cli::try_parse_from(["hex", "meetings", "show", "latest", "--to", "0"]).unwrap();
-    let Some(crate::Command::Meetings {
+    let cli = Cli::try_parse_from(["hex", "meetings", "show", "latest", "--to", "0"]).unwrap();
+    let Some(ControlCli::Meetings {
         command: MeetingsCommand::Show { from, to, .. },
     }) = cli.command
     else {
@@ -359,11 +364,11 @@ fn meeting_show_ranges_filter_json_entries_and_markdown() {
             .to_string(),
         "The range start 00:00 must be earlier than its end 00:00."
     );
-    let cli = crate::Cli::try_parse_from([
+    let cli = Cli::try_parse_from([
         "hex", "meetings", "show", "latest", "--from", "1:53:03", "--to", "120:43", "--json",
     ])
     .unwrap();
-    let Some(crate::Command::Meetings {
+    let Some(ControlCli::Meetings {
         command: MeetingsCommand::Show { from, to, .. },
     }) = cli.command
     else {
@@ -503,7 +508,7 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
             "--json",
         ],
     ] {
-        assert!(crate::Cli::try_parse_from(command).is_ok());
+        assert!(Cli::try_parse_from(command).is_ok());
     }
     for command in [
         vec!["hex", "history", "--limit", "0"],
@@ -521,7 +526,7 @@ fn parses_release_commands_and_rejects_invalid_limits_and_times() {
         ],
         vec!["hex", "meetings", "show", "latest", "--chapter", "two"],
     ] {
-        assert!(crate::Cli::try_parse_from(command).is_err());
+        assert!(Cli::try_parse_from(command).is_err());
     }
     for invalid in [
         "2026-02-30",

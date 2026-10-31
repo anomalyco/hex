@@ -30,8 +30,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::{
-    CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, Event, InputEvent,
-    Sampler, SharedCaptureTelemetry, ShortcutConfig, ShortcutKind, clean_label, hotkey_combos,
+    CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, InputEvent, Sampler,
+    SharedCaptureTelemetry, ShortcutConfig, ShortcutKind, clean_label, hotkey_combos,
     layout_default_keycode, pick_display, poll_clicks, pure_shift_state, shortcut_label,
     shortcut_matches, track_shift_ink,
 };

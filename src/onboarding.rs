@@ -1,6 +1,7 @@
-//! First-run setup state. macOS gates dictation on three privacy
-//! permissions; Windows and Linux have no such grants, so their permission
-//! states are always ready and only the transcription model step applies.
+//! First-run setup state. macOS gates dictation on its privacy permissions.
+//! Windows has one switch that matters, "Let desktop apps access your
+//! microphone", which the tour shows only while it is off. Linux has no such
+//! grants, so only the transcription model step applies.
 
 use std::fs::{self, OpenOptions};
 #[cfg(unix)]
@@ -255,6 +256,8 @@ pub struct Flow {
     status: SetupStatus,
     model: ModelProgress,
     permissions: bool,
+    /// Windows: the microphone switch was seen off, so its row shows.
+    microphone_row: bool,
     practice_step: bool,
     /// Microphone, then Accessibility.
     asked: [bool; 2],
@@ -281,6 +284,7 @@ impl Flow {
                 ..ModelProgress::default()
             },
             permissions,
+            microphone_row: status.microphone != PermissionState::Ready,
             practice_step: practice,
             asked: [false; 2],
             microphone_guide: false,
@@ -413,6 +417,7 @@ impl Flow {
 
     fn update(&mut self, status: SetupStatus, model: ModelProgress) -> Effect {
         let was_ready = self.setup_ready();
+        self.microphone_row |= status.microphone != PermissionState::Ready;
         self.status = status;
         self.model = model;
         if self.step == Step::Setup && !was_ready && self.setup_ready() {
@@ -436,7 +441,7 @@ impl Flow {
 
     fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::with_capacity(4);
-        if self.permissions {
+        if self.permissions || self.microphone_row {
             rows.push(Row {
                 item: SetupItem::Microphone,
                 status: match self.status.microphone {
@@ -449,6 +454,8 @@ impl Flow {
                 },
                 next: false,
             });
+        }
+        if self.permissions {
             rows.push(Row {
                 item: SetupItem::Accessibility,
                 status: match self.status.accessibility {
@@ -851,9 +858,41 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
 #[cfg(not(target_os = "macos"))]
 pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus {
     SetupStatus {
+        #[cfg(target_os = "windows")]
+        microphone: windows_microphone_state(),
+        #[cfg(not(target_os = "windows"))]
         microphone: PermissionState::Ready,
         accessibility: PermissionState::Ready,
         transcription_model,
+    }
+}
+
+/// Windows Settings' "Where Hex turns the microphone on".
+#[cfg(target_os = "windows")]
+pub const WINDOWS_MICROPHONE_SETTINGS: &str = "ms-settings:privacy-microphone";
+
+/// Off when the device-wide, per-user, or desktop-apps microphone switch in
+/// Settings › Privacy & security › Microphone says `Deny`. Windows never
+/// prompts desktop apps, so only Settings turns it back on.
+#[cfg(target_os = "windows")]
+fn windows_microphone_state() -> PermissionState {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
+
+    const CONSENT: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    let denied = |root, path: &str| {
+        RegKey::predef(root)
+            .open_subkey_with_flags(path, KEY_READ)
+            .and_then(|key| key.get_value::<String, _>("Value"))
+            .is_ok_and(|value| value.eq_ignore_ascii_case("Deny"))
+    };
+    if denied(HKEY_LOCAL_MACHINE, CONSENT)
+        || denied(HKEY_CURRENT_USER, CONSENT)
+        || denied(HKEY_CURRENT_USER, &format!(r"{CONSENT}\NonPackaged"))
+    {
+        PermissionState::NeedsSettings
+    } else {
+        PermissionState::Ready
     }
 }
 
@@ -927,7 +966,7 @@ fn relaunch_arguments(
 }
 
 /// `open --env` arguments for every `HEX_*` variable in `vars`
-/// (HEX_RETAIN_DICTATION_AUDIO, HEX_ENABLE_LLM, HEX_EXPERIMENTS, …), sorted.
+/// (HEX_RETAIN_DICTATION_AUDIO, HEX_ENABLE_LLM, HEX_EXPERIMENTAL_MIC, …), sorted.
 /// LaunchServices starts apps without the caller's environment, so a
 /// relaunch or `hex start` passes these explicitly. Values go only to
 /// `open`'s arguments; never log them.
@@ -1014,7 +1053,7 @@ mod tests {
             ("PATH", "/usr/bin"),
             ("HEX_RETAIN_DICTATION_AUDIO", "1"),
             ("HEX_ENABLE_LLM", "1"),
-            ("HEX_EXPERIMENTS", "a=b,c"),
+            ("HEX_EXPERIMENTAL_MIC", "a=b,c"),
             ("HEXAGON", "no"),
         ]
         .map(|(key, value)| (key.into(), value.into()));
@@ -1033,7 +1072,7 @@ mod tests {
                 "--env",
                 "HEX_ENABLE_LLM=1",
                 "--env",
-                "HEX_EXPERIMENTS=a=b,c",
+                "HEX_EXPERIMENTAL_MIC=a=b,c",
                 "--env",
                 "HEX_RETAIN_DICTATION_AUDIO=1",
                 "/Applications/Hex.app",
@@ -1498,6 +1537,43 @@ mod tests {
         assert_eq!(
             flow.on(Input::Status(ready_status(), installed())),
             Effect::AdvanceSoon
+        );
+    }
+
+    #[test]
+    fn a_switched_off_windows_microphone_adds_its_row_until_setup_ends() {
+        let off = SetupStatus {
+            microphone: PermissionState::NeedsSettings,
+            ..ready_status()
+        };
+        let mut flow = Flow::new(Step::Welcome, off, false, false);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Setup);
+        assert_eq!(
+            statuses(&flow),
+            [
+                (SetupItem::Microphone, ItemStatus::Denied, true),
+                (SetupItem::Model, ItemStatus::Ready, false),
+            ],
+            "no Accessibility row"
+        );
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Microphone)),
+            Effect::ShowGuide(PermissionKind::Microphone)
+        );
+        assert_eq!(
+            flow.on(Input::Status(ready_status(), installed())),
+            Effect::AdvanceSoon
+        );
+        assert_eq!(
+            statuses(&flow)[0],
+            (SetupItem::Microphone, ItemStatus::Ready, false),
+            "the row stays to show its check"
+        );
+        assert_eq!(
+            statuses(&Flow::new(Step::Welcome, ready_status(), false, false)),
+            [(SetupItem::Model, ItemStatus::Ready, false)],
+            "a switch already on adds nothing"
         );
     }
 
