@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::bundle::{load_bundle, resolve_bundle_dir};
