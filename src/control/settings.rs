@@ -148,7 +148,7 @@ const KEYS: &[Key] = &[
     key(
         "avoid_bluetooth_microphone",
         Kind::Bool,
-        "System default records from the Mac's microphone, not a Bluetooth headset's (macOS)",
+        "System default records from the built-in or another wired microphone, not a Bluetooth headset's",
     ),
     key(
         "recording_audio_behavior",
@@ -158,7 +158,7 @@ const KEYS: &[Key] = &[
     key(
         "recording_duck_volume",
         UNIT,
-        "Fraction of original output volume while lowering audio (macOS), from 0 to 1",
+        "Fraction of original output volume while lowering audio, from 0 to 1",
     ),
     key(
         "pause_browser_media",

@@ -1722,7 +1722,7 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
 }
 
 #[test]
-fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
+fn ducking_shows_a_persisted_slider_on_every_os_when_selected() {
     use crate::app_settings::RecordingAudioBehavior;
     let mut rt = runtime("mac-settings", true, (1100.0, 2800.0));
     open_advanced(&mut rt, Pane::General);
@@ -1754,9 +1754,12 @@ fn ducking_shows_a_persisted_slider_only_on_macos_when_selected() {
             rt.state.platform.caps = platform::Capabilities::LINUX;
         }
         open_advanced(&mut rt, Pane::General);
-        tap(&mut rt, "while-dictating-control-trigger");
-        assert!(rt.find("option3").is_none(), "no Lower audio");
-        assert!(rt.find("recording-duck-slider").is_none());
+        pick(&mut rt, "while-dictating", 2);
+        assert_eq!(
+            rt.state.settings.recording_audio_behavior,
+            RecordingAudioBehavior::Duck
+        );
+        assert!(rt.find("recording-duck-slider").is_some());
     }
 }
 

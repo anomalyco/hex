@@ -14,7 +14,6 @@ use objc2_core_audio::{
     kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
 };
-use objc2_core_foundation::CFString;
 
 use crate::app_settings::{self, RecordingAudioBehavior};
 use crate::browser_media::{self, NativeBrowserAudio, PausedBrowser};
@@ -22,7 +21,6 @@ use crate::browser_media::{self, NativeBrowserAudio, PausedBrowser};
 mod ducking;
 
 const VIRTUAL_MAIN_VOLUME: u32 = u32::from_be_bytes(*b"vmvc");
-const POWER_ASSERTION_LEVEL_ON: u32 = 255;
 
 /// A media player Hex may pause while recording and resume afterwards.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -123,8 +121,12 @@ impl Hold {
 
 /// What the native environment holds for one effect until it is dropped.
 enum Held {
-    Sleep { _guard: Option<PreventSleep> },
-    Audio { _guard: AudioBehaviorGuard },
+    Sleep {
+        _guard: Option<crate::idle_sleep::PreventSleep>,
+    },
+    Audio {
+        _guard: AudioBehaviorGuard,
+    },
 }
 
 fn hold_native(effect: Effect) -> Held {
@@ -133,7 +135,7 @@ fn hold_native(effect: Effect) -> Held {
     };
     match effect {
         Effect::Sleep => Held::Sleep {
-            _guard: prevent_sleep(),
+            _guard: crate::idle_sleep::prevent_sleep(),
         },
         Effect::Mute => audio(RecordingAudioBehavior::Mute),
         Effect::Duck => audio(RecordingAudioBehavior::Duck),
@@ -344,73 +346,8 @@ pub fn capture_active() -> bool {
     CAPTURES.load(std::sync::atomic::Ordering::Acquire) > 0
 }
 
-pub fn prevent_sleep() -> Option<PreventSleep> {
-    match PreventSleep::start() {
-        Ok(prevention) => Some(prevention),
-        Err(error) => {
-            tracing::warn!(%error, "could not prevent idle system sleep");
-            None
-        }
-    }
-}
-
-pub struct PreventSleep {
-    assertion_id: u32,
-}
-
-impl PreventSleep {
-    fn start() -> std::io::Result<Self> {
-        let assertion_type = CFString::from_static_str("NoIdleSleepAssertion");
-        let assertion_name = CFString::from_static_str("Hex intentional recording");
-        let mut assertion_id = 0;
-        // SAFETY: Both Core Foundation strings remain alive for the call and
-        // assertion_id points to writable, correctly sized storage. IOKit
-        // retains the assertion independently until IOPMAssertionRelease.
-        let status = unsafe {
-            IOPMAssertionCreateWithName(
-                (&*assertion_type as *const CFString).cast(),
-                POWER_ASSERTION_LEVEL_ON,
-                (&*assertion_name as *const CFString).cast(),
-                &mut assertion_id,
-            )
-        };
-        if status != 0 {
-            return Err(std::io::Error::other(format!(
-                "IOPMAssertionCreateWithName failed with IOReturn 0x{:08x}",
-                status as u32
-            )));
-        }
-        Ok(Self { assertion_id })
-    }
-}
-
-impl Drop for PreventSleep {
-    fn drop(&mut self) {
-        // SAFETY: assertion_id was returned by a successful create call and
-        // this guard is its sole owner, so release occurs exactly once.
-        let status = unsafe { IOPMAssertionRelease(self.assertion_id) };
-        if status != 0 {
-            tracing::warn!(
-                status = format_args!("0x{:08x}", status as u32),
-                "could not release idle-sleep assertion"
-            );
-        }
-    }
-}
-
-#[link(name = "IOKit", kind = "framework")]
-unsafe extern "C" {
-    fn IOPMAssertionCreateWithName(
-        assertion_type: *const c_void,
-        assertion_level: u32,
-        assertion_name: *const c_void,
-        assertion_id: *mut u32,
-    ) -> i32;
-    fn IOPMAssertionRelease(assertion_id: u32) -> i32;
-}
-
 enum AudioBehaviorGuard {
-    Ducked(ducking::Guard),
+    Ducked(crate::output_ducking::Guard),
     Muted {
         device: u32,
         previous: f32,
@@ -468,10 +405,8 @@ impl AudioBehaviorGuard {
                 }
                 paused_guard(players, browser)
             }
-            RecordingAudioBehavior::Duck => {
-                ducking::Guard::start(app_settings::recording_duck_volume())
-                    .map_or(Self::None, Self::Ducked)
-            }
+            RecordingAudioBehavior::Duck => ducking::start(app_settings::recording_duck_volume())
+                .map_or(Self::None, Self::Ducked),
             RecordingAudioBehavior::DoNothing => Self::None,
         }
     }
@@ -764,12 +699,6 @@ mod tests {
         let (ran, called) = mpsc::channel();
         dictation(&controller, MuteOutput).end_then(move || ran.send(()).unwrap());
         assert_eq!(called.try_recv(), Ok(()), "the callback still runs");
-    }
-
-    #[test]
-    #[ignore = "exercises the native macOS idle-sleep assertion"]
-    fn native_idle_sleep_assertion_acquires_and_releases() {
-        drop(PreventSleep::start().unwrap());
     }
 
     #[test]

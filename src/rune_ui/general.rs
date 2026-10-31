@@ -165,14 +165,6 @@ pub(super) fn shortcut_rows(
     rows
 }
 
-/// What other audio can do while dictating; Lower audio only where Hex can.
-fn audio_behaviors(ui: &Ui) -> Vec<RecordingAudioBehavior> {
-    RecordingAudioBehavior::ALL
-        .into_iter()
-        .filter(|behavior| *behavior != RecordingAudioBehavior::Duck || ui.platform.caps.duck_audio)
-        .collect()
-}
-
 /// The desktop's own dialog for the shortcuts its portal bound, where the
 /// user changes a trigger the desktop kept from an earlier binding.
 fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
@@ -749,23 +741,25 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             },
         ));
     }
-    if ui.platform.caps.os == super::platform::Os::Macos {
-        rows.push(
-            icon_toggle_row(
-                p,
-                "avoid-bluetooth-microphone",
-                &BLUETOOTH,
-                tr("Use the Mac's microphone instead of Bluetooth"),
-                tr("Keeps AirPods and other headsets out of call-quality audio"),
-                settings.avoid_bluetooth_microphone,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.avoid_bluetooth_microphone;
-                    ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
-                },
-            )
-            .into(),
-        );
-    }
+    rows.push(
+        icon_toggle_row(
+            p,
+            "avoid-bluetooth-microphone",
+            &BLUETOOTH,
+            if ui.platform.caps.os == super::platform::Os::Macos {
+                tr("Use the Mac's microphone instead of Bluetooth")
+            } else {
+                tr("Use another microphone instead of Bluetooth")
+            },
+            tr("Keeps AirPods and other headsets out of call-quality audio"),
+            settings.avoid_bluetooth_microphone,
+            |ui: &mut Ui| {
+                let enabled = !ui.settings.avoid_bluetooth_microphone;
+                ui.update(|settings| settings.avoid_bluetooth_microphone = enabled);
+            },
+        )
+        .into(),
+    );
     if ui.platform.caps.share_shortcut {
         rows.push(
             icon_toggle_row(
@@ -826,7 +820,7 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             None,
         ));
     }
-    let behaviors = audio_behaviors(ui);
+    let behaviors = RecordingAudioBehavior::ALL;
     rows.push(pick_row(
         ui,
         p,
@@ -840,18 +834,16 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         behaviors
             .iter()
             .position(|behavior| *behavior == settings.recording_audio_behavior)
-            .unwrap_or(2),
+            .unwrap_or(0),
         |ui, index| {
-            let behavior = audio_behaviors(ui)[index];
+            let behavior = RecordingAudioBehavior::ALL[index];
             if ui.settings.recording_audio_behavior != behavior {
                 ui.update(|settings| settings.recording_audio_behavior = behavior);
             }
         },
         layer,
     ));
-    if ui.platform.caps.duck_audio
-        && settings.recording_audio_behavior == RecordingAudioBehavior::Duck
-    {
+    if settings.recording_audio_behavior == RecordingAudioBehavior::Duck {
         let volume = ui
             .duck_volume_drag
             .unwrap_or(settings.recording_duck_volume);

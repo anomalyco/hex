@@ -1,6 +1,7 @@
-//! Controls other applications' audio while a dictation records: mutes
-//! their WASAPI render sessions or pauses playing media through the
-//! system media-transport sessions, restoring on finish or cancel.
+//! Controls other applications' audio while a dictation records: mutes or
+//! lowers their WASAPI render sessions, or pauses playing media through the
+//! system media-transport sessions, restoring on finish or cancel. It also
+//! keeps the computer from idle sleep while the dictation records.
 //!
 //! All COM/WinRT work runs on a dedicated worker thread so the dictation
 //! loop never blocks on audio plumbing; failures are logged and dictation
@@ -36,6 +37,8 @@ fn wait<T: windows::core::RuntimeType>(
 }
 
 use crate::app_settings::RecordingAudioBehavior as WhileDictating;
+use crate::idle_sleep::PreventSleep;
+use crate::output_ducking;
 
 enum Command {
     Suppress,
@@ -46,7 +49,14 @@ enum Command {
 /// Undo state for one suppression round.
 enum Suppressed {
     Sessions(Vec<ISimpleAudioVolume>),
+    Ducked(output_ducking::Guard),
     Media(Vec<GlobalSystemMediaTransportControlsSession>),
+}
+
+/// What one recording holds until it is restored.
+struct Held {
+    audio: Option<Suppressed>,
+    _sleep: Option<PreventSleep>,
 }
 
 pub struct AudioSuppressor {
@@ -55,12 +65,9 @@ pub struct AudioSuppressor {
 }
 
 impl AudioSuppressor {
-    /// A worker for the configured behavior, or `None` when dictation
-    /// should leave other audio alone.
-    pub fn start(mode: WhileDictating) -> Option<Self> {
-        if mode == WhileDictating::DoNothing {
-            return None;
-        }
+    /// A worker that applies the configured behavior and prevents idle
+    /// sleep while a dictation records.
+    pub fn start(mode: WhileDictating) -> Self {
         let (commands, receiver) = mpsc::channel();
         let worker = std::thread::Builder::new()
             .name("windows-audio-suppressor".into())
@@ -70,30 +77,36 @@ impl AudioSuppressor {
                     // agile WinRT media-session objects.
                     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 }
-                let mut undo: Option<Suppressed> = None;
+                let mut held: Option<Held> = None;
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        Command::Suppress if undo.is_none() => {
-                            undo = match mode {
-                                WhileDictating::Mute => mute_other_sessions(),
-                                WhileDictating::PauseMedia => pause_playing_media(),
-                                WhileDictating::DoNothing | WhileDictating::Duck => None,
-                            };
+                        Command::Suppress if held.is_none() => {
+                            held = Some(Held {
+                                audio: match mode {
+                                    WhileDictating::Mute => mute_other_sessions(),
+                                    WhileDictating::Duck => duck_other_sessions(),
+                                    WhileDictating::PauseMedia => pause_playing_media(),
+                                    WhileDictating::DoNothing => None,
+                                },
+                                _sleep: crate::idle_sleep::prevent_sleep(),
+                            });
                         }
                         Command::Suppress => {}
-                        Command::Restore => restore(undo.take()),
+                        Command::Restore => restore(held.take()),
                         Command::Shutdown => {
-                            restore(undo.take());
+                            restore(held.take());
                             return;
                         }
                     }
                 }
-            })
-            .ok()?;
-        Some(Self {
+            });
+        if let Err(error) = &worker {
+            tracing::warn!(%error, "could not start Windows audio control");
+        }
+        Self {
             commands,
-            worker: Some(worker),
-        })
+            worker: worker.ok(),
+        }
     }
 
     pub fn suppress(&self) {
@@ -114,38 +127,45 @@ impl Drop for AudioSuppressor {
     }
 }
 
+/// Every other process's render session on the default output.
+fn other_sessions() -> windows::core::Result<Vec<ISimpleAudioVolume>> {
+    let enumerator: IMMDeviceEnumerator =
+        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
+    let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)? };
+    let manager: IAudioSessionManager2 = unsafe { device.Activate(CLSCTX_ALL, None)? };
+    let sessions = unsafe { manager.GetSessionEnumerator()? };
+    let count = unsafe { sessions.GetCount()? };
+    let own_pid = std::process::id();
+    let mut volumes = Vec::new();
+    for index in 0..count {
+        let Ok(control) = (unsafe { sessions.GetSession(index) }) else {
+            continue;
+        };
+        if let Ok(control2) = control.cast::<IAudioSessionControl2>()
+            && let Ok(pid) = unsafe { control2.GetProcessId() }
+            && pid == own_pid
+        {
+            continue;
+        }
+        if let Ok(volume) = control.cast::<ISimpleAudioVolume>() {
+            volumes.push(volume);
+        }
+    }
+    Ok(volumes)
+}
+
 /// Mute every other process's render session on the default output,
 /// remembering only the sessions this round actually muted.
 fn mute_other_sessions() -> Option<Suppressed> {
-    let muted = (|| -> windows::core::Result<Vec<ISimpleAudioVolume>> {
-        let enumerator: IMMDeviceEnumerator =
-            unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
-        let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)? };
-        let manager: IAudioSessionManager2 = unsafe { device.Activate(CLSCTX_ALL, None)? };
-        let sessions = unsafe { manager.GetSessionEnumerator()? };
-        let count = unsafe { sessions.GetCount()? };
-        let own_pid = std::process::id();
-        let mut muted = Vec::new();
-        for index in 0..count {
-            let Ok(control) = (unsafe { sessions.GetSession(index) }) else {
-                continue;
-            };
-            if let Ok(control2) = control.cast::<IAudioSessionControl2>()
-                && let Ok(pid) = unsafe { control2.GetProcessId() }
-                && pid == own_pid
-            {
-                continue;
-            }
-            let Ok(volume) = control.cast::<ISimpleAudioVolume>() else {
-                continue;
-            };
-            let already_muted = unsafe { volume.GetMute() }.map_or(true, |mute| mute.as_bool());
-            if !already_muted && unsafe { volume.SetMute(true, std::ptr::null()) }.is_ok() {
-                muted.push(volume);
-            }
-        }
-        Ok(muted)
-    })();
+    let muted = other_sessions().map(|sessions| {
+        sessions
+            .into_iter()
+            .filter(|volume| {
+                let already_muted = unsafe { volume.GetMute() }.map_or(true, |mute| mute.as_bool());
+                !already_muted && unsafe { volume.SetMute(true, std::ptr::null()) }.is_ok()
+            })
+            .collect::<Vec<_>>()
+    });
     match muted {
         Ok(muted) if muted.is_empty() => None,
         Ok(muted) => Some(Suppressed::Sessions(muted)),
@@ -153,6 +173,48 @@ fn mute_other_sessions() -> Option<Suppressed> {
             tracing::warn!(%error, "could not mute other audio sessions");
             None
         }
+    }
+}
+
+/// Lower every other process's render session, so Hex's own tones stay
+/// at full volume. Sessions that start while recording are left alone.
+fn duck_other_sessions() -> Option<Suppressed> {
+    output_ducking::Guard::start(crate::app_settings::recording_duck_volume(), || {
+        unsafe {
+            // The ramp runs on its own thread, balanced at its exit.
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+        match other_sessions() {
+            Ok(sessions) => Some(Sessions(sessions)),
+            Err(error) => {
+                tracing::warn!(%error, "could not lower other audio sessions");
+                None
+            }
+        }
+    })
+    .map(Suppressed::Ducked)
+}
+
+/// Other apps' session volumes, lowered and restored together.
+struct Sessions(Vec<ISimpleAudioVolume>);
+
+impl output_ducking::Volume for Sessions {
+    fn read(&self) -> Option<Vec<f32>> {
+        self.0
+            .iter()
+            .map(|volume| unsafe { volume.GetMasterVolume() }.ok())
+            .collect()
+    }
+
+    fn write(&mut self, values: &[f32]) -> bool {
+        self.0
+            .iter()
+            .zip(values)
+            .fold(true, |written, (volume, &value)| {
+                written
+                    & unsafe { volume.SetMasterVolume(value.clamp(0.0, 1.0), std::ptr::null()) }
+                        .is_ok()
+            })
     }
 }
 
@@ -189,9 +251,10 @@ fn pause_playing_media() -> Option<Suppressed> {
     }
 }
 
-fn restore(undo: Option<Suppressed>) {
-    match undo {
+fn restore(held: Option<Held>) {
+    match held.and_then(|held| held.audio) {
         None => {}
+        Some(Suppressed::Ducked(mut guard)) => guard.restore(),
         Some(Suppressed::Sessions(sessions)) => {
             for volume in sessions {
                 if let Err(error) = unsafe { volume.SetMute(false, std::ptr::null()) } {

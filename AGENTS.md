@@ -91,8 +91,17 @@ substitute for source inspection or a second roadmap.
   each OS's audio owner and read by the window's level bars (General and the
   practice dictation); a stale peak reads as no audio.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior, each held
-  from the first dictation or capture session that wants it to the last.
+  output muting and lowering, and supported media-player pause/resume
+  behavior on macOS, each held from the first dictation or capture session
+  that wants it to the last.
+- `output_ducking`: the shared Lower audio ramp (relative, channel-preserving,
+  respecting manual changes, rolled back on failure) over each OS's volume
+  adapter: CoreAudio output channels, the Linux default sink's channels
+  (`pactl`, else `wpctl`), and other apps' WASAPI session volumes.
+- `idle_sleep`: idle-sleep prevention while a dictation records: an IOKit
+  assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
+  polkit refuses a process outside the seat session) on Linux, and a
+  system-required power request on Windows.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -241,8 +250,14 @@ substitute for source inspection or a second roadmap.
   without the virtual keyboard protocol: a keyboard-only session with a
   persisted owner-only restore token, and Ctrl+V as keysyms.
 - `linux_context`: the frontmost X11 application for modes; Wayland has none.
-- `linux_audio_control`: While-dictating mute through `wpctl`/`pactl` and
-  MPRIS pause over D-Bus (zbus), restoring only what it changed.
+- `linux_audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
+  audio through `output_ducking`, and MPRIS pause over D-Bus (zbus),
+  restoring only what it changed, plus idle-sleep prevention for dictations.
+- `linux_input_route`: System default's Bluetooth avoidance on Linux. ALSA's
+  default cannot name another PipeWire source, so Hex marks its ALSA streams
+  (`PIPEWIRE_ALSA`: `state.restore-target = false` and its PID, set on the
+  main thread at startup) and moves them off a Bluetooth default source to
+  the built-in (PCI) input, else the first other hardware input.
 - `linux_session`: display-backend selection matching winit's (Rune's)
   nonempty `WAYLAND_DISPLAY` rule, independent of persisted preferences.
 - `linux_service`: the single-instance lock and owner-only, same-user Unix
@@ -278,8 +293,9 @@ substitute for source inspection or a second roadmap.
   preparation, OpenCode catalog, transformations, updater) and single-instance
   claim, the tray app on `rune::App` (tray, window icon, and runtime thread;
   `rune_ui/windows_host.rs` is the window's host), the WASAPI dictation loop,
-  low-level keyboard hook, clipboard paste, UI Automation context, audio ducking, and the
-  login item.
+  low-level keyboard hook, clipboard paste, UI Automation context, While
+  dictating (mute, lower, or pause other apps' audio) with idle-sleep
+  prevention, and the login item.
 - `live_text`: Labs' live text of the recording in
   progress: the recording's `Publisher` shows it and its drop clears it, and
   each OS's host installs `rune_ui::live_text`, one click-through line just
@@ -616,10 +632,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   else the first real input, logged and shown in Settings. With a MacBook's
   lid closed (`AppleClamshellState`), the built-in microphone is off in
   hardware but still listed, so it is passed over the same way, and with no
-  other input Hex reports why instead of recording silence. On macOS, with
+  other input Hex reports why instead of recording silence. With
   `avoid_bluetooth_microphone` on (the default; General › Advanced), a
-  Bluetooth default (CoreAudio transport Bluetooth or Bluetooth LE) is passed
-  over the same way, so the headset never drops into call audio, but kept when
+  Bluetooth default is passed over the same way (macOS: CoreAudio transport
+  Bluetooth or Bluetooth LE; Windows: WASAPI enumerator `BTHENUM`, or a
+  headset/handset of unknown bus such as a `BTHHFENUM` hands-free endpoint;
+  Linux: a `bluez5` default source, whose stream Hex moves after opening), so the headset never drops into call audio, but kept when
   no other usable input exists; a saved Bluetooth microphone and `--device`
   are always honoured, and a change to the setting re-resolves like a
   device-list change. Settings names the stand-in. A saved microphone

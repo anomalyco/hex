@@ -387,9 +387,7 @@ pub fn run(
                         input.request_open();
                         crate::feedback::prepare();
                     }
-                    if let Some(suppressor) = &audio_suppressor {
-                        suppressor.suppress();
-                    }
+                    audio_suppressor.suppress();
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::rune_hud::HudEvent::Started);
                     }
@@ -400,9 +398,7 @@ pub fn run(
                     // Released before the opening microphone produced audio:
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
-                    if let Some(suppressor) = &audio_suppressor {
-                        suppressor.restore();
-                    }
+                    audio_suppressor.restore();
                     input.close();
                     audio_ready = false;
                     let cancelled = matches!(event.action, HotkeyAction::Cancel);
@@ -424,9 +420,7 @@ pub fn run(
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                 }
                 HotkeyAction::Finish if recording => {
-                    if let Some(suppressor) = &audio_suppressor {
-                        suppressor.restore();
-                    }
+                    audio_suppressor.restore();
                     if !recording_feedback_started && capture.become_intentional(occurred_at) {
                         if !start_tone_played {
                             crate::feedback::play(crate::feedback::Tone::DictationStart);
@@ -443,9 +437,7 @@ pub fn run(
                     finishing = Some(begin_finishing(&capture, occurred_at));
                 }
                 HotkeyAction::Cancel if recording => {
-                    if let Some(suppressor) = &audio_suppressor {
-                        suppressor.restore();
-                    }
+                    audio_suppressor.restore();
                     crate::feedback::retract_start();
                     if recording_feedback_started {
                         crate::feedback::play(crate::feedback::Tone::Cancel);
@@ -604,9 +596,7 @@ pub fn run(
                 // On-demand open failed (device busy or unplugged): report
                 // and stay released rather than killing the listener.
                 start_pending = false;
-                if let Some(suppressor) = &audio_suppressor {
-                    suppressor.restore();
-                }
+                audio_suppressor.restore();
                 events.dictation(
                     DictationPhase::Failed(format!("could not open microphone: {error}")),
                     "",
