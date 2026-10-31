@@ -236,9 +236,6 @@ fn flip(ui: &mut Ui, feature: Feature) {
         Feature::PauseBrowser if on && !ui.platform.system_audio => {
             ui.ask(super::platform::PlatformRequest::SystemAudio);
         }
-        Feature::MouseShortcuts if on => {
-            ui.update(|settings| settings.mouse_shortcut_notice = false)
-        }
         _ => {}
     }
 }
