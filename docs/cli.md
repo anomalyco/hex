@@ -5,20 +5,33 @@ meeting, change any setting, switch models, open the window, quit, or read its
 status. They are meant for agents and scripts as much as people, so every
 command takes `--json`, is idempotent, and exits with a stable code.
 
-macOS is the only supported host today. On Linux and Windows `hex settings`
-reports `unsupported` ("not supported on this OS yet; use the Hex window"); the
-Linux CLI keeps its own `dictation`, `paste-last`, `status`,
-`quit`, and `restart` over the Linux service socket (see `docs/linux.md`).
+One command tree (`control::cli`) is compiled on macOS, Linux, and Windows,
+and one versioned protocol carries it over each OS's owner-only transport:
+
+```ts
+hex <command>
+├── macOS    local API, bearer-authenticated POST /control (local_api)
+├── Linux    the single-instance socket, Request::Control (linux_service)
+└── Windows  a named pipe only this user can open (windows_control)
+```
+
+On Linux and Windows one shared host (`control::host`) carries out the
+commands through each OS's thin adapter (`linux_app`, `windows_rune`); macOS's
+host is `macos_rune::control`. A command the running Hex can't do on its OS
+answers `unsupported` at runtime (exit 1) instead of being missing from the
+CLI; `hex status --json` lists the OS's `capabilities`. Today that is
+playground stories (`window story`) outside macOS and the local `model`
+tools on macOS.
 
 The read-only `hex history` and `hex meetings list|show|chapters|search` commands, and
-`hex mcp`, are separate and unchanged; see `docs/transcript-cli.md`.
+`hex mcp`, read files rather than the running Hex; see `docs/transcript-cli.md`.
 
 ## Commands
 
 ```ts
 hex
 ├── status                         what Hex is doing (see Status below)
-├── start                          open Hex.app if it isn't running; wait until it answers
+├── start                          open Hex if it isn't running (macOS Hex.app, else `hex app --hidden`); wait until it answers
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
 ├── dictation start|stop|cancel|toggle
@@ -36,8 +49,9 @@ hex
 ├── model
 │   ├── list                       every model, its languages and size, installed or not
 │   ├── use <id> [--language L]    installed models only; never downloads or repairs
-│   ├── install <id> [--language L] download, then switch to it
-│   └── cancel                     stop a download or load in progress
+│   ├── install [id] [--language L] download, then switch to it (default: the selected model)
+│   ├── cancel                     stop a download or load in progress
+│   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process
 ├── commands
 │   ├── init                       create ~/.config/hex (local, no running Hex needed)
 │   └── check                      validate ~/.config/hex/hex.config.ts transformations
@@ -51,7 +65,7 @@ hex
 │   ├── list [--json]              every term and its "sounds like" spellings
 │   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
 │   └── remove <term>              any case
-├── annotate (alias capture)       Annotate, macOS and Linux (features/capture.md)
+├── annotate (alias capture)       Annotate (features/capture.md)
 │   ├── start|stop|cancel|status   record a capture, end or discard it, or report
 │   ├── list [--limit N]           the newest captures in the captures folder
 │   ├── show <capture>             one capture's words, files, and where it went
@@ -59,7 +73,7 @@ hex
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
 ├── check-for-updates              check for an update now
-├── launch-at-login [on|off]       report or change Launch at Login (installed Hex.app only)
+├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
 ```
 
@@ -83,8 +97,8 @@ clip, or an empty transcript) exits 4 with code `no-speech` and prints
 nothing; with nothing recording it refuses with `not-recording`. A failure,
 a cancel (Escape), or the 60 s timeout prints nothing, exits 1, and never
 falls back to pasting. `--print` with any other action is a usage error
-(exit 2). The command is the same on Linux (see `docs/linux.md`); Windows has
-no `hex dictation` command yet.
+(exit 2). The command is the same on Linux and Windows, where `hex dictation`
+and `hex paste-last` reach the listener's own queue as its shortcut would.
 
 `dictation cancel` with nothing recording cancels the newest unfinished
 dictation, like Escape. Escape cancels an active recording before any job, so
@@ -99,8 +113,7 @@ macOS, Linux, and Windows. It removes only the onboarding markers (`onboarding-c
 `onboarding-relaunch`) from the data folder. Settings, history, models, and
 permissions are untouched, so the run finds them ready: the download passes at
 once and the permission step is skipped. Labs' Run setup again row does the
-same. On Windows the CLI only signals the running Hex, so it answers before
-the window opens.
+same.
 
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
@@ -118,7 +131,16 @@ spellings, and replies `changed: false` when there are none.
 
 `quit` and `restart` without `--force` are refused with `busy` when the
 listener doesn't answer whether it's recording; no listener, or one waiting for
-setup, counts as idle.
+setup, counts as idle. On Linux a Hex its systemd unit runs restarts through
+the unit (after writing this desktop's `session.env`); elsewhere `restart`
+waits for the old Hex to drain and exit, then runs `hex start`.
+
+`model install` with Hex running downloads in the background, as Settings
+does; on Linux and Windows with no Hex running it downloads in this process,
+printing progress (the source-install step `hex model install`). `model
+status`, `devices`, `check`, and `transcribe` are local tools on Linux and
+Windows and take the selected model unless one is named; macOS answers
+`unsupported`.
 
 `start` and `restart` keep the `HEX_*` environment (`HEX_RETAIN_DICTATION_AUDIO`,
 `HEX_ENABLE_LLM`, and so on): macOS opens apps without the caller's
@@ -127,12 +149,11 @@ takes them from the shell that runs it, `restart` from the running Hex. The
 values are never logged.
 
 `annotate` (or its old name `capture`) drives [Annotate](features/capture.md),
-in every macOS and Linux build; with `capture.enabled` off it refuses with
+in every macOS, Linux, and Windows build; with `capture.enabled` off it refuses with
 `feature-off`. On Linux, `list`, `show`, `route`, and `send` run in the
 `hex` process itself and `start`, `stop`, and `cancel` are handed to the
-running Hex's listener; `status` is macOS-only for now. Windows records
-Annotate captures from its shortcut and capsule but has no `annotate`
-command yet. `capture stop` replies at once with the bundle
+running Hex's listener, as is `status`. On Windows every `annotate` command
+goes to the running Hex over its pipe. `capture stop` replies at once with the bundle
 path while the words and files are written in the background; `capture status`
 lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
 of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,

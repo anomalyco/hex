@@ -31,6 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::app_settings::AppSettings;
+use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
 use crate::desktop_host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
@@ -92,6 +93,8 @@ pub(crate) enum ShortcutTarget {
 /// What the runtime last published for the window.
 #[derive(Clone, PartialEq)]
 pub(crate) struct Published {
+    /// What the listener last reported doing, from the event log.
+    pub(crate) activity: Option<crate::events::VoiceState>,
     pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
@@ -107,6 +110,8 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
+    /// Where `hex` dictation commands go while a listener runs.
+    listener: Mutex<Option<mpsc::Sender<crate::windows_dictation::ListenerCommand>>>,
 }
 
 /// The window's connection to the runtime thread.
@@ -216,6 +221,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let local_api = crate::local_api::LocalApi::start_for_app(&event_path);
     let quit = window.clone();
     let runtime_tray = tray.clone();
+    let runtime_shared = shared.clone();
     let runtime = std::thread::Builder::new()
         .name("hex-runtime".into())
         .spawn(move || {
@@ -225,21 +231,22 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 settings_error,
                 history,
                 receiver,
-                &shared,
+                &runtime_shared,
                 shutdown,
                 hud,
                 runtime_tray.as_deref(),
             );
             quit.quit();
         })?;
-    let onboarding = window.clone();
-    if let Err(error) = crate::windows_app::serve_onboarding_requests(move || {
-        onboarding.open();
-        onboarding.update(|ui, tx| {
-            let _ = crate::rune_ui::restart_onboarding(ui, tx);
-        });
-    }) {
-        tracing::warn!(%error, "`hex onboarding reset` will not reach this Hex");
+    let control = WindowsControl {
+        runtime: runtime_handle(),
+        shared,
+        window: Mutex::new(window.clone()),
+    };
+    if let Err(error) = crate::windows_control::serve(Arc::new(move |request| {
+        crate::control::host::answer(&control, request)
+    })) {
+        tracing::warn!(%error, "`hex` control commands will not reach this Hex");
     }
     let relaunch = window.clone();
     instance.forward_launches(move || {
@@ -305,6 +312,7 @@ fn run_runtime(
             }
             changed
         };
+        *lock(&shared.listener) = host.listener_commands();
         if changed {
             for wake in lock(&shared.wakers).iter() {
                 wake();
@@ -324,6 +332,205 @@ fn run_runtime(
         }
     }
     host.stop();
+}
+
+fn runtime_handle() -> RuntimeHandle {
+    RUNTIME
+        .get()
+        .cloned()
+        .expect("the runtime is set before control starts")
+}
+
+/// The Windows adapter `hex` control commands run through
+/// ([`crate::control::host`]), on the control pipe's threads.
+struct WindowsControl {
+    runtime: RuntimeHandle,
+    shared: Arc<Shared>,
+    window: Mutex<rune::AppHandle<Ui>>,
+}
+
+/// Lets the pipe write its reply before Hex quits.
+const QUIT_GRACE: Duration = Duration::from_millis(250);
+
+impl WindowsControl {
+    fn window(&self) -> rune::AppHandle<Ui> {
+        lock(&self.window).clone()
+    }
+
+    fn send(&self, request: Request) -> std::result::Result<(), ControlError> {
+        self.runtime
+            .send(request)
+            .map_err(|error| ControlError::new("unavailable", format!("{error:#}")))
+    }
+
+    fn listener(
+        &self,
+        command: crate::windows_dictation::ListenerCommand,
+    ) -> std::result::Result<(), ControlError> {
+        let listener = lock(&self.shared.listener).clone().ok_or_else(|| {
+            ControlError::new(
+                "not-ready",
+                "Hex is not listening; turn it on in the tray or the window",
+            )
+        })?;
+        listener
+            .send(command)
+            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))
+    }
+}
+
+impl crate::control::host::Host for WindowsControl {
+    fn state(&self) -> std::result::Result<crate::control::host::HostState, ControlError> {
+        let published = self
+            .runtime
+            .published()
+            .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+        Ok(crate::control::host::HostState {
+            settings: published.settings.clone(),
+            listener: published.listener.clone(),
+            transcription: published.transcription.clone(),
+            update: published.update_status.clone(),
+            capture: crate::control::host::capture_from_state(published.activity),
+            window_open: self.window().is_visible(),
+        })
+    }
+
+    fn dictation(
+        &self,
+        action: CaptureAction,
+        print: Option<crate::control::PrintReply>,
+    ) -> std::result::Result<(), ControlError> {
+        use crate::windows_dictation::ListenerCommand;
+        self.listener(match print {
+            Some(print) => ListenerCommand::StopAndPrint(print),
+            None => ListenerCommand::Dictation(action),
+        })
+    }
+
+    fn paste_last(&self) -> std::result::Result<(), ControlError> {
+        self.listener(crate::windows_dictation::ListenerCommand::PasteLast)
+    }
+
+    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
+        settings
+            .save()
+            .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
+        self.send(Request::ReloadSettings)
+    }
+
+    fn history(&self) -> Option<History> {
+        self.runtime.history()
+    }
+
+    fn show_window(&self, pane: Option<Pane>) -> std::result::Result<(), ControlError> {
+        let window = self.window();
+        window.open();
+        window.update(move |ui, tx| {
+            crate::rune_ui::show(ui, crate::rune_ui::destination(pane), tx);
+        });
+        Ok(())
+    }
+
+    fn hide_window(&self) -> bool {
+        let window = self.window();
+        let open = window.is_visible();
+        if open {
+            window.close();
+        }
+        open
+    }
+
+    fn onboarding_reset(&self) -> ControlReply {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let window = self.window();
+        window.open();
+        window.update(move |ui, tx| {
+            let _ = sender.send(crate::rune_ui::restart_onboarding(ui, tx));
+        });
+        match receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => ControlReply::done("Opened onboarding"),
+            Ok(Err(why)) => ControlReply::error("unsupported", why),
+            Err(_) => ControlReply::error("unavailable", "the window didn't answer; try again"),
+        }
+    }
+
+    fn choose_model(
+        &self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) -> std::result::Result<(), ControlError> {
+        self.send(Request::ChooseModel {
+            model: selection.model,
+            language: selection.language,
+        })
+    }
+
+    fn cancel_model(&self) {
+        let _ = self.runtime.send(Request::CancelModel);
+    }
+
+    fn check_for_updates(&self) -> std::result::Result<(), ControlError> {
+        self.send(Request::Desktop(DesktopAction::CheckForUpdates))
+    }
+
+    fn launch_at_login(&self, enabled: Option<bool>) -> Option<std::result::Result<bool, String>> {
+        let format = |error: color_eyre::Report| format!("{error:#}");
+        Some(match enabled {
+            None => crate::windows_login_item::is_enabled().map_err(format),
+            Some(enabled) => crate::windows_login_item::set_enabled(enabled)
+                .and_then(|()| crate::windows_login_item::is_enabled())
+                .map_err(format),
+        })
+    }
+
+    /// `hex restart` opens Hex again once this one has gone.
+    fn quit(&self, _restart: bool) -> std::result::Result<(), ControlError> {
+        let runtime = self.runtime.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(QUIT_GRACE);
+            let _ = runtime.send(Request::Quit);
+        });
+        Ok(())
+    }
+
+    fn shortcut_rules(&self) -> crate::control::settings::ShortcutRules {
+        crate::rune_ui::shortcut_rules()
+    }
+
+    /// `hex annotate`: recording commands wait for the listener's capture
+    /// host; the captures folder is read here.
+    fn annotate(&self, command: crate::control::ControlCommand) -> ControlReply {
+        use crate::capture_host::{self as capture, CaptureCommand, CaptureControl};
+        use crate::control::ControlCommand as C;
+        let result = match command {
+            C::ScrawlCapture { action } => {
+                let (sender, receiver) = mpsc::sync_channel(1);
+                capture::send_to_listener(CaptureControl::Reply(action, sender))
+                    .map_err(|error| ControlError::new("not-ready", format!("{error:#}")))
+                    .and_then(|()| {
+                        receiver.recv_timeout(Duration::from_secs(5)).map_err(|_| {
+                            ControlError::new("unavailable", "the listener didn't answer")
+                        })
+                    })
+            }
+            C::ScrawlCaptureList { limit } => capture::list_captures(limit),
+            C::ScrawlCaptureShow { capture } => capture::show_capture(&capture),
+            C::ScrawlCaptureSend {
+                capture,
+                to,
+                always,
+            } => capture::send_capture(&capture, to, always),
+            C::ScrawlCaptureUndo => {
+                capture::send_to_listener(CaptureControl::Command(CaptureCommand::Undo))
+                    .map(|()| ControlReply::done("Asked Hex to take the newest send back"))
+                    .map_err(|error| ControlError::new("not-ready", format!("{error:#}")))
+            }
+            C::ScrawlCaptureRoute { capture, ask_jev } => {
+                capture::explain_capture(&capture, ask_jev)
+            }
+            _ => unreachable!("only Annotate's commands"),
+        };
+        result.unwrap_or_else(ControlReply::from)
+    }
 }
 
 // ---------------------------------------------------------------------------

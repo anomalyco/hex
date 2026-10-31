@@ -80,7 +80,6 @@ mod routing;
 mod screen_access;
 mod sink;
 
-#[cfg_attr(target_os = "windows", allow(unused_imports))]
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
 };
@@ -2577,6 +2576,10 @@ pub enum CaptureControl {
     /// Drawing on or off, or a recording that draws (`hex annotate draw`).
     #[cfg(target_os = "linux")]
     Draw,
+    /// A `hex annotate start|stop|cancel|status` that waits for the host's
+    /// answer on the sender.
+    #[cfg(not(target_os = "macos"))]
+    Reply(ScrawlCaptureAction, SyncSender<ControlReply>),
 }
 
 /// Hands `control` to the listener without waiting for it.

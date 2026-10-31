@@ -2,11 +2,12 @@
 //!
 //! The running process binds `service.sock` next to its `service.lock`. A
 //! later `hex` forwards `Activate` (with the launcher's activation token) and
-//! exits; `hex dictation …` (including `stop --print`, whose connection
-//! waits for the transcript), `hex paste-last`,
-//! `hex status`, and `hex quit` forward over the same socket. Shortcut
-//! commands go straight from the socket worker to the listener's command
-//! queue, never through the window's thread. This module also owns the
+//! exits; every `hex` control command (`crate::control`: status, dictation,
+//! including `stop --print`, whose connection waits for the transcript,
+//! settings, model, window, quit, …) rides the same socket as one
+//! `ControlRequest`, answered by `linux_app`'s control host on the socket's
+//! worker. Dictation commands go straight from there to the listener's
+//! command queue, never through the window's thread. This module also owns the
 //! per-user systemd lifecycle (`Type=notify` readiness, the session
 //! environment, start, stop, and restart).
 use std::fs::{self, OpenOptions};
@@ -31,7 +32,8 @@ use crate::linux_input::{ListenerCommand, ShortcutCommand};
 /// Version 1 was the service/Settings-client protocol; its clients get a
 /// version error and exit.
 const VERSION: u32 = 2;
-const MAX_FRAME: usize = 128 * 1024;
+/// Replies carry `hex settings list` and the status report.
+const MAX_FRAME: usize = 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
 /// A send waits for the router's answer (it waits 8 s itself).
@@ -51,11 +53,8 @@ pub(crate) enum Request {
         show: bool,
         session: Session,
     },
-    /// A `hex dictation` or `hex paste-last` command.
-    Shortcut(ShortcutCommand),
-    /// `hex dictation stop --print`: replies with the transcript, which is
-    /// not pasted.
-    DictationPrint,
+    /// A `hex` control command, answered by the running Hex's control host.
+    Control(crate::control::ControlRequest),
     /// `hex annotate start|stop|cancel`.
     Capture(crate::control::ScrawlCaptureAction),
     /// `hex annotate send`: the listener's router sends it and says how.
@@ -68,11 +67,9 @@ pub(crate) enum Request {
     CaptureUndo,
     /// `hex annotate draw`: the pen on or off, as the capsule's pen.
     CaptureDraw,
-    /// `hex onboarding reset`: replays the first run in the window.
-    OnboardingReset,
+    /// `hex annotate status`: what the listener's capture host reports.
+    CaptureStatus,
     Status,
-    /// Drain accepted work and exit.
-    Quit,
 }
 
 /// What a launcher handed the process that asked for the window.
@@ -201,44 +198,6 @@ pub(crate) fn route_shortcut(
         .map_err(|_| eyre!("Hex is busy; try again"))
 }
 
-/// Stops the dictation through the listener's queue and waits for its
-/// transcript. Only this caller waits; the listener stops recording at once.
-pub(crate) fn route_print(route: Option<&ShortcutRoute>) -> crate::control::ControlReply {
-    use crate::control::{ControlReply, PrintReply};
-    let Some(route) = route else {
-        return ControlReply::error(
-            "not-ready",
-            "Hex is not listening; enable it in Settings or run `hex start`",
-        );
-    };
-    let (reply, printed) = PrintReply::channel();
-    if route
-        .commands
-        .try_send(ListenerCommand::StopAndPrint(reply))
-        .is_err()
-    {
-        return ControlReply::error("busy", "Hex is busy; try again");
-    }
-    crate::control::await_printed(&printed, crate::control::PRINT_WAIT)
-}
-
-/// `hex dictation stop --print`, answered by the running Hex.
-pub(crate) fn print_dictation() -> crate::control::ControlReply {
-    use crate::control::ControlReply;
-    match exchange(
-        Request::DictationPrint,
-        crate::control::PRINT_WAIT + Duration::from_secs(5),
-    ) {
-        Ok(reply) => reply
-            .control
-            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
-        Err(RequestError::NotRunning) => {
-            ControlReply::error("not-running", "Hex is not running; run `hex start`")
-        }
-        Err(error) => ControlReply::error("failed", format!("{error}")),
-    }
-}
-
 /// What the socket reads without waiting on the host or the window: the
 /// latest status and the listener's command queue, both published by the
 /// host thread.
@@ -246,12 +205,21 @@ pub(crate) fn print_dictation() -> crate::control::ControlReply {
 pub(crate) struct Published {
     pub(crate) status: Mutex<Option<Status>>,
     pub(crate) shortcuts: Mutex<Option<ShortcutRoute>>,
+    /// Answers `hex` control commands on the socket's worker.
+    pub(crate) control: Mutex<Option<ControlHandler>>,
 }
+
+pub(crate) type ControlHandler =
+    Arc<dyn Fn(crate::control::ControlRequest) -> crate::control::ControlResponse + Send + Sync>;
 
 /// Requests for the main thread, which owns the window.
 #[derive(Debug)]
 pub(crate) enum Control {
     Activate(Activation),
+    /// `hex window show`: opens the window at a pane.
+    Show(Option<crate::control::Pane>),
+    /// `hex window hide`.
+    Hide,
     /// Replays the first run in the window, answering whether it opened.
     OnboardingReset(SyncSender<std::result::Result<(), String>>),
     Quit,
@@ -269,7 +237,7 @@ struct Reply {
     #[serde(default)]
     status: Option<Status>,
     error: Option<String>,
-    /// What an Annotate command did, for the CLI to print.
+    /// What a control or Annotate command did, for the CLI to print.
     #[serde(default)]
     control: Option<crate::control::ControlReply>,
 }
@@ -411,10 +379,13 @@ fn connect() -> std::result::Result<UnixStream, RequestError> {
 pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::control::ControlReply {
     use crate::control::{ControlReply, ScrawlCaptureAction};
     if action == ScrawlCaptureAction::Status {
-        return ControlReply::error(
-            "unsupported",
-            "`hex capture status` is macOS-only for now; the capsule shows a recording capture",
-        );
+        return match exchange(Request::CaptureStatus, SEND_WAIT) {
+            Ok(reply) => reply
+                .control
+                .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
+            Err(RequestError::NotRunning) => crate::control::cli::not_running(),
+            Err(error) => ControlReply::error("failed", format!("{error}")),
+        };
     }
     match request(Request::Capture(action)) {
         Ok(_) => ControlReply::done("Sent to Hex"),
@@ -445,31 +416,6 @@ pub(crate) fn capture_send(
     }
 }
 
-/// `hex onboarding reset`: the running Hex replays its first run.
-pub(crate) fn onboarding_reset() -> crate::control::ControlReply {
-    use crate::control::ControlReply;
-    match exchange(Request::OnboardingReset, SEND_WAIT) {
-        Ok(reply) => reply
-            .control
-            .unwrap_or_else(|| ControlReply::error("failed", "Hex did not say how it went")),
-        Err(error) => ControlReply::error("failed", format!("{error}")),
-    }
-}
-
-/// Asks the window to replay the first run and waits for its answer.
-fn reset_onboarding(control: &SyncSender<Control>) -> crate::control::ControlReply {
-    use crate::control::ControlReply;
-    let (sender, receiver) = mpsc::sync_channel(1);
-    if control.try_send(Control::OnboardingReset(sender)).is_err() {
-        return ControlReply::error("busy", "Hex is busy; try again");
-    }
-    match receiver.recv_timeout(SEND_WAIT / 2) {
-        Ok(Ok(())) => ControlReply::done("Opened onboarding"),
-        Ok(Err(why)) => ControlReply::error("unsupported", why),
-        Err(_) => ControlReply::error("unavailable", "the window didn't answer; try again"),
-    }
-}
-
 /// `hex annotate draw`: drawing on or off in the running Hex.
 pub(crate) fn capture_draw() -> crate::control::ControlReply {
     use crate::control::ControlReply;
@@ -486,6 +432,67 @@ pub(crate) fn capture_undo() -> crate::control::ControlReply {
         Ok(_) => ControlReply::done("Asked Hex to take the newest send back"),
         Err(error) => ControlReply::error("failed", format!("{error}")),
     }
+}
+
+/// Whether a current Hex answers on the socket.
+pub(crate) fn running() -> bool {
+    request(Request::Status).is_ok()
+}
+
+/// One `hex` control command, answered by the running Hex. Never starts one.
+pub(crate) fn control(
+    request: &crate::control::ControlRequest,
+) -> std::result::Result<crate::control::ControlResponse, crate::control::ControlReply> {
+    use crate::control::ControlReply;
+    match exchange(
+        Request::Control(request.clone()),
+        request.command.deadline(),
+    ) {
+        Ok(Reply {
+            control: Some(reply),
+            ..
+        }) => Ok(reply.into()),
+        Ok(_) => Err(ControlReply::error("failed", "Hex did not say how it went")),
+        Err(RequestError::NotRunning) => Err(crate::control::cli::not_running()),
+        Err(RequestError::Failed(error))
+            if format!("{error}").starts_with("Unsupported Hex request") =>
+        {
+            Err(ControlReply::error(
+                "version-mismatch",
+                format!(
+                    "an older Hex is running; restart it (`systemctl --user restart {}`) and try again",
+                    unit()
+                ),
+            ))
+        }
+        Err(error) => Err(ControlReply::error("transport", format!("{error}"))),
+    }
+}
+
+/// Before `hex restart`: the unit restarts into this desktop's session
+/// (without a desktop, over SSH, the one Hex last ran in).
+pub(crate) fn prepare_restart() -> Result<()> {
+    if supervised() && (graphical_session() || !session_environment_path()?.exists()) {
+        write_session_environment()?;
+    }
+    Ok(())
+}
+
+/// `hex annotate status`, asked of the listener's capture host.
+pub(crate) fn capture_status() -> crate::control::ControlReply {
+    use crate::control::ControlReply;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    if let Err(error) =
+        crate::capture_host::send_to_listener(crate::capture_host::CaptureControl::Reply(
+            crate::control::ScrawlCaptureAction::Status,
+            sender,
+        ))
+    {
+        return ControlReply::error("not-ready", format!("{error:#}"));
+    }
+    receiver
+        .recv_timeout(SEND_WAIT / 2)
+        .unwrap_or_else(|_| ControlReply::error("unavailable", "the listener didn't answer"))
 }
 
 /// Sends one request to the running instance. Never starts one.
@@ -557,13 +564,7 @@ impl Server {
     }
 
     /// Starts answering once the host has published its first status.
-    /// `Quit` sets `shutdown`, which the host thread drains on.
-    pub(crate) fn serve(
-        &mut self,
-        published: Arc<Published>,
-        control: SyncSender<Control>,
-        shutdown: &'static AtomicBool,
-    ) {
+    pub(crate) fn serve(&mut self, published: Arc<Published>, control: SyncSender<Control>) {
         let Some(listener) = self.listener.take() else {
             return;
         };
@@ -585,7 +586,7 @@ impl Server {
                         if stop.load(Ordering::Acquire) {
                             break;
                         }
-                        serve_client(stream, &published, &control, &session, &stop, shutdown);
+                        serve_client(stream, &published, &control, &session, &stop);
                     }
                 })
             })
@@ -611,7 +612,6 @@ fn serve_client(
     control: &SyncSender<Control>,
     session: &Session,
     stop: &AtomicBool,
-    shutdown: &AtomicBool,
 ) {
     if check_peer(&stream).is_err() {
         return;
@@ -654,12 +654,15 @@ fn serve_client(
                     Ok(())
                 }
             }
-            Request::Shortcut(command) => {
-                route_shortcut(published.shortcuts.lock().unwrap().as_ref(), command)
-            }
-            Request::DictationPrint => {
-                let route = published.shortcuts.lock().unwrap().clone();
-                answer = Some(route_print(route.as_ref()));
+            Request::Control(request) => {
+                let handler = published.control.lock().unwrap().clone();
+                answer = Some(match handler {
+                    Some(handler) => handler(request).reply,
+                    None => crate::control::ControlReply::error(
+                        "not-ready",
+                        "Hex is starting; try again",
+                    ),
+                });
                 Ok(())
             }
             Request::Capture(action) => crate::capture_host::send_to_listener(
@@ -684,17 +687,11 @@ fn serve_client(
                     crate::capture_host::CaptureCommand::Undo,
                 ))
             }
-            Request::OnboardingReset => {
-                answer = Some(reset_onboarding(control));
+            Request::CaptureStatus => {
+                answer = Some(capture_status());
                 Ok(())
             }
             Request::Status => Ok(()),
-            Request::Quit => {
-                shutdown.store(true, Ordering::Release);
-                // The host thread also wakes the main thread when it sees the flag.
-                let _ = control.try_send(Control::Quit);
-                Ok(())
-            }
         };
         let status = published.status.lock().unwrap().clone();
         let error = match (&result, &status) {
@@ -769,7 +766,7 @@ fn unit() -> String {
 /// installed (by the installer or Home Manager) and this process uses the
 /// default data root. `HEX_SYSTEMD_UNIT` names another unit, for isolated
 /// tests with a custom data root.
-fn supervised() -> bool {
+pub(crate) fn supervised() -> bool {
     if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
         && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
     {
@@ -894,17 +891,6 @@ pub(crate) fn launch(activation: &Activation, show: bool) -> Result<Launch> {
     }
     request(activate())?;
     Ok(Launch::Forwarded)
-}
-
-/// `hex quit` and `hex stop`.
-pub(crate) fn quit() -> Result<()> {
-    match request(Request::Quit) {
-        Ok(_) => Ok(()),
-        // An older service stops through its unit.
-        Err(RequestError::Outdated) if supervised() => systemctl(&["stop"]),
-        Err(RequestError::NotRunning) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
 }
 
 pub(crate) fn restart() -> Result<()> {

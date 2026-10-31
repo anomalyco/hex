@@ -458,6 +458,17 @@ pub(crate) fn run(
                 (Some(host), crate::capture_host::CaptureControl::Command(command)) => {
                     host.command(command, &timeline)
                 }
+                (host, crate::capture_host::CaptureControl::Reply(action, answer)) => {
+                    let report = match host {
+                        Some(host) => host.control(action, &timeline),
+                        None => crate::control::ControlReply::error(
+                            "feature-off",
+                            "Annotate is off; turn it on with `hex settings set capture.enabled on`",
+                        ),
+                    };
+                    let _ = answer.send(report);
+                    continue;
+                }
                 (None, _) => crate::control::ControlReply::error("feature-off", "captures are off"),
             };
             if let crate::control::ControlReply::Error { message, .. } = reply {

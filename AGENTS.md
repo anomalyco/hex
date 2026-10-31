@@ -172,13 +172,19 @@ substitute for source inspection or a second roadmap.
   `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
   the macOS recognition loop only; elsewhere it answers
   `service-capture-unavailable` at runtime, and `/profile/vitals` answers 503.
-  Linux and Windows do not route `/control` through it yet.
-- `control`: the release `hex` control surface: the versioned
+  Linux and Windows carry `hex` control over their socket and pipe
+  (`control`), not this `/control`.
+- `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
-  rules), and the CLI client (`control::cli`). `macos_rune::control` is the
-  one host that carries the commands out on macOS; Linux and Windows report
-  "not supported on this OS" for now. Contract: `docs/cli.md`.
+  rules and the capability each needs), and the one CLI tree and client
+  (`control::cli`), which each OS's `main` flattens beside its own commands.
+  Transports: the macOS local API's `/control`, the Linux socket's
+  `Request::Control`, and the Windows named pipe (`windows_control`).
+  `control::host` carries commands out on Linux and Windows through a thin
+  adapter (`linux_app::LinuxControl`, `windows_rune::WindowsControl`);
+  `macos_rune::control` is macOS's host. What an OS can't do answers
+  `unsupported` at runtime. Contract: `docs/cli.md`.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `developer_control`: the typed debug-only command/reply protocol the local
@@ -325,8 +331,9 @@ substitute for source inspection or a second roadmap.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata only, never audio.
-- `transcript_cli`: read-only macOS release commands `hex history` and
-  `hex meetings list|show|search`, versioned JSON projections and filters.
+- `transcript_cli`: read-only release commands `hex history` and
+  `hex meetings list|show|search` on every OS, versioned JSON projections and
+  filters.
   Reads history snapshots without opening the writable store, and shares
   meeting selection, search, and Markdown with `meeting::query` / MCP.
 - `events`, `dashboard`: bounded asynchronous append-only NDJSON observations
@@ -347,7 +354,7 @@ substitute for source inspection or a second roadmap.
   window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
   meeting capsules, the `--snap`
   fixture scenes, and the macOS `hex://story/…` playground links
-  (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist;
+  (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist (and, through `rune_ui::capabilities`, which `hex settings` keys act and what `hex status` reports); every difference between the OSes names a reason in `platform::DIFFERENCES` (an OS pattern, impossible, or pending), which `parity_tests` enforce;
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to
   each OS's host. Keep shared UI in the pane modules and only OS behavior in
   the hosts.
@@ -488,8 +495,8 @@ substitute for source inspection or a second roadmap.
   (Labs › Scrawl) and `CaptureSettings` its `capture.*` settings;
   `hex capture` is `control::cli::capture` (macOS through the running app;
   Linux reads the folder itself and hands start/stop/cancel to the
-  listener over `linux_service`; Windows has no `hex annotate` until the
-  shared control transport reaches it).
+  listener over `linux_service`; Windows sends every `hex annotate` command
+  to the running Hex over its control pipe).
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -751,7 +758,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   owner; searches never return expired entries while waiting for disk cleanup.
   The hard caps are 10,000 entries and 16 MiB of raw + final text (oldest evicted
   first), with existing per-entry metadata and text limits. There is no archive.
-- `hex history` and `hex meetings` are read-only, release-available on macOS,
+- `hex history` and `hex meetings` are read-only, release-available on every OS,
   independent of feature opt-ins. Dispatch before process
   logging, the instance lock, local API, GUI, permissions, or Hex Microphone.
   History reads one open
@@ -924,10 +931,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   the meetings folder; runs no model; and makes no network request. Stdout
   carries only MCP messages.
 - `hex` control commands (`status`, `quit`, `dictation`, `meetings record`,
-  `settings set`, `model use`, `window show`, …) are release-available and
-  drive only the one running Hex through the owner-only discovery file and
-  bearer-authenticated `POST /control` (64 KiB request, 1 MiB reply, 10 s
-  in-app deadline). They dispatch before process logging,
+  `settings set`, `model use`, `window show`, …) are release-available on
+  every OS and drive only the one running Hex: on macOS through the
+  owner-only discovery file and bearer-authenticated `POST /control`, on
+  Linux through the owner-only, peer-checked socket, on Windows through a
+  named pipe only this user's SID can open, whose server the client checks
+  runs as the same user (64 KiB request, 1 MiB reply, 10 s in-app
+  deadline). A command an OS can't do answers `unsupported` at runtime. They dispatch before process logging,
   or the instance lock, and never launch Hex; only `hex start` and
   `hex restart` open it. Every command is carried out by the app's own paths
   (the menu bar's meeting request, the window's settings save followed by

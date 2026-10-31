@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
+use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::local_transcriber::LocalTranscriber;
@@ -24,12 +25,15 @@ const TAIL_STALL_GRACE: Duration = Duration::from_millis(100);
 struct Job {
     transcript: PendingTranscript,
     audio_ms: u64,
+    /// `hex dictation stop --print`: the text goes here, never pasted.
+    print: Option<PrintReply>,
 }
 
 /// A release whose capture is still collecting its post-release tail.
 struct Finishing {
     ended_at: CaptureInstant,
     deadline: Instant,
+    print: Option<PrintReply>,
 }
 
 enum OutputJob {
@@ -37,10 +41,11 @@ enum OutputJob {
     PasteLast,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum OutputKind {
     Dictation,
     Repaste,
+    Printed,
 }
 
 struct JobResult {
@@ -78,10 +83,14 @@ pub struct WindowsDictationConfig {
     pub commands: Option<mpsc::Receiver<ListenerCommand>>,
 }
 
-/// A request from outside the keyboard hook, as the tray sends.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// A request from outside the keyboard hook, from the tray or a `hex`
+/// command (`crate::control::host`), handled as its shortcut would be.
+#[derive(Debug)]
 pub enum ListenerCommand {
+    Dictation(CaptureAction),
     PasteLast,
+    /// `hex dictation stop --print`.
+    StopAndPrint(PrintReply),
 }
 
 impl WindowsDictationConfig {
@@ -366,6 +375,16 @@ pub fn run(
                 (Some(host), crate::capture_host::CaptureControl::Command(command)) => {
                     host.command(command, &timeline)
                 }
+                (host, crate::capture_host::CaptureControl::Reply(action, answer)) => {
+                    let _ = answer.send(match host {
+                        Some(host) => host.control(action, &timeline),
+                        None => crate::control::ControlReply::error(
+                            "feature-off",
+                            "Annotate is off; turn it on with `hex settings set capture.enabled on`",
+                        ),
+                    });
+                    continue;
+                }
                 (None, _) => crate::control::ControlReply::error("feature-off", "captures are off"),
             };
             if let crate::control::ControlReply::Error { message, .. } = reply {
@@ -400,7 +419,10 @@ pub fn run(
             && (captured_through >= release.ended_at + POST_RELEASE_TAIL
                 || Instant::now() >= release.deadline)
         {
-            let Some(Finishing { ended_at, .. }) = finishing.take() else {
+            let Some(Finishing {
+                ended_at, print, ..
+            }) = finishing.take()
+            else {
                 unreachable!("checked above");
             };
             let submitted = submit_capture(
@@ -410,6 +432,7 @@ pub fn run(
                 &jobs,
                 &mut events,
                 &mut pending,
+                print,
             )?;
             if submitted {
                 next_job_id += 1;
@@ -430,25 +453,19 @@ pub fn run(
                 audio_ready = false;
             }
         }
-        let commanded = commands
-            .as_ref()
-            .and_then(|commands| commands.try_recv().ok())
-            .filter(|_| finishing.is_none() && !recording);
-        if commanded == Some(ListenerCommand::PasteLast) {
-            submit_paste_last(
-                &jobs,
-                &mut events,
-                &mut pending,
-                &mut next_job_id,
-                &mut job_ids,
-            )?;
-            emit_state(&mut events, VoiceState::Transcribing, &device_label)?;
-        }
+        // A tray or `hex` command acts as its shortcut would, at once; a
+        // printing stop's reply rides with the capture it finishes.
+        let mut print = None;
         while finishing.is_none()
-            && let Ok(event) = hotkey.events.try_recv()
+            && let Some((action, occurred_at, deliberate)) = next_action(
+                &hotkey,
+                commands.as_ref(),
+                recording || start_pending,
+                captured_through,
+                &mut print,
+            )
         {
-            let occurred_at = event.occurred_at(captured_through);
-            match event.action {
+            match action {
                 // Annotate records the narration itself: while it records,
                 // dictation starts nothing.
                 HotkeyAction::Start
@@ -473,9 +490,10 @@ pub fn run(
                     if audio_ready {
                         capture.start_at(occurred_at);
                         recording = true;
-                        // A toggle press is deliberate, so it streams at once.
-                        recording_feedback_started = toggle_mode;
-                        if toggle_mode {
+                        // A toggle press or a `hex` command is deliberate, so
+                        // it streams at once.
+                        recording_feedback_started = toggle_mode || deliberate;
+                        if recording_feedback_started {
                             audio_suppressor.suppress();
                         }
                         // The tone confirms the press at once; a short tap or a
@@ -504,7 +522,10 @@ pub fn run(
                         input.close();
                         audio_ready = false;
                     }
-                    let cancelled = matches!(event.action, HotkeyAction::Cancel);
+                    if let Some(print) = print.take() {
+                        print.send(PrintedTranscript::NoSpeech);
+                    }
+                    let cancelled = matches!(action, HotkeyAction::Cancel);
                     events.dictation(
                         if cancelled {
                             DictationPhase::Cancelled
@@ -537,7 +558,10 @@ pub fn run(
                     }
                     recording = false;
                     recording_feedback_started = false;
-                    finishing = Some(begin_finishing(&capture, occurred_at));
+                    finishing = Some(Finishing {
+                        print: print.take(),
+                        ..begin_finishing(&capture, occurred_at)
+                    });
                 }
                 HotkeyAction::Cancel if recording => {
                     audio_suppressor.restore();
@@ -570,6 +594,9 @@ pub fn run(
                 }
                 _ => {}
             }
+            if let Some(print) = print.take() {
+                print.send(PrintedTranscript::NotRecording);
+            }
         }
         while let Ok(result) = results.try_recv() {
             pending = pending.saturating_sub(1);
@@ -589,6 +616,9 @@ pub fn run(
                         crate::feedback::play(crate::feedback::Tone::DictationDone);
                     }
                     match result.kind {
+                        OutputKind::Printed => {
+                            events.dictation(DictationPhase::Printed, text)?;
+                        }
                         OutputKind::Dictation => {
                             events.emit(&VoiceEvent::Transcript {
                                 timestamp_ms: now_ms(),
@@ -748,7 +778,7 @@ pub fn run(
 
 #[allow(clippy::too_many_arguments)]
 fn process_dictation_job(
-    job: Job,
+    mut job: Job,
     paster: &mut Result<WindowsPaster>,
     history: Option<&crate::history::History>,
     last_dictation: &Mutex<Option<String>>,
@@ -756,6 +786,7 @@ fn process_dictation_job(
     transformations: &crate::personal_commands::TransformationClient,
 ) -> JobResult {
     let started = Instant::now();
+    let printed = job.print.is_some();
     // The context read starts now so the UIA walk overlaps inference.
     let pending_context = crate::windows_context::begin_capture();
     let inference_started = Instant::now();
@@ -784,16 +815,19 @@ fn process_dictation_job(
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
-        paster
-            .as_mut()
-            .map_err(|error| format!("{error:#}"))?
-            .paste(&text)
-            .map_err(|error| format!("{error:#}"))?;
-        *last_dictation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
+        // A printed dictation is never pasted, and Paste Last skips it.
+        if !printed {
+            paster
+                .as_mut()
+                .map_err(|error| format!("{error:#}"))?
+                .paste(&text)
+                .map_err(|error| format!("{error:#}"))?;
+            *last_dictation
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
+        }
         if let Some(history) = history {
-            let draft = crate::dictation_modes::history_draft(
+            let mut draft = crate::dictation_modes::history_draft(
                 raw_text,
                 &processed,
                 application.clone(),
@@ -801,6 +835,9 @@ fn process_dictation_job(
                 inference_ms,
                 started.elapsed().as_millis() as u64,
             );
+            if printed {
+                draft.kind = crate::history::HistoryKind::Printed;
+            }
             if let Err(error) = history.record(draft) {
                 tracing::warn!(%error, "could not retain Windows dictation history");
             }
@@ -813,6 +850,13 @@ fn process_dictation_job(
         latency_ms,
         "completed Windows dictation job"
     );
+    if let Some(print) = job.print.take() {
+        print.send(match &result {
+            Ok(text) => PrintedTranscript::Text(text.clone()),
+            Err(error) => PrintedTranscript::Failed(error.clone()),
+        });
+        return job_result(OutputKind::Printed, result, latency_ms);
+    }
     job_result(OutputKind::Dictation, result, latency_ms)
 }
 
@@ -935,10 +979,39 @@ fn resolve_device_name(query: &str) -> Result<String> {
         .ok_or_else(|| eyre!("microphone is unavailable: {query}"))
 }
 
+/// The next shortcut event or `hex` command, as the action the loop takes,
+/// when it occurred, and whether it was deliberate (a command records at
+/// once, like a toggle press). A printing stop leaves its reply in `print`.
+fn next_action(
+    hotkey: &WindowsHotkeyMonitor,
+    commands: Option<&mpsc::Receiver<ListenerCommand>>,
+    recording: bool,
+    captured_through: CaptureInstant,
+    print: &mut Option<PrintReply>,
+) -> Option<(HotkeyAction, CaptureInstant, bool)> {
+    if let Ok(event) = hotkey.events.try_recv() {
+        return Some((event.action, event.occurred_at(captured_through), false));
+    }
+    let action = match commands?.try_recv().ok()? {
+        ListenerCommand::Dictation(CaptureAction::Start) => HotkeyAction::Start,
+        ListenerCommand::Dictation(CaptureAction::Stop) => HotkeyAction::Finish,
+        ListenerCommand::Dictation(CaptureAction::Cancel) => HotkeyAction::Cancel,
+        ListenerCommand::Dictation(CaptureAction::Toggle) if recording => HotkeyAction::Finish,
+        ListenerCommand::Dictation(CaptureAction::Toggle) => HotkeyAction::Start,
+        ListenerCommand::PasteLast => HotkeyAction::PasteLast,
+        ListenerCommand::StopAndPrint(reply) => {
+            *print = Some(reply);
+            HotkeyAction::Finish
+        }
+    };
+    Some((action, captured_through, true))
+}
+
 fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant) -> Finishing {
     let now = Instant::now();
     Finishing {
         ended_at,
+        print: None,
         // A short tap is discarded on its release alone and needs no tail.
         deadline: if capture.would_transcribe(ended_at) {
             now + POST_RELEASE_TAIL + TAIL_STALL_GRACE
@@ -955,11 +1028,21 @@ fn submit_capture(
     jobs: &SyncSender<OutputJob>,
     events: &mut EventLog,
     pending: &mut usize,
+    print: Option<PrintReply>,
 ) -> Result<bool> {
     let mut submitted = false;
+    let no_speech = |print: Option<PrintReply>| {
+        if let Some(print) = print {
+            print.send(PrintedTranscript::NoSpeech);
+        }
+    };
     match capture.finish_with_tail(ended_at, POST_RELEASE_TAIL) {
-        Finish::Discard => events.dictation(DictationPhase::Discarded, "")?,
+        Finish::Discard => {
+            no_speech(print);
+            events.dictation(DictationPhase::Discarded, "")?
+        }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
+            no_speech(print);
             events.dictation(DictationPhase::Discarded, "")?
         }
         Finish::Transcribe(mut clip) => {
@@ -967,6 +1050,7 @@ fn submit_capture(
             let job = OutputJob::Dictation(Job {
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
                 audio_ms,
+                print,
             });
             match jobs.try_send(job) {
                 Ok(()) => {
