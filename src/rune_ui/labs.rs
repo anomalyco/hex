@@ -246,9 +246,11 @@ fn labs_switch_row(ui: &Ui, p: Paint) -> CardRow {
 
 fn flip_labs(ui: &mut Ui) {
     let on = !ui.settings.labs.enabled;
+    // An installed Hex Microphone driver keeps the Voice Filter on.
+    let keep_voice_filter = super::fun::driver_installed(ui);
     ui.update(|settings| {
         settings.labs.enabled = on;
-        if !on {
+        if !on && !keep_voice_filter {
             settings.experimental.hex_microphone = false;
         }
     });
