@@ -1340,8 +1340,13 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> Setup.exe or install-windows.ps1 -> hex.exe + install.json receipt
 ├── Launch -> DLLs load from System32 and Hex's folder only, never PATH (#587)
 │   └── DX12 compiles shaders with FXC (System32), never a dxcompiler.dll on PATH
-├── GPU -> Rune draws with DX12 only (Vulkan only without a DX12 adapter); a
-│   GPU whose device fails hands the window to the next adapter (#662)
+├── GPU -> Rune draws with DX12 only (Vulkan only without a DX12 adapter) on
+│   the lowest-power adapter; a GPU whose device fails hands the window to the
+│   next adapter (#662)
+│   └── A launch that crashed before its first frame (gpu-draw.pending left in
+│       the data folder, same version; cleared by a window or HUD frame or a
+│       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in
+│       process.log, until Hex updates or the file is deleted
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
 │   a failed GPU load retries on the CPU
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the

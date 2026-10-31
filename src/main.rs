@@ -193,6 +193,8 @@ mod windows_context;
 #[cfg(target_os = "windows")]
 mod windows_dictation;
 #[cfg(target_os = "windows")]
+mod windows_gpu_fallback;
+#[cfg(target_os = "windows")]
 mod windows_input;
 #[cfg(target_os = "windows")]
 mod windows_login_item;
@@ -987,6 +989,7 @@ fn main() -> Result<()> {
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
     windows::restrict_dll_search();
+    windows_gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
     windows::run(&SHUTDOWN)
