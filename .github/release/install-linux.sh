@@ -115,8 +115,8 @@ uninstall() {
       rm -f "$icon"
     fi
   done
-  if [ -d "$data_home/icons/hicolor" ]; then
-    touch "$data_home/icons/hicolor"
+  if [ -d "$data_home/icons/hicolor" ] && [ ! -L "$data_home/icons/hicolor" ]; then
+    touch "$data_home/icons/hicolor" 2>/dev/null || true
   fi
   rm -f "$support_dir/current" "$support_dir/.current.next" "$support_dir/install.json"
   rm -rf "$support_dir/versions"
