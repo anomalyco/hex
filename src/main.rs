@@ -32,6 +32,7 @@ mod dashboard;
 mod desktop_activity;
 mod desktop_host;
 mod desktop_i18n;
+mod dev_build;
 #[cfg(target_os = "macos")]
 mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -49,7 +50,6 @@ mod dictation_processor;
 mod dot_scope;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
-mod experiments;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod feedback;
 mod file_dialog;
@@ -67,6 +67,7 @@ mod keyboard;
 #[cfg(target_os = "macos")]
 mod keyboard_input_sources;
 mod keyboard_model_switching;
+mod labs;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
@@ -237,10 +238,16 @@ enum Command {
         #[command(subcommand)]
         command: transcript_cli::MeetingsCommand,
     },
-    /// Turn unfinished, unsupported features on or off for this Mac's Hex.
-    Experiments {
+    /// Turn Labs, every unfinished feature, on or off.
+    Labs {
         #[command(subcommand)]
-        command: experiments::ExperimentsCommand,
+        command: labs::LabsCommand,
+    },
+    /// Replaced by `hex labs`.
+    #[command(hide = true)]
+    Experiments {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Run the desktop app with local dictation.
     App {
@@ -508,7 +515,8 @@ fn main() -> Result<()> {
             }
             return transcript_cli::meetings(command);
         }
-        Some(Command::Experiments { command }) => return experiments::run(command),
+        Some(Command::Labs { command }) => return labs::run(command),
+        Some(Command::Experiments { .. }) => return labs::run_retired_experiments(),
         #[cfg(debug_assertions)]
         Some(Command::Meeting {
             command: MeetingCommand::List,
@@ -576,7 +584,7 @@ fn main() -> Result<()> {
         Command::App { device, rune_args } => open_app(event_path, device, rune_args),
         Command::Listen { device } => {
             let _instance = instance::acquire("listener")?;
-            experiments::log_launch();
+            labs::log_launch();
             let settings = app_settings::AppSettings::load()?;
             hex_microphone::host_service();
             let events = events::EventLog::create(&event_path)?;
@@ -650,6 +658,7 @@ fn main() -> Result<()> {
         Command::Mcp { .. }
         | Command::History(_)
         | Command::Meetings { .. }
+        | Command::Labs { .. }
         | Command::Experiments { .. }
         | Command::Control(_) => {
             unreachable!("handled before startup")
@@ -684,7 +693,7 @@ fn main() -> Result<()> {
                     DevCommand::Show { pane } => DeveloperCommand::ShowPane { pane },
                     #[cfg(all(debug_assertions, hex_capture))]
                     DevCommand::CaptureReplay { wavs } => {
-                        experiments::log_launch();
+                        labs::log_launch();
                         app_settings::AppSettings::load()?;
                         let bundle = capture_host::replay(&wavs)?;
                         println!("{}", bundle.display());
@@ -843,7 +852,7 @@ fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>)
         return Ok(());
     }
     let _instance = instance::acquire("listener")?;
-    experiments::log_launch();
+    labs::log_launch();
     hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
@@ -1065,23 +1074,20 @@ mod tests {
     }
 
     #[test]
-    fn experiments_parse_as_a_read_command() {
-        use super::experiments::ExperimentsCommand;
+    fn labs_parse_as_a_read_command() {
+        use super::labs::LabsCommand;
 
         assert!(matches!(
-            Cli::try_parse_from(["hex", "experiments", "list", "--json"]).map(|cli| cli.command),
-            Ok(Some(Command::Experiments {
-                command: ExperimentsCommand::List { json: true }
+            Cli::try_parse_from(["hex", "labs", "on"]).map(|cli| cli.command),
+            Ok(Some(Command::Labs {
+                command: LabsCommand::On
             }))
         ));
         assert!(matches!(
             Cli::try_parse_from(["hex", "experiments", "enable", "live-text"])
                 .map(|cli| cli.command),
-            Ok(Some(Command::Experiments {
-                command: ExperimentsCommand::Enable { name }
-            })) if name == "live-text"
+            Ok(Some(Command::Experiments { .. }))
         ));
-        assert!(Cli::try_parse_from(["hex", "experiments", "disable"]).is_err());
     }
 
     #[test]

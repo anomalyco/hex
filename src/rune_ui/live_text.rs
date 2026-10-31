@@ -67,7 +67,7 @@ pub(crate) type Place = fn() -> Spot;
 
 /// Adds the plate to the app when the `live-text` experiment is on.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
-    if !crate::experiments::enabled(crate::experiments::Experiment::LiveText) {
+    if !crate::labs::enabled() {
         return;
     }
     let spec = OverlaySpec {

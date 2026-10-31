@@ -548,7 +548,7 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: crate::experiments::enabled(crate::experiments::Experiment::LiveText),
+            live_text: crate::labs::enabled(),
             #[cfg(target_os = "macos")]
             held,
             next_stream: AtomicU64::new(0),

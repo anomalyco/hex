@@ -155,7 +155,7 @@ impl Tour {
         let saved = (!completed).then(crate::onboarding::saved_step).flatten();
         // The new first run shows until it finishes, even when setup is
         // already ready, so the whole story plays once.
-        let story = super::onboarding_kit::live::wanted_for(platform);
+        let story = super::onboarding_kit::live::wanted_for(settings);
         (resume.is_some() || (!completed && (story || !status.ready() || saved.is_some()))).then(
             || {
                 Tour::new(

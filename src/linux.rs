@@ -68,10 +68,21 @@ enum Command {
         #[command(subcommand)]
         command: crate::control::cli::SettingsCommand,
     },
-    /// Turn unfinished, unsupported features on or off for your Hex.
-    Experiments {
+    /// Turn Labs, every unfinished feature, on or off.
+    Labs {
         #[command(subcommand)]
-        command: crate::experiments::ExperimentsCommand,
+        command: crate::labs::LabsCommand,
+    },
+    /// Replaced by `hex labs`.
+    #[command(hide = true)]
+    Experiments {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Replay the first-run onboarding (needs Labs on).
+    Onboarding {
+        #[command(subcommand)]
+        command: crate::control::cli::OnboardingCommand,
     },
     /// Annotate: record your screen with drawing and narration, then list
     /// and send what you recorded (`hex capture` still works).
@@ -122,8 +133,16 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         rune_args: Vec::new(),
     });
     // Like a read command: no log, lock, or running Hex.
-    if let Command::Experiments { command } = &command {
-        return crate::experiments::run(command);
+    match &command {
+        Command::Labs { command } => return crate::labs::run(command),
+        Command::Experiments { .. } => return crate::labs::run_retired_experiments(),
+        Command::Onboarding {
+            command: crate::control::cli::OnboardingCommand::Reset { output },
+        } => crate::control::cli::finish(crate::control::cli::print(
+            crate::linux_service::onboarding_reset(),
+            *output,
+        )),
+        _ => {}
     }
     if let Command::Capture { command } = command {
         crate::control::cli::finish(crate::control::cli::capture(command));
@@ -164,7 +183,7 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::PasteLast => shortcut(ShortcutCommand::PasteLast),
         Command::Dictate { device } => {
             let _instance = crate::instance::acquire("listener")?;
-            crate::experiments::log_launch();
+            crate::labs::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             crate::linux_dictation::initialize_feedback(&settings);
             crate::linux_dictation::run(
@@ -233,7 +252,10 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::Settings { command } => {
             crate::control::cli::finish(crate::control::cli::settings(command))
         }
-        Command::Experiments { .. } | Command::Capture { .. } => {
+        Command::Labs { .. }
+        | Command::Experiments { .. }
+        | Command::Onboarding { .. }
+        | Command::Capture { .. } => {
             unreachable!("handled before logging")
         }
     })();

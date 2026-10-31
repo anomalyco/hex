@@ -1,4 +1,4 @@
-//! The `playground` experiment: Rune's playground in Hex's window. ⇧⌘D
+//! The playground (Labs): Rune's playground in Hex's window. ⇧⌘D
 //! (Ctrl+Shift+D off macOS) swaps the window for a folded list of
 //! prototypes (the onboarding options, live meeting notes, and on macOS
 //! the HUD and the capture capsule), then every fixture
@@ -12,7 +12,6 @@ use std::sync::OnceLock;
 use rune::{App, AppSpec, Playground};
 
 use super::{DesktopShortcuts, SCENES, Scene, Ui, WINDOW_SIZE, fixture};
-use crate::experiments::{self, Experiment};
 
 /// The list's top-level groups, in order. Each starts folded.
 const GROUPS: &[&str] = &[PROTOTYPES, WINDOW, LINUX_WINDOWS];
@@ -178,7 +177,7 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Voice Filter/Driver missing",
     ),
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
-    ("mac-labs", "Window/General/Labs & experiments"),
+    ("mac-labs", "Window/General/Labs"),
     ("mac-production", "Window/General/Production build"),
     ("mac-production-labs", "Window/General/Production Labs"),
     ("mac-activity", "Window/Activity/Activity"),
@@ -245,7 +244,7 @@ const PATHS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn enabled() -> bool {
-    experiments::enabled(Experiment::Playground)
+    crate::labs::enabled()
 }
 
 /// `spec` with the playground's scenes: every fixture scene but `live`, at

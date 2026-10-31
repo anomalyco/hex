@@ -1,7 +1,6 @@
-//! Labs: the opt-in features (Meetings beta on macOS, plus Annotate in dev
-//! builds) and the experiments in dev, local, and test builds, folded under one
-//! sidebar row. Production builds (`!dev_build`) expose only Meetings (beta)
-//! on macOS and hide Annotate and every experiment.
+//! Labs: the one switch for every unfinished feature (`crate::labs`), the
+//! opt-in features (Meetings beta on macOS, plus Annotate in dev builds), and
+//! the Labs features' panes, folded under one sidebar row.
 
 use rune::{El, Icon, Tx, col, row, text};
 
@@ -9,7 +8,6 @@ use super::controls::{self, CardRow, Paint, card, icon_row, pressable_row, row_s
 use super::icons::{HINTS, SPARKLES, WAVE};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
 use crate::desktop_i18n::tr;
-use crate::experiments::Experiment;
 
 pub(super) static LABS_ICON: Icon = Icon {
     name: "hex-labs",
@@ -59,13 +57,6 @@ fn labs(ui: &Ui) -> Vec<Lab> {
     labs
 }
 
-/// Whether the sidebar shows Labs: dev builds always have experiments;
-/// production builds show Labs only on OSes with a release opt-in (Meetings on
-/// macOS).
-pub(super) fn shown(ui: &Ui) -> bool {
-    ui.platform.dev_build || !labs(ui).is_empty()
-}
-
 /// An opt-in feature's pane is in the main sidebar: it's on.
 fn turned_on(ui: &Ui, pane: Pane) -> bool {
     match pane {
@@ -86,12 +77,9 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
     panes
 }
 
-/// The experiments' panes this install has: listed under Labs, never in the
-/// main sidebar. Empty in production builds.
+/// The Labs features' panes this install has: listed under Labs, never in
+/// the main sidebar.
 pub(super) fn experiments(ui: &Ui) -> Vec<Pane> {
-    if !ui.platform.dev_build {
-        return Vec::new();
-    }
     Pane::ALL
         .iter()
         .copied()
@@ -185,48 +173,89 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     tx.settle();
 }
 
-/// The Labs page: the opt-in features with their switches, then interactive
-/// toggles for every experiment available on this OS.
+/// The Labs page: the Labs switch, the opt-in features with their
+/// switches, then, while Labs is on, what it turns on and Run setup again.
 pub(super) fn page(ui: &Ui, p: Paint) -> El {
+    let mut content =
+        controls::page("content").child(card(p, "labs-switch", vec![labs_switch_row(ui, p)]));
     let rows: Vec<CardRow> = labs(ui).iter().map(|lab| lab_row(p, lab)).collect();
-    let mut content = controls::page("content").child(
-        text(tr("Turn a feature on and it joins the sidebar."))
-            .key("lede")
-            .font(p.k.ty.ui)
-            .color(p.muted())
-            .wrap()
-            .mx(controls::METRICS.row_px),
-    );
     if !rows.is_empty() {
-        content = content.child(card(p, "labs", rows));
+        content = content
+            .child(
+                text(tr("Turn a feature on and it joins the sidebar."))
+                    .key("lede")
+                    .font(p.k.ty.ui)
+                    .color(p.muted())
+                    .wrap()
+                    .mx(controls::METRICS.row_px),
+            )
+            .child(card(p, "labs", rows));
     }
-    let exp_rows = experiment_toggles(ui)
-        .into_iter()
-        .map(|toggle| experiment_row(p, toggle))
-        .collect::<Vec<_>>();
-    if !exp_rows.is_empty() {
+    if ui.settings.labs.enabled {
+        let mut included = features(ui)
+            .into_iter()
+            .map(|feature| feature_row(p, feature))
+            .collect::<Vec<_>>();
+        if super::onboarding_kit::live::restart_unavailable(ui).is_none() {
+            included.push(run_setup_row(p));
+        }
         content = content.child(controls::section(
             p,
             "experiments",
             tr("Experiments"),
-            exp_rows,
-        ));
-    }
-    if super::onboarding_kit::live::restart_unavailable(ui).is_none() {
-        content = content.child(controls::section(
-            p,
-            "onboarding",
-            "Onboarding",
-            vec![restart_onboarding_row(p)],
+            included,
         ));
     }
     super::scroll_body("scroll", content)
 }
 
-/// Replays the first run on this install, for trying it again (dev, test,
-/// and local builds).
-fn restart_onboarding_row(p: Paint) -> CardRow {
-    let restart = rune_kit::Button::new("Restart")
+/// The one Labs switch, with a link to send feedback.
+fn labs_switch_row(ui: &Ui, p: Paint) -> CardRow {
+    let c = &p.k.c;
+    let feedback = rune_kit::Button::new(tr("Send feedback"))
+        .variant(rune_kit::ButtonVariant::Ghost)
+        .control_size(rune_kit::ControlSize::Small)
+        .on_press(|ui: &mut Ui| {
+            if ui.live()
+                && let Err(error) = crate::opencode_catalog::open_url(crate::labs::FEEDBACK_URL)
+            {
+                ui.error = Some(format!("{error:#}"));
+            }
+        })
+        .build(p.k)
+        .key("send-feedback");
+    let trailing = row()
+        .key("trailing")
+        .gap(8.0)
+        .center_y()
+        .child(feedback)
+        .child(row_switch(p, ui.settings.labs.enabled));
+    pressable_row(icon_row(
+        p,
+        "labs-enabled",
+        &LABS_ICON,
+        tr("Labs"),
+        Some(tr("Try unfinished features. They may change or break.")),
+        trailing,
+    ))
+    .hover(c.hover)
+    .on_press(flip_labs)
+    .into()
+}
+
+fn flip_labs(ui: &mut Ui) {
+    let on = !ui.settings.labs.enabled;
+    ui.update(|settings| {
+        settings.labs.enabled = on;
+        if !on {
+            settings.experimental.hex_microphone = false;
+        }
+    });
+}
+
+/// Runs the first run again (`onboarding_kit::live::restart`).
+fn run_setup_row(p: Paint) -> CardRow {
+    let run = rune_kit::Button::new(tr("Run"))
         .variant(rune_kit::ButtonVariant::Ghost)
         .control_size(rune_kit::ControlSize::Small)
         .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
@@ -240,9 +269,11 @@ fn restart_onboarding_row(p: Paint) -> CardRow {
         p,
         "lab-restart-onboarding",
         &SPARKLES,
-        "Restart onboarding",
-        Some("Play the first run again. Settings, models, and permissions stay"),
-        restart,
+        tr("Run setup again"),
+        Some(tr(
+            "Play the first run again. Settings, models, and permissions stay",
+        )),
+        run,
     )
     .into()
 }
@@ -282,126 +313,62 @@ fn lab_row(p: Paint, lab: &Lab) -> CardRow {
     .into()
 }
 
-struct ExperimentToggle {
+/// One feature Labs turns on, listed while Labs is on.
+struct Feature {
     key: &'static str,
-    experiment: Experiment,
     icon: &'static Icon,
     title: &'static str,
     about: &'static str,
-    on: bool,
     pane: Option<Pane>,
 }
 
-fn experiment_on(ui: &Ui, experiment: Experiment) -> bool {
-    match experiment {
-        Experiment::VoiceFilter => ui.settings.experimental.voice_filter_enabled(
-            ui.platform.voice_filter,
-            ui.platform
-                .hex_microphone
-                .as_ref()
-                .is_some_and(|status| status.driver_bundle_installed),
-        ),
-        Experiment::Playground => ui.platform.playground,
-        other => ui.platform.experiments[other.index()],
-    }
-}
-
-fn experiment_toggles(ui: &Ui) -> Vec<ExperimentToggle> {
-    if !ui.platform.dev_build {
-        return Vec::new();
-    }
+fn features(ui: &Ui) -> Vec<Feature> {
     let caps = ui.platform.caps;
     let mut items = Vec::new();
     if caps.fun {
-        items.push(ExperimentToggle {
+        items.push(Feature {
             key: "exp-voice-filter",
-            experiment: Experiment::VoiceFilter,
             icon: &VOICE_FILTER_ICON,
             title: tr("Voice Filter"),
             about: tr("Hex Microphone virtual input and real-time voice filters"),
-            on: experiment_on(ui, Experiment::VoiceFilter),
-            pane: Some(Pane::VoiceFilter),
+            pane: Some(Pane::VoiceFilter).filter(|pane| pane.shown(ui)),
         });
     }
-    items.push(ExperimentToggle {
+    items.push(Feature {
         key: "exp-live-text",
-        experiment: Experiment::LiveText,
         icon: &WAVE,
         title: tr("Live text"),
         about: tr("Show provisional words beside the HUD while dictating (applies on restart)"),
-        on: experiment_on(ui, Experiment::LiveText),
         pane: None,
     });
     if caps.meetings {
-        items.push(ExperimentToggle {
+        items.push(Feature {
             key: "exp-live-chapters",
-            experiment: Experiment::LiveChapters,
             icon: &HINTS,
             title: tr("Live chapters"),
             about: tr("Break meeting transcripts into chapters while recording"),
-            on: experiment_on(ui, Experiment::LiveChapters),
             pane: None,
         });
     }
-    items.push(ExperimentToggle {
+    items.push(Feature {
         key: "exp-playground",
-        experiment: Experiment::Playground,
         icon: &SPARKLES,
         title: "Playground",
         about: tr("Scene and story browser in the window (applies on restart)"),
-        on: experiment_on(ui, Experiment::Playground),
         pane: None,
     });
     items
 }
 
-fn flip_experiment(ui: &mut Ui, experiment: Experiment) {
-    let on = !experiment_on(ui, experiment);
-    if ui.live()
-        && let Err(error) = crate::experiments::set_enabled(experiment, on)
-    {
-        ui.error = Some(format!("{error:#}"));
-        return;
-    }
-    ui.platform.experiments[experiment.index()] = on;
-    match experiment {
-        Experiment::VoiceFilter => {
-            ui.platform.voice_filter = on;
-            if !on && ui.settings.experimental.hex_microphone {
-                ui.update(|settings| settings.experimental.hex_microphone = false);
-            } else if ui.live() {
-                ui.settings.refresh_runtime();
-            }
-        }
-        Experiment::Playground => {
-            ui.platform.playground = on;
-        }
-        Experiment::LiveChapters | Experiment::LiveText | Experiment::NewOnboarding => {}
-    }
-}
-
-fn experiment_row(p: Paint, toggle: ExperimentToggle) -> CardRow {
-    let c = &p.k.c;
-    let open = toggle
-        .pane
-        .filter(|pane| toggle.on && *pane != Pane::General)
-        .map(|pane| open_pane_button(p, pane));
-    let trailing = row()
-        .key("trailing")
-        .gap(8.0)
-        .center_y()
-        .children(open)
-        .child(row_switch(p, toggle.on));
-    let experiment = toggle.experiment;
-    pressable_row(icon_row(
+fn feature_row(p: Paint, feature: Feature) -> CardRow {
+    let open = feature.pane.map(|pane| open_pane_button(p, pane));
+    icon_row(
         p,
-        toggle.key,
-        toggle.icon,
-        toggle.title,
-        Some(toggle.about),
-        trailing,
-    ))
-    .hover(c.hover)
-    .on_press(move |ui: &mut Ui| flip_experiment(ui, experiment))
+        feature.key,
+        feature.icon,
+        feature.title,
+        Some(feature.about),
+        row().key("trailing").gap(8.0).center_y().children(open),
+    )
     .into()
 }

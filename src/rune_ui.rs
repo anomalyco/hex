@@ -142,7 +142,7 @@ pub(crate) fn run_app(
     crate::linux_rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, in dev builds only.
-    let _capture_overlays = crate::experiments::is_dev_build()
+    let _capture_overlays = crate::dev_build::is_dev_build()
         .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let handle = app.handle();
     host.set_window_visible({
@@ -157,12 +157,19 @@ pub(crate) fn run_app(
         show(activation);
     }
     let quit = app.handle();
+    let window = app.handle();
     std::thread::Builder::new()
         .name("hex-window-requests".into())
         .spawn(move || {
             while let Ok(request) = requests.recv() {
                 match request {
                     Control::Activate(activation) => show(activation),
+                    Control::OnboardingReset(answer) => {
+                        show(Activation::default());
+                        window.update(move |ui, tx| {
+                            let _ = answer.send(restart_onboarding(ui, tx));
+                        });
+                    }
                     Control::Quit => {
                         quit.quit();
                         break;
@@ -346,10 +353,10 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
-/// `hex onboarding reset`: replays the first run in the window now.
-#[cfg(target_os = "macos")]
+/// `hex onboarding reset`: replays the first run in the window now; the
+/// window also shows why it couldn't.
 pub(crate) fn restart_onboarding(ui: &mut Ui, tx: &mut Tx) -> Result<(), String> {
-    onboarding_kit::live::restart(ui, tx)
+    onboarding_kit::live::restart(ui, tx).inspect_err(|why| ui.error = Some(why.clone()))
 }
 
 /// The pane the window shows, by its `hex window show` name: General is
@@ -535,13 +542,6 @@ impl Pane {
 
     fn shown(self, ui: &Ui) -> bool {
         let caps = ui.platform.caps;
-        if !ui.platform.dev_build {
-            return match self {
-                Pane::General | Pane::Output | Pane::History => true,
-                Pane::Meetings => caps.meetings,
-                _ => false,
-            };
-        }
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings,
@@ -549,7 +549,7 @@ impl Pane {
                 caps.fun
                     && crate::app_settings::voice_filter_enabled(
                         ui.settings.experimental.hex_microphone,
-                        ui.platform.voice_filter,
+                        ui.settings.labs.enabled,
                         ui.platform
                             .hex_microphone
                             .as_ref()
@@ -557,7 +557,7 @@ impl Pane {
                     )
             }
             #[cfg(hex_capture)]
-            Pane::Annotate => ui.platform.scrawl.is_some(),
+            Pane::Annotate => ui.platform.dev_build && ui.platform.scrawl.is_some(),
             _ => true,
         }
     }
@@ -738,15 +738,9 @@ impl Ui {
         ui.history = history::HistoryPane::shared(store);
         ui.models = models::Models::load();
         ui.modes.load_personal_commands();
-        let dev_build = crate::experiments::is_dev_build();
+        let dev_build = crate::dev_build::is_dev_build();
         ui.platform.dev_build = dev_build;
-        for experiment in crate::experiments::Experiment::ALL {
-            ui.platform.experiments[experiment.index()] = crate::experiments::enabled(experiment);
-        }
         ui.platform.developer = dev_build && crate::DEVELOPER_FEATURES_ENABLED;
-        ui.platform.voice_filter =
-            crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
-        ui.platform.playground = playground::enabled();
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         onboarding_kit::live::start(&mut ui);
@@ -1366,9 +1360,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             NAV_ROW_GAP / 2.0,
         ));
     }
-    if labs::shown(ui) {
-        nav = nav.child(labs::nav(ui, p));
-    }
+    nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => Some((
             tr("Restart to update").to_owned(),

@@ -788,7 +788,7 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     }
     let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);
-    if crate::experiments::enabled(crate::experiments::Experiment::LiveChapters) {
+    if crate::labs::enabled() {
         super::chapters::refine_meeting(&directory, &entries, &never);
     }
     let started = Instant::now();
