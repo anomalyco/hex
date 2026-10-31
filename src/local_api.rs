@@ -46,7 +46,7 @@ pub struct LocalApi {
     document: DiscoveryDocument,
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
-    transcription_service: Option<crate::transcription_service::TranscriptionService>,
+    transcription_service: Option<crate::transcription::service::TranscriptionService>,
     _instance: Option<crate::instance::InstanceLock>,
 }
 
@@ -105,12 +105,12 @@ struct HttpContext {
     auth_limiter: AuthObservationLimiter,
     model_preparing: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
-    transcription: crate::transcription_service::TranscriptionServiceHandle,
+    transcription: crate::transcription::service::TranscriptionServiceHandle,
     developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
     control: Option<SyncSender<crate::control::ControlCall>>,
     dictations: dictation::Dictations,
-    streams: Arc<crate::transcription_stream::Streams>,
-    stream_engine: crate::transcription_stream::EngineSource,
+    streams: Arc<crate::transcription::stream::Streams>,
+    stream_engine: crate::transcription::stream::EngineSource,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -143,7 +143,7 @@ pub struct LocalApiOptions {
     pub dictation_control: Option<dictation::Control>,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
-    pub(crate) stream_engine: Option<crate::transcription_stream::EngineSource>,
+    pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
 }
 
 impl LocalApi {
@@ -206,7 +206,7 @@ impl LocalApi {
             prepare_discovery_path(path)?;
         }
         let (transcription_service, transcription) =
-            crate::transcription_service::TranscriptionService::start()?;
+            crate::transcription::service::TranscriptionService::start()?;
         let listener = TcpListener::bind("127.0.0.1:0").wrap_err("could not bind the local API")?;
         listener.set_nonblocking(true)?;
         let address = listener.local_addr()?;
@@ -249,7 +249,7 @@ impl LocalApi {
             streams: Arc::default(),
             stream_engine: options
                 .stream_engine
-                .unwrap_or_else(|| Arc::new(crate::transcription_stream::shared_engine)),
+                .unwrap_or_else(|| Arc::new(crate::transcription::stream::shared_engine)),
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -709,10 +709,10 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             let Some(id) = model_prepare_path(path) else {
                 return RequestAction::Respond(HttpResponse::code(404, "not_found"));
             };
-            let Ok(id) = id.parse::<crate::transcription_models::TranscriptionModelId>() else {
+            let Ok(id) = id.parse::<crate::transcription::models::TranscriptionModelId>() else {
                 return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
             };
-            let model = crate::transcription_models::definition(id);
+            let model = crate::transcription::models::definition(id);
             if !model.available() {
                 return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
             }
@@ -735,7 +735,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
 
 fn transcription_action(
     request: HttpRequest,
-    transcription: &crate::transcription_service::TranscriptionServiceHandle,
+    transcription: &crate::transcription::service::TranscriptionServiceHandle,
 ) -> RequestAction {
     if !request.has_content_type("audio/wav") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
@@ -752,13 +752,13 @@ fn transcription_action(
             return RequestAction::Respond(HttpResponse::code(400, code));
         }
     };
-    let model = crate::transcription_models::definition(selection.model);
+    let model = crate::transcription::models::definition(selection.model);
     let prepared = match model.runtime {
-        crate::transcription_models::ModelRuntime::Gguf(_) => {
-            crate::transcription_models::is_verified(model)
+        crate::transcription::models::ModelRuntime::Gguf(_) => {
+            crate::transcription::models::is_verified(model)
         }
-        crate::transcription_models::ModelRuntime::AppleSpeech => {
-            crate::transcription_models::is_installed(model, &selection.language)
+        crate::transcription::models::ModelRuntime::AppleSpeech => {
+            crate::transcription::models::is_installed(model, &selection.language)
         }
     };
     if !prepared {
@@ -948,31 +948,31 @@ fn body_read_response(error: BodyReadError) -> HttpResponse {
 
 fn transcription_selection(
     path: &str,
-) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
     let query = selection_query(path)?;
     let model = query.model.ok_or("unknown-model")?;
     validate_selection(model, query.into_language())
 }
 
 fn validate_selection(
-    model: crate::transcription_models::TranscriptionModelId,
+    model: crate::transcription::models::TranscriptionModelId,
     language: String,
-) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
-    let selection = crate::transcription_models::TranscriptionSelection { model, language };
-    crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
+    let selection = crate::transcription::models::TranscriptionSelection { model, language };
+    crate::transcription::models::validate(&selection).map_err(|_| "unsupported-model")?;
     Ok(selection)
 }
 
 #[derive(Default)]
 struct SelectionQuery {
-    model: Option<crate::transcription_models::TranscriptionModelId>,
+    model: Option<crate::transcription::models::TranscriptionModelId>,
     language: Option<String>,
 }
 
 impl SelectionQuery {
     fn into_language(self) -> String {
         self.language.unwrap_or_else(|| {
-            crate::transcription_models::TranscriptionSelection::default().language
+            crate::transcription::models::TranscriptionSelection::default().language
         })
     }
 }
@@ -998,12 +998,12 @@ fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static s
 
 fn transcribe_audio(
     stream: &mut TcpStream,
-    selection: crate::transcription_models::TranscriptionSelection,
+    selection: crate::transcription::models::TranscriptionSelection,
     content_length: usize,
     mut body: Vec<u8>,
-    transcription: &crate::transcription_service::TranscriptionServiceHandle,
+    transcription: &crate::transcription::service::TranscriptionServiceHandle,
     shutdown: &AtomicBool,
-    admission: crate::transcription_service::AudioAdmission,
+    admission: crate::transcription::service::AudioAdmission,
 ) -> Option<HttpResponse> {
     if let Err(error) = read_body_bounded(
         stream,
@@ -1024,15 +1024,15 @@ fn transcribe_audio(
             BodyReadError::Shutdown => return None,
         });
     }
-    let clip = match crate::transcription_service::AudioClip::decode_wav(Cursor::new(body)) {
+    let clip = match crate::transcription::service::AudioClip::decode_wav(Cursor::new(body)) {
         Ok(clip) => clip,
-        Err(crate::transcription_service::AudioError::ResourceExhausted) => {
+        Err(crate::transcription::service::AudioError::ResourceExhausted) => {
             return Some(HttpResponse::code(413, "resource-exhausted"));
         }
-        Err(crate::transcription_service::AudioError::Unsupported) => {
+        Err(crate::transcription::service::AudioError::Unsupported) => {
             return Some(HttpResponse::code(415, "unsupported-audio"));
         }
-        Err(crate::transcription_service::AudioError::Invalid) => {
+        Err(crate::transcription::service::AudioError::Invalid) => {
             return Some(HttpResponse::code(400, "invalid-audio"));
         }
     };
@@ -1064,23 +1064,23 @@ fn transcribe_audio(
 }
 
 fn transcription_error(
-    error: crate::transcription_service::TranscriptionServiceError,
+    error: crate::transcription::service::TranscriptionServiceError,
 ) -> HttpResponse {
     match error {
-        crate::transcription_service::TranscriptionServiceError::QueueFull => {
+        crate::transcription::service::TranscriptionServiceError::QueueFull => {
             HttpResponse::code(429, "queue-full")
         }
-        crate::transcription_service::TranscriptionServiceError::Unavailable => {
+        crate::transcription::service::TranscriptionServiceError::Unavailable => {
             HttpResponse::code(503, "service-gone")
         }
-        crate::transcription_service::TranscriptionServiceError::Cancelled => {
+        crate::transcription::service::TranscriptionServiceError::Cancelled => {
             HttpResponse::code(409, "cancelled")
         }
-        crate::transcription_service::TranscriptionServiceError::Model(error) => {
+        crate::transcription::service::TranscriptionServiceError::Model(error) => {
             tracing::error!(%error, "prepared transcription model could not load");
             HttpResponse::code(500, "model-load-failed")
         }
-        crate::transcription_service::TranscriptionServiceError::Inference(error) => {
+        crate::transcription::service::TranscriptionServiceError::Inference(error) => {
             tracing::error!(%error, "local transcription failed");
             HttpResponse::code(500, "transcription-failed")
         }
@@ -1170,26 +1170,26 @@ fn model_prepare_path(path: &str) -> Option<&str> {
 
 fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> {
     let language = selection_query(path)?.into_language();
-    if !crate::transcription_models::LANGUAGES
+    if !crate::transcription::models::LANGUAGES
         .iter()
         .any(|(code, _)| *code == language)
     {
         return Err("unsupported-language");
     }
-    Ok(crate::transcription_models::MODELS
+    Ok(crate::transcription::models::MODELS
         .iter()
         .filter(|model| model.available())
         .map(|model| {
             let managed = matches!(
                 model.runtime,
-                crate::transcription_models::ModelRuntime::AppleSpeech
+                crate::transcription::models::ModelRuntime::AppleSpeech
             );
-            let installed = crate::transcription_models::is_installed(model, &language);
+            let installed = crate::transcription::models::is_installed(model, &language);
             ModelInfo {
                 id: model.id.as_str(),
                 name: model.name,
                 installed,
-                verified: managed && installed || crate::transcription_models::is_verified(model),
+                verified: managed && installed || crate::transcription::models::is_verified(model),
                 managed,
                 download_bytes: model.download_bytes(),
                 languages: model.presentation_languages(),
@@ -1200,27 +1200,27 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
 }
 
 fn installation_selection(
-    model: &crate::transcription_models::ModelDefinition,
+    model: &crate::transcription::models::ModelDefinition,
     path: &str,
-) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
+) -> std::result::Result<crate::transcription::models::TranscriptionSelection, &'static str> {
     let query = selection_query(path)?;
     validate_selection(model.id, query.into_language())
 }
 
 fn stream_model_prepare(
     stream: &mut TcpStream,
-    model: &'static crate::transcription_models::ModelDefinition,
-    selection: crate::transcription_models::TranscriptionSelection,
+    model: &'static crate::transcription::models::ModelDefinition,
+    selection: crate::transcription::models::TranscriptionSelection,
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
-    transcription: crate::transcription_service::TranscriptionServiceHandle,
+    transcription: crate::transcription::service::TranscriptionServiceHandle,
 ) {
     let preparer: ModelPreparer = Box::new(move |canceled, downloaded, stage| {
         if matches!(
             model.runtime,
-            crate::transcription_models::ModelRuntime::Gguf(_)
+            crate::transcription::models::ModelRuntime::Gguf(_)
         ) {
-            crate::transcription_models::download_with_stage_progress(
+            crate::transcription::models::download_with_stage_progress(
                 model,
                 &canceled,
                 &downloaded,
@@ -1230,7 +1230,7 @@ fn stream_model_prepare(
         if canceled.load(Ordering::Acquire) {
             bail!("model preparation canceled");
         }
-        crate::transcription_models::ModelPreparationStage::Loading.store(&stage);
+        crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
         transcription
             .prepare(selection, canceled)
             .map_err(|error| eyre!("model preparation failed: {error:?}"))
@@ -1240,7 +1240,7 @@ fn stream_model_prepare(
 
 fn stream_model_prepare_with(
     stream: &mut TcpStream,
-    model: &'static crate::transcription_models::ModelDefinition,
+    model: &'static crate::transcription::models::ModelDefinition,
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
     preparer: ModelPreparer,
@@ -1254,11 +1254,11 @@ fn stream_model_prepare_with(
     let downloaded = Arc::new(AtomicU64::new(0));
     let initial_stage = if matches!(
         model.runtime,
-        crate::transcription_models::ModelRuntime::AppleSpeech
+        crate::transcription::models::ModelRuntime::AppleSpeech
     ) {
-        crate::transcription_models::ModelPreparationStage::Loading as u8
+        crate::transcription::models::ModelPreparationStage::Loading as u8
     } else {
-        crate::transcription_models::ModelPreparationStage::Downloading as u8
+        crate::transcription::models::ModelPreparationStage::Downloading as u8
     };
     let stage = Arc::new(AtomicU8::new(initial_stage));
     let (result_sender, result_receiver) = mpsc::sync_channel(1);
@@ -1286,10 +1286,10 @@ fn stream_model_prepare_with(
             connected = false;
             break None;
         }
-        let current_stage = crate::transcription_models::ModelPreparationStage::load(&stage);
+        let current_stage = crate::transcription::models::ModelPreparationStage::load(&stage);
         let current_downloaded = downloaded.load(Ordering::Relaxed);
         let progress = match current_stage {
-            crate::transcription_models::ModelPreparationStage::Downloading
+            crate::transcription::models::ModelPreparationStage::Downloading
                 if last_stage != Some(current_stage) || last_downloaded != current_downloaded =>
             {
                 Some(serde_json::json!({
@@ -1298,12 +1298,12 @@ fn stream_model_prepare_with(
                     "totalBytes": total_bytes,
                 }))
             }
-            crate::transcription_models::ModelPreparationStage::Verifying
+            crate::transcription::models::ModelPreparationStage::Verifying
                 if last_stage != Some(current_stage) =>
             {
                 Some(serde_json::json!({ "type": "verifying" }))
             }
-            crate::transcription_models::ModelPreparationStage::Loading
+            crate::transcription::models::ModelPreparationStage::Loading
                 if last_stage != Some(current_stage) =>
             {
                 Some(serde_json::json!({ "type": "loading" }))
@@ -1365,15 +1365,15 @@ fn stream_model_prepare_with(
             );
         }
         Err(error) => {
-            let failed_stage = crate::transcription_models::ModelPreparationStage::load(&stage);
+            let failed_stage = crate::transcription::models::ModelPreparationStage::load(&stage);
             let code = match failed_stage {
-                crate::transcription_models::ModelPreparationStage::Downloading => {
+                crate::transcription::models::ModelPreparationStage::Downloading => {
                     "download-failed"
                 }
-                crate::transcription_models::ModelPreparationStage::Verifying => {
+                crate::transcription::models::ModelPreparationStage::Verifying => {
                     "verification-failed"
                 }
-                crate::transcription_models::ModelPreparationStage::Loading => "load-failed",
+                crate::transcription::models::ModelPreparationStage::Loading => "load-failed",
             };
             tracing::error!(%error, model = model.id.as_str(), code, "model preparation failed");
             let _ = write_sse(
@@ -1502,14 +1502,14 @@ enum RequestReadError {
 enum RequestAction {
     Respond(HttpResponse),
     Prepare {
-        model: &'static crate::transcription_models::ModelDefinition,
-        selection: crate::transcription_models::TranscriptionSelection,
+        model: &'static crate::transcription::models::ModelDefinition,
+        selection: crate::transcription::models::TranscriptionSelection,
     },
     Transcribe {
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
         content_length: usize,
         body_prefix: Vec<u8>,
-        admission: crate::transcription_service::AudioAdmission,
+        admission: crate::transcription::service::AudioAdmission,
     },
     DeveloperControl {
         content_length: usize,
@@ -1997,7 +1997,7 @@ mod tests {
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
         assert_eq!(
             models.len(),
-            crate::transcription_models::MODELS
+            crate::transcription::models::MODELS
                 .iter()
                 .filter(|model| model.available())
                 .count()
@@ -2392,8 +2392,8 @@ mod tests {
 
     #[test]
     fn model_preparation_rejects_disabled_apple_speech() {
-        let apple = crate::transcription_models::definition(
-            crate::transcription_models::TranscriptionModelId::AppleSpeech,
+        let apple = crate::transcription::models::definition(
+            crate::transcription::models::TranscriptionModelId::AppleSpeech,
         );
         assert!(installation_selection(apple, "/models/apple_speech/prepare?language=de").is_err());
     }
@@ -2586,7 +2586,7 @@ mod tests {
     #[test]
     fn transcription_route_requires_wav_and_a_safe_declared_length() {
         let (_service, transcription) =
-            crate::transcription_service::TranscriptionService::start().unwrap();
+            crate::transcription::service::TranscriptionService::start().unwrap();
         let action = transcription_action(
             HttpRequest {
                 method: "POST".into(),
@@ -2631,7 +2631,7 @@ mod tests {
         let preparing = Arc::new(AtomicBool::new(true));
         let health: HealthProvider = Arc::new(test_health);
         let (_service, transcription) =
-            crate::transcription_service::TranscriptionService::start().unwrap();
+            crate::transcription::service::TranscriptionService::start().unwrap();
         let context = HttpContext {
             token: "test-token".into(),
             health,
@@ -2644,7 +2644,7 @@ mod tests {
             control: None,
             dictations: dictation::Dictations::new(None),
             streams: Arc::default(),
-            stream_engine: Arc::new(crate::transcription_stream::shared_engine),
+            stream_engine: Arc::new(crate::transcription::stream::shared_engine),
         };
         let action = handle_request(
             HttpRequest {
@@ -2693,16 +2693,16 @@ mod tests {
         let preparer: ModelPreparer = Box::new(|_, downloaded, stage| {
             downloaded.store(123, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(400));
-            crate::transcription_models::ModelPreparationStage::Verifying.store(&stage);
+            crate::transcription::models::ModelPreparationStage::Verifying.store(&stage);
             thread::sleep(Duration::from_millis(400));
-            crate::transcription_models::ModelPreparationStage::Loading.store(&stage);
+            crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
             thread::sleep(Duration::from_millis(400));
             Ok(())
         });
         stream_model_prepare_with(
             &mut stream,
-            crate::transcription_models::definition(
-                crate::transcription_models::TranscriptionModelId::ParakeetV2,
+            crate::transcription::models::definition(
+                crate::transcription::models::TranscriptionModelId::ParakeetV2,
             ),
             preparing.clone(),
             &AtomicBool::new(false),
@@ -2734,13 +2734,13 @@ mod tests {
         });
         let (mut stream, _) = listener.accept().unwrap();
         let preparer: ModelPreparer = Box::new(|_, _, stage| {
-            crate::transcription_models::ModelPreparationStage::Loading.store(&stage);
+            crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
             Ok(())
         });
         stream_model_prepare_with(
             &mut stream,
-            crate::transcription_models::definition(
-                crate::transcription_models::TranscriptionModelId::ParakeetV2,
+            crate::transcription::models::definition(
+                crate::transcription::models::TranscriptionModelId::ParakeetV2,
             ),
             Arc::new(AtomicBool::new(true)),
             &AtomicBool::new(false),

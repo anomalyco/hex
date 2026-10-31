@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rune::{Anim, Cx, El, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row, text};
 
 use super::controls::Paint;
-use crate::transcription_engine::Partial;
+use crate::transcription::engine::Partial;
 
 /// The overlay's size: room for about a dozen words on one line.
 pub(crate) const SIZE: (f32, f32) = (560.0, 44.0);

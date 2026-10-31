@@ -2,7 +2,7 @@
 //! `transcription_preparation`, the microphone's `Meter { average, peak }`,
 //! and a recognizer's partial transcripts.
 
-use crate::transcription_models::{TranscriptionModelId, definition};
+use crate::transcription::models::{TranscriptionModelId, definition};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Language {

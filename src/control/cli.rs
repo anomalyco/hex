@@ -514,7 +514,7 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
 fn selection(
     model: Option<String>,
     language: Option<String>,
-) -> color_eyre::Result<crate::transcription_models::TranscriptionSelection> {
+) -> color_eyre::Result<crate::transcription::models::TranscriptionSelection> {
     let settings = crate::app_settings::AppSettings::load().unwrap_or_default();
     let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
     super::model_selection(&settings, &model, language.as_deref())
@@ -524,7 +524,7 @@ fn selection(
 /// `hex model status|devices|check|transcribe`, run in this process.
 #[cfg(not(target_os = "macos"))]
 fn offline_model(command: ModelCommand) -> u8 {
-    use crate::transcription_models::{definition, is_installed, is_verified, model_path};
+    use crate::transcription::models::{definition, is_installed, is_verified, model_path};
     report((|| match command {
         ModelCommand::Status { model, language } => {
             let selection = selection(model, language)?;

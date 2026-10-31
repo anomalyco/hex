@@ -90,7 +90,7 @@ fn keyboard_model_switching_maps_enabled_sources_to_an_installed_model_and_langu
             language: "es".into(),
         })
     );
-    let german = crate::transcription_models::definition(TranscriptionModelId::ParakeetV3)
+    let german = crate::transcription::models::definition(TranscriptionModelId::ParakeetV3)
         .language_choices()
         .iter()
         .position(|code| *code == "de")

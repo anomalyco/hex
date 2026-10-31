@@ -9,8 +9,8 @@ use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::AppSettings;
-use crate::transcription_models::{MODELS, TranscriptionModelId};
-use crate::transcription_preparation::PreparationStatus;
+use crate::transcription::models::{MODELS, TranscriptionModelId};
+use crate::transcription::preparation::PreparationStatus;
 use crate::tray_menu::model_menu_entries;
 
 const IDLE_ICON_PNG: &[u8] = include_bytes!("../assets/icons/menubar-idle@2x.png");
@@ -407,7 +407,7 @@ pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) 
         let entries = model_menu_entries(
             settings,
             status.model.is_some(),
-            crate::transcription_models::is_installed,
+            crate::transcription::models::is_installed,
         );
         for (model, item) in &controller.model_items {
             let entry = entries.iter().find(|entry| entry.model == *model);
@@ -426,7 +426,7 @@ pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) 
                 .model_preparing
                 .setTitle(&NSString::from_str(&format!(
                     "Preparing {}…",
-                    crate::transcription_models::definition(model).name,
+                    crate::transcription::models::definition(model).name,
                 )));
         }
         controller.model_error.setHidden(status.error.is_none());

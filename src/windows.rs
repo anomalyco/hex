@@ -25,7 +25,7 @@ use windows_sys::Win32::System::Console::{
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::local_transcriber::LocalTranscriber;
-use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection, validate};
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection, validate};
 
 const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
@@ -269,7 +269,7 @@ fn stream_bench(wav: &Path, speed: f64, selection: &TranscriptionSelection) -> R
     let offline = transcriber.transcribe(&samples)?;
     let offline_ms = started.elapsed().as_millis();
 
-    let engine = crate::transcription_engine::TranscriptionEngine::start(transcriber)?;
+    let engine = crate::transcription::engine::TranscriptionEngine::start(transcriber)?;
     let mut stream = engine
         .begin()
         .ok_or_else(|| color_eyre::eyre::eyre!("this model cannot stream on this device"))?;

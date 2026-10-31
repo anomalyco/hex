@@ -58,7 +58,7 @@ pub fn method() -> Method {
 /// The `windows-*` target is the signed executable our installers copy
 /// unchanged, so this build is the file whose SHA-256 it has.
 pub fn running_sha256() -> Option<String> {
-    crate::transcription_models::sha256_hex(&std::env::current_exe().ok()?, None).ok()
+    crate::transcription::models::sha256_hex(&std::env::current_exe().ok()?, None).ok()
 }
 
 pub fn updates_disabled_by_policy() -> bool {

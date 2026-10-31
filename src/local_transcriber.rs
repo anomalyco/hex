@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::gguf_session::OfflineGgufSession;
-use crate::transcription_models::{
+use crate::transcription::models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
 
@@ -212,7 +212,7 @@ impl LocalTranscriber {
 
     fn load_on(selection: &TranscriptionSelection, backend: Backend) -> Result<Self> {
         let definition = validate(selection)?;
-        if !crate::transcription_models::is_installed(definition, &selection.language) {
+        if !crate::transcription::models::is_installed(definition, &selection.language) {
             return Err(eyre!(
                 "{} is not installed; run `cargo run -- model install`",
                 definition.name
@@ -261,7 +261,7 @@ impl LocalTranscriber {
             selection: selection.clone(),
             options,
             device_label,
-            max_audio_samples: crate::transcription_models::max_audio_chunk_samples(
+            max_audio_samples: crate::transcription::models::max_audio_chunk_samples(
                 &architecture,
                 capabilities.max_audio_ms,
             ),
@@ -554,7 +554,7 @@ pub(crate) struct SwapFailed {
 #[cfg(test)]
 mod model_swap_tests {
     use super::*;
-    use crate::transcription_models::TranscriptionModelId;
+    use crate::transcription::models::TranscriptionModelId;
 
     #[test]
     fn an_unchanged_selection_loads_nothing() {

@@ -263,7 +263,7 @@ impl PendingFinals {
         if self.checked
             || !enabled
             || recording
-            || (crate::transcription_engine::TranscriptionEngine::shared().is_none()
+            || (crate::transcription::engine::TranscriptionEngine::shared().is_none()
                 && self.since.elapsed() < ENGINE_GRACE)
         {
             return;

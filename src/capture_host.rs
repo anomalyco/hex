@@ -67,8 +67,8 @@ use crate::dictation_audio::DictationAudio;
 pub use crate::recording_environment::RecordingEnvironmentController as Environment;
 #[cfg(target_os = "macos")]
 use crate::recording_environment::RecordingEnvironmentSession as Quiet;
-use crate::transcription_engine::TranscriptionEngine;
-use crate::transcription_models::{ModelRuntime, TranscriptionModelId};
+use crate::transcription::engine::TranscriptionEngine;
+use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
 
 // `hex annotate`'s folder commands; Windows has no control transport for
 // them yet.
@@ -713,7 +713,7 @@ pub struct TimedWord {
 #[cfg(target_os = "macos")]
 fn transcribe_words(
     engine: &Weak<TranscriptionEngine>,
-    selection: &crate::transcription_models::TranscriptionSelection,
+    selection: &crate::transcription::models::TranscriptionSelection,
     samples: Vec<f32>,
 ) -> Result<(String, Vec<TimedWord>)> {
     let transcript = crate::parakeet::transcribe_with_words(engine, selection, samples)?;
@@ -735,14 +735,14 @@ fn transcribe_words(
 #[cfg(not(target_os = "macos"))]
 fn transcribe_words(
     engine: &Weak<TranscriptionEngine>,
-    _selection: &crate::transcription_models::TranscriptionSelection,
+    _selection: &crate::transcription::models::TranscriptionSelection,
     samples: Vec<f32>,
 ) -> Result<(String, Vec<TimedWord>)> {
     if samples.is_empty() {
         return Ok((String::new(), Vec::new()));
     }
     let (send, transcript) = mpsc::sync_channel(1);
-    let offline: crate::transcription_engine::Offline = Box::new(move |model, samples| {
+    let offline: crate::transcription::engine::Offline = Box::new(move |model, samples| {
         let (text, words) = model
             .transcribe_words(&samples)
             .map_err(|error| format!("{error:#}"))?;
@@ -799,7 +799,7 @@ const WORD_LAGS: &[(TranscriptionModelId, &str, WordLag)] = &[(
 )];
 
 fn word_lag(model: TranscriptionModelId) -> Option<&'static WordLag> {
-    let ModelRuntime::Gguf(artifact) = crate::transcription_models::definition(model).runtime
+    let ModelRuntime::Gguf(artifact) = crate::transcription::models::definition(model).runtime
     else {
         return None;
     };

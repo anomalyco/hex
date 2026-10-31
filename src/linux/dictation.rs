@@ -20,7 +20,7 @@ use crate::linux::input::{
 use crate::linux::paste::LinuxPaster;
 use crate::linux::rune_hud::LinuxIndicator;
 use crate::local_transcriber::LocalTranscriber;
-use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
+use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 /// How long past the tail a release waits for audio that never arrives.
@@ -78,7 +78,7 @@ pub(crate) enum ListenerUpdate {
     Settings(Box<AppSettings>),
     /// A model the host prepared, swapped in once no transcription is pending.
     Transcriber {
-        selection: crate::transcription_models::TranscriptionSelection,
+        selection: crate::transcription::models::TranscriptionSelection,
         transcriber: Box<LocalTranscriber>,
     },
     /// True while the window records a shortcut: global matching stops.
@@ -951,7 +951,7 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription_engine::Command;
+    use crate::transcription::engine::Command;
 
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)

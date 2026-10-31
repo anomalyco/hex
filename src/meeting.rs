@@ -368,8 +368,8 @@ pub fn record(
     updates: Option<SyncSender<RecordingUpdate>>,
 ) -> Result<MeetingManifest> {
     let (_, transcription_selection) = crate::app_settings::transcription_selection();
-    let transcription_model = crate::transcription_models::validate(&transcription_selection)?;
-    if !crate::transcription_models::is_installed(
+    let transcription_model = crate::transcription::models::validate(&transcription_selection)?;
+    if !crate::transcription::models::is_installed(
         transcription_model,
         &transcription_selection.language,
     ) {
@@ -812,7 +812,7 @@ fn create_empty_track(path: PathBuf) -> Result<()> {
 fn transcribe(
     directory: &Path,
     manifest: &mut MeetingManifest,
-    selection: &crate::transcription_models::TranscriptionSelection,
+    selection: &crate::transcription::models::TranscriptionSelection,
     rolling: Option<transcript::RollingOutcome>,
 ) -> Result<()> {
     let (transcript, echo_suppressed) =
@@ -888,8 +888,8 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
         return Ok(None);
     }
     let (_, selection) = crate::app_settings::transcription_selection();
-    let model = crate::transcription_models::validate(&selection)?;
-    if !crate::transcription_models::is_installed(model, &selection.language) {
+    let model = crate::transcription::models::validate(&selection)?;
+    if !crate::transcription::models::is_installed(model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
     }
     let mut manifest = read_manifest(&directory)?;
@@ -1167,8 +1167,8 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
 #[cfg(debug_assertions)]
 pub fn transcribe_meeting(id: &str) -> Result<MeetingManifest> {
     let (_, selection) = crate::app_settings::transcription_selection();
-    let model = crate::transcription_models::validate(&selection)?;
-    if !crate::transcription_models::is_installed(model, &selection.language) {
+    let model = crate::transcription::models::validate(&selection)?;
+    if !crate::transcription::models::is_installed(model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
     }
     let directory = root()?.join(id);

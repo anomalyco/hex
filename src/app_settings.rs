@@ -12,7 +12,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
-use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -1912,13 +1912,13 @@ pub struct KeyboardModelChoice {
 impl KeyboardModelChoice {
     /// The picker's downloadable models only; Apple Speech is never mapped.
     pub fn validate(&self) -> Result<()> {
-        let model = crate::transcription_models::validate(&TranscriptionSelection {
+        let model = crate::transcription::models::validate(&TranscriptionSelection {
             model: self.model,
             language: self.language.clone(),
         })?;
         match model.runtime {
-            crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
-            crate::transcription_models::ModelRuntime::AppleSpeech => {
+            crate::transcription::models::ModelRuntime::Gguf(_) => Ok(()),
+            crate::transcription::models::ModelRuntime::AppleSpeech => {
                 Err(eyre!("{} can't be switched to by input source", model.name))
             }
         }
@@ -1953,7 +1953,7 @@ fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
 /// A new install starts with the model recommended for the person's
 /// language, so first-run setup can download it without asking.
 fn default_transcription() -> TranscriptionSelection {
-    crate::transcription_models::recommended_selection(&crate::desktop_i18n::preferred_language())
+    crate::transcription::models::recommended_selection(&crate::desktop_i18n::preferred_language())
 }
 
 impl AppSettings {
@@ -1962,11 +1962,11 @@ impl AppSettings {
             return self.transcription.clone();
         }
         if let Some(selection) = self.transcription_recents.iter().rev().find(|selection| {
-            selection.model == id && crate::transcription_models::validate(selection).is_ok()
+            selection.model == id && crate::transcription::models::validate(selection).is_ok()
         }) {
             return selection.clone();
         }
-        let model = crate::transcription_models::definition(id);
+        let model = crate::transcription::models::definition(id);
         TranscriptionSelection {
             model: id,
             language: model.language_for(&self.transcription.language).into(),
@@ -1984,7 +1984,8 @@ impl AppSettings {
         let mut seen = std::collections::HashSet::new();
         self.transcription_recents.reverse();
         self.transcription_recents.retain(|selection| {
-            crate::transcription_models::validate(selection).is_ok() && seen.insert(selection.model)
+            crate::transcription::models::validate(selection).is_ok()
+                && seen.insert(selection.model)
         });
         self.transcription_recents.reverse();
     }
@@ -1998,7 +1999,7 @@ impl AppSettings {
         selection: TranscriptionSelection,
         save: impl FnOnce(&Self) -> Result<()>,
     ) -> Result<()> {
-        crate::transcription_models::validate(&selection)?;
+        crate::transcription::models::validate(&selection)?;
         let mut candidate = self.clone();
         candidate.remember_transcription(selection);
         self.commit_with(candidate, save)
@@ -2181,7 +2182,7 @@ impl AppSettings {
                     .keyboard_model_switching
                     .mappings
                     .retain(|_, choice| choice.validate().is_ok());
-                crate::transcription_models::validate(&settings.transcription)?;
+                crate::transcription::models::validate(&settings.transcription)?;
                 if (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
                     && let Err(error) = settings.write_to(path)
                 {
@@ -2358,13 +2359,13 @@ impl AppSettings {
     /// so a later choice, such as switching back, sticks.
     fn apply_one_time_migrations(&mut self) {
         self.apply_one_time_migrations_with(|model| {
-            crate::transcription_models::is_installed(model, "en")
+            crate::transcription::models::is_installed(model, "en")
         });
     }
 
     fn apply_one_time_migrations_with(
         &mut self,
-        installed: impl Fn(&crate::transcription_models::ModelDefinition) -> bool,
+        installed: impl Fn(&crate::transcription::models::ModelDefinition) -> bool,
     ) {
         if !self.has_migration(STREAMING_ENGLISH_MIGRATION) {
             self.switch_english_to_streaming_model(installed);
@@ -2405,7 +2406,7 @@ impl AppSettings {
     /// download.
     fn switch_english_to_streaming_model(
         &mut self,
-        installed: impl Fn(&crate::transcription_models::ModelDefinition) -> bool,
+        installed: impl Fn(&crate::transcription::models::ModelDefinition) -> bool,
     ) {
         if self.transcription.language != "en"
             || self.transcription.model == TranscriptionModelId::ParakeetUnifiedEnglish
@@ -2413,7 +2414,7 @@ impl AppSettings {
             return;
         }
         let model =
-            crate::transcription_models::definition(TranscriptionModelId::ParakeetUnifiedEnglish);
+            crate::transcription::models::definition(TranscriptionModelId::ParakeetUnifiedEnglish);
         if !installed(model) {
             return;
         }
@@ -2421,7 +2422,7 @@ impl AppSettings {
             model: model.id,
             language: "en".into(),
         };
-        if crate::transcription_models::validate(&selection).is_err() {
+        if crate::transcription::models::validate(&selection).is_err() {
             return;
         }
         tracing::info!(
@@ -2432,7 +2433,7 @@ impl AppSettings {
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
-        if crate::transcription_models::definition(self.transcription.model).available() {
+        if crate::transcription::models::definition(self.transcription.model).available() {
             return;
         }
         tracing::warn!(
@@ -3405,7 +3406,7 @@ mod tests {
     #[test]
     fn other_languages_and_auto_keep_their_model() {
         for language in ["de", "auto"] {
-            let model = crate::transcription_models::choices_for_runtime(language)
+            let model = crate::transcription::models::choices_for_runtime(language)
                 .iter()
                 .map(|choice| choice.model.id)
                 .find(|model| *model != TranscriptionModelId::ParakeetUnifiedEnglish)
@@ -3743,7 +3744,7 @@ mod tests {
     fn transcription_selection_round_trips() {
         let settings = AppSettings {
             transcription: TranscriptionSelection {
-                model: crate::transcription_models::TranscriptionModelId::WhisperLargeV3Turbo,
+                model: crate::transcription::models::TranscriptionModelId::WhisperLargeV3Turbo,
                 language: "zh".into(),
             },
             ..AppSettings::default()
@@ -3753,7 +3754,7 @@ mod tests {
         let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded.transcription, settings.transcription);
-        assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+        assert!(crate::transcription::models::validate(&decoded.transcription).is_ok());
     }
 
     #[test]
@@ -3861,8 +3862,8 @@ mod tests {
     fn automatic_language_selection_round_trips_explicitly() {
         let settings = AppSettings {
             transcription: TranscriptionSelection {
-                model: crate::transcription_models::TranscriptionModelId::WhisperLargeV3Turbo,
-                language: crate::transcription_models::AUTO_LANGUAGE.into(),
+                model: crate::transcription::models::TranscriptionModelId::WhisperLargeV3Turbo,
+                language: crate::transcription::models::AUTO_LANGUAGE.into(),
             },
             ..AppSettings::default()
         };
@@ -3872,7 +3873,7 @@ mod tests {
 
         assert!(encoded.contains(r#""language":"auto""#));
         assert_eq!(decoded.transcription, settings.transcription);
-        assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+        assert!(crate::transcription::models::validate(&decoded.transcription).is_ok());
     }
 
     #[test]

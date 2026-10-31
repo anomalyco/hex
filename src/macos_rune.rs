@@ -51,10 +51,10 @@ use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
 use crate::status_item::StatusItemAction;
-use crate::transcription_models::{
+use crate::transcription::models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
-use crate::transcription_preparation::TranscriptionPreparation;
+use crate::transcription::preparation::TranscriptionPreparation;
 
 mod control;
 
@@ -126,7 +126,7 @@ pub(crate) struct Published {
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
     pub(crate) settings: AppSettings,
-    preparation: crate::transcription_preparation::PreparationStatus,
+    preparation: crate::transcription::preparation::PreparationStatus,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -722,7 +722,7 @@ impl Runtime {
         if let Some(result) = self.preparation.poll() {
             self.automatic_preparation = false;
             let result = result.and_then(|selection| {
-                crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
+                crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut settings = AppSettings::load().map_err(|e| format!("{e:#}"))?;
                 settings
                     .save_transcription(selection)

@@ -16,7 +16,9 @@ use super::fixture::{Language, Speech};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, advance_to};
 use crate::onboarding::{Input, ItemStatus, Practice, SetupItem, SetupStatus, Step as TourStep};
-use crate::transcription_models::{self, TranscriptionModelId, TranscriptionSelection};
+use crate::transcription::models::{
+    self as transcription_models, TranscriptionModelId, TranscriptionSelection,
+};
 
 /// How long both permission checks show before the page moves on.
 const GRANTED_BEAT: f64 = 0.7;

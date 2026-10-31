@@ -113,7 +113,7 @@ impl Live for FakeLive {
 
     fn finish(self: Box<Self>) -> Result<String, String> {
         if !self.open() {
-            return Err(crate::transcription_engine::PREEMPTED.into());
+            return Err(crate::transcription::engine::PREEMPTED.into());
         }
         Ok(format!("live {}", self.0.fed.load(Ordering::SeqCst)))
     }
