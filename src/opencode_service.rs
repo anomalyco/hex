@@ -391,11 +391,12 @@ pub(crate) mod tests {
     use std::net::TcpListener;
     use std::thread;
 
+    /// The headers and body of each request a fixture received.
+    pub(crate) type Received = thread::JoinHandle<Vec<(String, Vec<u8>)>>;
+
     /// A service fixture answering each `(request line, status, body)` in
-    /// order; returns its URL and the headers and bodies it received.
-    pub(crate) fn serve(
-        routes: Vec<(String, u16, String)>,
-    ) -> (String, thread::JoinHandle<Vec<(String, Vec<u8>)>>) {
+    /// order; returns its URL and what it received.
+    pub(crate) fn serve(routes: Vec<(String, u16, String)>) -> (String, Received) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         let server = thread::spawn(move || {
