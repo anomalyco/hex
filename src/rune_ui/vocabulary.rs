@@ -13,7 +13,7 @@ use super::controls::{
 };
 use super::lists::remove_button;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::vocabulary::{self, VocabularyEntry};
+use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
 const PADDING: f32 = 18.0;

@@ -9,7 +9,7 @@ use url::Url;
 
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::dictation::processor::{PostProcessingSettings, Processed, Profile, Profiles};
-use crate::text_replacements::ReplacementSet;
+use crate::dictation::text_replacements::ReplacementSet;
 
 /// Live mode-processing snapshot. The output worker clones it before any
 /// deadline-bounded OpenCode call, so settings writes never wait on
@@ -38,7 +38,7 @@ impl ModeRuntime {
     pub fn process(
         &self,
         raw_text: &str,
-        context: &crate::context::ContextSnapshot,
+        context: &crate::dictation::context::ContextSnapshot,
         transformations: &crate::personal_commands::TransformationClient,
     ) -> Processed {
         let text = self.replacements.replace(raw_text);
@@ -221,21 +221,21 @@ mod tests {
         let runtime = runtime(|settings| {
             let processing = &mut settings.dictation_processing;
             processing.default_mode.replacements =
-                vec![crate::text_replacements::TextReplacement {
+                vec![crate::dictation::text_replacements::TextReplacement {
                     matched_phrase: "hex".into(),
                     output: "Hex".into(),
                 }];
             processing.modes = vec![DictationMode {
-                replacements: vec![crate::text_replacements::TextReplacement {
+                replacements: vec![crate::dictation::text_replacements::TextReplacement {
                     matched_phrase: "open code".into(),
                     output: "OpenCode".into(),
                 }],
                 ..mode("Code", &["code"], &[])
             }];
         });
-        let context = crate::context::ContextSnapshot {
+        let context = crate::dictation::context::ContextSnapshot {
             application: Some("Visual Studio Code".into()),
-            ..crate::context::ContextSnapshot::default()
+            ..crate::dictation::context::ContextSnapshot::default()
         };
         let transformations = crate::personal_commands::TransformationClient::default();
 
@@ -254,7 +254,7 @@ mod tests {
 
         let processed = runtime.process(
             "Keep OpenCode Exact.",
-            &crate::context::ContextSnapshot::default(),
+            &crate::dictation::context::ContextSnapshot::default(),
             &transformations,
         );
 

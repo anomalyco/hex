@@ -1,7 +1,7 @@
 //! The live text plate (Labs): one click-through line
 //! beside the recording HUD with what the dictation has said so far, on
 //! every OS. It shows while a recording has text and hides when the
-//! recording ends ([`crate::live_text`]); `rune_hud` says where the HUD is,
+//! recording ends ([`crate::dictation::live_text`]); `rune_hud` says where the HUD is,
 //! so the plate sits just past it, on the HUD's screen.
 //!
 //! The overlay is prewarmed: macOS keeps it drawn while hidden and refreshes
@@ -89,7 +89,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     });
     let overlay = app.overlay(spec, Plate::default());
     let shown = Arc::new(AtomicBool::new(false));
-    crate::live_text::watch(move |partial| {
+    crate::dictation::live_text::watch(move |partial| {
         let partial = partial.filter(|partial| !is_blank(partial));
         let Some(Partial { stable, tentative }) = partial.cloned() else {
             if shown.swap(false, Ordering::AcqRel) {

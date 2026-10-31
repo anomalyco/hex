@@ -170,9 +170,9 @@ fn reply(result: Result<String>) -> Result<CallToolResult, ErrorData> {
 impl MeetingServer {
     /// The saved vocabulary, read on each search so edits apply without a
     /// restart.
-    fn vocabulary(&self) -> Vec<crate::vocabulary::VocabularyEntry> {
+    fn vocabulary(&self) -> Vec<crate::dictation::vocabulary::VocabularyEntry> {
         crate::app_paths::support_dir()
-            .map(|root| crate::vocabulary::read_saved(&root))
+            .map(|root| crate::dictation::vocabulary::read_saved(&root))
             .unwrap_or_default()
     }
 }

@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::context::{ContextSelector, ContextSnapshot};
+use crate::dictation::context::{ContextSelector, ContextSnapshot};
+use crate::dictation::text_replacements::ReplacementSet;
+use crate::dictation::vocabulary::VocabularyEntry;
 use crate::opencode_service::Service;
-use crate::text_replacements::ReplacementSet;
-use crate::vocabulary::VocabularyEntry;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const CATALOG_DEADLINE: Duration = Duration::from_secs(10);
@@ -273,7 +273,7 @@ impl Profiles {
         // corrections, so it is off for raw dictation and meetings.
         let formatted;
         let transcript = if crate::labs::spoken_formatting() {
-            formatted = crate::spoken_formatting::apply(transcript);
+            formatted = crate::dictation::spoken_formatting::apply(transcript);
             formatted.as_str()
         } else {
             transcript
@@ -281,7 +281,7 @@ impl Profiles {
         // Labs › Spoken symbols, likewise ahead of the corrections.
         let symbolized;
         let transcript = if crate::labs::spoken_symbols() {
-            symbolized = crate::spoken_symbols::apply(transcript);
+            symbolized = crate::dictation::spoken_symbols::apply(transcript);
             symbolized.as_str()
         } else {
             transcript
@@ -289,7 +289,7 @@ impl Profiles {
         // Labs › Remove filler words, likewise ahead of the corrections.
         let unfilled;
         let transcript = if crate::labs::filler_words() {
-            unfilled = crate::filler_words::apply(transcript);
+            unfilled = crate::dictation::filler_words::apply(transcript);
             unfilled.as_str()
         } else {
             transcript
@@ -302,7 +302,12 @@ impl Profiles {
                 transformations: profile.transformations.clone(),
             };
         }
-        let prompt = prompt(profile, &corrected, context, &crate::vocabulary::entries());
+        let prompt = prompt(
+            profile,
+            &corrected,
+            context,
+            &crate::dictation::vocabulary::entries(),
+        );
         let (text, observation) = generate_observed(
             &prompt,
             profile.model.as_ref(),
@@ -1154,7 +1159,7 @@ mod tests {
     fn mode_corrections_run_before_registered_transformations() {
         let profile = Profile::new("Global", "")
             .replacements(ReplacementSet::new(&[
-                crate::text_replacements::TextReplacement {
+                crate::dictation::text_replacements::TextReplacement {
                     matched_phrase: "open code".into(),
                     output: "OpenCode".into(),
                 },

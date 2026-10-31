@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
     BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
     candidate_from_microphone,

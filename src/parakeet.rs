@@ -10,7 +10,7 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
@@ -623,12 +623,13 @@ fn run_processor_worker(
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
             continue;
         }
-        let mut processed = process_job_text(&job, crate::config::dictation_profiles, || {
-            let _ = events.send(WorkerEvent::Stage {
-                job_id: job.job_id,
-                stage: DictationJobStage::Processing,
+        let mut processed =
+            process_job_text(&job, crate::dictation::config::dictation_profiles, || {
+                let _ = events.send(WorkerEvent::Stage {
+                    job_id: job.job_id,
+                    stage: DictationJobStage::Processing,
+                });
             });
-        });
         processed.apply_transformations(transformations, &job.context, &job.control.cancelled);
         if job.control.is_cancelled() {
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });

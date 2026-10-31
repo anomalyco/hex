@@ -705,7 +705,7 @@ pub fn apply(
 ) -> Result<Change, ControlError> {
     if name == RECOGNITION_HINTS {
         let mut candidate = settings.clone();
-        crate::vocabulary::fold_hints(&mut candidate.vocabulary, raw);
+        crate::dictation::vocabulary::fold_hints(&mut candidate.vocabulary, raw);
         return Ok(Change {
             settings: candidate,
             effects: Vec::new(),
@@ -1171,7 +1171,7 @@ mod tests {
     fn every_persisted_setting_has_a_cli_key() {
         // Lists left empty are left out of the file; fill them so they count.
         let settings = AppSettings {
-            vocabulary: vec![crate::vocabulary::VocabularyEntry {
+            vocabulary: vec![crate::dictation::vocabulary::VocabularyEntry {
                 term: "Rune".into(),
                 sounds_like: vec!["roon".into()],
             }],
@@ -1306,7 +1306,7 @@ mod tests {
     #[test]
     fn recognition_hints_alias_the_vocabulary() {
         let settings = AppSettings {
-            vocabulary: vec![crate::vocabulary::VocabularyEntry {
+            vocabulary: vec![crate::dictation::vocabulary::VocabularyEntry {
                 term: "Rune".into(),
                 sounds_like: Vec::new(),
             }],

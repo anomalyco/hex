@@ -20,7 +20,7 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_m
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, Window};
 
-use crate::context::ContextSnapshot;
+use crate::dictation::context::ContextSnapshot;
 use crate::linux::atspi::WindowHint;
 
 /// The focused window as the display server reports it.

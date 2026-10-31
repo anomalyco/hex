@@ -24,7 +24,7 @@ use super::{
     coalesce_transcript, display_title, format_duration, notes_markdown, recovered_status,
     section_markdown, transcript_markdown,
 };
-use crate::vocabulary::VocabularyEntry;
+use crate::dictation::vocabulary::VocabularyEntry;
 
 const TURN_GAP_MS: u64 = 3_000;
 const PASSAGE_WORDS: usize = 60;

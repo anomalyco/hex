@@ -904,7 +904,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         }
         let partial = match s.rehearsal {
             Some(rehearsal) => rehearsal.partial(now),
-            None => crate::live_text::current(),
+            None => crate::dictation::live_text::current(),
         };
         s.dictated.hear(partial.as_ref(), now);
         if s.live.as_ref().is_some_and(|live| {
