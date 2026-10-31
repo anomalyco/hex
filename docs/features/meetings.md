@@ -35,6 +35,10 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 
 Debug builds -> Always in the sidebar (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
+Subtitles -> hex meetings show <id> --srt | --vtt   // Labs › Subtitle export, off by default (#633)
+             one cue per transcript entry (You / Them), timed by entry offsets,
+             not word timings; off -> refused naming hex labs on subtitle-export
+             (docs/transcript-cli.md; no export button in the window yet)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio

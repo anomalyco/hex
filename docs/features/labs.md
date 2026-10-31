@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks (#630)
 ├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
+├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -182,6 +183,25 @@ exactly as before. Checks: the tests in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the toggle on; the Labs page goldens need regenerating on
 Linux with the new row.
+
+Subtitle export (`subtitle-export`, issue 633, macOS like Meetings; its row
+shows wherever Meetings does): while on, `hex meetings show <id> --srt` or
+`--vtt` writes the meeting's transcript as SubRip or WebVTT subtitles, one cue
+per transcript entry (speaker turn) labelled You or Them, timed by the entry's
+offsets from the meeting's start rather than word timings, and limited by
+`--from`/`--to` or `--chapter` as the other outputs are
+([transcript-cli.md](../transcript-cli.md)). The gate,
+`labs::subtitle_export()`, is read where the command starts: off, `--srt` and
+`--vtt` fail naming `hex labs on subtitle-export` before any meeting is read,
+and every other output is exactly as before. There is no export button in the
+window yet. Checks:
+`subtitles_render_speaker_turns_as_srt_and_vtt_cues` and
+`subtitles_follow_the_range_and_need_the_labs_toggle` in
+[transcript_cli_tests.rs](../../src/transcript_cli_tests.rs);
+`subtitle_export_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real meeting exported and
+loaded in a player; the Labs page goldens need regenerating on Linux with the
+new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

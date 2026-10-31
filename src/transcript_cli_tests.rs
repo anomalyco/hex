@@ -491,6 +491,89 @@ fn meeting_chapters_list_and_select_a_chapter_in_json_and_markdown() {
 }
 
 #[test]
+fn subtitles_render_speaker_turns_as_srt_and_vtt_cues() {
+    use crate::meeting::{MeetingSource, TranscriptEntry};
+    let entries = [
+        TranscriptEntry {
+            source: MeetingSource::Microphone,
+            start_ms: 5_500,
+            end_ms: 8_000,
+            text: "Hello <there> & welcome.".into(),
+        },
+        TranscriptEntry {
+            source: MeetingSource::System,
+            start_ms: 3_725_042,
+            end_ms: 3_725_000,
+            text: "First line\n\n  \nsecond --> line".into(),
+        },
+        TranscriptEntry {
+            source: MeetingSource::System,
+            start_ms: 3_800_000,
+            end_ms: 3_801_000,
+            text: " \n ".into(),
+        },
+    ];
+    assert_eq!(
+        render_subtitles(&entries, SubtitleFormat::Srt),
+        "1\n00:00:05,500 --> 00:00:08,000\nYou: Hello <there> & welcome.\n\n\
+         2\n01:02:05,042 --> 01:02:05,042\nThem: First line\nsecond -> line\n\n"
+    );
+    assert_eq!(
+        render_subtitles(&entries, SubtitleFormat::Vtt),
+        "WEBVTT\n\n\
+         00:00:05.500 --> 00:00:08.000\n<v You>Hello &lt;there&gt; &amp; welcome.\n\n\
+         01:02:05.042 --> 01:02:05.042\n<v Them>First line\nsecond -&gt; line\n\n"
+    );
+    assert_eq!(subtitle_time(360_000_000, ','), "100:00:00,000");
+}
+
+#[test]
+fn subtitles_follow_the_range_and_need_the_labs_toggle() {
+    let library =
+        Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));
+    let meeting = library.meeting("1790000500000-1002").unwrap();
+    let range = OffsetRange::parse(Some("0:06"), Some("14")).unwrap();
+    let srt = render_subtitles(meeting.entries_in(range, NOW).unwrap(), SubtitleFormat::Srt);
+    assert!(srt.starts_with("1\n00:00:05,500 --> "), "{srt}");
+    assert!(srt.contains("\n2\n00:00:13,000 --> "), "{srt}");
+    assert!(srt.contains("You: Performance profiling"), "{srt}");
+    assert!(srt.contains("Them: Agreed."), "{srt}");
+    assert!(!srt.contains("\n3\n"), "{srt}");
+
+    assert!(require_subtitle_export(true).is_ok());
+    assert!(
+        require_subtitle_export(false)
+            .unwrap_err()
+            .to_string()
+            .contains("hex labs on subtitle-export")
+    );
+    assert_eq!(SubtitleFormat::from_flags(false, false), None);
+    assert_eq!(
+        SubtitleFormat::from_flags(false, true),
+        Some(SubtitleFormat::Vtt)
+    );
+    assert!(Cli::try_parse_from(["hex", "meetings", "show", "latest", "--srt"]).is_ok());
+    assert!(
+        Cli::try_parse_from([
+            "hex",
+            "meetings",
+            "show",
+            "latest",
+            "--vtt",
+            "--chapter",
+            "1"
+        ])
+        .is_ok()
+    );
+    for conflict in [["--srt", "--vtt"], ["--srt", "--json"], ["--vtt", "--md"]] {
+        let command = ["hex", "meetings", "show", "latest"]
+            .into_iter()
+            .chain(conflict);
+        assert!(Cli::try_parse_from(command).is_err(), "{conflict:?}");
+    }
+}
+
+#[test]
 fn parses_release_commands_and_rejects_invalid_limits_and_times() {
     for command in [
         vec!["hex", "history"],

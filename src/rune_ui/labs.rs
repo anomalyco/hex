@@ -160,6 +160,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Live chapters"),
             tr("Break meeting transcripts into chapters while recording"),
         ));
+        rows.push(row(
+            Feature::SubtitleExport,
+            &HINTS,
+            tr("Subtitle export"),
+            tr("Export meeting transcripts as SRT or VTT subtitles with hex meetings show"),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -263,6 +269,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::CopyOnly => "lab-copy-only",
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
+        Feature::SubtitleExport => "lab-subtitle-export",
     }
 }
 

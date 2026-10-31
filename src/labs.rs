@@ -43,10 +43,11 @@ pub enum Feature {
     CopyOnly,
     SpokenFormatting,
     FillerWords,
+    SubtitleExport,
 }
 
 impl Feature {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -64,6 +65,7 @@ impl Feature {
         Self::CopyOnly,
         Self::SpokenFormatting,
         Self::FillerWords,
+        Self::SubtitleExport,
     ];
 
     /// The features this OS has.
@@ -73,7 +75,9 @@ impl Feature {
 
     fn on_this_os(self) -> bool {
         match self {
-            Self::Meetings | Self::LiveChapters => cfg!(target_os = "macos"),
+            Self::Meetings | Self::LiveChapters | Self::SubtitleExport => {
+                cfg!(target_os = "macos")
+            }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::MouseShortcuts | Self::PauseBrowser | Self::KeepOnClipboard | Self::CopyOnly => {
@@ -110,6 +114,7 @@ impl Feature {
             Self::CopyOnly => "copy-only",
             Self::SpokenFormatting => "spoken-formatting",
             Self::FillerWords => "filler-words",
+            Self::SubtitleExport => "subtitle-export",
         }
     }
 
@@ -133,6 +138,7 @@ impl Feature {
             Self::CopyOnly => "labs.copy_only",
             Self::SpokenFormatting => "labs.spoken_formatting",
             Self::FillerWords => "labs.filler_words",
+            Self::SubtitleExport => "labs.subtitle_export",
         }
     }
 
@@ -173,6 +179,9 @@ impl Feature {
             Self::FillerWords => {
                 "Remove filler words such as um and uh from dictations, without an AI model"
             }
+            Self::SubtitleExport => {
+                "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
+            }
         }
     }
 
@@ -200,6 +209,7 @@ impl Feature {
             Self::CopyOnly => settings.labs.copy_only,
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
+            Self::SubtitleExport => settings.labs.subtitle_export,
         }
     }
 
@@ -222,6 +232,7 @@ impl Feature {
             Self::CopyOnly => settings.labs.copy_only = on,
             Self::SpokenFormatting => settings.labs.spoken_formatting = on,
             Self::FillerWords => settings.labs.filler_words = on,
+            Self::SubtitleExport => settings.labs.subtitle_export = on,
         }
     }
 }
@@ -238,8 +249,9 @@ const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
 const COPY_ONLY: u32 = 1 << 8;
 const SPOKEN_FORMATTING: u32 = 1 << 9;
 const FILLER_WORDS: u32 = 1 << 10;
+const SUBTITLE_EXPORT: u32 = 1 << 11;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 11;
+const MINUTES_SHIFT: u32 = 12;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -312,6 +324,12 @@ pub fn filler_words() -> bool {
     on(FILLER_WORDS)
 }
 
+/// `hex meetings show --srt|--vtt` may export subtitles (read when the
+/// command starts).
+pub fn subtitle_export() -> bool {
+    on(SUBTITLE_EXPORT)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -338,6 +356,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.copy_only, COPY_ONLY),
         (settings.spoken_formatting, SPOKEN_FORMATTING),
         (settings.filler_words, FILLER_WORDS),
+        (settings.subtitle_export, SUBTITLE_EXPORT),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -504,6 +523,18 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & FILLER_WORDS, 0);
         assert_eq!(state & SPOKEN_FORMATTING, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn subtitle_export_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & SUBTITLE_EXPORT, 0);
+        labs.subtitle_export = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state & FILLER_WORDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
