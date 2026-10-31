@@ -36,6 +36,8 @@ unsafe extern "C" {
         string: *const c_char,
         encoding: u32,
     ) -> CfStringRef;
+    fn CFURLGetTypeID() -> usize;
+    fn CFURLGetString(url: CfTypeRef) -> CfStringRef;
     fn CFRelease(value: CfTypeRef);
 }
 
@@ -44,6 +46,28 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     let application = bounded_element(unsafe { AXUIElementCreateApplication(pid) })?;
     let window = copy_element(&application, c"AXFocusedWindow")?;
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
+}
+
+/// The page address of the web area holding the application's focused
+/// element, for browsers without a scripting dictionary (Firefox, Zen).
+/// The outermost web area wins, so focus inside an iframe still reports
+/// the page itself.
+pub fn focused_web_url(pid: i32) -> Option<String> {
+    const MAX_DEPTH: usize = 64;
+    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
+    let application = bounded_element(unsafe { AXUIElementCreateApplication(pid) })?;
+    let mut element = copy_element(&application, c"AXFocusedUIElement")?;
+    let mut url = None;
+    for _ in 0..MAX_DEPTH {
+        if copy_string(&element, c"AXRole").as_deref() == Some("AXWebArea") {
+            url = copy_url(&element, c"AXURL").or(url);
+        }
+        match copy_element(&element, c"AXParent") {
+            Some(parent) => element = parent,
+            None => break,
+        }
+    }
+    url
 }
 
 struct CfObject(CfTypeRef);
@@ -80,6 +104,16 @@ fn copy_element(element: &CfObject, name: &CStr) -> Option<CfObject> {
 fn copy_string(element: &CfObject, name: &CStr) -> Option<String> {
     let value = copy_attribute(element, name)?;
     cf_string(value.0)
+}
+
+fn copy_url(element: &CfObject, name: &CStr) -> Option<String> {
+    let value = copy_attribute(element, name)?;
+    if unsafe { CFGetTypeID(value.0) } != unsafe { CFURLGetTypeID() } {
+        return cf_string(value.0);
+    }
+    // SAFETY: CFURLGetString follows the Get rule; `value` keeps it alive.
+    let string = unsafe { CFURLGetString(value.0) };
+    (!string.is_null()).then(|| cf_string(string)).flatten()
 }
 
 fn cf_string_literal(value: &CStr) -> Option<CfStringRef> {
@@ -122,5 +156,6 @@ mod tests {
     #[test]
     fn a_missing_attribute_is_none() {
         assert_eq!(focused_window_title(i32::MAX), None);
+        assert_eq!(focused_web_url(i32::MAX), None);
     }
 }

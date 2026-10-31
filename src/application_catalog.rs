@@ -47,6 +47,13 @@ pub fn metadata(path: &std::path::Path) -> color_eyre::Result<InstalledApplicati
     platform::metadata(path)
 }
 
+/// The catalog name of the application whose desktop entry is `app_id`;
+/// Wayland compositors report a window's app ID as its desktop file name.
+#[cfg(target_os = "linux")]
+pub fn desktop_application_name(app_id: &str) -> Option<String> {
+    platform::desktop_application_name(app_id)
+}
+
 /// One entry per application: macOS bundles by identifier (or path), and
 /// executables by name, since Windows modes match the executable name.
 fn normalize(applications: &mut Vec<InstalledApplication>) {

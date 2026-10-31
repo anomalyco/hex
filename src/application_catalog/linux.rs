@@ -38,6 +38,26 @@ pub(super) fn metadata(path: &Path) -> Result<InstalledApplication> {
     })
 }
 
+pub(super) fn desktop_application_name(app_id: &str) -> Option<String> {
+    let lowercase = app_id.to_lowercase();
+    [app_id, lowercase.as_str()]
+        .into_iter()
+        .flat_map(|id| {
+            data_directories()
+                .into_iter()
+                .map(move |directory| directory.join(format!("applications/{id}.desktop")))
+        })
+        .find_map(|path| {
+            let entry = parse_desktop_entry(&fs::read_to_string(path).ok()?);
+            entry
+                .application
+                .then_some(entry.exec)
+                .flatten()
+                .as_deref()
+                .and_then(executable_name)
+        })
+}
+
 /// `$XDG_DATA_HOME` then `$XDG_DATA_DIRS`, with the specification's
 /// defaults.
 fn data_directories() -> Vec<PathBuf> {

@@ -8,7 +8,7 @@ inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your 
 or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes,
-and History. Website mode rules and meetings are macOS-only.
+and History. Meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard
 protocol (wlroots compositors, niri) and the desktop's RemoteDesktop portal
 elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts portal when it has one, otherwise
@@ -252,10 +252,21 @@ listener reads at start temporarily stops listening and restores the previous
 running state after the edit.
 
 Modes apply corrections, OpenCode rewriting, and transformations per
-application. On X11, Hex reads the frontmost application from the active
-window's process name (`code`, `firefox`); the application picker lists
-`.desktop` entries. Wayland doesn't report the focused window,
-so the Global mode applies there. Completed dictations are kept in History.
+application or website; the application picker lists `.desktop` entries. On
+X11, Hex reads the focused application from the active window's process name
+(`code`, `chrome`). On Wayland, compositors with the foreign-toplevel protocol
+(wlroots compositors such as Sway, niri, Hyprland) report the activated
+window's app ID, which Hex names by its `.desktop` entry
+(`google-chrome-stable`, `firefox`). GNOME and KDE don't report it, so the
+Global mode applies there.
+
+Website rules read the focused page's address through AT-SPI, the desktop
+accessibility bus, on X11 and Wayland. Firefox exposes it whenever the
+accessibility bus is running. Chrome and other Chromium browsers expose it
+only with accessibility turned on: launch them with
+`--force-renderer-accessibility` (for example in
+`~/.config/chrome-flags.conf`), or run a screen reader. Without it, the
+application rule applies. Completed dictations are kept in History.
 
 **Microphone mode** can release the microphone between dictations; it then opens
 on the shortcut press without pre-roll. **While dictating** can mute the default

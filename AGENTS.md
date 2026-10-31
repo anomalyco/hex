@@ -204,9 +204,11 @@ substitute for source inspection or a second roadmap.
   replacements applied longest-match-first to transcripts.
 - `config`: dictation profiles.
 - `context`: the foreground context snapshot and selectors for modes,
-  plus native macOS capture. Browser host is the domain concept;
-  Brave AppleScript is the first macOS adapter and `windows_context` reads any
-  browser through UI Automation.
+  plus native macOS capture. Browser host is the domain concept. macOS
+  reads the front tab of a table of scriptable browsers (Safari and Chromium
+  dictionaries) through AppleScript and any other app's focused AXWebArea
+  `AXURL`; `windows_context` reads any browser through UI Automation and
+  `linux_atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
   shortcuts, App Paths, and open windows, Linux `.desktop` entries.
@@ -249,7 +251,12 @@ substitute for source inspection or a second roadmap.
 - `linux_remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
   persisted owner-only restore token, and Ctrl+V as keysyms.
-- `linux_context`: the frontmost X11 application for modes; Wayland has none.
+- `linux_context`: the focused application for modes: the X11 active
+  window's process, or on Wayland the activated `zwlr_foreign_toplevel`
+  window's app ID named by its `.desktop` entry (none on GNOME and KDE).
+- `linux_atspi`: the focused window's page address through AT-SPI on X11 and
+  Wayland, matched by title and process and bounded by a deadline. Chromium
+  exposes pages only with renderer accessibility on.
 - `linux_audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
   audio through `output_ducking`, and MPRIS pause over D-Bus (zbus),
   restoring only what it changed, plus idle-sleep prevention for dictations.

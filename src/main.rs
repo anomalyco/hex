@@ -76,6 +76,8 @@ mod linux;
 #[cfg(target_os = "linux")]
 mod linux_app;
 #[cfg(target_os = "linux")]
+mod linux_atspi;
+#[cfg(target_os = "linux")]
 mod linux_audio_control;
 #[cfg(target_os = "linux")]
 mod linux_clipboard;

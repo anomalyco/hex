@@ -136,11 +136,11 @@ impl ContextSnapshot {
 
     #[cfg(target_os = "macos")]
     pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
-        if canonical_bundle_id == "com.brave.Browser"
-            && let Some((browser_url, window_title)) = capture_brave_meeting_tab()?
+        if let Some(browser) = ScriptableBrowser::from_bundle_id(canonical_bundle_id)
+            && let Some((browser_url, window_title)) = browser.meeting_tab()?
         {
             return Ok(Self {
-                application: Some("Brave Browser".into()),
+                application: Some(browser.name.into()),
                 browser_url: Some(browser_url),
                 window_title,
                 input_revision: None,
@@ -158,14 +158,10 @@ impl ContextSnapshot {
         self.browser_url.as_ref().and_then(Url::host_str)
     }
 
+    /// Command semantics depend on the browser host, never the browser.
     pub fn browser_host_is(&self, host: &str) -> bool {
-        // Brave is the first macOS browser adapter; Windows reads any
-        // browser's URL through UI Automation. Command semantics intentionally
-        // depend on browser host, not this application name.
-        (cfg!(not(target_os = "macos")) || self.application.as_deref() == Some("Brave Browser"))
-            && self
-                .browser_host()
-                .is_some_and(|current| browser_hosts_equal(current, host))
+        self.browser_host()
+            .is_some_and(|current| browser_hosts_equal(current, host))
     }
 
     pub fn application_is(&self, application: &str) -> bool {
@@ -185,7 +181,7 @@ impl ContextSnapshot {
 
 #[cfg(target_os = "macos")]
 fn capture_macos() -> Result<ContextSnapshot> {
-    let (application, pid) = autoreleasepool(|_| {
+    let (application, bundle_id, pid) = autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
             .ok_or_else(|| eyre!("macOS did not report a foreground application"))?;
@@ -193,13 +189,18 @@ fn capture_macos() -> Result<ContextSnapshot> {
             .localizedName()
             .map(|name| name.to_string())
             .ok_or_else(|| eyre!("the foreground application has no display name"))?;
-        Ok::<_, color_eyre::Report>((name, application.processIdentifier()))
+        let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
+        Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let browser_url = if application == "Brave Browser" {
-        capture_brave_url()?
-    } else {
-        None
-    };
+    let scripted = bundle_id
+        .as_deref()
+        .and_then(ScriptableBrowser::from_bundle_id)
+        .and_then(ScriptableBrowser::active_url);
+    let browser_url = scripted.or_else(|| {
+        crate::accessibility::focused_web_url(pid)
+            .and_then(|url| Url::parse(&url).ok())
+            .filter(|url| matches!(url.scheme(), "http" | "https"))
+    });
     Ok(ContextSnapshot {
         application: Some(application),
         browser_url,
@@ -219,16 +220,128 @@ pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     })
 }
 
+/// How a browser's AppleScript dictionary names the front window's tab.
 #[cfg(target_os = "macos")]
-fn capture_brave_url() -> Result<Option<Url>> {
-    let url = run_osascript(BRAVE_URL_SCRIPT)?;
-    Ok(Url::parse(url.trim()).ok())
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TabDialect {
+    /// `active tab`, with `title`: Chrome and its forks.
+    Chromium,
+    /// `current tab`, with `name`: Safari and Orion.
+    Safari,
+}
+
+/// A browser whose front tab is read through AppleScript. Browsers without
+/// a dictionary (Firefox, Zen) use the Accessibility web area instead.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug)]
+struct ScriptableBrowser {
+    bundle_id: &'static str,
+    name: &'static str,
+    #[cfg(target_os = "macos")]
+    dialect: TabDialect,
+}
+
+#[cfg(any(target_os = "macos", test))]
+macro_rules! browsers {
+    ($(($bundle_id:literal, $name:literal, $dialect:ident)),* $(,)?) => {
+        &[$(ScriptableBrowser {
+            bundle_id: $bundle_id,
+            name: $name,
+            #[cfg(target_os = "macos")]
+            dialect: TabDialect::$dialect,
+        }),*]
+    };
+}
+
+#[cfg(any(target_os = "macos", test))]
+const SCRIPTABLE_BROWSERS: &[ScriptableBrowser] = browsers![
+    ("com.apple.Safari", "Safari", Safari),
+    (
+        "com.apple.SafariTechnologyPreview",
+        "Safari Technology Preview",
+        Safari
+    ),
+    ("com.brave.Browser", "Brave Browser", Chromium),
+    ("com.brave.Browser.beta", "Brave Browser Beta", Chromium),
+    (
+        "com.brave.Browser.nightly",
+        "Brave Browser Nightly",
+        Chromium
+    ),
+    ("com.google.Chrome", "Google Chrome", Chromium),
+    ("com.google.Chrome.beta", "Google Chrome Beta", Chromium),
+    ("com.google.Chrome.canary", "Google Chrome Canary", Chromium),
+    ("com.google.Chrome.dev", "Google Chrome Dev", Chromium),
+    ("com.kagi.kagimacOS", "Orion", Safari),
+    ("com.microsoft.edgemac", "Microsoft Edge", Chromium),
+    ("com.operasoftware.Opera", "Opera", Chromium),
+    ("com.vivaldi.Vivaldi", "Vivaldi", Chromium),
+    ("company.thebrowser.Browser", "Arc", Chromium),
+    ("net.imput.helium", "Helium", Chromium),
+    ("org.chromium.Chromium", "Chromium", Chromium),
+];
+
+#[cfg(any(target_os = "macos", test))]
+impl ScriptableBrowser {
+    fn from_bundle_id(bundle_id: &str) -> Option<Self> {
+        SCRIPTABLE_BROWSERS
+            .iter()
+            .find(|browser| browser.bundle_id.eq_ignore_ascii_case(bundle_id))
+            .copied()
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn capture_brave_meeting_tab() -> Result<Option<(Url, Option<String>)>> {
-    let output = run_osascript(BRAVE_MEETING_TAB_SCRIPT)?;
-    Ok(parse_brave_tab_output(&output))
+impl ScriptableBrowser {
+    fn tab(self) -> (&'static str, &'static str) {
+        match self.dialect {
+            TabDialect::Chromium => ("active tab", "title"),
+            TabDialect::Safari => ("current tab", "name"),
+        }
+    }
+
+    /// The front tab's address. A failure (Automation denied, a hung
+    /// browser) is logged once per browser and leaves the application
+    /// context intact.
+    fn active_url(self) -> Option<Url> {
+        let (tab, _) = self.tab();
+        let script = format!(
+            "tell application id \"{}\"\n    if (count of windows) > 0 then return URL of {tab} of front window\nend tell\nreturn \"\"",
+            self.bundle_id
+        );
+        match self.run(&script) {
+            Ok(url) => Url::parse(url.trim()).ok(),
+            Err(error) => {
+                static WARNED: std::sync::Mutex<Vec<&str>> = std::sync::Mutex::new(Vec::new());
+                let mut warned = WARNED.lock().unwrap_or_else(|error| error.into_inner());
+                if !warned.contains(&self.bundle_id) {
+                    warned.push(self.bundle_id);
+                    tracing::warn!(
+                        error = format!("{error:#}"),
+                        "could not read the browser tab"
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    /// The front window's tab, even when another app is in front.
+    /// Background tabs are deliberately not searched: a call open in one
+    /// says nothing about which tab is using the microphone.
+    fn meeting_tab(self) -> Result<Option<(Url, Option<String>)>> {
+        let (tab, title) = self.tab();
+        let script = format!(
+            "tell application id \"{}\"\n    if (count of windows) is 0 then return \"\"\n    set frontTab to {tab} of front window\n    return (URL of frontTab) & linefeed & ({title} of frontTab)\nend tell",
+            self.bundle_id
+        );
+        Ok(parse_tab_output(&self.run(&script)?))
+    }
+
+    fn run(self, script: &str) -> Result<String> {
+        run_osascript(script)
+            .wrap_err_with(|| format!("could not inspect the active {} tab", self.name))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -239,29 +352,23 @@ fn run_osascript(script: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .wrap_err("could not inspect the active Brave tab")?;
+        .wrap_err("could not start osascript")?;
     let started = Instant::now();
     loop {
-        if child
-            .try_wait()
-            .wrap_err("could not inspect the active Brave tab")?
-            .is_some()
-        {
+        if child.try_wait().wrap_err("osascript failed")?.is_some() {
             break;
         }
         if started.elapsed() >= CAPTURE_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(eyre!("active Brave tab inspection timed out"));
+            return Err(eyre!("osascript timed out"));
         }
         thread::sleep(Duration::from_millis(10));
     }
-    let output = child
-        .wait_with_output()
-        .wrap_err("could not inspect the active Brave tab")?;
+    let output = child.wait_with_output().wrap_err("osascript failed")?;
     if !output.status.success() {
         return Err(eyre!(
-            "active Brave tab inspection failed: {}",
+            "osascript failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
@@ -269,7 +376,7 @@ fn run_osascript(script: &str) -> Result<String> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn parse_brave_tab_output(output: &str) -> Option<(Url, Option<String>)> {
+fn parse_tab_output(output: &str) -> Option<(Url, Option<String>)> {
     let mut lines = output.lines();
     let url = Url::parse(lines.next()?.trim()).ok()?;
     let title = lines.collect::<Vec<_>>().join(" ");
@@ -304,26 +411,6 @@ pub(crate) fn browser_hosts_equal(left: &str, right: &str) -> bool {
     left.trim_end_matches('.')
         .eq_ignore_ascii_case(right.trim_end_matches('.'))
 }
-
-#[cfg(target_os = "macos")]
-const BRAVE_URL_SCRIPT: &str = r#"
-tell application "Brave Browser"
-    if (count of windows) > 0 then return URL of active tab of front window
-end tell
-return ""
-"#;
-
-/// The active tab of Brave's front window, even when another app is in
-/// front. Background tabs are deliberately not searched: a call open in one
-/// says nothing about which tab is using the microphone.
-#[cfg(target_os = "macos")]
-const BRAVE_MEETING_TAB_SCRIPT: &str = r#"
-tell application "Brave Browser"
-    if (count of windows) is 0 then return ""
-    set activeTab to active tab of front window
-    return (URL of activeTab) & linefeed & (title of activeTab)
-end tell
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -401,29 +488,49 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
-    fn the_meeting_tab_query_reads_only_the_active_tab() {
-        assert!(!BRAVE_MEETING_TAB_SCRIPT.contains("repeat"));
+    fn scriptable_browsers_are_found_by_bundle_id() {
+        assert_eq!(
+            ScriptableBrowser::from_bundle_id("com.google.Chrome").map(|browser| browser.name),
+            Some("Google Chrome")
+        );
+        assert_eq!(
+            ScriptableBrowser::from_bundle_id("com.brave.browser").map(|browser| browser.name),
+            Some("Brave Browser")
+        );
+        assert!(ScriptableBrowser::from_bundle_id("org.mozilla.firefox").is_none());
+        assert!(
+            SCRIPTABLE_BROWSERS
+                .windows(2)
+                .all(|pair| pair[0].bundle_id < pair[1].bundle_id)
+        );
     }
 
     #[test]
-    fn parses_brave_tab_url_and_title_output() {
+    fn browser_hosts_match_in_any_browser() {
+        let context = ContextSnapshot {
+            application: Some("Google Chrome".into()),
+            browser_url: Some(Url::parse("https://X.com./home").unwrap()),
+            ..ContextSnapshot::default()
+        };
+        assert!(ContextSelector::browser_host("x.com").matches(&context));
+    }
+
+    #[test]
+    fn parses_tab_url_and_title_output() {
         assert_eq!(
-            parse_brave_tab_output(
-                "https://meet.google.com/abc-defg-hij\nDesign sync - Google Meet\n"
-            ),
+            parse_tab_output("https://meet.google.com/abc-defg-hij\nDesign sync - Google Meet\n"),
             Some((
                 Url::parse("https://meet.google.com/abc-defg-hij").unwrap(),
                 Some("Design sync - Google Meet".into()),
             ))
         );
         assert_eq!(
-            parse_brave_tab_output("https://meet.google.com/abc-defg-hij\n"),
+            parse_tab_output("https://meet.google.com/abc-defg-hij\n"),
             Some((
                 Url::parse("https://meet.google.com/abc-defg-hij").unwrap(),
                 None,
             ))
         );
-        assert_eq!(parse_brave_tab_output(""), None);
+        assert_eq!(parse_tab_output(""), None);
     }
 }
