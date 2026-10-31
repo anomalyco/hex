@@ -1160,7 +1160,16 @@ mod tests {
                     scene.typos()
                 );
             } else {
-                println!("FAIL {name}");
+                if let Ok(script) = scene_script::parse(src) {
+                    let scene = Scene::play(&Timing::default(), Box::leak(Box::new(script)));
+                    println!(
+                        "FAIL {name} {:.1}s typos={}",
+                        scene.duration(),
+                        scene.typos()
+                    );
+                } else {
+                    println!("FAIL {name}");
+                }
                 for p in problems {
                     println!("  {p}");
                 }
