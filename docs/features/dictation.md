@@ -550,7 +550,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── One click-through line just past the HUD, on the HUD's screen
   │   ├── macOS: beside the plate the HUD placed (under the menu bar, over the Dock,
   │   │   in the menu bar, out of the notch), on the pointer's screen
-  │   ├── Linux, Windows: past the plate `rune_hud` draws, on the primary display
+  │   ├── Linux, Windows: past the plate `rune_hud` draws, on the HUD's display
   │   ├── HUD hidden -> In the HUD's place at the top
   │   ├── Appears with the first words, already drawn; prewarmed, so macOS never
   │   │   reveals the last dictation's words for a frame (Linux, Windows: unverified)
@@ -1119,7 +1119,14 @@ a Rune overlay). It was the `dot-scope` experiment (#264) until 2026-10-29,
 when it replaced the glossy capsule, which Omarchy users on X called a
 "static red thingy"; the capsule's shader and HUD Lab styles are deleted. It is the t422 prototype's look A with its values.
 Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no
-menu-bar or notch placement). On Windows the window is a topmost,
+menu-bar or notch placement), on the display under the pointer when the
+capture starts, as macOS does (#486; `rune_hud::display`). Windows and X11
+read the pointer and pick its monitor; Windows keeps it inside that
+monitor's work area and draws it at that monitor's scale. A layer-shell
+surface pins no output, so niri, Sway and Hyprland put it on the focused
+output. GNOME and KDE keep the primary display. The display stays picked
+until the HUD hides, so it never jumps mid-capture (tested by reading the
+code only, not on multi-monitor hardware). On Windows the window is a topmost,
 click-through tool window with no redirection bitmap, drawn through
 DirectComposition. Rune shows and hides it with Win32 calls alone and
 re-asserts its styles on each show; winit never sees its visibility. The

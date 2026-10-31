@@ -32,7 +32,8 @@ pub(crate) struct Plate {
 /// Where the plate starts, just past the HUD.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Spot {
-    /// This far from the primary display's edge that the HUD is on.
+    /// This far from the edge that the HUD is on, on the HUD's display
+    /// (`rune_hud::display`).
     Edge(ScreenEdge, f32),
     /// At `y` in Rune's global space (points from the primary display's
     /// top-left, y down), centred on `x`; the plate hangs down from `y`
@@ -82,6 +83,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     }
     .options(OverlayOptions {
         prewarm: crate::labs::live_text(),
+        #[cfg(not(target_os = "macos"))]
+        display: crate::rune_hud::display(),
         ..Default::default()
     });
     let overlay = app.overlay(spec, Plate::default());
