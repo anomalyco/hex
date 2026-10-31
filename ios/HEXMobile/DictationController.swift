@@ -1217,6 +1217,113 @@ final class DictationController {
             controller.setReturnAppID("claude")
             controller.autoReturnState = .attempting(HostApp(id: "claude", name: "Claude", schemeURL: "claude://"))
 
+        case "hosted-keyboard-warm":
+            controller.phase = .ready
+            controller.warmDuration = .fifteenMinutes
+            controller.keyboardSessionEnabled = true
+            controller.keyboardSessionRemaining = 14 * 60 + 42
+            controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
+            controller.setReturnAppID("messages")
+            Task { @MainActor in
+                while !Task.isCancelled {
+                    let t = Date().timeIntervalSince1970
+                    controller.keyboardBridge.publish(
+                        KeyboardSnapshot(
+                            state: .ready,
+                            heartbeat: t,
+                            expiresAt: t + 14 * 60 + 42
+                        )
+                    )
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+            }
+
+        case "hosted-keyboard-recording", "hosted-keyboard-light":
+            controller.phase = .ready
+            controller.warmDuration = .fifteenMinutes
+            controller.keyboardSessionEnabled = true
+            controller.keyboardSessionRemaining = 14 * 60 + 55
+            let startWall = Date().timeIntervalSince1970 - 4.0
+            Task { @MainActor in
+                var simTime: Float = 0.4
+                while !Task.isCancelled {
+                    let t = Date().timeIntervalSince1970
+                    let db = -28.5 + 5.2 * sin(simTime * 19.0) + 2.4 * cos(simTime * 7.3)
+                    controller.keyboardBridge.publish(
+                        KeyboardSnapshot(
+                            state: .recording,
+                            heartbeat: t,
+                            expiresAt: t + 15 * 60,
+                            recordingStartedAt: startWall,
+                            audioLevel: 0.78,
+                            loudnessDB: db,
+                            jobID: "hosted-demo-job"
+                        )
+                    )
+                    simTime += 0.033
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+
+        case "hosted-keyboard-tour":
+            controller.phase = .ready
+            controller.warmDuration = .fifteenMinutes
+            controller.keyboardSessionEnabled = true
+            controller.keyboardSessionRemaining = 14 * 60 + 58
+            Task { @MainActor in
+                let boot = Date().timeIntervalSince1970
+                let freshResultID = "hosted-tour-\(UUID().uuidString)"
+                var simTime: Float = 0.0
+                while !Task.isCancelled {
+                    let t = Date().timeIntervalSince1970
+                    let elapsed = t - boot
+                    if elapsed < 1.8 {
+                        controller.keyboardBridge.publish(
+                            KeyboardSnapshot(
+                                state: .ready,
+                                heartbeat: t,
+                                expiresAt: t + 15 * 60
+                            )
+                        )
+                    } else if elapsed < 4.5 {
+                        let db = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
+                        controller.keyboardBridge.publish(
+                            KeyboardSnapshot(
+                                state: .recording,
+                                heartbeat: t,
+                                expiresAt: t + 15 * 60,
+                                recordingStartedAt: boot + 1.8,
+                                audioLevel: 0.78,
+                                loudnessDB: db,
+                                jobID: "hosted-tour-job"
+                            )
+                        )
+                        simTime += 0.033
+                    } else if elapsed < 5.5 {
+                        controller.keyboardBridge.publish(
+                            KeyboardSnapshot(
+                                state: .transcribing,
+                                heartbeat: t,
+                                expiresAt: t + 15 * 60,
+                                jobID: "hosted-tour-job"
+                            )
+                        )
+                    } else {
+                        controller.keyboardBridge.publish(
+                            KeyboardSnapshot(
+                                state: .ready,
+                                heartbeat: t,
+                                expiresAt: t + 14 * 60 + 54,
+                                resultID: freshResultID,
+                                resultExpiresAt: boot + 30,
+                                transcript: "Meet at ten on Thursday and bring the updated design notes."
+                            )
+                        )
+                    }
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+
         default:
             return false
         }

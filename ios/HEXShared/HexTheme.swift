@@ -57,6 +57,52 @@ struct HexStatusDot: View {
     }
 }
 
+/// Hex's concentric-hexagon brand mark (`site/src/App.tsx`).
+struct HexMarkView: View {
+    var size: CGFloat = 20
+    var color: Color = HexTheme.textBase
+    var coreColor: Color? = nil
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let side = min(canvasSize.width, canvasSize.height)
+            let s = side / 64.0
+            let lineWidth = max(1.15, 4.5 * s)
+            let stroke = StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+
+            func hexPath(_ points: [(CGFloat, CGFloat)]) -> Path {
+                var path = Path()
+                guard let first = points.first else { return path }
+                path.move(to: CGPoint(x: first.0 * s, y: first.1 * s))
+                for pt in points.dropFirst() {
+                    path.addLine(to: CGPoint(x: pt.0 * s, y: pt.1 * s))
+                }
+                path.closeSubpath()
+                return path
+            }
+
+            let outer = hexPath([
+                (32, 4), (57, 18.5), (57, 45.5),
+                (32, 60), (7, 45.5), (7, 18.5),
+            ])
+            let middle = hexPath([
+                (32, 15), (48, 24.25), (48, 39.75),
+                (32, 49), (16, 39.75), (16, 24.25),
+            ])
+            let core = hexPath([
+                (32, 24), (39.5, 28.25), (39.5, 36.75),
+                (32, 41), (24.5, 36.75), (24.5, 28.25),
+            ])
+
+            context.stroke(outer, with: .color(color), style: stroke)
+            context.stroke(middle, with: .color(color), style: stroke)
+            context.fill(core, with: .color(coreColor ?? color))
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 /// Static braided dot-matrix glyph for WidgetKit / Live Activity surfaces
 /// where SpringBoard renders archived display lists rather than Metal drawables.
 struct HexDotMatrixBadge: View {

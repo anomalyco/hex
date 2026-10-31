@@ -125,9 +125,9 @@ nonisolated enum DotScopeStage: Equatable, Sendable {
 }
 
 nonisolated struct DotScopeTuning: Equatable, Sendable {
-    static let maxColumns = 96
-    static let maxRows = 15
-    static let maxDots = 1024
+    static let maxColumns = 192
+    static let maxRows = 21
+    static let maxDots = 4096
 
     var columns: Int = 43
     var rows: Int = 9
@@ -136,6 +136,10 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
     var idleWidth: Float = 112.0
     var processingWidth: Float = 76.0
     var height: Float = 26.0
+    var fitsBounds: Bool = false
+    var leadingInset: Float = 0.0
+    var trailingInset: Float = 0.0
+    var windowFade: Float = 0.0
     var braidSpeed: Float = 1.0
     var helixCycles: Float = 1.6
     var gain: Float = 1.0
@@ -147,8 +151,8 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
     var saturation: Float = 1.0
     var shimmerPass: Float = 0.55
     var shimmer: Float = 1.0
-    var transition: Float = 0.30
-    var bounce: Float = 0.15
+    var transition: Float = 0.28
+    var bounce: Float = 0.08
     var autoLevel: Bool = true
     var autoRelease: Float = 3.0
     var noiseFloor: Float = -60.0
@@ -184,13 +188,69 @@ nonisolated struct DotScopeTuning: Equatable, Sendable {
         return t
     }
 
+    /// Full-width bar scope matching OpenCode iOS's `DictationScopeBar`:
+    /// spans the entire capsule bar pixel-exact and softly fades around leading/trailing buttons.
+    static func bar(
+        leadingInset: Float = 0,
+        trailingInset: Float = 0,
+        fade: Float = 16.0,
+        spacing: Float = 3.2
+    ) -> DotScopeTuning {
+        var t = DotScopeTuning()
+        t.fitsBounds = true
+        t.spacing = spacing
+        t.width = 340.0
+        t.idleWidth = 340.0
+        t.processingWidth = 340.0
+        t.height = 52.0
+        t.columns = 104
+        t.rows = 13
+        t.leadingInset = max(0, leadingInset)
+        t.trailingInset = max(0, trailingInset)
+        t.windowFade = fade
+        t.helixCycles = 2.2
+        t.gain = 1.24
+        t.historySpeed = 215.0
+        t.bounce = 0.0
+        return t
+    }
+
+    /// Returns a copy whose grid is pixel-snapped to a real Metal drawable (`DotScopeGrid`).
+    func fitted(pixelWidth: Int, pixelHeight: Int, scale rawScale: Float) -> DotScopeTuning {
+        guard fitsBounds, pixelWidth > 8, pixelHeight > 8 else { return self }
+        let scale = max(1.0, rawScale)
+        let pxPitch = max(3.0, (spacing * scale).rounded())
+        let pitch = pxPitch / scale
+        let w = Float(pixelWidth) / scale
+        let h = Float(pixelHeight) / scale
+
+        let rawRows = min(15, min(Self.maxRows, max(5, Int(floor(Float(pixelHeight) / pxPitch)) - 2)))
+        let oddRows = rawRows.isMultiple(of: 2) ? max(5, rawRows - 1) : rawRows
+        let maxCols = min(Self.maxColumns, Self.maxDots / max(oddRows, 1))
+        let cols = max(11, min(maxCols, Int(floor(Float(pixelWidth) / pxPitch)) - 1))
+
+        var copy = self
+        copy.spacing = pitch
+        copy.width = w
+        copy.idleWidth = w
+        copy.processingWidth = w
+        copy.height = h
+        copy.columns = cols
+        copy.rows = oddRows
+        return copy
+    }
+
     static let keyboard = DotScopeTuning.sized(width: 152, idleWidth: 122, processingWidth: 96, height: 30, rows: 9, spacing: 2.75)
-    static let handoff = DotScopeTuning.sized(width: 162, idleWidth: 126, processingWidth: 100, height: 30, rows: 9, spacing: 2.8)
+    static let handoff = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 18.0, spacing: 3.3)
 }
 
 nonisolated struct DotScopePose: Equatable, Sendable {
     var width: Float
     var height: Float
+    var activeSpan: Float
+    var activeCenter: Float
+    var leadingInset: Float
+    var trailingInset: Float
     var opacity: Float
     var scale: Float
     var softness: Float
@@ -236,9 +296,9 @@ nonisolated struct DotScopePalette: Equatable, Sendable {
         return DotScopePalette(
             base: sat(base, saturation),
             core: sat(core, saturation),
-            plate: SIMD4<Float>(17.0 / 255.0, 17.0 / 255.0, 20.0 / 255.0, 0.94),
-            rim: SIMD4<Float>(1.0, 1.0, 1.0, 0.11),
-            shadow: SIMD4<Float>(0.0, 0.0, 0.0, 0.50)
+            plate: SIMD4<Float>(17.0 / 255.0, 17.0 / 255.0, 20.0 / 255.0, 0.95),
+            rim: SIMD4<Float>(1.0, 1.0, 1.0, 0.09),
+            shadow: SIMD4<Float>(0.0, 0.0, 0.0, 0.42)
         )
     }
 }
@@ -394,14 +454,25 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
 
     private var grid: Float = 0
     private var widthSpring = DotSpring(at: startWidth)
+    private var leadingInsetSpring = DotSpring(at: 0.0)
+    private var trailingInsetSpring = DotSpring(at: 0.0)
     private var opacitySpring = DotSpring(at: 0.0)
     private var scaleSpring = DotSpring(at: hiddenScale)
     private var softnessSpring = DotSpring(at: hiddenSoftness)
     private var coolSpring = DotSpring(at: 0.0)
     private var failSpring = DotSpring(at: 0.0)
+    private var enterFromHidden = true
 
     init(tuning: DotScopeTuning = .hud) {
         self.tuning = tuning
+        self.leadingInsetSpring = DotSpring(at: tuning.leadingInset)
+        self.trailingInsetSpring = DotSpring(at: tuning.trailingInset)
+        if tuning.fitsBounds {
+            let initialSpan = max(tuning.height, tuning.width - tuning.leadingInset - tuning.trailingInset)
+            self.widthSpring = DotSpring(at: initialSpan)
+            self.scaleSpring = DotSpring(at: 1.0)
+            self.softnessSpring = DotSpring(at: 0.0)
+        }
         resizeIfNeeded()
     }
 
@@ -453,10 +524,19 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         self.reduceMotion = reduceMotion
         enterFromHidden = true
         grid = 0
-        widthSpring = DotSpring(at: Self.startWidth)
+        leadingInsetSpring = DotSpring(at: currentTuning.leadingInset)
+        trailingInsetSpring = DotSpring(at: currentTuning.trailingInset)
+        if currentTuning.fitsBounds {
+            let span = max(currentTuning.height, currentTuning.width - currentTuning.leadingInset - currentTuning.trailingInset)
+            widthSpring = DotSpring(at: span)
+            scaleSpring = DotSpring(at: 1.0)
+            softnessSpring = DotSpring(at: 0.0)
+        } else {
+            widthSpring = DotSpring(at: Self.startWidth)
+            scaleSpring = DotSpring(at: Self.hiddenScale)
+            softnessSpring = DotSpring(at: Self.hiddenSoftness)
+        }
         opacitySpring = DotSpring(at: 0.0)
-        scaleSpring = DotSpring(at: Self.hiddenScale)
-        softnessSpring = DotSpring(at: Self.hiddenSoftness)
         coolSpring = DotSpring(at: 0.0)
         failSpring = DotSpring(at: 0.0)
         columns = 0
@@ -466,27 +546,51 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         if reduceMotion {
             scaleSpring.jump(1.0)
             softnessSpring.jump(0.0)
-            widthSpring.jump(tuning.width)
+            widthSpring.jump(expectedTargetWidth(for: stage))
         }
     }
 
-    func tune(_ newTuning: DotScopeTuning) {
+    func tune(_ newTuning: DotScopeTuning, jumpLayout: Bool = false) {
         guard tuning != newTuning else { return }
+        let resized = (newTuning.columns != tuning.columns || newTuning.rows != tuning.rows || abs(newTuning.width - tuning.width) > 0.5)
         tuning = newTuning
         resizeIfNeeded()
+        if jumpLayout || resized || reduceMotion {
+            leadingInsetSpring.jump(newTuning.leadingInset)
+            trailingInsetSpring.jump(newTuning.trailingInset)
+            if newTuning.fitsBounds {
+                widthSpring.jump(expectedTargetWidth(for: stage))
+            }
+            if steps > 0 {
+                beam(hb: Self.stepDt * 2.0)
+            }
+        }
     }
 
-    private var enterFromHidden = true
+    private func expectedTargetWidth(for targetStage: DotScopeStage) -> Float {
+        if tuning.fitsBounds {
+            return max(tuning.height, tuning.width - leadingInsetSpring.target - trailingInsetSpring.target)
+        }
+        return switch targetStage {
+        case .idle: tuning.idleWidth
+        case .recording: tuning.width
+        case .processing, .done: tuning.processingWidth
+        case .failed: widthSpring.target
+        }
+    }
 
     var settled: Bool {
         opacitySpring.target == 0.0 && opacitySpring.x < 0.002
     }
 
     var isIdleSettled: Bool {
-        stage == .idle
+        let targetSpan = expectedTargetWidth(for: .idle)
+        return stage == .idle
             && elapsed >= 0.45
-            && abs(widthSpring.x - tuning.idleWidth) < 0.25
+            && abs(widthSpring.x - targetSpan) < 0.35
             && abs(opacitySpring.x - 1.0) < 0.01
+            && abs(leadingInsetSpring.x - tuning.leadingInset) < 0.35
+            && abs(trailingInsetSpring.x - tuning.trailingInset) < 0.35
     }
 
     var elapsedTime: Float {
@@ -494,12 +598,19 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     }
 
     var pose: DotScopePose {
-        DotScopePose(
-            width: max(widthSpring.x, tuning.height),
+        let activeSpan = max(widthSpring.x, tuning.height)
+        let plateWidth = tuning.fitsBounds ? tuning.width : activeSpan
+        let activeCenter = tuning.fitsBounds ? (leadingInsetSpring.x - trailingInsetSpring.x) * 0.5 : 0.0
+        return DotScopePose(
+            width: plateWidth,
             height: tuning.height,
+            activeSpan: activeSpan,
+            activeCenter: activeCenter,
+            leadingInset: max(0.0, leadingInsetSpring.x),
+            trailingInset: max(0.0, trailingInsetSpring.x),
             opacity: min(1.0, max(0.0, opacitySpring.x)),
-            scale: max(0.01, scaleSpring.x),
-            softness: min(Self.hiddenSoftness, max(0.0, softnessSpring.x)),
+            scale: tuning.fitsBounds ? 1.0 : max(0.01, scaleSpring.x),
+            softness: tuning.fitsBounds ? 0.0 : min(Self.hiddenSoftness, max(0.0, softnessSpring.x)),
             cool: min(1.0, max(0.0, coolSpring.x)),
             fail: min(1.0, max(0.0, failSpring.x)),
             glow: ((traces.0.glow + traces.1.glow) * 0.5) * tuning.glow,
@@ -561,7 +672,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     }
 
     private var flowSpacing: Float {
-        Self.flowSpacingFactor * tuning.processingWidth
+        let refWidth = tuning.fitsBounds ? max(96.0, widthSpring.x * 0.45) : tuning.processingWidth
+        return Self.flowSpacingFactor * refWidth
     }
 
     private var flowSpeed: Float {
@@ -573,7 +685,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     }
 
     private var pulseSpeed: Float {
-        (tuning.processingWidth * 0.5 + 12.0) / (1.4 * workPeriod)
+        (widthSpring.x * 0.5 + 12.0) / (1.4 * workPeriod)
     }
 
     private func armDone() {
@@ -608,7 +720,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let liveTarget: Float = if isRecording {
             1.0
         } else if stage == .idle && visible {
-            0.26
+            0.28
         } else {
             0.0
         }
@@ -629,18 +741,25 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let turn = rest + (flowTurnHz - rest) * flowTurn
         carrier = (carrier + h * Self.tau * turn * speed).truncatingRemainder(dividingBy: Self.tau)
 
-        let targetWidth: Float = switch stage {
-        case .idle: tuning.idleWidth
-        case .recording: tuning.width
-        case .processing, .done: tuning.processingWidth
-        case .failed: widthSpring.target
+        let fade = DotSpringSpec(duration: tuning.transition, bounce: 0.0)
+        let bouncy = DotSpringSpec(duration: tuning.transition, bounce: tuning.bounce)
+
+        if reduceMotion {
+            leadingInsetSpring.jump(tuning.leadingInset)
+            trailingInsetSpring.jump(tuning.trailingInset)
+        } else {
+            leadingInsetSpring.step(to: tuning.leadingInset, spec: fade, dt: h)
+            trailingInsetSpring.step(to: tuning.trailingInset, spec: fade, dt: h)
+        }
+
+        let targetWidth: Float = if tuning.fitsBounds {
+            max(tuning.height, tuning.width - leadingInsetSpring.x - trailingInsetSpring.x)
+        } else {
+            expectedTargetWidth(for: stage)
         }
         let coolTarget: Float = (stage == .processing || stage == .done) ? 1.0 : 0.0
         let failTarget: Float = stage == .failed ? 1.0 : 0.0
         let shownTarget: Float = visible ? 1.0 : 0.0
-
-        let fade = DotSpringSpec(duration: tuning.transition, bounce: 0.0)
-        let bouncy = DotSpringSpec(duration: tuning.transition, bounce: tuning.bounce)
 
         if reduceMotion {
             widthSpring.jump(targetWidth)
@@ -650,7 +769,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
             coolSpring.step(to: coolTarget, spec: .reducedFade, dt: h)
             failSpring.step(to: failTarget, spec: .reducedFade, dt: h)
         } else {
-            widthSpring.step(to: targetWidth, spec: bouncy, dt: h)
+            widthSpring.step(to: targetWidth, spec: tuning.fitsBounds ? fade : bouncy, dt: h)
             opacitySpring.step(to: shownTarget, spec: fade, dt: h)
             scaleSpring.step(to: visible ? 1.0 : Self.hiddenScale, spec: bouncy, dt: h)
             softnessSpring.step(to: visible ? 0.0 : Self.hiddenSoftness, spec: fade, dt: h)
@@ -697,7 +816,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     private func flowLight(x: Float) -> Float {
         let spacing = flowSpacing
         let d = Self.remEuclid(x - flowOffset + spacing * 0.5, spacing) - spacing * 0.5
-        return Self.bump(d, 7.0)
+        return Self.bump(d, 8.5)
     }
 
     private func beam(hb: Float) {
@@ -708,6 +827,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let pitch = tuning.spacing
         let width = max(widthSpring.x, tuning.height)
         let halfWidth = width * 0.5
+        let activeCenter = tuning.fitsBounds ? (leadingInsetSpring.x - trailingInsetSpring.x) * 0.5 : 0.0
         let e = elapsed
 
         let scanHelix: Float
@@ -739,7 +859,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
                     scanGrid = min(1.0, e / 0.30)
                     let p = min(1.0, max(0.0, e / Self.enterDuration))
                     let passPos = 0.5 - 0.5 * cos(.pi * p)
-                    let reach = (halfWidth + 12.0) * passPos
+                    let reach = (halfWidth + 14.0) * passPos
                     let head = 2.8 * (1.0 - Self.smoothstep(0.08, Self.enterDuration, e))
                     let unfold = Self.smoothstep(0.0, 0.10, e)
                     mode = .enter(reach: reach, head: head, unfold: unfold)
@@ -778,6 +898,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let breath: Float = reduceMotion ? 0.5 : (0.5 + 0.5 * sin(time * Self.tau / Self.breathPeriod))
         let rest = (0.55 + 0.35 * breath) * (0.4 + 0.6 * live) * scanHelix
         let sf = Self.spatialFreqs
+        let reachAttenuation: Float = tuning.fitsBounds ? 0.48 : 0.80
+        let reachInner: Float = tuning.fitsBounds ? 26.0 : 14.0
 
         func scanAt(_ x: Float) -> (Float, Float, Float) {
             switch mode {
@@ -808,7 +930,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         func fillSamples(trace: Trace, sign: Float, ys: inout [Float], brightness: inout [Float]) {
             let p = trace.phases
             for s in 0..<sampleCount {
-                let x = (Float(s) / Float(sub) - Float(cols - 1) * 0.5) * pitch
+                let sampleX = (Float(s) / Float(sub) - Float(cols - 1) * 0.5) * pitch
+                let x = sampleX - activeCenter
                 if abs(x) > halfWidth {
                     ys[s] = mid
                     brightness[s] = 0
@@ -818,10 +941,10 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
                 let own = abs(x)
                 let xn = (x + halfWidth) / width
                 let ends = min(
-                    Self.smoothstep(-halfWidth + 3.0, -halfWidth + 17.0, x),
-                    Self.smoothstep(-halfWidth + 3.0, -halfWidth + 17.0, -x)
+                    Self.smoothstep(-halfWidth + 2.5, -halfWidth + 18.0, x),
+                    Self.smoothstep(-halfWidth + 2.5, -halfWidth + 18.0, -x)
                 )
-                let reach = 1.0 - 0.8 * Self.smoothstep(14.0, halfWidth, own)
+                let reach = 1.0 - reachAttenuation * Self.smoothstep(reachInner, max(reachInner + 1.0, halfWidth), own)
                 let delay = own / tuning.historySpeed
                 let a = trace.past(delay: delay, channel: 0)
                 var spread: Float = 0
@@ -832,7 +955,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
 
                 let helix = (rest + swell + half * 0.55 * a * reach)
                     * sin(Self.tau * tuning.helixCycles * xn - carrier)
-                let y = half * tanh((helix + half * 0.7 * spread * reach) / max(half, 0.01)) * ends * amp
+                let y = half * tanh((helix + half * 0.72 * spread * reach) / max(half, 0.01)) * ends * amp
                 ys[s] = mid - sign * y
                 let spatial = (0.3 + 0.7 * min(1.0, a * 1.8)) * (0.45 + 0.55 * ends)
                 brightness[s] = spatial * amp + 0.36 * max(0.0, bright - amp)
@@ -912,7 +1035,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     }
 }
 
-// MARK: - Metal GPU View (`DotScopeView`)
+// MARK: - Metal GPU Pipeline (`DotScopeView` & `DotSwipeCueView`)
 
 enum DotScopePhase: Equatable, Sendable {
     case hidden
@@ -927,11 +1050,19 @@ private struct DotScopeMetalUniforms {
     var metrics1: SIMD4<Float>
     var metrics2: SIMD4<Float>
     var state: SIMD4<Float>
+    var window: SIMD4<Float>
     var base: SIMD4<Float>
     var core: SIMD4<Float>
     var plate: SIMD4<Float>
     var rim: SIMD4<Float>
     var shadow: SIMD4<Float>
+}
+
+private struct DotSwipeCueMetalUniforms {
+    var metrics: SIMD4<Float>
+    var grid: SIMD4<Float>
+    var base: SIMD4<Float>
+    var core: SIMD4<Float>
 }
 
 @MainActor
@@ -940,7 +1071,8 @@ private final class DotScopeMetalPipeline {
 
     let device: MTLDevice
     let queue: MTLCommandQueue
-    let pipeline: MTLRenderPipelineState
+    let scopePipeline: MTLRenderPipelineState
+    let swipePipeline: MTLRenderPipelineState?
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -950,40 +1082,58 @@ private final class DotScopeMetalPipeline {
         let bundle = Bundle(for: DotScopeHostView.self)
         guard let library = (try? device.makeDefaultLibrary(bundle: bundle)) ?? device.makeDefaultLibrary(),
               let vertex = library.makeFunction(name: "dot_scope_vertex"),
-              let fragment = library.makeFunction(name: "dot_scope_fragment") else {
+              let scopeFragment = library.makeFunction(name: "dot_scope_fragment") else {
             return nil
         }
 
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "Hex DotScope"
-        descriptor.vertexFunction = vertex
-        descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        let scopeDesc = MTLRenderPipelineDescriptor()
+        scopeDesc.label = "Hex DotScope"
+        scopeDesc.vertexFunction = vertex
+        scopeDesc.fragmentFunction = scopeFragment
+        scopeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
 
-        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else {
+        guard let scopePipeline = try? device.makeRenderPipelineState(descriptor: scopeDesc) else {
             return nil
+        }
+
+        let swipePipeline: MTLRenderPipelineState?
+        if let swipeFragment = library.makeFunction(name: "dot_swipe_cue_fragment") {
+            let swipeDesc = MTLRenderPipelineDescriptor()
+            swipeDesc.label = "Hex DotSwipeCue"
+            swipeDesc.vertexFunction = vertex
+            swipeDesc.fragmentFunction = swipeFragment
+            swipeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+            swipePipeline = try? device.makeRenderPipelineState(descriptor: swipeDesc)
+        } else {
+            swipePipeline = nil
         }
 
         self.device = device
         self.queue = queue
-        self.pipeline = pipeline
+        self.scopePipeline = scopePipeline
+        self.swipePipeline = swipePipeline
     }
 }
 
 private final class DisplayLinkProxy: NSObject {
-    weak var owner: DotScopeHostView?
+    weak var onTickOwner: AnyObject?
+    var tickHandler: ((CADisplayLink) -> Void)?
 
     @MainActor
     @objc func tick(_ link: CADisplayLink) {
-        owner?.stepAndRender(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp)
+        tickHandler?(link)
     }
 }
+
+// MARK: - `DotScopeView`
 
 @MainActor
 final class DotScopeHostView: UIView {
     override static var layerClass: AnyClass { CAMetalLayer.self }
 
     private let simulation: DotScopeSimulation
+    private var requestedTuning: DotScopeTuning
+    private var hasFittedInitialLayout = false
     private let dotBuffer: MTLBuffer?
     private let proxy = DisplayLinkProxy()
     private var displayLink: CADisplayLink?
@@ -1015,6 +1165,7 @@ final class DotScopeHostView: UIView {
     }
 
     init(tuning: DotScopeTuning) {
+        self.requestedTuning = tuning
         self.simulation = DotScopeSimulation(tuning: tuning)
         if let gpu = DotScopeMetalPipeline.shared {
             self.dotBuffer = gpu.device.makeBuffer(
@@ -1038,7 +1189,9 @@ final class DotScopeHostView: UIView {
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
 
-        proxy.owner = self
+        proxy.tickHandler = { [weak self] link in
+            self?.stepAndRender(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp)
+        }
     }
 
     @available(*, unavailable)
@@ -1047,7 +1200,19 @@ final class DotScopeHostView: UIView {
     }
 
     func updateTuning(_ tuning: DotScopeTuning) {
-        simulation.tune(tuning)
+        guard requestedTuning != tuning else { return }
+        requestedTuning = tuning
+        applyEffectiveTuning(jumpLayout: !hasFittedInitialLayout)
+        updateAnimatingState()
+        renderCurrentFrame()
+    }
+
+    private func applyEffectiveTuning(jumpLayout: Bool) {
+        let scale = Float(max(1.0, traitCollection.displayScale))
+        let pxW = Int((bounds.width * CGFloat(scale)).rounded())
+        let pxH = Int((bounds.height * CGFloat(scale)).rounded())
+        let effective = requestedTuning.fitted(pixelWidth: pxW, pixelHeight: pxH, scale: scale)
+        simulation.tune(effective, jumpLayout: jumpLayout)
     }
 
     override func didMoveToWindow() {
@@ -1067,11 +1232,24 @@ final class DotScopeHostView: UIView {
         super.layoutSubviews()
         let scale = max(1.0, traitCollection.displayScale)
         metalLayer.contentsScale = scale
-        let pixelSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        if metalLayer.drawableSize != pixelSize {
+        let pixelSize = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        let sizeChanged = metalLayer.drawableSize != pixelSize
+        if sizeChanged {
             metalLayer.drawableSize = pixelSize
         }
+        if pixelSize.width > 8 && pixelSize.height > 8 {
+            let isFirstFit = !hasFittedInitialLayout
+            hasFittedInitialLayout = true
+            applyEffectiveTuning(jumpLayout: isFirstFit || sizeChanged)
+            if isFirstFit, case .idle = phase {
+                settleIdleImmediately()
+            }
+            if sizeChanged {
+                hasSeededSnapshot = false
+            }
+        }
         seedForSnapshotIfNeeded()
+        updateAnimatingState()
         renderCurrentFrame()
     }
 
@@ -1086,30 +1264,34 @@ final class DotScopeHostView: UIView {
         displayLink = link
     }
 
+    private func settleIdleImmediately() {
+        for _ in 0..<36 {
+            simulation.advance(
+                dt: 1.0 / 60.0,
+                stage: .idle,
+                visible: true,
+                loudness: -120.0,
+                reduceMotion: reduceMotion
+            )
+        }
+    }
+
     private func handlePhaseChange(from old: DotScopePhase, to next: DotScopePhase) {
         if case .hidden = old, next != .hidden {
             simulation.restart(reduceMotion: reduceMotion)
             if case .idle = next {
-                // Settle resting frame immediately so idle starts at 0% CPU/GPU with zero flash.
-                for _ in 0..<36 {
-                    simulation.advance(
-                        dt: 1.0 / 60.0,
-                        stage: .idle,
-                        visible: true,
-                        loudness: -120.0,
-                        reduceMotion: reduceMotion
-                    )
-                }
+                settleIdleImmediately()
             }
         }
         lastTimestamp = nil
+        hasSeededSnapshot = false
         seedForSnapshotIfNeeded()
         updateAnimatingState()
         renderCurrentFrame()
     }
 
     private func seedForSnapshotIfNeeded() {
-        guard useDemoVoice, !hasSeededSnapshot else { return }
+        guard useDemoVoice, !hasSeededSnapshot, bounds.width > 8 else { return }
         switch phase {
         case .hidden, .idle:
             return
@@ -1118,14 +1300,13 @@ final class DotScopeHostView: UIView {
         }
         hasSeededSnapshot = true
         simulation.restart(reduceMotion: false)
-        // Step into an expressive mid-phrase peak so static screenshots show crisp braided loops.
         let dt: Float = 1.0 / 60.0
-        for _ in 0..<48 {
+        for _ in 0..<52 {
             simulation.advance(
                 dt: dt,
                 stage: .recording,
                 visible: true,
-                loudness: -28.0 + 4.5 * sin(simulation.elapsedTime * 22.0),
+                loudness: -27.5 + 5.0 * sin(simulation.elapsedTime * 21.0),
                 reduceMotion: false
             )
         }
@@ -1183,7 +1364,7 @@ final class DotScopeHostView: UIView {
             return (.idle, true, -120.0)
         case .recording(let db):
             let effectiveDB = useDemoVoice
-                ? (-29.0 + 5.0 * sin(simulation.elapsedTime * 21.0))
+                ? (-28.5 + 5.2 * sin(simulation.elapsedTime * 21.0))
                 : db
             return (.recording, true, effectiveDB)
         case .processing:
@@ -1218,8 +1399,14 @@ final class DotScopeHostView: UIView {
                 pose.height * 0.5
             ),
             state: SIMD4<Float>(pose.glow, pose.grid, pose.live, pose.cool),
+            window: SIMD4<Float>(
+                pose.leadingInset,
+                pose.trailingInset,
+                simulation.tuning.windowFade,
+                pose.activeCenter
+            ),
             base: SIMD4<Float>(palette.base.x, palette.base.y, palette.base.z, drawPlate ? 1.0 : 0.0),
-            core: SIMD4<Float>(palette.core.x, palette.core.y, palette.core.z, 0.0),
+            core: SIMD4<Float>(palette.core.x, palette.core.y, palette.core.z, pose.activeSpan * 0.5),
             plate: palette.plate,
             rim: palette.rim,
             shadow: palette.shadow
@@ -1246,7 +1433,7 @@ final class DotScopeHostView: UIView {
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
         if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.setRenderPipelineState(gpu.pipeline)
+            encoder.setRenderPipelineState(gpu.scopePipeline)
             encoder.setFragmentBytes(
                 &uniforms,
                 length: MemoryLayout<DotScopeMetalUniforms>.stride,
@@ -1285,5 +1472,185 @@ struct DotScopeView: UIViewRepresentable {
         uiView.updateTuning(tuning)
         uiView.drawPlate = drawPlate
         uiView.phase = phase
+    }
+}
+
+// MARK: - `DotSwipeCueView` (Bottom-Edge Directional Return Cue)
+
+@MainActor
+final class DotSwipeCueHostView: UIView {
+    override static var layerClass: AnyClass { CAMetalLayer.self }
+
+    private let proxy = DisplayLinkProxy()
+    private var displayLink: CADisplayLink?
+    private var lastTimestamp: CFTimeInterval?
+    /// Starts mid-glide so initial paint and snapshot stills immediately read as a rightward swipe.
+    private var elapsed: Float = 0.76
+
+    var reduceMotion = false {
+        didSet {
+            if reduceMotion != oldValue {
+                updateAnimatingState()
+                renderCurrentFrame()
+            }
+        }
+    }
+
+    var isPaused = false {
+        didSet {
+            if isPaused != oldValue {
+                updateAnimatingState()
+                renderCurrentFrame()
+            }
+        }
+    }
+
+    private var metalLayer: CAMetalLayer {
+        // swiftlint:disable:next force_cast
+        layer as! CAMetalLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+
+        if let gpu = DotScopeMetalPipeline.shared {
+            metalLayer.device = gpu.device
+            metalLayer.pixelFormat = .bgra8Unorm
+            metalLayer.isOpaque = false
+            metalLayer.framebufferOnly = true
+            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+        }
+
+        proxy.tickHandler = { [weak self] link in
+            self?.tick(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            ensureDisplayLink()
+            updateAnimatingState()
+            renderCurrentFrame()
+        } else {
+            displayLink?.invalidate()
+            displayLink = nil
+            lastTimestamp = nil
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let scale = max(1.0, traitCollection.displayScale)
+        metalLayer.contentsScale = scale
+        let pixelSize = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        if metalLayer.drawableSize != pixelSize {
+            metalLayer.drawableSize = pixelSize
+        }
+        renderCurrentFrame()
+    }
+
+    private func ensureDisplayLink() {
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        if #available(iOS 15.0, *) {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 60)
+        }
+        link.isPaused = true
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func updateAnimatingState() {
+        let shouldRun = window != nil && !reduceMotion && !isPaused
+        if displayLink?.isPaused == shouldRun {
+            lastTimestamp = nil
+        }
+        displayLink?.isPaused = !shouldRun
+    }
+
+    private func tick(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval) {
+        let dt: Float
+        if let prev = lastTimestamp {
+            dt = Float(min(0.1, max(1.0 / 240.0, timestamp - prev)))
+        } else {
+            dt = Float(max(1.0 / 120.0, targetTimestamp - timestamp))
+        }
+        lastTimestamp = timestamp
+        elapsed += dt
+        renderCurrentFrame()
+    }
+
+    private func renderCurrentFrame() {
+        guard bounds.width > 4, bounds.height > 4,
+              let gpu = DotScopeMetalPipeline.shared,
+              let swipePipeline = gpu.swipePipeline,
+              let drawable = metalLayer.nextDrawable(),
+              let commandBuffer = gpu.queue.makeCommandBuffer() else {
+            return
+        }
+
+        let scale = Float(max(1.0, metalLayer.contentsScale))
+        let resX = Float(metalLayer.drawableSize.width)
+        let resY = Float(metalLayer.drawableSize.height)
+        let pxPitch = max(3.0, (2.85 * scale).rounded())
+        let pitch = pxPitch / scale
+        let cols = max(15, Int(floor(resX / pxPitch)) - 1)
+        let rawRows = max(3, min(5, Int(floor(resY / pxPitch))))
+        let rows = rawRows.isMultiple(of: 2) ? max(3, rawRows - 1) : rawRows
+
+        var uniforms = DotSwipeCueMetalUniforms(
+            metrics: SIMD4<Float>(resX, resY, scale, pitch),
+            grid: SIMD4<Float>(Float(cols), Float(rows), elapsed, reduceMotion ? 1.0 : 0.0),
+            base: SIMD4<Float>(0.86, 0.83, 0.77, 1.0),
+            core: SIMD4<Float>(0.99, 0.97, 0.93, 24.0)
+        )
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+
+        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
+            encoder.setRenderPipelineState(swipePipeline)
+            encoder.setFragmentBytes(
+                &uniforms,
+                length: MemoryLayout<DotSwipeCueMetalUniforms>.stride,
+                index: 0
+            )
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+        }
+
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+}
+
+struct DotSwipeCueView: UIViewRepresentable {
+    var isPaused: Bool = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    func makeUIView(context: Context) -> DotSwipeCueHostView {
+        let view = DotSwipeCueHostView()
+        view.reduceMotion = reduceMotion
+        view.isPaused = isPaused || scenePhase != .active
+        return view
+    }
+
+    func updateUIView(_ uiView: DotSwipeCueHostView, context: Context) {
+        uiView.reduceMotion = reduceMotion
+        uiView.isPaused = isPaused || scenePhase != .active
     }
 }
