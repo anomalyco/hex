@@ -79,6 +79,11 @@ unsafe fn languages(source: Ref) -> Vec<String> {
     }
 }
 
+/// Every Mac has input sources.
+pub(crate) fn available() -> bool {
+    true
+}
+
 pub(crate) fn current(_mtm: MainThreadMarker) -> Option<String> {
     // SAFETY: TIS calls run on the UI main thread; the copy is released here.
     unsafe {

@@ -319,15 +319,18 @@ Changes go through the same rules as the window and are saved by the app,
 which then reloads them live; an open window adopts the change unless it has
 an unsaved edit.
 
-On macOS, `keyboard_model_switching.enabled` opts into switching the shared
-speech-model picker on keyboard input-source changes. The JSON setting
-`keyboard_model_switching.mappings` maps enabled input-source IDs to a model and
-a language it supports, for example
-`{"com.apple.keylayout.Spanish":{"model":"parakeet_v3","language":"es"}}`. Omit a
-source for "Don't switch"; Apple Speech can't be mapped. Automatic switches load
+On macOS, Windows, and Linux on X11, `keyboard_model_switching.enabled` opts
+into switching the shared speech-model picker on keyboard input-source changes.
+The JSON setting `keyboard_model_switching.mappings` maps enabled input-source
+IDs to a model and a language it supports, for example
+`{"com.apple.keylayout.Spanish":{"model":"parakeet_v3","language":"es"}}`.
+Source IDs are macOS input-source IDs, Windows keyboard layout handles
+(`04190419` for Russian), or X11 XKB layouts (`ru`, `de(neo)`). Omit a source
+for "Don't switch"; Apple Speech can't be mapped. Automatic switches load
 installed models only; they never download them. Enabling or editing the active
-mapping applies it; launching Hex does not reapply it. Other platforms keep the
-settings but do not observe input-source changes or show these controls.
+mapping applies it; launching Hex does not reapply it. Wayland has no general
+protocol for the active layout, so there Hex keeps the settings but does not
+observe input-source changes or show these controls.
 
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.

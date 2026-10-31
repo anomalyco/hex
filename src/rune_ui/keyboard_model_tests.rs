@@ -33,7 +33,7 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
 }
 
 #[test]
-fn keyboard_model_switching_is_a_macos_only_saved_opt_in() {
+fn keyboard_model_switching_is_a_saved_opt_in_wherever_layouts_are_observable() {
     let mut rt = runtime("mac-settings");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
     assert!(rt.find("keyboard-model-switching").is_none(), "in Advanced");
@@ -43,11 +43,14 @@ fn keyboard_model_switching_is_a_macos_only_saved_opt_in() {
     assert_eq!(rt.state.saved, 1);
     tap(&mut rt, "keyboard-model-switching");
     assert!(!rt.state.settings.keyboard_model_switching.enabled);
-    for scene in ["portal", "windows-settings"] {
-        let mut rt = runtime(scene);
-        tap(&mut rt, "advanced-toggle");
-        assert!(rt.find("keyboard-model-switching").is_none());
-    }
+    let mut rt = runtime("windows-settings");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("keyboard-model-switching").is_some());
+    // Wayland (the portal scene) has no layout protocol.
+    let mut rt = runtime("portal");
+    rt.state.platform.caps.keyboard_model_switching = false;
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("keyboard-model-switching").is_none());
 }
 
 #[test]

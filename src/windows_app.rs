@@ -74,6 +74,12 @@ pub(crate) struct WindowsDesktopHost {
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
     preparation: TranscriptionPreparation,
+    keyboard_switcher: crate::keyboard_model_switching::Switcher,
+    /// Present only while keyboard model switching is on.
+    input_sources: Option<crate::keyboard_input_sources::Watcher>,
+    /// The preparation running is a keyboard switch, which a manual choice
+    /// or a later source change supersedes.
+    automatic_preparation: bool,
     updater: crate::updater::Updater,
 }
 
@@ -211,6 +217,16 @@ impl WindowsDesktopHost {
         let mode_runtime = Arc::new(RwLock::new(
             crate::dictation_modes::ModeRuntime::from_settings(&settings),
         ));
+        // Known before the first poll, so launching keeps the saved model
+        // instead of applying the current layout's mapping.
+        let keyboard_switcher = crate::keyboard_model_switching::Switcher::new(
+            settings.keyboard_model_switching.clone(),
+            settings
+                .keyboard_model_switching
+                .enabled
+                .then(crate::keyboard_input_sources::current)
+                .flatten(),
+        );
         let mut host = Self {
             event_path,
             event_reader,
@@ -232,6 +248,9 @@ impl WindowsDesktopHost {
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             preparation: TranscriptionPreparation::default(),
+            keyboard_switcher,
+            input_sources: None,
+            automatic_preparation: false,
             updater: crate::updater::Updater::start(),
         };
         crate::transcription_models::delete_set_aside();
@@ -259,7 +278,10 @@ impl WindowsDesktopHost {
                 }
             }
             Request::ChooseModel { model, language } => self.choose_model(model, language),
-            Request::CancelModel => self.preparation.cancel(),
+            Request::CancelModel => {
+                self.manual_choice();
+                self.preparation.cancel();
+            }
             Request::Quit => return true,
             Request::ReloadSettings => match AppSettings::load() {
                 Ok(settings) => self.apply_settings(&settings),
@@ -293,6 +315,7 @@ impl WindowsDesktopHost {
     }
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
+        self.manual_choice();
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -305,6 +328,60 @@ impl WindowsDesktopHost {
             },
         };
         self.preparation.start(selection, false);
+    }
+
+    /// A layout change not yet polled counts as before this choice, so it
+    /// cannot later undo it.
+    fn manual_choice(&mut self) {
+        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll()) {
+            self.keyboard_switcher.source_changed(source, Instant::now());
+        }
+        self.keyboard_switcher.manual_choice();
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
+    }
+
+    /// A layout being cycled through cancels only automatic work; a manual
+    /// operation is superseded once the debounced choice is due.
+    fn supersede_automatic(&mut self) {
+        if self.automatic_preparation {
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
+    }
+
+    /// Follows the foreground layout while switching is on, and starts the
+    /// installed-only preparation of a mapping once it is due.
+    fn switch_with_keyboard(&mut self) {
+        let enabled = self.settings.keyboard_model_switching.enabled;
+        if enabled != self.input_sources.is_some() {
+            self.input_sources = enabled.then(Default::default);
+        }
+        if let Some(source) = self.input_sources.as_mut().and_then(|watcher| watcher.poll())
+            && self.keyboard_switcher.source_changed(source, Instant::now())
+        {
+            self.supersede_automatic();
+        }
+        let Some(choice) = self.keyboard_switcher.take_due(Instant::now()) else {
+            return;
+        };
+        let selection = crate::transcription_models::TranscriptionSelection {
+            language: choice.language,
+            ..self.settings.transcription_for_model(choice.model)
+        };
+        if selection.model != self.settings.transcription.model
+            || selection.language != self.settings.transcription.language
+        {
+            self.preparation.start(selection, true);
+            self.automatic_preparation = true;
+        } else {
+            // The current model stays, but an older manual preparation must
+            // not replace it.
+            self.preparation.cancel();
+            self.automatic_preparation = false;
+        }
     }
 
     fn model_ready(&self) -> bool {
@@ -393,6 +470,12 @@ impl WindowsDesktopHost {
     /// listener reads changes in place; anything the listener captured at
     /// start restarts a running listener.
     fn apply_settings(&mut self, settings: &AppSettings) {
+        if self.keyboard_switcher.configure(
+            settings.keyboard_model_switching.clone(),
+            Instant::now(),
+        ) {
+            self.supersede_automatic();
+        }
         let previous = std::mem::replace(&mut self.settings, settings.clone());
         let current = settings;
         crate::feedback::set_enabled(current.sound_effects);
@@ -495,7 +578,9 @@ impl WindowsDesktopHost {
     }
 
     pub(crate) fn refresh(&mut self) {
+        self.switch_with_keyboard();
         if let Some(result) = self.preparation.poll() {
+            self.automatic_preparation = false;
             let result = result.and_then(|selection| {
                 crate::transcription_models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut candidate = self.settings.clone();

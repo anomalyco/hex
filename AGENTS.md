@@ -73,6 +73,10 @@ substitute for source inspection or a second roadmap.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
+- `keyboard_input_sources`, `keyboard_model_switching`: keyboard input-source
+  observation (macOS TIS, Windows foreground-window layout, X11 XKB groups;
+  Wayland has no general protocol) and the shared debounced policy that turns a
+  mapped source into an installed-only model-picker choice.
 - `dictation`, `dictation_diagnostics`: warm pre-roll, growable capture, 16 kHz
   local-transcription resampling, and owner-only diagnostic WAV retention when
   `HEX_RETAIN_DICTATION_AUDIO` is set.
