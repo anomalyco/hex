@@ -1028,13 +1028,7 @@ impl Ui {
         if let platform::PlatformRequest::Meeting(meeting) = &request
             && matches!(self.host, platform::PlatformHost::Local(_))
         {
-            let waker = self.modes.waker.clone();
-            let wake = move || {
-                if let Some(waker) = &waker {
-                    waker();
-                }
-            };
-            if let Err(error) = self.meetings.local.send(meeting.clone(), wake) {
+            if let Err(error) = self.send_meeting(meeting.clone()) {
                 self.error = Some(error);
             }
             return;
@@ -1051,6 +1045,23 @@ impl Ui {
             Err(_) if is_relaunch => self.platform.relaunch_failed = true,
             Err(error) => self.error = Some(error),
         }
+    }
+
+    /// Sends a meeting request to whoever carries it out: on Linux and
+    /// Windows the meetings this window keeps itself, whose host ignores
+    /// meeting requests; elsewhere the OS host.
+    fn send_meeting(&mut self, request: platform::MeetingRequest) -> Result<(), String> {
+        #[cfg(not(target_os = "macos"))]
+        if matches!(self.host, platform::PlatformHost::Local(_)) {
+            let waker = self.modes.waker.clone();
+            let wake = move || {
+                if let Some(waker) = &waker {
+                    waker();
+                }
+            };
+            return self.meetings.local.send(request, wake);
+        }
+        self.host.send(platform::PlatformRequest::Meeting(request))
     }
 
     fn running(&self) -> bool {

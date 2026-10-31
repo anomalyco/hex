@@ -19,7 +19,7 @@ use super::controls::{
 };
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
-use super::platform::{MeetingRequest, PlatformRequest};
+use super::platform::MeetingRequest;
 use super::{Menu, Ui};
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
 
@@ -433,8 +433,10 @@ impl MeetingsPane {
     }
 }
 
+/// Sends `request` where it is carried out (on Linux and Windows, the
+/// window's own meetings, not the OS host, which ignores meeting requests).
 fn ask(ui: &mut Ui, request: MeetingRequest) -> bool {
-    match ui.host.send(PlatformRequest::Meeting(request)) {
+    match ui.send_meeting(request) {
         Ok(()) => true,
         Err(error) => {
             ui.meetings.action_error = Some(error);
@@ -1206,4 +1208,29 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
             ),
     );
     els
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+    use crate::rune_ui::Service;
+    use crate::rune_ui::platform::PlatformHost;
+
+    /// Linux and Windows carry meeting requests out in the window's own
+    /// process; the OS host ignored them, so Stop, Rename, and Trash from
+    /// the pane did nothing and reported nothing (#566).
+    #[test]
+    fn pane_requests_reach_the_window_s_own_meetings() {
+        let mut ui = Ui::with(
+            crate::app_settings::AppSettings::default(),
+            Service::Fixture(Vec::new()),
+        );
+        assert!(matches!(ui.host, PlatformHost::Local(_)));
+        ui.meetings = MeetingsPane::fixture();
+        // No meeting controller runs in tests, so the request is refused
+        // rather than silently accepted.
+        stop(&mut ui);
+        assert!(!ui.meetings.stop_pending);
+        assert!(ui.meetings.action_error.is_some());
+    }
 }
