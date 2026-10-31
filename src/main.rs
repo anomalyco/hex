@@ -33,7 +33,7 @@ mod desktop_activity;
 mod desktop_host;
 mod desktop_i18n;
 mod dev_build;
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
@@ -99,7 +99,6 @@ mod linux_session;
 #[cfg(target_os = "linux")]
 mod linux_tray;
 mod live_text;
-#[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod local_transcriber;
@@ -124,7 +123,6 @@ mod opencode_catalog;
 mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod pause_segmenter;
 #[cfg(target_os = "macos")]
 mod permission_guide;
@@ -155,9 +153,7 @@ mod transcription_engine;
 mod transcription_models;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 mod transcription_preparation;
-#[cfg(target_os = "macos")]
 mod transcription_service;
-#[cfg(target_os = "macos")]
 mod transcription_stream;
 mod updater;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -184,14 +180,8 @@ mod windows_paste;
 mod windows_rune;
 
 #[cfg(target_os = "macos")]
-use std::fs;
-#[cfg(target_os = "macos")]
-use std::io::{Read, Write};
-#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "macos")]
 use clap::{Parser, Subcommand, ValueEnum};
@@ -603,59 +593,7 @@ fn main() -> Result<()> {
             if !embedded {
                 app_settings::AppSettings::load()?;
             }
-            let service_event_path = if embedded {
-                log_dir.join(format!("embedded-{}.ndjson", std::process::id()))
-            } else {
-                event_path
-            };
-            let events = events::EventLog::create(&service_event_path)?;
-            let local_api = if embedded {
-                let api = local_api::LocalApi::start_embedded(events)?;
-                std::thread::Builder::new()
-                    .name("embedded-host-lease".into())
-                    .spawn(|| {
-                        let mut stdin = std::io::stdin().lock();
-                        let mut buffer = [0_u8; 1];
-                        loop {
-                            match stdin.read(&mut buffer) {
-                                Ok(0) => {
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    std::thread::sleep(std::time::Duration::from_secs(5));
-                                    tracing::warn!(
-                                        "forcing embedded service shutdown after host lease closed"
-                                    );
-                                    std::process::exit(0);
-                                }
-                                Ok(_) => {}
-                                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                                Err(error) => {
-                                    tracing::warn!(%error, "embedded host lease failed");
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    break;
-                                }
-                            }
-                        }
-                    })?;
-                let mut stdout = std::io::stdout().lock();
-                serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
-                stdout.write_all(b"\n")?;
-                stdout.flush()?;
-                drop(stdout);
-                api
-            } else {
-                local_api::LocalApi::start(events, local_api::LocalApiOptions::default())?
-            };
-            while !SHUTDOWN.load(Ordering::Relaxed) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            drop(local_api);
-            if embedded
-                && let Err(error) = fs::remove_file(&service_event_path)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(%error, "could not remove embedded service event log");
-            }
-            Ok(())
+            local_api::run_service(&log_dir, event_path, embedded, &SHUTDOWN)
         }
         Command::Mcp { .. }
         | Command::History(_)

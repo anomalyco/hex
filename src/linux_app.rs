@@ -324,6 +324,7 @@ pub(crate) fn run(
     crate::linux_dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::local_transcriber::initialize_backends();
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path);
     let enable_on_launch = settings.enable_on_launch;
     let mut host = LinuxDesktopHost::new(
         event_path,
@@ -355,6 +356,7 @@ pub(crate) fn run(
     run_window(&host, requests, first, shutdown);
     shutdown.store(true, Ordering::Release);
     let _ = worker.join();
+    drop(local_api);
     drop(tray);
     Ok(())
 }

@@ -1459,17 +1459,30 @@ Both Linux CI triggers include `tests/**`, and the
 layout evidence.
 
 ```ts
-TypeScript SDK + macOS local service
+TypeScript SDK + local service             // macOS, Linux, Windows
 ├── Caller records audio -> Explicit helper -> Raw transcription
+│   └── Linux, Windows -> No packaged helper; command: hex service --embedded
 ├── Caller streams audio -> Running app's /streams -> Partials, segments, final
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
+├── Running app's /transcriptions -> Listener's engine when it holds the model
+│   └── Otherwise the service's own copy of the requested model
 ├── Running desktop capture API -> Separate microphone ownership protocol
-│   └── No silence gate                  // model output, unlike hotkey dictation;
-│                                         // only Whisper hint echoes are dropped
+│   ├── No silence gate                  // model output, unlike hotkey dictation;
+│   │                                     // only Whisper hint echoes are dropped
+│   └── Linux, Windows -> serviceCapture false, 404 service-capture-unavailable
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished
 ```
+
+Linux and Windows serve the same local API from the running app
+([linux_app.rs](../../src/linux_app.rs), [windows_rune.rs](../../src/windows_rune.rs))
+and from `hex service [--embedded]`; a failed start only logs, and Hex runs on
+without it. On Linux, the embedded service answered `/health`,
+`/capabilities`, `/models`, and transcribed a WAV with Parakeet Unified
+English on the Vulkan iGPU (October 30). The running app's shared-engine path,
+`/streams` on a live Linux or Windows listener, and anything on Windows beyond
+`cargo xwin clippy` (x64) are unverified.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

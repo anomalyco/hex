@@ -18,6 +18,7 @@ pub type TimedSpan = (i64, i64, String);
 
 pub struct LocalTranscriber {
     session: OfflineGgufSession,
+    selection: TranscriptionSelection,
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
@@ -187,6 +188,7 @@ impl LocalTranscriber {
         let session = OfflineGgufSession::new(model)?;
         let mut transcriber = Self {
             session,
+            selection: selection.clone(),
             options: RunOptions {
                 timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
                     TimestampKind::None
@@ -243,6 +245,33 @@ impl LocalTranscriber {
             .with_stream(&options, stream_options, cancel, drive)
     }
 
+    /// The selection this model was loaded for, so the transcription engine
+    /// can say which model it holds.
+    pub(crate) fn gguf_selection(&self) -> Option<&TranscriptionSelection> {
+        Some(&self.selection)
+    }
+
+    pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
+        &self.selection == selection
+    }
+
+    /// Brings an idle model's weights back before audio arrives, as loading
+    /// does; a model that ran recently is already warm.
+    pub(crate) fn prewarm(&mut self) -> Result<()> {
+        if self.session.ran_recently() {
+            return Ok(());
+        }
+        self.transcribe(&vec![0.0; 24_000])
+            .wrap_err("could not prewarm transcription model")
+            .map(drop)
+    }
+
+    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
+    pub(crate) fn transcribe_clip(&mut self, mut samples: Vec<f32>) -> Result<String> {
+        crate::dictation::pad_for_parakeet(&mut samples);
+        self.transcribe(&samples)
+    }
+
     pub fn device_label(&self) -> &str {
         &self.device_label
     }
@@ -293,6 +322,38 @@ impl LocalTranscriber {
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
         self.session
             .transcribe_chunked(samples, &self.options, self.max_audio_samples)
+    }
+}
+
+/// The local API's own model, loaded for the selection a host asks for
+/// when the dictation engine holds another one.
+#[derive(Default)]
+pub(crate) struct WarmLocal {
+    active: Option<LocalTranscriber>,
+}
+
+impl WarmLocal {
+    /// The loaded model, without switching or loading one.
+    pub(crate) fn active(&mut self) -> Option<&mut LocalTranscriber> {
+        self.active.as_mut()
+    }
+
+    pub(crate) fn activate(
+        &mut self,
+        selection: &TranscriptionSelection,
+    ) -> Result<&mut LocalTranscriber> {
+        if !self
+            .active
+            .as_ref()
+            .is_some_and(|model| model.matches_selection(selection))
+        {
+            self.active = None;
+            self.active = Some(LocalTranscriber::load(selection)?);
+        }
+        Ok(self
+            .active
+            .as_mut()
+            .expect("activated transcriber must be available"))
     }
 }
 

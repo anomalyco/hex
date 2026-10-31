@@ -157,7 +157,6 @@ impl OfflineGgufSession {
     }
 
     /// Whether a run or live stream completed within [`RECENT_RUN`].
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn ran_recently(&self) -> bool {
         ran_within(self.last_run, Instant::now(), RECENT_RUN)
     }

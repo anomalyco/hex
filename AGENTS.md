@@ -129,8 +129,12 @@ substitute for source inspection or a second roadmap.
   whole-clip runs, and (macOS) model loads and switches. The capture owns its
   `LiveStream` and hands it to the finished clip; finishing returns a
   `PendingTranscript` whose wait enforces the stream deadline and falls back to
-  the whole clip. On macOS it also runs background work (meeting chunks) that
-  yields to any dictation request sent before it starts.
+  the whole clip. It also runs background work (meeting chunks, local API
+  host audio) that yields to any dictation request sent before it starts. The
+  listener shares its engine (`TranscriptionEngine::share`) on every OS;
+  `transcription_engine::dictation_busy` is the press-to-paste capture state
+  on macOS, and on Linux and Windows only the engine's dictation streams and
+  finishes, so a host clip can start during a CPU-only capture's hold.
 - `transcription_preparation`: application-owned model preparation shared by
   Settings and the menu bar on macOS and by the Windows runtime, with one
   worker, latest-choice pending admission, cancellation fences, and an
@@ -140,7 +144,8 @@ substitute for source inspection or a second roadmap.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
-  service loads its own, released after a long clip when the engine holds it.
+  service loads its own (`WarmTranscriber` on macOS, `local_transcriber::WarmLocal`
+  on Linux and Windows), released after a long clip when the engine holds it.
 - `transcription_stream`: live `/streams` transcription of another app's
   pushed audio on the engine's loaded model: pause-cut windows fed through
   yielding engine streams that any dictation request closes, a bounded
@@ -152,7 +157,13 @@ substitute for source inspection or a second roadmap.
   [`docs/streams.md`](docs/streams.md)), plus the always-on authenticated
   `POST /control`, and `GET /profile/vitals` (process footprint and CPU from
   Rune's `procwatch`, sampled by `macos_rune`; debug builds also count the heap
-  and report the `speech.model_weights` gauge from `parakeet`).
+  and report the `speech.model_weights` gauge from `parakeet`). The running
+  app serves it on every OS, as does `hex service [--embedded]`; the discovery
+  file is `local-api.json` in the data folder (mode 0600 on Unix, the per-user
+  `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
+  the macOS recognition loop only; elsewhere it answers
+  `service-capture-unavailable` at runtime, and `/profile/vitals` answers 503.
+  Linux and Windows do not route `/control` through it yet.
 - `control`: the release `hex` control surface: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
