@@ -110,10 +110,8 @@ impl Feature {
             Self::VoiceFilter => {
                 "Hex Microphone virtual input and real-time voice filters (its own pane)"
             }
-            Self::Playground => "Scene and story browser in the window (applies on restart)",
-            Self::LiveText => {
-                "Show provisional words beside the HUD while dictating (applies on restart)"
-            }
+            Self::Playground => "Scene and story browser in the window",
+            Self::LiveText => "Show provisional words beside the HUD while dictating",
             Self::LiveChapters => "Break meeting transcripts into chapters while recording",
             Self::VocabularyBiasing => {
                 "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
@@ -190,7 +188,7 @@ fn on(bit: u8) -> bool {
     state & bit != 0
 }
 
-/// Live text: provisional words beside the HUD (read at launch).
+/// Live text: provisional words beside the HUD (read as each dictation starts).
 pub fn live_text() -> bool {
     on(LIVE_TEXT)
 }
@@ -200,7 +198,7 @@ pub fn live_chapters() -> bool {
     on(LIVE_CHAPTERS)
 }
 
-/// The playground in the window (read at launch).
+/// The playground in the window.
 pub fn playground() -> bool {
     on(PLAYGROUND)
 }
@@ -292,6 +290,19 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         ));
     }
     let state = if on { "on" } else { "off" };
+    // A running Hex saves and applies it at once, as its Labs row would.
+    if let Some(reply) = crate::control::cli::set_in_running_hex(
+        feature.settings_key(),
+        if on { "true" } else { "false" },
+    ) {
+        return match reply {
+            crate::control::ControlReply::Error { message, .. } => Err(eyre!("{message}")),
+            _ => {
+                println!("Turned {} {state}.", feature.name());
+                Ok(())
+            }
+        };
+    }
     if feature.on(&settings) == on {
         println!("{} is already {state}.", feature.name());
         return Ok(());
@@ -299,7 +310,6 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
     feature.set(&mut settings, on);
     settings.save()?;
     println!("Turned {} {state}.", feature.name());
-    println!("{RESTART_HINT}");
     Ok(())
 }
 
@@ -329,11 +339,6 @@ pub fn run_retired_experiments() -> Result<()> {
     println!("Experiments are now Labs: hex labs, hex labs on|off <feature>");
     Ok(())
 }
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-const RESTART_HINT: &str = "Restart Hex to apply it: hex restart";
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-const RESTART_HINT: &str = "Quit and reopen Hex to apply it.";
 
 #[cfg(test)]
 mod tests {

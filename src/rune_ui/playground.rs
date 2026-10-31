@@ -5,8 +5,8 @@
 //! the HUD and the capture capsule), then every fixture
 //! scene in [`SCENES`] under a readable name, by pane. Each opens on a fresh
 //! fixture state; the real window's state keeps running underneath,
-//! untouched. Off, nothing is attached: no shortcut, menu item, or scene
-//! list.
+//! untouched. The window always attaches it, so the toggle applies at once;
+//! off, no shortcut, menu item, sidebar item, or link opens it.
 
 use std::sync::OnceLock;
 
@@ -248,7 +248,7 @@ const PATHS: &[(&str, &str)] = &[
     ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
 ];
 
-/// Labs › Playground is on (read at launch).
+/// Labs › Playground is on.
 pub(crate) fn enabled() -> bool {
     crate::labs::playground()
 }
@@ -266,6 +266,17 @@ pub(super) fn spec(spec: AppSpec<Ui>) -> AppSpec<Ui> {
 }
 
 pub(super) fn attach(app: App<Ui>) -> App<Ui> {
+    app.playground(playground())
+}
+
+/// The window's playground: always attached, so Labs › Playground applies at
+/// once. Rune's own ⇧⌘D is off; the window's `on_key`, its sidebar item, and
+/// the macOS View menu open it only while the toggle is on.
+pub(super) fn attach_gated(app: App<Ui>) -> App<Ui> {
+    app.playground(playground().shortcut(None))
+}
+
+fn playground() -> Playground<Ui> {
     let playground = Playground::new()
         .enabled(true)
         .bar(false)
@@ -279,7 +290,7 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
     let playground = super::hud_stories::add(playground);
     #[cfg(all(hex_capture, target_os = "macos"))]
     let playground = super::capture_capsule::playground::stories(playground);
-    app.playground(playground)
+    playground
 }
 
 fn blank() -> Ui {

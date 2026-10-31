@@ -249,7 +249,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.live_text",
         Kind::Bool,
-        "Labs: provisional words beside the HUD while dictating (applies on restart)",
+        "Labs: provisional words beside the HUD while dictating",
     ),
     key(
         "labs.live_chapters",
@@ -259,7 +259,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.playground",
         Kind::Bool,
-        "Labs: the scene and story browser in the window (applies on restart)",
+        "Labs: the scene and story browser in the window",
     ),
     key(
         "labs.vocabulary_biasing",

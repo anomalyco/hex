@@ -1264,7 +1264,9 @@ objc2::define_class!(
 
         #[unsafe(method(togglePlayground:))]
         fn toggle_playground(&self, _sender: Option<&AnyObject>) {
-            with_window(|window| window.update(|_, tx| tx.toggle_playground()));
+            if crate::rune_ui::playground::enabled() {
+                with_window(|window| window.update(|_, tx| tx.toggle_playground()));
+            }
         }
 
         #[unsafe(method(minimizeWindow:))]
@@ -1334,13 +1336,12 @@ fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
         ),
     ];
     // Rune's own View › Playground item, which this menu bar replaces. A
-    // capital letter adds Shift: ⇧⌘D.
-    if crate::rune_ui::playground::enabled() {
-        menus.push((
-            "View",
-            vec![Some(("Playground", sel!(togglePlayground:), "D"))],
-        ));
-    }
+    // capital letter adds Shift: ⇧⌘D. It opens the playground only while
+    // Labs › Playground is on.
+    menus.push((
+        "View",
+        vec![Some(("Playground", sel!(togglePlayground:), "D"))],
+    ));
     menus.push((
         "Window",
         vec![Some(("Minimize", sel!(minimizeWindow:), "m"))],

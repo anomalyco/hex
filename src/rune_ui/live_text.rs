@@ -65,11 +65,10 @@ impl Spot {
 /// appears, so it may read the screen.
 pub(crate) type Place = fn() -> Spot;
 
-/// Adds the plate to the app when Labs is on.
+/// Adds the plate to the app. It shows only while a dictation publishes its
+/// text (Labs › Live text, applied at once), so it's prewarmed only when
+/// Live text is on at launch.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
-    if !crate::labs::live_text() {
-        return;
-    }
     let spec = OverlaySpec {
         name: "Hex live text",
         size: SIZE,
@@ -82,7 +81,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         view,
     }
     .options(OverlayOptions {
-        prewarm: true,
+        prewarm: crate::labs::live_text(),
         ..Default::default()
     });
     let overlay = app.overlay(spec, Plate::default());

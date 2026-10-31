@@ -381,9 +381,10 @@ pub struct TranscriptionEngine {
     requests: Arc<AtomicU64>,
     /// Whether the loaded model can stream on its device.
     streams: Arc<AtomicBool>,
-    /// Whether dictation streams publish their text as they go (the
-    /// Labs); a [`crate::live_text::Demand`] also asks.
-    live_text: bool,
+    /// Whether dictation streams publish their text as they go (Labs ›
+    /// Live text, read as each stream begins); a
+    /// [`crate::live_text::Demand`] also asks.
+    live_text: fn() -> bool,
     held: Held,
     /// Whether the worker is running a dictation stream or finish.
     dictating: Arc<AtomicBool>,
@@ -542,7 +543,7 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: crate::labs::live_text(),
+            live_text: crate::labs::live_text,
             held,
             dictating,
             next_stream: AtomicU64::new(0),
@@ -562,7 +563,7 @@ impl TranscriptionEngine {
             stalled: Arc::default(),
             requests: Arc::default(),
             streams: Arc::new(AtomicBool::new(true)),
-            live_text: false,
+            live_text: || false,
             held: Held::default(),
             dictating: Arc::default(),
             next_stream: AtomicU64::new(0),
@@ -589,7 +590,7 @@ impl TranscriptionEngine {
     /// Turns live text on, as Labs does.
     #[cfg(test)]
     pub(crate) fn with_live_text(mut self) -> Self {
-        self.live_text = true;
+        self.live_text = || true;
         self
     }
 
@@ -600,7 +601,7 @@ impl TranscriptionEngine {
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = CancelToken::new();
-        let partials = (self.live_text || crate::live_text::demanded()).then(Partials::default);
+        let partials = ((self.live_text)() || crate::live_text::demanded()).then(Partials::default);
         self.requests.fetch_add(1, Ordering::AcqRel);
         self.commands
             .send(Command::Begin {
