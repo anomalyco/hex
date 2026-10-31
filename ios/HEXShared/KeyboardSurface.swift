@@ -58,6 +58,19 @@ final class KeyboardViewModel: ObservableObject {
         guard let pending = pendingCommand, pending.kind == .stop else { return false }
         return now - pending.sentAt < Self.commandAckTimeout && snapshot.state == .recording
     }
+
+    var dotScopePhase: DotScopePhase {
+        if isOptimisticStopping || snapshot.state == .transcribing {
+            return .processing
+        }
+        if isOptimisticStarting {
+            return .recording(loudnessDB: -62.0)
+        }
+        if snapshot.state == .recording {
+            return .recording(loudnessDB: snapshot.effectiveLoudnessDB)
+        }
+        return .idle
+    }
 }
 
 private struct GlobeKeyRepresentable: UIViewRepresentable {
@@ -70,7 +83,7 @@ private struct GlobeKeyRepresentable: UIViewRepresentable {
             systemName: "globe",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         )
-        config.baseForegroundColor = UIColor(white: 0.92, alpha: 1)
+        config.baseForegroundColor = UIColor(white: 0.90, alpha: 1)
         button.configuration = config
         button.accessibilityLabel = "Next keyboard"
         if let controller {
@@ -96,12 +109,15 @@ private struct RepeatDeleteKey: View {
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(HexTheme.textBase)
             .frame(width: 52, height: 40)
-            .background(isPressing ? HexTheme.layer02 : HexTheme.layer01, in: RoundedRectangle(cornerRadius: 10))
+            .background(
+                isPressing ? HexTheme.layer02 : HexTheme.layer01,
+                in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                     .stroke(HexTheme.borderWeak, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -147,6 +163,15 @@ enum KeyboardSetupCopy {
 struct KeyboardSurfaceView: View {
     @ObservedObject var model: KeyboardViewModel
 
+    private var isStageActive: Bool {
+        switch model.dotScopePhase {
+        case .recording, .processing, .failed:
+            true
+        case .hidden, .idle:
+            false
+        }
+    }
+
     var body: some View {
         VStack(spacing: 8) {
             topBar
@@ -160,6 +185,8 @@ struct KeyboardSurfaceView: View {
         .background(HexTheme.bgDeep)
         .preferredColorScheme(.dark)
     }
+
+    // MARK: - Top Bar (26 pt)
 
     @ViewBuilder
     private var topBar: some View {
@@ -176,7 +203,7 @@ struct KeyboardSurfaceView: View {
                             .font(.system(size: 12, weight: active ? .semibold : .medium))
                             .foregroundStyle(active ? HexTheme.textBase : HexTheme.textMuted)
                             .padding(.horizontal, 10)
-                            .frame(height: 28)
+                            .frame(height: 26)
                             .background(active ? HexTheme.layer02 : HexTheme.layer01, in: Capsule())
                     }
                     .buttonStyle(.plain)
@@ -184,7 +211,7 @@ struct KeyboardSurfaceView: View {
                 Spacer(minLength: 4)
                 closeTrayButton
             }
-            .frame(height: 30)
+            .frame(height: 26)
 
         case .returnApp:
             HStack(spacing: 4) {
@@ -199,55 +226,111 @@ struct KeyboardSurfaceView: View {
                 .hexScrollEdgeEffectHidden()
                 closeTrayButton
             }
-            .frame(height: 30)
+            .frame(height: 26)
 
         case .none:
             HStack(spacing: 8) {
-                statusLead
+                leadingAccessory
                 Spacer(minLength: 4)
-
-                if !model.isWarmAvailable && model.hasFullAccess {
-                    Button {
-                        model.activeTray = .returnApp
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(model.selectedReturnApp?.name ?? "Swipe")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(HexTheme.textMuted)
-                        .padding(.horizontal, 9)
-                        .frame(height: 26)
-                        .background(HexTheme.layer01, in: Capsule())
-                        .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Return app after cold start")
-                }
-
                 if model.hasFullAccess {
-                    Button {
-                        model.activeTray = .style
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(model.style.label)
-                                .font(.system(size: 12, weight: .medium))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 9, weight: .semibold))
-                        }
-                        .foregroundStyle(HexTheme.textBase)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(HexTheme.layer01, in: Capsule())
-                        .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Dictation style: \(model.style.label)")
+                    stylePill
                 }
             }
-            .frame(height: 30)
+            .frame(height: 26)
         }
+    }
+
+    @ViewBuilder
+    private var leadingAccessory: some View {
+        if !model.hasFullAccess {
+            HStack(spacing: 6) {
+                HexStatusDot(color: HexTheme.warmMic, size: 6)
+                Text(KeyboardSetupCopy.fullAccessPath)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
+        } else if model.isWarmAvailable {
+            switch model.snapshot.state {
+            case .recording:
+                HStack(spacing: 6) {
+                    HexStatusDot(color: HexTheme.danger, size: 7)
+                    Text(HexTheme.formatClock(model.snapshot.recordingElapsed(at: model.now)))
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(HexTheme.textBase)
+                }
+            case .transcribing:
+                EmptyView()
+            case .failed:
+                if let message = model.snapshot.message, !message.isEmpty {
+                    HStack(spacing: 6) {
+                        HexStatusDot(color: HexTheme.danger, size: 6)
+                        Text(message)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(HexTheme.textMuted)
+                            .lineLimit(1)
+                    }
+                }
+            default:
+                if let message = model.snapshot.message, !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .lineLimit(1)
+                } else {
+                    HStack(spacing: 5) {
+                        HexStatusDot(color: HexTheme.warmMic, size: 6)
+                        Text(HexTheme.formatRemaining(model.snapshot.expiresAt - model.now))
+                            .font(.system(size: 12, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+            }
+        } else {
+            Button {
+                model.activeTray = .returnApp
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(model.selectedReturnApp?.name ?? "Swipe")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(HexTheme.textMuted)
+                .padding(.horizontal, 9)
+                .frame(height: 26)
+                .background(HexTheme.layer01, in: Capsule())
+                .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Return app")
+        }
+    }
+
+    private var stylePill: some View {
+        Button {
+            model.activeTray = .style
+        } label: {
+            HStack(spacing: 4) {
+                Text(model.style.label)
+                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(HexTheme.textMuted)
+            }
+            .foregroundStyle(HexTheme.textBase)
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(HexTheme.layer01, in: Capsule())
+            .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Style: \(model.style.label)")
     }
 
     private func returnChip(id: String?, label: String) -> some View {
@@ -260,7 +343,7 @@ struct KeyboardSurfaceView: View {
                 .font(.system(size: 12, weight: active ? .semibold : .medium))
                 .foregroundStyle(active ? HexTheme.textBase : HexTheme.textMuted)
                 .padding(.horizontal, 10)
-                .frame(height: 28)
+                .frame(height: 26)
                 .background(active ? HexTheme.layer02 : HexTheme.layer01, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -271,203 +354,132 @@ struct KeyboardSurfaceView: View {
             model.activeTray = .none
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(HexTheme.textMuted)
-                .frame(width: 28, height: 28)
+                .frame(width: 26, height: 26)
                 .background(HexTheme.layer01, in: Circle())
         }
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
-    private var statusLead: some View {
-        if !model.hasFullAccess {
-            HStack(spacing: 6) {
-                HexStatusDot(color: HexTheme.warmMic, size: 7)
-                Text(KeyboardSetupCopy.fullAccessPath)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(HexTheme.textBase)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
-        } else if model.isWarmAvailable {
-            switch model.snapshot.state {
-            case .recording:
-                HStack(spacing: 6) {
-                    HexStatusDot(color: HexTheme.danger, size: 8)
-                    Text(HexTheme.formatClock(model.snapshot.recordingElapsed(at: model.now)))
-                        .font(.system(size: 13, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(HexTheme.textBase)
-                }
-            case .transcribing:
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(HexTheme.textMuted)
-                    Text("Transcribing…")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                }
-            case .failed:
-                HStack(spacing: 6) {
-                    HexStatusDot(color: HexTheme.danger, size: 7)
-                    Text(model.snapshot.message ?? "Hex needs attention")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .lineLimit(1)
-                }
-            default:
-                HStack(spacing: 6) {
-                    HexStatusDot(color: HexTheme.warmMic, size: 7)
-                    Text(
-                        model.snapshot.message
-                            ?? "Warm · \(HexTheme.formatRemaining(model.snapshot.expiresAt - model.now))"
-                    )
-                    .font(.system(size: 12, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(HexTheme.textMuted)
-                    .lineLimit(1)
-                }
-            }
-        } else {
-            HStack(spacing: 6) {
-                HexStatusDot(color: HexTheme.textFaint, size: 6)
-                Text(
-                    model.snapshot.message
-                        ?? (model.isModelInstalled ? "Hex · mic asleep" : "Hex · setup needed")
-                )
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(HexTheme.textFaint)
-                .lineLimit(1)
-            }
-        }
-    }
+    // MARK: - Unified 52 pt Stage Well
 
-    @ViewBuilder
     private var primaryStage: some View {
-        if !model.hasFullAccess {
-            Button {
-                model.onOpenURL?(KeyboardLaunchRequest.setup.url)
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.up.forward.app.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Open Hex setup")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundStyle(HexTheme.textContrast)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(HexTheme.bgContrast, in: Capsule())
-            }
-            .buttonStyle(.plain)
-        } else if !model.isWarmAvailable || model.snapshot.state == .failed {
-            Button {
-                model.onOpenURL?(model.coldStartURL)
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(model.isModelInstalled ? "Start Hex" : "Set up Hex")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundStyle(HexTheme.textContrast)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(HexTheme.bgContrast, in: Capsule())
-            }
-            .buttonStyle(.plain)
-        } else if model.snapshot.state == .recording {
-            HStack(spacing: 10) {
-                Button {
-                    model.onCancelTap?()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .frame(width: 40, height: 40)
-                        .background(HexTheme.layer02, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel dictation")
+        let showRecordingControls = (model.snapshot.state == .recording || model.isOptimisticStarting)
+            && !model.isOptimisticStopping
 
-                Spacer(minLength: 4)
-
-                DotScopeBar(
-                    level: model.snapshot.audioLevel,
-                    barCount: 18,
-                    active: !model.isOptimisticStopping,
-                    height: 24
+        return ZStack {
+            Capsule()
+                .fill(HexTheme.bgBase)
+                .overlay(
+                    Capsule()
+                        .stroke(isStageActive ? HexTheme.borderStrong : HexTheme.borderWeak, lineWidth: 1)
                 )
 
-                Spacer(minLength: 4)
+            DotScopeView(
+                phase: model.dotScopePhase,
+                tuning: .keyboard,
+                drawPlate: false
+            )
+            .frame(width: 168, height: 38)
+            .padding(.leading, isStageActive ? 0 : 12)
+            .frame(maxWidth: .infinity, alignment: isStageActive ? .center : .leading)
+            .allowsHitTesting(false)
 
-                Button {
-                    model.onStopTap?()
-                } label: {
-                    HStack(spacing: 6) {
-                        if model.isOptimisticStopping {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(HexTheme.textContrast)
-                        } else {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 13, weight: .bold))
+            if isStageActive {
+                if showRecordingControls {
+                    HStack(spacing: 8) {
+                        Button {
+                            model.onCancelTap?()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(HexTheme.textMuted)
+                                .frame(width: 38, height: 38)
+                                .background(HexTheme.layer02, in: Circle())
                         }
-                        Text(model.isOptimisticStopping ? "Finishing" : "Done")
-                            .font(.system(size: 14, weight: .semibold))
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cancel dictation")
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            model.onStopTap?()
+                        } label: {
+                            Text("Done")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(HexTheme.textContrast)
+                                .padding(.horizontal, 16)
+                                .frame(height: 38)
+                                .background(HexTheme.bgContrast, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundStyle(HexTheme.textContrast)
-                    .padding(.horizontal, 16)
-                    .frame(height: 40)
-                    .background(HexTheme.bgContrast, in: Capsule())
+                    .padding(.horizontal, 7)
+                }
+            } else if !model.hasFullAccess {
+                Button {
+                    model.onOpenURL?(KeyboardLaunchRequest.setup.url)
+                } label: {
+                    idleTrailingTrigger(icon: "arrow.up.forward.app.fill", title: "Open Hex setup")
                 }
                 .buttonStyle(.plain)
-                .disabled(model.isOptimisticStopping)
-            }
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .background(HexTheme.bgBase, in: Capsule())
-            .overlay(Capsule().stroke(HexTheme.borderStrong, lineWidth: 1))
-        } else if model.snapshot.state == .transcribing || model.isOptimisticStarting {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(HexTheme.textBase)
-                Text(model.isOptimisticStarting ? "Opening mic…" : "Transcribing on iPhone…")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(HexTheme.textBase)
-            }
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .background(HexTheme.bgBase, in: Capsule())
-            .overlay(Capsule().stroke(HexTheme.borderWeak, lineWidth: 1))
-        } else {
-            Button {
-                model.onDictateTap?()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Dictate")
-                        .font(.system(size: 15, weight: .semibold))
+            } else if !model.isWarmAvailable || model.snapshot.state == .failed {
+                Button {
+                    model.onOpenURL?(model.coldStartURL)
+                } label: {
+                    idleTrailingTrigger(
+                        icon: "mic.fill",
+                        title: model.isModelInstalled ? "Dictate" : "Set up"
+                    )
                 }
-                .foregroundStyle(HexTheme.textContrast)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(HexTheme.bgContrast, in: Capsule())
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    model.onDictateTap?()
+                } label: {
+                    idleTrailingTrigger(icon: "mic.fill", title: "Dictate")
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
+        .frame(height: 52)
+        .animation(.spring(duration: 0.30, bounce: 0.12), value: isStageActive)
     }
+
+    private func idleTrailingTrigger(icon: String, title: String) -> some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundStyle(HexTheme.textContrast)
+            .padding(.leading, 14)
+            .padding(.trailing, 16)
+            .frame(height: 38)
+            .background(HexTheme.bgContrast, in: Capsule())
+        }
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Capsule())
+    }
+
+    // MARK: - Bottom Utility Key Row (40 pt)
 
     private var utilityRow: some View {
         HStack(spacing: 6) {
             if model.needsGlobeKey {
                 GlobeKeyRepresentable(controller: model.inputViewController)
                     .frame(width: 44, height: 40)
-                    .background(HexTheme.layer01, in: RoundedRectangle(cornerRadius: 10))
+                    .background(
+                        HexTheme.layer01,
+                        in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                             .stroke(HexTheme.borderWeak, lineWidth: 1)
                     )
             }
@@ -477,15 +489,18 @@ struct KeyboardSurfaceView: View {
             } label: {
                 Text("space")
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(HexTheme.textBase)
+                    .foregroundStyle(HexTheme.textMuted)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
-                    .background(HexTheme.layer01, in: RoundedRectangle(cornerRadius: 10))
+                    .background(
+                        HexTheme.layer01,
+                        in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                             .stroke(HexTheme.borderWeak, lineWidth: 1)
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
             .buttonStyle(.plain)
 
@@ -500,12 +515,15 @@ struct KeyboardSurfaceView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(HexTheme.textBase)
                     .frame(width: 56, height: 40)
-                    .background(HexTheme.layer01, in: RoundedRectangle(cornerRadius: 10))
+                    .background(
+                        HexTheme.layer01,
+                        in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                             .stroke(HexTheme.borderWeak, lineWidth: 1)
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(model.returnKeyLabel)

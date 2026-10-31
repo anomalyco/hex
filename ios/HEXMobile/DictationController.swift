@@ -88,6 +88,7 @@ final class DictationController {
     private(set) var isModelReady = false
     private(set) var transcript = ""
     private(set) var audioLevel: Float = 0
+    private(set) var loudnessDB: Float = -120
     private(set) var recordingDuration: TimeInterval = 0
     private(set) var copied = false
     private(set) var keyboardSessionEnabled = false
@@ -204,6 +205,18 @@ final class DictationController {
         }
     }
 
+    /// Used by the settings segmented control: picking a duration warms immediately; picking Off ends it.
+    func selectWarmDuration(_ duration: WarmSessionDuration) {
+        setWarmDuration(duration)
+        if duration == .off {
+            if keyboardSessionEnabled {
+                endWarmSession()
+            }
+        } else if !keyboardSessionEnabled {
+            requestWarmSession(attemptAutoReturn: false)
+        }
+    }
+
     func setStyle(_ newStyle: DictationStyle) {
         style = newStyle
         keyboardBridge.style = newStyle
@@ -253,10 +266,11 @@ final class DictationController {
         }
 
         if activeKeyboardJobID != nil {
-            keyboardMessage = "Cancelled"
+            keyboardMessage = nil
         }
         activeKeyboardJobID = nil
         audioLevel = 0
+        loudnessDB = -120
         recordingDuration = 0
         if phase == .recording || phase == .transcribing || phase == .requestingPermission {
             phase = .ready
@@ -302,6 +316,7 @@ final class DictationController {
             try? fileManager.removeItem(at: session.capture.url)
             activeKeyboardJobID = nil
             audioLevel = 0
+            loudnessDB = -120
             recordingDuration = 0
             liveActivity.endImmediately()
             if phase == .recording {
@@ -351,7 +366,7 @@ final class DictationController {
 
         let currentTime = now()
         if request.isHandoffExpired(at: currentTime) {
-            handoffNotice = "Handoff timed out after 10s — session warmed"
+            handoffNotice = "Timed out"
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: style,
@@ -402,7 +417,7 @@ final class DictationController {
         guard let handoff = pendingHandoff else { return }
 
         if now() - handoff.requestedAt > KeyboardLaunchRequest.handoffWindow {
-            handoffNotice = "Handoff timed out — tap Dictate in keyboard"
+            handoffNotice = "Timed out"
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: handoff.style,
@@ -448,7 +463,7 @@ final class DictationController {
                     attemptAutoReturnOnStart: handoff?.attemptAutoReturn ?? false
                 )
             } else {
-                handoffNotice = "Handoff timed out — tap Dictate again"
+                handoffNotice = "Timed out"
                 autoReturnState = .swipeFallback
             }
             return
@@ -467,7 +482,7 @@ final class DictationController {
                     )
                     return
                 } else {
-                    handoffNotice = "Handoff timed out — session stays warm"
+                    handoffNotice = "Timed out"
                 }
             }
             maybeAutoReturnAfterActivation(allowed: handoff?.attemptAutoReturn ?? false)
@@ -505,7 +520,7 @@ final class DictationController {
             }
 
             if let jobID = handoff?.jobID, !jobID.isEmpty {
-                self.handoffNotice = "Handoff timed out — session warmed"
+                self.handoffNotice = "Timed out"
             }
 
             do {
@@ -690,6 +705,7 @@ final class DictationController {
                 )
                 refreshWarmExpiry()
                 audioLevel = 0
+                loudnessDB = -120
                 recordingDuration = 0
                 phase = .recording
                 liveActivity.startRecording(startedAt: Date(timeIntervalSince1970: startedAt))
@@ -718,6 +734,7 @@ final class DictationController {
         let finalDuration = max(recordingDuration, session.capture.currentTime)
         session.capture.stop()
         audioLevel = 0
+        loudnessDB = -120
 
         let captureURL = session.capture.url
         let captureGeneration = session.generation
@@ -727,7 +744,7 @@ final class DictationController {
             try? fileManager.removeItem(at: captureURL)
             recordingDuration = 0
             activeKeyboardJobID = nil
-            keyboardMessage = keyboardJobID == nil ? nil : "Hold a beat longer to dictate"
+            keyboardMessage = nil
             phase = .ready
             liveActivity.endImmediately()
             restoreAudioAfterCapture()
@@ -826,7 +843,9 @@ final class DictationController {
                     break
                 }
 
-                self.audioLevel = session.capture.normalizedPowerLevel()
+                let db = session.capture.averagePowerDB()
+                self.loudnessDB = db
+                self.audioLevel = max(0, min(1, (db + 48) / 48))
                 self.recordingDuration = session.capture.currentTime
                 self.publishKeyboardSnapshot()
 
@@ -835,7 +854,7 @@ final class DictationController {
                     return
                 }
 
-                try? await Task.sleep(for: .milliseconds(60))
+                try? await Task.sleep(for: .milliseconds(33))
             }
         }
     }
@@ -867,7 +886,7 @@ final class DictationController {
                         do {
                             try self.audio.startKeepalive(allowBluetooth: self.allowBluetoothMic)
                         } catch {
-                            self.endWarmSession(message: "Session ended in background")
+                            self.endWarmSession()
                             return
                         }
                     }
@@ -961,6 +980,7 @@ final class DictationController {
                 expiresAt: keyboardSessionEnabled ? keyboardSessionExpiresAt : 0,
                 recordingStartedAt: activeCapture?.startedAt,
                 audioLevel: state == .recording ? audioLevel : 0,
+                loudnessDB: state == .recording ? loudnessDB : nil,
                 jobID: activeKeyboardJobID,
                 resultID: keyboardResultID,
                 resultExpiresAt: keyboardResultExpiresAt,
@@ -1004,7 +1024,7 @@ final class DictationController {
                     finishRecording()
                 } else {
                     cancelCurrentJob()
-                    keyboardMessage = "Paused for call or Siri"
+                    keyboardMessage = "Interrupted"
                 }
             } else {
                 audio.stopKeepalive()
@@ -1023,10 +1043,10 @@ final class DictationController {
                     try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
                     publishKeyboardSnapshot()
                 } catch {
-                    endWarmSession(message: "Tap Start Hex to reconnect after call")
+                    endWarmSession()
                 }
             } else {
-                endWarmSession(message: "Tap Start Hex to reconnect after call")
+                endWarmSession()
             }
 
         case .routeOldDeviceUnavailable:
@@ -1036,14 +1056,13 @@ final class DictationController {
                     finishRecording()
                 } else {
                     cancelCurrentJob()
-                    keyboardMessage = "Audio input changed"
                 }
             } else if keyboardSessionEnabled && phase == .ready {
                 do {
                     try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
                     publishKeyboardSnapshot()
                 } catch {
-                    endWarmSession(message: "Audio device disconnected")
+                    endWarmSession()
                 }
             }
 
@@ -1062,7 +1081,7 @@ final class DictationController {
                     try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
                     publishKeyboardSnapshot()
                 } catch {
-                    endWarmSession(message: "Audio services reset")
+                    endWarmSession()
                 }
             }
         }
@@ -1145,28 +1164,45 @@ final class DictationController {
         controller.isModelReady = true
 
         switch scene {
+        case "setup":
+            controller.phase = .ready
+            controller.warmDuration = .fifteenMinutes
+            controller.keyboardSessionEnabled = false
+
         case "ready":
             controller.phase = .ready
-            controller.transcript = "Ship the TestFlight build once the expiry race test passes."
+            controller.warmDuration = .off
+            controller.keyboardSessionEnabled = false
+            controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
 
         case "warm":
             controller.phase = .ready
+            controller.warmDuration = .fifteenMinutes
             controller.keyboardSessionEnabled = true
             controller.keyboardSessionRemaining = 14 * 60 + 42
             controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
             controller.setReturnAppID("messages")
-            controller.transcript = "Meet at Sightglass at ten, bring the prototype iPhone."
+            controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
 
         case "recording":
             controller.phase = .recording
+            controller.warmDuration = .fifteenMinutes
             controller.audioLevel = 0.74
+            controller.loudnessDB = -31.0
             controller.recordingDuration = 6.4
             controller.keyboardSessionEnabled = true
             controller.keyboardSessionRemaining = 14 * 60 + 54
 
+        case "transcribing":
+            controller.phase = .transcribing
+            controller.warmDuration = .fifteenMinutes
+            controller.keyboardSessionEnabled = true
+            controller.keyboardSessionRemaining = 14 * 60 + 52
+
         case "handoff-listening":
             controller.phase = .recording
             controller.audioLevel = 0.68
+            controller.loudnessDB = -32.5
             controller.recordingDuration = 3.2
             controller.keyboardSessionEnabled = true
             controller.keyboardSessionRemaining = 14 * 60 + 57

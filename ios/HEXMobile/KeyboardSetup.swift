@@ -26,6 +26,21 @@ final class KeyboardSetupMonitor {
     }
 
     func refresh() {
+        let args = ProcessInfo.processInfo.arguments
+        if let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count {
+            let snapScene = args[idx + 1]
+            if snapScene == "setup" {
+                keyboardAdded = true
+                fullAccessOn = false
+                microphone = .granted
+            } else {
+                keyboardAdded = true
+                fullAccessOn = true
+                microphone = .granted
+            }
+            return
+        }
+
         fullAccessOn = bridge.fullAccessSeenAt != nil
         if let keyboards = UserDefaults.standard.stringArray(forKey: "AppleKeyboards") {
             keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn
@@ -50,146 +65,128 @@ struct KeyboardSetupCard: View {
     let monitor: KeyboardSetupMonitor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("SET UP THE KEYBOARD")
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.6)
-                .foregroundStyle(HexTheme.textFaint)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Keyboard setup")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(HexTheme.textBase)
 
             VStack(spacing: 0) {
                 row(
                     title: "Hex Keyboard",
-                    detail: keyboardDetail,
+                    status: keyboardStatus,
                     done: monitor.keyboardAdded == true
                 )
                 divider
                 row(
                     title: "Allow Full Access",
-                    detail: monitor.fullAccessOn
-                        ? "On. The keyboard can reach Hex."
-                        : "Lets the keyboard pass your words from Hex into the text field.",
+                    status: monitor.fullAccessOn ? "On" : "Off",
                     done: monitor.fullAccessOn
                 )
                 divider
-                row(title: "Microphone", detail: microphoneDetail, done: monitor.microphone == .granted) {
+                row(
+                    title: "Microphone",
+                    status: microphoneStatus,
+                    done: monitor.microphone == .granted
+                ) {
                     if monitor.microphone == .undetermined {
                         smallButton("Allow") { monitor.requestMicrophone() }
                     }
                 }
                 divider
-                row(title: "Speech model", detail: modelDetail, done: dictation.isModelReady)
+                row(
+                    title: "Speech model",
+                    status: modelStatus,
+                    done: dictation.isModelReady
+                )
             }
 
             if !monitor.keyboardReady || monitor.microphone == .denied {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            openURL(url)
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Open Hex in Settings")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .foregroundStyle(HexTheme.textContrast)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(HexTheme.bgContrast, in: Capsule())
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        openURL(url)
                     }
-                    .buttonStyle(.plain)
-
-                    Text(settingsInstruction)
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else if dictation.isModelReady {
-                Text("Ready. In any text field, hold 🌐 and choose Hex Keyboard, then tap Start Hex.")
-                    .font(.system(size: 13))
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Open Settings")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
                     .foregroundStyle(HexTheme.textBase)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .background(HexTheme.layer02, in: Capsule())
+                    .overlay(Capsule().stroke(HexTheme.borderStrong, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(16)
-        .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius))
+        .padding(14)
+        .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: HexTheme.cardRadius)
+            RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
                 .stroke(HexTheme.borderWeak, lineWidth: 1)
         )
     }
 
-    private var keyboardDetail: String {
+    private var keyboardStatus: String {
         switch monitor.keyboardAdded {
-        case true?: "Added."
-        case false?: "Not added yet."
-        case nil: "Open the keyboard once to confirm it's added."
+        case true?: "Added"
+        case false?: "Not added"
+        case nil: "Not verified"
         }
     }
 
-    private var microphoneDetail: String {
+    private var microphoneStatus: String {
         switch monitor.microphone {
-        case .granted: "Allowed."
-        case .denied: "Off. Turn on Microphone in Settings."
-        default: "Hex records only while you dictate."
+        case .granted: "Allowed"
+        case .denied: "Off"
+        default: "Required"
         }
     }
 
-    private var modelDetail: String {
+    private var modelStatus: String {
         if dictation.isModelReady {
-            return "\(dictation.engineName) is ready on this iPhone."
+            return dictation.engineName
         }
         switch dictation.phase {
         case .preparingModel:
-            let percent = Int(dictation.modelPreparation.fractionCompleted * 100)
-            return "\(dictation.modelPreparation.detail) · \(percent)%"
-        case .failed(let message):
-            return message
+            return "\(Int(dictation.modelPreparation.fractionCompleted * 100))%"
+        case .failed:
+            return "Failed"
         default:
-            return "Runs on this iPhone. Nothing leaves it."
+            return "Preparing"
         }
     }
 
-    private var settingsInstruction: String {
-        var steps: [String] = []
-        if !monitor.keyboardReady {
-            steps.append("tap Keyboards, then turn on Hex Keyboard and Allow Full Access")
-        }
-        if monitor.microphone == .denied {
-            steps.append("turn on Microphone")
-        }
-        return "In Settings, " + steps.joined(separator: ", and ") + ". Then come back here."
-    }
-
-    private func row(title: String, detail: String, done: Bool) -> some View {
-        row(title: title, detail: detail, done: done) { EmptyView() }
+    private func row(title: String, status: String, done: Bool) -> some View {
+        row(title: title, status: status, done: done) { EmptyView() }
     }
 
     private func row<Trailing: View>(
         title: String,
-        detail: String,
+        status: String,
         done: Bool,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(done ? HexTheme.success : HexTheme.textFaint)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(HexTheme.textBase)
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(HexTheme.textMuted)
-                    .lineLimit(2)
-            }
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(HexTheme.textBase)
 
             Spacer(minLength: 8)
+
+            Text(status)
+                .font(.system(size: 13))
+                .foregroundStyle(HexTheme.textMuted)
+                .lineLimit(1)
+
             trailing()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
     }
 
     private func smallButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -197,7 +194,7 @@ struct KeyboardSetupCard: View {
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(HexTheme.textBase)
             .padding(.horizontal, 12)
-            .frame(height: 30)
+            .frame(height: 28)
             .background(HexTheme.layer02, in: Capsule())
             .buttonStyle(.plain)
     }

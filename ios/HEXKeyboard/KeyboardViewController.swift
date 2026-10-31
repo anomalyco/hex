@@ -22,7 +22,7 @@ final class KeyboardViewController: UIInputViewController {
         syncFromBridge()
 
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.syncFromBridge()
             }
