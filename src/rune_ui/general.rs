@@ -818,7 +818,7 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
                     p,
                     "hints-field",
                     &ui.hints,
-                    tr("Names and terms Whisper should expect, e.g. OpenCode, Effect…"),
+                    tr("Names and terms the model should expect, e.g. OpenCode, Effect…"),
                     |ui: &mut Ui| &mut ui.hints,
                     |ui: &mut Ui, _| {
                         let hints = ui.hints.text.clone();

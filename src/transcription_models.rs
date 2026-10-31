@@ -491,7 +491,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: true,
-        supports_recognition_hints: false,
+        supports_recognition_hints: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::QwenCleoAsr17B,
@@ -508,7 +508,7 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["ar"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: false,
+        supports_recognition_hints: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::SenseVoiceSmall,
@@ -1785,7 +1785,7 @@ mod tests {
     }
 
     #[test]
-    fn recognition_hints_are_whisper_only() {
+    fn recognition_hints_are_for_whisper_and_qwen3_asr() {
         let mut selection = TranscriptionSelection {
             recognition_hints: "OpenCode".into(),
             ..TranscriptionSelection::default()
@@ -1793,6 +1793,24 @@ mod tests {
         assert!(validate(&selection).is_err());
         selection.model = TranscriptionModelId::WhisperLargeV3Turbo;
         assert!(validate(&selection).is_ok());
+        selection.model = TranscriptionModelId::Qwen3Asr06B;
+        assert!(validate(&selection).is_ok());
+        selection.model = TranscriptionModelId::QwenCleoAsr17B;
+        selection.language = "ar".into();
+        assert!(validate(&selection).is_ok());
+        let hinted = MODELS
+            .iter()
+            .filter(|model| model.supports_recognition_hints)
+            .map(|model| model.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hinted,
+            [
+                TranscriptionModelId::WhisperLargeV3Turbo,
+                TranscriptionModelId::Qwen3Asr06B,
+                TranscriptionModelId::QwenCleoAsr17B,
+            ]
+        );
     }
 
     #[test]

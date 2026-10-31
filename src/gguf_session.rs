@@ -46,6 +46,51 @@ pub(crate) fn job_cancel() -> Option<transcribe_cpp::CancelToken> {
     JOB_CANCEL.with(|slot| slot.borrow().clone())
 }
 
+/// Passes the recognition hints the way `model` reads them: Whisper as its
+/// initial prompt, Qwen3-ASR as the context prompt in its system message.
+/// Blank hints leave `options` untouched.
+pub(crate) fn apply_recognition_hints(
+    options: &mut transcribe_cpp::RunOptions,
+    model: &transcribe_cpp::Model,
+    definition: &ModelDefinition,
+    hints: &str,
+) -> Result<()> {
+    let hints = hints.trim();
+    if hints.is_empty() {
+        return Ok(());
+    }
+    if !definition.supports_recognition_hints {
+        return Err(eyre!("{} does not take recognition hints", definition.name));
+    }
+    if model.accepts_ext(
+        transcribe_cpp::ExtSlot::Run,
+        transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_WHISPER_RUN,
+    ) {
+        options.family = Some(transcribe_cpp::RunExtension::Whisper(
+            transcribe_cpp::WhisperRunOptions {
+                initial_prompt: Some(hints.to_string()),
+                ..Default::default()
+            },
+        ));
+    } else if model.supports(transcribe_cpp::Feature::ContextPrompt) {
+        options.prompt = Some(hints.to_string());
+    } else {
+        return Err(eyre!(
+            "{} has no prompt slot for recognition hints",
+            definition.name
+        ));
+    }
+    Ok(())
+}
+
+/// The recognition hints a run primes the model with, as either prompt.
+fn hint_prompt(options: &transcribe_cpp::RunOptions) -> Option<&str> {
+    match &options.family {
+        Some(transcribe_cpp::RunExtension::Whisper(whisper)) => whisper.initial_prompt.as_deref(),
+        _ => options.prompt.as_deref(),
+    }
+}
+
 pub(crate) fn validate_gguf_artifact(
     path: &Path,
     definition: &ModelDefinition,
@@ -279,9 +324,7 @@ impl OfflineGgufSession {
         }
         let result = keep_repetition_partial(session.run(samples, &self.with_vocabulary(options)))
             .map(|mut transcript| {
-                if let Some(transcribe_cpp::RunExtension::Whisper(whisper)) = &options.family
-                    && let Some(prompt) = &whisper.initial_prompt
-                {
+                if let Some(prompt) = hint_prompt(options) {
                     drop_prompt_echo(&mut transcript, prompt);
                 }
                 transcript
@@ -378,9 +421,9 @@ fn normalize_spoken(text: &str) -> String {
         .join(" ")
 }
 
-/// Drops Whisper segments that only repeat the recognition hints. Whisper
-/// reads the hints as its initial prompt and, on silence or noise, often
-/// returns them verbatim. Speech that merely contains a hint is kept, and so
+/// Drops segments that only repeat the recognition hints. Whisper (initial
+/// prompt) and Qwen3-ASR (context prompt) can return them verbatim on silence
+/// or noise. Speech that merely contains a hint is kept, and so
 /// is a single hint: dictating the one listed name must still paste it.
 fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
     let is_separator = |character: char| matches!(character, ',' | ';' | '\n');
