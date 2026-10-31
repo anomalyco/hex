@@ -1,15 +1,15 @@
 //! Settings controls on `rune-kit`, themed with OpenCode's design language
 //! (`rune-theme-opencode`): the card, row, switch, segmented control,
-//! select-style menus, buttons, keycaps, note, and text field. Colours,
+//! select-style menus, buttons, keycaps, and note. Colours,
 //! type, radii, elevation, and motion come from the kit's tokens.
 
 use rune::{
-    Color, Edge, El, LoopSpec, Shadow, Spring, SpringPair, TextEdit, TextStyle, Transition, Tx,
-    col, el, row, text,
+    Color, Edge, El, LoopSpec, Shadow, Spring, SpringPair, TextStyle, Transition, Tx, col, el, row,
+    text,
 };
 use rune_kit::{
     Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Kit, Menu, MenuItem,
-    Placement, SegmentedControl, Select, SelectAppearance, Switch, TextInput,
+    Placement, SegmentedControl, Select, SelectAppearance, Switch,
 };
 
 use super::Ui;
