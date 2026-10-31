@@ -129,6 +129,7 @@ mod microphone_activity;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod onboarding;
 mod opencode_catalog;
+mod opencode_service;
 mod output_ducking;
 #[cfg(target_os = "macos")]
 mod parakeet;

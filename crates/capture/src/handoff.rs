@@ -908,7 +908,6 @@ fn router_env_from(path: &Path) -> scrawl_router::env::Env {
         })),
         summary: Some(crate::sketch::summary_markdown),
         pages: Some(crate::web::lookup),
-        opencode: None,
         live: true,
     }
 }
@@ -1370,7 +1369,7 @@ mod tests {
         fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         fs::write(
             &config_path,
-            br#"{"agentHost":"studio","agentOpencode":"~/bin/opencode2","usbApps":["com.example.UpDown"],"customKey":42}"#,
+            br#"{"agentHost":"studio","agentOpencode":"~/bin/opencode","usbApps":["com.example.UpDown"],"customKey":42}"#,
         )
         .unwrap();
 

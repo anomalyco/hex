@@ -66,7 +66,7 @@ pub struct RouterConfig {
     /// The SSH host whose OpenCode server holds the sessions, when it isn't this Mac
     /// (`agentHost`).
     pub agent_host: Option<String>,
-    /// The `opencode2` command on the agent host (`agentOpencode`, default `opencode2`).
+    /// The `opencode` command on the agent host (`agentOpencode`, default `opencode`).
     pub agent_opencode: Option<String>,
     /// Whether a capture of a dev site goes straight to its session (top-level `autoSend`,
     /// default on).
@@ -125,12 +125,12 @@ impl RouterConfig {
         self.agent_host.as_deref().filter(|h| safe_word(h))
     }
 
-    /// The `opencode2` command on the agent host.
+    /// The `opencode` command on the agent host.
     pub fn agent_opencode(&self) -> &str {
         self.agent_opencode
             .as_deref()
             .filter(|c| safe_word(c))
-            .unwrap_or("opencode2")
+            .unwrap_or("opencode")
     }
 
     /// Whether Jev is asked: both experiments on.

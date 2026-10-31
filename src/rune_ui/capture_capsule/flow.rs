@@ -2879,7 +2879,7 @@ mod tests {
         flow.input(
             Input::Delivered(Delivered::Queued {
                 to: "SEER".into(),
-                why: "couldn't reach OpenCode".into(),
+                why: "OpenCode isn't running".into(),
             }),
             1.2,
         );
@@ -2907,7 +2907,7 @@ mod tests {
         for ended in [
             Input::Delivered(Delivered::Queued {
                 to: "SEER".into(),
-                why: "couldn't reach OpenCode".into(),
+                why: "OpenCode isn't running".into(),
             }),
             Input::Failed(Failure::Send("SEER".into()), Some("500".into())),
         ] {
@@ -3314,7 +3314,7 @@ mod tests {
         flow.input(
             Input::Delivered(Delivered::Queued {
                 to: "SEER".into(),
-                why: "couldn't reach OpenCode".into(),
+                why: "OpenCode isn't running".into(),
             }),
             closed,
         );

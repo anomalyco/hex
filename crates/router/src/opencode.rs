@@ -1,5 +1,6 @@
-//! OpenCode's session API, as the router uses it: the local server over HTTP (found through
-//! OpenCode's own `service.json`), or `opencode2 api` over SSH on the agent host. Sessions are
+//! OpenCode's session API, as the router uses it: the running local service over HTTP (found
+//! through OpenCode's own `service.json`; nothing is ever started), or `opencode api` over SSH
+//! on the agent host. Sessions are
 //! listed and looked up, prompts sent (steer or queue), and the inbox, interrupt, revert and
 //! messages reached through [`api_within`].
 
@@ -7,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::bundle::{load_bundle, resolve_bundle_dir};
@@ -101,54 +102,13 @@ pub fn on_path(name: &str) -> Option<PathBuf> {
     })
 }
 
-fn opencode_binary() -> Result<PathBuf> {
-    find_opencode_binary(
-        std::env::var_os("OPENCODE_BIN"),
-        on_path,
-        crate::env::get().opencode,
-        dirs::home_dir(),
-    )
-}
-
-/// `OPENCODE_BIN`, then `opencode2` on `PATH`, then where the host looks, then `~/bin`.
-fn find_opencode_binary(
-    configured: Option<std::ffi::OsString>,
-    on_path: impl Fn(&str) -> Option<PathBuf>,
-    host: Option<crate::env::Opencode>,
-    home: Option<PathBuf>,
-) -> Result<PathBuf> {
-    if let Some(bin) = configured.filter(|bin| !bin.is_empty()) {
-        let path = PathBuf::from(bin);
-        if executable(&path) {
-            return Ok(path);
-        }
-        if let Some(path) = path.to_str().and_then(&on_path) {
-            return Ok(path);
-        }
-        bail!("OPENCODE_BIN is not an executable");
-    }
-    if let Some(path) = on_path("opencode2") {
-        return Ok(path);
-    }
-    if let Some(path) = host.and_then(|find| find()) {
-        return Ok(path);
-    }
-    if let Some(path) = home
-        .map(|home| home.join("bin/opencode2"))
-        .filter(|path| executable(path))
-    {
-        return Ok(path);
-    }
-    bail!("Could not find opencode2; set OPENCODE_BIN or add it to PATH")
-}
-
 /// The Mac whose OpenCode server holds Kit's sessions when it isn't this one: an SSH host from
 /// the host's [`RouterConfig::agent_host`](crate::RouterConfig).
 pub fn agent_host() -> Option<String> {
     crate::env::get().config.agent_host().map(str::to_owned)
 }
 
-/// The `opencode2` command to run on the agent host (`agentOpencode`, default `opencode2`).
+/// The `opencode` command to run on the agent host (`agentOpencode`, default `opencode`).
 fn agent_opencode() -> String {
     crate::env::get().config.agent_opencode().to_owned()
 }
@@ -306,8 +266,22 @@ impl Drop for RemoveOnDrop {
     }
 }
 
+/// One request to the running local service over HTTP, or, when the agents run on another Mac,
+/// `opencode api` there over SSH. Nothing local is ever started.
 fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> Result<Vec<u8>> {
-    let command = if let Some(host) = agent_host() {
+    let Some(host) = agent_host() else {
+        let body = data.map(serde_json::to_vec).transpose()?;
+        let (address, password) = local_server();
+        return http_request(
+            address,
+            password.as_deref(),
+            &method.to_ascii_uppercase(),
+            path,
+            body.as_deref(),
+            SERVICE_TIMEOUT,
+        );
+    };
+    let command = {
         let mut remote = format!(
             "PATH=\"$HOME/bin:$HOME/.opencode/bin:/opt/homebrew/bin:$PATH\" {} api {} {}",
             agent_opencode(),
@@ -322,17 +296,6 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         }
         let mut command = ssh(&host);
         command.arg(remote);
-        command
-    } else {
-        let body = data.map(serde_json::to_string).transpose()?;
-        if let Some(body) = body.as_deref().filter(|body| body.len() > CLI_BODY_LIMIT) {
-            return post_to_service(method, path, body.as_bytes());
-        }
-        let mut command = Command::new(opencode_binary()?);
-        command.args(["api", method, path]);
-        if let Some(body) = &body {
-            command.args(["--data", body]);
-        }
         command
     };
     let output = bounded_output(command)?;
@@ -353,41 +316,10 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
     Ok(output.stdout)
 }
 
-/// The largest body `opencode api --data` carries; past it (a send's inline
-/// images) the request goes to the service over HTTP, since one argument may
-/// not pass 128 KiB on Linux.
-const CLI_BODY_LIMIT: usize = 64 * 1024;
-/// How long a prompt with inline images may take to post.
-const SERVICE_POST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a request to the local service may take (a prompt with inline images included).
+const SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// A large request straight to the local service from its registration. A
-/// service that isn't running is started by one small `opencode api` call,
-/// then the request is tried again.
-fn post_to_service(method: &str, path: &str, body: &[u8]) -> Result<Vec<u8>> {
-    let method = method.to_ascii_uppercase();
-    let post = || {
-        let (address, password) = local_server();
-        http_request(
-            address,
-            password.as_deref(),
-            &method,
-            path,
-            Some(body),
-            SERVICE_POST_TIMEOUT,
-        )
-    };
-    match post() {
-        Err(error)
-            if http_status(&error).is_none() && error.to_string().contains("Could not reach") =>
-        {
-            opencode_api("get", "/api/session?limit=1", None)?;
-            post()
-        }
-        answer => answer,
-    }
-}
-
-/// How much of `opencode api`'s stderr is kept; the rest is read and dropped.
+/// How much of the agent host's `opencode api` stderr is kept; the rest is read and dropped.
 const CLI_STDERR_LIMIT: u64 = 64 * 1024;
 
 /// `command.output()` with stdout capped at [`SERVER_RESPONSE_LIMIT`] (the child is killed
@@ -400,8 +332,8 @@ fn bounded_output(mut command: Command) -> Result<std::process::Output> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Could not launch opencode2")?;
-    let mut stderr = child.stderr.take().context("No opencode2 stderr")?;
+        .context("Could not reach the agent host")?;
+    let mut stderr = child.stderr.take().context("No agent host stderr")?;
     let errors = std::thread::spawn(move || {
         let mut kept = Vec::new();
         let _ = (&mut stderr).take(CLI_STDERR_LIMIT).read_to_end(&mut kept);
@@ -412,16 +344,16 @@ fn bounded_output(mut command: Command) -> Result<std::process::Output> {
     let read = child
         .stdout
         .take()
-        .context("No opencode2 output")?
+        .context("No agent host output")?
         .take(SERVER_RESPONSE_LIMIT + 1)
         .read_to_end(&mut stdout);
     let too_much = stdout.len() as u64 > SERVER_RESPONSE_LIMIT;
     if too_much {
         let _ = child.kill();
     }
-    let status = child.wait().context("Could not wait for opencode2")?;
+    let status = child.wait().context("Could not wait for the agent host")?;
     let stderr = errors.join().unwrap_or_default();
-    read.context("Could not read opencode2 output")?;
+    read.context("Could not read the agent host output")?;
     ensure!(!too_much, "OpenCode response too large");
     Ok(std::process::Output {
         status,
@@ -454,12 +386,7 @@ pub fn query_escape(value: &str) -> String {
 pub type ApiGet<'a> = dyn FnMut(&str) -> Result<Vec<u8>> + 'a;
 
 pub fn api_get(path: &str) -> Result<Vec<u8>> {
-    if agent_host().is_none()
-        && let Ok(body) = api_get_within(path, std::time::Duration::from_secs(5))
-    {
-        return Ok(body);
-    }
-    opencode_api("get", path, None)
+    api_get_within(path, std::time::Duration::from_secs(5))
 }
 
 /// How long a TCP connect to the local OpenCode server may take before giving up.
@@ -713,7 +640,7 @@ fn said(body: &[u8]) -> Option<String> {
 }
 
 /// One request to the local OpenCode server (`method` is `GET`, `POST`, `DELETE`…) within
-/// `timeout`, through `opencode2 api` when the agents run on another Mac. A 4xx or 5xx answer is
+/// `timeout`, through `opencode api` over SSH when the agents run on another Mac. A 4xx or 5xx answer is
 /// an [`HttpStatus`] error.
 pub fn api_within(
     method: &str,
@@ -737,8 +664,7 @@ pub fn api_within(
 }
 
 /// [`api_get`] for routing: talks HTTP directly to the local OpenCode server with a
-/// [`SERVER_CONNECT_TIMEOUT`] connect cap and `timeout` read deadline, instead of spawning
-/// `opencode2 api` per request.
+/// [`SERVER_CONNECT_TIMEOUT`] connect cap and `timeout` read deadline.
 pub fn api_get_within(path: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
     if agent_host().is_some() {
         return opencode_api("get", path, None);
@@ -1539,31 +1465,7 @@ mod session_lookup {
     }
 
     #[test]
-    fn the_host_can_say_where_opencode2_is() {
-        fn found() -> Option<PathBuf> {
-            Some(PathBuf::from("/host/opencode2"))
-        }
-        let nowhere = |_: &str| None;
-        let no_home = Some(PathBuf::from("/nonexistent-home"));
-        assert_eq!(
-            find_opencode_binary(None, nowhere, Some(found), no_home.clone()).unwrap(),
-            PathBuf::from("/host/opencode2")
-        );
-        // PATH comes first, and nothing anywhere says where to look.
-        let on = |name: &str| Some(PathBuf::from(format!("/path/{name}")));
-        assert_eq!(
-            find_opencode_binary(None, on, Some(found), no_home.clone()).unwrap(),
-            PathBuf::from("/path/opencode2")
-        );
-        let err = find_opencode_binary(None, nowhere, None, no_home).unwrap_err();
-        assert!(
-            err.to_string().contains("Could not find opencode2"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn opencode2_output_is_bounded() {
+    fn agent_host_output_is_bounded() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "head -c 200000 /dev/zero >&2; printf ok; exit 3"]);
         let output = bounded_output(command).unwrap();

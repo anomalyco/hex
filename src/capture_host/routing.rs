@@ -121,7 +121,7 @@ pub enum RouteDelivery {
         to: String,
     },
     /// OpenCode didn't take it; retried every 15 s. `why` says what went
-    /// wrong in a few words ("opencode2 not found").
+    /// wrong in a few words ("OpenCode isn't running").
     Queued {
         to: String,
         why: String,
@@ -165,7 +165,6 @@ pub fn router() -> Router {
             }
         })
         .with_summary(scrawl_capture::sketch::summary_markdown)
-        .with_opencode(crate::dictation_processor::installed_opencode_executable)
 }
 
 fn sends(config: &RouterConfig) -> bool {
@@ -967,11 +966,9 @@ fn send_why(error: &str, agent_host: bool) -> String {
         return fit(said.lines().next().unwrap_or(said));
     }
     if error.starts_with("Could not reach server") {
-        "couldn't reach OpenCode".into()
+        "OpenCode isn't running".into()
     } else if error.contains("didn't answer in time") {
         "OpenCode didn't answer".into()
-    } else if error.contains("Could not find opencode2") || error.contains("OPENCODE_BIN") {
-        "opencode2 not found".into()
     } else {
         fit(&delivery::short(error))
     }
@@ -1549,12 +1546,8 @@ mod tests {
                 "Skill not found: x",
             ),
             (
-                "Could not find opencode2; set OPENCODE_BIN or add it to PATH",
-                "opencode2 not found",
-            ),
-            (
                 "Could not reach server at http://127.0.0.1:4096: Connection refused (os error 61)",
-                "couldn't reach OpenCode",
+                "OpenCode isn't running",
             ),
             (
                 "OpenCode at http://127.0.0.1:4096 didn't answer in time: Resource temporarily \

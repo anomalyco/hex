@@ -562,8 +562,11 @@ General                                  // settings
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
-│   ├── Level bars -> peak of the audio Hex receives, ~30 fps while General shows // input_level
+│   ├── Level bars -> peak of the audio Hex receives, ~30 fps while General shows them above rest // input_level
 │   │   ├── Read from one atomic the audio owner stores per chunk; never opens or blocks the mic
+│   │   ├── Quiet room (bars at rest) -> no 30 fps frames; the window's 250 ms tick notices a rise.
+│   │   │   An open General window with a warm mic woke 34.5 times a second in a quiet room before
+│   │   │   (dev-364, headless sway on apollo, Oct 31) and 4.1 after; macOS was reasoned about only
 │   │   ├── No audio for 250 ms (released while idle, failed, not allowed) -> flat, dimmed
 │   │   └── Scenes: mac-settings-mic-level (a recorded WAV, `--video`), mac-settings-mic-released
 │   │       // check: the_microphone_level_follows_the_voice (Linux)
@@ -848,16 +851,15 @@ document's `DocURL` (Firefox) or `URI` (Chromium, only with
 under headless Sway and `chrome` with the page under its XWayland, and `hex`
 on niri (Oct 30); the macOS adapters are compiled on CI only and not run.
 
-OpenCode transformation discovery accepts `opencode2` or a V2 `opencode` and
-rejects V1. While the switch can't be turned on, the
-reason ("Requires OpenCode", "Requires OpenCode V2") shows beside it and the
-setup/retry notice below; `unavailable_opencode_is_explained_beside_each_switch`
-covers it headlessly.
-
-GUI executable discovery also checks `~/.vite-plus/bin/opencode2` when it is
-absent from the inherited PATH. `standard_install_location_finds_opencode_outside_the_gui_path`
-in [dictation_processor.rs](../../src/dictation_processor.rs) covers this with
-a temporary executable; it does not run an installed Vite Plus shim or provider.
+OpenCode transformation talks only to an already running OpenCode service,
+found through its registration file ([opencode_service.rs](../../src/opencode_service.rs));
+Hex runs no OpenCode executable and starts nothing. The catalog loads only while
+the Modes pane shows. Without a service, "OpenCode isn't running" shows beside
+the switch and the setup/retry notice below;
+`unavailable_opencode_is_explained_beside_each_switch` covers it headlessly, and
+the `opencode_service` tests cover registration, stale-PID, loopback, chunked,
+deadline, and cancellation handling against a local fixture, not a live
+provider.
 
 `ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations` in
 [parakeet.rs](../../src/parakeet.rs) checks processing-time profile acquisition,

@@ -476,6 +476,11 @@ impl MicLevel {
         (self.receiving, super::onboarding::level_step(self.level))
     }
 
+    /// Whether the bars show a level, so the next frames can move them.
+    pub(super) fn moving(&self) -> bool {
+        self.receiving && super::onboarding::level_step(self.level) > 0
+    }
+
     /// The recording's peak over the frame before `clock`, or `None` once
     /// it has played.
     fn recording_peak(&self, clock: f64) -> Option<Option<f32>> {
@@ -501,8 +506,7 @@ impl MicLevel {
 
 /// Follows the microphone's level while General shows in a visible window
 /// (a scene's recording also plays headless), waking at a UI rate only while
-/// audio arrives or the bars fall; the window's own tick notices audio
-/// starting again. It only reads the level the audio owner stores, so it
+/// the bars show a level; the window's own tick notices audio rising again. It only reads the level the audio owner stores, so it
 /// never opens a microphone, including one released while idle. True when
 /// the row changed.
 pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
@@ -518,8 +522,12 @@ pub(super) fn poll_level(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     };
     let level = &mut ui.mic_level;
     let changed = level.hear(peak);
-    // A level still falling finishes even once the recording has played.
-    if ((playing && level.receiving) || level.level > 0.0) && clock >= level.frame_at {
+    // Frames follow the bars only while they stand above rest (a level still
+    // falling finishes, even once a recording has played) or a scene's
+    // recording plays. A quiet room's noise shows nothing, so it waits for
+    // the window's tick instead of waking the window 30 times a second.
+    let recording = level.recording.is_some() && playing;
+    if (level.moving() || recording) && clock >= level.frame_at {
         level.frame_at = clock + LEVEL_FRAME.as_secs_f64();
         tx.wake_after(LEVEL_FRAME);
     }

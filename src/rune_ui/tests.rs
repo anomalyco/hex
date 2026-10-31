@@ -967,7 +967,7 @@ fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
 #[test]
 fn opencode_missing_offers_setup_instead_of_models() {
     let mut rt = runtime("modes", true, PANE_SIZE);
-    rt.state.models = models::Models::fixture_missing();
+    rt.state.models = models::Models::fixture_not_running();
     rt.state.settings.dictation_processing.modes[0]
         .post_processing
         .enabled = false;
@@ -987,13 +987,16 @@ fn unavailable_opencode_is_explained_beside_each_switch() {
             .filter_map(|e| e.text)
             .collect::<Vec<_>>()
     };
-    let rt = runtime("modes-opencode-v1", true, PANE_SIZE);
+    let rt = runtime("modes-opencode-not-running", true, PANE_SIZE);
     assert!(rt.find("processing-toggle").is_some());
-    assert_eq!(beside(&rt, "processing-enabled"), ["Requires OpenCode V2"]);
+    assert_eq!(
+        beside(&rt, "processing-enabled"),
+        ["OpenCode isn't running"]
+    );
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text == "Transformation requires OpenCode V2")
+            .any(|text| text == "Install or start OpenCode to transform dictated text.")
     );
 }
 
@@ -2006,7 +2009,7 @@ fn goldens() {
     }
     check_golden("commands", true, GOLDEN_SIZE);
     check_golden("menus", false, GOLDEN_SIZE);
-    check_golden("modes-opencode-v1", false, PANE_SIZE);
+    check_golden("modes-opencode-not-running", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
 }
 

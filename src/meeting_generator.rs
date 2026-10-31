@@ -64,8 +64,8 @@ enum Writer {
 
 /// The writer for a meeting's notes now: the one the user turned on, or,
 /// when asked for notes directly, Apple Intelligence wherever it is
-/// available, since it never leaves the Mac. Looking for OpenCode may run a
-/// bounded probe, so call this off the UI thread.
+/// available, since it never leaves the Mac. Looking for OpenCode asks its
+/// running service over loopback, so call this off the UI thread.
 fn writer() -> Result<Writer, String> {
     if let Some(writer) = chosen() {
         return Ok(writer);
@@ -81,7 +81,7 @@ fn writer() -> Result<Writer, String> {
         }
     }
     Err(if crate::app_settings::meeting_notes_with_opencode() {
-        "Install OpenCode to write meeting notes".into()
+        "OpenCode isn't running".into()
     } else {
         "Turn on Summarize with OpenCode to write meeting notes".into()
     })
@@ -95,9 +95,8 @@ fn chosen() -> Option<Writer> {
     {
         return Some(Writer::AppleIntelligence);
     }
-    (crate::app_settings::meeting_notes_with_opencode()
-        && crate::dictation_processor::installed_opencode_executable().is_some())
-    .then_some(Writer::OpenCode)
+    (crate::app_settings::meeting_notes_with_opencode() && crate::opencode_service::running())
+        .then_some(Writer::OpenCode)
 }
 
 /// Whether finished meetings get notes, and recording ones titles,

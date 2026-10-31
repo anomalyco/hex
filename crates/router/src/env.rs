@@ -23,9 +23,6 @@ pub type Summary = fn(&ScrawlBundle, &Path) -> String;
 /// The `/sdk.js` registration for a tab's URL, when the host serves `/sdk.js`.
 pub type Pages = fn(&str) -> Option<Registration>;
 
-/// Where the host finds `opencode2`, when it searches beyond `PATH`.
-pub type Opencode = fn() -> Option<std::path::PathBuf>;
-
 #[derive(Clone, Default)]
 pub struct Env {
     pub config: RouterConfig,
@@ -33,7 +30,6 @@ pub struct Env {
     pub log: Option<Log>,
     pub summary: Option<Summary>,
     pub pages: Option<Pages>,
-    pub opencode: Option<Opencode>,
     /// Configured by a host: reads this Mac's OpenCode history and sessions' last lines. Off
     /// when nothing configured the router (tests).
     pub live: bool,

@@ -811,7 +811,6 @@ impl Ui {
             });
         }
         ui.history = history::HistoryPane::shared(store);
-        ui.models = models::Models::load();
         ui.modes.load_personal_commands();
         ui.platform.developer =
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
@@ -1277,7 +1276,12 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
-    changed |= ui.models.poll(ui.live());
+    // The OpenCode catalog is read only while the pane that uses it shows.
+    changed |= ui.models.poll(
+        ui.live()
+            && ui.pane == Pane::Modes
+            && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
+    );
     changed |= ui.history.poll(ui.pane == Pane::History);
     // Mode rows show their applications' icons, which the catalog locates.
     if matches!(ui.pane, Pane::Modes | Pane::Output)
@@ -1956,10 +1960,10 @@ const SCENES: &[Scene] = &[
         modes::fixture(ui);
         ui.pane = Pane::Modes;
     }),
-    ("modes-opencode-v1", |ui| {
+    ("modes-opencode-not-running", |ui| {
         *ui = portal_fixture();
         modes::fixture(ui);
-        ui.models = models::Models::fixture_v1();
+        ui.models = models::Models::fixture_not_running();
         ui.settings.dictation_processing.modes[0]
             .post_processing
             .enabled = false;

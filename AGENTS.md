@@ -108,15 +108,14 @@ substitute for source inspection or a second roadmap.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
-  model catalog, and the transformation stage. Every
-  OS discovers the OpenCode V2 CLI (any `opencode2` first, else an `opencode`
-  that proves to be V2; a V1 `opencode` is never run) and links missing installs
-  to `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
-  or starts the managed service, and generation uses the matching owner-only
-  service registration and authenticated loopback HTTP through the system curl;
-  request bodies and credentials use stdin, never argv or new temporary files.
-  Windows sends the same requests through the `opencode2 api` CLI inside a job
-  object.
+  model catalog, and the transformation stage, over `opencode_service`.
+- `opencode_service`: the only way Hex reaches OpenCode, on every OS. It reads
+  the running service's owner-only registration
+  (`${XDG_STATE_HOME:-~/.local/state}/opencode/service.json`, then other
+  channels' `service-*.json`), confirms the registered PID through
+  `/api/info`, and talks authenticated loopback HTTP over `TcpStream` with
+  cancellation and deadlines. It never runs an OpenCode executable or curl;
+  without a service, features say "OpenCode isn't running".
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus the dictation
   worker that hands clips to the transcription engine and runs bounded,
   ordered processing, output, paste, last-result, and meeting-delta work, plus
@@ -724,15 +723,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   rewriting, then selected transformations. A failed stage preserves its input;
   the transformation chain is one stage, so failure discards its partial results.
   It applies to Paste, not meetings.
-- OpenCode availability checks stay off the UI thread. When the app finds the
-  `opencode2` executable, `opencode2 api` discovers or starts the managed service;
-  the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
-  Hex never invokes
-  `opencode2 serve --service` or owns that service's lifecycle directly. A
-  missing or V1-only install is retried at a coarse interval so installing
-  OpenCode V2 while Settings is open refreshes the model catalog without
-  restarting Hex. Catalog failures require an explicit retry rather than
-  spawning clients in a tight loop.
+- Hex never starts, probes, or searches for an OpenCode executable, and never
+  starts the service: it only talks to an already running OpenCode service
+  found through its registration file (`opencode_service`). Nothing touches
+  OpenCode unless a feature that uses it runs: mode rewriting, meeting notes
+  with Summarize with OpenCode, sending an Annotate capture, or the model
+  catalog while the Modes pane shows. Checks stay off the UI thread. A stopped
+  service is looked for again at a coarse interval only while that pane shows;
+  catalog failures require an explicit retry. Hex's OpenCode workspace folder is
+  created by the first request that uses it.
 - Personal transformations run in-process: no child process,
   no Node or Bun, and no filesystem, network, process, or timer API in the
   script engine; scripts import only `@hex/commands` and files inside the

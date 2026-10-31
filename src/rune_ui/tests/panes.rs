@@ -431,6 +431,12 @@ fn the_microphone_level_follows_the_voice() {
     assert!(level.hear(Some(0.5)), "a voice shows at once");
     assert!(level.hear(None), "no audio flattens the bars");
     assert!(!level.hear(None));
+
+    // A quiet room's noise shows nothing, so it asks for no frames.
+    let mut quiet = general::MicLevel::default();
+    assert!(!quiet.hear(Some(0.01)));
+    assert!(!quiet.moving());
+    assert!(quiet.hear(Some(0.5)) && quiet.moving());
 }
 
 #[test]
