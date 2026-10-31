@@ -574,6 +574,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Connect calendar", ["Połącz kalendarz", "连接日历", "カレンダーを接続", "Kalender verbinden", "Conectar calendario", "Під'єднати календар"]),
     ("Remind me before meetings", ["Przypominaj przed spotkaniami", "会议前提醒我", "会議の前に知らせる", "Vor Meetings erinnern", "Recordarme antes de las reuniones", "Нагадувати перед зустрічами"]),
     ("Shows a reminder with Record and Join buttons", ["Pokazuje przypomnienie z przyciskami Nagraj i Dołącz", "显示带有录制和加入按钮的提醒", "録音と参加のボタン付きでリマインダーを表示します", "Zeigt eine Erinnerung mit den Tasten Aufnehmen und Beitreten", "Muestra un recordatorio con los botones Grabar y Unirse", "Показує нагадування з кнопками «Записати» і «Приєднатися»"]),
+    ("Keep meetings", ["Przechowuj spotkania", "会议保留时间", "会議の保存期間", "Meetings behalten", "Conservar reuniones", "Зберігати зустрічі"]),
+    ("Older meetings move to the Trash", ["Starsze spotkania trafiają do kosza", "更早的会议会移到废纸篓", "古い会議はゴミ箱に移動します", "Ältere Meetings kommen in den Papierkorb", "Las reuniones más antiguas se mueven a la papelera", "Старіші зустрічі переміщуються до Смітника"]),
     ("Remind me", ["Przypomnij", "提醒时间", "通知のタイミング", "Erinnern", "Recordarme", "Нагадати"]),
     ("At start", ["Na początku", "开始时", "開始時", "Zu Beginn", "Al empezar", "На початку"]),
     ("1 min", ["1 min", "1 分钟", "1 分", "1 Min.", "1 min", "1 хв"]),

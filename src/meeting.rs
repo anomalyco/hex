@@ -1076,6 +1076,50 @@ fn trash_meeting(
     move_to_trash(directory)
 }
 
+/// Moves every meeting older than `retention` to the Trash through [`trash`].
+/// One that is recording, transcribing, writing notes, or waiting for its
+/// final transcript stays for a later pass. Returns how many moved.
+pub fn expire(retention: crate::app_settings::MeetingRetention) -> Result<usize> {
+    let Some(max_age_ms) = retention.max_age_ms() else {
+        return Ok(0);
+    };
+    let meetings = list()?;
+    let pending = pending_final_transcripts();
+    let mut moved = 0;
+    for id in expired_meetings(&meetings, max_age_ms, &pending, now_ms()) {
+        match trash(id) {
+            Ok(()) => {
+                moved += 1;
+                tracing::info!(meeting = id, "moved an expired meeting to the Trash");
+            }
+            Err(error) => {
+                tracing::info!(%error, meeting = id, "kept an expired meeting for now");
+            }
+        }
+    }
+    Ok(moved)
+}
+
+/// The meetings that ended (or, with no end, started) more than
+/// `max_age_ms` before `now_ms`, leaving out active and `pending` ones.
+fn expired_meetings<'a>(
+    meetings: &'a [MeetingManifest],
+    max_age_ms: u64,
+    pending: &[String],
+    now_ms: u64,
+) -> Vec<&'a str> {
+    meetings
+        .iter()
+        .filter(|meeting| !meeting.status.is_active())
+        .filter(|meeting| !pending.contains(&meeting.id))
+        .filter(|meeting| {
+            let ended = meeting.ended_at_ms.unwrap_or(meeting.created_at_ms);
+            now_ms.saturating_sub(ended) > max_age_ms
+        })
+        .map(|meeting| meeting.id.as_str())
+        .collect()
+}
+
 /// Renames a meeting. The Markdown heading follows only while it still reads
 /// the previous title, and the file keeps its name, as with generated titles.
 pub fn rename(id: &str, title: &str) -> Result<MeetingManifest> {

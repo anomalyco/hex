@@ -133,6 +133,7 @@ pub(crate) fn controller_loop(
     let mut observed_microphone_apps = Vec::new();
     let mut browser = BrowserWatch::new(ContextSnapshot::capture_for_meeting);
     let mut pending_finals = PendingFinals::new();
+    let mut expiry = MeetingExpiry::default();
     tracing::info!("meeting watcher started");
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -161,6 +162,7 @@ pub(crate) fn controller_loop(
         poll_recording(&mut recording, &mut detector, &events)?;
         reminders.poll(enabled, recording.is_some(), &events);
         pending_finals.poll(enabled, recording.is_some(), &events);
+        expiry.poll(enabled);
 
         if recording.is_none() && enabled {
             let choices = crate::app_settings::meeting_provider_choices();
@@ -204,6 +206,35 @@ pub(crate) fn controller_loop(
     }
     pending_finals.join();
     Ok(())
+}
+
+/// How often meetings past their retention move to the Trash while Hex runs.
+const EXPIRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+/// Moves meetings past the retention setting to the Trash: at launch, then
+/// hourly, and soon after the setting changes. Only while Meetings is on.
+#[derive(Default)]
+struct MeetingExpiry {
+    last: Option<(Instant, crate::app_settings::MeetingRetention)>,
+}
+
+impl MeetingExpiry {
+    fn poll(&mut self, enabled: bool) {
+        if !enabled {
+            return;
+        }
+        let retention = crate::app_settings::meeting_retention();
+        if self
+            .last
+            .is_some_and(|(at, last)| last == retention && at.elapsed() < EXPIRY_INTERVAL)
+        {
+            return;
+        }
+        self.last = Some((Instant::now(), retention));
+        if let Err(error) = meeting::expire(retention) {
+            tracing::warn!(%error, "could not expire old meetings");
+        }
+    }
 }
 
 /// How long finishing pending transcripts waits for the dictation engine

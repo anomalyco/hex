@@ -387,6 +387,9 @@ observe input-source changes or show these controls.
   or `notch`: the capsule's flow after a capture, prototypes to compare). Both
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
+- `meetings.retention` is `day`, `week`, `month`, or `forever` (the
+  default). While Meetings is on, Hex moves meetings that ended longer ago
+  than that to the Trash at launch and hourly.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
@@ -406,7 +409,7 @@ Writable keys: `release_microphone_while_idle`,
 `meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,
 `meetings.summarize_with_opencode`,
 `meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
-`meetings.providers`, `meetings.calendar.excluded_calendars`,
+`meetings.retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
 `meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,

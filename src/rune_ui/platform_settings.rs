@@ -17,7 +17,7 @@ use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
     AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy,
-    MeetingProviderChoice, ModifierSide,
+    MeetingProviderChoice, MeetingRetention, ModifierSide,
 };
 use crate::calendar::{CalendarAccess, CallProvider};
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
@@ -170,7 +170,7 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
 }
 
 /// Meetings › Settings: the opt-in (and the system-audio permission while
-/// it's missing); once on, Calendar and each detected call provider's Ask /
+/// it's missing); once on, how long meetings are kept, Calendar and each detected call provider's Ask /
 /// Always record / Never offer choice; behind Advanced the indicator,
 /// folder, Apple Intelligence notes, and the granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
@@ -217,6 +217,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         }
     }
     if meetings.enabled {
+        rows.push(retention_row(ui, p, layer));
         more.push(icon_toggle_row(
             p,
             "meeting-indicator",
@@ -301,6 +302,36 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         }
     }
     sections
+}
+
+/// How long finished meetings are kept before they move to the Trash.
+fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let retention = ui.settings.meetings.retention;
+    let control = super::general::pick_select(
+        ui,
+        p,
+        "meeting-retention",
+        MeetingRetention::ALL
+            .iter()
+            .map(|retention| tr(retention.label()))
+            .collect(),
+        MeetingRetention::ALL
+            .iter()
+            .position(|choice| *choice == retention)
+            .unwrap_or_default(),
+        |ui, index| {
+            ui.update(|settings| settings.meetings.retention = MeetingRetention::ALL[index]);
+        },
+        layer,
+    );
+    icon_row(
+        p,
+        "meeting-retention",
+        &icons::CLOCK,
+        tr("Keep meetings"),
+        (retention != MeetingRetention::Forever).then(|| tr("Older meetings move to the Trash")),
+        control,
+    )
 }
 
 static ZOOM_ICON: Icon = Icon {
