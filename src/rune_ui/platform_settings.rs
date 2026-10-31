@@ -306,7 +306,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
 
 /// How long finished meetings are kept before they move to the Trash.
 fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let retention = ui.settings.meetings.retention;
+    let chosen = ui.settings.meetings.retention;
+    let retention = chosen.unwrap_or(MeetingRetention::DEFAULT);
     let control = super::general::pick_select(
         ui,
         p,
@@ -320,7 +321,7 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             .position(|choice| *choice == retention)
             .unwrap_or_default(),
         |ui, index| {
-            ui.update(|settings| settings.meetings.retention = MeetingRetention::ALL[index]);
+            ui.update(|settings| settings.meetings.retention = Some(MeetingRetention::ALL[index]));
         },
         layer,
     );
@@ -329,7 +330,15 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         "meeting-retention",
         &icons::CLOCK,
         tr("Keep meetings"),
-        (retention != MeetingRetention::Forever).then(|| tr("Older meetings move to the Trash")),
+        match chosen {
+            None => Some(tr(
+                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
+            )),
+            Some(MeetingRetention::Forever) => None,
+            Some(_) => Some(tr(
+                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
+            )),
+        },
         control,
     )
 }

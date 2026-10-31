@@ -992,9 +992,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   to the Trash (never `rm`), after a two-step confirmation, and is refused while
   it records, transcribes, or writes notes. Renaming rewrites the manifest and
   only a Markdown heading that still reads the previous title; files keep
-  their names. `meetings.retention` (default Forever) expires meetings by the
-  same Trash path on the meeting controller, at launch and hourly while
-  Meetings is on, measured from when they ended; active ones wait.
+  their names.
+- Meeting data is a liability: until the user chooses a `meetings.retention`,
+  meetings recorded since the default began (manifest `retention_applies`)
+  are kept 24 hours and older ones stay; a chosen retention covers every
+  finished meeting. The meeting controller expires them at launch and hourly,
+  Meetings on or off, measured from when they ended: the recording folder
+  moves to the Trash (never `rm`), and the exported Markdown only while it
+  still matches the SHA-256 of the copy Hex last wrote (`export_sha256`), so
+  an edited copy stays. Recording, transcribing, writing-notes, and
+  final.pending meetings wait. Queries, `hex meetings`, `hex mcp`, and the
+  pane never return an expired meeting.
 - Visible state remains `Transcribing` until every accepted transcription or
   paste output has completed, including ordered post-processing and insertion.
 - The HUD is observational and click-through. It must not alter capture

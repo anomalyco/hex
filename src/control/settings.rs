@@ -367,10 +367,10 @@ const KEYS: &[Key] = &[
         Kind::Choice(&["top_right", "top_left", "bottom_right", "bottom_left"]),
         "Screen corner of the meeting recording indicator",
     ),
-    key(
+    optional(
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings are kept before they move to the Trash",
+        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
     ),
     key(
         "meetings.providers",

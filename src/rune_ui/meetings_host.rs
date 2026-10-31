@@ -169,6 +169,12 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
         transcript,
         // Sections come from the transcript lines, not the merged turns, as
         // the menu bar and `hex meetings show --chapter` read them.
+        kept_for: (!meeting.status.is_active())
+            .then(|| {
+                crate::meeting::retention_for(manifest, crate::app_settings::meeting_retention())
+            })
+            .filter(|retention| retention.max_age_ms().is_some())
+            .map(crate::app_settings::MeetingRetention::label),
         chapters: meeting
             .chapter_views(now_ms)
             .iter()

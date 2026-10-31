@@ -26,7 +26,9 @@ static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
-static MEETING_RETENTION: AtomicU8 = AtomicU8::new(MeetingRetention::Forever as u8);
+/// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
+static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
+const RETENTION_UNSET: u8 = u8::MAX;
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
 static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
@@ -1110,17 +1112,18 @@ pub struct MeetingSettings {
     /// connects a calendar.
     pub calendar: CalendarSettings,
     /// How long finished meetings are kept before they move to the Trash.
-    pub retention: MeetingRetention,
+    /// `None` until the user chooses: meetings recorded since the default
+    /// began are kept 24 hours, and older ones stay.
+    pub retention: Option<MeetingRetention>,
 }
 
 /// How long a finished meeting is kept, counted from when it ended.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingRetention {
     Day,
     Week,
     Month,
-    #[default]
     Forever,
 }
 
@@ -1146,12 +1149,26 @@ impl MeetingRetention {
         }
     }
 
-    const fn decode(value: u8) -> Self {
+    /// The default for meetings recorded since it began.
+    pub const DEFAULT: Self = Self::Day;
+
+    const fn encode(retention: Option<Self>) -> u8 {
+        match retention {
+            Some(Self::Day) => 0,
+            Some(Self::Week) => 1,
+            Some(Self::Month) => 2,
+            Some(Self::Forever) => 3,
+            None => 4,
+        }
+    }
+
+    const fn decode(value: u8) -> Option<Self> {
         match value {
-            0 => Self::Day,
-            1 => Self::Week,
-            2 => Self::Month,
-            _ => Self::Forever,
+            0 => Some(Self::Day),
+            1 => Some(Self::Week),
+            2 => Some(Self::Month),
+            3 => Some(Self::Forever),
+            _ => None,
         }
     }
 }
@@ -1261,7 +1278,7 @@ impl Default for MeetingSettings {
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
             calendar: CalendarSettings::default(),
-            retention: MeetingRetention::default(),
+            retention: None,
         }
     }
 }
@@ -1821,9 +1838,14 @@ const MIGRATIONS: &[&str] = &[
     STREAMING_ENGLISH_MIGRATION,
     ANNOTATE_DEFAULT_MIGRATION,
     ANOMALY_IDENTITY_MIGRATION,
+    MEETING_RETENTION_DEFAULT_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, ANOMALY_IDENTITY_MIGRATION];
+const MIGRATIONS: &[&str] = &[
+    STREAMING_ENGLISH_MIGRATION,
+    ANOMALY_IDENTITY_MIGRATION,
+    MEETING_RETENTION_DEFAULT_MIGRATION,
+];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
 #[cfg(hex_capture)]
@@ -1832,6 +1854,9 @@ const SCRAWL_IMPORT_MIGRATION: &str = "scrawl-capture-settings";
 /// migration, as it came after the first import.
 #[cfg(hex_capture)]
 const SCRAWL_ROUTING_IMPORT_MIGRATION: &str = "scrawl-routing-settings";
+/// Meeting retention first saved `forever` as its default; that default is
+/// now unchosen (24 hours for new meetings, older ones kept).
+const MEETING_RETENTION_DEFAULT_MIGRATION: &str = "meeting-retention-default";
 
 fn deserialize_retired_value<'de, D>(
     deserializer: D,
@@ -2288,7 +2313,10 @@ impl AppSettings {
             self.meetings.recording_indicator_corner as u8,
             Ordering::Release,
         );
-        MEETING_RETENTION.store(self.meetings.retention as u8, Ordering::Release);
+        MEETING_RETENTION.store(
+            MeetingRetention::encode(self.meetings.retention),
+            Ordering::Release,
+        );
         *MEETING_OUTPUT_FOLDER
             .get_or_init(Default::default)
             .write()
@@ -2373,6 +2401,13 @@ impl AppSettings {
         if !self.has_migration(STREAMING_ENGLISH_MIGRATION) {
             self.switch_english_to_streaming_model(installed);
             self.migrations.push(STREAMING_ENGLISH_MIGRATION.into());
+        }
+        if !self.has_migration(MEETING_RETENTION_DEFAULT_MIGRATION) {
+            if self.meetings.retention == Some(MeetingRetention::Forever) {
+                self.meetings.retention = None;
+            }
+            self.migrations
+                .push(MEETING_RETENTION_DEFAULT_MIGRATION.into());
         }
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
@@ -2762,8 +2797,21 @@ pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
 /// The connected calendar's reminder settings, as last applied.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// [`MeetingSettings::retention`] for the running meeting controller.
-pub fn meeting_retention() -> MeetingRetention {
-    MeetingRetention::decode(MEETING_RETENTION.load(Ordering::Acquire))
+/// The retention the user chose, `None` until they choose. A process that
+/// never loaded settings (`hex mcp`, `hex meetings`) reads it from
+/// `settings.json` without migrating or writing anything.
+pub fn meeting_retention() -> Option<MeetingRetention> {
+    match MEETING_RETENTION.load(Ordering::Acquire) {
+        RETENTION_UNSET if cfg!(test) => None,
+        RETENTION_UNSET => stored_meeting_retention(),
+        value => MeetingRetention::decode(value),
+    }
+}
+
+fn stored_meeting_retention() -> Option<MeetingRetention> {
+    let data = fs::read(path().ok()?).ok()?;
+    let settings: serde_json::Value = serde_json::from_slice(&data).ok()?;
+    serde_json::from_value(settings.get("meetings")?.get("retention")?.clone()).ok()
 }
 
 pub fn calendar_settings() -> CalendarSettings {

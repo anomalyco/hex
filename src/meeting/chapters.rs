@@ -889,17 +889,22 @@ fn refine_meeting_with(
     let previous = display_title(&manifest);
     manifest.chapters = refinement.chapters;
     manifest.chapters_refined = true;
-    retitle_export(&manifest, &previous);
+    retitle_export(&mut manifest, &previous);
     if let Err(error) = write_manifest(directory, &manifest) {
         tracing::warn!(%error, meeting = manifest.id, "could not record refined chapters");
     }
 }
 
-fn retitle_export(manifest: &MeetingManifest, previous: &str) {
+fn retitle_export(manifest: &mut MeetingManifest, previous: &str) {
     let title = display_title(manifest);
     if title != previous
-        && let Some(path) = manifest.export_path.as_ref().filter(|path| path.exists())
-        && let Err(error) = super::notes::retitle_markdown_file(path, previous, &title)
+        && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
+        && let Err(error) = super::notes::retitle_markdown_file(
+            &path,
+            &mut manifest.export_sha256,
+            previous,
+            &title,
+        )
     {
         tracing::warn!(%error, meeting = manifest.id, "could not retitle meeting Markdown");
     }

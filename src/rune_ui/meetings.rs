@@ -98,6 +98,9 @@ pub(super) struct Meeting {
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
+    /// How long it is kept once finished, as `MeetingRetention::label`;
+    /// `None` when it is kept for good.
+    pub(super) kept_for: Option<&'static str>,
 }
 
 impl Meeting {
@@ -326,6 +329,7 @@ impl MeetingsPane {
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
+                kept_for: Some("24 hours"),
             };
         let mut live = meeting(
             "preview-live",
@@ -880,6 +884,11 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         clock_offset(meeting.duration_ms),
     ];
     meta_line.extend(meeting.app.clone());
+    if !meeting.status.is_active()
+        && let Some(kept_for) = meeting.kept_for
+    {
+        meta_line.push(tr_fill("Deleted after {}", tr(kept_for)));
+    }
     let mut meta: Vec<El> = status_tag(p, meeting.status, pane.stop_pending)
         .into_iter()
         .collect();
