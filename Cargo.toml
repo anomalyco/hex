@@ -101,9 +101,8 @@ x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
 
-# The desktop UI, and the `capture` experiment (Scrawl's capture engine),
-# compiled into every desktop build and dormant until
-# `hex experiments enable capture` and `capture.enabled`.
+# The desktop UI, and Annotate (Scrawl's capture engine), compiled into
+# every desktop build (`capture.enabled`).
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 # `hex mcp`.
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }

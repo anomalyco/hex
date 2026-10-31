@@ -395,7 +395,7 @@ interaction, installed-app switching, and Linux runtime behavior were not exerci
 ### Switch models with keyboard language
 
 ```ts
-General > Switch model with keyboard language   // setup.input-source-model; macOS, Windows, Linux X11; off by default
+Labs > Switch model with keyboard language      // setup.input-source-model; macOS, Windows, Linux X11; off by default; General shows the mappings while on
 ├── Each enabled keyboard input source -> Don't switch, or a downloaded model and language
 │   ├── New mapping -> The source's own language when the model has it
 │   ├── One-language model -> Its language shown fixed
@@ -486,7 +486,7 @@ worker readiness; a later worker-load failure does not roll back saved selection
 ## Dictate
 
 ```ts
-Saved shortcut                           // dictation; Option by default; macOS, Windows and X11 also accept mouse buttons
+Saved shortcut                           // dictation; Option by default; Windows and X11 accept mouse buttons, macOS with Labs > Mouse shortcuts
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
 └── Escape
@@ -550,7 +550,7 @@ latency measurement.
 ```ts
 Sidebar                                  // settings.nav
 ├── General, Output, History, then each feature that is on: Meetings and
-│   Voice Filter (Labs toggles), Annotate (dev builds), Playground (Labs, an item)
+│   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
 └── Labs -> one flat page of toggles, each off by default (labs.md)
     // Command-1…9 follow the panes' order (labs::order)
 
@@ -592,18 +592,18 @@ General                                  // settings
 ├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
 │   ├── Collapse -> drops a pending release confirmation
 │   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
-│   │   Double-tap only, Microphone mode, keyboard-language model switching (macOS),
+│   │   Double-tap only, Microphone mode, keyboard-language mappings (while its Labs toggle is on),
 │   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
 │   │   microphone instead of Bluetooth"),
-│   │   Share dictation shortcut with other apps (Windows), Recognition hints
-│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux, Windows)
+│   │   Recognition hints
+│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
-├── Share dictation shortcut with other apps (Advanced, Windows, off)
+├── Labs > Share dictation shortcut with other apps (Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
-├── Terminal paste (Advanced, Linux and Windows, off)
+├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
 ├── Microphone mode (Advanced)
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
@@ -613,7 +613,7 @@ General                                  // settings
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
 │   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
-│   └── Also pause the browser (macOS, Pause media only; off by default)
+│   └── Labs > Also pause the browser (macOS, Pause media only; off by default); its permission row shows here while on
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below

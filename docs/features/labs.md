@@ -15,6 +15,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating (restart)
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
+├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
+│                                        the input source picks its mapped model (#216); General shows the mappings while on
+├── Mouse shortcuts no    labs.mouse_shortcuts         (macOS)   mouse buttons record as shortcuts (#209)
+├── Also pause the browser no pause_browser_media      (macOS)   pause a playing tab too, with Pause media (#301); General shows its permission row
+├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -50,8 +55,15 @@ Add a new feature to `labs::Feature` (name, settings key, description), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
 When a feature graduates, remove it from Labs.
 
-Normal features, not Labs: dictation, Annotate (dev builds; its own pane and
-switch), Dot scope, chord shortcuts, QuickJS transformations, clipboard
+Mouse shortcuts off: the recorder ignores mouse buttons, `hex settings`
+refuses one, and a saved mouse-button shortcut goes back to its default when
+settings load (macOS), with a one-time note in General
+(`mouse_shortcut_notice`). Check:
+`mouse_shortcuts_go_back_to_their_default_while_their_labs_toggle_is_off` in
+[app_settings.rs](../../src/app_settings.rs).
+
+Normal features, not Labs: dictation, Annotate (every build; its own pane
+and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
 restore, the vocabulary list itself (rewriting and search), and Linux's
 Terminal paste.
 
@@ -191,6 +203,9 @@ Terminal paste.
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
+`contributed_options_are_labs_toggles_off_by_default`,
+`the_browser_labs_toggle_turns_on_and_asks_for_system_audio`,
+`keyboard_model_switching_is_a_labs_toggle_wherever_layouts_are_observable`,
 `voice_filter_shows_only_while_its_labs_toggle_is_on`, and
 `an_installed_driver_keeps_the_voice_filter_on` in
 [panes.rs](../../src/rune_ui/tests/panes.rs);

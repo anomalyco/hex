@@ -183,11 +183,17 @@ impl ChordWatch {
                     )
                 }
                 NSEventType::FlagsChanged => capture.borrow_mut().flags_changed(flags),
+                // Mouse buttons record only with Labs › Mouse shortcuts on;
+                // otherwise the click reaches the window as usual.
                 NSEventType::LeftMouseDown
                 | NSEventType::RightMouseDown
-                | NSEventType::OtherMouseDown => capture
-                    .borrow_mut()
-                    .mouse_down(event_ref.buttonNumber(), flags),
+                | NSEventType::OtherMouseDown
+                    if crate::labs::mouse_shortcuts() =>
+                {
+                    capture
+                        .borrow_mut()
+                        .mouse_down(event_ref.buttonNumber(), flags)
+                }
                 // Key releases still reach the window so its key state
                 // stays balanced.
                 _ => return event.as_ptr(),
@@ -686,7 +692,7 @@ impl NativeHost for MacHost {
         let refresh = Instant::now() >= self.refresh_at;
         changed |= poll_voice_filter(state, refresh);
         #[cfg(hex_capture)]
-        if state.dev_build {
+        {
             changed |= self.scrawl.poll(state, Instant::now() >= self.refresh_at);
         }
         if Instant::now() < self.refresh_at {

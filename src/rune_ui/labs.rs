@@ -6,7 +6,7 @@
 use rune::{El, Icon, Tx, row, text};
 
 use super::controls::{self, CardRow, Paint, card, icon_row, pressable_row, row_switch};
-use super::icons::{BOOK, HINTS, SPARKLES, TERMINAL, WAVE};
+use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, WAVE};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
 use crate::desktop_i18n::tr;
 use crate::labs::Feature;
@@ -167,6 +167,36 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Vocabulary biasing"),
         tr("Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"),
     ));
+    if caps.keyboard_model_switching {
+        rows.push(row(
+            Feature::KeyboardModelSwitching,
+            &KEYBOARD,
+            tr("Switch model with keyboard language"),
+            tr("Changing input source selects its mapped model and language; manual choices still work"),
+        ));
+    }
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(
+            Feature::MouseShortcuts,
+            &MOUSE,
+            tr("Mouse shortcuts"),
+            tr("Record mouse buttons as shortcuts"),
+        ));
+        rows.push(row(
+            Feature::PauseBrowser,
+            &GLOBE,
+            tr("Also pause the browser"),
+            tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
+        ));
+    }
+    if caps.share_shortcut {
+        rows.push(row(
+            Feature::ShareShortcut,
+            &KEYBOARD,
+            tr("Share dictation shortcut with other apps"),
+            tr("Lets apps such as Discord detect the same key"),
+        ));
+    }
     if caps.os == super::platform::Os::Windows {
         rows.push(row(
             Feature::TerminalPaste,
@@ -187,6 +217,10 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::TerminalPaste => "lab-terminal-paste",
+        Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
+        Feature::MouseShortcuts => "lab-mouse-shortcuts",
+        Feature::PauseBrowser => "lab-pause-browser",
+        Feature::ShareShortcut => "lab-share-shortcut",
     }
 }
 
@@ -196,6 +230,14 @@ fn flip(ui: &mut Ui, feature: Feature) {
     }
     let on = !feature.on(&ui.settings);
     ui.update(|settings| feature.set(settings, on));
+    match feature {
+        Feature::KeyboardModelSwitching => ui.open = None,
+        // Hex hears the browser through System Audio Recording.
+        Feature::PauseBrowser if on && !ui.platform.system_audio => {
+            ui.ask(super::platform::PlatformRequest::SystemAudio);
+        }
+        _ => {}
+    }
 }
 
 /// The Labs page: what Labs is with Send feedback, every feature's row,

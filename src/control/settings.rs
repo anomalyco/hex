@@ -113,7 +113,7 @@ const KEYS: &[Key] = &[
     key(
         "keyboard_model_switching.enabled",
         Kind::Bool,
-        "Switch the model when the keyboard input source changes (macOS, Windows, X11)",
+        "Labs: switch the model when the keyboard input source changes (macOS, Windows, X11)",
     ),
     key(
         "keyboard_model_switching.mappings",
@@ -171,7 +171,7 @@ const KEYS: &[Key] = &[
     key(
         "pause_browser_media",
         Kind::Bool,
-        "Also pause a playing browser tab while dictating (macOS, with Pause media)",
+        "Labs: also pause a playing browser tab while dictating (macOS, with Pause media)",
     ),
     key(
         "double_tap_lock",
@@ -265,6 +265,11 @@ const KEYS: &[Key] = &[
         "labs.vocabulary_biasing",
         Kind::Bool,
         "Labs: bias Parakeet transcription toward the vocabulary",
+    ),
+    key(
+        "labs.mouse_shortcuts",
+        Kind::Bool,
+        "Labs: record mouse buttons as shortcuts (macOS)",
     ),
     key(
         "meetings.enabled",
@@ -365,7 +370,7 @@ const KEYS: &[Key] = &[
     key(
         "share_dictation_shortcut",
         Kind::Bool,
-        "Let other apps see the dictation shortcut too (Windows)",
+        "Labs: let other apps see the dictation shortcut too (Windows)",
     ),
     optional(
         "ui_language",
@@ -479,7 +484,7 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 
 /// Settings `hex settings` never shows: Hex's own bookkeeping.
 #[cfg(test)]
-const INTERNAL: &[&str] = &["migrations"];
+const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice"];
 
 /// Settings another `hex` command edits instead (`hex vocabulary`).
 #[cfg(test)]
@@ -641,6 +646,15 @@ pub fn apply(
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };
             if let Some(binding) = binding {
+                if cfg!(target_os = "macos")
+                    && !candidate.labs.mouse_shortcuts
+                    && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
+                {
+                    return Err(invalid(
+                        name,
+                        "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
+                    ));
+                }
                 (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
                 if settings.hotkey_in_use(slot, binding) {
                     return Err(ControlError::new(

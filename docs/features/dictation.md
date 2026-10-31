@@ -20,7 +20,8 @@ injects a failed shortcut save yet.
 **Shortcut:** Option by default, after macOS permissions and the selected local
 model are ready. Commands and OpenCode are not required. General > Dictation >
 Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
-standalone function-key bindings. On macOS, Windows and Linux/X11 it also accepts mouse buttons,
+standalone function-key bindings. On Windows and Linux/X11 it also accepts mouse buttons, and on
+macOS with Labs › Mouse shortcuts on (off by default; issue 209; see labs.md),
 alone or with modifiers: click Record, then press the desired mouse button.
 Mouse 1/2/3 are left/right/middle; Mouse 4 and higher are auxiliary buttons.
 Mouse 1 (left click) needs a modifier: alone it would swallow every click,

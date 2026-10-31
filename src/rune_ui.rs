@@ -143,9 +143,9 @@ pub(crate) fn run_app(
         .float_on_open();
     crate::linux_rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
-    // The capture capsule, picker, and ink, in dev builds only.
-    let _capture_overlays = crate::dev_build::is_dev_build()
-        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    // The capture capsule, picker, and ink.
+    let _capture_overlays =
+        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
     let meetings = crate::meeting_runtime::Meetings::install(&mut app, shutdown)
         .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
         .ok();
@@ -605,7 +605,7 @@ impl Pane {
             // On from Labs, or kept by a driver apps already use.
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
-            Pane::Annotate => ui.platform.dev_build && ui.platform.scrawl.is_some(),
+            Pane::Annotate => ui.platform.scrawl.is_some(),
             _ => true,
         }
     }
@@ -778,12 +778,21 @@ impl Ui {
         let store = host::history(&connect, settings.history_retention);
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
+        // A mouse-button shortcut went back to its default: say so once.
+        if ui.settings.mouse_shortcut_notice {
+            ui.settings.mouse_shortcut_notice = false;
+            if let Err(error) = ui.settings.save() {
+                tracing::warn!(%error, "could not clear the mouse shortcut note");
+            }
+            ui.error.get_or_insert_with(|| {
+                tr("Mouse shortcuts are in Labs now, so your mouse-button shortcut went back to the default. Turn on Labs › Mouse shortcuts to use one again.").to_owned()
+            });
+        }
         ui.history = history::HistoryPane::shared(store);
         ui.models = models::Models::load();
         ui.modes.load_personal_commands();
-        let dev_build = crate::dev_build::is_dev_build();
-        ui.platform.dev_build = dev_build;
-        ui.platform.developer = dev_build && crate::DEVELOPER_FEATURES_ENABLED;
+        ui.platform.developer =
+            crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.playground = playground::enabled();
         ui.platform.hud.tuning = crate::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
@@ -2376,7 +2385,6 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
-        ui.platform.dev_build = false;
         ui.settings.meetings.enabled = false;
     }),
     ("mac-activity", |ui| {
