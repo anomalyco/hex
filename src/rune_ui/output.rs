@@ -20,6 +20,8 @@ use crate::app_settings::DictationMode;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::text_replacements::ReplacementSet;
 
+mod examples;
+
 /// The agent card's spark, this many points square.
 const SPARK: f32 = 30.0;
 /// Each app rule's folding steps, by its place in the list.
@@ -159,29 +161,11 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 /// to change them.
 fn agent_card(ui: &Ui, p: Paint) -> El {
     let mark = spark(p, "spark", SPARK);
-    let detail = if ui.output.prompt_copied {
-        tr("Copied. Paste it into your agent and say what you want")
+    let copy = if ui.output.prompt_copied {
+        examples::copied(p)
     } else {
-        tr("Tell it what you want, like “no final period in Slack”")
+        examples::copy(p)
     };
-    let copy = col()
-        .key("copy")
-        .grow(1.0)
-        .shrink()
-        .gap(2.0)
-        .child(
-            text(tr("Your agent writes these steps"))
-                .key("title")
-                .font(p.k.ty.ui_medium)
-                .color(p.text()),
-        )
-        .child(
-            text(detail)
-                .key("detail")
-                .font(DESCRIPTION)
-                .color(p.muted())
-                .wrap(),
-        );
     let open = Button::new(tr("Open file"))
         .variant(ButtonVariant::Ghost)
         .on_press(open_settings_file)

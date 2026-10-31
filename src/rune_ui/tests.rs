@@ -683,9 +683,12 @@ fn switching_panes_is_instant() {
     }
 }
 
-/// A frame of Output's turning spark, which moves on its own.
+/// A frame of Output's turning spark or a word of its cycling examples,
+/// which move on their own.
 fn spark(e: &rune::ElementInfo) -> bool {
-    e.key.as_deref().is_some_and(|key| key.starts_with("spark"))
+    e.key
+        .as_deref()
+        .is_some_and(|key| key.starts_with("spark") || key.starts_with("example"))
 }
 
 fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
