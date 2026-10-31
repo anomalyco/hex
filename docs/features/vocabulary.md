@@ -31,6 +31,9 @@ General › Vocabulary   // vocabulary.settings; after Language
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
 Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; gguf_session::with_vocabulary
+├── Only with Labs › Vocabulary biasing on (`labs.vocabulary_biasing`, off by
+│   default; labs.md) -> off: no run takes the list; the sheet says so, and
+│   rewriting and search still use it
 ├── Every run and live stream reads the list and the boost at its start:
 │   dictation, meetings, captures, the local API
 ├── First 64 terms (the engine's cap) and their spellings; empty or Off -> unchanged

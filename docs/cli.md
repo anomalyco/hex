@@ -45,7 +45,7 @@ hex
 │   ├── show [settings|models|modes|history|meetings]
 │   ├── hide                       close the window; Hex stays in the menu bar
 │   └── story <story> [--variant V] [--play]  the playground (Labs): open a story
-├── onboarding reset (alias restart)  replay the first run now; every OS, needs Labs on (below)
+├── onboarding reset (alias restart)  replay the first run now; every OS (below)
 ├── history clear --yes            delete every retained dictation
 ├── vocabulary                     the shared vocabulary (features/vocabulary.md)
 │   ├── list [--json]              every term and its "sounds like" spellings
@@ -57,7 +57,7 @@ hex
 │   ├── show <capture>             one capture's words, files, and where it went
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
-├── labs on|off|status            Labs, every unfinished feature; edits settings.json (features/labs.md)
+├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (installed Hex.app only)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
@@ -98,9 +98,9 @@ first-run onboarding at once, as on a new install, for trying it again, on
 macOS, Linux, and Windows. It removes only the onboarding markers (`onboarding-complete`, `onboarding-step`,
 `onboarding-relaunch`) from the data folder. Settings, history, models, and
 permissions are untouched, so the run finds them ready: the download passes at
-once and the permission step is skipped. With Labs off it refuses with
-`unsupported`. Labs' Run setup again row does the same. On Windows the CLI
-only signals the running Hex, so it answers before the window opens.
+once and the permission step is skipped. Labs' Run setup again row does the
+same. On Windows the CLI only signals the running Hex, so it answers before
+the window opens.
 
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
@@ -266,7 +266,7 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
                   "transcription_model": true},
   "window": {"open": false, "pane": null},
   "update": "current",
-  "labs": true
+  "labs": ["live-text"]
 }
 ```
 
@@ -281,7 +281,7 @@ update              current | checking | available | unavailable
 ```
 
 `memory_footprint_bytes` is the physical footprint Activity Monitor shows.
-`labs` says whether [Labs](features/labs.md) is on; older Hex omits it.
+`labs` lists the [Labs](features/labs.md) features turned on; older Hex omits it.
 
 ### Error codes
 

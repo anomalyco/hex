@@ -837,12 +837,11 @@ Before: map-reduce over 8 chunks, 9 calls, 51-minute call  96 s
 
 ### Live Chapters (Labs)
 
-Part of [Labs](labs.md), with its own switch, off by default: Live chapters
-on its Labs row (`labs.live_chapters`, read when a recording starts). Off, or
-with Labs off, nothing below starts, and meetings behave as without it.
+A [Labs](labs.md) toggle, off by default: Live chapters
+(`labs.live_chapters`, read when a recording starts). Off, nothing below starts, and meetings behave as without it.
 
 ```ts
-Recording starts, Labs on                             // meetings.chapters.live
+Recording starts, toggle on                           // meetings.chapters.live
   -> meeting-chapters thread, utility QoS; checks the rolling transcript every 5 s
      (nothing read while Apple Intelligence is unavailable or titles are off)
   -> ≥ 3 min of new meeting time and ≥ 40 new words -> waits (≤30 s) for dictation
@@ -879,7 +878,7 @@ Copy section (pane, per chapter; menu bar "Copy Section" while recording;
      chapter, joined into turns only within it (one shared function)
 ```
 
-Titles: with Labs on, the manifest records `title_source` (`default`,
+Titles: with Live chapters on, the manifest records `title_source` (`default`,
 `call`, `calendar`, `user`); off, it is written only to a manifest that already
 has it or has chapters. Unless it is `user`, the shown title is the base title
 plus up to three of the longest chapters in meeting order, once there are two:

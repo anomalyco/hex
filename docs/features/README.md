@@ -525,10 +525,10 @@ latency measurement.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, History, then each opt-in feature that is on (Meetings)
-└── Labs ▸ -> Labs page: a switch per opt-in feature; one turned on joins the sidebar
-    └── Labs features' panes (and Modes when shown) indent under Labs while it's open
-        // Command-1…9 follow this order (labs::order)
+├── General, Output, History, then each feature that is on: Meetings and
+│   Voice Filter (Labs toggles), Annotate (dev builds), Playground (Labs, an item)
+└── Labs -> one flat page of toggles, each off by default (labs.md)
+    // Command-1…9 follow the panes' order (labs::order)
 
 General                                  // settings
 ├── Basics card -> Shortcut, Speech model, Language, Microphone, Launch at login
@@ -831,9 +831,9 @@ suppression, and the Markdown copy in the user's transcript folder.
 ## Experimental: Hex Microphone And Voice Filter
 
 ```ts
-Turn on Voice Filter (experimental.hex_microphone = true), HEX_EXPERIMENTAL_MIC=1,
-or the driver installed; Labs only shows the pane  // fun.hex-microphone; macOS
-├── Sidebar > Labs > Voice Filter  // the only home of these controls
+Labs › Voice Filter (experimental.hex_microphone = true), HEX_EXPERIMENTAL_MIC=1,
+or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS
+├── Sidebar > Voice Filter  // the only home of these controls
 ├── Hex Microphone card
 │   ├── Driver status -> Installed v<ver> / In use by <app> + Uninstall
 │   │   ├── Version mismatch -> v<old> installed + Update + Uninstall
@@ -1477,7 +1477,7 @@ microphone behavior.
 macOS debug runtime                      // not release navigation
 ├── Meetings -> Always available; release builds need the Meetings opt-in (its pane's card or Meetings › Settings)
 ├── Activity / HUD Lab / hex dev -> Observation and developer controls
-└── HUD Lab in release -> Only in the playground, while Labs is on
+└── HUD Lab in release -> Only in the playground (Labs › Playground)
 
 `hex app -- --snap OUT --scene NAME` -> Rendered fixtures    // not proof capture/download/update happened
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui

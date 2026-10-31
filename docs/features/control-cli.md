@@ -44,7 +44,7 @@ Agent or terminal                                  // control.cli; macOS release
 │   ├── settings -> the General pane (status window.pane stays "settings")
 │   ├── meetings pane with Meetings off -> the pane's opt-in card
 │   └── story <story> [--variant V] [--play] -> a playground story, as a
-│       hex://story link opens (labs.md); Labs off -> feature-off
+│       hex://story link opens (labs.md); playground off -> feature-off
 ├── hex history clear --yes -> without --yes refused before Hex is asked
 ├── hex check-for-updates -> The updater checks now
 ├── hex launch-at-login [on|off] -> SMAppService; changes need Hex.app
