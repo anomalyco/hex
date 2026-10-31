@@ -79,13 +79,11 @@ fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
         TranscriptionSelection {
             model: TranscriptionModelId::ParakeetV3,
             language,
-            recognition_hints: current.recognition_hints.clone(),
         }
     } else {
         TranscriptionSelection {
             model: TranscriptionModelId::ParakeetUnifiedEnglish,
             language: "en".into(),
-            recognition_hints: current.recognition_hints.clone(),
         }
     }
 }

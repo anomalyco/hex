@@ -72,7 +72,7 @@ impl VocabularyEditor {
     }
 
     /// Adds a row at the end and returns its identity.
-    fn push(&mut self, term: TextEdit, sounds_like: TextEdit) -> u64 {
+    pub(super) fn push(&mut self, term: TextEdit, sounds_like: TextEdit) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.rows.push(TermRow {
@@ -136,8 +136,9 @@ pub(super) fn summary(ui: &Ui) -> String {
     }
 }
 
-/// Why the list doesn't reach transcription, when the selected model is
-/// one transcription doesn't bias (only Parakeet-based models take it).
+/// Why the list doesn't reach transcription, when the selected model takes
+/// none (Parakeet biases toward it; Whisper and Qwen3-ASR read it as a
+/// prompt).
 pub(super) fn unused_note(ui: &Ui) -> Option<String> {
     let model = crate::transcription_models::definition(ui.settings.transcription.model);
     (!model.uses_vocabulary()).then(|| {
@@ -320,8 +321,11 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.muted())
                 .wrap(),
         );
+    let biases = crate::transcription_models::definition(ui.settings.transcription.model)
+        .vocabulary_use()
+        == crate::transcription_models::VocabularyUse::Bias;
     let unused = unused_note(ui).or_else(|| {
-        (!ui.settings.labs.vocabulary_biasing).then(|| {
+        (biases && !ui.settings.labs.vocabulary_biasing).then(|| {
             tr("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do")
                 .to_string()
         })

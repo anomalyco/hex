@@ -656,8 +656,7 @@ fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
 // ---------------------------------------------------------------------------
 // Advanced
 
-/// How the shortcut triggers, the microphone's idle release, and the speech
-/// model's hints.
+/// How the shortcut triggers and the microphone's idle release.
 fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     use super::platform_settings::{SIDES, picked_side, side_binding};
     let settings = &ui.settings;
@@ -805,30 +804,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
-    let model = transcription_models::definition(settings.transcription.model);
-    if model.supports_recognition_hints {
-        rows.push(
-            icon_row(
-                p,
-                "hints",
-                &HINTS,
-                tr("Recognition hints"),
-                Some(tr("Names and terms to prime the speech model")),
-                text_field(
-                    p,
-                    "hints-field",
-                    &ui.hints,
-                    tr("Names and terms the model should expect, e.g. OpenCode, Effect…"),
-                    |ui: &mut Ui| &mut ui.hints,
-                    |ui: &mut Ui, _| {
-                        let hints = ui.hints.text.clone();
-                        ui.update(|settings| settings.transcription.recognition_hints = hints);
-                    },
-                ),
-            )
-            .into(),
-        );
-    }
     rows
 }
 

@@ -123,7 +123,7 @@ menu bar's Paste Last Dictation does nothing in that case.
 
 `model use` switches only to a downloaded model and checks it on disk; it never
 downloads or repairs one (`model install` does). It keeps that model's own
-remembered language and recognition hints, as the menu bar does; `--language`
+remembered language, as the menu bar does; `--language`
 overrides only the language, and must be one the model supports.
 
 `vocabulary` edits the [shared vocabulary](features/vocabulary.md) through the
@@ -254,7 +254,7 @@ Replies are tagged by `status`:
   "kind": "bool", "writable": true, "about": "Play recording, cancellation, and error tones"}]}
 {"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
-  "streams": true, "supports_recognition_hints": false}]}
+  "streams": true, "vocabulary": "bias", "supports_recognition_hints": false}]}
 {"version": 4, "status": "vocabulary", "entries": [{"term": "OpenCode",
   "sounds_like": ["open code"]}, {"term": "Rune"}]}
 {"version": 4, "status": "scrawl-capture", "changed": true, "state": "idle",
@@ -415,7 +415,7 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `show_dock_icon`, `transcription.recognition_hints`, `vocabulary_boost`,
+`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,
@@ -427,6 +427,13 @@ Writable keys: `release_microphone_while_idle`,
 `experimental.hex_microphone_comfort_noise`,
 `experimental.hex_microphone_strength`, `enable_on_launch`,
 `paste_with_shift`, `ui_language`, `indicator_position`, `updates.channel`.
+
+`transcription.recognition_hints` is deprecated: recognition hints merged into
+the [vocabulary](features/vocabulary.md). `get` returns the vocabulary's terms,
+comma-separated, and `set` (or `apply`) adds the comma-separated names to it;
+`list` leaves the key out. Model listings keep `supports_recognition_hints`
+(true where the model reads the vocabulary as its prompt) beside the newer
+`vocabulary`: `prompt`, `bias`, or `none`.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

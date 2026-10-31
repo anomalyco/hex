@@ -958,11 +958,7 @@ fn validate_selection(
     model: crate::transcription_models::TranscriptionModelId,
     language: String,
 ) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
-    let selection = crate::transcription_models::TranscriptionSelection {
-        model,
-        language,
-        recognition_hints: String::new(),
-    };
+    let selection = crate::transcription_models::TranscriptionSelection { model, language };
     crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
     Ok(selection)
 }

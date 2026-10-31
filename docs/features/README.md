@@ -222,41 +222,28 @@ Language row is unexercised.
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
-│   └── Recognition hints -> initial prompt; output that only repeats them is dropped
-├── Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Recognition hints -> context prompt in the
-│   system message; output that only repeats them is dropped
+├── Whisper, Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary -> context prompt
+│   (vocabulary.md); output that only repeats it is dropped
 └── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 
-Whisper reads the recognition hints as its initial prompt and Qwen3-ASR
-(including QwenCleo) as the context prompt in its system message
-([#129](https://github.com/anomalyco/hex/issues/129)); `apply_recognition_hints`
-in [gguf_session.rs](../../src/gguf_session.rs) picks the slot on every OS, so
-dictation, meetings, and the local API on the listener's model all get them.
-Live streams run without them. Observed on apollo (Vulkan, 2026-10-31,
-LibriSpeech test-clean): with Qwen3-ASR 0.6B, hints "Kaffar, Rodolfo,
-Bragelonne, …" fixed Caffer, Rudolpho, Redolfo, Rudolph, and Bragolon in 10
-clips without changing the others checked. Both families, on silence or noise,
-often return the hints verbatim (Qwen3-ASR 0.6B did on 3 s of silence and of
-noise). A segment whose text equals the hints after
-normalization (case, ASCII punctuation, spelled-out digits; commas, semicolons
-and line breaks separate words) is removed, in dictation, meetings, and the
-local API alike. The filter needs at least two hints, so dictating the one
-listed name still pastes it; speech that contains a hint among other words is
-kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
-`speech_containing_the_hints_is_kept`, `only_the_echo_segment_is_removed`,
-`single_hint_dictation_is_kept`, and
+Whisper and Qwen3-ASR (including QwenCleo) read the shared
+[Vocabulary](vocabulary.md) as their context prompt; recognition hints, a
+separate per-model box, merged into it ([#129](https://github.com/anomalyco/hex/issues/129)).
+Observed on apollo (Vulkan, 2026-10-31, LibriSpeech test-clean), when they were
+still hints: with Qwen3-ASR 0.6B, "Kaffar, Rodolfo, Bragelonne, …" fixed Caffer,
+Rudolpho, Redolfo, Rudolph, and Bragolon in 10 clips without changing the others
+checked. Both families, on silence or noise, often return the prompt verbatim
+(Qwen3-ASR 0.6B did on 3 s of silence and of noise). A segment whose text
+equals the prompt after normalization (case, ASCII punctuation, spelled-out
+digits; commas, semicolons and line breaks separate words) is removed, in
+dictation, meetings, and the local API alike. The filter needs at least two
+terms, so dictating the one listed name still pastes it; speech that contains
+a term among other words is kept, and so is a repeat of only some terms.
+Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
+`only_the_echo_segment_is_removed`, `single_hint_dictation_is_kept`, and
 `hints_without_spaces_after_commas_are_matched` in
 [gguf_session.rs](../../src/gguf_session.rs).
-
-Whisper, Qwen3-ASR 0.6B, and QwenCleo-ASR 1.7B take recognition hints, and
-Settings shows the field only for them. Saved hints for a model that can't use
-them (for example Parakeet Unified English, set by hand in `settings.json`) are
-cleared with a logged warning when settings load, rather than failing the whole
-load and leaving the listener off
-([#448](https://github.com/anomalyco/hex/issues/448)). Check:
-`loading_clears_recognition_hints_the_model_does_not_support` in
-[app_settings.rs](../../src/app_settings.rs).
 
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
@@ -627,8 +614,7 @@ General                                  // settings
 │   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
 │   │   Double-tap only, Microphone mode, keyboard-language mappings (while its Labs toggle is on),
 │   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
-│   │   microphone instead of Bluetooth"),
-│   │   Recognition hints
+│   │   microphone instead of Bluetooth")
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,

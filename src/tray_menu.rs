@@ -239,7 +239,6 @@ mod tests {
         settings.remember_transcription(TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,
             language: "fr".into(),
-            recognition_hints: String::new(),
         });
         settings.remember_transcription(TranscriptionSelection::default());
         let installed = |model: &ModelDefinition, _: &str| {

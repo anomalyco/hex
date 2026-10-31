@@ -8,10 +8,12 @@ Linux, and Windows; the `hex vocabulary` commands are macOS only for now.
 ```ts
 General › Vocabulary   // vocabulary.settings; after Language
 ├── Row value -> "None", "1 term", "N terms" -> opens the Vocabulary sheet
-├── Selected model transcription doesn't bias (ModelDefinition::uses_vocabulary)
-│   -> muted note on the row and under the sheet's description: "Whisper
-│   large-v3-turbo doesn't use these terms; rewriting and search still do";
-│   Parakeet-based models (Parakeet, Underdog Bark) show none
+├── Selected model takes no vocabulary (ModelDefinition::vocabulary_use)
+│   -> muted note on the row and under the sheet's description: "SenseVoice
+│   Small doesn't use these terms; rewriting and search still do"; Parakeet,
+│   Underdog Bark, Whisper, and Qwen3-ASR (QwenCleo too) show none
+├── Parakeet-based model with Labs › Vocabulary biasing off -> the sheet says
+│   transcription uses the terms only with it on
 ├── Sheet description -> what the list does, then "Terms with spaces match
 │   only when said in full" (a term is matched whole; "Dax Rad" doesn't help
 │   "Dax" said alone, so a name also said alone gets its own row)
@@ -51,7 +53,28 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transc
 ├── Left alone: case-only differences, inflections ("Abattoirs"), and addresses
 │   and paths ("opencode.ai"); rescoring also skips terms under 5 letters
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
-└── Whisper, Qwen3, SenseVoice, Cohere, Apple Speech -> no biasing
+└── SenseVoice, Cohere, Apple Speech -> no vocabulary in transcription
+
+Context prompt (Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; gguf_session::with_vocabulary
+├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
+├── Every whole-clip run reads the list at its start: dictation, meetings,
+│   captures, the local API; live streams run without it
+├── "Term, Term, …": the first terms in list order, at most 64, as many as
+│   fit 500 characters (Whisper: its prompt slot holds 223 tokens and trims
+│   an overlong one from the front) or 1,000 (Qwen3-ASR's system message)
+├── Whisper: transcribe.cpp's generic context prompt in the <|startofprev|>
+│   slot; Qwen3-ASR: the system message
+├── Output that only repeats the prompt (two or more terms) is dropped, as
+│   both models return it on silence or noise (README.md#get-ready)
+└── "Sounds like" spellings are not sent; rewriting and search use them
+
+Recognition hints, folded in                // vocabulary.hints
+├── Loading settings.json -> `recognition_hints` of the selected model and the
+│   recent models (newest first), split on commas, semicolons, and line
+│   breaks, become terms; names already listed (any case) are skipped, and
+│   the rewritten file drops the field
+└── `hex settings get|set transcription.recognition_hints` -> deprecated alias:
+    reads the terms comma-separated; set adds names (cli.md)
 
 hex vocabulary                           // vocabulary.cli
 ├── list [--json]
@@ -114,7 +137,14 @@ Sources: [vocabulary.rs](../../src/vocabulary.rs),
 
 Checks: `vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
-first 64 terms and their spellings reaching transcription, boost names);
+first 64 terms and their spellings reaching transcription, the bounded prompt,
+folding hints, boost names);
+`loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
+[app_settings.rs](../../src/app_settings.rs);
+`recognition_hints_alias_the_vocabulary` in
+[control/settings.rs](../../src/control/settings.rs);
+`whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases` in
+[transcription_models.rs](../../src/transcription_models.rs);
 `vocabulary_round_trips_and_stays_out_of_files_without_one` in
 [app_settings.rs](../../src/app_settings.rs);
 `a_vocabulary_term_finds_its_mis_transcriptions_below_exact_hits`,

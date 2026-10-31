@@ -285,17 +285,7 @@ impl WindowsDesktopHost {
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
         self.manual_choice();
-        let definition = crate::transcription_models::definition(model);
-        let selection = crate::transcription_models::TranscriptionSelection {
-            model,
-            language,
-            // Hints persist across models that can use them.
-            recognition_hints: if definition.supports_recognition_hints {
-                self.settings.transcription.recognition_hints.clone()
-            } else {
-                String::new()
-            },
-        };
+        let selection = crate::transcription_models::TranscriptionSelection { model, language };
         self.preparation.start(selection, false);
     }
 
@@ -512,15 +502,8 @@ impl WindowsDesktopHost {
         }
     }
 
-    /// The selection with recognition hints stripped when the model cannot
-    /// use them, so validation never rejects a load because hints linger
-    /// from a Whisper session.
     fn runtime_selection(&self) -> crate::transcription_models::TranscriptionSelection {
-        let mut selection = self.settings.transcription.clone();
-        if !crate::transcription_models::definition(selection.model).supports_recognition_hints {
-            selection.recognition_hints = String::new();
-        }
-        selection
+        self.settings.transcription.clone()
     }
 
     /// The listener could not load a newly chosen model and still runs the

@@ -108,7 +108,6 @@ struct VerificationReceipt {
 pub struct TranscriptionSelection {
     pub model: TranscriptionModelId,
     pub language: String,
-    pub recognition_hints: String,
 }
 
 impl Default for TranscriptionSelection {
@@ -116,7 +115,6 @@ impl Default for TranscriptionSelection {
         Self {
             model: TranscriptionModelId::default(),
             language: "en".into(),
-            recognition_hints: String::new(),
         }
     }
 }
@@ -126,7 +124,7 @@ pub enum Recommendation {
     Recommended,
     Fastest,
     MostAccurate,
-    RecognitionHints,
+    Vocabulary,
 }
 
 impl Recommendation {
@@ -135,7 +133,7 @@ impl Recommendation {
             Self::Recommended => "Recommended",
             Self::Fastest => "Fastest",
             Self::MostAccurate => "Most accurate",
-            Self::RecognitionHints => "Recognition hints",
+            Self::Vocabulary => "Uses vocabulary",
         }
     }
 }
@@ -164,7 +162,17 @@ pub struct ModelDefinition {
     pub languages: &'static [&'static str],
     pub accepts_language_hint: bool,
     pub supports_language_detection: bool,
-    pub supports_recognition_hints: bool,
+}
+
+/// How a model's transcription takes the vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VocabularyUse {
+    /// Parakeet's transducer heads bias their decode toward the terms
+    /// (Labs › Vocabulary biasing).
+    Bias,
+    /// Whisper and Qwen3-ASR read the terms as their context prompt.
+    Prompt,
+    None,
 }
 
 #[derive(Clone, Copy)]
@@ -271,12 +279,25 @@ impl ModelDefinition {
         }
     }
 
-    /// Whether transcription biases this model toward the vocabulary: only
-    /// Parakeet's transducer heads take it (`gguf_session` checks the same
-    /// architecture before it adds the list to a run). Rewriting and search
-    /// use the vocabulary with every model.
+    /// How transcription feeds this model the vocabulary (`gguf_session`
+    /// checks the model itself before it adds the list to a run). Rewriting
+    /// and search use the vocabulary with every model.
+    pub fn vocabulary_use(&self) -> VocabularyUse {
+        match self.runtime {
+            ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet" => {
+                VocabularyUse::Bias
+            }
+            ModelRuntime::Gguf(artifact)
+                if matches!(artifact.architecture, "whisper" | "qwen3_asr") =>
+            {
+                VocabularyUse::Prompt
+            }
+            _ => VocabularyUse::None,
+        }
+    }
+
     pub fn uses_vocabulary(&self) -> bool {
-        matches!(self.runtime, ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet")
+        self.vocabulary_use() != VocabularyUse::None
     }
 
     pub const fn download_bytes(&self) -> Option<u64> {
@@ -430,7 +451,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV2,
@@ -445,7 +465,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV3,
@@ -461,7 +480,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // The pinned v3 artifact detects language from audio and has no prompt input.
         accepts_language_hint: false,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::WhisperLargeV3Turbo,
@@ -476,7 +494,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: true,
-        supports_recognition_hints: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::Qwen3Asr06B,
@@ -491,7 +508,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: true,
-        supports_recognition_hints: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::QwenCleoAsr17B,
@@ -508,7 +524,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["ar"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::SenseVoiceSmall,
@@ -523,7 +538,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["zh", "yue", "en", "ja", "ko"],
         accepts_language_hint: true,
         supports_language_detection: true,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::CohereTranscribe,
@@ -538,7 +552,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: COHERE_LANGUAGES,
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Pro,
@@ -554,7 +567,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // Like Parakeet v3, its base, the artifact has no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::UnderdogBark3Clean,
@@ -569,7 +581,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["en"],
         accepts_language_hint: false,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -584,7 +595,6 @@ pub const MODELS: &[ModelDefinition] = &[
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: false,
-        supports_recognition_hints: false,
     },
 ];
 
@@ -649,7 +659,7 @@ pub fn language_name(code: &str) -> &str {
 }
 
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
-    use Recommendation::{Fastest, MostAccurate, RecognitionHints, Recommended};
+    use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
         CohereTranscribe, ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall,
         WhisperLargeV3Turbo,
@@ -659,16 +669,16 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         "en" => &[
             (ParakeetUnifiedEnglish, Recommended),
             (CohereTranscribe, MostAccurate),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
         "zh" => &[
             (Qwen3Asr06B, Recommended),
             (SenseVoiceSmall, Fastest),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
         "yue" | "ko" => &[
             (Qwen3Asr06B, Recommended),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
         "ja" => &[
             (WhisperLargeV3Turbo, Recommended),
@@ -676,7 +686,7 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         ],
         "el" => &[
             (CohereTranscribe, Recommended),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
         "fi" | "sv" | "da" => &[(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)],
         "mt" => &[(ParakeetV3, Recommended)],
@@ -688,15 +698,14 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         "vi" => &[
             (Qwen3Asr06B, Recommended),
             (CohereTranscribe, MostAccurate),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
-        language if PARAKEET_V3_LANGUAGES.contains(&language) => &[
-            (ParakeetV3, Recommended),
-            (WhisperLargeV3Turbo, RecognitionHints),
-        ],
+        language if PARAKEET_V3_LANGUAGES.contains(&language) => {
+            &[(ParakeetV3, Recommended), (WhisperLargeV3Turbo, Vocabulary)]
+        }
         language if QWEN_LANGUAGES.contains(&language) => &[
             (Qwen3Asr06B, Recommended),
-            (WhisperLargeV3Turbo, RecognitionHints),
+            (WhisperLargeV3Turbo, Vocabulary),
         ],
         _ => &[(WhisperLargeV3Turbo, Recommended)],
     };
@@ -751,9 +760,6 @@ pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefi
             model.name,
             language_name(&selection.language)
         );
-    }
-    if !model.supports_recognition_hints && !selection.recognition_hints.trim().is_empty() {
-        bail!("{} does not support recognition hints", model.name);
     }
     Ok(model)
 }
@@ -1201,7 +1207,6 @@ pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     TranscriptionSelection {
         model,
         language: language.into(),
-        recognition_hints: String::new(),
     }
 }
 
@@ -1332,26 +1337,6 @@ mod tests {
             runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
             ..*definition(TranscriptionModelId::ParakeetV2)
         }
-    }
-
-    #[test]
-    fn only_parakeet_based_models_use_the_vocabulary() {
-        use TranscriptionModelId::*;
-        let using: Vec<_> = MODELS
-            .iter()
-            .filter(|model| model.uses_vocabulary())
-            .map(|model| model.id)
-            .collect();
-        assert_eq!(
-            using,
-            [
-                ParakeetUnifiedEnglish,
-                ParakeetV2,
-                ParakeetV3,
-                UnderdogBark3Pro,
-                UnderdogBark3Clean,
-            ]
-        );
     }
 
     #[test]
@@ -1503,7 +1488,6 @@ mod tests {
             validate(&TranscriptionSelection {
                 model: TranscriptionModelId::ParakeetV2,
                 language: "zh".into(),
-                recognition_hints: String::new(),
             })
             .is_err()
         );
@@ -1511,7 +1495,6 @@ mod tests {
             validate(&TranscriptionSelection {
                 model: TranscriptionModelId::ParakeetV2,
                 language: AUTO_LANGUAGE.into(),
-                recognition_hints: String::new(),
             })
             .is_err()
         );
@@ -1519,7 +1502,6 @@ mod tests {
             validate(&TranscriptionSelection {
                 model: TranscriptionModelId::WhisperLargeV3Turbo,
                 language: AUTO_LANGUAGE.into(),
-                recognition_hints: String::new(),
             })
             .is_ok()
         );
@@ -1556,7 +1538,7 @@ mod tests {
 
     #[test]
     fn weak_qwen_and_parakeet_languages_route_to_stronger_shipped_models() {
-        use Recommendation::{Fastest, MostAccurate, RecognitionHints, Recommended};
+        use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
         use TranscriptionModelId::{
             CohereTranscribe, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
         };
@@ -1564,7 +1546,7 @@ mod tests {
             routing("el"),
             [
                 (CohereTranscribe, Recommended),
-                (WhisperLargeV3Turbo, RecognitionHints)
+                (WhisperLargeV3Turbo, Vocabulary)
             ]
         );
         for language in ["tr", "ms", "fil", "fa", "mk"] {
@@ -1599,7 +1581,7 @@ mod tests {
                 routing(language),
                 [
                     (Qwen3Asr06B, Recommended),
-                    (WhisperLargeV3Turbo, RecognitionHints)
+                    (WhisperLargeV3Turbo, Vocabulary)
                 ]
             );
         }
@@ -1608,7 +1590,7 @@ mod tests {
             [
                 (Qwen3Asr06B, Recommended),
                 (CohereTranscribe, MostAccurate),
-                (WhisperLargeV3Turbo, RecognitionHints)
+                (WhisperLargeV3Turbo, Vocabulary)
             ]
         );
         assert_eq!(routing("mt"), [(ParakeetV3, Recommended)]);
@@ -1662,7 +1644,7 @@ mod tests {
                 ),
                 (
                     TranscriptionModelId::WhisperLargeV3Turbo,
-                    Some(Recommendation::RecognitionHints)
+                    Some(Recommendation::Vocabulary)
                 ),
             ]
         );
@@ -1694,7 +1676,6 @@ mod tests {
                 let selection = TranscriptionSelection {
                     model: model.id,
                     language: model.language_for(language).into(),
-                    recognition_hints: String::new(),
                 };
                 assert!(validate(&selection).is_ok(), "{} {language}", model.name);
             }
@@ -1742,7 +1723,6 @@ mod tests {
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::ParakeetV3,
             language: "pt".into(),
-            recognition_hints: String::new(),
         };
         let model = validate(&selection).unwrap();
         assert_eq!(model.id, TranscriptionModelId::ParakeetV3);
@@ -1778,37 +1758,33 @@ mod tests {
             validate(&TranscriptionSelection {
                 model: TranscriptionModelId::Qwen3Asr06B,
                 language: "bn".into(),
-                recognition_hints: String::new(),
             })
             .is_err()
         );
     }
 
     #[test]
-    fn recognition_hints_are_for_whisper_and_qwen3_asr() {
-        let mut selection = TranscriptionSelection {
-            recognition_hints: "OpenCode".into(),
-            ..TranscriptionSelection::default()
+    fn whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases() {
+        use TranscriptionModelId::*;
+        let by = |kind| {
+            MODELS
+                .iter()
+                .filter(|model| model.vocabulary_use() == kind)
+                .map(|model| model.id)
+                .collect::<Vec<_>>()
         };
-        assert!(validate(&selection).is_err());
-        selection.model = TranscriptionModelId::WhisperLargeV3Turbo;
-        assert!(validate(&selection).is_ok());
-        selection.model = TranscriptionModelId::Qwen3Asr06B;
-        assert!(validate(&selection).is_ok());
-        selection.model = TranscriptionModelId::QwenCleoAsr17B;
-        selection.language = "ar".into();
-        assert!(validate(&selection).is_ok());
-        let hinted = MODELS
-            .iter()
-            .filter(|model| model.supports_recognition_hints)
-            .map(|model| model.id)
-            .collect::<Vec<_>>();
         assert_eq!(
-            hinted,
+            by(VocabularyUse::Prompt),
+            [WhisperLargeV3Turbo, Qwen3Asr06B, QwenCleoAsr17B]
+        );
+        assert_eq!(
+            by(VocabularyUse::Bias),
             [
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                TranscriptionModelId::Qwen3Asr06B,
-                TranscriptionModelId::QwenCleoAsr17B,
+                ParakeetUnifiedEnglish,
+                ParakeetV2,
+                ParakeetV3,
+                UnderdogBark3Pro,
+                UnderdogBark3Clean,
             ]
         );
     }

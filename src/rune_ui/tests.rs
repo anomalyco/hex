@@ -585,23 +585,24 @@ fn service_settings_are_adopted_only_when_the_service_changes_them() {
 #[test]
 fn a_draft_saves_over_what_another_writer_changed_meanwhile() {
     let mut ui = portal_fixture();
-    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
     let service = ui.settings.clone();
     ui.adopt(service.clone());
-    ui.hints = TextEdit::new("OpenCode, Effect");
+    ui.vocabulary
+        .push(TextEdit::new("OpenCode"), TextEdit::default());
     let start = std::time::Instant::now();
     assert!(!ui.save_drafts(start), "waits for a pause");
     // `hex settings set` (or a capture's saved rule) saves while it waits.
     let mut elsewhere = service;
     elsewhere.enable_on_launch = !elsewhere.enable_on_launch;
     ui.adopt(elsewhere.clone());
-    assert_eq!(ui.hints.text, "OpenCode, Effect", "the typing stays");
+    assert_eq!(
+        ui.vocabulary.project()[0].term,
+        "OpenCode",
+        "the typing stays"
+    );
     assert!(ui.save_drafts(start + DRAFT_DELAY));
     assert_eq!(ui.settings.enable_on_launch, elsewhere.enable_on_launch);
-    assert_eq!(
-        ui.settings.transcription.recognition_hints,
-        "OpenCode, Effect"
-    );
+    assert_eq!(ui.settings.vocabulary[0].term, "OpenCode");
 }
 
 /// Typing in one editor keeps only that editor's text: the others take
@@ -609,10 +610,10 @@ fn a_draft_saves_over_what_another_writer_changed_meanwhile() {
 #[test]
 fn a_draft_keeps_only_its_own_editor() {
     let mut ui = portal_fixture();
-    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
     let service = ui.settings.clone();
     ui.adopt(service.clone());
-    ui.hints = TextEdit::new("OpenCode, Effect");
+    ui.vocabulary
+        .push(TextEdit::new("OpenCode"), TextEdit::default());
     let start = std::time::Instant::now();
     assert!(!ui.save_drafts(start), "waits for a pause");
     let mut elsewhere = service;
@@ -623,10 +624,7 @@ fn a_draft_keeps_only_its_own_editor() {
         .prompt = "Keep it short.".into();
     ui.adopt(elsewhere);
     assert!(ui.save_drafts(start + DRAFT_DELAY));
-    assert_eq!(
-        ui.settings.transcription.recognition_hints,
-        "OpenCode, Effect"
-    );
+    assert_eq!(ui.settings.vocabulary[0].term, "OpenCode");
     assert_eq!(
         ui.settings
             .dictation_processing
@@ -1455,7 +1453,6 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     rt.state.settings.transcription = TranscriptionSelection {
         model: TranscriptionModelId::WhisperLargeV3Turbo,
         language: "ja".into(),
-        recognition_hints: String::new(),
     };
     rt.state.picker.installed = Some(Vec::new());
     rt.invalidate();
@@ -1479,7 +1476,6 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     rt.state.settings.transcription = TranscriptionSelection {
         model: TranscriptionModelId::ParakeetUnifiedEnglish,
         language: "en".into(),
-        recognition_hints: String::new(),
     };
     rt.invalidate();
     tap(&mut rt, "close-picker");
@@ -1817,20 +1813,6 @@ fn onboarding_downloads_the_model_through_the_service() {
     tap(&mut rt, "tour-skip");
     tap(&mut rt, "tour-continue");
     assert!(rt.state.tour.is_none(), "Start using Hex closes setup");
-}
-
-#[test]
-fn recognition_hints_save_when_typing_pauses() {
-    let mut ui = portal_fixture();
-    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
-    ui.hints = TextEdit::new("OpenCode, Effect");
-    let start = std::time::Instant::now();
-    assert!(!ui.save_drafts(start), "waits for a pause");
-    assert!(ui.save_drafts(start + DRAFT_DELAY));
-    assert_eq!(
-        ui.settings.transcription.recognition_hints,
-        "OpenCode, Effect"
-    );
 }
 
 #[test]

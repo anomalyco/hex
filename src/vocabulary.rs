@@ -1,8 +1,9 @@
 //! The shared vocabulary: names Hex should know (people, projects,
 //! products), each with spellings a transcript may show instead ("sounds
 //! like"). Search uses it to find a term's likely mis-transcriptions,
-//! prompts can read it through [`terms`], and Parakeet biases its
-//! transcripts toward it through [`transcription_bias`].
+//! prompts can read it through [`terms`], Parakeet biases its transcripts
+//! toward it through [`transcription_bias`], and Whisper and Qwen3-ASR read
+//! it as their context prompt through [`transcription_prompt`].
 
 use std::io::Read as _;
 use std::path::Path;
@@ -124,6 +125,38 @@ fn bias_for(
             sounds_like,
         },
     ))
+}
+
+/// The context prompt Whisper and Qwen3-ASR runs read: the first terms in
+/// list order (at most the bias cap), comma-separated so the echo filter can
+/// recognise the list, and only as many as fit `max_chars`. `None` while the
+/// list is empty. Read at the start of each run, like the bias.
+pub(crate) fn transcription_prompt(max_chars: usize) -> Option<String> {
+    prompt_for(&entries(), max_chars)
+}
+
+fn prompt_for(entries: &[VocabularyEntry], max_chars: usize) -> Option<String> {
+    let mut prompt = String::new();
+    for entry in entries.iter().take(MAX_BIASED_TERMS) {
+        let separator = if prompt.is_empty() { "" } else { ", " };
+        if prompt.chars().count() + separator.len() + entry.term.chars().count() > max_chars {
+            break;
+        }
+        prompt.push_str(separator);
+        prompt.push_str(&entry.term);
+    }
+    (!prompt.is_empty()).then_some(prompt)
+}
+
+/// Adds each name in recognition hints saved before they merged into the
+/// vocabulary (comma, semicolon, or line separated), skipping names already
+/// listed in any case. Returns whether the list changed.
+pub(crate) fn fold_hints(list: &mut Vec<VocabularyEntry>, hints: &str) -> bool {
+    let before = list.len();
+    for hint in hints.split([',', ';', '\n']) {
+        add_clamped(list, hint, &[]);
+    }
+    list.len() != before
 }
 
 /// Called by `AppSettings` whenever settings load or save.
@@ -360,6 +393,41 @@ mod tests {
                 .iter()
                 .all(|(index, _)| *index < MAX_BIASED_TERMS)
         );
+    }
+
+    #[test]
+    fn the_prompt_keeps_the_first_terms_that_fit() {
+        let list = vec![
+            entry("Kaffar", &["Caffer"]),
+            entry("Rodolfo", &[]),
+            entry("Bragelonne", &[]),
+        ];
+        assert_eq!(
+            prompt_for(&list, 100).as_deref(),
+            Some("Kaffar, Rodolfo, Bragelonne")
+        );
+        assert_eq!(prompt_for(&list, 20).as_deref(), Some("Kaffar, Rodolfo"));
+        assert_eq!(prompt_for(&list, 3), None);
+        assert_eq!(prompt_for(&[], 100), None);
+        let many: Vec<_> = (0..100).map(|n| entry(&format!("T{n}"), &[])).collect();
+        let prompt = prompt_for(&many, 10_000).unwrap();
+        assert_eq!(prompt.split(", ").count(), MAX_BIASED_TERMS);
+    }
+
+    #[test]
+    fn hints_fold_into_the_list_without_duplicates() {
+        let mut list = vec![entry("OpenCode", &["open code"])];
+        assert!(fold_hints(&mut list, "opencode, Effect;Rune\n  ,Effect"));
+        assert_eq!(
+            list,
+            [
+                entry("OpenCode", &["open code"]),
+                entry("Effect", &[]),
+                entry("Rune", &[]),
+            ]
+        );
+        assert!(!fold_hints(&mut list, "Rune, effect"));
+        assert!(!fold_hints(&mut list, "  "));
     }
 
     #[test]

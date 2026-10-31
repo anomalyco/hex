@@ -609,7 +609,7 @@ fn run_runtime(
     runtime.preparation.cancel();
 }
 
-/// Two selections that load the same thing; recognition hints aside.
+/// Two selections that load the same thing.
 fn same_model_and_language(left: &TranscriptionSelection, right: &TranscriptionSelection) -> bool {
     left.model == right.model && left.language == right.language
 }
@@ -630,17 +630,7 @@ impl Runtime {
         match request {
             Request::ChooseModel { model, language } => {
                 self.manual_choice();
-                let definition = crate::transcription_models::definition(model);
-                let selection = TranscriptionSelection {
-                    model,
-                    language,
-                    // Hints persist across models that can use them.
-                    recognition_hints: if definition.supports_recognition_hints {
-                        self.settings.transcription.recognition_hints.clone()
-                    } else {
-                        String::new()
-                    },
-                };
+                let selection = TranscriptionSelection { model, language };
                 self.preparation.start(selection, false);
             }
             Request::SelectInstalledModel(model) => {

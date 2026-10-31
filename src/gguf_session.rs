@@ -46,51 +46,6 @@ pub(crate) fn job_cancel() -> Option<transcribe_cpp::CancelToken> {
     JOB_CANCEL.with(|slot| slot.borrow().clone())
 }
 
-/// Passes the recognition hints the way `model` reads them: Whisper as its
-/// initial prompt, Qwen3-ASR as the context prompt in its system message.
-/// Blank hints leave `options` untouched.
-pub(crate) fn apply_recognition_hints(
-    options: &mut transcribe_cpp::RunOptions,
-    model: &transcribe_cpp::Model,
-    definition: &ModelDefinition,
-    hints: &str,
-) -> Result<()> {
-    let hints = hints.trim();
-    if hints.is_empty() {
-        return Ok(());
-    }
-    if !definition.supports_recognition_hints {
-        return Err(eyre!("{} does not take recognition hints", definition.name));
-    }
-    if model.accepts_ext(
-        transcribe_cpp::ExtSlot::Run,
-        transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_WHISPER_RUN,
-    ) {
-        options.family = Some(transcribe_cpp::RunExtension::Whisper(
-            transcribe_cpp::WhisperRunOptions {
-                initial_prompt: Some(hints.to_string()),
-                ..Default::default()
-            },
-        ));
-    } else if model.supports(transcribe_cpp::Feature::ContextPrompt) {
-        options.prompt = Some(hints.to_string());
-    } else {
-        return Err(eyre!(
-            "{} has no prompt slot for recognition hints",
-            definition.name
-        ));
-    }
-    Ok(())
-}
-
-/// The recognition hints a run primes the model with, as either prompt.
-fn hint_prompt(options: &transcribe_cpp::RunOptions) -> Option<&str> {
-    match &options.family {
-        Some(transcribe_cpp::RunExtension::Whisper(whisper)) => whisper.initial_prompt.as_deref(),
-        _ => options.prompt.as_deref(),
-    }
-}
-
 pub(crate) fn validate_gguf_artifact(
     path: &Path,
     definition: &ModelDefinition,
@@ -138,6 +93,46 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
     }
 }
 
+/// How much of the vocabulary a context prompt carries, in characters.
+/// Whisper's prompt slot holds 223 tokens and its engine trims an overlong
+/// one from the front, dropping the first (most important) terms, so the list
+/// stays well inside it. Qwen3-ASR's system message has far more room; the
+/// bound keeps a long list from crowding out the audio or being echoed.
+const WHISPER_PROMPT_CHARS: usize = 500;
+const QWEN3_ASR_PROMPT_CHARS: usize = 1_000;
+
+/// How a session feeds its model the vocabulary.
+#[derive(Clone, Copy)]
+enum VocabularySlot {
+    /// Parakeet's transducer heads, as a run extension (Labs).
+    Bias,
+    /// The context prompt (Whisper, Qwen3-ASR), bounded to this many characters.
+    Prompt(usize),
+    None,
+}
+
+impl VocabularySlot {
+    fn of(model: &transcribe_cpp::Model) -> Self {
+        let architecture = model.arch();
+        if architecture == "parakeet"
+            && model.accepts_ext(
+                transcribe_cpp::ExtSlot::Run,
+                transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_VOCABULARY,
+            )
+        {
+            return Self::Bias;
+        }
+        if !model.supports(transcribe_cpp::Feature::ContextPrompt) {
+            return Self::None;
+        }
+        match architecture.as_str() {
+            "whisper" => Self::Prompt(WHISPER_PROMPT_CHARS),
+            "qwen3_asr" => Self::Prompt(QWEN3_ASR_PROMPT_CHARS),
+            _ => Self::None,
+        }
+    }
+}
+
 /// A run this recent leaves the weights resident (ggml keeps them so for three
 /// minutes), so a prewarm after it would only repeat work.
 const RECENT_RUN: Duration = Duration::from_secs(60);
@@ -148,9 +143,8 @@ pub(crate) struct OfflineGgufSession {
     options: transcribe_cpp::SessionOptions,
     /// When the last run or live stream completed; `None` until the first.
     last_run: Option<Instant>,
-    /// Whether runs are biased toward the vocabulary: Parakeet's transducer
-    /// heads (TDT, RNN-T), which take it as a run extension.
-    takes_vocabulary: bool,
+    /// How runs take the vocabulary.
+    vocabulary: VocabularySlot,
 }
 
 impl OfflineGgufSession {
@@ -165,39 +159,50 @@ impl OfflineGgufSession {
     pub(crate) fn new(model: transcribe_cpp::Model) -> transcribe_cpp::Result<Self> {
         let options = session_options(model.device()?.device_type);
         let session = model.session_with(&options)?;
-        let takes_vocabulary = model.arch() == "parakeet"
-            && model.accepts_ext(
-                transcribe_cpp::ExtSlot::Run,
-                transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_VOCABULARY,
-            );
+        let vocabulary = VocabularySlot::of(&model);
         Ok(Self {
             model,
             session: Some(session),
             options,
             last_run: None,
-            takes_vocabulary,
+            vocabulary,
         })
     }
 
-    /// `options` with the vocabulary (`crate::vocabulary::transcription_bias`)
-    /// added, read now so a settings change applies from the next run. The
-    /// engine writes a term in place of the heard words only when the audio
-    /// supports it: an RNN-T whole-clip run decodes the term alongside the
-    /// greedy path, and streams and TDT heads rescore the greedy transcript.
+    /// `options` with the vocabulary added, read now so a settings change
+    /// applies from the next run. Parakeet biases toward it
+    /// (`crate::vocabulary::transcription_bias`): the engine writes a term in
+    /// place of the heard words only when the audio supports it (an RNN-T
+    /// whole-clip run decodes the term alongside the greedy path; streams and
+    /// TDT heads rescore the greedy transcript). Whisper and Qwen3-ASR read it
+    /// as their context prompt (`crate::vocabulary::transcription_prompt`),
+    /// in whole-clip runs only.
     fn with_vocabulary<'a>(
         &self,
         options: &'a transcribe_cpp::RunOptions,
+        stream: bool,
     ) -> Cow<'a, transcribe_cpp::RunOptions> {
-        if !self.takes_vocabulary || options.family.is_some() {
-            return Cow::Borrowed(options);
-        }
-        match crate::vocabulary::transcription_bias() {
-            Some((terms, bias)) => Cow::Owned(transcribe_cpp::RunOptions {
-                vocabulary: terms,
-                family: Some(transcribe_cpp::RunExtension::ParakeetVocabulary(bias)),
-                ..options.clone()
-            }),
-            None => Cow::Borrowed(options),
+        match self.vocabulary {
+            VocabularySlot::Bias if options.family.is_none() => {
+                match crate::vocabulary::transcription_bias() {
+                    Some((terms, bias)) => Cow::Owned(transcribe_cpp::RunOptions {
+                        vocabulary: terms,
+                        family: Some(transcribe_cpp::RunExtension::ParakeetVocabulary(bias)),
+                        ..options.clone()
+                    }),
+                    None => Cow::Borrowed(options),
+                }
+            }
+            VocabularySlot::Prompt(max_chars) if !stream && options.prompt.is_none() => {
+                match crate::vocabulary::transcription_prompt(max_chars) {
+                    Some(prompt) => Cow::Owned(transcribe_cpp::RunOptions {
+                        prompt: Some(prompt),
+                        ..options.clone()
+                    }),
+                    None => Cow::Borrowed(options),
+                }
+            }
+            _ => Cow::Borrowed(options),
         }
     }
 
@@ -294,7 +299,7 @@ impl OfflineGgufSession {
             None => self.model.session_with(&self.options)?,
         };
         session.set_cancel_token(cancel);
-        let options = self.with_vocabulary(options);
+        let options = self.with_vocabulary(options, true);
         let result = session
             .stream(&options, stream_options)
             .map(|mut stream| drive(&mut stream));
@@ -322,9 +327,10 @@ impl OfflineGgufSession {
         if let Some(cancel) = job_cancel() {
             session.set_cancel_token(&cancel);
         }
-        let result = keep_repetition_partial(session.run(samples, &self.with_vocabulary(options)))
-            .map(|mut transcript| {
-                if let Some(prompt) = hint_prompt(options) {
+        let options = self.with_vocabulary(options, false);
+        let result =
+            keep_repetition_partial(session.run(samples, &options)).map(|mut transcript| {
+                if let Some(prompt) = &options.prompt {
                     drop_prompt_echo(&mut transcript, prompt);
                 }
                 transcript
@@ -421,10 +427,10 @@ fn normalize_spoken(text: &str) -> String {
         .join(" ")
 }
 
-/// Drops segments that only repeat the recognition hints. Whisper (initial
-/// prompt) and Qwen3-ASR (context prompt) can return them verbatim on silence
-/// or noise. Speech that merely contains a hint is kept, and so
-/// is a single hint: dictating the one listed name must still paste it.
+/// Drops segments that only repeat the vocabulary prompt. Whisper and
+/// Qwen3-ASR can return their context prompt verbatim on silence or noise.
+/// Speech that merely contains a term is kept, and so is a single term:
+/// dictating the one listed name must still paste it.
 fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
     let is_separator = |character: char| matches!(character, ',' | ';' | '\n');
     let hints = prompt

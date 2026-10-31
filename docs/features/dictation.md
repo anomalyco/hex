@@ -846,7 +846,7 @@ you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
 covers hotkey and voice-delimited captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
 are deliberately left ungated: they skip both silence checks, and only output
-that repeats the recognition hints (Whisper, Qwen3-ASR) is dropped there.
+that repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped there.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
 tone, or a key click can lift a capture above it. Those captures then go to the
 Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
@@ -859,7 +859,7 @@ preparation (macOS, Windows) and the Linux listener load it when present and
 never download it. It runs on the CPU with a speech threshold of 0.4 instead of
 Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
 load, captures above the threshold still reach the model, as before.
-Output that only repeats the recognition hints (Whisper, Qwen3-ASR) is dropped as well
+Output that only repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped as well
 ([models](README.md#get-ready)). Other hallucinations after real
 speech are not addressed.
 `silence_gate_discards_only_near_silent_captures` and

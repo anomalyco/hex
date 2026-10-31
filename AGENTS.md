@@ -677,7 +677,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
   model and persisted selection.
 - The menu-bar model picker lists only downloaded, available models and remembers
-  each model's last selected language and recognition hints. It works without a
+  each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
   choice supersedes uncommitted work, and preparation/save failures leave the old
   selection intact. Menu-bar selections never silently download or repair a model.

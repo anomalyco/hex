@@ -231,15 +231,10 @@ const KEYS: &[Key] = &[
         "The dictation language",
         MODEL_CHANGE,
     ),
-    key(
-        "transcription.recognition_hints",
-        Kind::Text,
-        "Names and terms the model should expect (models that support hints)",
-    ),
     read_only(
         "transcription_recents",
         Kind::Json,
-        "Recently used models, each with its language and hints",
+        "Recently used models, each with its language",
         "Hex records these as you switch models",
     ),
     key(
@@ -592,6 +587,31 @@ impl Change {
     }
 }
 
+/// Deprecated: recognition hints merged into the vocabulary. `get` reads
+/// the vocabulary's terms, comma-separated, and `set` adds names to it;
+/// `list` leaves it out.
+const RECOGNITION_HINTS: &str = "transcription.recognition_hints";
+
+fn recognition_hints(settings: &AppSettings) -> SettingValue {
+    SettingValue {
+        key: RECOGNITION_HINTS.into(),
+        value: Value::String(
+            settings
+                .vocabulary
+                .iter()
+                .map(|entry| entry.term.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        kind: Kind::Text.name().into(),
+        choices: Vec::new(),
+        writable: true,
+        about: "Deprecated: the vocabulary's terms; setting it adds names to the vocabulary                 (use `hex vocabulary`)"
+            .into(),
+        available: true,
+    }
+}
+
 /// Every setting, in registry order.
 pub fn list(settings: &AppSettings) -> Vec<SettingValue> {
     let json = serde_json::to_value(settings).unwrap_or(Value::Null);
@@ -600,6 +620,9 @@ pub fn list(settings: &AppSettings) -> Vec<SettingValue> {
 
 /// One setting, or every setting under a prefix such as `meetings`.
 pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, ControlError> {
+    if name == RECOGNITION_HINTS {
+        return Ok(vec![recognition_hints(settings)]);
+    }
     let json = serde_json::to_value(settings).unwrap_or(Value::Null);
     let prefix = format!("{name}.");
     let found: Vec<_> = keys()
@@ -667,6 +690,17 @@ pub fn apply(
     raw: &str,
     shortcuts: &ShortcutRules,
 ) -> Result<Change, ControlError> {
+    if name == RECOGNITION_HINTS {
+        let mut candidate = settings.clone();
+        crate::vocabulary::fold_hints(&mut candidate.vocabulary, raw);
+        return Ok(Change {
+            settings: candidate,
+            effects: Vec::new(),
+            message: "Added the names to the vocabulary (transcription.recognition_hints is \
+                      deprecated; use `hex vocabulary`)"
+                .into(),
+        });
+    }
     let key = keys()
         .find(|key| key.key == name)
         .ok_or_else(|| unknown(name))?;
@@ -753,15 +787,6 @@ pub fn apply(
                     .map_err(|error| invalid(name, &error.to_string()))?;
             }
         }
-        "transcription.recognition_hints" => {
-            let model = crate::transcription_models::definition(candidate.transcription.model);
-            if !model.supports_recognition_hints {
-                return Err(invalid(
-                    name,
-                    &format!("{} doesn't take recognition hints", model.name),
-                ));
-            }
-        }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
         }
@@ -833,6 +858,13 @@ pub fn apply_all(
         }
         if let Some(error) = unavailable(name) {
             return Err(error);
+        }
+        if name == RECOGNITION_HINTS {
+            let Value::String(text) = value else {
+                return Err(invalid(name, "expected text"));
+            };
+            pending.push((name.as_str(), text.clone()));
+            continue;
         }
         let key = keys()
             .find(|key| key.key == name)
@@ -1256,6 +1288,35 @@ mod tests {
         let retention = get(&settings, "history_retention").unwrap();
         assert_eq!(retention[0].value, Value::String("week".into()));
         assert_eq!(retention[0].choices.len(), 5);
+    }
+
+    #[test]
+    fn recognition_hints_alias_the_vocabulary() {
+        let settings = AppSettings {
+            vocabulary: vec![crate::vocabulary::VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        let change = apply(&settings, RECOGNITION_HINTS, "rune, Kaffar", &rules()).unwrap();
+        let terms: Vec<_> = change
+            .settings
+            .vocabulary
+            .iter()
+            .map(|entry| entry.term.as_str())
+            .collect();
+        assert_eq!(terms, ["Rune", "Kaffar"]);
+        let read = get(&change.settings, RECOGNITION_HINTS).unwrap();
+        assert_eq!(read[0].value, Value::String("Rune, Kaffar".into()));
+        assert!(
+            list(&settings)
+                .iter()
+                .all(|value| value.key != RECOGNITION_HINTS)
+        );
+        let values = serde_json::json!({ RECOGNITION_HINTS: "Rodolfo" });
+        let applied = apply_all(&settings, values.as_object().unwrap(), &rules()).unwrap();
+        assert_eq!(applied.settings.vocabulary.len(), 2);
     }
 
     #[test]

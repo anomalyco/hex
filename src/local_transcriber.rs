@@ -145,7 +145,7 @@ impl LocalTranscriber {
             selection,
             capabilities.supports_language_detect,
         )?;
-        let mut options = RunOptions {
+        let options = RunOptions {
             timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
                 TimestampKind::None
             } else {
@@ -154,12 +154,6 @@ impl LocalTranscriber {
             language,
             ..Default::default()
         };
-        crate::gguf_session::apply_recognition_hints(
-            &mut options,
-            &model,
-            definition,
-            &selection.recognition_hints,
-        )?;
         let device_label = format!("{} ({})", device.description, device.kind);
         tracing::info!(
             backend = device.kind,
@@ -189,19 +183,10 @@ impl LocalTranscriber {
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed local transcription model"
         );
-        let stream_run = transcriber.stream_run_options();
-        transcriber.stream = transcriber.session.probe_stream(&stream_run, &architecture);
+        transcriber.stream = transcriber
+            .session
+            .probe_stream(&transcriber.options, &architecture);
         Ok(transcriber)
-    }
-
-    /// Streams decode exactly as offline, without the recognition hints'
-    /// prompt (Whisper's run-slot extension or the context prompt).
-    fn stream_run_options(&self) -> RunOptions {
-        RunOptions {
-            family: None,
-            prompt: None,
-            ..self.options.clone()
-        }
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
@@ -214,9 +199,8 @@ impl LocalTranscriber {
         cancel: &transcribe_cpp::CancelToken,
         drive: impl FnOnce(&mut transcribe_cpp::Stream<'_>) -> R,
     ) -> transcribe_cpp::Result<R> {
-        let options = self.stream_run_options();
         self.session
-            .with_stream(&options, stream_options, cancel, drive)
+            .with_stream(&self.options, stream_options, cancel, drive)
     }
 
     /// The selection this model was loaded for, so the transcription engine
@@ -377,7 +361,7 @@ pub(crate) struct ModelSwap {
 impl ModelSwap {
     pub(crate) fn new(loaded: &TranscriptionSelection) -> Self {
         Self {
-            loaded: runnable(loaded),
+            loaded: loaded.clone(),
             loading: None,
             ready: None,
         }
@@ -401,13 +385,13 @@ impl ModelSwap {
         transcriber: LocalTranscriber,
     ) {
         self.loading = None;
-        self.ready = Some((runnable(selection), transcriber));
+        self.ready = Some((selection.clone(), transcriber));
     }
 
     /// Settings now select `selection`; loads it unless it is already the
     /// target.
     pub(crate) fn want(&mut self, selection: &TranscriptionSelection) {
-        let selection = runnable(selection);
+        let selection = selection.clone();
         if &selection == self.target() {
             return;
         }
@@ -473,34 +457,19 @@ pub(crate) struct SwapFailed {
     pub(crate) error: String,
 }
 
-/// `selection` without recognition hints a model cannot use, which
-/// `validate` would reject.
-fn runnable(selection: &TranscriptionSelection) -> TranscriptionSelection {
-    let mut selection = selection.clone();
-    if !crate::transcription_models::definition(selection.model).supports_recognition_hints {
-        selection.recognition_hints = String::new();
-    }
-    selection
-}
-
 #[cfg(test)]
 mod model_swap_tests {
     use super::*;
     use crate::transcription_models::TranscriptionModelId;
 
     #[test]
-    fn an_unchanged_or_hint_only_change_on_a_hintless_model_loads_nothing() {
+    fn an_unchanged_selection_loads_nothing() {
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::default(),
             ..Default::default()
         };
         let mut swap = ModelSwap::new(&selection);
         swap.want(&selection);
-        let mut hinted = selection.clone();
-        hinted.recognition_hints = "Hex".into();
-        if !crate::transcription_models::definition(hinted.model).supports_recognition_hints {
-            swap.want(&hinted);
-        }
         assert!(swap.loading.is_none());
         assert!(swap.take_ready().is_none());
         assert!(swap.poll().is_none());
