@@ -943,7 +943,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     }
 
     s.sfx.advance_to(now);
-    if s.ready_from.is_some_and(|from| now - from >= 0.25) {
+    if s.ready_from.is_some_and(|from| now - from >= BUILD_SECS) {
         s.sfx.flush_offline_if_requested(now + 1.5);
     }
     let mut moving = s.sfx.has_pending(now)
