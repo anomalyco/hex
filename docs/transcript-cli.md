@@ -139,7 +139,7 @@ type History = {
     timestamp_ms: number
     application: string | null
     mode: string | null
-    kind: "dictation" | "send" | "voice_action"
+    kind: "dictation" | "send" | "voice_action" | "printed" | "raw"
     final_text: string
     raw_text?: string // present only with --raw
     score?: number // present only with --search; higher is more relevant

@@ -30,7 +30,8 @@ hex
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
 ├── dictation start|stop|cancel|toggle
-│   └── stop --print               print the transcript instead of pasting it (below)
+│   ├── stop --print               print the transcript instead of pasting it (below)
+│   └── start|toggle --raw         paste the transcript as heard, skipping the Output steps
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
 ├── meetings
 │   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
@@ -94,6 +95,12 @@ a cancel (Escape), or the 60 s timeout prints nothing, exits 1, and never
 falls back to pasting. `--print` with any other action is a usage error
 (exit 2). The command is the same on Linux and Windows, where `hex dictation`
 and `hex paste-last` reach the listener's own queue as its shortcut would.
+
+`dictation start --raw` and `toggle --raw` start a dictation that pastes the
+transcript as heard, skipping the Output pane's steps, as the Dictate without
+processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
+and Paste Last pastes it. `--raw` with `stop` or `cancel` is a usage error
+(exit 2); a printing stop always processes.
 
 `dictation cancel` with nothing recording cancels the newest unfinished
 dictation, like Escape. Escape cancels an active recording before any job, so
@@ -399,7 +406,7 @@ default 0.2), applied on the next intentional capture when ducking is selected.
 Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
-`shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`,
+`shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
 `show_dock_icon`, `transcription.recognition_hints`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,

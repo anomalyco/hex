@@ -88,6 +88,8 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     /// Annotate (the `capture` experiment).
     Capture,
+    /// Dictate without processing.
+    RawDictation,
 }
 
 /// What the runtime last published for the window.
@@ -398,11 +400,12 @@ impl crate::control::host::Host for WindowsControl {
         &self,
         action: CaptureAction,
         print: Option<crate::control::PrintReply>,
+        raw: bool,
     ) -> std::result::Result<(), ControlError> {
         use crate::windows_dictation::ListenerCommand;
         self.listener(match print {
             Some(print) => ListenerCommand::StopAndPrint(print),
-            None => ListenerCommand::Dictation(action),
+            None => ListenerCommand::Dictation { action, raw },
         })
     }
 

@@ -46,6 +46,8 @@ pub enum RecognitionControl {
     Capture {
         action: CaptureAction,
         print: Option<PrintReply>,
+        /// Skip processing for the dictation this starts.
+        raw: bool,
         reply: SyncSender<ControlReply>,
     },
     /// What is recording, for `hex status`.
@@ -180,39 +182,129 @@ impl ProgrammaticCompletion {
     }
 }
 
-/// The dictation shortcut machine.
+/// The dictation shortcut machines: dictation, and Dictate without
+/// processing while it is bound. One records at a time.
 struct Hotkeys {
     dictation: DictationHotkey,
+    raw: Option<DictationHotkey>,
+    /// The recording (or the last) skips processing: the raw shortcut or
+    /// `hex dictation start --raw` started it.
+    raw_capture: bool,
 }
 
 impl Hotkeys {
+    fn machines(&mut self) -> impl Iterator<Item = &mut DictationHotkey> {
+        std::iter::once(&mut self.dictation).chain(self.raw.as_mut())
+    }
+
     fn any_recording(&self) -> bool {
-        self.dictation.is_recording()
+        self.dictation.is_recording() || self.raw_recording()
+    }
+
+    fn raw_recording(&self) -> bool {
+        self.raw.as_ref().is_some_and(DictationHotkey::is_recording)
     }
 
     fn suppresses_recognition(&self) -> bool {
         self.dictation.suppresses_recognition()
+            || self
+                .raw
+                .as_ref()
+                .is_some_and(DictationHotkey::suppresses_recognition)
     }
 
-    /// Suspends the machine and reports whether it was recording.
+    /// Suspends the machines and reports whether one was recording.
     fn suspend_all(&mut self) -> bool {
-        self.dictation.suspend().is_some()
+        self.machines().fold(false, |recording, machine| {
+            machine.suspend().is_some() || recording
+        })
     }
 
     fn disarm_pending_gestures(&mut self) {
-        self.dictation.disarm_pending_gesture();
+        self.machines()
+            .for_each(DictationHotkey::disarm_pending_gesture);
     }
 
     fn track_key_state(&mut self, event: InputEvent, at: CaptureInstant) {
-        self.dictation.track_key_state(event, at);
+        for machine in self.machines() {
+            machine.track_key_state(event, at);
+        }
     }
 
     fn recover_stale_keys(&mut self) {
-        self.dictation.recover_stale_keys();
+        self.machines()
+            .for_each(DictationHotkey::recover_stale_keys);
     }
 
     fn break_chords(&mut self, now: CaptureInstant) {
-        self.dictation.break_chord(now);
+        for machine in self.machines() {
+            machine.break_chord(now);
+        }
+    }
+
+    /// Applies the saved shortcut options. Unbinding the raw shortcut while
+    /// it records reports true: the caller cancels that recording.
+    fn configure(&mut self, now: CaptureInstant) -> bool {
+        let raw_binding = crate::app_settings::runtime_hotkeys().raw_dictation;
+        let mut cancelled = false;
+        match raw_binding {
+            None => cancelled = self.raw.take().is_some_and(|raw| raw.is_recording()),
+            Some(binding) => match self.raw.as_mut() {
+                Some(raw) => raw.set_binding(binding),
+                None => {
+                    self.raw = Some(DictationHotkey::new(
+                        now,
+                        crate::app_settings::double_tap_lock(),
+                        binding,
+                    ));
+                }
+            },
+        }
+        self.dictation
+            .set_binding(crate::app_settings::dictation_hotkey());
+        for machine in self.machines() {
+            machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
+            machine.set_double_tap_only(crate::app_settings::double_tap_only());
+            machine.set_toggle(crate::app_settings::shortcut_toggle());
+        }
+        cancelled
+    }
+
+    /// Feeds one input to both machines, and returns what each did with
+    /// whether it was the raw machine. A machine that starts while the other
+    /// records stands down until its keys come up, and only the dictation
+    /// machine pastes.
+    fn process(&mut self, event: InputEvent, at: CaptureInstant) -> Vec<(bool, HotkeyAction)> {
+        let mut actions = Vec::new();
+        let raw_recording = self.raw_recording();
+        match self.dictation.process(event, at) {
+            Some(HotkeyAction::Start) if raw_recording => {
+                self.dictation.suspend();
+            }
+            Some(action) => actions.push((false, action)),
+            None => {}
+        }
+        let dictation_recording = self.dictation.is_recording();
+        if let Some(raw) = &mut self.raw {
+            match raw.process(event, at) {
+                Some(HotkeyAction::Start) if dictation_recording => {
+                    raw.suspend();
+                }
+                Some(HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) | None => {}
+                Some(action) => actions.push((true, action)),
+            }
+        }
+        actions
+    }
+
+    /// Stops whichever machine records, as a `stop` or `cancel` command does.
+    fn suspend_recording(&mut self) {
+        if self.dictation.is_recording() {
+            self.dictation.suspend();
+        }
+        if let Some(raw) = self.raw.as_mut().filter(|raw| raw.is_recording()) {
+            raw.suspend();
+        }
     }
 }
 
@@ -242,13 +334,10 @@ pub fn listen(
             crate::app_settings::double_tap_lock(),
             crate::app_settings::dictation_hotkey(),
         ),
+        raw: None,
+        raw_capture: false,
     };
-    hotkeys
-        .dictation
-        .set_double_tap_only(crate::app_settings::double_tap_only());
-    hotkeys
-        .dictation
-        .set_toggle(crate::app_settings::shortcut_toggle());
+    hotkeys.configure(CaptureInstant::now());
     let recording_environment = RecordingEnvironmentController::start();
     #[cfg(hex_capture)]
     let capture_environment = recording_environment.clone();
@@ -355,7 +444,7 @@ pub fn listen(
                     RecognitionControl::CaptureStatus { reply } => {
                         let recording = if programmatic.is_some() {
                             Some(CaptureKind::Service)
-                        } else if hotkeys.dictation.is_recording() {
+                        } else if hotkeys.any_recording() {
                             Some(CaptureKind::Dictation)
                         } else {
                             None
@@ -369,6 +458,7 @@ pub fn listen(
                     RecognitionControl::Capture {
                         action,
                         print,
+                        raw,
                         reply,
                     } => {
                         let release_while_idle = microphone_policy.release_while_idle;
@@ -378,6 +468,7 @@ pub fn listen(
                         let outcome = control_dictation(
                             action,
                             print,
+                            raw,
                             other_recording,
                             suspended,
                             &mut hotkeys,
@@ -706,18 +797,20 @@ pub fn listen(
                 .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
                 .flatten();
         }
-        hotkeys
-            .dictation
-            .set_double_tap_enabled(crate::app_settings::double_tap_lock());
-        hotkeys
-            .dictation
-            .set_double_tap_only(crate::app_settings::double_tap_only());
-        hotkeys
-            .dictation
-            .set_toggle(crate::app_settings::shortcut_toggle());
-        hotkeys
-            .dictation
-            .set_binding(crate::app_settings::dictation_hotkey());
+        if hotkeys.configure(CaptureInstant::now()) {
+            handle_hotkey_action(
+                HotkeyAction::Cancel,
+                false,
+                input.captured_through(),
+                &input,
+                &dictation_worker,
+                &context,
+                &input.device_name(),
+                &mut events,
+                indicator.as_ref(),
+                microphone_policy.release_while_idle,
+            )?;
+        }
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
         if next_microphone_revision != microphone_revision {
             input.request_selection(next_microphone_revision, microphone.as_deref());
@@ -732,6 +825,7 @@ pub fn listen(
         if hotkey_capture_suspended && hotkeys.suspend_all() {
             handle_hotkey_action(
                 HotkeyAction::Cancel,
+                false,
                 input.captured_through(),
                 &input,
                 &dictation_worker,
@@ -810,9 +904,13 @@ pub fn listen(
                 hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }
-            if let Some(action) = hotkeys.dictation.process(input_event, capture_at) {
+            for (raw, action) in hotkeys.process(input_event, capture_at) {
+                if action == HotkeyAction::Start {
+                    hotkeys.raw_capture = raw;
+                }
                 let accepted = handle_hotkey_action(
                     action,
+                    hotkeys.raw_capture,
                     capture_at,
                     &input,
                     &dictation_worker,
@@ -823,7 +921,10 @@ pub fn listen(
                     microphone_policy.release_while_idle,
                 )?;
                 if !accepted {
-                    hotkeys.dictation.suspend();
+                    match &mut hotkeys.raw {
+                        Some(machine) if raw => machine.suspend(),
+                        _ => hotkeys.dictation.suspend(),
+                    };
                 }
             }
         }
@@ -833,7 +934,7 @@ pub fn listen(
         {
             hotkeys.recover_stale_keys();
         }
-        if hotkeys.dictation.is_recording()
+        if hotkeys.any_recording()
             && input.become_intentional(capture_boundary(
                 &input,
                 microphone_policy.release_while_idle,
@@ -1203,6 +1304,7 @@ fn amplitude_db(amplitude: f32) -> f32 {
 #[allow(clippy::too_many_arguments)]
 fn handle_hotkey_action(
     action: HotkeyAction,
+    raw: bool,
     action_at: CaptureInstant,
     dictation: &DictationAudio,
     worker: &DictationWorker,
@@ -1241,6 +1343,7 @@ fn handle_hotkey_action(
             indicator,
             release_while_idle,
             None,
+            raw,
         )
         .map(drop),
         HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
@@ -1288,6 +1391,7 @@ fn finish_hotkey_dictation(
     indicator: Option<&DictationIndicatorSender>,
     release_while_idle: bool,
     print: Option<PrintReply>,
+    raw: bool,
 ) -> Result<FinishResult> {
     if dictation.become_intentional(action_at)? && release_while_idle {
         feedback::play(Tone::DictationStart);
@@ -1298,7 +1402,11 @@ fn finish_hotkey_dictation(
             action_at,
             POST_RELEASE_TAIL,
             worker,
-            TranscriptionTarget::Paste,
+            if raw {
+                TranscriptionTarget::RawPaste
+            } else {
+                TranscriptionTarget::Paste
+            },
             context,
             device,
             events,
@@ -1418,6 +1526,7 @@ fn finish_reply(finished: Option<FinishResult>, submitted: &str) -> ControlReply
 fn control_dictation(
     action: CaptureAction,
     print: Option<PrintReply>,
+    raw: bool,
     other_recording: bool,
     suspended: bool,
     hotkeys: &mut Hotkeys,
@@ -1428,7 +1537,7 @@ fn control_dictation(
     indicator: Option<&DictationIndicatorSender>,
     release_while_idle: bool,
 ) -> Result<ControlReply> {
-    let recording = hotkeys.dictation.is_recording();
+    let recording = hotkeys.any_recording();
     let device = input.device_name();
     let action = match action {
         CaptureAction::Toggle if recording => CaptureAction::Stop,
@@ -1449,8 +1558,10 @@ fn control_dictation(
                     "the dictation shortcut is held; release it and try again",
                 ));
             }
+            hotkeys.raw_capture = raw;
             let accepted = handle_hotkey_action(
                 HotkeyAction::Start,
+                raw,
                 capture_boundary(input, release_while_idle),
                 input,
                 worker,
@@ -1477,7 +1588,7 @@ fn control_dictation(
         ),
         CaptureAction::Stop if !recording => ControlReply::unchanged("Dictation isn't recording"),
         CaptureAction::Stop => {
-            hotkeys.dictation.suspend();
+            hotkeys.suspend_recording();
             let printing = print.is_some();
             let finished = finish_hotkey_dictation(
                 capture_boundary(input, release_while_idle),
@@ -1489,6 +1600,7 @@ fn control_dictation(
                 indicator,
                 release_while_idle,
                 print,
+                hotkeys.raw_capture,
             )?;
             match finished {
                 FinishResult::Discarded | FinishResult::Silent if printing => {
@@ -1505,9 +1617,10 @@ fn control_dictation(
             }
         }
         CaptureAction::Cancel if recording => {
-            hotkeys.dictation.suspend();
+            hotkeys.suspend_recording();
             handle_hotkey_action(
                 HotkeyAction::Cancel,
+                false,
                 input.captured_through(),
                 input,
                 worker,
@@ -1759,7 +1872,9 @@ fn handle_dictation_event(
             processing,
         } => {
             let phase = match target {
-                TranscriptionTarget::Paste => DictationPhase::Pasted,
+                TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
+                    DictationPhase::Pasted
+                }
                 TranscriptionTarget::Print => DictationPhase::Printed,
                 TranscriptionTarget::Service => return Ok(()),
             };

@@ -31,6 +31,8 @@ struct Job {
     audio_ms: u64,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
+    /// Dictate without processing: paste the transcript as heard.
+    raw: bool,
 }
 
 enum OutputJob {
@@ -51,6 +53,7 @@ enum OutputKind {
 struct Finishing {
     ended_at: CaptureInstant,
     print: Option<PrintReply>,
+    raw: bool,
     released: Instant,
     deadline: Instant,
 }
@@ -92,6 +95,10 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             && settings.dictation_hotkey.key.is_some(),
         toggle: settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle,
         paste_last: settings.paste_last_hotkey.as_ref().map(LinuxHotkey::from),
+        raw_dictation: settings
+            .raw_dictation_hotkey
+            .as_ref()
+            .map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled
@@ -135,23 +142,29 @@ impl DictationOutput {
         }
     }
 
-    /// Processes and pastes one transcript, or only processes it when
-    /// there is no paster (a printing stop), then records it.
+    /// Processes (unless `raw`) and pastes one transcript, or only
+    /// processes it when there is no paster (a printing stop), then records
+    /// it.
     fn deliver(
         &self,
         raw_text: String,
+        raw: bool,
         paster: Option<&mut LinuxPaster>,
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
     ) -> Result<String> {
         let context = crate::linux_context::capture();
-        let modes = self
-            .modes
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        let processed = modes.process(&raw_text, &context, &self.transformations);
+        let processed = if raw {
+            crate::dictation_processor::Processed::unchanged(raw_text.trim())
+        } else {
+            let modes = self
+                .modes
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            modes.process(&raw_text, &context, &self.transformations)
+        };
         if processed.text.trim().is_empty() {
             return Err(eyre!("text replacements produced empty output"));
         }
@@ -170,6 +183,8 @@ impl DictationOutput {
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
+            } else if raw {
+                draft.kind = crate::history::HistoryKind::Raw;
             }
             if let Err(error) = history.record(draft) {
                 tracing::warn!(%error, "could not retain Linux dictation history");
@@ -278,6 +293,7 @@ pub(crate) fn run(
                 if kind == OutputKind::Printed {
                     return output_settings.deliver(
                         text,
+                        false,
                         None,
                         job.audio_ms,
                         inference_ms,
@@ -285,7 +301,14 @@ pub(crate) fn run(
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
-                output_settings.deliver(text, Some(paster), job.audio_ms, inference_ms, started)
+                output_settings.deliver(
+                    text,
+                    job.raw,
+                    Some(paster),
+                    job.audio_ms,
+                    inference_ms,
+                    started,
+                )
             })()
             .map_err(|error| format!("{error:#}"));
             if let Some(print) = job.print.take() {
@@ -352,6 +375,8 @@ pub(crate) fn run(
     let mut start_pending = false;
     let mut captured_through = CaptureInstant::ZERO;
     let mut finishing: Option<Finishing> = None;
+    // The recording skips processing (Dictate without processing).
+    let mut recording_raw = false;
     let mut pending = 0_usize;
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -510,7 +535,10 @@ pub(crate) fn run(
                 "post-release tail captured"
             );
             let Finishing {
-                ended_at, print, ..
+                ended_at,
+                print,
+                raw,
+                ..
             } = finishing.take().expect("a release is finishing");
             submit_capture(
                 &mut capture,
@@ -520,6 +548,7 @@ pub(crate) fn run(
                 &mut events,
                 &mut pending,
                 print,
+                raw,
             )?;
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
@@ -546,11 +575,12 @@ pub(crate) fn run(
                 // Annotate records the narration itself: while it records,
                 // dictation starts nothing. The desktop already took the keys,
                 // so nothing reaches the app.
-                HotkeyEvent::Start
+                HotkeyEvent::Start { .. }
                     if capture_host
                         .as_mut()
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
-                HotkeyEvent::Start if !capture.is_recording() && !start_pending => {
+                HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
+                    recording_raw = raw;
                     if audio_ready {
                         start_capture(&mut capture, captured_through, || {
                             feedback::play_provisional_start();
@@ -589,12 +619,12 @@ pub(crate) fn run(
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
                 HotkeyEvent::Finish if capture.is_recording() => {
-                    finishing = Some(begin_finishing(
-                        &capture,
-                        captured_through,
-                        print.take(),
-                        || suppressor.restore_then(|| feedback::play(Tone::DictationStop)),
-                    ));
+                    finishing = Some(Finishing {
+                        raw: recording_raw,
+                        ..begin_finishing(&capture, captured_through, print.take(), || {
+                            suppressor.restore_then(|| feedback::play(Tone::DictationStop))
+                        })
+                    });
                 }
                 // One key: a tap starts and stops; held while recording, it
                 // draws until it comes up.
@@ -832,6 +862,7 @@ fn begin_finishing(
     Finishing {
         ended_at,
         print,
+        raw: false,
         released: now,
         deadline: if transcribes {
             now + POST_RELEASE_TAIL + TAIL_STALL_GRACE
@@ -850,6 +881,7 @@ fn submit_capture(
     events: &mut EventLog,
     pending: &mut usize,
     print: Option<PrintReply>,
+    raw: bool,
 ) -> Result<()> {
     let no_speech = |print: Option<PrintReply>| {
         if let Some(print) = print {
@@ -873,6 +905,7 @@ fn submit_capture(
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
                 audio_ms,
                 print,
+                raw,
             });
             match jobs.try_send(job) {
                 Ok(()) => {
@@ -1032,6 +1065,7 @@ mod tests {
             &mut events,
             &mut pending,
             None,
+            false,
         )
         .unwrap();
         assert_eq!(pending, 1);
@@ -1101,6 +1135,7 @@ mod tests {
             &mut events,
             &mut pending,
             finishing.print,
+            false,
         )
         .unwrap();
 
@@ -1133,6 +1168,7 @@ mod tests {
             &mut events,
             &mut pending,
             None,
+            false,
         )
         .unwrap();
         assert!(queued.try_recv().is_ok());

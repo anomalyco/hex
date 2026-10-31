@@ -175,6 +175,39 @@ does not prove the physical dictation shortcut; see the [feature index](README.m
 
 ## Sub-features
 
+### Dictate Without Processing
+
+A second, optional dictation shortcut (issue 451, suggested by @ksajan). It
+records exactly like the dictation shortcut and pastes the transcript as
+heard, skipping the Output pane's steps: replacements, corrections,
+transformations, and OpenCode rewriting.
+
+```ts
+Output > Without processing > Dictate without processing   // raw.shortcut
+├── Unbound by default -> nothing registered, grabbed, or reserved
+│   └── Record a shortcut (the same recorder) -> registered on every OS
+│       ├── macOS: any binding the dictation shortcut takes; its own
+│       │   shortcut machine beside dictation's (recognition::Hotkeys)
+│       ├── Windows: a key chord (the hook's raw trigger)
+│       └── Linux: an X11 grab, or a portal entry "Dictate without processing",
+│           only while bound
+├── Hold / double-tap lock / toggle / Escape -> as the dictation shortcut
+│   ├── The shortcut that started a capture owns it: the other one neither
+│   │   finishes it nor counts toward its double tap
+│   └── Queueing and ordered output -> shared with dictation
+├── Finish -> transcript pasted as heard (trimmed)          // raw.paste
+│   ├── History -> kind Raw ("raw" in `hex history --json`)
+│   └── Paste Last -> pastes it (it is the last dictation)
+├── Clear (trash) -> unbound again
+└── hex dictation start|toggle --raw -> the same, without a shortcut
+    └── A printing stop (`stop --print`) always processes
+```
+
+Checks: `raw_dictation_owns_the_capture_it_starts` (Linux reducer),
+`every_command_round_trips` and the `check_flags` cases in `control.rs`.
+Proof limits: no physical shortcut run on any OS; the macOS machine pairing
+was not compiled or run here (Linux check, Windows cross-clippy only).
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,

@@ -446,6 +446,7 @@ pub(crate) fn shortcut_rule(
     let target = match slot {
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
         HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
+        HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
         #[cfg(hex_capture)]
         HotkeySlot::Capture => ShortcutTarget::Capture,
     };

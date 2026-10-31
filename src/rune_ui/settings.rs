@@ -359,6 +359,7 @@ pub(super) fn conflicts(
     let slot = match target {
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
+        ShortcutTarget::RawDictation => HotkeySlot::RawDictation,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
     };
@@ -385,6 +386,7 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
     match target {
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
+        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey.as_ref(),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
     }
@@ -398,6 +400,7 @@ pub(super) fn set_binding(
     match target {
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
+        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = Some(binding),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
     }
@@ -645,6 +648,7 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     let name = match target {
         ShortcutTarget::Dictation => "Dictation",
         ShortcutTarget::PasteLast => "Paste last dictation",
+        ShortcutTarget::RawDictation => "Dictate without processing",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "Capture",
     };
@@ -706,6 +710,13 @@ pub(super) fn desktop_commands(p: Paint) -> El {
             tr("Paste last dictation"),
             tr("Re-paste the most recent dictation"),
             &["hex paste-last"],
+        ),
+        command_row(
+            p,
+            "raw-dictation",
+            tr("Dictate without processing"),
+            tr("Paste your words as Hex heard them, skipping every step"),
+            &["hex dictation toggle --raw"],
         ),
     ];
     section(p, "desktop-shortcuts", tr("Desktop shortcuts"), rows)
@@ -952,6 +963,7 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
     match target {
         ShortcutTarget::Dictation => "dictation-hotkey",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
+        ShortcutTarget::RawDictation => "raw-dictation-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",
     }

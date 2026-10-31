@@ -114,6 +114,7 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     #[cfg(hex_capture)]
     Capture,
+    RawDictation,
 }
 
 /// What the runtime last published for the window and the menu bar.

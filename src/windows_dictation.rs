@@ -25,6 +25,8 @@ const TAIL_STALL_GRACE: Duration = Duration::from_millis(100);
 struct Job {
     transcript: PendingTranscript,
     audio_ms: u64,
+    /// Dictate without processing: paste the transcript as heard.
+    raw: bool,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
 }
@@ -34,6 +36,7 @@ struct Finishing {
     ended_at: CaptureInstant,
     deadline: Instant,
     print: Option<PrintReply>,
+    raw: bool,
 }
 
 enum OutputJob {
@@ -59,6 +62,8 @@ pub struct WindowsDictationConfig {
     pub device: Option<String>,
     pub hotkey: WindowsHotkey,
     pub paste_last_hotkey: Option<WindowsHotkey>,
+    /// Dictate without processing, while it is bound.
+    pub raw_dictation_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
@@ -87,7 +92,11 @@ pub struct WindowsDictationConfig {
 /// command (`crate::control::host`), handled as its shortcut would be.
 #[derive(Debug)]
 pub enum ListenerCommand {
-    Dictation(CaptureAction),
+    /// `raw`: the dictation this starts skips processing.
+    Dictation {
+        action: CaptureAction,
+        raw: bool,
+    },
     PasteLast,
     /// `hex dictation stop --print`.
     StopAndPrint(PrintReply),
@@ -101,6 +110,10 @@ impl WindowsDictationConfig {
             device: settings.microphone.clone(),
             hotkey: WindowsHotkey::from(&settings.dictation_hotkey),
             paste_last_hotkey: settings.paste_last_hotkey.as_ref().map(WindowsHotkey::from),
+            raw_dictation_hotkey: settings
+                .raw_dictation_hotkey
+                .as_ref()
+                .map(WindowsHotkey::from),
             annotate_hotkey: settings
                 .capture_on()
                 .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
@@ -145,6 +158,7 @@ pub fn run(
         device,
         hotkey,
         paste_last_hotkey,
+        raw_dictation_hotkey,
         annotate_hotkey,
         double_tap_lock,
         double_tap_only,
@@ -212,6 +226,7 @@ pub fn run(
     let mut shortcuts = Shortcuts {
         hotkey,
         paste_last_hotkey,
+        raw_dictation_hotkey,
         annotate_hotkey,
         double_tap_lock,
         double_tap_only,
@@ -262,6 +277,8 @@ pub fn run(
         })?;
 
     let mut recording = false;
+    // The recording skips processing (Dictate without processing).
+    let mut recording_raw = false;
     let mut recording_feedback_started = false;
     // Whether this capture's start tone already played on its press.
     let mut start_tone_played = false;
@@ -299,6 +316,7 @@ pub fn run(
             let next_shortcuts = Shortcuts {
                 hotkey: next_config.hotkey,
                 paste_last_hotkey: next_config.paste_last_hotkey,
+                raw_dictation_hotkey: next_config.raw_dictation_hotkey,
                 annotate_hotkey: next_config.annotate_hotkey,
                 double_tap_lock: next_config.double_tap_lock,
                 double_tap_only: next_config.double_tap_only,
@@ -420,7 +438,10 @@ pub fn run(
                 || Instant::now() >= release.deadline)
         {
             let Some(Finishing {
-                ended_at, print, ..
+                ended_at,
+                print,
+                raw,
+                ..
             }) = finishing.take()
             else {
                 unreachable!("checked above");
@@ -433,6 +454,7 @@ pub fn run(
                 &mut events,
                 &mut pending,
                 print,
+                raw,
             )?;
             if submitted {
                 next_job_id += 1;
@@ -457,7 +479,7 @@ pub fn run(
         // printing stop's reply rides with the capture it finishes.
         let mut print = None;
         while finishing.is_none()
-            && let Some((action, occurred_at, deliberate)) = next_action(
+            && let Some((action, occurred_at, deliberate, raw)) = next_action(
                 &hotkey,
                 commands.as_ref(),
                 recording || start_pending,
@@ -487,6 +509,7 @@ pub fn run(
                 HotkeyAction::Start
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
+                    recording_raw = raw;
                     if audio_ready {
                         capture.start_at(occurred_at);
                         recording = true;
@@ -558,7 +581,9 @@ pub fn run(
                     }
                     recording = false;
                     recording_feedback_started = false;
+                    // A printing stop always processes, as on every OS.
                     finishing = Some(Finishing {
+                        raw: recording_raw && print.is_none(),
                         print: print.take(),
                         ..begin_finishing(&capture, occurred_at)
                     });
@@ -806,11 +831,15 @@ fn process_dictation_job(
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
         }
-        let mode_runtime = mode_runtime
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        let processed = mode_runtime.process(&raw_text, &context, transformations);
+        let processed = if job.raw {
+            crate::dictation_processor::Processed::unchanged(raw_text.trim())
+        } else {
+            let mode_runtime = mode_runtime
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            mode_runtime.process(&raw_text, &context, transformations)
+        };
         let text = processed.text.clone();
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
@@ -837,6 +866,8 @@ fn process_dictation_job(
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
+            } else if job.raw {
+                draft.kind = crate::history::HistoryKind::Raw;
             }
             if let Err(error) = history.record(draft) {
                 tracing::warn!(%error, "could not retain Windows dictation history");
@@ -905,6 +936,7 @@ fn job_result(kind: OutputKind, result: Result<String, String>, latency_ms: u32)
 struct Shortcuts {
     hotkey: WindowsHotkey,
     paste_last_hotkey: Option<WindowsHotkey>,
+    raw_dictation_hotkey: Option<WindowsHotkey>,
     annotate_hotkey: Option<WindowsHotkey>,
     double_tap_lock: bool,
     double_tap_only: bool,
@@ -919,6 +951,7 @@ impl Shortcuts {
         WindowsHotkeyMonitor::start(
             self.hotkey.clone(),
             self.paste_last_hotkey.clone(),
+            self.raw_dictation_hotkey.clone(),
             self.annotate_hotkey.clone(),
             self.double_tap_lock,
             self.double_tap_lock && self.double_tap_only,
@@ -981,30 +1014,41 @@ fn resolve_device_name(query: &str) -> Result<String> {
 
 /// The next shortcut event or `hex` command, as the action the loop takes,
 /// when it occurred, and whether it was deliberate (a command records at
-/// once, like a toggle press). A printing stop leaves its reply in `print`.
+/// once, like a toggle press), and whether it skips processing. A printing
+/// stop leaves its reply in `print`.
 fn next_action(
     hotkey: &WindowsHotkeyMonitor,
     commands: Option<&mpsc::Receiver<ListenerCommand>>,
     recording: bool,
     captured_through: CaptureInstant,
     print: &mut Option<PrintReply>,
-) -> Option<(HotkeyAction, CaptureInstant, bool)> {
+) -> Option<(HotkeyAction, CaptureInstant, bool, bool)> {
     if let Ok(event) = hotkey.events.try_recv() {
-        return Some((event.action, event.occurred_at(captured_through), false));
+        return Some((
+            event.action,
+            event.occurred_at(captured_through),
+            false,
+            event.raw,
+        ));
     }
-    let action = match commands?.try_recv().ok()? {
-        ListenerCommand::Dictation(CaptureAction::Start) => HotkeyAction::Start,
-        ListenerCommand::Dictation(CaptureAction::Stop) => HotkeyAction::Finish,
-        ListenerCommand::Dictation(CaptureAction::Cancel) => HotkeyAction::Cancel,
-        ListenerCommand::Dictation(CaptureAction::Toggle) if recording => HotkeyAction::Finish,
-        ListenerCommand::Dictation(CaptureAction::Toggle) => HotkeyAction::Start,
-        ListenerCommand::PasteLast => HotkeyAction::PasteLast,
+    let (action, raw) = match commands?.try_recv().ok()? {
+        ListenerCommand::Dictation { action, raw } => (
+            match action {
+                CaptureAction::Start => HotkeyAction::Start,
+                CaptureAction::Stop => HotkeyAction::Finish,
+                CaptureAction::Cancel => HotkeyAction::Cancel,
+                CaptureAction::Toggle if recording => HotkeyAction::Finish,
+                CaptureAction::Toggle => HotkeyAction::Start,
+            },
+            raw,
+        ),
+        ListenerCommand::PasteLast => (HotkeyAction::PasteLast, false),
         ListenerCommand::StopAndPrint(reply) => {
             *print = Some(reply);
-            HotkeyAction::Finish
+            (HotkeyAction::Finish, false)
         }
     };
-    Some((action, captured_through, true))
+    Some((action, captured_through, true, raw))
 }
 
 fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant) -> Finishing {
@@ -1012,6 +1056,7 @@ fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant) -> Fini
     Finishing {
         ended_at,
         print: None,
+        raw: false,
         // A short tap is discarded on its release alone and needs no tail.
         deadline: if capture.would_transcribe(ended_at) {
             now + POST_RELEASE_TAIL + TAIL_STALL_GRACE
@@ -1021,6 +1066,7 @@ fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant) -> Fini
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_capture(
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,
@@ -1029,6 +1075,7 @@ fn submit_capture(
     events: &mut EventLog,
     pending: &mut usize,
     print: Option<PrintReply>,
+    raw: bool,
 ) -> Result<bool> {
     let mut submitted = false;
     let no_speech = |print: Option<PrintReply>| {
@@ -1051,6 +1098,7 @@ fn submit_capture(
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
                 audio_ms,
                 print,
+                raw,
             });
             match jobs.try_send(job) {
                 Ok(()) => {

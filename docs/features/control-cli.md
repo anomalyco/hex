@@ -30,6 +30,9 @@ Agent or terminal                                  // control.cli; every OS
 │       ├── Not recording -> not-recording, exit 1
 │       ├── Failure, cancel, or timeout -> exit 1, prints nothing, never pastes
 │       └── History keeps it as Printed; Paste Last skips it (also on Linux)
+│   └── dictation start|toggle --raw -> the dictation it starts pastes the
+│       transcript as heard (Dictate without processing); History keeps it as Raw;
+│       --raw with stop or cancel -> usage error, exit 2
 ├── hex paste-last -> pastes the last dictation
 │   ├── Setup gates the listener -> not-ready
 │   └── Recording or shortcut gesture in progress -> busy (menu bar: nothing)

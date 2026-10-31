@@ -746,6 +746,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
   (read from its bundle's framework version) gets the text typed, because
   those versions can drop a ⌘V that races their pasteboard notification.
+- Dictate without processing (`raw_dictation_hotkey`, Output pane) is
+  unbound by default and registers, grabs, or reserves nothing until bound
+  (on Linux a portal entry and X11 grab exist only while bound). It follows
+  hold, toggle, double-tap lock, Escape, and queueing as dictation does; the
+  shortcut that started a capture owns it. It pastes the trimmed transcript
+  with no Output step, records History kind Raw, and updates Paste Last.
+  `hex dictation start|toggle --raw` does the same; a printing stop always
+  processes.
 - `hex dictation stop --print` (macOS and Linux) stops through the listener's
   own queue with a one-shot reply: recording stops at once and only that
   command waits, at most 60 s, for the text, processed as a paste. It never
