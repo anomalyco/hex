@@ -128,6 +128,12 @@ impl HudSender {
             .update(move |hud, _| hud.set_position(position));
     }
 
+    /// Whether the HUD ever presented a frame.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn presented(&self) -> bool {
+        self.overlay.surface_stats().totals.presents > 0
+    }
+
     /// Why Windows could not show the HUD, for Settings: Rune's reason, or a
     /// started HUD that presented no frame. Logged as an error the first time
     /// each reason is seen; what draws the HUD is logged once it exists.

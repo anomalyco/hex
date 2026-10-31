@@ -187,6 +187,8 @@ mod windows;
 #[cfg(target_os = "windows")]
 mod windows_app;
 #[cfg(target_os = "windows")]
+mod windows_gpu_fallback;
+#[cfg(target_os = "windows")]
 mod windows_audio_control;
 #[cfg(target_os = "windows")]
 mod windows_context;
@@ -987,6 +989,7 @@ fn main() -> Result<()> {
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
     windows::restrict_dll_search();
+    windows_gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]
     cpu_floor::require();
     windows::run(&SHUTDOWN)
