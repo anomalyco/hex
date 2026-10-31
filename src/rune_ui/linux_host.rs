@@ -10,7 +10,7 @@ use color_eyre::eyre::eyre;
 
 use super::{HostState, ServiceView};
 use crate::app_settings::{AppSettings, HotkeyBinding};
-use crate::desktop_i18n::tr;
+use crate::desktop::i18n::tr;
 use crate::linux::app::HostHandle;
 pub(super) use crate::linux::app::{HostRequest as Request, ShortcutTarget};
 use crate::linux::input::LinuxHotkey;

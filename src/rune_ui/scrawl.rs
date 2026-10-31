@@ -16,7 +16,7 @@ use super::platform::{PlatformRequest, ScrawlRequest, ScrawlView};
 use super::settings::cancel_capture;
 use super::{Menu, ShortcutTarget, Ui};
 use crate::app_settings::{AppSettings, CaptureTranscriber};
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::onboarding::{PermissionAction, PermissionKind};
 
 fn description(enabled: bool) -> &'static str {

@@ -21,8 +21,8 @@ use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
 use crate::app_settings::{IndicatorPosition, RecordingAudioBehavior, UpdateChannel};
-use crate::desktop_host::DesktopAction;
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop::host::DesktopAction;
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
 use crate::login_item::LoginItemStatus;
 use crate::onboarding::PermissionKind;
@@ -1066,7 +1066,7 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
-    let languages = crate::desktop_i18n::LANGUAGE_CHOICES;
+    let languages = crate::desktop::i18n::LANGUAGE_CHOICES;
     rows.push(pick_row(
         ui,
         p,
@@ -1079,11 +1079,11 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .position(|(code, _)| *code == settings.ui_language.as_deref())
             .unwrap_or(0),
         |ui, index| {
-            let code = crate::desktop_i18n::LANGUAGE_CHOICES[index]
+            let code = crate::desktop::i18n::LANGUAGE_CHOICES[index]
                 .0
                 .map(str::to_string);
             if ui.update(|settings| settings.ui_language = code.clone()) {
-                crate::desktop_i18n::apply(code.as_deref());
+                crate::desktop::i18n::apply(code.as_deref());
             }
         },
         layer,

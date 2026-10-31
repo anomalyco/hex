@@ -72,7 +72,7 @@ fn english(selection: &TranscriptionSelection) -> bool {
 fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
     if english(current) {
         let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
-        let preferred = crate::desktop_i18n::preferred_language();
+        let preferred = crate::desktop::i18n::preferred_language();
         let language = if preferred != "en" && v3.supports_language(&preferred) {
             preferred
         } else {

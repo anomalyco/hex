@@ -16,7 +16,7 @@ use super::controls::{
 };
 use super::lists::{Tone, slider, small_button, tone_tag};
 use super::platform::{DemoRequest, PlatformRequest};
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, DriverActionState, HexMicrophoneStatus,
     TunedFilterConfig,

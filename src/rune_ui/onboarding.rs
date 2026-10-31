@@ -24,7 +24,7 @@ use super::lists::{PermissionControl, allowed, permission_control};
 use super::platform::{Os, PlatformRequest, PlatformState};
 use super::{Menu, Request};
 use crate::app_settings::AppSettings;
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 use crate::onboarding::{
     Effect, Flow, Input, ItemStatus, ModelProgress, Observation, PermissionState, Practice, Row,

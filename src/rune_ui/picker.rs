@@ -15,7 +15,7 @@ use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_t
 use super::lists::error_panel;
 use super::{Request, Ui};
 use crate::app_settings::AppSettings;
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::transcription::models::{
     self as transcription_models, ModelDefinition, ModelPreparationStage, ModelRuntime,
     TranscriptionModelId, TranscriptionSelection, language_name,

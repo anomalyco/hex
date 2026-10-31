@@ -21,7 +21,7 @@ use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 static MORE_ICON: rune::Icon = rune::Icon {
     name: "hex-more",

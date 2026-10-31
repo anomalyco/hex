@@ -20,7 +20,7 @@ use crate::app_settings::{
     MeetingProviderChoice, MeetingRetention, ModifierSide,
 };
 use crate::calendar::{CalendarAccess, CallProvider};
-use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::hex_microphone::DriverActionState;
 use crate::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
 

@@ -32,11 +32,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::app_settings::AppSettings;
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop_i18n::tr_fill;
+use crate::desktop::i18n::tr_fill;
 use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription::models::TranscriptionModelId;

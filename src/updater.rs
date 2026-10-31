@@ -28,7 +28,7 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use crate::app_settings::{AppSettings, UpdateChannel};
-use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
 use protocol::{Decision, Install};
 
 use platform::Staged;
@@ -130,10 +130,10 @@ pub fn switch_label(channel: &str, version: &str) -> String {
         "stable" => UpdateChannel::Stable.label(),
         other => other,
     };
-    crate::desktop_i18n::tr_named(
+    crate::desktop::i18n::tr_named(
         "Switch to {channel} {version}",
         &[
-            ("channel", crate::desktop_i18n::tr(channel)),
+            ("channel", crate::desktop::i18n::tr(channel)),
             ("version", version),
         ],
     )

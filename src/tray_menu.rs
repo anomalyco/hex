@@ -45,8 +45,8 @@ pub(crate) use tray::*;
 #[cfg(not(target_os = "macos"))]
 mod tray {
     use super::ModelMenuEntry;
-    use crate::desktop_host::DesktopUpdateStatus;
-    use crate::desktop_i18n::tr;
+    use crate::desktop::host::DesktopUpdateStatus;
+    use crate::desktop::i18n::tr;
     use crate::events::VoiceState;
     use crate::transcription::models::TranscriptionModelId;
 
@@ -217,8 +217,8 @@ mod tray {
     /// What the update item does for `status`, if it shows.
     pub(crate) fn update_action(
         status: &DesktopUpdateStatus,
-    ) -> Option<crate::desktop_host::DesktopAction> {
-        use crate::desktop_host::DesktopAction;
+    ) -> Option<crate::desktop::host::DesktopAction> {
+        use crate::desktop::host::DesktopAction;
         match status {
             DesktopUpdateStatus::ReadyToRestart => Some(DesktopAction::RestartIntoUpdate),
             DesktopUpdateStatus::Available => Some(DesktopAction::OpenUpdate),
@@ -268,7 +268,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn tray_menu_ids_round_trip_and_show_the_state() {
-        use crate::desktop_host::DesktopUpdateStatus;
+        use crate::desktop::host::DesktopUpdateStatus;
         use crate::events::VoiceState;
         let settings = AppSettings::default();
         let models = model_menu_entries(&settings, false, |model, _| {

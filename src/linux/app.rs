@@ -19,8 +19,8 @@ use color_eyre::Result;
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::control::{CaptureAction, ControlError, ControlReply, Pane};
-use crate::desktop_activity::DesktopActivity;
-use crate::desktop_host::{
+use crate::desktop::activity::DesktopActivity;
+use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
     DesktopTranscriptionSnapshot,
 };

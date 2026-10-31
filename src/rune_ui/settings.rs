@@ -15,10 +15,10 @@ use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, KeyboardModelChoice, ModifierSide,
 };
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 use crate::keyboard_model_switching::InputSource;
 use crate::transcription::models::{self as transcription_models, ModelPreparationStage};

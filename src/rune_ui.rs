@@ -63,11 +63,11 @@ use rune::{
 };
 
 use crate::app_settings::{AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
-use crate::desktop_host::{
+use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopListenerSnapshot, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill};
 use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
@@ -813,7 +813,7 @@ impl Ui {
             Ok(settings) => (settings, None),
             Err(error) => (AppSettings::default(), Some(format!("{error:#}"))),
         };
-        crate::desktop_i18n::apply(settings.ui_language.as_deref());
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let store = host::history(&connect, settings.history_retention);
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
@@ -1896,7 +1896,7 @@ const SCENES: &[Scene] = &[
         };
         if let Some(view) = &mut ui.view {
             view.listener.shortcuts =
-                DesktopShortcuts::Portal(vec![crate::desktop_host::DesktopGrantedShortcut {
+                DesktopShortcuts::Portal(vec![crate::desktop::host::DesktopGrantedShortcut {
                     name: "Dictation".into(),
                     trigger: None,
                     unconfirmed: false,
@@ -1922,7 +1922,7 @@ const SCENES: &[Scene] = &[
     ("chinese", |ui| {
         *ui = portal_fixture();
         ui.settings.ui_language = Some("zh".into());
-        crate::desktop_i18n::apply(Some("zh"));
+        crate::desktop::i18n::apply(Some("zh"));
     }),
     ("menus", |ui| {
         *ui = portal_fixture();
@@ -2053,7 +2053,7 @@ const SCENES: &[Scene] = &[
         shortcut_row(ui, listening(None, HotkeyModifiers::option_command()));
     }),
     ("shortcut-row-rejected", |ui| {
-        let message = crate::desktop_i18n::tr("Add a modifier");
+        let message = crate::desktop::i18n::tr("Add a modifier");
         shortcut_row(ui, listening(Some(message), HotkeyModifiers::default()));
     }),
     ("shortcut-row-saved", |ui| {
@@ -2660,7 +2660,7 @@ fn portal_fixture() -> Ui {
 /// Deterministic settings and service state matching a typical Wayland
 /// desktop with the shortcuts portal.
 fn fixture(shortcuts: DesktopShortcuts) -> Ui {
-    crate::desktop_i18n::apply(Some("en"));
+    crate::desktop::i18n::apply(Some("en"));
     let settings = AppSettings {
         dictation_hotkey: HotkeyBinding {
             modifiers: HotkeyModifiers::default(),

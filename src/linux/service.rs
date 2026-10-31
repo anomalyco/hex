@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::desktop_host::DesktopSnapshot;
+use crate::desktop::host::DesktopSnapshot;
 use crate::linux::input::{ListenerCommand, ShortcutCommand};
 
 /// Version 1 was the service/Settings-client protocol; its clients get a
