@@ -80,10 +80,11 @@ pub enum Feature {
     SmartSpacing,
     SpokenSymbols,
     PickerSortFilter,
+    SidedChords,
 }
 
 impl Feature {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -106,6 +107,7 @@ impl Feature {
         Self::SmartSpacing,
         Self::SpokenSymbols,
         Self::PickerSortFilter,
+        Self::SidedChords,
     ];
 
     /// The features this OS and build have.
@@ -150,7 +152,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SpokenSymbols
-            | Self::PickerSortFilter => Audience::Everyone,
+            | Self::PickerSortFilter
+            | Self::SidedChords => Audience::Everyone,
         }
     }
 
@@ -177,7 +180,8 @@ impl Feature {
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::SecondDictationShortcut
-            | Self::SmartSpacing => cfg!(target_os = "macos"),
+            | Self::SmartSpacing
+            | Self::SidedChords => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -216,6 +220,7 @@ impl Feature {
             Self::SmartSpacing => "smart-spacing",
             Self::SpokenSymbols => "spoken-symbols",
             Self::PickerSortFilter => "picker-sort-filter",
+            Self::SidedChords => "sided-modifier-chords",
         }
     }
 
@@ -244,6 +249,7 @@ impl Feature {
             Self::SmartSpacing => "labs.smart_spacing",
             Self::SpokenSymbols => "labs.spoken_symbols",
             Self::PickerSortFilter => "labs.picker_sort_filter",
+            Self::SidedChords => "labs.sided_modifier_chords",
         }
     }
 
@@ -297,6 +303,9 @@ impl Feature {
             Self::PickerSortFilter => {
                 "Sort the Local transcription picker by size or name and show only models for the saved language"
             }
+            Self::SidedChords => {
+                "Record which side each modifier of a shortcut is on, such as Right Command + Right Option"
+            }
         }
     }
 
@@ -329,6 +338,7 @@ impl Feature {
             Self::SmartSpacing => settings.labs.smart_spacing,
             Self::SpokenSymbols => settings.labs.spoken_symbols,
             Self::PickerSortFilter => settings.labs.picker_sort_filter,
+            Self::SidedChords => settings.labs.sided_modifier_chords,
         }
     }
 
@@ -356,6 +366,7 @@ impl Feature {
             Self::SmartSpacing => settings.labs.smart_spacing = on,
             Self::SpokenSymbols => settings.labs.spoken_symbols = on,
             Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
+            Self::SidedChords => settings.labs.sided_modifier_chords = on,
         }
     }
 }
@@ -375,8 +386,9 @@ const FILLER_WORDS: u32 = 1 << 10;
 const SUBTITLE_EXPORT: u32 = 1 << 11;
 const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
+const SIDED_CHORDS: u32 = 1 << 14;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 14;
+const MINUTES_SHIFT: u32 = 15;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -468,6 +480,13 @@ pub fn smart_spacing() -> bool {
     on(SMART_SPACING)
 }
 
+/// The shortcut recorder keeps each modifier's side in a modifier-only
+/// chord of two or more keys (macOS; read as each recording starts).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn sided_modifier_chords() -> bool {
+    on(SIDED_CHORDS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -526,6 +545,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::SpokenSymbols,
             settings.spoken_symbols,
             SPOKEN_SYMBOLS,
+        ),
+        (
+            Feature::SidedChords,
+            settings.sided_modifier_chords,
+            SIDED_CHORDS,
         ),
     ]
     .into_iter()
@@ -801,6 +825,18 @@ mod tests {
         assert_ne!(state & SPOKEN_SYMBOLS, 0);
         assert_eq!(state & SPOKEN_FORMATTING, 0);
         assert_eq!(state & SMART_SPACING, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn sided_modifier_chords_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SIDED_CHORDS, 0);
+        labs.sided_modifier_chords = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SIDED_CHORDS, 0);
+        assert_eq!(state & SPOKEN_SYMBOLS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

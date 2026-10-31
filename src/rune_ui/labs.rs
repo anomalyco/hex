@@ -261,6 +261,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Smart spacing"),
                 tr("Add a space before a dictation pasted right after a word"),
             ));
+            // macOS's recorder reads each modifier key's side.
+            rows.push(row(
+                Feature::SidedChords,
+                &KEYBOARD,
+                tr("Sided modifier chords"),
+                tr("Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥"),
+            ));
         }
     }
     rows.push(row(
@@ -342,6 +349,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SmartSpacing => "lab-smart-spacing",
         Feature::SpokenSymbols => "lab-spoken-symbols",
         Feature::PickerSortFilter => "lab-picker-sort-filter",
+        Feature::SidedChords => "lab-sided-modifier-chords",
     }
 }
 

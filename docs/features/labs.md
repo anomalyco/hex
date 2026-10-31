@@ -41,6 +41,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
+├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
@@ -299,6 +300,25 @@ letter is not done. Off, pasting is exactly as before. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: which apps (Chrome, Safari,
 Slack, VS Code, Notes) expose the cursor, or a real paste with the toggle
 on; the row renders only in macOS builds, so no golden changes.
+
+Sided modifier chords (`sided-modifier-chords`, issue 710, macOS): while
+on, the shortcut recorder (`ChordCapture` in
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs)) records a
+modifier-only chord of two or more keys with the side each modifier was
+pressed on, so Right ⌘ + Right ⌥ saves as `right-option+right-command` and
+the tray shows R⌥ R⌘; only those keys press it, and the left keys don't.
+The gate is the recorder: `labs::sided_modifier_chords()` is read once when
+a recording starts. Matching, the conflict checks, and saved shortcuts are
+unchanged (chords already store and match sides; `hex settings set` could
+always save one), a chord with a non-modifier key still records its
+modifiers from either side, and the side picker stays for one-modifier
+shortcuts only. Off, a chord such as ⌥⌘ records from either side exactly as
+before. Checks: `with_sided_chords_each_modifier_keeps_its_side` and
+`without_sided_chords_two_modifiers_record_from_either_side` in
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs) (macOS only);
+`sided_modifier_chords_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real recording on a Mac;
+the row renders only in macOS builds, so no golden changes.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the Local transcription picker shows one row between its header and the
