@@ -1345,6 +1345,9 @@ pub struct LabsSettings {
     /// `second_dictation_hotkey` dictates like the dictation shortcut
     /// (macOS, issue 627).
     pub second_dictation_shortcut: bool,
+    /// A pasted dictation gets one leading space when the character before
+    /// the cursor is one a space belongs after (macOS, issue 632).
+    pub smart_spacing: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1367,6 +1370,7 @@ impl Default for LabsSettings {
             filler_words: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
+            smart_spacing: false,
         }
     }
 }

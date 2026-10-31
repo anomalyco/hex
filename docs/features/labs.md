@@ -30,6 +30,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
+├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -229,6 +230,30 @@ suppressed, or checked for it, and Hex is unchanged. Checks:
 [recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
 real Mac with an external keyboard, or the recorder row's rendering (macOS
 builds only; no golden).
+
+Smart spacing (`smart-spacing`, issue 632, macOS): while on, a dictation
+pasted right after typed text gets one leading space, so words don't merge
+("alreadyin progress"). `paste::Paster` reads `labs::smart_spacing()` as each
+paste commits, only when no continuation join applies (a join already spaces
+contiguous dictations) and not for Copy dictation only. It asks the
+frontmost app's focused element through Accessibility
+(`accessibility::char_before_caret`: `AXSelectedTextRange`, then
+`AXStringForRange` for the one character before the cursor, surrogate-pair
+aware, each call bounded by the 250 ms messaging timeout) and adds the space
+when `paste::needs_leading_space` agrees: after a letter, digit, `. , ; : ! ?
+…`, or a closing bracket or typographic quote (`) ] } ” ’ »`); never after
+whitespace, opening punctuation, straight quotes, or symbols such as `@ $ # /
+-`, and never before text that starts with whitespace or closing punctuation.
+Selected text, a cursor at the start, or an app that doesn't expose its
+cursor leaves the text unchanged, and both the clipboard paste and the
+Chromium 155/156 typing path use the adjusted text. Lowercasing the first
+letter is not done. Off, pasting is exactly as before. Checks:
+`smart_spacing_adds_a_space_only_where_one_belongs` in
+[paste.rs](../../src/paste.rs) (macOS only);
+`smart_spacing_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: which apps (Chrome, Safari,
+Slack, VS Code, Notes) expose the cursor, or a real paste with the toggle
+on; the row renders only in macOS builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

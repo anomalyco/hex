@@ -17,6 +17,26 @@ unsafe extern "C" {
         value: *mut CfTypeRef,
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout_in_seconds: f32) -> i32;
+    fn AXUIElementCopyParameterizedAttributeValue(
+        element: AxUiElementRef,
+        parameterized_attribute: CfStringRef,
+        parameter: CfTypeRef,
+        result: *mut CfTypeRef,
+    ) -> i32;
+    fn AXValueGetTypeID() -> usize;
+    fn AXValueCreate(value_type: u32, value: *const c_void) -> CfTypeRef;
+    fn AXValueGetValue(value: CfTypeRef, value_type: u32, value_out: *mut c_void) -> bool;
+}
+
+/// `kAXValueTypeCFRange`.
+const AX_VALUE_CF_RANGE: u32 = 4;
+
+/// Core Foundation's `CFRange`, in UTF-16 code units.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct CfRange {
+    location: isize,
+    length: isize,
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -68,6 +88,63 @@ pub fn focused_web_url(pid: i32) -> Option<String> {
         }
     }
     url
+}
+
+/// The character just before the insertion point of the application's
+/// focused text element, for Labs › Smart spacing. `None` when text is
+/// selected, the cursor is at the start, or the app doesn't say.
+pub fn char_before_caret(pid: i32) -> Option<char> {
+    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
+    let application = bounded_element(unsafe { AXUIElementCreateApplication(pid) })?;
+    let focused = copy_element(&application, c"AXFocusedUIElement")?;
+    let selection = copy_range(&focused, c"AXSelectedTextRange")?;
+    if selection.length != 0 || selection.location <= 0 {
+        return None;
+    }
+    // One UTF-16 unit, or two when it is half of a surrogate pair.
+    (1..=2.min(selection.location)).find_map(|units| {
+        let range = CfRange {
+            location: selection.location - units,
+            length: units,
+        };
+        copy_string_for_range(&focused, range)?.chars().next_back()
+    })
+}
+
+fn copy_range(element: &CfObject, name: &CStr) -> Option<CfRange> {
+    let value = copy_attribute(element, name)?;
+    if unsafe { CFGetTypeID(value.0) } != unsafe { AXValueGetTypeID() } {
+        return None;
+    }
+    let mut range = CfRange::default();
+    // SAFETY: `value` is an AXValue and `range` has CFRange's layout.
+    unsafe {
+        AXValueGetValue(
+            value.0,
+            AX_VALUE_CF_RANGE,
+            (&mut range as *mut CfRange).cast(),
+        )
+    }
+    .then_some(range)
+}
+
+fn copy_string_for_range(element: &CfObject, range: CfRange) -> Option<String> {
+    // SAFETY: AXValueCreate copies the CFRange and returns a retained object.
+    let parameter = unsafe { AXValueCreate(AX_VALUE_CF_RANGE, (&range as *const CfRange).cast()) };
+    if parameter.is_null() {
+        return None;
+    }
+    let parameter = CfObject(parameter);
+    let attribute = CfObject(cf_string_literal(c"AXStringForRange")?);
+    let mut value = ptr::null();
+    let status = unsafe {
+        AXUIElementCopyParameterizedAttributeValue(element.0, attribute.0, parameter.0, &mut value)
+    };
+    if status != 0 || value.is_null() {
+        return None;
+    }
+    let value = CfObject(value);
+    cf_string(value.0).filter(|text| !text.is_empty())
 }
 
 struct CfObject(CfTypeRef);
@@ -157,5 +234,6 @@ mod tests {
     fn a_missing_attribute_is_none() {
         assert_eq!(focused_window_title(i32::MAX), None);
         assert_eq!(focused_web_url(i32::MAX), None);
+        assert_eq!(char_before_caret(i32::MAX), None);
     }
 }

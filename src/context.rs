@@ -220,6 +220,16 @@ pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     })
 }
 
+/// The frontmost application's process ID, for Accessibility reads.
+#[cfg(target_os = "macos")]
+pub fn frontmost_pid() -> Option<i32> {
+    autoreleasepool(|_| {
+        NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .map(|application| application.processIdentifier())
+    })
+}
+
 /// How a browser's AppleScript dictionary names the front window's tab.
 #[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
