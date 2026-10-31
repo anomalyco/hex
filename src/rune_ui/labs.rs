@@ -5,9 +5,7 @@
 
 use rune::{El, Icon, Tx, row, text};
 
-use super::controls::{
-    self, CardRow, Paint, card, icon_row, icon_row_tagged, pressable_row, row_switch,
-};
+use super::controls::{self, CardRow, Paint, card, icon_row_tagged, pressable_row, row_switch};
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::lists::{Tone, tone_tag};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};

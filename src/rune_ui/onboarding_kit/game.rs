@@ -750,7 +750,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         _ => Some(session.typed.as_str()).filter(|typed| !typed.trim().is_empty()),
     };
     session.play.hear(held, words, now);
-    let peak = crate::input_level::recent().filter(|_| held);
+    let peak = crate::audio::input_level::recent().filter(|_| held);
     session.hud.step(&session.play, now, held, peak, reduced);
     session.keep_best();
     s.game = Some(session);
