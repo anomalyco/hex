@@ -85,8 +85,12 @@ Terminal paste.
   story, replayed on every OS
   (`rune_ui/onboarding_kit/live.rs`): the real model download, Microphone and
   Accessibility rows that follow macOS (ready at once on Linux and Windows,
-  which ask for no permissions), and a practice dictation with the real
-  shortcut and the HUD on the live microphone level. The window's tour stays
+  which ask for no permissions), and the practice step as a mini game
+  (`onboarding_kit/game.rs`): one lit message card at a time, answered by a
+  real dictation (live words fly in while the shortcut is held, the paste
+  lands in an unseen focused field), struck by lightning and burnt away,
+  then a score card with Keep playing and Continue; Done always skips on.
+  The window's tour stays
   the state machine underneath. Labs' **Run setup again** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
   and a named event on Windows) forget that onboarding finished
@@ -96,8 +100,9 @@ Terminal paste.
   `labs_run_setup_again_opens_the_first_run` and
   `run_setup_again_opens_the_first_run_on_linux_and_windows` in
   [panes.rs](../../src/rune_ui/tests/panes.rs). Every OS reads the practice
-  dictation from the listener's event log (`rune_ui/practice.rs`). Not yet:
-  words flying into the field.
+  dictation from the listener's event log (`rune_ui/practice.rs`). The
+  game's checks are the `onboarding_kit::game` tests; not yet observed: a
+  real dictation playing it end to end.
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
   OS; see [Streaming Finish](dictation.md#streaming-finish)). Its toggle
