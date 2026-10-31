@@ -195,6 +195,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Unload model when idle"),
         tr("Frees the speech model's memory after a while unused; the next dictation reloads it"),
     ));
+    rows.push(row(
+        Feature::RestoreShortcutDefault,
+        &KEYBOARD,
+        tr("Restore shortcut default"),
+        tr("Offer Restore default next to Paste last dictation's shortcut"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -228,6 +234,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",
         Feature::UnloadIdle => "lab-unload-idle",
+        Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
     }
 }
 

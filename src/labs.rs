@@ -4,7 +4,8 @@
 //! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
 //! as a normal item while on and is hidden while off; a behaviour-only
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
-//! model switching, mouse shortcuts, pausing the browser, and Terminal paste
+//! model switching, mouse shortcuts, pausing the browser, restoring Paste
+//! last dictation's default shortcut, and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Gate a feature where its work starts (the worker, thread, or capture
@@ -36,10 +37,11 @@ pub enum Feature {
     PauseBrowser,
     ShareShortcut,
     UnloadIdle,
+    RestoreShortcutDefault,
 }
 
 impl Feature {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -52,6 +54,7 @@ impl Feature {
         Self::PauseBrowser,
         Self::ShareShortcut,
         Self::UnloadIdle,
+        Self::RestoreShortcutDefault,
     ];
 
     /// The features this OS has.
@@ -66,7 +69,11 @@ impl Feature {
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::MouseShortcuts | Self::PauseBrowser => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
-            Self::Playground | Self::LiveText | Self::VocabularyBiasing | Self::UnloadIdle => true,
+            Self::Playground
+            | Self::LiveText
+            | Self::VocabularyBiasing
+            | Self::UnloadIdle
+            | Self::RestoreShortcutDefault => true,
         }
     }
 
@@ -85,6 +92,7 @@ impl Feature {
             Self::PauseBrowser => "pause-browser",
             Self::ShareShortcut => "share-shortcut",
             Self::UnloadIdle => "unload-idle",
+            Self::RestoreShortcutDefault => "restore-shortcut-default",
         }
     }
 
@@ -103,6 +111,7 @@ impl Feature {
             Self::PauseBrowser => "pause_browser_media",
             Self::ShareShortcut => "share_dictation_shortcut",
             Self::UnloadIdle => "labs.unload_idle",
+            Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
         }
     }
 
@@ -130,6 +139,9 @@ impl Feature {
             Self::UnloadIdle => {
                 "Free the speech model's memory after a while unused (labs.unload_idle_minutes); the next dictation reloads it"
             }
+            Self::RestoreShortcutDefault => {
+                "Offer Restore default next to Paste last dictation's shortcut"
+            }
         }
     }
 
@@ -152,6 +164,7 @@ impl Feature {
             Self::PauseBrowser => settings.pause_browser_media,
             Self::ShareShortcut => settings.share_dictation_shortcut,
             Self::UnloadIdle => settings.labs.unload_idle,
+            Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
         }
     }
 
@@ -169,6 +182,7 @@ impl Feature {
             Self::PauseBrowser => settings.pause_browser_media = on,
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
             Self::UnloadIdle => settings.labs.unload_idle = on,
+            Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
         }
     }
 }

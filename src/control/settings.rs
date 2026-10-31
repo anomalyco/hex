@@ -291,6 +291,11 @@ const KEYS: &[Key] = &[
         "Minutes unused before Labs › Unload model when idle unloads the model",
     ),
     key(
+        "labs.restore_shortcut_default",
+        Kind::Bool,
+        "Labs: offer Restore default beside the Paste last dictation shortcut",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

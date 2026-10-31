@@ -236,6 +236,53 @@ fn toggles_save_through_the_host() {
 }
 
 #[test]
+fn restore_default_brings_back_paste_last_only_with_its_lab_on() {
+    use crate::app_settings::HotkeyBinding;
+    let default = HotkeyBinding::paste_last_default();
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    rt.state.settings.paste_last_hotkey = None;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("restore-paste-last").is_none(),
+        "hidden while Labs › Restore shortcut default is off"
+    );
+
+    rt.state.settings.labs.restore_shortcut_default = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let note = format!("Default shortcut: {}", default.keycaps().join("+"));
+    assert!(
+        texts(&rt).contains(&note),
+        "the empty row names its default"
+    );
+    tap(&mut rt, "restore-paste-last");
+    assert_eq!(rt.state.settings.paste_last_hotkey, Some(default.clone()));
+    assert_eq!(saved(&rt), 1);
+    assert!(
+        rt.find("restore-paste-last").is_none(),
+        "hidden once the shortcut is the default"
+    );
+
+    // A default another shortcut already uses is refused, as recording it would be.
+    rt.state.settings.paste_last_hotkey = None;
+    rt.state.settings.raw_dictation_hotkey = Some(default);
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "restore-paste-last");
+    assert_eq!(rt.state.settings.paste_last_hotkey, None);
+    assert_eq!(saved(&rt), 1);
+    assert!(matches!(
+        rt.state.capture,
+        settings::Capture::Listening {
+            message: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
