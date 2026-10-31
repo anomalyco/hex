@@ -795,7 +795,7 @@ struct Pump {
     hud: crate::rune_hud::HudSender,
     status_actions: Option<Receiver<StatusItemAction>>,
     controller_events: Receiver<ControllerEvent>,
-    developer_calls: Receiver<crate::developer_control::DeveloperCall>,
+    developer_calls: Receiver<crate::control::developer_control::DeveloperCall>,
     control_calls: Receiver<crate::control::ControlCall>,
     meeting_waiters: Vec<control::MeetingWaiter>,
     meeting_state: MeetingMenuState,
@@ -1189,10 +1189,10 @@ impl Pump {
 
     fn developer(
         &mut self,
-        command: crate::developer_control::DeveloperCommand,
+        command: crate::control::developer_control::DeveloperCommand,
         indicator: &mut DictationIndicatorUi,
-    ) -> crate::developer_control::DeveloperReply {
-        use crate::developer_control::{
+    ) -> crate::control::developer_control::DeveloperReply {
+        use crate::control::developer_control::{
             DeveloperCommand, DeveloperHudState, DeveloperPane, DeveloperReply,
         };
         match command {

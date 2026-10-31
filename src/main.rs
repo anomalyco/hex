@@ -20,12 +20,8 @@ mod calendar;
 mod capture_host;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
-#[cfg(all(debug_assertions, target_os = "macos"))]
-mod dashboard;
 mod desktop;
 mod dev_build;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod developer_control;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 mod durable;
@@ -62,7 +58,6 @@ mod rune_ui;
 mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
-mod transcript_cli;
 mod transcription;
 mod updater;
 #[cfg(target_os = "windows")]
@@ -191,13 +186,13 @@ enum DevCommand {
     /// Drive a deterministic HUD state.
     Hud {
         #[arg(value_enum)]
-        state: developer_control::DeveloperHudState,
+        state: control::developer_control::DeveloperHudState,
     },
     #[cfg(debug_assertions)]
     /// Open the app and select a pane.
     Show {
         #[arg(value_enum)]
-        pane: developer_control::DeveloperPane,
+        pane: control::developer_control::DeveloperPane,
     },
     #[cfg(all(debug_assertions, hex_capture))]
     /// Run a capture headlessly, feeding WAV files in place of the
@@ -318,23 +313,25 @@ fn main() -> Result<()> {
         Some(Command::Meeting {
             command: MeetingCommand::List,
         }) => {
-            return transcript_cli::meetings(&transcript_cli::MeetingsCommand::List(
-                Default::default(),
-            ));
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::List(Default::default()),
+            );
         }
         Some(Command::Meeting {
             command: MeetingCommand::Show { id },
         }) => {
-            return transcript_cli::meetings(&transcript_cli::MeetingsCommand::Show {
-                id: id.clone(),
-                md: true,
-                json: false,
-                srt: false,
-                vtt: false,
-                from: None,
-                to: None,
-                chapter: None,
-            });
+            return control::transcript_cli::meetings(
+                &control::transcript_cli::MeetingsCommand::Show {
+                    id: id.clone(),
+                    md: true,
+                    json: false,
+                    srt: false,
+                    vtt: false,
+                    from: None,
+                    to: None,
+                    chapter: None,
+                },
+            );
         }
         _ => {}
     }
@@ -407,10 +404,10 @@ fn main() -> Result<()> {
         Command::Dev { command } => {
             #[cfg(debug_assertions)]
             {
-                use developer_control::{DeveloperCommand, DeveloperReply};
+                use control::developer_control::{DeveloperCommand, DeveloperReply};
                 let command = match command {
                     DevCommand::Dashboard => {
-                        return dashboard::run(event_path);
+                        return control::dashboard::run(event_path);
                     }
                     DevCommand::Status => DeveloperCommand::Status,
                     DevCommand::Hud { state } => DeveloperCommand::Hud { state },
@@ -649,7 +646,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn developer_show_accepts_every_developer_pane_spelling() {
-        use super::{DevCommand, developer_control::DeveloperPane};
+        use super::DevCommand;
+        use crate::control::developer_control::DeveloperPane;
 
         for (pane, expected) in [
             ("hud-lab", DeveloperPane::HudLab),
@@ -670,8 +668,8 @@ mod tests {
 
     #[test]
     fn control_commands_parse_beside_the_read_commands() {
-        use super::transcript_cli;
         use crate::control::cli::CommandsCommand;
+        use crate::control::transcript_cli;
         use clap::CommandFactory;
 
         Cli::command().debug_assert();

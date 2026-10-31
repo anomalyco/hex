@@ -106,7 +106,7 @@ struct HttpContext {
     model_preparing: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     transcription: crate::transcription::service::TranscriptionServiceHandle,
-    developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    developer_control: Option<SyncSender<crate::control::developer_control::DeveloperCall>>,
     control: Option<SyncSender<crate::control::ControlCall>>,
     dictations: dictation::Dictations,
     streams: Arc<crate::transcription::stream::Streams>,
@@ -135,7 +135,7 @@ struct CapabilitiesResponse {
 /// Optional control channels the running app exposes through its local API.
 #[derive(Default)]
 pub struct LocalApiOptions {
-    pub developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    pub developer_control: Option<SyncSender<crate::control::developer_control::DeveloperCall>>,
     /// The `hex` control commands (`POST /control`).
     pub control: Option<SyncSender<crate::control::ControlCall>>,
     /// Running-app dictation (`/dictations`), which only the macOS
@@ -837,7 +837,7 @@ fn developer_control(
     stream: &mut TcpStream,
     content_length: usize,
     mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::developer_control::DeveloperCall>>,
+    controls: Option<&SyncSender<crate::control::developer_control::DeveloperCall>>,
     shutdown: &AtomicBool,
 ) -> HttpResponse {
     if let Err(error) = read_body_bounded(
@@ -857,7 +857,7 @@ fn developer_control(
         return HttpResponse::code(404, "developer-control-unavailable");
     };
     let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(crate::developer_control::DeveloperCall { command, reply }) {
+    match controls.try_send(crate::control::developer_control::DeveloperCall { command, reply }) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) => {
             return HttpResponse::code(503, "developer-control-busy");
@@ -1704,8 +1704,8 @@ fn current_health() -> HealthResponse {
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn call_developer(
-    command: &crate::developer_control::DeveloperCommand,
-) -> Result<crate::developer_control::DeveloperReply> {
+    command: &crate::control::developer_control::DeveloperCommand,
+) -> Result<crate::control::developer_control::DeveloperReply> {
     let body = serde_json::to_vec(command)?;
     let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
     if status != 200 {
@@ -2080,12 +2080,12 @@ mod tests {
         let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(matches!(
             call.command,
-            crate::developer_control::DeveloperCommand::Hud {
-                state: crate::developer_control::DeveloperHudState::Recording
+            crate::control::developer_control::DeveloperCommand::Hud {
+                state: crate::control::developer_control::DeveloperHudState::Recording
             }
         ));
         call.reply
-            .send(crate::developer_control::DeveloperReply::Ok)
+            .send(crate::control::developer_control::DeveloperReply::Ok)
             .unwrap();
         let response = client.join().unwrap();
         assert!(response.starts_with("HTTP/1.1 200"));

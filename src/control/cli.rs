@@ -125,12 +125,12 @@ pub enum ControlCli {
     /// Read retained dictation history without starting the app, or clear
     /// it in the running Hex (`hex history clear --yes`).
     #[command(args_conflicts_with_subcommands = true)]
-    History(crate::transcript_cli::HistoryArgs),
+    History(crate::control::transcript_cli::HistoryArgs),
     /// Read and search recorded meetings without starting the app; record
     /// and stop them in the running Hex.
     Meetings {
         #[command(subcommand)]
-        command: crate::transcript_cli::MeetingsCommand,
+        command: crate::control::transcript_cli::MeetingsCommand,
     },
     /// Serve recorded meetings to agents over MCP (stdio). Read-only.
     Mcp {
@@ -466,11 +466,11 @@ pub fn run(command: ControlCli) -> u8 {
             lines,
             follow,
         } => logs(process, lines, follow),
-        ControlCli::History(crate::transcript_cli::HistoryArgs {
-            action: Some(crate::transcript_cli::HistoryAction::Clear { yes, output }),
+        ControlCli::History(crate::control::transcript_cli::HistoryArgs {
+            action: Some(crate::control::transcript_cli::HistoryAction::Clear { yes, output }),
             ..
         }) => clear_history(yes, output),
-        ControlCli::History(args) => report(crate::transcript_cli::history(&args)),
+        ControlCli::History(args) => report(crate::control::transcript_cli::history(&args)),
         ControlCli::Meetings { command } => meetings(command),
         ControlCli::Mcp { meetings_dir } => report(mcp(meetings_dir)),
         ControlCli::Commands { command } => report(match command {
@@ -596,15 +596,15 @@ fn report(result: color_eyre::Result<()>) -> u8 {
 
 /// `hex meetings`: record, stop, and copy in the running Hex; the rest
 /// read the meetings folder here.
-fn meetings(command: crate::transcript_cli::MeetingsCommand) -> u8 {
-    use crate::transcript_cli::MeetingsCommand;
+fn meetings(command: crate::control::transcript_cli::MeetingsCommand) -> u8 {
+    use crate::control::transcript_cli::MeetingsCommand;
     match command {
         MeetingsCommand::Record { title, output } => {
             send(ControlCommand::MeetingRecord { title }, output)
         }
         MeetingsCommand::Stop { output } => send(ControlCommand::MeetingStop, output),
         MeetingsCommand::CopyLast { output } => send(ControlCommand::MeetingCopyLast, output),
-        command => report(crate::transcript_cli::meetings(&command)),
+        command => report(crate::control::transcript_cli::meetings(&command)),
     }
 }
 
