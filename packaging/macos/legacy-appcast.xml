@@ -28,8 +28,10 @@
         <h2>Hex is now published by Anomaly</h2>
         <p>The new Hex is a separate app that updates itself. Quit this Hex,
         download the new one from <a href="https://anoma.ly/hex">anoma.ly/hex</a>,
-        and drag it to Applications, replacing this one. Your settings,
-        history, and models carry over.</p>
+        and drag it to Applications, replacing this one.</p>
+        <p>The new Hex starts fresh: settings, History, and downloaded models
+        don't carry over, and it downloads a speech model on first launch.
+        Meeting notes in Documents › Hex Meetings stay where they are.</p>
         <p>macOS treats it as a new app, so grant Microphone and Accessibility
         again (and Screen &amp; System Audio Recording for meetings), and turn
         Launch at login back on in Hex's settings.</p>
