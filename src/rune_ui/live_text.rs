@@ -11,7 +11,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rune::{Anim, Cx, El, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row, text};
+use rune::{
+    Anim, Cx, El, OverlayHandle, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row,
+    text,
+};
 
 use super::controls::Paint;
 use crate::transcription::engine::Partial;
@@ -59,6 +62,20 @@ impl Spot {
                 height: SIZE.1,
             },
         }
+    }
+
+    /// Places `overlay` for the plate to start at this spot.
+    fn apply(self, overlay: &OverlayHandle<Plate>) {
+        // Off macOS the HUD is placed with `place`, which picks the display
+        // again and measures from the same edge of its work area (above the
+        // Windows taskbar), so the plate is placed the same way and never
+        // lands under the HUD (#797).
+        #[cfg(not(target_os = "macos"))]
+        if let Self::Edge(edge, margin) = self {
+            overlay.place(edge, margin - PAD);
+            return;
+        }
+        overlay.set_placement(Some(self.placement()));
     }
 }
 
@@ -114,7 +131,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
             if appearing {
                 // Placed and shown after the new words, so it appears
                 // where it belongs with them already drawn.
-                handle.set_placement(Some(place().placement()));
+                place().apply(&handle);
                 handle.show();
             }
         });

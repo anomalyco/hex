@@ -565,7 +565,11 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   real dictation playing it end to end.
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
-  OS; see [Streaming Finish](dictation.md#streaming-finish)). Its toggle
+  OS; see [Streaming Finish](dictation.md#streaming-finish)). Off macOS the
+  line is placed with the HUD's own edge placement (`OverlayHandle::place`),
+  so with the HUD at the bottom it sits above the pill and the Windows
+  taskbar rather than under the pill (#797; not yet observed on Windows).
+  Its toggle
   is `labs.live_text` (off by default), asked as each dictation starts. The
   gate, `labs::live_text()`, is where the work starts: with it off, the engine gives a hotkey capture's
   live stream no partial slot and never reads the model's text between
