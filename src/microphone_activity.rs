@@ -363,7 +363,7 @@ fn running_application_info(pid: i32) -> Option<(String, Option<String>)> {
 }
 
 #[cfg(target_os = "macos")]
-fn running_application_by_bundle_id(bundle_id: &str) -> Option<(i32, String)> {
+pub(crate) fn running_application_by_bundle_id(bundle_id: &str) -> Option<(i32, String)> {
     let candidates = NSRunningApplication::runningApplicationsWithBundleIdentifier(
         &NSString::from_str(bundle_id),
     );

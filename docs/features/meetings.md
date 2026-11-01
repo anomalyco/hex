@@ -168,7 +168,11 @@ process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
 microphone and is not snoozed, `ContextSnapshot::capture_for_meeting` in
 [dictation/context.rs](../../src/dictation/context.rs) reads the active tab of Brave's front window,
-even if Brave is behind another window. Background tabs are not searched: a
+even if Brave is behind another window. When that AppleScript read fails or
+answers nothing (Automation not allowed, a failing script; #827, Arc), the
+page comes from the browser process's focused web area through Accessibility
+(`AXURL`), still behind another window; the first failure per browser is
+logged as `could not read the browser tab`. Background tabs are not searched: a
 call open in one says nothing about which tab holds the microphone, and a
 voice note elsewhere would otherwise get a known service's 2 s threshold or
 trigger Always record. (A call in a background tab is therefore judged by the
