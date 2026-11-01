@@ -571,3 +571,112 @@ mod model_swap_tests {
         assert!(swap.poll().is_none());
     }
 }
+
+#[cfg(test)]
+mod nemotron_bench {
+    use super::*;
+
+    /// Temporary: replays WAVs into the engine as capture would and prints
+    /// release latency, word differences, and live text.
+    #[test]
+    #[ignore = "bench"]
+    fn stream_bench() {
+        use crate::transcription::engine::TranscriptionEngine;
+        let model: crate::transcription::models::TranscriptionModelId =
+            std::env::var("HEX_BENCH_MODEL").unwrap().parse().unwrap();
+        let language = std::env::var("HEX_BENCH_LANGUAGE").unwrap();
+        let selection = TranscriptionSelection { model, language };
+        let words = |text: &str| {
+            text.split_whitespace()
+                .map(|word| {
+                    word.chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
+                })
+                .filter(|word| !word.is_empty())
+                .collect::<Vec<_>>()
+        };
+        let mut transcriber = LocalTranscriber::load(&selection).unwrap();
+        let clips: Vec<(String, Vec<f32>)> = std::env::var("HEX_STREAM_WAVS")
+            .unwrap()
+            .split(',')
+            .map(|path| {
+                (
+                    path.to_owned(),
+                    read_wav_for_parakeet(Path::new(path)).unwrap(),
+                )
+            })
+            .collect();
+        let mut offline = Vec::new();
+        for (_, samples) in &clips {
+            transcriber.transcribe(samples).unwrap();
+            let started = std::time::Instant::now();
+            let text = transcriber.transcribe(samples).unwrap();
+            offline.push((text, started.elapsed().as_millis()));
+        }
+        let engine = TranscriptionEngine::start(transcriber)
+            .unwrap()
+            .with_live_text();
+        for ((path, samples), (whole, offline_ms)) in clips.iter().zip(offline) {
+            let mut stream = engine.begin().expect("streams");
+            let held = samples.len().saturating_sub(3_200);
+            let feeding = std::time::Instant::now();
+            let mut timeline = Vec::new();
+            let mut stable = String::new();
+            let mut rewrites = 0;
+            for (index, block) in samples[..held].chunks(2_560).enumerate() {
+                let due = std::time::Duration::from_secs_f64(index as f64 * 0.16);
+                std::thread::sleep(due.saturating_sub(feeding.elapsed()));
+                stream.feed(block);
+                if let Some(partial) = stream.take_partial() {
+                    if !partial.stable.starts_with(stable.as_str()) {
+                        rewrites += 1;
+                    }
+                    stable = partial.stable.clone();
+                    timeline.push((
+                        stream.fed() / 16,
+                        words(&partial.stable).len(),
+                        words(&partial.tentative).len(),
+                    ));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let streamed = engine
+                .finish(Some(stream), samples.clone())
+                .unwrap()
+                .wait()
+                .unwrap();
+            let (reference, hypothesis) = (words(&whole), words(&streamed.text));
+            let mut previous = (0..=hypothesis.len()).collect::<Vec<_>>();
+            for (row, expected) in reference.iter().enumerate() {
+                let mut current = vec![row + 1; hypothesis.len() + 1];
+                for (column, actual) in hypothesis.iter().enumerate() {
+                    current[column + 1] = (previous[column + 1] + 1)
+                        .min(current[column] + 1)
+                        .min(previous[column] + usize::from(expected != actual));
+                }
+                previous = current;
+            }
+            println!(
+                "{path}: audio_ms={} offline_ms={offline_ms} release_ms={} ({}) word_differences={}/{}",
+                samples.len() / 16,
+                streamed.finish_ms,
+                streamed.source.label(),
+                previous[hypothesis.len()],
+                reference.len()
+            );
+            println!("  offline {whole}");
+            println!("  stream  {}", streamed.text);
+            let first = timeline
+                .iter()
+                .find(|(_, s, t)| s + t > 0)
+                .map(|(ms, ..)| *ms);
+            println!(
+                "  live text: updates={} first_text_at_audio_ms={first:?} stable_rewrites={rewrites} last={:?}",
+                timeline.len(),
+                timeline.last()
+            );
+        }
+    }
+}

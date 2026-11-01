@@ -37,6 +37,7 @@ pub enum TranscriptionModelId {
     UnderdogBark3Pro,
     UnderdogBark3Clean,
     ParakeetUltra,
+    Nemotron35Asr,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -69,6 +70,7 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::ParakeetUltra => "parakeet_ultra",
+            Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -103,6 +105,7 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
+            "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -262,10 +265,14 @@ impl ModelDefinition {
     }
 
     pub fn runtime_language<'a>(&self, language: &'a str) -> &'a str {
-        if self.id == TranscriptionModelId::WhisperLargeV3Turbo && language == "fil" {
-            "tl"
-        } else {
-            language
+        match self.id {
+            TranscriptionModelId::WhisperLargeV3Turbo if language == "fil" => "tl",
+            // Its prompt and advertised languages are locales: `de-DE`.
+            TranscriptionModelId::Nemotron35Asr => NEMOTRON_3_5_LOCALES
+                .iter()
+                .find_map(|(code, locale)| (*code == language).then_some(*locale))
+                .unwrap_or(language),
+            _ => language,
         }
     }
 
@@ -497,6 +504,59 @@ const PARAKEET_ULTRA_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "tdt-0.6b-ultra",
 };
+// NVIDIA's Nemotron 3.5 ASR Streaming 0.6B (OpenMDW-1.1), a cache-aware
+// FastConformer with a language-prompted RNN-T. Hex converted
+// nvidia/nemotron-3.5-asr-streaming-0.6b at 24b151a (the .nemo,
+// 210214ed…) with transcribe.cpp 7045d1c's Parakeet converter and quantized
+// it to Q8_0: all 653 tensors match this file byte for byte, and the
+// metadata differs only by two capability flags the newer converter writes
+// as false (translate, diarization). The pinned file is handy-computer's,
+// which ships the licence and notice beside it.
+const NEMOTRON_3_5_ASR_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+    revision: "53ce288f69326b415aeef030cfcb02a08a8096dd",
+    repository: "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+    bytes: 751_094_240,
+    sha256: "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c",
+    architecture: "parakeet",
+    variant: "nemotron-3.5-asr-streaming-0.6b",
+};
+/// The languages Nemotron 3.5 transcribes that Hex names, as the locales
+/// its language prompt takes (`runtime_language`). Its card also lists
+/// Norwegian Bokmål, which Hex doesn't offer yet.
+const NEMOTRON_3_5_LOCALES: &[(&str, &str)] = &[
+    ("en", "en-US"),
+    ("es", "es-ES"),
+    ("fr", "fr-FR"),
+    ("de", "de-DE"),
+    ("it", "it-IT"),
+    ("pt", "pt-BR"),
+    ("nl", "nl-NL"),
+    ("tr", "tr-TR"),
+    ("ru", "ru-RU"),
+    ("uk", "uk-UA"),
+    ("pl", "pl-PL"),
+    ("cs", "cs-CZ"),
+    ("sk", "sk-SK"),
+    ("bg", "bg-BG"),
+    ("hr", "hr-HR"),
+    ("ro", "ro-RO"),
+    ("hu", "hu-HU"),
+    ("sv", "sv-SE"),
+    ("da", "da-DK"),
+    ("fi", "fi-FI"),
+    ("et", "et-EE"),
+    ("ar", "ar-AR"),
+    ("hi", "hi-IN"),
+    ("ja", "ja-JP"),
+    ("ko", "ko-KR"),
+    ("zh", "zh-CN"),
+    ("vi", "vi-VN"),
+];
+const NEMOTRON_3_5_LANGUAGES: &[&str] = &[
+    "en", "es", "fr", "de", "it", "pt", "nl", "tr", "ru", "uk", "pl", "cs", "sk", "bg", "hr", "ro",
+    "hu", "sv", "da", "fi", "et", "ar", "hi", "ja", "ko", "zh", "vi",
+];
 /// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
 /// because models hallucinate closing phrases such as "thank you" on silence
 /// and room noise. It downloads with every transcription model.
@@ -694,6 +754,22 @@ pub const MODELS: &[ModelDefinition] = &[
         // no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::Nemotron35Asr,
+        name: "Nemotron 3.5 ASR",
+        realtime: "REALTIME",
+        word_error_rate: Some(0.0),
+        quality_context: "English benchmark",
+        coverage: "27 languages",
+        timestamps: "Token timestamps",
+        streams: true,
+        runtime: ModelRuntime::Gguf(&NEMOTRON_3_5_ASR_ARTIFACT),
+        languages: NEMOTRON_3_5_LANGUAGES,
+        // Its prompt takes the language (`runtime_language`), and Auto leaves
+        // it to the model.
+        accepts_language_hint: true,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
