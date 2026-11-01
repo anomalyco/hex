@@ -130,6 +130,17 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   └── A model not ready yet keeps downloading: the one picked, else the
 │       recommended one, also when the model step or the scan held it, so a
 │       blocked network (#894) never traps the person in onboarding
+├── GNOME/KDE Wayland (pastes through the RemoteDesktop portal, no wtype)
+│   and no saved grant -> before Your turn, "Let Hex paste for you"     // setup.paste-access
+│   ├── Says why: Hex only sends the paste keystroke, never sees the screen;
+│   │   the desktop asks once and may call it remote desktop (#932)
+│   ├── Allow -> opens the desktop's dialog; the grant's restore token is saved,
+│   │   so the first paste needs no dialog
+│   ├── Refused -> Try again, or Continue (the desktop asks at the first paste)
+│   ├── X11, wlroots with wtype, macOS, Windows -> no page
+│   └── Skipped or refused -> Settings › General shows it under "Permissions
+│       needed" until allowed. Check: golden `onboarding-paste`; the real
+│       portal dialog is not exercised
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch
@@ -1454,6 +1465,7 @@ Linux beta                               // not macOS feature parity
 │       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
+│       │   (onboarding or Settings can ask first, `setup.paste-access`)
 │       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms
 │       │   ├── 15 s after the last paste -> session closes when its grant restores, so
 │       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant

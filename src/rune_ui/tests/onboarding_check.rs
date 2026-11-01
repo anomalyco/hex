@@ -32,6 +32,8 @@ pub(super) const SCENES: &[&str] = &[
     "mac-onboarding-stale",
     "mac-onboarding-restart",
     "windows-onboarding-microphone",
+    // GNOME and KDE on Wayland: the desktop's paste permission, explained.
+    "onboarding-paste",
     // Almost ready: the model still downloads.
     "onboarding-waiting",
     // Your turn: the practice game, and the shortcut that didn't start.

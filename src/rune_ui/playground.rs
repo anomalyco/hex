@@ -268,6 +268,10 @@ const PATHS: &[(&str, &str)] = &[
         "onboarding-waiting",
         "Linux & Windows/Onboarding · almost ready",
     ),
+    (
+        "onboarding-paste",
+        "Linux & Windows/Onboarding · paste permission",
+    ),
     ("onboarding-try", "Linux & Windows/Onboarding · your turn"),
     ("onboarding-ready", "Linux & Windows/Onboarding · ready"),
     (

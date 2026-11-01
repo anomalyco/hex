@@ -7,7 +7,8 @@
 #   1. Renders every onboarding scene (Setting up Hex with nothing found, a
 #      stopped download, the model step with found models, with the
 #      recommended model already present, ours downloading, Back to it, the
-#      demo, permissions, Windows' microphone switch, Almost ready, the
+#      demo, permissions, Windows' microphone switch, the paste permission on
+#      GNOME and KDE Wayland, Almost ready, the
 #      practice game, Hex is ready) in both
 #      appearances and compares each with its approved golden in
 #      tests/golden/. Any difference fails and names the changed scenes; an

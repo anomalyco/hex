@@ -300,6 +300,9 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
+    /// The desktop's paste permission where Hex pastes through the
+    /// RemoteDesktop portal (GNOME and KDE on Wayland); `None` elsewhere.
+    pub(super) paste: Option<super::paste_access::PasteAccess>,
     /// A scene's state: [`Self::setup_status`] reports `permissions` on
     /// every OS rather than asking this computer.
     preview: bool,
@@ -375,6 +378,7 @@ impl PlatformState {
             meeting_folder_error: None,
             calendar: CalendarView::default(),
             relaunch_failed: false,
+            paste: None,
             preview: false,
             developer: false,
             accessibility_renamed: false,

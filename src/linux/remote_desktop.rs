@@ -114,6 +114,18 @@ impl RemoteDesktop {
         })
     }
 
+    /// Asks the desktop for the keyboard ahead of the first paste, from
+    /// onboarding or Settings. The saved grant lets later pastes start
+    /// without a dialog.
+    pub(crate) fn ask() -> Result<()> {
+        Self::start(&AtomicBool::new(false)).map(drop)
+    }
+
+    /// Whether the desktop granted the keyboard before: a saved grant.
+    pub(crate) fn granted() -> bool {
+        load_restore_token().is_some()
+    }
+
     /// Whether a later session restores this grant without a dialog.
     pub(crate) fn restorable(&self) -> bool {
         self.restorable

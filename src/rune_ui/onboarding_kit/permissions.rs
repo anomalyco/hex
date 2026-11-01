@@ -18,6 +18,7 @@ use super::super::controls::{Paint, PushSize};
 use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
+use super::super::paste_access::PasteAccess;
 use super::live::Live;
 use super::stories::Onboard;
 use crate::desktop::i18n::tr;
@@ -141,6 +142,9 @@ fn heading(p: Paint, motion: Motion, title: &str, lead: &str) -> El {
 /// Accessibility. Windows asks nothing, so this page shows only while its
 /// microphone privacy switch is off, with the one row that opens Settings.
 fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
+    if let Some(paste) = live.paste {
+        return paste_page(p, paste, motion);
+    }
     let k = p.k;
     let mic_ready = live.microphone == ItemStatus::Ready;
     let windows = !live.accessibility_row;
@@ -236,6 +240,87 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
         .child(heading(p, motion, title, lead))
         .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
         .children(relaunch)
+        .child(row().key("action").h(ACTION_H).center().child(action))
+}
+
+/// GNOME and KDE on Wayland: Hex pastes through the desktop's
+/// RemoteDesktop portal, whose dialog asks once (#932). This page says what
+/// it is for before Allow opens it.
+fn paste_page(p: Paint, paste: PasteAccess, motion: Motion) -> El {
+    let k = p.k;
+    let desc = if paste == PasteAccess::Declined {
+        tr("Without it, Hex copies your words and you press Ctrl+V.")
+    } else {
+        tr("Hex only sends the paste keystroke. It never sees your screen.")
+    };
+    let allow = |label: &str, primary: bool| {
+        Button::new(label)
+            .variant(if primary {
+                ButtonVariant::Contrast
+            } else {
+                ButtonVariant::Neutral
+            })
+            .on_press(super::live::allow_paste)
+            .build_push(k)
+            .key("paste-pill-allow")
+            .transition(arrives())
+    };
+    let control = match paste {
+        PasteAccess::Ask | PasteAccess::Later => allow(tr("Allow"), true),
+        PasteAccess::Asking => perm_pill(p, "paste-pill", PermState::Asking),
+        PasteAccess::Allowed => perm_pill(p, "paste-pill", PermState::Allowed),
+        PasteAccess::Declined => allow(tr("Try again"), false),
+    };
+    let card = col()
+        .key("setup-card")
+        .w(COL_W)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(p.hair, k.c.border_weak)
+        .child(perm_row(
+            p,
+            "paste-row",
+            &glyphs::CURSOR_TEXT,
+            tr("Paste into apps"),
+            desc,
+            control,
+        ));
+    let action = if paste == PasteAccess::Declined {
+        Button::new(tr("Continue"))
+            .variant(ButtonVariant::Contrast)
+            .on_press(super::live::paste_later)
+            .build_push(k)
+            .key("paste-later")
+            .transition(arrives())
+    } else {
+        el().key("none")
+    };
+    col()
+        .key("permissions")
+        .gap(22.0)
+        .items_center()
+        .child(motion.heading(
+            col()
+                .key("permissions-head")
+                .gap(8.0)
+                .items_center()
+                .child(
+                    text(tr("Let Hex paste for you"))
+                        .key("title")
+                        .font(title_font(p))
+                        .color(p.text()),
+                )
+                .child(
+                    text(tr("Hex needs this to type your words into your apps. Your desktop asks once, and may call it remote desktop."))
+                        .key("lead")
+                        .font(LEAD)
+                        .color(p.muted())
+                        .align(rune::Align::Center)
+                        .wrap()
+                        .w(COL_W),
+                ),
+        ))
+        .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
         .child(row().key("action").h(ACTION_H).center().child(action))
 }
 
