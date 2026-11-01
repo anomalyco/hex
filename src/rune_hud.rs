@@ -238,8 +238,11 @@ impl Hud {
     }
 
     fn handle(&mut self, event: HudEvent) {
+        // A capture's start sends the display and placement to Rune again,
+        // so a placement Rune resolved wrong on another screen (#873)
+        // doesn't stick.
         #[cfg(target_os = "macos")]
-        if let HudEvent::ConfigureDotScope(_) = event {
+        if let HudEvent::ConfigureDotScope(_) | HudEvent::Started = event {
             self.placed = None;
         }
         #[cfg(not(target_os = "macos"))]
@@ -311,6 +314,10 @@ impl Hud {
         #[cfg(not(target_os = "macos"))]
         {
             self.edge_placed = None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            self.placed = None;
         }
         if std::mem::take(&mut self.shown)
             && let Some(overlay) = &self.this
