@@ -46,6 +46,10 @@ pub(crate) struct Live {
     pub(crate) listening: bool,
     /// The model download stopped with an error.
     pub(crate) failed: bool,
+    /// Why, in one line, such as a proxy or certificate (#894).
+    pub(crate) failure: Option<String>,
+    /// A model file chosen with Use a model file… is being added.
+    pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
     pub(crate) accessibility: ItemStatus,
     /// Every permission is on and one applies only after Hex restarts.
@@ -199,6 +203,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     s.live = Some(Live {
         listening: false,
         failed: false,
+        failure: None,
+        using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
         restart: false,
@@ -352,6 +358,8 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
                 t.error.is_some(),
             )
         });
+    let failure = super::super::model_import::download_failure(ui);
+    let using_file = super::super::model_import::using_file(ui);
     // The disk and macOS checks run a few times a second, not every frame.
     let checked = ui
         .first_run
@@ -449,7 +457,9 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     live.listening = live.practice == Practice::Listening;
 
     // The model download.
-    live.failed = !choice_installed && !preparing && errored;
+    live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    live.failure = failure;
+    live.using_file = using_file;
     s.granted = granted;
     s.caps = caps;
     if let Some(download) = s.download.as_mut() {
@@ -574,6 +584,12 @@ pub(super) fn back_to_models(ui: &mut Ui) {
 /// "Reopen Hex" once the listener failed and Hex won't relaunch itself.
 pub(super) fn reopen(ui: &mut Ui) {
     onboarding::input(ui, Input::Reopen);
+}
+
+/// "Use a model file…" when the download is blocked: a GGUF chosen here is
+/// imported and selected, and the first run moves on once it is ready.
+pub(super) fn use_file(ui: &mut Ui) {
+    super::super::model_import::use_file(ui);
 }
 
 pub(super) fn retry_download(ui: &mut Ui) {

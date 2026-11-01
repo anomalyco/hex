@@ -1595,6 +1595,84 @@ fn add_term_scrolls_the_new_row_into_view() {
     );
 }
 
+/// The wheel scrolls a term list longer than the sheet, wherever the
+/// pointer is over it: on a row's field or between rows (#906).
+#[test]
+fn the_wheel_scrolls_a_long_term_list() {
+    let mut rt = runtime("portal", true, (900.0, 480.0));
+    rt.state.settings.vocabulary = (0..75)
+        .map(|index| crate::dictation::vocabulary::VocabularyEntry {
+            term: format!("term {index}"),
+            sounds_like: vec![format!("sound {index}")],
+        })
+        .collect();
+    rt.state.vocabulary = super::vocabulary::VocabularyEditor::new(&rt.state.settings.vocabulary);
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "vocabulary-control");
+    settle(&mut rt);
+    let first = |rt: &Runtime<Ui>| element(rt, "term0").rect[1];
+    let list = element(&rt, "term-scroll").rect;
+    // Beside the fields, on a term field, and on a "sounds like" field; a
+    // mouse wheel's line steps, then a touchpad's precise gesture.
+    for (x, precise) in [
+        (list[0] + 1.0, false),
+        (list[0] + 40.0, true),
+        (list[0] + list[2] - 8.0, false),
+    ] {
+        let before = first(&rt);
+        wheel_down(&mut rt, x, list[1] + list[3] / 2.0, precise);
+        assert!(
+            first(&rt) < before - 100.0,
+            "the list didn't scroll at x {x}"
+        );
+    }
+}
+
+/// The model picker sheet's list scrolls with the wheel too.
+#[test]
+fn the_wheel_scrolls_the_model_picker() {
+    let mut rt = runtime("picker-downloading", true, (900.0, 480.0));
+    let list = element(&rt, "model-scroll").rect;
+    let first = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.contains("model-scroll/inset/"))
+            .map(|e| e.rect[1])
+            .unwrap()
+    };
+    let before = first(&rt);
+    wheel_down(
+        &mut rt,
+        list[0] + list[2] / 2.0,
+        list[1] + list[3] / 2.0,
+        true,
+    );
+    assert!(first(&rt) < before - 50.0, "the picker didn't scroll");
+}
+
+/// Ten wheel steps down at (x, y), as the window's platform sends them: the
+/// pointer moves there first, and a gesture begins, moves, and ends.
+fn wheel_down(rt: &mut Runtime<Ui>, x: f32, y: f32, precise: bool) {
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    for step in 0..10 {
+        let phase = match step {
+            0 => rune::GesturePhase::Began,
+            9 => rune::GesturePhase::Ended,
+            _ => rune::GesturePhase::Moved,
+        };
+        rt.wheel_event(
+            rune::WheelEvent::new(0.0, -30.0)
+                .at(x, y)
+                .phase(phase)
+                .precise(precise),
+        );
+        rt.frame(1.0 / 60.0);
+    }
+    settle(rt);
+}
+
 /// A model whose transcription takes no vocabulary says so on the Vocabulary
 /// row and in its sheet; Parakeet-based and prompt-reading models show none.
 #[test]
@@ -1879,6 +1957,30 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
     // Back returns to the list to change the pick.
     tap(&mut rt, "back");
     assert!(rt.find("model-list").is_some());
+}
+
+#[test]
+fn a_failed_download_names_its_cause_and_offers_a_model_file() {
+    let mut rt = runtime("onboarding-setup", false, PANE_SIZE);
+    if let Some(view) = &mut rt.state.view {
+        view.transcription.preparing = None;
+        view.transcription.error = Some(
+            "Couldn't reach huggingface.co through the proxy proxy.corp:8080: the proxy refused (403)\n\nCheck your connection, then retry, or choose a model file."
+                .into(),
+        );
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(
+            &"Couldn't reach huggingface.co through the proxy proxy.corp:8080: the proxy refused (403)"
+                .to_owned()
+        ),
+        "{shown:?}"
+    );
+    assert!(shown.contains(&"Use a model file…".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Retry".to_owned()), "{shown:?}");
 }
 
 #[test]

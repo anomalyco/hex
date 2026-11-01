@@ -72,6 +72,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("{model} is hidden by the language filter: {state}", "{model} est masqué par le filtre de langue : {state}"),
     ("Add model file…", "Ajouter un fichier de modèle…"),
     ("Adding model…", "Ajout du modèle…"),
+    ("Use a model file…", "Utiliser un fichier de modèle…"),
     ("Add model file", "Ajouter un fichier de modèle"),
     ("GGUF speech models", "Modèles vocaux GGUF"),
     ("The import stopped.", "L'importation s'est arrêtée."),

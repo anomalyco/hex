@@ -412,24 +412,50 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         s.motion.staggered(progress_capsule, 2.0, 6.0)
     };
 
-    let retry = s.live.as_ref().filter(|live| live.failed).map(|_| {
-        row()
+    // A network that blocks the download: why, then retry or use a model
+    // file brought some other way (#894).
+    let retry = s.live.as_ref().filter(|live| live.failed).map(|live| {
+        let why = live
+            .failure
+            .clone()
+            .unwrap_or_else(|| tr("The download stopped.").to_owned());
+        col()
             .key("download-failed")
-            .gap(10.0)
-            .center_y()
+            .gap(12.0)
+            .items_center()
             .transition(arrives())
             .child(
-                text(tr("The download stopped."))
+                text(why)
                     .key("why")
                     .font(LEAD)
-                    .color(p.muted()),
+                    .color(p.muted())
+                    .align(rune::Align::Center)
+                    .wrap()
+                    .w(TRY_W),
             )
             .child(
-                Button::new(tr("Try again"))
-                    .variant(ButtonVariant::Neutral)
-                    .on_press(live::retry_download)
-                    .build_push(p.k)
-                    .key("retry-download"),
+                row()
+                    .key("actions")
+                    .gap(10.0)
+                    .center_y()
+                    .child(
+                        Button::new(if live.using_file {
+                            tr("Adding model…")
+                        } else {
+                            tr("Use a model file…")
+                        })
+                        .variant(ButtonVariant::Neutral)
+                        .on_press(live::use_file)
+                        .build_push(p.k)
+                        .key("use-file"),
+                    )
+                    .child(
+                        Button::new(tr("Try again"))
+                            .variant(ButtonVariant::Neutral)
+                            .on_press(live::retry_download)
+                            .build_push(p.k)
+                            .key("retry-download"),
+                    ),
             )
     });
     col()
