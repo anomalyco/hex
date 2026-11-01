@@ -680,7 +680,8 @@ impl<'de> Deserialize<'de> for HotkeyBinding {
 
 impl Default for HotkeyBinding {
     /// Option on macOS, Ctrl+Space on Windows, Alt+Space on Linux, and
-    /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723).
+    /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723), and
+    /// on KDE Plasma, whose KRunner does (#898).
     fn default() -> Self {
         #[cfg(target_os = "macos")]
         let binding = Self {
@@ -690,15 +691,16 @@ impl Default for HotkeyBinding {
         #[cfg(target_os = "windows")]
         let binding = Self::chord(HotkeyModifiers::control(), "space");
         #[cfg(target_os = "linux")]
-        let binding = Self::linux_dictation_default(crate::linux::portal::gnome());
+        let binding =
+            Self::linux_dictation_default(crate::linux::portal::desktop_takes_alt_space());
         binding
     }
 }
 
 impl HotkeyBinding {
     #[cfg(target_os = "linux")]
-    fn linux_dictation_default(gnome: bool) -> Self {
-        if gnome {
+    fn linux_dictation_default(alt_space_taken: bool) -> Self {
+        if alt_space_taken {
             Self::chord(HotkeyModifiers::control_option(), "space")
         } else {
             Self::chord(HotkeyModifiers::option(), "space")
@@ -2982,8 +2984,9 @@ pub fn exists() -> bool {
 mod tests {
     use super::*;
 
-    /// GNOME's window menu takes Alt+Space, so new GNOME setups dictate
-    /// with Ctrl+Alt+Space; it shares no key with Paste last or Annotate.
+    /// GNOME's window menu and KDE's KRunner take Alt+Space, so new setups
+    /// there dictate with Ctrl+Alt+Space; it shares no key with Paste last or
+    /// Annotate.
     #[cfg(target_os = "linux")]
     #[test]
     fn gnome_dictates_with_a_key_gnome_leaves_free() {

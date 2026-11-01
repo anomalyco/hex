@@ -387,8 +387,8 @@ dictation rules:
   `systemctl --user restart xdg-desktop-portal`. Run `hex service` directly:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
-  focused application. On GNOME, new setups dictate with Ctrl+Alt+Space, because GNOME keeps
-  Alt+Space for the window menu; Settings warns when a shortcut uses a key GNOME
+  focused application. On GNOME and KDE Plasma, new setups dictate with Ctrl+Alt+Space,
+  because GNOME keeps Alt+Space for the window menu and Plasma for KRunner; Settings warns when a shortcut uses a key GNOME
   keeps for itself. Keys you change in GNOME Settings › Keyboard work at once,
   and Hex's Settings and `hex status --json` show them. Annotate's shortcut (F9
   by default) sits under the dictation shortcut in General. **Disable** (General or the tray) keeps Hex disabled

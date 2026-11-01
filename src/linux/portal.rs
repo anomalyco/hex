@@ -1005,6 +1005,13 @@ pub(crate) fn gnome() -> bool {
     desktop_is("GNOME")
 }
 
+/// Whether the desktop keeps Alt+Space for itself: GNOME's window menu
+/// (#723) and KDE Plasma's KRunner (#898), which the KDE portal's approval
+/// dialog flags as a conflict and then leaves Hex without.
+pub(crate) fn desktop_takes_alt_space() -> bool {
+    gnome() || desktop_is("KDE")
+}
+
 /// Whether the desktop assigns portal shortcuts their keys in its own
 /// configuration and describes no trigger in the portal's answer. Hyprland's
 /// portal returns an empty description for every shortcut, bound or not

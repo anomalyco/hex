@@ -1449,7 +1449,9 @@ Linux beta                               // not macOS feature parity
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
 GNOME portal shortcuts (#723)            // linux.gnome-shortcuts
-├── New GNOME setup -> dictation default Ctrl+Alt+Space (GNOME keeps Alt+Space)
+├── New GNOME or KDE Plasma setup -> dictation default Ctrl+Alt+Space (GNOME's
+│   window menu and Plasma's KRunner keep Alt+Space; #898)
+│   // checked in a headless KWin 6.8 session: the portal's dialog flags Alt+Space
 ├── Granted key GNOME keeps (Alt+Space, Super+Space, Alt+Tab, Print, …) -> red note under the row
 ├── Keys changed in GNOME Settings -> ShortcutsChanged -> pressing them dictates at once;
 │   the row note, the Status hint and `hex status --json` listener.shortcuts show them
