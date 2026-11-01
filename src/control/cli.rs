@@ -280,7 +280,7 @@ pub enum ModelCommand {
         #[arg(long)]
         language: Option<String>,
     },
-    /// Labs: copy a GGUF speech model into Hex after checking its header,
+    /// Copy a GGUF speech model into Hex after checking its header,
     /// and print its id. The original is left as it is.
     Import {
         path: std::path::PathBuf,
@@ -288,12 +288,12 @@ pub enum ModelCommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Labs: rename an imported model.
+    /// Rename an imported or found model.
     Rename { model: String, name: String },
-    /// Labs: check Hex's copy of an import again; a copy whose contents
+    /// Check Hex's copy of an import (or a found file) again; a copy whose contents
     /// still match is ready again.
     Repair { model: String },
-    /// Labs: remove Hex's copy of an imported model.
+    /// Remove Hex's copy of an imported model, or forget a found one (its file stays).
     Remove { model: String },
 }
 

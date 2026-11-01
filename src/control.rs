@@ -738,7 +738,8 @@ pub fn model_source(
         .filter(|_| installed)
         .and_then(|path| describe(&path));
     match (model.id.is_custom(), here) {
-        (_, Some(origin)) => format!("found: {origin}"),
+        (true, Some(origin)) => format!("found: {origin} (not tested by Hex)"),
+        (false, Some(origin)) => format!("found: {origin}"),
         (true, None) => "imported".into(),
         (false, None) if installed => "hex".into(),
         (false, None) => "download".into(),
