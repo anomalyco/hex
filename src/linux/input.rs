@@ -1139,7 +1139,18 @@ impl Backend {
                 "could not remove Hex's old shortcuts from KDE"
             );
         }
-        let granted = portal.bind(&shortcuts, &self.stop)?;
+        // GNOME asks for approval whenever Hex binds shortcuts it hasn't
+        // approved, as after a shortcut change; dismissing that dialog fails
+        // the bind (#723), and Enable binds again, so the dialog returns.
+        let granted = match portal.bind(&shortcuts, &self.stop) {
+            Ok(granted) => granted,
+            Err(error) if self.stopping() => return Err(error),
+            Err(error) => {
+                return Err(error.wrap_err(
+                    "the desktop did not approve Hex's shortcuts; choose Enable to ask again",
+                ));
+            }
+        };
         let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             project_grants(granted, &requested, &ids, desktop_assigns)
