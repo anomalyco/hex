@@ -156,12 +156,14 @@ impl ContextSnapshot {
                 crate::microphone_activity::running_application_by_bundle_id(browser.bundle_id)
                     .map(|(pid, _)| pid)
             });
-            if let Some(pid) = pid
-                && let Some(browser_url) = accessibility_web_url(pid)
-            {
+            // Chromium browsers behind another app often expose no web area
+            // either; their window title (the tab's) still names a call such
+            // as Google Meet, so the browser's own window is reported rather
+            // than the app in front (#827).
+            if let Some(pid) = pid {
                 return Ok(Self {
                     application: Some(browser.name.into()),
-                    browser_url: Some(browser_url),
+                    browser_url: accessibility_web_url(pid),
                     window_title: crate::accessibility::focused_window_title(pid),
                     input_revision: None,
                 });
