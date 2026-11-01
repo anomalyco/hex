@@ -1484,18 +1484,20 @@ mod tests {
 
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
     /// shortcut only with Labs › Special keys alone on, and turning the
-    /// toggle off puts it back to the default.
+    /// toggle off puts it back to the default. Windows takes it alone
+    /// without the toggle (#794).
     #[test]
     fn menu_alone_needs_its_labs_toggle() {
         assert!(parse_hotkey("menu", rules().key_named).is_ok());
         assert!(parse_hotkey("space", rules().key_named).is_err());
         let settings = AppSettings::default();
-        assert_eq!(
-            apply(&settings, "dictation_hotkey", "menu", &rules())
-                .unwrap_err()
-                .code,
-            "invalid-value"
-        );
+        let without_toggle = apply(&settings, "dictation_hotkey", "menu", &rules());
+        if cfg!(target_os = "windows") {
+            let change = without_toggle.unwrap();
+            assert_eq!(format_hotkey(&change.settings.dictation_hotkey), "menu");
+            return;
+        }
+        assert_eq!(without_toggle.unwrap_err().code, "invalid-value");
         let on = apply(&settings, "labs.standalone_special_keys", "on", &rules())
             .unwrap()
             .settings;
