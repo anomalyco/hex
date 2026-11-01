@@ -316,6 +316,8 @@ impl LocalTranscriber {
         tracing::info!(
             backend = device.kind,
             device = device.description,
+            key = gpu_health::device_key(&device),
+            driver = gpu_health::driver(),
             variant,
             "loaded local transcription model"
         );
