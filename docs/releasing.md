@@ -304,14 +304,16 @@ Two account tokens, each used by one locked step only:
   take effect on the routes API in testing.
 - `hex-r2-production-files` (`release` secret `R2_SECRET_ACCESS_KEY`, variable
   `R2_ACCESS_KEY_ID` = its id): object write on `hex-production-files` only,
-  used only by the Legacy appcast workflow (`.github/release/r2-put.sh`).
+  used through `.github/release/r2-put.sh` by the Installers and Legacy
+  appcast workflows and Release's dev-notes job.
 
 ## Old clients (2.3.1 and earlier)
 
 `https://anoma.ly/hex/files/` (`hex-production-files`) keeps serving the 2.3.1
 `linux-update.json`, `windows-update.json`, `windows-aarch64-update.json`,
-`appcast.xml`, and their files, frozen: nothing publishes there anymore, and
-those installs see no update on their own. The new Hex is effectively a new
+`appcast.xml`, and their files, frozen: nothing updates them anymore (the
+bucket now also holds the installers and `dev-notes.json`), and those
+installs see no update on their own. The new Hex is effectively a new
 app (new updater, and on macOS a new bundle ID), so:
 
 - **macOS:** at the first release on the service, add one informational item
@@ -374,7 +376,7 @@ it. No reviewer is required.
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
 | `CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
-| `R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | the one-time legacy appcast upload (`hex-r2-production-files`) |
+| `R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
 | `AUR_SSH_PRIVATE_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
 | `HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
 | `AZURE_*` | Authenticode (docs/windows-signing.md) |

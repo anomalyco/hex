@@ -207,7 +207,7 @@ mod tray {
     /// cannot apply it itself, or the channel switch.
     fn update_label(status: &DesktopUpdateStatus) -> Option<String> {
         match status {
-            DesktopUpdateStatus::ReadyToRestart { .. } => Some(tr("Restart to update").to_owned()),
+            DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update").to_owned()),
             DesktopUpdateStatus::Available => Some(tr("Download update").to_owned()),
             DesktopUpdateStatus::SwitchAvailable { channel, version } => {
                 Some(crate::updater::switch_label(channel, version))
@@ -222,7 +222,7 @@ mod tray {
     ) -> Option<crate::desktop::host::DesktopAction> {
         use crate::desktop::host::DesktopAction;
         match status {
-            DesktopUpdateStatus::ReadyToRestart { .. } => Some(DesktopAction::RestartIntoUpdate),
+            DesktopUpdateStatus::ReadyToRestart => Some(DesktopAction::RestartIntoUpdate),
             DesktopUpdateStatus::Available => Some(DesktopAction::OpenUpdate),
             DesktopUpdateStatus::SwitchAvailable { .. } => Some(DesktopAction::ConfirmUpdateSwitch),
             _ => None,
@@ -279,7 +279,7 @@ mod tests {
         let view = TrayView::new(
             true,
             Some(VoiceState::Dictating),
-            &DesktopUpdateStatus::ReadyToRestart { notes: None },
+            &DesktopUpdateStatus::ReadyToRestart,
             models,
         );
         let menu = view.menu();

@@ -1364,6 +1364,7 @@ impl LinuxDesktopHost {
                     .map(|preparation| preparation.model),
             },
             update_status,
+            update_notes: self.updater.notes(),
         }
     }
 

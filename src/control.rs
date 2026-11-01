@@ -536,7 +536,7 @@ pub fn update_label(status: &crate::desktop::host::DesktopUpdateStatus) -> &'sta
     match status {
         DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
         DesktopUpdateStatus::Available
-        | DesktopUpdateStatus::ReadyToRestart { .. }
+        | DesktopUpdateStatus::ReadyToRestart
         | DesktopUpdateStatus::SwitchAvailable { .. }
         | DesktopUpdateStatus::PackageUpdate { .. } => "available",
         DesktopUpdateStatus::Unavailable

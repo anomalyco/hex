@@ -35,7 +35,9 @@ case "$status" in
   404) echo '{"schema": 1, "builds": []}' > "$work/previous.json" ;;
   *) echo "Could not read $notes_url (HTTP $status)." >&2; exit 1 ;;
 esac
-previous=$(jq -r '.builds[0].commit // empty' "$work/previous.json")
+# A rerun of a build lists what it changed since the build before it.
+previous=$(jq -r --arg version "$version" \
+  '[.builds[] | select(.version != $version)][0].commit // empty' "$work/previous.json")
 if [ -z "$previous" ]; then
   previous=$(curl --fail --silent --show-error --location --proto =https --max-time 60 "$manifest_url" |
     jq -r '.release.notes_url // "" | capture("/commit/(?<sha>[0-9a-f]{40})$").sha // empty')
@@ -59,20 +61,26 @@ while IFS=$'\t' read -r sha subject; do
   shopt -s nocasematch
   if [[ "$subject" =~ $internal ]]; then shopt -u nocasematch; continue; fi
   shopt -u nocasematch
-  git diff-tree --no-commit-id --name-only -r "$sha" | grep -E "$app_path" | grep -qvE "$test_path" || continue
+  # No grep -q: an early exit would SIGPIPE git under pipefail and drop
+  # a large change.
+  git diff-tree --no-commit-id --name-only -r "$sha" | grep -E "$app_path" | grep -vE "$test_path" > /dev/null || continue
   # Squash merges end in "(#<pr>)", sometimes after the issue's "(#<n>)".
   pr=""
   title=$subject
-  while [[ "$title" =~ ^(.*[^[:space:]])[[:space:]]+\(#([0-9]+)\)$ ]]; do
+  while [[ "$title" =~ ^(.*[^[:space:]])[[:space:]]+\(#([0-9]{1,7})\)$ ]]; do
     title=${BASH_REMATCH[1]}
     [ -n "$pr" ] || pr=${BASH_REMATCH[2]}
   done
   # "fix(macos): clear …" reads as "Clear …".
   if [[ "$title" =~ ^[a-z]+(\([^\)]*\))?!?:[[:space:]]+(.+)$ ]]; then title=${BASH_REMATCH[2]}; fi
-  title="$(printf '%s' "${title:0:1}" | tr '[:lower:]' '[:upper:]')${title:1}"
-  title=$(printf '%s' "$title" | tr -d '\000-\037\177' | cut -c1-200)
   if [ -n "$pr" ]; then url="$repository/pull/$pr"; else url="$repository/commit/$sha"; fi
-  jq -nc --arg title "$title" --arg url "$url" '{title: $title, url: $url}' >> "$work/items.jsonl"
+  # Characters, not bytes: no control characters, the first letter upper
+  # case, at most 200.
+  jq -nc --arg title "$title" --arg url "$url" '
+    ($title | explode | map(select(. >= 32 and (. < 127 or . > 159))) | implode) as $clean
+    | ($clean[:1] | ascii_upcase) + $clean[1:200] as $title
+    | select($title | length > 0)
+    | {title: $title, url: $url}' >> "$work/items.jsonl"
 done < <(git log --first-parent --format='%H%x09%s' "${range[@]}")
 
 jq -s --arg version "$version" --arg commit "$commit" --argjson max "$max_items" \

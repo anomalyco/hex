@@ -12,9 +12,15 @@
 [ $# -eq 3 ] || die "Usage: publish-dev-notes.sh <dev-notes.json> <version> <commit>"
 file=$1 version=$2 commit=$3
 [ -f "$file" ] || die "$file does not exist."
-[ "$(wc -c < "$file")" -le 200000 ] || die "The dev notes are over 200 KB."
+# One JSON document, re-emitted by jq: what is uploaded is exactly what was
+# checked, valid UTF-8 without duplicate keys.
+canonical=$(mktemp)
+trap 'rm -f "$canonical"' EXIT
+jq -se 'length == 1' "$file" > /dev/null || die "The dev notes are not one JSON document."
+jq -c '.' "$file" > "$canonical" || die "The dev notes are not JSON."
+[ "$(wc -c < "$canonical")" -le 200000 ] || die "The dev notes are over 200 KB."
 jq -e --arg version "$version" --arg commit "$commit" '
-  def text($max): type == "string" and length > 0 and length <= $max and all(explode[]; . >= 32 and . != 127);
+  def text($max): type == "string" and length > 0 and length <= $max and all(explode[]; . >= 32 and (. < 127 or . > 159));
   (keys == ["builds", "schema"]) and .schema == 1
   and (.builds | type == "array" and length >= 1 and length <= 40)
   and .builds[0].version == $version and .builds[0].commit == $commit
@@ -30,7 +36,7 @@ jq -e --arg version "$version" --arg commit "$commit" '
       and (.title | text(200))
       and (.url | type == "string"
         and test("^https://github\\.com/anomalyco/hex/(pull/[0-9]{1,7}|commit/[0-9a-f]{40})$"))))
-' "$file" > /dev/null || die "The dev notes are not the expected shape for $version ($commit)."
+' "$canonical" > /dev/null || die "The dev notes are not the expected shape for $version ($commit)."
 sh "$(dirname "$0")/r2-put.sh" \
-  dev-notes.json "$file" "application/json; charset=utf-8" "public, max-age=60"
+  dev-notes.json "$canonical" "application/json; charset=utf-8" "public, max-age=60"
 echo "Published the notes for $version: https://anoma.ly/hex/dev#$version"

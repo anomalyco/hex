@@ -219,6 +219,7 @@ impl Shared {
 struct StagedUpdate {
     staged: Staged,
     sha256: String,
+    version: String,
 }
 
 #[derive(Debug, Default)]
@@ -332,6 +333,13 @@ impl Updater {
         self.shared.signal.notify_all();
     }
 
+    /// What the staged dev build changed, while Restart to update shows.
+    pub fn notes(&self) -> Option<UpdateNotes> {
+        matches!(*lock(&self.shared.state), State::Ready | State::Applied)
+            .then(|| lock(&self.shared.notes).clone())
+            .flatten()
+    }
+
     pub fn status(&self) -> DesktopUpdateStatus {
         match &*lock(&self.shared.state) {
             State::Disabled(status) => status.clone(),
@@ -344,9 +352,7 @@ impl Updater {
             State::Current => DesktopUpdateStatus::Current,
             State::Failed => DesktopUpdateStatus::Failed,
             State::Downloading => DesktopUpdateStatus::Downloading,
-            State::Ready | State::Applied => DesktopUpdateStatus::ReadyToRestart {
-                notes: lock(&self.shared.notes).clone(),
-            },
+            State::Ready | State::Applied => DesktopUpdateStatus::ReadyToRestart,
             State::Download { .. } => DesktopUpdateStatus::Available,
             State::Switch {
                 channel, version, ..
@@ -413,7 +419,7 @@ impl Updater {
     #[cfg(target_os = "macos")]
     pub fn menu_action(&self) -> DesktopAction {
         match self.status() {
-            DesktopUpdateStatus::ReadyToRestart { .. } => DesktopAction::RestartIntoUpdate,
+            DesktopUpdateStatus::ReadyToRestart => DesktopAction::RestartIntoUpdate,
             DesktopUpdateStatus::Available => DesktopAction::OpenUpdate,
             DesktopUpdateStatus::SwitchAvailable { .. } => DesktopAction::ConfirmUpdateSwitch,
             _ => DesktopAction::CheckForUpdates,
@@ -618,6 +624,13 @@ fn check(
         Decision::None { .. } | Decision::Install { .. }
             if staged.is_some_and(|staged| !replaces_staged(&decision, &staged.sha256)) =>
         {
+            // The notes may have been published after the build was staged.
+            if let Some(staged) = staged
+                && !restarting
+                && lock(&shared.notes).is_none()
+            {
+                fetch_notes(shared, &channel, &user_agent, &updates, &staged.version);
+            }
             Ok(State::Ready)
         }
         Decision::None { .. } => {
@@ -676,20 +689,27 @@ fn check(
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
+                version: version.clone(),
             });
-            *lock(&shared.notes) = (channel == UpdateChannel::Dev.name())
-                .then(|| {
-                    notes::fetch(
-                        &user_agent,
-                        &updates.join("notes"),
-                        crate::VERSION,
-                        &version,
-                    )
-                })
-                .flatten();
+            *lock(&shared.notes) = None;
+            // Restart to update's final check quits right after; notes
+            // would only hold it up.
+            if !restarting {
+                fetch_notes(shared, &channel, &user_agent, &updates, &version);
+            }
             Ok(State::Ready)
         }
     }
+}
+
+/// What the staged dev build changed; nothing for other channels or when
+/// the dev notes don't list it yet.
+fn fetch_notes(shared: &Shared, channel: &str, user_agent: &str, updates: &Path, version: &str) {
+    if channel != UpdateChannel::Dev.name() {
+        return;
+    }
+    let notes = notes::fetch(user_agent, &updates.join("notes"), crate::VERSION, version);
+    *lock(&shared.notes) = notes;
 }
 
 /// Checks the manifest's `<target>-sig` file: Anomaly's release key signing
@@ -1068,7 +1088,7 @@ mod tests {
         updater.check_now();
         assert_eq!(
             updater.status(),
-            DesktopUpdateStatus::ReadyToRestart { notes: None },
+            DesktopUpdateStatus::ReadyToRestart,
             "a check keeps the staged update offered"
         );
         assert!(

@@ -1035,12 +1035,10 @@ fn a_staged_dev_build_lists_its_first_changes_under_the_update() {
         "no notes, no list"
     );
     if let Some(view) = &mut rt.state.view {
-        view.update_status = DesktopUpdateStatus::ReadyToRestart {
-            notes: Some(crate::desktop::host::UpdateNotes {
-                items: ["One", "Two", "Three", "Four"].map(String::from).to_vec(),
-                url: "https://anoma.ly/hex/dev#0.0.0-dev-2".into(),
-            }),
-        };
+        view.update_notes = Some(crate::desktop::host::UpdateNotes {
+            items: ["One", "Two", "Three", "Four"].map(String::from).to_vec(),
+            url: "https://anoma.ly/hex/dev#0.0.0-dev-2".into(),
+        });
     }
     refresh(&mut rt);
     let shown = texts(&rt);

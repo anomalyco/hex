@@ -126,6 +126,7 @@ pub(crate) struct Published {
     pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
+    pub(crate) update_notes: Option<crate::desktop::host::UpdateNotes>,
     pub(crate) settings: AppSettings,
     preparation: crate::transcription::preparation::PreparationStatus,
 }
@@ -782,6 +783,7 @@ impl Runtime {
                 preparing: preparation.model,
             },
             update_status: update_status(),
+            update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),
             settings: self.settings.clone(),
             preparation,
         }

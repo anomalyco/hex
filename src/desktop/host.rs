@@ -13,6 +13,9 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
+    /// What the staged dev build changed, while Restart to update shows.
+    #[serde(default)]
+    pub(crate) update_notes: Option<UpdateNotes>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -77,11 +80,7 @@ pub(crate) enum DesktopUpdateStatus {
     /// Another release exists that this install cannot apply itself; the
     /// window links to its download.
     Available,
-    /// The update is staged; the dev channel says what changed in it.
-    ReadyToRestart {
-        #[serde(default)]
-        notes: Option<UpdateNotes>,
-    },
+    ReadyToRestart,
     /// The Update channel setting names another channel; its current
     /// release installs only once the user confirms ("Switch to Stable
     /// 2.3.1").

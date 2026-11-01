@@ -601,6 +601,7 @@ struct ServiceView {
     operation_error: Option<String>,
     transcription: DesktopTranscriptionSnapshot,
     update_status: DesktopUpdateStatus,
+    update_notes: Option<crate::desktop::host::UpdateNotes>,
     /// The service is recording or saving a shortcut.
     editing: bool,
 }
@@ -1543,7 +1544,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
     nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart { .. }) => Some((
+        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
             tr("Restart to update").to_owned(),
             DesktopAction::RestartIntoUpdate,
         )),
@@ -1572,10 +1573,12 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
                 move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
             ))
     });
-    let notes = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart { notes: Some(notes) }) => update_notes(p, notes),
-        _ => None,
-    };
+    let notes = ui
+        .view
+        .as_ref()
+        .filter(|view| view.update_status == DesktopUpdateStatus::ReadyToRestart)
+        .and_then(|view| view.update_notes.as_ref())
+        .and_then(|notes| update_notes(p, notes));
     title_bar(col())
         .key("sidebar")
         .role("navigation")
@@ -1682,7 +1685,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
         | Some(
             DesktopUpdateStatus::Unavailable
             | DesktopUpdateStatus::Available
-            | DesktopUpdateStatus::ReadyToRestart { .. }
+            | DesktopUpdateStatus::ReadyToRestart
             | DesktopUpdateStatus::SwitchAvailable { .. },
         ) => None,
         Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
@@ -2367,7 +2370,7 @@ const SCENES: &[Scene] = &[
     ("mac-update-ready", |ui| {
         *ui = mac_fixture();
         if let Some(view) = &mut ui.view {
-            view.update_status = DesktopUpdateStatus::ReadyToRestart { notes: None };
+            view.update_status = DesktopUpdateStatus::ReadyToRestart;
         }
     }),
     ("mac-update-checking", |ui| {
@@ -2801,6 +2804,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             preparing: None,
         },
         update_status: DesktopUpdateStatus::Current,
+        update_notes: None,
         editing: false,
     });
     ui

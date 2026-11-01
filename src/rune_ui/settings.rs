@@ -1335,7 +1335,7 @@ pub(super) fn updates_itself(ui: &Ui) -> bool {
                 | DesktopUpdateStatus::Failed
                 | DesktopUpdateStatus::Downloading
                 | DesktopUpdateStatus::Available
-                | DesktopUpdateStatus::ReadyToRestart { .. }
+                | DesktopUpdateStatus::ReadyToRestart
                 | DesktopUpdateStatus::SwitchAvailable { .. }
         )
     })
