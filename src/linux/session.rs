@@ -32,9 +32,50 @@ impl LinuxSession {
     }
 }
 
+/// Desktops whose window managers float every window, so Hex's window
+/// opens at its own resizable size there.
+const FLOATING_DESKTOPS: &[&str] = &[
+    "KDE",
+    "GNOME",
+    "XFCE",
+    "X-Cinnamon",
+    "Cinnamon",
+    "MATE",
+    "LXQt",
+    "LXDE",
+    "Budgie",
+    "Pantheon",
+    "Unity",
+    "Deepin",
+    "Enlightenment",
+];
+
+/// Whether `XDG_CURRENT_DESKTOP` names a desktop that floats every window.
+pub(crate) fn floats_windows() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| floating(&desktops))
+}
+
+fn floating(desktops: &str) -> bool {
+    desktops.split(':').any(|desktop| {
+        FLOATING_DESKTOPS
+            .iter()
+            .any(|floating| desktop.eq_ignore_ascii_case(floating))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floating_desktops_skip_the_fixed_size_map() {
+        assert!(floating("KDE"));
+        assert!(floating("ubuntu:GNOME"));
+        assert!(floating("X-Cinnamon"));
+        for tiling in ["niri", "sway", "Hyprland", "i3", ""] {
+            assert!(!floating(tiling), "{tiling}");
+        }
+    }
 
     #[test]
     fn backend_selection_matches_winit_without_mutating_the_environment() {
