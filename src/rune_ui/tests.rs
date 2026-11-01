@@ -1961,7 +1961,7 @@ fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
 
 #[test]
 fn a_failed_download_names_its_cause_and_offers_a_model_file() {
-    let mut rt = runtime("onboarding-setup", false, PANE_SIZE);
+    let mut rt = runtime("onboarding", false, PANE_SIZE);
     if let Some(view) = &mut rt.state.view {
         view.transcription.preparing = None;
         view.transcription.error = Some(
@@ -1980,7 +1980,7 @@ fn a_failed_download_names_its_cause_and_offers_a_model_file() {
         "{shown:?}"
     );
     assert!(shown.contains(&"Use a model file…".to_owned()), "{shown:?}");
-    assert!(shown.contains(&"Retry".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
 }
 
 #[test]

@@ -146,7 +146,8 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   └── Back on the pages after it returns to the list to change the pick
 │   ├── Nothing found -> this page as always, the recommended model downloading
 │   ├── Progress moves to the top pill once the story moves on; failure ->
-│   │   "The download stopped." + Try again
+│   │   why, in one line (a proxy or certificate, #894), + Use a model
+│   │   file… + Try again
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── The demo: Without Hex (typed, with typos) -> With Hex (spoken) -> Continue
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
