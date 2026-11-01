@@ -57,6 +57,7 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var statusMessage: String?
     @Published var style: DictationStyle = .polished
     @Published var returnAppID: String?
+    @Published var quickReturnApps: [HostApp] = HostAppCatalog.quickChips
     @Published var activeTray: PickerTray = .none
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
@@ -574,7 +575,7 @@ struct KeyboardSurfaceView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     returnChip(id: nil, label: "Swipe", palette: p)
-                    ForEach(HostAppCatalog.quickChips) { app in
+                    ForEach(model.quickReturnApps) { app in
                         returnChip(id: app.id, label: app.name, palette: p)
                     }
                 }

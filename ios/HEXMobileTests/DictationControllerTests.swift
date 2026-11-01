@@ -235,6 +235,32 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(snap.transcript, "ship it tonight")
     }
 
+    func testChosenReturnAppsKeepTheirOrderAndUntickingTheSavedAppForgetsIt() throws {
+        let bridge = KeyboardBridge(defaults: defaults)
+        XCTAssertEqual(bridge.quickReturnApps, HostAppCatalog.quickChips)
+
+        let transcriber = ControlledTranscriber()
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            autoPrepareOnInit: false
+        )
+        let signal = try XCTUnwrap(HostAppCatalog.app(for: "signal"))
+        let t3Code = try XCTUnwrap(HostAppCatalog.app(for: "t3code"))
+        controller.setReturnAppID("t3code")
+
+        controller.setQuickReturnApps([t3Code, signal])
+        XCTAssertEqual(bridge.quickReturnApps, [t3Code, signal])
+        XCTAssertEqual(bridge.returnAppID, "t3code")
+
+        controller.setQuickReturnApps([signal])
+        XCTAssertEqual(bridge.quickReturnApps, [signal])
+        XCTAssertNil(bridge.returnAppID)
+        XCTAssertNil(controller.returnAppID)
+    }
+
     func testTenSecondHandoffWindowAndAutoReturnBehavior() async throws {
         var now = 5_000.0
         let audio = FakeAudioManager()
