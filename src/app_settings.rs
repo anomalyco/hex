@@ -1354,7 +1354,7 @@ impl Default for ExperimentalSettings {
     }
 }
 
-/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790).
+/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790, `recent_dictations`: issue 877, macOS).
 /// Labs features that already had a home keep it: `meetings.enabled`, `paste_with_shift`,
 /// `experimental.hex_microphone`, `keyboard_model_switching.enabled`, `pause_browser_media`,
 /// and `share_dictation_shortcut`. An older `labs.enabled` master switch is read and ignored.
@@ -1391,14 +1391,12 @@ pub struct LabsSettings {
     pub second_dictation_shortcut: bool,
     /// A paste gets a leading space when the character before the cursor wants one (macOS, issue 632).
     pub smart_spacing: bool,
-    /// Spoken punctuation and symbol words ("comma", "hashtag",
-    /// "underscore") become characters joined to their words (issue 678).
+    /// Spoken symbol words ("comma", "hashtag", "underscore") become characters joined to their words (issue 678).
     pub spoken_symbols: bool,
     /// The Local transcription picker offers a sort (Recommended, Size,
     /// Name) and a "Supports the saved language" toggle (issue 645).
     pub picker_sort_filter: bool,
-    /// The shortcut recorder keeps the side of each modifier in a
-    /// modifier-only chord, such as Right ⌘ + Right ⌥ (macOS, issue 710).
+    /// The recorder keeps each modifier's side in a modifier-only chord, such as Right ⌘ + Right ⌥ (macOS, issue 710).
     pub sided_modifier_chords: bool,
     /// In Toggle mode, a press held past the hold threshold dictates until
     /// it lifts; a short tap still starts and stops (macOS, issue 711).
@@ -1411,6 +1409,7 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
+    pub recent_dictations: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1442,6 +1441,7 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
+            recent_dictations: false,
         }
     }
 }

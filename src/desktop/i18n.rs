@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
+mod french;
 mod portuguese;
 
 /// A persisted interface-language code (`None` follows the system) and its
@@ -17,7 +18,7 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil) has not had a native speaker's review yet.
+/// (Brasil) and Français have not had a native speaker's review yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
@@ -28,6 +29,7 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("es"), "Español"),
     (Some("uk"), "Українська"),
     (Some("pt"), "Português (Brasil)"),
+    (Some("fr"), "Français"),
 ];
 
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
@@ -64,9 +66,11 @@ fn set_current(code: u8) {
 const ENGLISH: u8 = 255;
 /// Brazilian Portuguese, kept in its own table ([`portuguese::TRANSLATIONS`]).
 const PORTUGUESE_COLUMN: u8 = 6;
+/// French, kept in its own table ([`french::TRANSLATIONS`]).
+const FRENCH_COLUMN: u8 = 7;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
-/// is Brazilian Portuguese.
+/// is Brazilian Portuguese, and `fr` any French one.
 fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
@@ -76,6 +80,7 @@ fn column_for_code(code: &str) -> u8 {
         "es" => 4,
         "uk" => 5,
         "pt" => PORTUGUESE_COLUMN,
+        "fr" => FRENCH_COLUMN,
         _ => ENGLISH,
     }
 }
@@ -190,10 +195,10 @@ pub(crate) fn tr(english: &str) -> &str {
     if column == ENGLISH {
         return english;
     }
-    let table = if column == PORTUGUESE_COLUMN {
-        portuguese::table()
-    } else {
-        &tables()[column as usize]
+    let table = match column {
+        PORTUGUESE_COLUMN => portuguese::table(),
+        FRENCH_COLUMN => french::table(),
+        _ => &tables()[column as usize],
     };
     table.get(english).copied().unwrap_or(english)
 }
@@ -251,6 +256,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Labs", ["Laboratorium", "实验室", "ラボ", "Labs", "Labs", "Лабораторія"]),
     ("Tap or hold", ["Stuknij lub przytrzymaj", "轻点或按住", "タップまたは長押し", "Tippen oder halten", "Toca o mantén", "Торкніться або утримуйте"]),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", ["W trybie przełączania przytrzymaj skrót, aby dyktować do puszczenia; krótkie stuknięcie nadal uruchamia i zatrzymuje", "在切换模式下，按住快捷键即可听写，松开即结束；轻点仍可开始和停止", "切り替えモードでショートカットを長押しすると、離すまで音声入力します。短いタップでは従来どおり開始と停止をします", "Im Umschaltmodus diktierst du, solange du das Kürzel hältst; kurzes Tippen startet und stoppt weiterhin", "En el modo alternar, mantén el atajo para dictar hasta soltarlo; un toque corto sigue iniciando y deteniendo", "У режимі перемикання утримуйте комбінацію, щоб диктувати, доки не відпустите; коротке торкання й далі запускає та зупиняє"]),
+    ("Copy recent dictations", ["Kopiowanie ostatnich dyktowań", "复制最近的听写", "最近の音声入力をコピー", "Letzte Diktate kopieren", "Copiar dictados recientes", "Копіювання останніх диктувань"]),
+    ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", ["Kopiuj jedno z pięciu ostatnich dyktowań z paska menu, pod Wklej ostatnie dyktowanie", "从菜单栏“粘贴上次听写”下方复制最近五条听写中的一条", "メニューバーの「最後の音声入力を貼り付け」の下から、直近 5 件の音声入力のいずれかをコピーします", "Eines deiner letzten fünf Diktate in der Menüleiste unter „Letztes Diktat einfügen“ kopieren", "Copia uno de tus últimos cinco dictados desde la barra de menús, bajo Pegar último dictado", "Копіюйте одне з п'яти останніх диктувань у рядку меню, під «Вставити останнє диктування»"]),
     ("Record your screen, draw on it, and talk over it", ["Nagrywaj ekran, rysuj po nim i mów w trakcie", "录制屏幕，边画边说", "画面を録画しながら描き、話します", "Bildschirm aufnehmen, darauf zeichnen und dazu sprechen", "Graba la pantalla, dibuja sobre ella y habla mientras tanto", "Записуйте екран, малюйте на ньому й коментуйте голосом"]),
     ("Hex Microphone virtual input and real-time voice filters", ["Wirtualne wejście Hex Microphone i filtry głosu na żywo", "Hex Microphone 虚拟输入与实时声音滤镜", "Hex Microphone 仮想入力とリアルタイムのボイスフィルター", "Virtueller Eingang Hex Microphone und Echtzeit-Stimmfilter", "Entrada virtual Hex Microphone y filtros de voz en tiempo real", "Віртуальний вхід Hex Microphone та голосові фільтри наживо"]),
     ("Live text", ["Tekst na żywo", "实时文字", "ライブテキスト", "Live-Text", "Texto en vivo", "Текст наживо"]),
@@ -460,9 +467,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Shortcuts", ["Skróty", "快捷键", "ショートカット", "Tastenkürzel", "Atajos", "Комбінації клавіш"]),
     ("Your desktop granted {}", ["Pulpit przyznał {}", "桌面已授予 {}", "デスクトップが {} を割り当て", "Vom Desktop vergeben: {}", "Tu escritorio concedió {}", "Система надала {}"]),
     ("Your desktop did not grant this shortcut", ["Pulpit nie przyznał tego skrótu", "桌面未授予此快捷键", "デスクトップはこのショートカットを割り当てませんでした", "Der Desktop hat dieses Tastenkürzel nicht vergeben", "Tu escritorio no concedió este atajo", "Система не надала цю комбінацію клавіш"]),
-    ("Last dictation discarded: {}", ["Ostatnie dyktowanie odrzucone: {}", "上次听写已丢弃：{}", "前回の音声入力は破棄されました: {}", "Letztes Diktat verworfen: {}", "Último dictado descartado: {}", "Останнє диктування відкинуто: {}"]),
-    ("too quiet, check your mic level", ["za cicho, sprawdź poziom mikrofonu", "声音太小，请检查麦克风音量", "音が小さすぎます。マイクの音量を確認してください", "zu leise, prüfe den Mikrofonpegel", "demasiado bajo, revisa el nivel del micrófono", "надто тихо, перевірте рівень мікрофона"]),
-    ("no speech heard, check your mic level", ["nie usłyszano mowy, sprawdź poziom mikrofonu", "未听到语音，请检查麦克风音量", "音声が聞き取れませんでした。マイクの音量を確認してください", "keine Sprache gehört, prüfe den Mikrofonpegel", "no se oyó voz, revisa el nivel del micrófono", "мовлення не почуто, перевірте рівень мікрофона"]),
     ("GNOME keyboard shortcuts", ["Skróty klawiszowe GNOME", "GNOME 键盘快捷键", "GNOME のキーボードショートカット", "GNOME-Tastaturkürzel", "Atajos de teclado de GNOME", "Комбінації клавіш GNOME"]),
     ("Add GNOME keyboard shortcuts", ["Dodaj skróty klawiszowe GNOME", "添加 GNOME 键盘快捷键", "GNOME のキーボードショートカットを追加", "GNOME-Tastaturkürzel hinzufügen", "Añadir atajos de teclado de GNOME", "Додати комбінації клавіш GNOME"]),
     ("Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.", ["Dodaje dyktowanie, wklejanie ostatniego i Adnotacje do Ustawień GNOME › Klawiatura › Własne skróty z Twoimi skrótami. GNOME uruchamia je przy naciśnięciu klawisza, więc dyktowanie się przełącza.", "将听写、粘贴上次和批注以你的快捷键添加到 GNOME 设置 › 键盘 › 自定义快捷键。GNOME 在按下按键时运行它们，因此听写为切换方式。", "音声入力、前回を貼り付け、注釈をあなたのショートカットで GNOME 設定 › キーボード › カスタムショートカットに追加します。GNOME はキーを押したときに実行するため、音声入力は切り替え式になります。", "Fügt Diktat, Letztes einfügen und Annotieren mit deinen Tastenkürzeln zu GNOME-Einstellungen › Tastatur › Eigene Tastenkürzel hinzu. GNOME führt sie beim Tastendruck aus, daher schaltet das Diktat um.", "Añade dictado, pegar el último y Anotar a Configuración de GNOME › Teclado › Atajos personalizados con tus atajos. GNOME los ejecuta al pulsar la tecla, así que el dictado se alterna.", "Додає диктування, вставлення останнього та Анотації до Налаштувань GNOME › Клавіатура › Власні комбінації з вашими комбінаціями. GNOME запускає їх під час натискання клавіші, тож диктування перемикається."]),
@@ -506,6 +510,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("GPU", ["GPU", "GPU", "GPU", "GPU", "GPU", "GPU"]),
     ("CPU", ["CPU", "CPU", "CPU", "CPU", "CPU", "CPU"]),
     ("Speech engine", ["Silnik mowy", "语音引擎", "音声エンジン", "Sprach-Engine", "Motor de voz", "Рушій мовлення"]),
+    ("Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway.", ["Tryb automatyczny używa CPU, bo rozpoznaje mowę szybciej niż {device}. Wybierz GPU, aby mimo to go używać.", "自动使用 CPU，因为它的语音识别比 {device} 更快。选择 GPU 可仍然使用它。", "CPU の方が {device} より音声認識が速いため、自動では CPU を使います。それでも使うには GPU を選んでください。", "Automatisch nutzt die CPU, weil sie Sprache schneller erkennt als {device}. Wähle GPU, um es trotzdem zu verwenden.", "Automático usa la CPU porque reconoce la voz más rápido que {device}. Elige GPU para usarla de todos modos.", "Авто використовує CPU, бо він розпізнає мовлення швидше, ніж {device}. Виберіть GPU, щоб усе одно використовувати його."]),
     ("Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.", ["Tryb automatyczny używa CPU, bo {device} przestał odpowiadać. Wybierz GPU, aby spróbować ponownie.", "自动使用 CPU，因为 {device} 停止响应。选择 GPU 可再次尝试。", "{device} が応答しなくなったため、自動では CPU を使います。もう一度試すには GPU を選んでください。", "Automatisch nutzt die CPU, weil {device} nicht mehr reagiert hat. Wähle GPU, um es erneut zu versuchen.", "Automático usa la CPU porque {device} dejó de responder. Elige GPU para volver a intentarlo.", "Авто використовує CPU, бо {device} перестав відповідати. Виберіть GPU, щоб спробувати знову."]),
     ("Dictation HUD", ["Wskaźnik dyktowania", "听写指示器", "音声入力インジケーター", "Diktatanzeige", "Indicador de dictado", "HUD диктування"]),
     ("Call recording", ["Nagrywanie rozmów", "通话录音", "通話の録音", "Anrufaufzeichnung", "Grabación de llamadas", "Запис дзвінків"]),
@@ -556,6 +561,12 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Write my commit messages like Shakespeare", ["Pisz moje commity jak Szekspir", "用莎士比亚的口吻写提交信息", "コミットメッセージはシェイクスピア風に", "Schreib meine Commit-Nachrichten wie Shakespeare", "Escribe mis commits como Shakespeare", "Пиши мої коміти як Шекспір"]),
     ("Make “per my last email” sound friendly", ["Niech „jak pisałem w poprzednim mailu” brzmi miło", "让“如我上封邮件所说”听起来友好点", "「前回のメールの通り」を優しい言い方に", "Lass „wie in meiner letzten Mail erwähnt“ freundlich klingen", "Haz que «como dije en mi último correo» suene amable", "Зроби «як я писав у попередньому листі» дружнім"]),
     ("Open file", ["Otwórz plik", "打开文件", "ファイルを開く", "Datei öffnen", "Abrir archivo", "Відкрити файл"]),
+    ("Your transformations want to use the network", ["Twoje transformacje chcą korzystać z sieci", "你的转换想要使用网络", "変換がネットワークを使おうとしています", "Deine Transformationen möchten das Netzwerk nutzen", "Tus transformaciones quieren usar la red", "Ваші перетворення хочуть використовувати мережу"]),
+    ("Your transformations want to run programs", ["Twoje transformacje chcą uruchamiać programy", "你的转换想要运行程序", "変換がプログラムを実行しようとしています", "Deine Transformationen möchten Programme ausführen", "Tus transformaciones quieren ejecutar programas", "Ваші перетворення хочуть запускати програми"]),
+    ("Your transformations want to use the network and run programs", ["Twoje transformacje chcą korzystać z sieci i uruchamiać programy", "你的转换想要使用网络并运行程序", "変換がネットワークの使用とプログラムの実行をしようとしています", "Deine Transformationen möchten das Netzwerk nutzen und Programme ausführen", "Tus transformaciones quieren usar la red y ejecutar programas", "Ваші перетворення хочуть використовувати мережу й запускати програми"]),
+    ("Hosts: {}", ["Hosty: {}", "主机：{}", "ホスト: {}", "Hosts: {}", "Hosts: {}", "Хости: {}"]),
+    ("Programs: {}", ["Programy: {}", "程序：{}", "プログラム: {}", "Programme: {}", "Programas: {}", "Програми: {}"]),
+    ("Hex asks again whenever the config changes. Until you allow it, they paste your words unchanged", ["Hex zapyta ponownie po każdej zmianie konfiguracji. Dopóki nie zezwolisz, wkleją twoje słowa bez zmian", "配置每次更改后 Hex 都会再次询问。在你允许之前，它们会原样粘贴你的话", "設定が変わるたびに Hex は再度確認します。許可するまで、言葉はそのまま貼り付けられます", "Hex fragt erneut, sobald sich die Konfiguration ändert. Bis du es erlaubst, fügen sie deine Worte unverändert ein", "Hex vuelve a preguntar cada vez que cambia la configuración. Hasta que lo permitas, pegan tus palabras sin cambios", "Hex питатиме знову після кожної зміни конфігурації. Доки ви не дозволите, вони вставлятимуть ваші слова без змін"]),
     ("Edit with agent", ["Edytuj z agentem", "用智能体编辑", "エージェントで編集", "Mit Agent bearbeiten", "Editar con agente", "Редагувати з агентом"]),
     ("No steps yet. Hex pastes your words as it heard them", ["Brak kroków. Hex wkleja twoje słowa tak, jak je usłyszał", "还没有步骤。Hex 会按听到的内容粘贴", "まだステップはありません。Hex は聞き取ったとおりに貼り付けます", "Noch keine Schritte. Hex fügt deine Worte so ein, wie es sie gehört hat", "Aún no hay pasos. Hex pega tus palabras tal como las oyó", "Кроків ще немає. Hex вставляє ваші слова так, як їх почув"]),
     ("Every dictation", ["Każde dyktowanie", "每次听写", "すべての音声入力", "Jedes Diktat", "Cada dictado", "Кожне диктування"]),
@@ -1180,6 +1191,19 @@ mod tests {
         assert_eq!(column_for_code("pt"), PORTUGUESE_COLUMN);
         assert_eq!(column_for_language_tag(""), ENGLISH);
         assert!(LANGUAGE_CHOICES.contains(&(Some("pt"), "Português (Brasil)")));
+        assert_eq!(column_for_language_tag("fr-FR"), super::FRENCH_COLUMN);
+        assert_eq!(column_for_language_tag("fr_CA"), super::FRENCH_COLUMN);
+        assert_eq!(column_for_code("fr"), super::FRENCH_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("fr"), "Français")));
+    }
+
+    #[test]
+    fn french_translates_with_its_column() {
+        super::set_current(super::FRENCH_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "Ne pas changer");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Supprimer x ?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
 
     #[test]

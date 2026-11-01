@@ -36,8 +36,9 @@ Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each card's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
-uses it for any Portuguese system language (#867); its strings haven't had a
-native speaker's review yet.
+uses it for any Portuguese system language (#867); it also offers Français,
+used for any French system language (#892). Neither has had a native
+speaker's review yet.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
 models another app already downloaded.
@@ -890,7 +891,8 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 ```ts
 Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes output*
-├── Edit with agent -> Copy a prompt naming the steps' keys and `hex settings`
+├── Trust prompt -> Allow a config that uses fetch or programs (only when one asks)
+├── Edit with agent -> Copy a prompt naming the steps' keys, `hex settings`, and the transforms docs
 ├── Open file -> settings.json in the default editor
 ├── Every dictation -> Global's steps, numbered, read-only
 ├── Try -> Global's corrections and built-ins on a typed sentence
@@ -913,9 +915,35 @@ Stage fails -> Preserve its input        // failed chain discards partial result
 ```
 
 Built-in text transformations run natively. Custom transformations come from
-`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine with a 1 s
-limit per call. OpenCode rewriting sends documented
+`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
+under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
+60 s cap). OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
+
+```ts
+Transform host APIs                      // personal_commands/{io,fetch,process,trust}.rs
+├── fetch(url, { method, headers, body, signal }) -> Response (ureq, platform TLS)
+├── node:child_process execFile / exec (+ node:util promisify, input option)
+├── setTimeout, AbortController, AbortSignal.timeout
+└── First use -> Output pane trust prompt (hosts, programs, or capability)
+    ├── Allow -> hash of every loaded file pinned in transform-trust.json
+    ├── Any edit -> asks again
+    └── Not allowed -> call throws -> chain fails -> text pasted unchanged
+Timeout or settle -> requests abandoned, process group / job object killed
+```
+
+The API is documented for agents at
+[anoma.ly/hex/docs/transforms](../../site/public/docs/transforms.md), linked
+from `llms.txt`, the managed `AGENTS.md`, and Edit with agent's prompt. Checks:
+[tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs) runs
+`fetch` against a local server (approval, re-ask on edit, abort, network
+error) and `exec`/`execFile` (exit codes, stdin `input`, promisify, `timeout`,
+`maxBuffer`, process-tree kill on Linux, fallback through dictation's
+processing stage); [trust.rs](../../src/personal_commands/trust.rs) covers the
+scan and hash; `the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed`
+and the `output-trust` golden cover the prompt. Windows `cmd` quoting is a
+pure-function test only; the job object and macOS paths compile on CI but are
+not run against real programs there. No check reaches a remote TLS host.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
 last removes only the final contiguous run of sentence marks (including
@@ -1272,6 +1300,9 @@ Linux beta                               // not macOS feature parity
 │   ├── A GPU load, prewarm or run that fails with a device error (hang,
 │   │   reset, lost device, out of memory) -> reloads on the CPU; once the CPU
 │   │   works, that GPU is recorded
+│   ├── An integrated GPU whose warm 1.5 s run takes over 300 ms -> Auto times
+│   │   the CPU too and keeps the faster; a slower GPU is recorded (slow), so
+│   │   later loads go straight to the CPU (#484: UHD 620, Iris Plus 655)
 │   ├── GPU -> tries the GPU anyway; working, it clears that GPU's record
 │   └── CPU -> CPU only
 │   // checked on apollo with a planted record (RADV); a real i915 hang not reproduced
@@ -1321,11 +1352,14 @@ Linux beta                               // not macOS feature parity
 │   ├── X11 -> Grabbed only while Annotate draws (it stops drawing)
 │   └── Portal -> Never bound
 │       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
-│           pre-#492 `cancel` on Escape), and `cancel` and `cancel-dictation`
-│           under `anomaly.hex`, are removed from kglobalaccel (`unregister`);
+│           pre-#492 `cancel` on Escape), and every action under `anomaly.hex`
+│           this bind doesn't ask for (`cancel`, `cancel-dictation`, and the ids
+│           of shortcuts changed since, which kept their keys so the new id could
+│           never take them, #898) are removed from kglobalaccel (`unregister`);
 │           other apps untouched
 │           // check: only_requested_shortcuts_are_shown (a stale grant stays
-│           // out); the KDE removal is not run on a Plasma session
+│           // out), kde_actions_hex_no_longer_binds_are_removed (the list only);
+│           // the KDE removal is not run on a Plasma session
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
@@ -1700,7 +1734,7 @@ Capture                                  // hex app and hex dictate
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
-│       nothing pasted
+│       nothing pasted, no error sound or note; the log has its level
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
 └── Dictation pasted -> Done sound; failures play the error sound
 ```

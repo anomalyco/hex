@@ -895,25 +895,18 @@ fn submit_capture(
             print.send(PrintedTranscript::NoSpeech);
         }
     };
-    let finish = capture.finish_with_tail(ended_at, POST_RELEASE_TAIL);
-    let silence = match &finish {
-        Finish::Transcribe(clip) => clip.silence(),
-        Finish::Discard => None,
-    };
-    match (finish, silence) {
-        (Finish::Discard, _) => {
+    match capture.finish_with_tail(ended_at, POST_RELEASE_TAIL) {
+        Finish::Discard => {
             // A short tap or chord withdraws the start tone of its press.
             feedback::retract_start();
             no_speech(print);
             events.dictation(DictationPhase::Discarded, "")?
         }
-        (Finish::Transcribe(_), Some(silence)) => {
-            crate::dictation::silence::announce(silence);
+        Finish::Transcribe(clip) if clip.is_near_silent() => {
             no_speech(print);
             events.dictation(DictationPhase::Discarded, "")?
         }
-        (Finish::Transcribe(mut clip), None) => {
-            crate::dictation::silence::clear();
+        Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
             let job = OutputJob::Dictation(Job {
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,

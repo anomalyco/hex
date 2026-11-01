@@ -1078,6 +1078,24 @@ impl Pump {
                     .runtime
                     .recognition(RecognitionControl::PasteLast { reply: None });
             }
+            // Labs › Copy recent dictations: copied, never pasted.
+            StatusItemAction::CopyRecentDictation(id) => {
+                if !crate::labs::recent_dictations() {
+                    return;
+                }
+                let copied = self
+                    .runtime
+                    .history()
+                    .and_then(|history| history.final_text(id))
+                    .ok_or_else(|| eyre!("that dictation is no longer in History"))
+                    .and_then(|text| {
+                        arboard::Clipboard::new()?.set_text(text)?;
+                        Ok(())
+                    });
+                if let Err(error) = copied {
+                    tracing::warn!(%error, "could not copy a recent dictation");
+                }
+            }
             StatusItemAction::Update => {
                 if let Some(updater) = UPDATER.get()
                     && let Err(error) = update_action(&updater.menu_action())

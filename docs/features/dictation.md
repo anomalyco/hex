@@ -236,6 +236,22 @@ Checks: `raw_dictation_owns_the_capture_it_starts` (Linux reducer),
 Proof limits: no physical shortcut run on any OS; the macOS machine pairing
 was not compiled or run here (Linux check, Windows cross-clippy only).
 
+### Copy Recent Dictation (Labs, macOS)
+
+Paste Last Dictation reaches only the newest dictation. With Labs › Copy
+recent dictations on (`labs.recent_dictations`, off by default, issue 877):
+
+```ts
+Menu bar > Copy Recent Dictation (under Paste Last Dictation)  // dictate.copy-recent
+├── Menu opens -> History read once: five newest entries within retention,
+│   newest first, no printed or empty ones (as Paste Last skips them)
+│   └── One line each: whitespace collapsed, cut to 48 characters with "…"
+├── Click one -> Its full final text on the clipboard; nothing is pasted
+└── Toggle off, History Off, or nothing to list -> Item hidden, History unread
+```
+
+Details and checks in [labs.md](labs.md).
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,
@@ -528,7 +544,8 @@ Release that will transcribe                          // dictate.stop-tone
      still captured; a muted output (macOS, Linux) unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
      ├── Clip later near-silent or without speech -> Tone already played;
-     │   discard, nothing pasted
+     │   discard quietly, nothing pasted, no error tone or note; the log has
+     │   the measured level and peak against the thresholds
      └── Escape after the release -> Nothing; the clip still transcribes
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail

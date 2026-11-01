@@ -373,6 +373,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.recent_dictations",
+        Kind::Bool,
+        "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -485,7 +490,7 @@ const KEYS: &[Key] = &[
     ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt"]),
+        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt", "fr"]),
         "Interface language; none follows the system",
     ),
     key(
@@ -1521,6 +1526,21 @@ mod tests {
         } else {
             assert!(change.is_err(), "only Linux has the toggle");
         }
+    }
+
+    #[test]
+    fn interface_language_offers_every_translation() {
+        let key = keys().find(|key| key.key == "ui_language").unwrap();
+        let Kind::Choice(choices) = key.kind else {
+            panic!("ui_language is a choice");
+        };
+        let languages: Vec<&str> = crate::desktop::i18n::LANGUAGE_CHOICES
+            .iter()
+            .filter_map(|(code, _)| *code)
+            .collect();
+        assert_eq!(languages, choices);
+        let change = apply(&AppSettings::default(), "ui_language", "fr", &rules()).unwrap();
+        assert_eq!(change.settings.ui_language.as_deref(), Some("fr"));
     }
 
     #[test]

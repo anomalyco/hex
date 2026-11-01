@@ -19,13 +19,22 @@ Transformations section. No install step and no Node, Bun, or npm are involved.
   `!` before running, keeping lines and columns. Syntax that would need
   generated code is rejected: enums, namespaces, constructor parameter
   properties, and `import x = require()`.
-- Import only `@hex/commands` and other files in this folder by relative path
+- Import `@hex/commands`, `node:child_process` (`exec`, `execFile`),
+  `node:util` (`promisify`), and other files in this folder by relative path
   (`./lib.ts`, `./data.json`). npm packages are not available.
-- No filesystem, network, process, environment, or timer APIs (`fetch`,
-  `setTimeout`, `require`, `process` do not exist). `console.log` writes to
-  Hex's log.
-- Each transformation call must finish within one second; a script that runs
-  longer is stopped and fails that call. Scripts share a 64 MiB memory limit.
+- `fetch` (WHATWG, string bodies, no streaming), `setTimeout`,
+  `AbortController`, and `AbortSignal` exist. No filesystem, environment,
+  `process`, or `require`. `console.log` writes to Hex's log.
+- `fetch` and `node:child_process` work only after the person allows this
+  config in Hex's Output pane; any edit asks again. Use `execFile` with an
+  argument array (and the `input` option for stdin) for anything involving
+  dictated text, never a shell command built from it.
+- Each transformation has `timeout` milliseconds: 1000 by default, 30000 when
+  the config uses `fetch` or programs, 60000 at most. Past it, Hex aborts its
+  requests, ends its programs, and pastes the text unchanged. Scripts share a
+  64 MiB memory limit.
+
+The full API, with examples: https://anoma.ly/hex/docs/transforms
 
 To check types in an editor or agent, run `npx -y -p typescript tsc` here.
 
