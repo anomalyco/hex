@@ -133,14 +133,9 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
                     )
                 })
         }
-        VoiceEvent::Context {
-            application,
-            browser_url,
-            ..
-        } => match (application, browser_url) {
-            (Some(application), Some(url)) => format!("Context changed to {application} / {url}"),
-            (Some(application), None) => format!("Context changed to {application}"),
-            _ => "Foreground context became unavailable".into(),
+        VoiceEvent::Context { application, .. } => match application {
+            Some(application) => format!("Context changed to {application}"),
+            None => "Foreground context became unavailable".into(),
         },
         VoiceEvent::ApiServerStarted { port, .. } => {
             format!("Local API started on port {port}")

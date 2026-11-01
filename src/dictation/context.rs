@@ -192,21 +192,27 @@ fn capture_macos() -> Result<ContextSnapshot> {
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let scripted = bundle_id
-        .as_deref()
-        .and_then(ScriptableBrowser::from_bundle_id)
-        .and_then(ScriptableBrowser::active_url);
-    let browser_url = scripted.or_else(|| {
-        crate::accessibility::focused_web_url(pid)
-            .and_then(|url| Url::parse(&url).ok())
-            .filter(|url| matches!(url.scheme(), "http" | "https"))
-    });
+    let browser_url = crate::dictation::config::website_modes()
+        .then(|| browser_url(bundle_id.as_deref(), pid))
+        .flatten();
     Ok(ContextSnapshot {
         application: Some(application),
         browser_url,
         window_title: crate::accessibility::focused_window_title(pid),
         input_revision: None,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn browser_url(bundle_id: Option<&str>, pid: i32) -> Option<Url> {
+    bundle_id
+        .and_then(ScriptableBrowser::from_bundle_id)
+        .and_then(ScriptableBrowser::active_url)
+        .or_else(|| {
+            crate::accessibility::focused_web_url(pid)
+                .and_then(|url| Url::parse(&url).ok())
+                .filter(|url| matches!(url.scheme(), "http" | "https"))
+        })
 }
 
 #[cfg(target_os = "macos")]

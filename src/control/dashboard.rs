@@ -133,17 +133,9 @@ fn draw(
         .iter()
         .rev()
         .find_map(|event| match event {
-            VoiceEvent::Context {
-                application,
-                browser_url,
-                ..
-            } => Some(ContextSnapshot {
+            VoiceEvent::Context { application, .. } => Some(ContextSnapshot {
                 application: application.clone(),
-                browser_url: browser_url
-                    .as_deref()
-                    .and_then(|url| url::Url::parse(url).ok()),
-                window_title: None,
-                input_revision: None,
+                ..ContextSnapshot::default()
             }),
             _ => None,
         })

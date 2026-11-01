@@ -107,7 +107,6 @@ impl ActivityPane {
             VoiceEvent::Context {
                 timestamp_ms: at(12),
                 application: Some("Slack".into()),
-                browser_url: None,
             },
             VoiceEvent::State {
                 timestamp_ms: at(60),

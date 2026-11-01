@@ -842,7 +842,6 @@ pub fn listen(
             events.emit(&VoiceEvent::Context {
                 timestamp_ms: now_ms(),
                 application: context.application.clone(),
-                browser_url: context.browser_url.as_ref().map(ToString::to_string),
             })?;
         }
         let next_microphone_policy = crate::app_settings::microphone_policy();
