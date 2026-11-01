@@ -1,62 +1,23 @@
 name: Check Linux
 
+# The full Linux suite (tests, goldens, integration exercises, clippy, Nix).
+# It runs where it matters: Release's check and stable channels call it on the
+# candidate commit and publish nothing until it passes, and anyone can run it
+# by hand. Pull requests only compile (compile.yml).
 on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The commit to test
+        required: true
+        type: string
   workflow_dispatch:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build.rs"
-      - "crates/**"
-      - "src/**"
-      - "native/**"
-      - "macos/HexMicrophoneDriver/Info.plist"
-      - "resources/**"
-      - "assets/**"
-      - "tests/**"
-      - "scripts/test-wayland-paste.sh"
-      - "scripts/test-linux-dictation.sh"
-      - "scripts/test-linux-service.py"
-      - "scripts/*install-linux*.sh"
-      - "flake.*"
-      - "nix/**"
-      - ".config/nextest.toml"
-      - ".github/workflows/check-linux.yml"
-  push:
-    branches: [dev]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build.rs"
-      - "crates/**"
-      - "src/**"
-      - "native/**"
-      - "macos/HexMicrophoneDriver/Info.plist"
-      - "resources/**"
-      - "assets/**"
-      - "tests/**"
-      - "scripts/test-wayland-paste.sh"
-      - "scripts/test-linux-dictation.sh"
-      - "scripts/test-linux-service.py"
-      - "scripts/*install-linux*.sh"
-      - "flake.*"
-      - "nix/**"
-      - ".config/nextest.toml"
-      - ".github/workflows/check-linux.yml"
 
 permissions:
   contents: read
 
-# A new push to a pull request cancels its stale run. Every push and manual run
-# keeps its own group, so each dev commit gets a result.
-concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
-  cancel-in-progress: true
-
 jobs:
   test:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -69,6 +30,9 @@ jobs:
       CXX: clang++
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -138,11 +102,13 @@ jobs:
       - run: cargo clippy --locked -p scrawl-router --all-targets -- -D warnings
 
   nix:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
       - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
         with:

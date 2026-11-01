@@ -38,9 +38,10 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 ├─ sign-windows             Azure Artifact Signing of both hex.exe, Authenticode check                [release]
 ├─ installers               windows-installers.yml: Setup.exe around them, tested on x64 + ARM64      [build]
 ├─ sign-windows-installers  Azure Artifact Signing of both Setup.exe                                  [release]
+├─ check-linux, -macos,     stable, check: the full suites on the candidate (check-<os>.yml, called   [build]
+│  -windows                 here; pull requests only compile, dev pushes run no checks)
 ├─ onboarding               stable, check: scripts/check-onboarding.sh (scene goldens + a first run   [build]
-│                           in a clean data folder, Linux); stable also needs the candidate's Check
-│                           Linux, macOS, and Windows to have passed. Publishing waits for it
+│                           in a clean data folder, Linux). Stable publishes only once these four pass
 ├─ publish                  OIDC: every signed target, then the release (release-service.sh); Nix     [release]
 ├─ github                   last: tag v<version> on the released commit (tag-release.sh), then the    [contents: write]
 │                           GitHub release mirror (publish-github-release.sh); GITHUB_TOKEN only.

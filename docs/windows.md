@@ -340,7 +340,7 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it.
 `check-windows` builds and tests the optimized MSVC release for x64 and ARM64
-on every pull request. The remaining code
+in Release's check and stable channels; pull requests only compile x64. The remaining code
 parity slice is the developer-only Meetings surface after the physical matrix
 is green. Shared
 first-run onboarding, complete OpenCode mode rewriting controls, and the bounded

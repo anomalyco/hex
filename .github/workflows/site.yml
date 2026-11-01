@@ -1,19 +1,11 @@
 name: Site
 
-# Builds site/ and checks every download link on pull requests. A push (or a
-# dispatch) on dev deploys the dev site (https://dev.anoma.ly/hex); on
+# Pull requests run no site check (CI is minimal; the deploy builds the site
+# and checks every download link). A push (or a dispatch) on dev deploys the
+# dev site (https://dev.anoma.ly/hex); on
 # production, which moves only by a fast-forward from dev, the production
 # site (https://anoma.ly/hex). The mode always follows the branch.
 on:
-  pull_request:
-    paths:
-      - "site/**"
-      - ".github/workflows/site.yml"
-      - ".github/workflows/site-deploy.yml"
-      - ".github/release/deploy-site.sh"
-      - ".github/release/cf/**"
-      - ".github/release/install-linux.sh"
-      - ".github/release/install-windows.ps1"
   push:
     branches: [dev, production]
     paths:
@@ -34,23 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: bun run check:downloads
-
   deploy:
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production')
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production'
     uses: ./.github/workflows/site-deploy.yml
     with:
       mode: ${{ github.ref == 'refs/heads/production' && 'production' || 'dev' }}

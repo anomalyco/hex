@@ -5,15 +5,9 @@ name: Windows installer
 # installer changes are tested on real Windows runners without a full
 # release. Before the first stable release on the service there is nothing to
 # wrap, and the run says so. Release builds and tests the installers for
-# every build itself.
+# every build itself. Run it by hand after an installer change; pull requests
+# only compile the app (compile.yml).
 on:
-  pull_request:
-    paths:
-      - packaging/windows/**
-      - resources/windows/hex.ico
-      - scripts/build-windows-installer.ps1
-      - scripts/test-windows-installer.ps1
-      - .github/workflows/windows-installer.yml
   workflow_dispatch:
 
 permissions:

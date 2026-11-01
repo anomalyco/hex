@@ -5,7 +5,7 @@
 
 `dev` and `production` take changes only through pull requests (Dax's
 ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
-`dev`, and merge it yourself once its checks pass; merge any open PR without
+`dev`, and merge it yourself once it compiles (don't wait on CI); merge any open PR without
 asking. After merging, update the installed copy. See
 `~/code/control/AGENTS.md`. `production` holds what was released and moves
 only by a fast-forward from `dev` when Kit releases; never commit to it.
@@ -1486,10 +1486,18 @@ visual or flow change blocks the release; an intentional change refreshes the
 goldens in its own PR. It runs on Linux, like every golden; the macOS and
 Windows scenes are fixtures of the same window and render there too, but
 nothing renders on a real Mac or Windows GPU. Release's `onboarding` job runs
-the same script and requires the candidate's Check Linux, Check macOS, and
-Check Windows to have passed (`gh workflow run <check> --ref production`
-for a commit their paths skip); a stable run publishes nothing until it
-passes.
+the same script, and Release's check and stable channels run the full Check
+Linux, Check macOS, and Check Windows suites on the candidate commit; a stable
+run publishes nothing until all four pass.
+
+CI is minimal (Dax): a pull request runs only `hex-agent-policy` and Compile
+(`compile.yml`: `cargo clippy --bin hex` on Linux, macOS, and Windows x64,
+for code changes). Merge as soon as it compiles locally, without waiting for
+CI; the CI failure pipeline fixes breakages on `dev` afterwards. A push to
+`dev` runs no checks: its Release dev build compiles every OS, and Test
+builds run beside it. The full suites (tests, goldens, Nix, Windows ARM64)
+run only in Release's check and stable channels and by hand
+(`gh workflow run check-<os>.yml`).
 
 Every platform is built, signed, and published by one run of
 `.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
