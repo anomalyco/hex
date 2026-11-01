@@ -1467,8 +1467,9 @@ changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
 one informational appcast item, `packaging/macos/legacy-appcast.xml`, that
 links to the new app; they never auto-update into it.
 There is no Swift migration: never import Swift preferences or data, adopt its
-bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
-delete, or replace the Swift app. Prefer a website-only informational item in
+bundle identifier, publish Rust artifacts to its S3 feed, or automatically
+delete or replace the Swift app. The one automatic step: once setup is ready,
+Hex asks a running old Hex (2.3.1 or Swift) to quit, leaving it installed. Prefer a website-only informational item in
 the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
 installation and fresh setup. Publish it only after the new artifact is live. See
 `docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the

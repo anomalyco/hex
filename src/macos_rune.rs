@@ -266,6 +266,25 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
 
+/// Asks a running 2.3.1 or Swift Hex to quit once this Hex is ready to
+/// listen, so the two never answer the same shortcut. The old app stays
+/// installed.
+fn quit_legacy_hex() {
+    objc2::rc::autoreleasepool(|_| {
+        for bundle_id in crate::desktop::onboarding::LEGACY_MAC_BUNDLE_IDS {
+            for app in objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(
+                &NSString::from_str(bundle_id),
+            ) {
+                if app.terminate() {
+                    tracing::info!(bundle_id, "asked the old Hex to quit");
+                } else {
+                    tracing::warn!(bundle_id, "the old Hex did not agree to quit");
+                }
+            }
+        }
+    });
+}
+
 /// Samples footprint and CPU for the life of the app (every 10 s in release, 2 s in debug
 /// builds) and logs a warning on a large footprint, steady growth, or a busy core.
 fn watch_process() {
@@ -370,6 +389,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     }
                 }
             }
+            quit_legacy_hex();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::recognition::listen(
                     event_log,
