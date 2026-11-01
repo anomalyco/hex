@@ -67,6 +67,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.2.0
+        OTHER_LDFLAGS: $(inherited) -weak_framework FoundationModels
         PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile
         PRODUCT_NAME: HEX
     scheme:

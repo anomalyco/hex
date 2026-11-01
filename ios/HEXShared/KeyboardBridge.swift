@@ -8,6 +8,18 @@ nonisolated enum KeyboardDictationState: String, Codable, Sendable {
     case failed
 }
 
+nonisolated enum SpeechModel: String, Codable, CaseIterable, Sendable {
+    case apple
+    case parakeet
+
+    var label: String {
+        switch self {
+        case .apple: "Apple"
+        case .parakeet: "Parakeet"
+        }
+    }
+}
+
 nonisolated enum WarmSessionDuration: String, Codable, CaseIterable, Sendable {
     case off
     case fiveMinutes
@@ -310,6 +322,8 @@ struct KeyboardBridge {
         static let style = "settings.dictationStyle"
         static let returnAppID = "settings.returnAppID"
         static let allowBluetoothMic = "settings.allowBluetoothMic"
+        static let speechModel = "settings.speechModel"
+        static let appleIntelligenceCleanup = "settings.appleIntelligenceCleanup"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
     }
@@ -401,6 +415,28 @@ struct KeyboardBridge {
         }
         nonmutating set {
             defaults?.set(newValue, forKey: Key.allowBluetoothMic)
+        }
+    }
+
+    var speechModel: SpeechModel {
+        get {
+            guard let raw = defaults?.string(forKey: Key.speechModel),
+                  let parsed = SpeechModel(rawValue: raw) else {
+                return .apple
+            }
+            return parsed
+        }
+        nonmutating set {
+            defaults?.set(newValue.rawValue, forKey: Key.speechModel)
+        }
+    }
+
+    var appleIntelligenceCleanup: Bool {
+        get {
+            defaults?.object(forKey: Key.appleIntelligenceCleanup) as? Bool ?? true
+        }
+        nonmutating set {
+            defaults?.set(newValue, forKey: Key.appleIntelligenceCleanup)
         }
     }
 
