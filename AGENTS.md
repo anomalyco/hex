@@ -225,8 +225,9 @@ substitute for source inspection or a second roadmap.
   replacements applied longest-match-first to transcripts.
 - `dictation/config`: dictation profiles.
 - `dictation/context`: the foreground context snapshot and selectors for modes,
-  plus native macOS capture. Browser host is the domain concept. Only while
-  some mode is chosen by website, macOS reads the front tab of a table of
+  plus native macOS capture. Browser host is the domain concept. Only while a
+  website mode, an OpenCode rewrite, or a script transformation is set up,
+  macOS reads the front tab of a table of
   scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
   `AXURL`; `windows/context` reads any browser through UI Automation and

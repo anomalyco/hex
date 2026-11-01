@@ -81,7 +81,7 @@ const BUILTIN_TRANSFORMATIONS: &[BuiltinTransformation] = &[
     },
 ];
 
-fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
+pub(crate) fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
     BUILTIN_TRANSFORMATIONS
         .iter()
         .find(|transformation| transformation.id == id)

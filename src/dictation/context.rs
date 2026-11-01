@@ -192,7 +192,7 @@ fn capture_macos() -> Result<ContextSnapshot> {
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let browser_url = crate::dictation::config::website_modes()
+    let browser_url = crate::dictation::config::reads_browser()
         .then(|| browser_url(bundle_id.as_deref(), pid))
         .flatten();
     Ok(ContextSnapshot {
