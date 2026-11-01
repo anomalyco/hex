@@ -5,11 +5,73 @@ use std::sync::atomic::Ordering;
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 
+use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, PM_REMOVE,
+    PeekMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
+
 use super::{
     CAPTURE_NAMED_KEYS, MOUSE_KEYS, ModifierState, NUMPAD_DOWN, NUMPAD_ENTER, WindowsHotkey,
-    key_down,
+    key_down, track_numpad,
 };
 use crate::app_settings::{HotkeyModifiers, ModifierSide};
+
+/// The capture's own keyboard hook, on the thread that polls: it tells
+/// numpad keys from the navigation keys they send with Num Lock off
+/// (`NUMPAD_DOWN`), whether or not the listener's hook runs (#815). It only
+/// watches; every key goes on to the next hook. The thread must `pump`.
+pub(crate) struct NumpadWatch(HHOOK);
+
+impl NumpadWatch {
+    pub fn install() -> Option<Self> {
+        // SAFETY: a low-level hook owned by this thread, removed on drop.
+        let hook = unsafe {
+            SetWindowsHookExW(WH_KEYBOARD_LL, Some(numpad_hook), std::ptr::null_mut(), 0)
+        };
+        if hook.is_null() {
+            tracing::warn!(
+                error = %std::io::Error::last_os_error(),
+                "the shortcut recorder could not watch numpad keys"
+            );
+            return None;
+        }
+        Some(Self(hook))
+    }
+
+    /// Delivers the hook's pending key events.
+    pub fn pump(&self) {
+        let mut message = MSG::default();
+        // SAFETY: this thread's message queue.
+        while unsafe { PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) } != 0 {
+            unsafe {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+}
+
+impl Drop for NumpadWatch {
+    fn drop(&mut self) {
+        // SAFETY: the hook this watch installed.
+        unsafe { UnhookWindowsHookEx(self.0) };
+        NUMPAD_DOWN.store(0, Ordering::Relaxed);
+    }
+}
+
+unsafe extern "system" fn numpad_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        let message = wparam as u32;
+        let is_down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
+        if is_down || matches!(message, WM_KEYUP | WM_SYSKEYUP) {
+            // SAFETY: a keyboard hook's lparam is a KBDLLHOOKSTRUCT.
+            track_numpad(unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) }, is_down);
+        }
+    }
+    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
+}
 
 /// One step of the settings-pane chord capture. The UI polls this on a
 /// timer instead of listening to window keystrokes because dictation
