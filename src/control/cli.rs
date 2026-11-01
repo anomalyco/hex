@@ -490,7 +490,7 @@ pub fn run(command: ControlCli) -> u8 {
 fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
     let model = match model {
         Some(model) => model,
-        None => match crate::app_settings::AppSettings::load() {
+        None => match crate::app_settings::AppSettings::read() {
             Ok(settings) => settings.transcription.model.as_str().to_owned(),
             Err(error) => return fail(&format!("couldn't read settings: {error:#}")),
         },
@@ -514,7 +514,7 @@ fn selection(
     model: Option<String>,
     language: Option<String>,
 ) -> color_eyre::Result<crate::transcription::models::TranscriptionSelection> {
-    let settings = crate::app_settings::AppSettings::load().unwrap_or_default();
+    let settings = crate::app_settings::AppSettings::read().unwrap_or_default();
     let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
     super::model_selection(&settings, &model, language.as_deref())
         .map_err(|error| color_eyre::eyre::eyre!(error.message))

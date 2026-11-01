@@ -207,7 +207,7 @@ pub(crate) fn run_app(
 /// opens.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     onboarding_kit::set_live_window(true);
-    let app = build(connect, PlaygroundMode::Gated);
+    let app = build(move || Ui::load_with(connect), PlaygroundMode::Gated);
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
     app
@@ -247,8 +247,10 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
         .iter()
         .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
     onboarding_kit::set_live_window(playground && !headless);
+    // Fixtures only: a render never reads, migrates, or saves the user's
+    // settings, History, or anything else in the data folder.
     let app = build(
-        Default::default(),
+        Ui::fixture_base,
         if playground && playground::enabled() {
             PlaygroundMode::Attached
         } else {
@@ -306,14 +308,14 @@ enum PlaygroundMode {
     Gated,
 }
 
-fn build(connect: host::Connect, playground: PlaygroundMode) -> rune::App<Ui> {
+fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> rune::App<Ui> {
     let spec = if playground == PlaygroundMode::None {
         spec()
     } else {
         playground::spec(spec())
     };
     let app = rune::App::new(spec)
-        .init(move || Ui::load_with(connect))
+        .init(init)
         .on_close(on_close)
         .compositor(WindowCompositor::default());
     // Linux records shortcuts from the window's keys, so a modifier pressed
@@ -563,7 +565,7 @@ fn spec() -> AppSpec<Ui> {
         size: WINDOW_SIZE,
         // Narrower windows crowd the sidebar and rows.
         min_size: Some((860.0, 560.0)),
-        init: Ui::load,
+        init: Ui::fixture_base,
         view,
         scenes: SCENES,
         fonts: rune_theme_opencode::FONTS,
@@ -813,8 +815,11 @@ struct Drafts {
 }
 
 impl Ui {
-    fn load() -> Self {
-        Self::load_with(host::Connect::default())
+    /// The state a headless render starts from before its scene: default
+    /// settings and a fixture service, built without touching the data
+    /// folder. The goldens start from it too.
+    fn fixture_base() -> Self {
+        Self::with(AppSettings::default(), Service::Fixture(Vec::new()))
     }
 
     fn load_with(connect: host::Connect) -> Self {
@@ -1899,7 +1904,10 @@ const SCENES: &[Scene] = &[
     // (`--snap`): waits for its first snapshot instead of drawing
     // "Connecting…" at virtual time zero.
     ("live", |ui| {
-        *ui = Ui::load();
+        // Reads the saved settings and the running Hex; writes neither.
+        let settings = AppSettings::read().unwrap_or_default();
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
+        *ui = Ui::with(settings, Service::Fixture(Vec::new()));
         let mut backend = Backend::connect(Default::default(), Arc::new(|| {}));
         let deadline = Instant::now() + Duration::from_secs(5);
         while backend.state().is_none() && backend.error().is_none() && Instant::now() < deadline {
@@ -2723,6 +2731,9 @@ mod tests;
 
 #[cfg(test)]
 mod offscreen;
+
+#[cfg(test)]
+mod snap_isolation;
 
 #[cfg(test)]
 mod keyboard_model_tests;

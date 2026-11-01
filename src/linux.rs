@@ -101,6 +101,14 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     let adopted = matches!(command, Command::Service { embedded: false })
         .then(crate::linux::service::adopt_wayland_display)
         .flatten();
+    // Rune reads its own flags (`--snap`, `--scene`, …) from the process
+    // arguments. A render draws fixtures: no log or data folder of its own.
+    if let Command::App { rune_args, .. } = &command
+        && !rune_args.is_empty()
+    {
+        crate::rune_ui::render();
+        return Ok(());
+    }
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
     if let Some(wayland_display) = adopted {
         tracing::info!(%wayland_display, "adopted the session's Wayland display");
@@ -108,11 +116,6 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
 
     let event_path = log_dir.join("live.ndjson");
     match command {
-        // Rune reads its own flags (`--snap`, `--scene`, …) from the process arguments.
-        Command::App { rune_args, .. } if !rune_args.is_empty() => {
-            crate::rune_ui::render();
-            Ok(())
-        }
         Command::App { hidden, .. } => launch(&activation, !hidden, event_path, shutdown),
         Command::Service { embedded: true } => {
             crate::local_api::run_service(&log_dir, event_path, true, shutdown)

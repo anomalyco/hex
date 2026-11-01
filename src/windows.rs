@@ -159,17 +159,20 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     if let Command::Control(command) = command {
         crate::control::cli::finish(crate::control::cli::run(command));
     }
+    // A headless render (`--snap`) draws fixtures without starting the
+    // runtime or touching the data folder, and prints to the terminal that
+    // ran it.
+    if let Command::App { rune_args, .. } = &command
+        && !rune_args.is_empty()
+    {
+        crate::rune_ui::render_app(rune_args.clone()).run();
+        return Ok(());
+    }
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
 
     let event_path = log_dir.join("live.ndjson");
     match command {
-        Command::App { hidden, rune_args } => {
-            // A headless render (`--snap`) draws fixtures without starting
-            // the runtime and prints to the terminal that ran it.
-            if !rune_args.is_empty() {
-                crate::rune_ui::render_app(rune_args).run();
-                return Ok(());
-            }
+        Command::App { hidden, .. } => {
             detach_from_console();
             crate::windows::rune::open(event_path, shutdown, hidden)
         }

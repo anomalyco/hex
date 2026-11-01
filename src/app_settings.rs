@@ -2188,6 +2188,12 @@ impl AppSettings {
         serde_json::from_slice::<File>(&data).ok()?.updates.channel
     }
 
+    /// The saved settings as `load` would see them, for a reader that must
+    /// never change the file: no migration is written back.
+    pub fn read() -> Result<Self> {
+        Ok(Self::read_from(&path()?)?.0)
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = path()?;
         self.write_to(&path)?;
