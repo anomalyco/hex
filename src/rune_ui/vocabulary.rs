@@ -224,7 +224,7 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
         .center_y()
         .child(
             TextInput::new(&entry.term)
-                .placeholder(tr("Term (e.g. abattoir)"))
+                .placeholder(tr("Term (e.g. cappuccino)"))
                 .width(Some(TERM_WIDTH))
                 .on_edit(edit_access(move |ui: &mut Ui| {
                     ui.vocabulary.field(id, false)
@@ -234,7 +234,7 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
         )
         .child(
             TextInput::new(&entry.sounds_like)
-                .placeholder(tr("Sounds like (e.g. avatar, a bat war)"))
+                .placeholder(tr("Sounds like (e.g. capuchin, cap a chino)"))
                 .width(None)
                 .on_edit(edit_access(move |ui: &mut Ui| {
                     ui.vocabulary.field(id, true)
@@ -395,7 +395,7 @@ pub(super) fn fixture(ui: &mut Ui, filled: bool) {
     ui.settings.vocabulary = if filled {
         let mut entries = Vec::new();
         for (term, sounds_like) in [
-            ("abattoir", "avatar, a bat war"),
+            ("cappuccino", "capuchin, cap a chino"),
             ("OpenCode", "open code"),
             ("Rune", "roon"),
             ("Parakeet", ""),
@@ -441,11 +441,11 @@ mod tests {
         assert_eq!(summary(&ui), "None");
 
         open(&mut ui);
-        ui.vocabulary.rows[0].term = TextEdit::new("abattoir");
+        ui.vocabulary.rows[0].term = TextEdit::new("cappuccino");
         add_row(&mut ui);
         close(&mut ui);
         assert_eq!(ui.vocabulary.rows.len(), 1);
-        assert_eq!(ui.settings.vocabulary[0].term, "abattoir");
+        assert_eq!(ui.settings.vocabulary[0].term, "cappuccino");
         assert_eq!(summary(&ui), "1 term");
 
         open(&mut ui);
@@ -455,19 +455,26 @@ mod tests {
     #[test]
     fn rows_project_to_cleaned_merged_entries() {
         let mut editor = VocabularyEditor::new(&[VocabularyEntry {
-            term: "abattoir".into(),
-            sounds_like: vec!["avatar".into(), "a bat war".into()],
+            term: "cappuccino".into(),
+            sounds_like: vec!["capuchin".into(), "cap a chino".into()],
         }]);
-        assert_eq!(editor.rows[0].sounds_like.text, "avatar, a bat war");
+        assert_eq!(editor.rows[0].sounds_like.text, "capuchin, cap a chino");
         editor.push(TextEdit::default(), TextEdit::new("ignored"));
-        editor.push(TextEdit::new(" Abattoir "), TextEdit::new("abba toy,"));
+        editor.push(
+            TextEdit::new(" Cappuccino "),
+            TextEdit::new("cap you chino,"),
+        );
         editor.push(TextEdit::new("Rune"), TextEdit::new(" roon "));
         assert_eq!(
             editor.project(),
             [
                 VocabularyEntry {
-                    term: "abattoir".into(),
-                    sounds_like: vec!["avatar".into(), "a bat war".into(), "abba toy".into()],
+                    term: "cappuccino".into(),
+                    sounds_like: vec![
+                        "capuchin".into(),
+                        "cap a chino".into(),
+                        "cap you chino".into()
+                    ],
                 },
                 VocabularyEntry {
                     term: "Rune".into(),
@@ -483,13 +490,13 @@ mod tests {
         let spellings: Vec<String> = (0..17).map(|index| format!("spelling {index}")).collect();
         let mut editor = VocabularyEditor::new(&[]);
         editor.push(
-            TextEdit::new("abattoir"),
+            TextEdit::new("cappuccino"),
             TextEdit::new(format!("{}, {}", spellings.join(", "), "y".repeat(65))),
         );
         editor.push(TextEdit::new("Rune"), TextEdit::new("roon"));
         let entries = editor.project();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].term, "abattoir");
+        assert_eq!(entries[0].term, "cappuccino");
         assert_eq!(entries[0].sounds_like, spellings[..16]);
         assert_eq!(entries[1].sounds_like, ["roon"]);
         assert!(editor.clamped());

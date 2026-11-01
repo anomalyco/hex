@@ -952,7 +952,7 @@ fn soundex(word: &str) -> Option<String> {
 }
 
 /// Soundex without its four-character cap or padding: the first letter, then
-/// every consonant sound (`abattoir` and `avatar` are both `a136`).
+/// every consonant sound (`cappuccino` and `capuchin` are both `c125`).
 fn sound_key(word: &str) -> Option<String> {
     let mut characters = word.chars().filter(char::is_ascii_alphabetic);
     let first = characters.next()?;
@@ -1267,7 +1267,7 @@ fn vocabulary_aliases(
 const SOUND_ALIKE_MIN_CONSONANTS: usize = 2;
 
 /// Whether the corpus stem `candidate` is a likely mis-transcription of the
-/// vocabulary stem `term` (`avatar` for `abattoir`): the same uncapped
+/// vocabulary stem `term` (`capuchin` for `cappuccino`): the same uncapped
 /// Soundex key with at least [`SOUND_ALIKE_MIN_CONSONANTS`] consonant sounds,
 /// at most half the letters changed, and not a stopword.
 fn sounds_alike(term: &str, candidate: &str) -> bool {

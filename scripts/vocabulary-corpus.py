@@ -15,13 +15,12 @@ import urllib.request
 import wave
 
 
-TERMS = ["Hex", "Abattoir", "OpenCode", "Rune", "Scrawl", "Effect", "Anomaly",
+TERMS = ["Hex", "OpenCode", "Rune", "Scrawl", "Effect", "Anomaly",
          "Dax", "Aiden", "Kit", "Parakeet", "Moonshine", "GPUI", "Sparkle",
          "Argon", "Astra", "HiveMind"]
 
 SENTENCES = [
     ("Hex", ["I use Hex to dictate my notes.", "Please check whether Hex heard that correctly.", "The latest Hex build is ready to test."]),
-    ("Abattoir", ["Open Abattoir and run the next experiment.", "I want to change the settings in Abattoir.", "We should test Abattoir before the release."]),
     ("OpenCode", ["OpenCode is running on my desktop.", "Send the patch to OpenCode for review.", "I started a new session in OpenCode."]),
     ("Rune", ["Build the settings panel with Rune.", "The Rune window should stay open.", "We moved the interface to Rune last week."]),
     ("Scrawl", ["Use Scrawl to capture that feedback.", "I left a note in Scrawl about the button.", "Scrawl should send the recording to this session."]),

@@ -332,13 +332,13 @@ mod tests {
     #[test]
     fn adding_dedupes_by_case_and_merges_spellings() {
         let mut list = Vec::new();
-        assert!(add(&mut list, "  Abattoir ", &["avatar".into(), "".into()]).unwrap());
-        assert_eq!(list, [entry("Abattoir", &["avatar"])]);
-        assert!(!add(&mut list, "abattoir", &["Avatar".into()]).unwrap());
-        assert!(add(&mut list, "ABATTOIR", &["a bat war".into()]).unwrap());
-        assert_eq!(list, [entry("Abattoir", &["avatar", "a bat war"])]);
+        assert!(add(&mut list, "  Cappuccino ", &["capuchin".into(), "".into()]).unwrap());
+        assert_eq!(list, [entry("Cappuccino", &["capuchin"])]);
+        assert!(!add(&mut list, "cappuccino", &["Capuchin".into()]).unwrap());
+        assert!(add(&mut list, "CAPPUCCINO", &["cap a chino".into()]).unwrap());
+        assert_eq!(list, [entry("Cappuccino", &["capuchin", "cap a chino"])]);
         // A spelling identical to its term adds nothing.
-        assert!(!add(&mut list, "Abattoir", &["abattoir".into()]).unwrap());
+        assert!(!add(&mut list, "Cappuccino", &["cappuccino".into()]).unwrap());
         assert!(add(&mut list, "   ", &[]).is_err());
         assert!(add(&mut list, &"x".repeat(65), &[]).is_err());
         assert_eq!(list.len(), 1);
@@ -350,9 +350,9 @@ mod tests {
         let mut list = Vec::new();
         let mut with_long = spellings[..2].to_vec();
         with_long.push("y".repeat(65));
-        assert!(add_clamped(&mut list, "Abattoir", &with_long));
-        assert_eq!(list, [entry("Abattoir", &["spelling 0", "spelling 1"])]);
-        assert!(add_clamped(&mut list, "abattoir", &spellings));
+        assert!(add_clamped(&mut list, "Cappuccino", &with_long));
+        assert_eq!(list, [entry("Cappuccino", &["spelling 0", "spelling 1"])]);
+        assert!(add_clamped(&mut list, "cappuccino", &spellings));
         assert_eq!(list[0].sounds_like, spellings[..MAX_SOUNDS_LIKE]);
 
         assert!(add_clamped(&mut list, &"x".repeat(70), &["ex".into()]));
@@ -374,17 +374,17 @@ mod tests {
     fn transcription_bias_keeps_the_first_terms_and_their_spellings() {
         assert!(bias_for(&[], VocabularyBoost::Normal).is_none());
         let mut list = vec![
-            entry("Abattoir", &["avatar", "a bat war"]),
+            entry("Cappuccino", &["capuchin", "cap a chino"]),
             entry("Rune", &[]),
         ];
         list.extend((0..70).map(|index| entry(&format!("term {index}"), &["x"])));
         let (terms, options) = bias_for(&list, VocabularyBoost::Strong).unwrap();
         assert_eq!(terms.len(), MAX_BIASED_TERMS);
-        assert_eq!(terms[..2], ["Abattoir", "Rune"]);
+        assert_eq!(terms[..2], ["Cappuccino", "Rune"]);
         assert_eq!(options.boost, Some(4.0));
         assert_eq!(
             options.sounds_like[..2],
-            [(0, "avatar".into()), (0, "a bat war".into())]
+            [(0, "capuchin".into()), (0, "cap a chino".into())]
         );
         assert_eq!(options.sounds_like[2], (2, "x".into()));
         assert!(
@@ -445,8 +445,8 @@ mod tests {
     #[test]
     fn sounds_like_splits_on_commas() {
         assert_eq!(
-            parse_sounds_like(" avatar,, a  bat war ,"),
-            ["avatar", "a bat war"]
+            parse_sounds_like(" capuchin,, cap  a chino ,"),
+            ["capuchin", "cap a chino"]
         );
         assert!(parse_sounds_like(" , ").is_empty());
     }
@@ -461,12 +461,12 @@ mod tests {
         assert_eq!(read_from(&path).unwrap(), []);
         std::fs::write(
             &path,
-            r#"{"vocabulary": [{"term": "Rune"}, {"term": "Abattoir", "sounds_like": ["avatar"]}]}"#,
+            r#"{"vocabulary": [{"term": "Rune"}, {"term": "Cappuccino", "sounds_like": ["capuchin"]}]}"#,
         )
         .unwrap();
         assert_eq!(
             read_from(&path).unwrap(),
-            [entry("Rune", &[]), entry("Abattoir", &["avatar"])]
+            [entry("Rune", &[]), entry("Cappuccino", &["capuchin"])]
         );
         std::fs::write(&path, "{").unwrap();
         assert!(read_from(&path).is_err());

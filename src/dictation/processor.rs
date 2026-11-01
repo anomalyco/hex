@@ -1126,8 +1126,8 @@ mod tests {
     fn prompt_names_vocabulary_terms_and_their_mistranscriptions() {
         let vocabulary = [
             VocabularyEntry {
-                term: "abattoir".into(),
-                sounds_like: vec!["avatar".into(), "a bat war".into()],
+                term: "cappuccino".into(),
+                sounds_like: vec!["capuchin".into(), "cap a chino".into()],
             },
             VocabularyEntry {
                 term: "Rune".into(),
@@ -1141,8 +1141,8 @@ mod tests {
             &vocabulary,
         );
         assert!(prompt.contains(
-            "Vocabulary (spell these exactly when the speaker means them): abattoir (may be \
-             transcribed as avatar, a bat war); Rune\n\nForeground application: Slack"
+            "Vocabulary (spell these exactly when the speaker means them): cappuccino (may be \
+             transcribed as capuchin, cap a chino); Rune\n\nForeground application: Slack"
         ));
     }
 

@@ -953,11 +953,11 @@ mod tests {
             },
             ControlCommand::VocabularyList,
             ControlCommand::VocabularyAdd {
-                term: "abattoir".into(),
-                sounds_like: vec!["avatar".into()],
+                term: "cappuccino".into(),
+                sounds_like: vec!["capuchin".into()],
             },
             ControlCommand::VocabularyRemove {
-                term: "abattoir".into(),
+                term: "cappuccino".into(),
             },
         ] {
             round_trip_request(command);
@@ -983,29 +983,29 @@ mod tests {
         let remove = |term: &str| ControlCommand::VocabularyRemove { term: term.into() };
         let mut list = Vec::new();
         assert_eq!(
-            edit_vocabulary(&mut list, &add("abattoir", &["avatar, a bat war"])).unwrap(),
-            ControlReply::done("Added “abattoir”")
+            edit_vocabulary(&mut list, &add("cappuccino", &["capuchin, cap a chino"])).unwrap(),
+            ControlReply::done("Added “cappuccino”")
         );
-        assert_eq!(list[0].sounds_like, ["avatar", "a bat war"]);
+        assert_eq!(list[0].sounds_like, ["capuchin", "cap a chino"]);
         assert_eq!(
-            edit_vocabulary(&mut list, &add("Abattoir", &[])).unwrap(),
-            ControlReply::unchanged("“Abattoir” is already in the vocabulary")
+            edit_vocabulary(&mut list, &add("Cappuccino", &[])).unwrap(),
+            ControlReply::unchanged("“Cappuccino” is already in the vocabulary")
         );
         assert_eq!(
-            edit_vocabulary(&mut list, &add("abattoir", &["abba toy"])).unwrap(),
-            ControlReply::done("Added spellings to “abattoir”")
+            edit_vocabulary(&mut list, &add("cappuccino", &["cap you chino"])).unwrap(),
+            ControlReply::done("Added spellings to “cappuccino”")
         );
         assert_eq!(
             edit_vocabulary(&mut list, &add(" ", &[])).unwrap_err().code,
             "invalid-value"
         );
         assert_eq!(
-            edit_vocabulary(&mut list, &remove("ABATTOIR")).unwrap(),
-            ControlReply::done("Removed “ABATTOIR”")
+            edit_vocabulary(&mut list, &remove("CAPPUCCINO")).unwrap(),
+            ControlReply::done("Removed “CAPPUCCINO”")
         );
         assert_eq!(
-            edit_vocabulary(&mut list, &remove("abattoir")).unwrap(),
-            ControlReply::unchanged("“abattoir” isn't in the vocabulary")
+            edit_vocabulary(&mut list, &remove("cappuccino")).unwrap(),
+            ControlReply::unchanged("“cappuccino” isn't in the vocabulary")
         );
         assert!(list.is_empty());
     }
@@ -1068,8 +1068,8 @@ mod tests {
             ControlReply::Models { models: vec![] },
             ControlReply::Vocabulary {
                 entries: vec![VocabularyEntry {
-                    term: "abattoir".into(),
-                    sounds_like: vec!["avatar".into()],
+                    term: "cappuccino".into(),
+                    sounds_like: vec!["capuchin".into()],
                 }],
             },
             ControlReply::ScrawlCapture(Box::new(ScrawlCaptureReport {

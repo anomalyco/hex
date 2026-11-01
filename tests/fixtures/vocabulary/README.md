@@ -76,4 +76,4 @@ The synthetic clips are short; use the public guard's longer clips for latency.
 Keep the scoring vocabulary fixed across baseline and candidate runs, including
 when merging private clips: merge unions all inputs' vocabularies.
 The approved spike also requires
-real Hanks→Hex and Avatar→Abattoir evidence; synthetic success cannot replace it.
+real Hanks→Hex evidence; synthetic success cannot replace it.
