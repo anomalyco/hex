@@ -2096,18 +2096,9 @@ const SCENES: &[Scene] = &[
         ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
         ui.open = Some(Menu::Pick("transcription-language"));
     }),
-    // Shortcut mode's modal. A lone modifier can't double-tap.
-    ("shortcut-mode", |ui| {
-        *ui = mac_fixture();
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
-    // Option-Space can, and does.
-    ("shortcut-mode-key", |ui| {
-        *ui = mac_fixture();
-        ui.settings.dictation_hotkey.key = Some(crate::app_settings::HotkeyKey::named("space"));
-        shortcut_mode::Trigger::DoubleTap.apply(&mut ui.settings);
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
+    // Shortcut mode's modal. A lone modifier can't double-tap; Option-Space can.
+    ("shortcut-mode", |ui| shortcut_mode::scene(ui, false)),
+    ("shortcut-mode-key", |ui| shortcut_mode::scene(ui, true)),
     // The Shortcut row with a modifier-only shortcut, Left Option, beside
     // its side picker (macOS), in each face of the recorder.
     ("shortcut-row", |ui| shortcut_row(ui, Capture::Idle)),

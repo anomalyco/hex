@@ -485,6 +485,8 @@ fn the_shortcut_mode_row_names_the_choice() {
 #[test]
 fn shortcut_mode_opens_from_its_row_and_keeps_focus_inside() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    rt.state.settings.dictation_hotkey.key = None;
+    refresh(&mut rt);
     tab_to(&mut rt, "shortcut-mode-control");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
@@ -553,11 +555,13 @@ fn each_option_picks_its_trigger() {
 
     // With a lone modifier, Double-tap says why and does nothing.
     let mut rt = runtime("shortcut-mode", true, PANE_SIZE);
-    assert!(
-        texts(&rt)
-            .iter()
-            .any(|text| text == "Needs a shortcut with a key, like ⌥Space")
+    let mut example = rt.state.settings.dictation_hotkey.clone();
+    example.key = Some(crate::app_settings::HotkeyKey::named("space"));
+    let why = format!(
+        "Needs a shortcut with a key, like {}",
+        example.keycaps().join("+")
     );
+    assert!(texts(&rt).contains(&why));
     tap(&mut rt, "trigger-double-tap");
     assert_eq!(trigger(&rt), Trigger::HoldOrDoubleTap);
     assert_eq!(saved(&rt), 0);

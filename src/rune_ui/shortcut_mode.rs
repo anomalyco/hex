@@ -12,7 +12,7 @@ use super::controls::{Paint, copy_row};
 use super::explainer::{self, Script};
 use super::general::value_button;
 use super::icons::HAND;
-use crate::app_settings::AppSettings;
+use crate::app_settings::{AppSettings, HotkeyKey};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 
@@ -98,8 +98,12 @@ impl Trigger {
     /// modifier can't tell a double-tap from a chord.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
         (self == Self::DoubleTap && settings.dictation_hotkey.key.is_none()).then(|| {
-            let example = format!("{}Space", settings.dictation_hotkey.keycaps().concat());
-            tr_fill("Needs a shortcut with a key, like {}", &example)
+            let mut example = settings.dictation_hotkey.clone();
+            example.key = Some(HotkeyKey::named("space"));
+            tr_fill(
+                "Needs a shortcut with a key, like {}",
+                &example.keycaps().join("+"),
+            )
         })
     }
 }
@@ -130,10 +134,21 @@ pub(super) fn row(ui: &Ui, p: Paint) -> El {
     )
 }
 
+/// The modal's scene: a lone modifier, which can't double-tap, or the same
+/// with Space, double-tapping.
+pub(super) fn scene(ui: &mut Ui, key: bool) {
+    *ui = super::mac_fixture();
+    let hotkey = &mut ui.settings.dictation_hotkey;
+    hotkey.key = key.then(|| HotkeyKey::named("space"));
+    if key {
+        Trigger::DoubleTap.apply(&mut ui.settings);
+    }
+    explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_settings::HotkeyKey;
 
     fn settings(key: bool) -> AppSettings {
         let mut settings = AppSettings::default();
