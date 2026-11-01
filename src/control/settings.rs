@@ -474,6 +474,11 @@ const KEYS: &[Key] = &[
         "Paste with Ctrl-Shift-V for terminals (Linux and Windows)",
     ),
     key(
+        "gnome_keyboard_shortcuts",
+        Kind::Bool,
+        "Hex's own GNOME custom keyboard shortcuts, for GNOME without a shortcuts portal (Linux)",
+    ),
+    key(
         "share_dictation_shortcut",
         Kind::Bool,
         "Labs: let other apps see the dictation shortcut too (Windows)",

@@ -1675,6 +1675,10 @@ impl CaptureHost {
             ScrawlCaptureAction::Start => self.begin(now, audio, CaptureTarget::Pointer, None),
             ScrawlCaptureAction::Stop => self.end(now, audio, End::Finish),
             ScrawlCaptureAction::Cancel => self.end(now, audio, End::Cancel),
+            ScrawlCaptureAction::Toggle if self.recording_since(audio).is_some() => {
+                self.end(now, audio, End::Finish)
+            }
+            ScrawlCaptureAction::Toggle => self.begin(now, audio, CaptureTarget::Pointer, None),
             ScrawlCaptureAction::Status => Ok(self.report(false, None)),
         };
         result.unwrap_or_else(|error| ControlReply::error("failed", format!("{error:#}")))

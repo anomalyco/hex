@@ -39,7 +39,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         content = content.child(s::listener_card(ui, p));
     }
     if !ui.records_shortcuts() {
-        content = content.child(s::desktop_commands(p));
+        content = content.child(s::desktop_commands(ui, p));
     }
     content = content
         .child(basics(ui, p, layer))

@@ -125,6 +125,8 @@ struct LinuxDesktopHost {
     status: String,
     error: Option<String>,
     dismissed_failure_at: Option<u64>,
+    /// What Hex's GNOME custom shortcuts were last written for (#781).
+    gnome_shortcuts: Option<String>,
     settings_error: Option<String>,
     settings: AppSettings,
     // Dismissing a load error must not authorize recording with fallback defaults.
@@ -534,6 +536,7 @@ impl LinuxDesktopHost {
             status: "Disabled".into(),
             error: None,
             dismissed_failure_at: None,
+            gnome_shortcuts: None,
             settings_valid: error.is_none(),
             settings_error: error,
             settings,
@@ -665,6 +668,45 @@ impl LinuxDesktopHost {
         }
     }
 
+    /// Keeps Hex's GNOME custom shortcuts (#781) in step: written while Hex
+    /// listens with them on, for its current shortcuts; removed when Hex is
+    /// disabled or they're turned off.
+    fn sync_gnome_shortcuts(&mut self) {
+        if !self.settings_valid || !crate::linux::portal::gnome() {
+            return;
+        }
+        let wanted = self.settings.gnome_keyboard_shortcuts && self.listen_when_ready;
+        let key = format!(
+            "{wanted} {:?} {:?} {:?}",
+            self.settings.dictation_hotkey,
+            self.settings.paste_last_hotkey,
+            capture_shortcut(&self.settings)
+        );
+        if self.gnome_shortcuts.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        // Nothing to remove that this Hex wrote or was asked to keep.
+        if !wanted && self.gnome_shortcuts.is_none() && !self.settings.gnome_keyboard_shortcuts {
+            self.gnome_shortcuts = Some(key);
+            return;
+        }
+        let result = if wanted {
+            crate::linux::login_item::launcher()
+                .and_then(|hex| crate::linux::gnome_shortcuts::install(&self.settings, &hex))
+        } else {
+            crate::linux::gnome_shortcuts::remove()
+        };
+        match result {
+            Ok(()) => tracing::info!(written = wanted, "updated Hex's GNOME keyboard shortcuts"),
+            Err(error) => {
+                self.error = Some(format!(
+                    "Could not update GNOME keyboard shortcuts: {error:#}"
+                ));
+            }
+        }
+        self.gnome_shortcuts = Some(key);
+    }
+
     fn stop(&mut self) {
         self.listen_when_ready = false;
         if let Some(edit) = &self.shortcut_edit {
@@ -755,6 +797,7 @@ impl LinuxDesktopHost {
         }
 
         self.refresh_shortcut_edit();
+        self.sync_gnome_shortcuts();
 
         self.activity.refresh(&mut self.event_reader);
         if let Some(listener) = &mut self.listener {
@@ -1093,6 +1136,16 @@ impl LinuxDesktopHost {
 
 /// Saves one host-owned change on top of the current `settings.json`, so
 /// edits the window saved meanwhile survive.
+/// Annotate's shortcut, while Annotate is on.
+fn capture_shortcut(settings: &AppSettings) -> Option<&crate::app_settings::HotkeyBinding> {
+    #[cfg(hex_capture)]
+    if settings.capture.enabled {
+        return Some(&settings.capture.hotkey);
+    }
+    let _ = settings;
+    None
+}
+
 fn save_with(change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings> {
     let mut settings = AppSettings::load()?;
     change(&mut settings);

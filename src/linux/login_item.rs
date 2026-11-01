@@ -144,7 +144,7 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
 
 /// The executable the entry starts: a managed install's `current/hex`,
 /// which outlives the version directory this process runs from.
-fn launcher() -> Result<PathBuf> {
+pub(crate) fn launcher() -> Result<PathBuf> {
     let executable = std::env::current_exe().wrap_err("could not locate the Hex executable")?;
     let current = crate::app_paths::support_dir()?.join("current").join("hex");
     let managed = executable

@@ -1838,6 +1838,9 @@ pub struct AppSettings {
     pub enable_on_launch: bool,
     /// Paste with Ctrl-Shift-V for terminals (Linux and Windows).
     pub paste_with_shift: bool,
+    /// Hex keeps its own GNOME custom keyboard shortcuts, on GNOME without a
+    /// shortcuts portal (Linux, #781).
+    pub gnome_keyboard_shortcuts: bool,
     /// Let other apps see the dictation shortcut's key presses too
     /// (Windows), so a push-to-talk key can drive both.
     pub share_dictation_shortcut: bool,
@@ -1946,6 +1949,7 @@ impl Default for AppSettings {
             labs: LabsSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
+            gnome_keyboard_shortcuts: false,
             share_dictation_shortcut: false,
             mouse_shortcut_notice: false,
             ui_language: None,
