@@ -312,8 +312,6 @@ fn build(connect: host::Connect, playground: PlaygroundMode) -> rune::App<Ui> {
         .init(move || Ui::load_with(connect))
         .on_close(on_close)
         .compositor(WindowCompositor::default());
-    #[cfg(target_os = "macos")]
-    let app = app.gpu_backend(rune::GpuBackend::Metal);
     // Linux records shortcuts from the window's keys, so a modifier pressed
     // alone reaches the recorder, which says Linux needs a key with it.
     #[cfg(target_os = "linux")]
