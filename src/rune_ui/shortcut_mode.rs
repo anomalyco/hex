@@ -134,16 +134,50 @@ pub(super) fn row(ui: &Ui, p: Paint) -> El {
     )
 }
 
-/// The modal's scene: a lone modifier, which can't double-tap, or the same
-/// with Space, double-tapping.
-pub(super) fn scene(ui: &mut Ui, key: bool) {
+/// The modal's scenes.
+enum Example {
+    /// Option alone, which can't double-tap.
+    Modifier,
+    /// Option-Space, double-tapping.
+    Key,
+    /// A three-key chord: Control-Option-Space.
+    Chord,
+    /// Loops, for `--frames` clips.
+    Motion,
+}
+
+pub(super) fn scene_modifier(ui: &mut Ui) {
+    scene(ui, Example::Modifier);
+}
+
+pub(super) fn scene_key(ui: &mut Ui) {
+    scene(ui, Example::Key);
+}
+
+pub(super) fn scene_chord(ui: &mut Ui) {
+    scene(ui, Example::Chord);
+}
+
+pub(super) fn scene_motion(ui: &mut Ui) {
+    scene(ui, Example::Motion);
+}
+
+fn scene(ui: &mut Ui, example: Example) {
     *ui = super::mac_fixture();
     let hotkey = &mut ui.settings.dictation_hotkey;
-    hotkey.key = key.then(|| HotkeyKey::named("space"));
-    if key {
-        Trigger::DoubleTap.apply(&mut ui.settings);
+    match example {
+        Example::Modifier | Example::Motion => hotkey.key = None,
+        Example::Key => {
+            hotkey.key = Some(HotkeyKey::named("space"));
+            Trigger::DoubleTap.apply(&mut ui.settings);
+        }
+        Example::Chord => {
+            hotkey.modifiers.control = hotkey.modifiers.option;
+            hotkey.key = Some(HotkeyKey::named("space"));
+        }
     }
-    explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
+    let held = !matches!(example, Example::Motion);
+    explainer::fixture(ui, held.then_some(explainer::SNAPSHOT_MS));
 }
 
 #[cfg(test)]

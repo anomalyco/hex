@@ -2096,9 +2096,10 @@ const SCENES: &[Scene] = &[
         ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
         ui.open = Some(Menu::Pick("transcription-language"));
     }),
-    // Shortcut mode's modal. A lone modifier can't double-tap; Option-Space can.
-    ("shortcut-mode", |ui| shortcut_mode::scene(ui, false)),
-    ("shortcut-mode-key", |ui| shortcut_mode::scene(ui, true)),
+    ("shortcut-mode", shortcut_mode::scene_modifier),
+    ("shortcut-mode-key", shortcut_mode::scene_key),
+    ("shortcut-mode-chord", shortcut_mode::scene_chord),
+    ("shortcut-mode-motion", shortcut_mode::scene_motion),
     // The Shortcut row with a modifier-only shortcut, Left Option, beside
     // its side picker (macOS), in each face of the recorder.
     ("shortcut-row", |ui| shortcut_row(ui, Capture::Idle)),
@@ -2129,19 +2130,6 @@ const SCENES: &[Scene] = &[
                 until: None,
             },
         );
-    }),
-    // A three-key chord: Control-Option-Space.
-    ("shortcut-mode-chord", |ui| {
-        *ui = mac_fixture();
-        let hotkey = &mut ui.settings.dictation_hotkey;
-        hotkey.modifiers.control = hotkey.modifiers.option;
-        hotkey.key = Some(crate::app_settings::HotkeyKey::named("space"));
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
-    // Loops, for `--frames` clips.
-    ("shortcut-mode-motion", |ui| {
-        *ui = mac_fixture();
-        explainer::fixture(ui, None);
     }),
     // The first run on Linux (Windows is the same window): setting up Hex
     // with nothing found, the model step with models found here, the demo,

@@ -49,11 +49,8 @@ pub(super) fn ask(ui: &mut Ui) {
         return;
     }
     ui.platform.paste = Some(PasteAccess::Asking);
-    if ui.is_fixture() {
-        return;
-    }
     #[cfg(target_os = "linux")]
-    {
+    if !ui.is_fixture() {
         let waker = ui.modes.waker.clone();
         std::thread::spawn(move || {
             let allowed = crate::linux::remote_desktop::RemoteDesktop::ask()
