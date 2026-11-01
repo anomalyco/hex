@@ -172,7 +172,15 @@ even if Brave is behind another window. When that AppleScript read fails or
 answers nothing (Automation not allowed, a failing script; #827, Arc), the
 page comes from the browser process's focused web area through Accessibility
 (`AXURL`), still behind another window; the first failure per browser is
-logged as `could not read the browser tab`. Background tabs are not searched: a
+logged as `could not read the browser tab`. Arc (and other Chromium browsers)
+behind another app often exposes no web area either, so without a page the
+browser's own focused window title is used: a tab titled `Meet - …` /
+`Meet – …` counts as a Google Meet call on `meet.google.com` (2 s, Always
+record applies); the landing page ("Google Meet") does not. Before this, a
+Meet call in a background Arc without Automation was an unnamed browser call
+(#827). Check:
+`a_google_meet_call_in_arc_without_its_address_is_known_by_its_title`; not yet
+observed against a live background Arc. Background tabs are not searched: a
 call open in one says nothing about which tab holds the microphone, and a
 voice note elsewhere would otherwise get a known service's 2 s threshold or
 trigger Always record. (A call in a background tab is therefore judged by the
