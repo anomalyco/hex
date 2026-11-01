@@ -772,10 +772,21 @@ only about 8 dB louder than the room missed the meeting detector's 12 dB
 speech margin, so the whole dictation counted as one pause and the stream
 heard only its first 2.5 s ("This in a test on the" for a 17 s clip over
 −35 dBFS noise). `PauseCap` now cuts only frames within 4 dB of the noise
-floor (or under −55 dBFS) (`SpeechFrames::is_quiet`); anything louder is
+floor (or under −70 dBFS since #841) (`SpeechFrames::is_quiet`); anything louder is
 kept. Noisier rooms keep more pause audio rather than lose speech. Check:
 `quiet_speech_over_steady_noise_is_never_cut_as_a_pause` (synthetic noise
 bursts, a fake stream; no real-model or microphone run).
+
+**Fixed November 1, 2026 (issue 841):** a quiet built-in microphone (Linux,
+Wayland) carried whole dictations under −55 dBFS, so every frame counted as
+quiet and the stream again kept only the first 2.5 s, which pasted as a
+success. The absolute quiet bound is now −70 dBFS, and a stream whose cap
+heard no frame above the noise floor yet cut audio as a pause is unusable:
+the whole clip is transcribed offline (`source=fallback`). Checks:
+`quiet_speech_over_steady_noise_is_never_cut_as_a_pause` (now also −62 dBFS
+speech over −72 dBFS noise) and
+`a_stream_that_heard_only_quiet_audio_falls_back_to_the_whole_clip`
+(synthetic noise, a fake stream; no microphone run).
 
 ### Ongoing Jobs And Output
 

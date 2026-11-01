@@ -65,6 +65,8 @@ pub(super) struct PauseCap<'a, S> {
     /// The newest pause samples past the head, released if speech resumes.
     tail: VecDeque<f32>,
     pub(super) dropped: usize,
+    /// Whether any frame rose above the noise floor.
+    heard: bool,
     /// Silence fed after the clip, just before finalizing.
     trailing_silence: usize,
 }
@@ -78,6 +80,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             pause: 0,
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
+            heard: false,
             trailing_silence,
         }
     }
@@ -87,6 +90,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
         // steady noise misses the meeting detector's speech margin, and
         // cutting it truncated the transcript (#458).
         if !self.speech.is_quiet(&self.frame) {
+            self.heard = true;
             out.extend(self.tail.drain(..));
             self.pause = 0;
             out.append(&mut self.frame);
@@ -134,6 +138,15 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         }
         self.dropped += self.tail.len();
         self.tail.clear();
+        // Everything after the first pause head was cut, yet the clip reached
+        // the transcriber: the cap misjudged the microphone's level, so the
+        // stream heard only the opening words (#841). The whole clip decides.
+        if !self.heard && self.dropped > 0 {
+            return Err(format!(
+                "the stream heard only quiet audio and {} ms was cut as a pause",
+                self.dropped / 16
+            ));
+        }
         if self.trailing_silence > 0 {
             self.stream.feed(&vec![0.0; self.trailing_silence])?;
         }
