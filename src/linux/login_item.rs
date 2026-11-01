@@ -46,13 +46,15 @@ fn refresh_in(directory: &Path, launcher: &Path) -> Result<()> {
     if !current.lines().any(|line| line.trim() == MANAGED_MARK) {
         return Ok(());
     }
-    let refreshed =
-        if starts(&current) && !program(&current).is_some_and(|program| program.is_file()) {
-            tracing::info!(entry = %entry.display(), "pointed Launch at login at this Hex");
-            self::entry(launcher)
-        } else {
-            crate::linux::portal::with_icon(&current)
-        };
+    let refreshed = if starts(&current)
+        && program(&current).is_none_or(|program| superseded(&program, launcher))
+        && launcher.is_file()
+    {
+        tracing::info!(entry = %entry.display(), "pointed Launch at login at this Hex");
+        self::entry(launcher)
+    } else {
+        crate::linux::portal::with_icon(&current)
+    };
     if refreshed == current {
         return Ok(());
     }
@@ -65,7 +67,28 @@ pub(crate) fn program(entry: &str) -> Option<PathBuf> {
     let exec = entry
         .lines()
         .find_map(|line| line.trim().strip_prefix("Exec="))?;
-    let mut characters = exec.strip_prefix('"')?.chars();
+    // The key file's string escapes first, then the Exec quoting.
+    let mut unescaped = String::new();
+    let mut escapes = exec.chars();
+    while let Some(character) = escapes.next() {
+        if character != '\\' {
+            unescaped.push(character);
+            continue;
+        }
+        match escapes.next() {
+            Some('s') => unescaped.push(' '),
+            Some('n') => unescaped.push('\n'),
+            Some('t') => unescaped.push('\t'),
+            Some('r') => unescaped.push('\r'),
+            Some('\\') => unescaped.push('\\'),
+            Some(other) => {
+                unescaped.push('\\');
+                unescaped.push(other);
+            }
+            None => unescaped.push('\\'),
+        }
+    }
+    let mut characters = unescaped.strip_prefix('"')?.chars();
     let mut program = String::new();
     loop {
         match characters.next()? {
@@ -209,6 +232,14 @@ fn ours(entry: &str) -> bool {
 /// which outlives the version directory this process runs from.
 pub(crate) fn launcher() -> Result<PathBuf> {
     let executable = std::env::current_exe().wrap_err("could not locate the Hex executable")?;
+    // Linux names a running binary that was removed or replaced "… (deleted)".
+    let executable = match executable
+        .to_str()
+        .and_then(|path| path.strip_suffix(" (deleted)"))
+    {
+        Some(path) if !executable.is_file() => PathBuf::from(path),
+        _ => executable,
+    };
     let current = crate::app_paths::support_dir()?.join("current").join("hex");
     let managed = executable
         .parent()
@@ -222,14 +253,91 @@ pub(crate) fn launcher() -> Result<PathBuf> {
 }
 
 /// A version manager's shim for `executable` (mise, asdf: `<root>/shims/hex`
-/// beside `<root>/installs/…/hex`), which outlives the version it runs.
+/// beside `<root>/installs/…/hex`), which outlives the version it runs: only
+/// one inside the home directory, executable, the user's own and writable by
+/// no one else, that runs Hex from the home directory (a shim whose tool has
+/// no version set there fails).
 fn shim(executable: &Path) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let shim = shim_path(executable, &home)?;
+    static CHECKED: std::sync::Mutex<Option<(PathBuf, bool)>> = std::sync::Mutex::new(None);
+    let mut checked = CHECKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((path, runs)) = checked.as_ref()
+        && *path == shim
+    {
+        return runs.then_some(shim);
+    }
+    let runs = owned(&shim) && owned(shim.parent()?) && runs_hex(&shim, &home);
+    *checked = Some((shim.clone(), runs));
+    runs.then_some(shim)
+}
+
+/// Where a version manager keeps `executable`'s shim, inside `home`.
+fn shim_path(executable: &Path, home: &Path) -> Option<PathBuf> {
     let name = executable.file_name()?;
     let installs = executable
         .ancestors()
+        .take_while(|ancestor| *ancestor != home)
         .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "installs"))?;
+    installs.starts_with(home).then_some(())?;
     let shim = installs.parent()?.join("shims").join(name);
     shim.is_file().then_some(shim)
+}
+
+/// Executable or searchable, the user's, and writable by no one else.
+fn owned(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).is_ok_and(|metadata| {
+        // SAFETY: geteuid has no preconditions.
+        metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.mode() & 0o022 == 0
+            && metadata.mode() & 0o111 != 0
+    })
+}
+
+/// Whether `shim --version`, run from `home`, says it's Hex.
+fn runs_hex(shim: &Path, home: &Path) -> bool {
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new(shim)
+        .arg("--version")
+        .current_dir(home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return false,
+            Ok(None) if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+    let mut output = String::new();
+    child
+        .stdout
+        .take()
+        .is_some_and(|mut stdout| std::io::Read::read_to_string(&mut stdout, &mut output).is_ok())
+        && output.trim_start().starts_with("hex ")
+}
+
+/// Whether an entry that starts `program` should start `launcher` instead:
+/// `program` is gone, or `launcher` is the version manager's shim that runs
+/// it (#810), so an upgrade's prune can't strand the entry.
+pub(crate) fn superseded(program: &Path, launcher: &Path) -> bool {
+    program != launcher
+        && launcher.is_file()
+        && (!program.is_file() || shim(program).as_deref() == Some(launcher))
 }
 
 /// Whether an autostart entry starts its program: the spec's `Hidden` and
@@ -252,28 +360,12 @@ fn entry(executable: &Path) -> String {
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\
          {MANAGED_MARK}\n",
-        exec_argument(&executable.to_string_lossy()),
+        crate::linux::portal::exec_argument(&executable.to_string_lossy()),
         crate::linux::portal::APP_ID,
     )
 }
 
 /// `value` quoted as one Exec argument (Desktop Entry Specification).
-fn exec_argument(value: &str) -> String {
-    let mut quoted = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '"' | '`' | '$' | '\\' => {
-                quoted.push('\\');
-                quoted.push(character);
-            }
-            '%' => quoted.push_str("%%"),
-            _ => quoted.push(character),
-        }
-    }
-    quoted.push('"');
-    quoted
-}
-
 fn write_atomically(path: &Path, contents: &str) -> Result<()> {
     let directory = path
         .parent()
@@ -295,7 +387,7 @@ mod tests {
     #[test]
     fn the_entry_starts_hex_with_a_quoted_path() {
         let entry = entry(Path::new("/home/a b/100%/hex$"));
-        assert!(entry.contains("Exec=\"/home/a b/100%%/hex\\$\" start\n"));
+        assert!(entry.contains("Exec=\"/home/a b/100%%/hex\\\\$\" start\n"));
         assert!(entry.contains("X-Hex-Managed=true\n"));
         assert!(starts(&entry));
     }
@@ -306,11 +398,19 @@ mod tests {
         let executable = root.join("mise/installs/hex/3.1.1/hex");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
         fs::write(&executable, "").unwrap();
-        assert_eq!(shim(&executable), None);
+        assert_eq!(shim_path(&executable, &root), None);
         fs::create_dir_all(root.join("mise/shims")).unwrap();
         fs::write(root.join("mise/shims/hex"), "").unwrap();
-        assert_eq!(shim(&executable), Some(root.join("mise/shims/hex")));
-        assert_eq!(shim(Path::new("/usr/bin/hex")), None);
+        assert_eq!(
+            shim_path(&executable, &root),
+            Some(root.join("mise/shims/hex"))
+        );
+        assert_eq!(shim_path(Path::new("/usr/bin/hex"), &root), None);
+        // Outside the home directory a shim is nobody's to trust.
+        assert_eq!(shim_path(&executable, Path::new("/home/nobody")), None);
+        // The entry's program reads back through both levels of escaping.
+        let odd = Path::new("/tmp/my $dir/100%/a\"b\\c/hex");
+        assert_eq!(program(&entry(odd)).as_deref(), Some(odd));
         fs::remove_dir_all(root).unwrap();
     }
 

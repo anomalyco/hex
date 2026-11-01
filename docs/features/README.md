@@ -1340,6 +1340,8 @@ Linux beta                               // not macOS feature parity
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux/login_item)
+│   ├── Background portal (GNOME, KDE; xdg-desktop-portal 1.20+) -> the portal writes it (X-XDP-Autostart=anomaly.hex; linux/background)
+│   └── Installed by mise or asdf -> starts the version manager's shim, if it runs Hex from home
 │   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
@@ -1382,7 +1384,9 @@ Linux beta                               // not macOS feature parity
     └── No anomaly.hex.desktop in XDG data dirs -> Hex writes
         ~/.local/share/applications/anomaly.hex.desktop (X-Hex-Managed),
         NoDisplay when an older package's hex.desktop already shows Hex,
-        removed once a package ships anomaly.hex.desktop
+        removed once a package ships anomaly.hex.desktop; never rewritten while
+        its program is there; pointed at this Hex (or a version manager's
+        shim) once its program is gone or superseded by that shim (#810)
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
 GNOME portal shortcuts (#723)            // linux.gnome-shortcuts

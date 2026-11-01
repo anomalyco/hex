@@ -562,9 +562,19 @@ impl DesktopEntries {
         let Entry::File(current) = read_entry(&entry)? else {
             return Ok(());
         };
+        let Some(program) = crate::linux::login_item::program(&current) else {
+            return Ok(());
+        };
         if !managed(&current)
-            || crate::linux::login_item::program(&current).is_none_or(|program| program.is_file())
+            || !crate::linux::login_item::superseded(&program, Path::new(executable))
         {
+            return Ok(());
+        }
+        // A package now ships Hex's entry: the stranded fallback only hid it.
+        if !program.is_file() && self.shipped(&format!("{APP_ID}.desktop")) {
+            std::fs::remove_file(&entry)
+                .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
+            tracing::info!(entry = %entry.display(), "removed Hex's stranded desktop entry");
             return Ok(());
         }
         let repointed = desktop_entry(executable, no_display(&current));
@@ -582,10 +592,11 @@ impl DesktopEntries {
     /// and hidden from launchers when an older package's or the user's own
     /// `hex.desktop` already shows Hex. Returns the entry it wrote.
     fn ensure(&self, executable: &str) -> Result<Option<PathBuf>> {
-        if let Some(moved) = self.tidy()? {
-            return Ok(Some(moved));
-        }
+        let moved = self.tidy()?;
         self.repoint(executable)?;
+        if moved.is_some() {
+            return Ok(moved);
+        }
         let entry = self.entry();
         if !matches!(read_entry(&entry)?, Entry::Missing)
             || self.shipped(&format!("{APP_ID}.desktop"))
@@ -679,7 +690,7 @@ fn desktop_entry(executable: &str, hidden: bool) -> String {
 
 /// One quoted Exec argument: quoting escapes, then string escapes, as the
 /// Desktop Entry spec reads them, with `%` doubled for field codes.
-fn exec_argument(argument: &str) -> String {
+pub(crate) fn exec_argument(argument: &str) -> String {
     let mut quoted = String::from("\"");
     for character in argument.chars() {
         match character {
@@ -1068,19 +1079,39 @@ mod tests {
         let program = root.join("hex");
         std::fs::write(&program, "").unwrap();
         let program = program.to_str().unwrap();
+        let target = root.join("new-hex");
+        std::fs::write(&target, "").unwrap();
+        let target = target.to_str().unwrap();
         entries.ensure(program).unwrap();
         let written = std::fs::read_to_string(entries.entry()).unwrap();
-        entries.repoint("/opt/hex").unwrap();
+        entries.repoint(target).unwrap();
         assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), written);
         std::fs::remove_file(program).unwrap();
-        entries.repoint("/opt/hex").unwrap();
+        entries.repoint(target).unwrap();
         assert_eq!(
             std::fs::read_to_string(entries.entry()).unwrap(),
-            desktop_entry("/opt/hex", false)
+            desktop_entry(target, false)
         );
+        // Nothing to point at: left as it is.
+        std::fs::remove_file(target).unwrap();
+        std::fs::write(entries.entry(), desktop_entry(program, false)).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entries.entry()).unwrap(),
+            desktop_entry(program, false)
+        );
+        // A package ships Hex's entry now: the stranded fallback goes.
+        std::fs::write(
+            entries.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        std::fs::write(&root.join("new-hex"), "").unwrap();
+        entries.repoint(target).unwrap();
+        assert!(!entries.entry().exists());
         let users = "[Desktop Entry]\nExec=/gone/hex\n";
         std::fs::write(entries.entry(), users).unwrap();
-        entries.repoint("/opt/hex").unwrap();
+        entries.repoint(target).unwrap();
         assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), users);
         std::fs::remove_dir_all(root).unwrap();
     }
