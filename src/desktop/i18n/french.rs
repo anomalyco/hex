@@ -902,6 +902,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On this computer · not tested by Hex", "Sur cet ordinateur · non testé par Hex"),
     ("Downloading… {}%", "Téléchargement… {} %"),
     ("Couldn't prepare this model", "Impossible de préparer ce modèle"),
+    ("Your transformations want to use the network", "Vos transformations veulent utiliser le réseau"),
+    ("Your transformations want to run programs", "Vos transformations veulent lancer des programmes"),
+    ("Your transformations want to use the network and run programs", "Vos transformations veulent utiliser le réseau et lancer des programmes"),
+    ("Hosts: {}", "Hôtes : {}"),
+    ("Programs: {}", "Programmes : {}"),
+    ("Hex asks again whenever the config changes. Until you allow it, they paste your words unchanged", "Hex redemande à chaque modification de la configuration. Tant que vous ne l'autorisez pas, elles collent vos mots sans les modifier"),
 ];
 
 #[cfg(test)]
