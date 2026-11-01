@@ -72,9 +72,15 @@ fn column_for_code(code: &str) -> u8 {
 pub(crate) fn apply(setting: Option<&str>) {
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_code(&system_language()),
+        None => column_for_language_tag(&preferred_language()),
     };
     set_current(code);
+}
+
+/// The column for a system language tag such as `zh-Hans-CN` or `pl`;
+/// unknown or empty tags stay English.
+fn column_for_language_tag(tag: &str) -> u8 {
+    primary_subtag(tag).map_or(ENGLISH, |code| column_for_code(&code))
 }
 
 pub(crate) fn system_language() -> String {
@@ -118,7 +124,6 @@ fn macos_preferred_language() -> Option<String> {
 }
 
 /// `pt-BR` and `zh-Hans-CN` yield `pt` and `zh`.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn primary_subtag(tag: &str) -> Option<String> {
     let subtag = tag.split(['-', '_']).next()?.trim().to_ascii_lowercase();
     (!subtag.is_empty()).then_some(subtag)
@@ -937,6 +942,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Hex Dictation: transcribing", ["Dyktowanie Hex: transkrypcja", "Hex 听写：转写中", "Hex 音声入力: 文字起こし中", "Hex-Diktat: transkribiert", "Dictado de Hex: transcribiendo", "Диктування Hex: розпізнавання"]),
     ("Hex Dictation: update available", ["Dyktowanie Hex: dostępna aktualizacja", "Hex 听写：有可用更新", "Hex 音声入力: アップデートがあります", "Hex-Diktat: Update verfügbar", "Dictado de Hex: actualización disponible", "Диктування Hex: доступне оновлення"]),
     ("Download update", ["Pobierz aktualizację", "下载更新", "アップデートをダウンロード", "Update herunterladen", "Descargar actualización", "Завантажити оновлення"]),
+    ("What's new", ["Co nowego", "新功能", "新機能", "Neuigkeiten", "Novedades", "Що нового"]),
     ("Downloading update", ["Pobieranie aktualizacji", "正在下载更新", "アップデートをダウンロード中", "Update wird geladen", "Descargando actualización", "Завантаження оновлення"]),
     ("Managed by your organization", ["Zarządzane przez Twoją organizację", "由你的组织管理", "組織によって管理されています", "Von deiner Organisation verwaltet", "Gestionado por tu organización", "Керується вашою організацією"]),
     ("Enabled", ["Włączony", "已启用", "有効", "Aktiviert", "Activado", "Увімкнено"]),
@@ -1120,6 +1126,16 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 mod tests {
     use super::TRANSLATIONS;
     use super::{language_from_env, primary_subtag};
+
+    #[test]
+    fn system_language_tags_choose_their_interface_column() {
+        use super::{ENGLISH, column_for_code, column_for_language_tag};
+        assert_eq!(column_for_language_tag("zh-Hans-CN"), column_for_code("zh"));
+        assert_eq!(column_for_language_tag("zh"), column_for_code("zh"));
+        assert_eq!(column_for_language_tag("pl"), column_for_code("pl"));
+        assert_eq!(column_for_language_tag("pt-BR"), ENGLISH);
+        assert_eq!(column_for_language_tag(""), ENGLISH);
+    }
 
     #[test]
     fn preferred_language_tags_reduce_to_their_primary_subtag() {

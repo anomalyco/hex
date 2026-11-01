@@ -49,10 +49,11 @@ pub enum VoiceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// The foreground application. Never the page address: this log is a
+    /// plain file, and a running list of pages is browsing history.
     Context {
         timestamp_ms: u64,
         application: Option<String>,
-        browser_url: Option<String>,
     },
     ApiServerStarted {
         timestamp_ms: u64,
@@ -178,7 +179,7 @@ pub struct EventReader {
     pending: Vec<u8>,
     discarding_record: bool,
     events: VecDeque<VoiceEvent>,
-    current_context: Option<(Option<String>, Option<String>)>,
+    current_context: Option<Option<String>>,
     #[cfg(unix)]
     file_id: Option<(u64, u64)>,
 }
@@ -490,7 +491,7 @@ impl EventReader {
     }
 
     #[cfg(test)]
-    pub fn current_context(&self) -> Option<&(Option<String>, Option<String>)> {
+    pub fn current_context(&self) -> Option<&Option<String>> {
         self.current_context.as_ref()
     }
 
@@ -503,13 +504,8 @@ impl EventReader {
             self.events.clear();
             self.current_context = None;
         }
-        if let VoiceEvent::Context {
-            application,
-            browser_url,
-            ..
-        } = &event
-        {
-            self.current_context = Some((application.clone(), browser_url.clone()));
+        if let VoiceEvent::Context { application, .. } = &event {
+            self.current_context = Some(application.clone());
         }
         self.events.push_back(event);
         while self.events.len() > EVENT_RETENTION {
@@ -554,8 +550,8 @@ mod tests {
             {"kind": "dictation", "timestamp_ms": 42, "phase": "pasted", "text": "olá", "processing": {"profile": "example", "latency_ms": 321}},
             {"kind": "dictation", "timestamp_ms": 42, "phase": "pasted", "text": "olá", "processing": {"profile": "example", "latency_ms": 321, "fallback": "timeout"}},
             {"kind": "dictation", "timestamp_ms": 42, "phase": {"failed": "timeout"}},
-            {"kind": "context", "timestamp_ms": 42, "application": null, "browser_url": null},
-            {"kind": "context", "timestamp_ms": 42, "application": "Test", "browser_url": "https://example.com"},
+            {"kind": "context", "timestamp_ms": 42, "application": null},
+            {"kind": "context", "timestamp_ms": 42, "application": "Test"},
             {"kind": "api_server_started", "timestamp_ms": 42, "port": 12345},
             {"kind": "api_server_stopped", "timestamp_ms": 42},
             {"kind": "api_auth_failed", "timestamp_ms": 42, "method": "POST", "path": "/transcribe"}
@@ -696,10 +692,7 @@ mod tests {
 
         reader.refresh().unwrap();
         assert_eq!(reader.events().len(), 1);
-        assert_eq!(
-            reader.current_context().cloned(),
-            Some((Some("Zed".into()), None))
-        );
+        assert_eq!(reader.current_context().cloned(), Some(Some("Zed".into())));
 
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
         writeln!(file).unwrap();
@@ -748,7 +741,6 @@ mod tests {
         log.emit(&VoiceEvent::Context {
             timestamp_ms: 0,
             application: Some("Fixture".into()),
-            browser_url: None,
         })
         .unwrap();
         for timestamp_ms in 1..=2048 {
@@ -763,10 +755,7 @@ mod tests {
         reader.refresh().unwrap();
         assert_eq!(reader.offset, fs::metadata(&path).unwrap().len());
         assert_eq!(reader.events().len(), EVENT_RETENTION);
-        assert_eq!(
-            reader.current_context(),
-            Some(&(Some("Fixture".into()), None))
-        );
+        assert_eq!(reader.current_context(), Some(&Some("Fixture".into())));
         assert!(
             matches!(reader.events().back(), Some(VoiceEvent::Dictation { text, .. }) if text.starts_with("2048:"))
         );
@@ -804,7 +793,7 @@ mod tests {
         assert!(!reader.discarding_record);
         file.write_all(b"\xa9\",\"browser_url\":null}\r\n").unwrap();
         reader.refresh().unwrap();
-        assert_eq!(reader.current_context(), Some(&(Some("café".into()), None)));
+        assert_eq!(reader.current_context(), Some(&Some("café".into())));
         assert_eq!(reader.events().len(), 1);
         fs::remove_file(path).unwrap();
     }

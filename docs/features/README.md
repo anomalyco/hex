@@ -673,6 +673,8 @@ General                                  // settings
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs),
 │       Replay onboarding (see labs.md, New onboarding)
+│       // Interface language System: macOS's first preferred language (zh-Hans -> 中文),
+│       // Linux LC_ALL/LC_MESSAGES/LANG, Windows the user locale; unknown -> English
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)
@@ -918,7 +920,12 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
 
-Website context per OS: macOS asks the front tab of Safari, Orion, Chrome,
+Website context per OS: macOS reads no page at all until something uses it: a
+mode chosen by website, an OpenCode rewrite (its prompt names the site), or a
+script transformation (it receives the address)
+(`dictation::config::reads_browser`), so dictation's page reads never prompt
+without one (Meetings and media pause still ask browsers when on). Otherwise
+it asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
@@ -1168,7 +1175,8 @@ Hex checks the release service            // maintain.updates
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
-│   └── Sidebar Update, menu bar / tray: Restart to update
+│   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
+│       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
@@ -1549,6 +1557,8 @@ Linux process                            // maintain.linux-service
 ├── hex / hex app -> Hex running? -> Activate{activation token} over the socket -> exit 0
 │   ├── No Hex, hex.service loaded -> session.env -> systemctl start (Type=notify) -> Activate
 │   ├── No Hex, no unit or custom data dir -> This process becomes Hex
+│   │   └── Custom data dir -> Keep the supplied desktop environment; no user-manager query
+│   │       or Wayland socket discovery (unless HEX_SYSTEMD_UNIT explicitly opts in)
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
@@ -1598,6 +1608,8 @@ points, so a delayed listener start cannot reset a newer live volume selection.
 Checks: [test-linux-service.py](../../scripts/test-linux-service.py) exercises
 the real socket and process lifetime without a display, installed model, or
 audio device; it passed on apollo (Arch, niri) on 2026-10-22.
+It also checks custom-root isolation with a stale Xauthority path and an
+answering Wayland socket nearby: no `systemctl` call or adopted display.
 `closing_the_window_cancels_only_an_uncommitted_capture`,
 `commands_route_only_to_a_started_listener`, and
 `adopting_saved_settings_restarts_only_for_listener_settings` use controlled

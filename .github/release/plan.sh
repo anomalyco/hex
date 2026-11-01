@@ -44,8 +44,12 @@ case "$CHANNEL" in
     # builds by it, and it names version directories), so continue past them.
     number=$((GITHUB_RUN_NUMBER + 100))
     release_channel=dev release_version="0.0.0-dev-$number" tag=""
-    if [ "$CHANNEL" = check ]; then tag="v0.0.0-test-$number"; fi
-    notes="https://github.com/$GITHUB_REPOSITORY/commit/$SHA"
+    # The dev changelog lists what each build changed (dev-notes jobs).
+    notes="https://anoma.ly/hex/dev#$release_version"
+    if [ "$CHANNEL" = check ]; then
+      tag="v0.0.0-test-$number"
+      notes="https://github.com/$GITHUB_REPOSITORY/commit/$SHA"
+    fi
     ;;
   *) die "Unknown channel $CHANNEL." ;;
 esac

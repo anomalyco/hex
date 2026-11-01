@@ -87,6 +87,11 @@ fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
         .find(|transformation| transformation.id == id)
 }
 
+#[cfg(target_os = "macos")]
+pub fn is_builtin_transformation(id: &str) -> bool {
+    builtin_transformation(id).is_some()
+}
+
 /// `text` after the built-in transformation `id`, or None when `id` is not
 /// built in (a script runs in the transformation host instead).
 pub fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {

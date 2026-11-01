@@ -673,6 +673,7 @@ impl WindowsDesktopHost {
                 preparing: preparation.model,
             },
             update_status: self.updater.status(),
+            update_notes: self.updater.notes(),
             settings: self.settings.clone(),
             state: self.activity.state.filter(|_| self.is_running()),
         }
