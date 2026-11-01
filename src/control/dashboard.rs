@@ -46,6 +46,7 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, path: PathBuf) -> io::Resul
             draw(
                 frame,
                 events.events(),
+                events.current_context().cloned().flatten(),
                 view,
                 &path,
                 &meetings,
@@ -80,6 +81,7 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, path: PathBuf) -> io::Resul
 fn draw(
     frame: &mut ratatui::Frame,
     events: &VecDeque<VoiceEvent>,
+    application: Option<String>,
     view: View,
     path: &Path,
     meetings: &[MeetingManifest],
@@ -129,17 +131,10 @@ fn draw(
         VoiceEvent::Dictation { phase, text, .. } => Some(RecentAction::Dictation(phase, text)),
         _ => None,
     });
-    let context = events
-        .iter()
-        .rev()
-        .find_map(|event| match event {
-            VoiceEvent::Context { application, .. } => Some(ContextSnapshot {
-                application: application.clone(),
-                ..ContextSnapshot::default()
-            }),
-            _ => None,
-        })
-        .unwrap_or_default();
+    let context = ContextSnapshot {
+        application,
+        ..ContextSnapshot::default()
+    };
 
     frame.render_widget(
         Paragraph::new(vec![

@@ -490,7 +490,8 @@ impl EventReader {
         self.events.iter().rev().take(limit).cloned().collect()
     }
 
-    #[cfg(test)]
+    /// The foreground app from the latest context event, even one older
+    /// than the retained events.
     pub fn current_context(&self) -> Option<&Option<String>> {
         self.current_context.as_ref()
     }

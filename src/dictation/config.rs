@@ -132,5 +132,15 @@ mod tests {
         });
         assert!(uses_browser(&rewrite));
         assert!(!uses_scripts(&rewrite));
+
+        let global = |transformation: &str| DictationProcessingSettings {
+            default_mode: DictationMode {
+                transformations: vec![transformation.into()],
+                ..DictationMode::default()
+            },
+            ..DictationProcessingSettings::default()
+        };
+        assert!(uses_scripts(&global("my-script")));
+        assert!(!uses_scripts(&global("lowercase")));
     }
 }
