@@ -27,6 +27,7 @@ pub(super) const SCENES: &[&str] = &[
     // Models already on this computer; the recommended one among them.
     "onboarding-model-found",
     "onboarding-model-found-recommended",
+    "onboarding-model-found-downloading",
     // The practice dictation.
     "mac-onboarding-try",
     "mac-onboarding-listening",
