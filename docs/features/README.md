@@ -1227,6 +1227,10 @@ Linux beta                               // not macOS feature parity
 │   │   │       // (the row's data only); not run on a Hyprland session
 │   │   ├── Portal version 2 -> Desktop shortcuts > Open -> ConfigureShortcuts,
 │   │   │   the desktop's own dialog; ShortcutsChanged updates each row
+│   │   │   ├── The call fails (the frontend says version 2 but the desktop's backend,
+│   │   │   │   such as GNOME's, lacks it) -> the row goes away instead of a dead
+│   │   │   │   Open button, and process.log warns (#723)
+│   │   │   │   // no check; not run on a GNOME session
 │   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id
 │   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
 │   │       under that shortcut's own row (Dictation, Output);

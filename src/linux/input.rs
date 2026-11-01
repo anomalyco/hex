@@ -1242,6 +1242,11 @@ impl Backend {
             if self.status.configure.swap(false, Ordering::AcqRel)
                 && let Err(error) = portal.configure()
             {
+                // The portal advertises ConfigureShortcuts even when the
+                // desktop's backend lacks it (GNOME, #723), so the call
+                // fails and opens nothing. Settings then drops its Open
+                // button rather than keep one that does nothing.
+                self.status.configurable.store(false, Ordering::Release);
                 tracing::warn!(
                     error = format!("{error:#}"),
                     "could not open the desktop's shortcut settings"
