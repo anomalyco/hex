@@ -1166,7 +1166,8 @@ Hex checks the release service            // maintain.updates
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
-│   └── Sidebar Update, menu bar / tray: Restart to update
+│   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
+│       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch

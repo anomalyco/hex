@@ -51,6 +51,7 @@ mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+mod sidebar_update;
 mod sound_sets;
 mod spark;
 #[cfg(target_os = "macos")]
@@ -601,6 +602,7 @@ struct ServiceView {
     operation_error: Option<String>,
     transcription: DesktopTranscriptionSnapshot,
     update_status: DesktopUpdateStatus,
+    update_notes: Option<crate::desktop::host::UpdateNotes>,
     /// The service is recording or saving a shortcut.
     editing: bool,
 }
@@ -1542,36 +1544,6 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
     }
     nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
-    let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
-            tr("Restart to update").to_owned(),
-            DesktopAction::RestartIntoUpdate,
-        )),
-        Some(DesktopUpdateStatus::Available) => {
-            Some((tr("Download update").to_owned(), DesktopAction::OpenUpdate))
-        }
-        Some(DesktopUpdateStatus::SwitchAvailable { channel, version }) => Some((
-            crate::updater::switch_label(channel, version),
-            DesktopAction::ConfirmUpdateSwitch,
-        )),
-        _ => None,
-    };
-    // An available update is a state, not the screen's main action.
-    let update = action.map(|(label, action)| {
-        row()
-            .key("sidebar-update-control")
-            .gap(8.0)
-            .pl(6.0)
-            .center_y()
-            .child(controls::status_dot(p.accent()))
-            .child(controls::button(
-                p,
-                "sidebar-update",
-                &label,
-                controls::ButtonKind::Secondary,
-                move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
-            ))
-    });
     title_bar(col())
         .key("sidebar")
         .role("navigation")
@@ -1583,7 +1555,8 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .pr(6.0)
         .child(nav)
         .child(el().key("spacer").grow(1.0))
-        .children(update)
+        .children(sidebar_update::control(ui, p))
+        .children(sidebar_update::notes(ui, p))
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
         .child(footer(ui, p))
 }
@@ -2736,6 +2709,7 @@ fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             preparing: None,
         },
         update_status: DesktopUpdateStatus::Current,
+        update_notes: None,
         editing: false,
     });
     ui

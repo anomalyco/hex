@@ -14,6 +14,7 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
+mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
@@ -28,7 +29,7 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use crate::app_settings::{AppSettings, UpdateChannel};
-use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::host::{DesktopAction, DesktopUpdateStatus, UpdateNotes};
 use protocol::{Decision, Install};
 
 use platform::Staged;
@@ -191,6 +192,8 @@ struct Shared {
     /// The newest staged update. Checks continue while one waits, and a
     /// different current release replaces it before the restart.
     staged: Mutex<Option<StagedUpdate>>,
+    /// What the staged dev build changed, when the dev notes said.
+    notes: Mutex<Option<UpdateNotes>>,
     restart: Mutex<Restart>,
 }
 
@@ -204,6 +207,7 @@ impl Shared {
             last: Mutex::new(None),
             confirmed: Mutex::new(None),
             staged: Mutex::new(None),
+            notes: Mutex::new(None),
             restart: Mutex::new(Restart::Idle),
         }
     }
@@ -215,6 +219,7 @@ impl Shared {
 struct StagedUpdate {
     staged: Staged,
     sha256: String,
+    version: String,
 }
 
 #[derive(Debug, Default)]
@@ -326,6 +331,13 @@ impl Updater {
     pub fn stop(&self) {
         lock(&self.shared.wake).stop = true;
         self.shared.signal.notify_all();
+    }
+
+    /// What the staged dev build changed, while Restart to update shows.
+    pub fn notes(&self) -> Option<UpdateNotes> {
+        matches!(*lock(&self.shared.state), State::Ready | State::Applied)
+            .then(|| lock(&self.shared.notes).clone())
+            .flatten()
     }
 
     pub fn status(&self) -> DesktopUpdateStatus {
@@ -612,6 +624,13 @@ fn check(
         Decision::None { .. } | Decision::Install { .. }
             if staged.is_some_and(|staged| !replaces_staged(&decision, &staged.sha256)) =>
         {
+            // The notes may have been published after the build was staged.
+            if let Some(staged) = staged
+                && !restarting
+                && lock(&shared.notes).is_none()
+            {
+                fetch_notes(shared, &channel, &user_agent, &updates, &staged.version);
+            }
             Ok(State::Ready)
         }
         Decision::None { .. } => {
@@ -670,10 +689,27 @@ fn check(
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
+                version: version.clone(),
             });
+            *lock(&shared.notes) = None;
+            // Restart to update's final check quits right after; notes
+            // would only hold it up.
+            if !restarting {
+                fetch_notes(shared, &channel, &user_agent, &updates, &version);
+            }
             Ok(State::Ready)
         }
     }
+}
+
+/// What the staged dev build changed; nothing for other channels or when
+/// the dev notes don't list it yet.
+fn fetch_notes(shared: &Shared, channel: &str, user_agent: &str, updates: &Path, version: &str) {
+    if channel != UpdateChannel::Dev.name() {
+        return;
+    }
+    let notes = notes::fetch(user_agent, &updates.join("notes"), crate::VERSION, version);
+    *lock(&shared.notes) = notes;
 }
 
 /// Checks the manifest's `<target>-sig` file: Anomaly's release key signing

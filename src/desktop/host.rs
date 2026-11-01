@@ -13,6 +13,9 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
+    /// What the staged dev build changed, while Restart to update shows.
+    #[serde(default)]
+    pub(crate) update_notes: Option<UpdateNotes>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -94,6 +97,14 @@ pub(crate) enum DesktopUpdateStatus {
     PackageUpdate {
         command: String,
     },
+}
+
+/// What changed between the running build and a staged dev build: the
+/// titles of the PRs merged in between, and the dev changelog's entry.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct UpdateNotes {
+    pub(crate) items: Vec<String>,
+    pub(crate) url: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
