@@ -1170,10 +1170,7 @@ fn model_prepare_path(path: &str) -> Option<&str> {
 
 fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> {
     let language = selection_query(path)?.into_language();
-    if !crate::transcription::models::LANGUAGES
-        .iter()
-        .any(|(code, _)| *code == language)
-    {
+    if !crate::transcription::models::is_known_language(&language) {
         return Err("unsupported-language");
     }
     Ok(crate::transcription::models::MODELS
