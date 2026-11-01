@@ -327,3 +327,17 @@ pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
         too_big: false,
     }
 }
+
+/// Onboarding's choice over [`fixture`]: with the recommended model's exact
+/// file too, or else with the other models listed.
+pub(super) fn onboarding_scene(ui: &mut Ui, recommended_found: bool) {
+    *ui = super::portal_fixture();
+    ui.found.models = fixture();
+    if recommended_found {
+        let recommended = fixture_catalog(ui.settings.transcription.model);
+        ui.found.models.insert(0, recommended);
+    } else {
+        ui.found.expanded = true;
+    }
+    super::onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
+}

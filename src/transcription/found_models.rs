@@ -587,8 +587,7 @@ mod tests {
     fn download_instead_stops_using_the_found_copy() {
         let model = super::super::models::definition(TranscriptionModelId::SenseVoiceSmall);
         let path = PathBuf::from("/nowhere/sense-voice.gguf");
-        let mut found = Vec::new();
-        found.push(Found {
+        let found = vec![Found {
             path: path.clone(),
             repository: String::new(),
             revision: String::new(),
@@ -603,7 +602,7 @@ mod tests {
             compression: "Q8_0",
             tensor_bytes: 0,
             too_big: false,
-        });
+        }];
         CACHE.lock().unwrap().last = found;
         assert_eq!(catalog_candidate(model), Some(path.clone()));
         decline(model.id);
