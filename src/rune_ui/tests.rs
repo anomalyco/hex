@@ -1599,16 +1599,17 @@ fn add_term_scrolls_the_new_row_into_view() {
 /// pointer is over it: on a row's field or between rows (#906).
 #[test]
 fn the_wheel_scrolls_a_long_term_list() {
-    let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
-    rt.state.settings.vocabulary = (0..20)
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    rt.state.settings.vocabulary = (0..75)
         .map(|index| crate::dictation::vocabulary::VocabularyEntry {
             term: format!("term {index}"),
-            sounds_like: Vec::new(),
+            sounds_like: vec![format!("sound {index}")],
         })
         .collect();
     rt.state.vocabulary = super::vocabulary::VocabularyEditor::new(&rt.state.settings.vocabulary);
-    rt.state.vocabulary.open = true;
     rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "vocabulary-control");
     settle(&mut rt);
     let first = |rt: &Runtime<Ui>| {
         let keys: Vec<_> = rt
