@@ -1781,17 +1781,9 @@ fn finish_dictation_with(
     events: &mut EventLog,
     indicator: Option<&DictationIndicatorSender>,
 ) -> Result<FinishResult> {
-    let finish = capture.finish_with_tail(ended_at, tail)?;
-    let silence = match &finish {
-        Finish::Transcribe(clip) => clip.silence(),
-        Finish::Discard => None,
-    };
-    let clip = match (finish, silence) {
-        (Finish::Transcribe(clip), None) => {
-            crate::dictation::silence::clear();
-            clip
-        }
-        (finish, silence) => {
+    let clip = match capture.finish_with_tail(ended_at, tail)? {
+        Finish::Transcribe(clip) if !clip.is_near_silent() => clip,
+        finish => {
             events.dictation(DictationPhase::Discarded, "")?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::Discarded);
@@ -1799,9 +1791,6 @@ fn finish_dictation_with(
             return Ok(match finish {
                 Finish::Discard => FinishResult::Discarded,
                 Finish::Transcribe(clip) => {
-                    if let Some(silence) = silence {
-                        crate::dictation::silence::announce(silence);
-                    }
                     crate::dictation::diagnostics::persist_near_silent(
                         &clip.into_transcription_samples(),
                     );

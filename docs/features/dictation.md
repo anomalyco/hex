@@ -544,7 +544,8 @@ Release that will transcribe                          // dictate.stop-tone
      still captured; a muted output (macOS, Linux) unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
      ├── Clip later near-silent or without speech -> Tone already played;
-     │   discard, nothing pasted
+     │   discard quietly, nothing pasted, no error tone or note; the log has
+     │   the measured level and peak against the thresholds
      └── Escape after the release -> Nothing; the clip still transcribes
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail
