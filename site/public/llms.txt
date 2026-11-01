@@ -11,4 +11,5 @@
 - [README](https://github.com/anomalyco/hex/blob/dev/README.md): features, settings, privacy, and troubleshooting
 - [Windows guide](https://github.com/anomalyco/hex/blob/dev/docs/windows.md)
 - [Linux guide](https://github.com/anomalyco/hex/blob/dev/docs/linux.md)
+- [Transforms](https://anoma.ly/hex/docs/transforms): the JavaScript API for changing dictated text before Hex pastes it, including `fetch` and `node:child_process`
 - [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): local transcription for other apps

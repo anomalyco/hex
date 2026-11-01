@@ -1980,6 +1980,7 @@ dependencies = [
  "transcribe-rs",
  "unicode-normalization",
  "unicode-segmentation",
+ "ureq",
  "url",
  "wayland-client",
  "wayland-protocols",

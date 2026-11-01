@@ -140,6 +140,8 @@ pub(super) struct ModesPane {
     /// Whether the listener can tell which app is frontmost (X11, not Wayland).
     focused_app_known: bool,
     pub(super) status: StatusSnapshot,
+    /// The config hash the person allowed to use `fetch` and programs.
+    pub(super) approved: Option<String>,
     status_read: Option<Instant>,
     workspace: PathBuf,
     config_exists: bool,
@@ -168,6 +170,7 @@ impl ModesPane {
             icons_ready: 0,
             focused_app_known: true,
             status,
+            approved: None,
             status_read: None,
             workspace: PathBuf::new(),
             config_exists: true,
@@ -197,6 +200,11 @@ impl ModesPane {
         crate::personal_commands::include_builtin_transformations(&mut status);
         if status != self.status {
             self.status = status;
+            changed = true;
+        }
+        let approved = crate::personal_commands::approved_config();
+        if approved != self.approved {
+            self.approved = approved;
             changed = true;
         }
         changed

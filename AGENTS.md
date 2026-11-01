@@ -224,9 +224,17 @@ substitute for source inspection or a second roadmap.
   `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
   worker thread: TypeScript erased to same-position JavaScript by
   `personal_commands/typescript` (oxc's parser), the `@hex/commands` module
-  and managed `hex.d.ts` typings, watch-reloaded deterministic transformation
-  calls, per-call time and runtime memory limits, status snapshots, and
-  `hex commands init|check`. macOS, Windows, and Linux share it.
+  and managed `hex.d.ts` typings, watch-reloaded transformation calls with
+  per-transformation timeouts and a runtime memory limit, status snapshots,
+  and `hex commands init|check`. Its host APIs are thin native bindings:
+  `fetch` over ureq with the platform's TLS (`personal_commands/fetch`),
+  `node:child_process` `exec`/`execFile` over `std::process` with a process
+  group or job object per run (`personal_commands/process`), and timers,
+  settled through QuickJS's job queue by `personal_commands/io`. They work
+  only once the person allows the config's content hash (`personal_commands/trust`,
+  the Output pane's trust prompt). Public API docs:
+  `site/public/docs/transforms.md` (https://anoma.ly/hex/docs/transforms).
+  macOS, Windows, and Linux share it.
 - `desktop/background_process`: the one constructor for child processes Hex starts for
   its own work (OpenCode CLI, curl, PowerShell); on Windows they
   never open a console window.
@@ -796,6 +804,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   rewriting, then selected transformations. A failed stage preserves its input;
   the transformation chain is one stage, so failure discards its partial results.
   It applies to Paste, not meetings.
+- A config reaches `fetch` or `node:child_process` only after the person
+  allows its exact content hash; any file change asks again, and approval is
+  stored outside the config folder. Each transformation runs under its own
+  timeout (1 s, 30 s with host APIs, 60 s cap); when it settles or expires,
+  Hex abandons its requests and kills every process tree it started. Requests
+  and programs stay bounded (8 and 4 at once). Logs name hosts and programs
+  with status, duration, and byte counts, never text, bodies, arguments, or
+  environment values.
 - Hex never starts, probes, or searches for an OpenCode executable, and never
   starts the service: it only talks to an already running OpenCode service
   found through its registration file (`desktop/opencode_service`). Nothing touches

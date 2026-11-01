@@ -94,6 +94,12 @@ pub fn personal_commands_status_file() -> Result<PathBuf> {
     Ok(support_dir()?.join("personal-commands.json"))
 }
 
+/// The config hash the person allowed to use `fetch` and run programs. It
+/// lives here, not in the config folder, so a config cannot allow itself.
+pub fn transform_trust_file() -> Result<PathBuf> {
+    Ok(support_dir()?.join("transform-trust.json"))
+}
+
 pub fn personal_commands_workspace() -> Result<PathBuf> {
     user_config_dir()
 }
