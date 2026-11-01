@@ -244,7 +244,7 @@ impl LocalTranscriber {
                 Some((backend, gpu)) => (backend, Some(gpu)),
                 None => {
                     tracing::info!(
-                        "this GPU failed before under its current driver; transcribing on the CPU (Settings › Speech engine › GPU tries it again)"
+                        "this GPU failed or ran slower than the CPU before, under its current driver; transcribing on the CPU (Settings › Speech engine › GPU tries it again)"
                     );
                     return Self::load_on(selection, Backend::Cpu, None, preference);
                 }
