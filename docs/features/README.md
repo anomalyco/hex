@@ -782,6 +782,9 @@ and Bluetooth detection on hardware, a real Bluetooth headset on Linux, and
 Windows ARM64 (its cross-build stops in `rquickjs-sys` on this host).
 
 Successful settings saves persist and project changes at safe runtime boundaries.
+An invalid saved field falls back independently at launch, with its key and
+reason in the log; the next save preserves the original first. See
+[settings recovery](recovery.md#load-settings-with-invalid-fields).
 Immediate settings controls commit a candidate before changing the saved UI
 choice or applying dependent native/history effects. A failed shortcut save
 stays in capture instead of showing Saved; failed retention saves keep the old
