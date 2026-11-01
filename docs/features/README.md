@@ -1365,7 +1365,12 @@ Linux beta                               // not macOS feature parity
 │   │       under that shortcut's own row (Dictation, Output);
 │   │       the rest keep working
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
-│   │   └── General hides shortcut rows and lists the commands
+│   │   ├── General hides shortcut rows and lists the commands
+│   │   └── GNOME: Add GNOME keyboard shortcuts -> custom shortcuts running
+│   │       `hex dictation toggle` (#781); written only while the listener has no
+│   │       portal, and removed once the portal (or X11) binds the shortcuts, so a
+│   │       press never both starts a portal hold and toggles it off (#931)
+│   │       // check: entries_exist_only_without_the_portal (the rule only)
 │   └── Listener starting or stopped -> `hex status` reports Unregistered,
 │       never the X11 mode
 ├── hex dictation start|stop|toggle, hex paste-last

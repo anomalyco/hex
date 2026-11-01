@@ -679,7 +679,11 @@ impl LinuxDesktopHost {
         if !self.settings_valid || !crate::linux::portal::gnome() {
             return;
         }
-        let wanted = self.settings.gnome_keyboard_shortcuts && self.listen_when_ready;
+        let requested = self.settings.gnome_keyboard_shortcuts && self.listen_when_ready;
+        let shortcuts = self.listener.as_ref().map(|l| l.hotkey_status.shortcuts());
+        let Some(wanted) = crate::linux::gnome_shortcuts::wanted(requested, shortcuts) else {
+            return;
+        };
         let key = format!(
             "{wanted} {:?} {:?} {:?}",
             self.settings.dictation_hotkey,
