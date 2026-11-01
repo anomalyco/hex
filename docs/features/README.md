@@ -588,12 +588,12 @@ worker readiness; a later worker-load failure does not roll back saved selection
 ```ts
 Saved shortcut                           // dictation; Option by default; Windows and X11 accept mouse buttons, macOS with Labs > Mouse shortcuts
 ├── Hold -> Speak -> Release
-├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
+├── Tap, tap -> Speak hands-free -> Press again   // Shortcut mode: Hold or double-tap
 └── Escape -> Nothing: no cancel, every dictation finishes and pastes (#786)
 
-General > Advanced > Double-tap only     // optional for key bindings
-  -> Disable single-hold activation
-  -> Keep the double-tap hands-free path
+General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
+  -> Modal: each choice with its keys and a looping key/recording timeline
+  -> Double-tap needs a key binding; with a lone modifier it says so
 
 Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
@@ -669,7 +669,7 @@ General                                  // settings
 ├── Basics card -> Shortcut, Speech model, Language, Microphone, Launch at login
 │   ├── Each row leads with an icon; choices are inline dropdowns, not segments
 │   ├── Language -> fixed text for a one-language model, else a dropdown
-│   └── A row that hides or shows (Advanced, a microphone error, Double-tap only)
+│   └── A row that hides or shows (Advanced, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
@@ -705,8 +705,7 @@ General                                  // settings
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
 │   ├── Collapse -> drops a pending release confirmation
-│   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
-│   │   Double-tap only, keyboard-language mappings (while its Labs toggle is on),
+│   ├── Dictation -> Shortcut side, keyboard-language mappings (while its Labs toggle is on),
 │   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
 │   │   microphone instead of Bluetooth")
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
@@ -1946,7 +1945,7 @@ best-effort deletion is not guaranteed deletion.
 
 `dev.rune-ui` lives in [rune_ui.rs](../../src/rune_ui.rs) and its pane modules;
 its tests drive the Rune runtime headlessly (navigation; General rows per
-shortcut source, fitting the default window with Advanced collapsed, Double-tap to lock folding under the rows below, saves through the host, Quit Hex, microphone-release
+shortcut source, fitting the default window with Advanced collapsed, Shortcut mode's modal, saves through the host, Quit Hex, microphone-release
 confirmation, shortcut recording and Escape, conflicts; History select, delete, two-step
 clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
 on release), application conflicts, a chosen file joining the mode, arrow

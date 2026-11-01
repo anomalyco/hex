@@ -424,13 +424,16 @@ breaker reaches the app.
 ### Shortcut Mode
 
 ```ts
-General > Shortcut mode = Hold (default)             // dictate.shortcut-mode
-  -> Hold and lock behave as described above
-General > Shortcut mode = Toggle
+General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
+  -> Names the choice; opens the Shortcut mode modal
+  Hold or double-tap (default) -> Hold, plus double-tap to lock
+  Hold                         -> Hold only
+  Tap                          -> Toggle, below
+  Double-tap                   -> Double-tap only; needs a key binding
+Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
   -> Escape -> Nothing: it reaches the app (#786)
-  // Double-tap to lock and Double-tap only are hidden and ignored
   // Shortcut chords during the first 300 ms still discard
   macOS, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711):
   ├── Release 300 ms or more after the press -> Finish (with the release tail)
@@ -440,7 +443,15 @@ General > Shortcut mode = Toggle
   └── Sooner -> Ignored as a key repeat (KWin repeats held shortcuts)
 ```
 
-Toggle reuses the lock state on every platform: each press behaves as the
+The one choice is stored in the three settings it replaced
+(`shortcut_mode`, `double_tap_lock`, `double_tap_only`); of their eight
+combinations only four behave differently, and `Trigger::of` in
+[shortcut_mode.rs](../../src/rune_ui/shortcut_mode.rs) folds the rest onto
+them (`redundant_and_invalid_combinations_fold_away`). `hex settings` still
+sets each one. Linux with only `hex` commands shows no row: the commands
+ignore it.
+
+Tap (`toggle`) reuses the lock state on every platform: each press behaves as the
 second tap of a double-tap. Persisted as `shortcut_mode` (`hold`/`toggle`) in
 each platform's settings; files without it load as Hold. Checks:
 `toggle_mode_starts_on_a_press_and_finishes_on_the_next` and
@@ -460,22 +471,21 @@ CI. The Linux state machine and X11 grab tests ran on 2026-10-22 (the grabs on
 an isolated Xwayland display). No physical keyboard check yet.
 
 ```ts
-General > Shortcut mode > How it works                // dictate.shortcut-explainer
-  -> Modal: Hold and Toggle cards, each the shortcut's keycaps (one per key,
-     pressing together) beside two lanes (key above, recording below) on a
-     chart-recorder tape: a still pen at the right, the tape scrolling left
-     without end and fading out at its left edge; opening it ends a shortcut
-     recording and closes the model picker
-  ├── Opens centred at its Hold height in either mode; a window resize
-  │   centres it again
-  ├── Long chord -> The panel widens (up to the window) so each card's lanes
-  │   keep at least 64 pt beside the keycaps
-  ├── Pick a card (click, Enter, Space) -> Saves Shortcut mode
-  ├── Hold -> Double-tap to lock row: switch + striped hands-free lane
-  ├── Toggle -> No lock row; it folds inside its own slot and the panel's
-  │   bottom edge rises with it (the top stays put)
-  ├── Tab -> Hold, Toggle, lock switch, Close; focus stays inside
-  ├── Close, Escape, or a press outside -> Closes; focus returns to the link
+General > Shortcut mode                               // dictate.shortcut-explainer
+  -> Modal: the four choices, each its name and one line beside the
+     shortcut's keycaps (one per key, pressing together) and two lanes (key
+     above, recording below) on a chart-recorder tape: a still pen at the
+     right, the tape scrolling left without end and fading out at its left
+     edge; opening it ends a shortcut recording and closes the model picker
+  ├── The current choice has a focus-coloured border
+  ├── Double-tap with a lone modifier -> Dimmed, takes no focus or press,
+  │   says "Needs a shortcut with a key, like ⌥Space"
+  ├── Long chord -> The panel widens (up to the window) so each option's
+  │   lanes keep at least 64 pt beside the keycaps
+  ├── Pick an option (click, Space) -> Saves the choice
+  ├── Tab -> each available option, Done; focus stays inside
+  ├── Done, Return, Escape, or a press outside -> Closes; focus returns to
+  │   the row
   ├── Change pane, menu bar, or `hex window show` -> Closes
   └── Reduce Motion -> One whole take, still, no wakes; turned off while
       open, the tape starts again when the window regains focus
@@ -483,28 +493,25 @@ General > Shortcut mode > How it works                // dictate.shortcut-explai
 
 The lanes are Rune shapes drawn at their laid-out width and redrawn from the
 window's poll clock while the modal is open (`src/rune_ui/explainer.rs`).
-Checks: `how_it_works_opens_the_shortcut_explainer_and_keeps_focus_inside`,
-`explainer_cards_pick_the_shortcut_mode`,
+Checks: `the_shortcut_mode_row_names_the_choice`,
+`shortcut_mode_opens_from_its_row_and_keeps_focus_inside`,
+`each_option_picks_its_trigger`,
 `the_explainer_loops_on_the_poll_clock`,
 `reduce_motion_shows_the_finished_explainer_without_waking`,
 `the_explainer_restarts_when_reduce_motion_turns_off`,
-`the_explainer_centres_at_its_hold_height_in_either_mode`,
-`a_long_chord_widens_the_explainer` (five keys),
-the tape's own `nothing_draws_past_the_pen`, `the_tape_scrolls_without_steps`,
-`the_still_frame_shows_a_whole_take`, `narrow_lanes_draw_nothing` and
-`the_past_leaves_the_tape` in `explainer.rs`,
-`the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes`, and
+`a_long_chord_widens_shortcut_mode` (five keys),
+`shortcut_mode_draws_a_keycap_per_key_and_lines_up_the_lanes`, and
 `the_explainer_picker_and_shortcut_recording_never_share_the_window` in
-[tests/panes.rs](../../src/rune_ui/tests/panes.rs), plus the
-`shortcut-explainer`, `shortcut-explainer-toggle`, and
-`shortcut-explainer-chord` (Ctrl+Alt+Space) goldens (frozen at 1.8 s into the
-tape). The animation itself has been seen only in headless
-frames, not on a real window; a headless trace of Hold, Toggle and rapid
-switching on 2026-10-25 kept every element inside the panel and clear of
-Close on every frame (no automated check yet).
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs), the tape's own
+`nothing_draws_past_the_pen`, `the_tape_scrolls_without_steps`,
+`the_still_frame_shows_a_whole_take`, `narrow_lanes_draw_nothing` and
+`the_past_leaves_the_tape` in `explainer.rs`, plus the `shortcut-mode`
+(Option, Double-tap unavailable), `shortcut-mode-key` (Option-Space,
+Double-tap chosen), and `shortcut-mode-chord` (Ctrl+Alt+Space) goldens
+(frozen at 1.8 s into the tape). The animation itself has been seen only in
+headless frames, not on a real window.
 
-On Linux, `hex dictation start` and `stop` bypass Hold, Toggle, and the
-double-tap rules: start records unless something already records, stop
+On Linux, `hex dictation start` and `stop` bypass every Shortcut mode: start records unless something already records, stop
 finishes, and `toggle` does whichever applies. Bound to a key's press and
 release they give hold-to-dictate; a shortcut press still finishes a capture a
 command started.
@@ -515,13 +522,13 @@ and explicit programmatic capture have different intentional-start rules.
 ### Lock, With Or Without Hold
 
 ```ts
-General > Double-tap to lock                          // dictate.lock; Hold only
+Shortcut mode = Hold or double-tap or Double-tap     // dictate.lock
   Hold -> Ordinary hold path remains available
   Tap -> Tap
     ├── Second press AND release <300 ms after first release -> LOCKED
     └── Slow second release -> No lock
 
-General > Advanced > Double-tap only                  // dictate.double-tap-only
+Shortcut mode = Double-tap                           // dictate.double-tap-only
   Requires a key binding AND locking enabled
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode

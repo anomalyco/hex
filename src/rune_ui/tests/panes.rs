@@ -419,16 +419,12 @@ fn contributed_options_are_labs_toggles_off_by_default() {
 #[test]
 fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    assert!(rt.find("shortcut-mode").is_none());
+    assert!(rt.find("shortcut-mode").is_some(), "under the shortcut");
+    assert!(rt.find("avoid-bluetooth-microphone").is_none());
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("shortcut-mode").is_some());
-    assert_eq!(
-        rt.find("double-tap-only").is_some(),
-        rt.state.settings.dictation_hotkey.key.is_some(),
-        "double-tap only needs a key chord"
-    );
+    assert!(rt.find("avoid-bluetooth-microphone").is_some());
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("shortcut-mode").is_none());
+    assert!(rt.find("avoid-bluetooth-microphone").is_none());
     assert!(
         rt.find("microphone-mode").is_some(),
         "the mic switch is in General"
@@ -473,29 +469,34 @@ fn the_microphone_level_follows_the_voice() {
     assert!(quiet.hear(Some(0.5)) && quiet.moving());
 }
 
+/// The row under the shortcut names the choice and opens Shortcut mode.
 #[test]
-fn double_tap_to_lock_shows_only_for_hold() {
-    let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    open_advanced(&mut rt, Pane::General);
-    assert!(rt.find("double-tap").is_some());
-    pick(&mut rt, "shortcut-mode", 1);
-    assert_eq!(
-        rt.state.settings.shortcut_mode,
-        crate::dictation::ShortcutMode::Toggle
-    );
-    assert!(rt.find("double-tap").is_none());
+fn the_shortcut_mode_row_names_the_choice() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    let name = |rt: &Runtime<Ui>| element(rt, "shortcut-mode-control").label.clone();
+    assert_eq!(name(&rt).as_deref(), Some("Hold or double-tap"));
+    rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+    refresh(&mut rt);
+    assert_eq!(name(&rt).as_deref(), Some("Tap"));
+    tap(&mut rt, "shortcut-mode-control");
+    assert!(rt.state.explainer.open);
 }
 
 #[test]
-fn how_it_works_opens_the_shortcut_explainer_and_keeps_focus_inside() {
+fn shortcut_mode_opens_from_its_row_and_keeps_focus_inside() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    open_advanced(&mut rt, Pane::General);
-    tab_to(&mut rt, "shortcut-help");
+    tab_to(&mut rt, "shortcut-mode-control");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
     assert!(rt.state.explainer.open);
-    tab_to(&mut rt, "mode-hold");
-    let stops = ["mode-toggle", "double-tap", "close-explainer", "mode-hold"];
+    tab_to(&mut rt, "trigger-hold-or-double-tap");
+    // A lone modifier can't double-tap, so that option takes no focus.
+    let stops = [
+        "trigger-hold",
+        "trigger-tap",
+        "shortcut-mode-done",
+        "trigger-hold-or-double-tap",
+    ];
     for stop in stops {
         key(&mut rt, Key::Tab, Mods::default());
         assert!(
@@ -508,56 +509,67 @@ fn how_it_works_opens_the_shortcut_explainer_and_keeps_focus_inside() {
     settle(&mut rt);
     assert!(!rt.state.explainer.open);
     assert!(
-        focused(&rt).ends_with("shortcut-help"),
+        focused(&rt).ends_with("shortcut-mode-control"),
         "focus went to {}",
         focused(&rt)
     );
 
-    // Return presses Close, the default button, even from a focused card.
-    let mode = rt.state.settings.shortcut_mode;
+    // Return presses Done, the default button, even from a focused option.
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
-    tab_to(&mut rt, "mode-toggle");
+    tab_to(&mut rt, "trigger-tap");
     key(&mut rt, Key::Enter, Mods::default());
     settle(&mut rt);
     assert!(!rt.state.explainer.open);
-    assert_eq!(rt.state.settings.shortcut_mode, mode);
+    assert_eq!(
+        rt.state.settings.shortcut_mode,
+        crate::dictation::ShortcutMode::Hold
+    );
 }
 
 #[test]
-fn explainer_cards_pick_the_shortcut_mode() {
-    let mut rt = runtime("shortcut-explainer", true, PANE_SIZE);
-    let mode = |rt: &Runtime<Ui>| rt.state.settings.shortcut_mode;
-    assert_eq!(mode(&rt), crate::dictation::ShortcutMode::Hold);
-    assert!(
-        rt.find("shortcut-explainer/explainer-body/lock/double-tap")
-            .is_some()
-    );
-    tab_to(&mut rt, "mode-toggle");
+fn each_option_picks_its_trigger() {
+    use shortcut_mode::Trigger;
+    let mut rt = runtime("shortcut-mode-key", true, PANE_SIZE);
+    let trigger = |rt: &Runtime<Ui>| Trigger::of(&rt.state.settings);
+    assert_eq!(trigger(&rt), Trigger::DoubleTap);
+    tab_to(&mut rt, "trigger-tap");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
-    assert_eq!(mode(&rt), crate::dictation::ShortcutMode::Toggle);
+    assert_eq!(trigger(&rt), Trigger::Tap);
     assert_eq!(saved(&rt), 1);
-    assert!(
-        rt.find("shortcut-explainer/explainer-body/lock/double-tap")
-            .is_none(),
-        "Double-tap to lock is Hold's"
-    );
-    tap(&mut rt, "mode-hold");
-    assert_eq!(mode(&rt), crate::dictation::ShortcutMode::Hold);
-    tap(&mut rt, "shortcut-explainer/explainer-body/lock/double-tap");
-    assert!(!rt.state.settings.double_tap_lock);
-    tap(&mut rt, "close-explainer");
+    for (option, picked) in [
+        ("trigger-hold", Trigger::Hold),
+        ("trigger-hold-or-double-tap", Trigger::HoldOrDoubleTap),
+        ("trigger-double-tap", Trigger::DoubleTap),
+    ] {
+        tap(&mut rt, option);
+        assert_eq!(trigger(&rt), picked);
+    }
+    tap(&mut rt, "trigger-double-tap");
+    assert_eq!(saved(&rt), 4, "picking the choice again saves nothing");
+    tap(&mut rt, "shortcut-mode-done");
     assert!(!rt.state.explainer.open);
+
+    // With a lone modifier, Double-tap says why and does nothing.
+    let mut rt = runtime("shortcut-mode", true, PANE_SIZE);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Needs a shortcut with a key, like ⌥Space")
+    );
+    tap(&mut rt, "trigger-double-tap");
+    assert_eq!(trigger(&rt), Trigger::HoldOrDoubleTap);
+    assert_eq!(saved(&rt), 0);
 }
 
 #[test]
 fn the_explainer_loops_on_the_poll_clock() {
-    let mut rt = runtime("shortcut-explainer-motion", true, PANE_SIZE);
+    let mut rt = runtime("shortcut-mode-motion", true, PANE_SIZE);
     let pressed = |rt: &Runtime<Ui>| {
         rt.elements()
             .into_iter()
-            .find(|e| e.path.ends_with("mode-hold/visual/keys/keycap0/cap"))
+            .find(|e| e.path.ends_with("trigger-hold/visual/keys/keycap0/cap"))
             .map(|e| e.target[1])
             .unwrap()
     };
@@ -567,7 +579,7 @@ fn the_explainer_loops_on_the_poll_clock() {
     assert!(pressed(&rt) > up, "the keycap goes down while held");
     rt.frame(2.0);
     assert_eq!(pressed(&rt), up, "and comes back up");
-    let held = runtime("shortcut-explainer", true, PANE_SIZE);
+    let held = runtime("shortcut-mode", true, PANE_SIZE);
     assert_eq!(held.state.explainer.time(), explainer::SNAPSHOT_MS);
 }
 
@@ -745,10 +757,18 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
     }
 }
 
+/// Shortcut mode's options, by key.
+const TRIGGERS: [&str; 4] = [
+    "trigger-hold-or-double-tap",
+    "trigger-hold",
+    "trigger-tap",
+    "trigger-double-tap",
+];
+
 #[test]
-fn the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes() {
+fn shortcut_mode_draws_a_keycap_per_key_and_lines_up_the_lanes() {
     use crate::app_settings::{HotkeyBinding, HotkeyModifiers};
-    let mut rt = runtime("shortcut-explainer-chord", true, PANE_SIZE);
+    let mut rt = runtime("shortcut-mode-chord", true, PANE_SIZE);
     let default = rt.state.settings.dictation_hotkey.clone();
     let one = HotkeyBinding {
         modifiers: HotkeyModifiers {
@@ -770,7 +790,7 @@ fn the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes() {
                 .unwrap_or_else(|| panic!("no {suffix}"))
         };
         let labels = binding.keycaps();
-        for owner in ["mode-hold", "mode-toggle", "double-tap"] {
+        for owner in TRIGGERS {
             let caps: Vec<_> = (0..labels.len())
                 .map(|index| rect(&format!("{owner}/visual/keys/keycap{index}")))
                 .collect();
@@ -788,75 +808,24 @@ fn the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes() {
                 assert_eq!(pair[0][1], pair[1][1], "{owner}'s keycaps share a baseline");
             }
         }
-        let hold = rect("mode-hold/visual/lanes");
-        let toggle = rect("mode-toggle/visual/lanes");
-        let lock = rect("double-tap/visual/lanes");
-        assert!(
-            (hold[0] - lock[0]).abs() < 0.5,
-            "{labels:?}: lanes start together"
-        );
-        assert!(
-            (hold[2] - toggle[2]).abs() < 0.5,
-            "{labels:?}: both cards' lanes are as wide"
-        );
+        let hold = rect("trigger-hold/visual/lanes");
+        for owner in TRIGGERS {
+            let lanes = rect(&format!("{owner}/visual/lanes"));
+            assert!(
+                (hold[0] - lanes[0]).abs() < 0.5 && (hold[2] - lanes[2]).abs() < 0.5,
+                "{labels:?}: {owner}'s lanes line up with Hold's"
+            );
+        }
         assert!(hold[2] > 30.0, "{labels:?}: lanes keep room to draw");
     }
 }
 
-/// Opened in either mode, the panel centres at its Hold height, so Hold and
-/// Toggle move only its bottom edge; resizing the window centres it again.
+/// A five-key chord widens the panel so every option's lanes keep room, and
+/// the keycaps stay inside their options.
 #[test]
-fn the_explainer_centres_at_its_hold_height_in_either_mode() {
-    fn panel(rt: &Runtime<Ui>) -> [f32; 4] {
-        rt.elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some("shortcut-explainer"))
-            .map(|e| e.target)
-            .expect("the panel")
-    }
-    for (size, scene) in [
-        (PANE_SIZE, "shortcut-explainer-toggle"),
-        (PANE_SIZE, "shortcut-explainer"),
-        ((900.0, 620.0), "shortcut-explainer-toggle"),
-    ] {
-        let mut rt = runtime(scene, true, size);
-        settle(&mut rt);
-        let opened = panel(&rt);
-        tap(&mut rt, "mode-hold");
-        settle(&mut rt);
-        let hold = panel(&rt);
-        assert!(
-            (hold[1] - opened[1]).abs() < 0.5,
-            "{scene}: the top moved from {} to {}",
-            opened[1],
-            hold[1]
-        );
-        assert!(
-            (hold[1] + hold[3] / 2.0 - size.1 / 2.0).abs() < 0.5,
-            "{scene}: Hold is centred in {size:?}: {hold:?}"
-        );
-        tap(&mut rt, "mode-toggle");
-        settle(&mut rt);
-        let toggle = panel(&rt);
-        assert!(
-            (toggle[1] - opened[1]).abs() < 0.5,
-            "{scene}: Toggle {opened:?} {hold:?} {toggle:?}"
-        );
-        rt.set_viewport((size.0, size.1 + 100.0), 1.0);
-        settle(&mut rt);
-        assert!(
-            (panel(&rt)[1] - opened[1] - 50.0).abs() < 0.5,
-            "{scene}: a taller window centres it again"
-        );
-    }
-}
-
-/// A five-key chord widens the panel so every card's lanes keep room, and
-/// the keycaps stay inside their cards.
-#[test]
-fn a_long_chord_widens_the_explainer() {
+fn a_long_chord_widens_shortcut_mode() {
     use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
-    let mut rt = runtime("shortcut-explainer-chord", true, PANE_SIZE);
+    let mut rt = runtime("shortcut-mode-chord", true, PANE_SIZE);
     let side = Some(ModifierSide::Either);
     rt.state.settings.dictation_hotkey = HotkeyBinding {
         modifiers: HotkeyModifiers {
@@ -877,11 +846,11 @@ fn a_long_chord_widens_the_explainer() {
             .map(|e| e.target)
             .unwrap_or_else(|| panic!("no {suffix}"))
     };
-    let panel = rect("shortcut-explainer");
+    let panel = rect("shortcut-mode-modal");
     assert!(panel[0] >= 0.0 && panel[0] + panel[2] <= PANE_SIZE.0);
-    for owner in ["modes/mode-hold", "modes/mode-toggle", "lock/double-tap"] {
+    for owner in TRIGGERS {
         let (card, keys, lanes) = (
-            rect(&format!("explainer-body/{owner}")),
+            rect(&format!("options/{owner}")),
             rect(&format!("{owner}/visual/keys")),
             rect(&format!("{owner}/visual/lanes")),
         );
@@ -892,7 +861,7 @@ fn a_long_chord_widens_the_explainer() {
         );
         assert!(
             lanes[0] + lanes[2] <= card[0] + card[2],
-            "{owner}'s lanes stay in the card"
+            "{owner}'s lanes stay in the option"
         );
     }
 }
@@ -901,7 +870,7 @@ fn a_long_chord_widens_the_explainer() {
 /// frame's poll; the tape starts again on the next.
 #[test]
 fn the_explainer_restarts_when_reduce_motion_turns_off() {
-    let mut rt = runtime("shortcut-explainer-motion", true, PANE_SIZE);
+    let mut rt = runtime("shortcut-mode-motion", true, PANE_SIZE);
     rt.set_system_reduced_motion(true);
     settle(&mut rt);
     assert_eq!(rt.state.explainer.time(), explainer::DONE);
@@ -1511,15 +1480,15 @@ fn platform_goldens() {
             "meetings-off",
             "meetings-recording",
             "mac-settings-permissions-stale",
-            "shortcut-explainer",
-            "shortcut-explainer-toggle",
+            "shortcut-mode",
+            "shortcut-mode-key",
             "sound-sets",
             "sound-sets-playing",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }
     }
-    check_golden("shortcut-explainer-chord", false, PANE_SIZE);
+    check_golden("shortcut-mode-chord", false, PANE_SIZE);
     check_golden("mac-settings-permissions", true, PANE_SIZE);
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-microphone-bluetooth", true, PANE_SIZE);
@@ -1875,45 +1844,6 @@ fn experiment_goldens() {
     check_golden("mac-activity", false, PANE_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
     check_golden("mac-local-build", true, PANE_SIZE);
-}
-
-#[test]
-fn double_tap_to_lock_folds_away_under_the_rows_below() {
-    let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    open_advanced(&mut rt, Pane::General);
-    let element = |rt: &Runtime<Ui>, key: &str| {
-        rt.elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some(key))
-            .unwrap_or_else(|| panic!("no element {key}"))
-    };
-    let edge = |rt: &Runtime<Ui>| {
-        let slot = element(rt, "double-tap-fold").rect;
-        slot[1] + slot[3]
-    };
-    let separator = element(&rt, "double-tap-only-fold").rect[1] - edge(&rt);
-    for mode in [1, 0] {
-        pick(&mut rt, "shortcut-mode", mode);
-        for _ in 0..30 {
-            rt.frame(1.0 / 60.0);
-            let bottom = edge(&rt);
-            let below = element(&rt, "double-tap-only-fold").rect[1];
-            assert!(
-                (below - bottom - separator).abs() < 0.01,
-                "the row below rides the slot's edge: {below} vs {bottom}"
-            );
-            if let Some(row) = rt.elements().into_iter().find(|e| {
-                e.key.as_deref() == Some("double-tap") && e.opacity > 0.0 && e.visible[3] > 0.0
-            }) {
-                let shown = row.visible[1] + row.visible[3];
-                assert!(
-                    shown <= bottom + 0.25,
-                    "the row shows {shown} past its slot's edge {bottom}"
-                );
-            }
-        }
-        settle(&mut rt);
-    }
 }
 
 #[test]

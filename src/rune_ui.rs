@@ -53,6 +53,7 @@ mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+mod shortcut_mode;
 mod sidebar_update;
 mod sound_sets;
 mod spark;
@@ -1234,7 +1235,7 @@ impl Ui {
 }
 
 /// Shortcut recording takes every key; Command-1 through 9 open the
-/// sidebar's panes in order; otherwise Escape closes the shortcut explainer,
+/// sidebar's panes in order; otherwise Escape closes Shortcut mode,
 /// the sound sets sheet, the picker, or the open menu.
 fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if settings::on_key(ui, event, tx) {
@@ -2095,14 +2096,16 @@ const SCENES: &[Scene] = &[
         ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
         ui.open = Some(Menu::Pick("transcription-language"));
     }),
-    ("shortcut-explainer", |ui| {
+    // Shortcut mode's modal. A lone modifier can't double-tap.
+    ("shortcut-mode", |ui| {
         *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
         explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
     }),
-    ("shortcut-explainer-toggle", |ui| {
+    // Option-Space can, and does.
+    ("shortcut-mode-key", |ui| {
         *ui = mac_fixture();
-        ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+        ui.settings.dictation_hotkey.key = Some(crate::app_settings::HotkeyKey::named("space"));
+        shortcut_mode::Trigger::DoubleTap.apply(&mut ui.settings);
         explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
     }),
     // The Shortcut row with a modifier-only shortcut, Left Option, beside
@@ -2137,17 +2140,16 @@ const SCENES: &[Scene] = &[
         );
     }),
     // A three-key chord: Control-Option-Space.
-    ("shortcut-explainer-chord", |ui| {
+    ("shortcut-mode-chord", |ui| {
         *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
-        let modifiers = &mut ui.settings.dictation_hotkey.modifiers;
-        modifiers.control = modifiers.option;
+        let hotkey = &mut ui.settings.dictation_hotkey;
+        hotkey.modifiers.control = hotkey.modifiers.option;
+        hotkey.key = Some(crate::app_settings::HotkeyKey::named("space"));
         explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
     }),
     // Loops, for `--frames` clips.
-    ("shortcut-explainer-motion", |ui| {
+    ("shortcut-mode-motion", |ui| {
         *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
         explainer::fixture(ui, None);
     }),
     // The first run on Linux (Windows is the same window): setting up Hex
