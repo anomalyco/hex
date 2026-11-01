@@ -36,8 +36,9 @@ Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each card's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
-uses it for any Portuguese system language (#867); its strings haven't had a
-native speaker's review yet.
+uses it for any Portuguese system language (#867); it also offers Français,
+used for any French system language (#892). Neither has had a native
+speaker's review yet.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
 models another app already downloaded.

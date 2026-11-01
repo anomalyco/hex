@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
+mod french;
 mod portuguese;
 
 /// A persisted interface-language code (`None` follows the system) and its
@@ -17,7 +18,7 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil) has not had a native speaker's review yet.
+/// (Brasil) and Français have not had a native speaker's review yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
@@ -28,6 +29,7 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("es"), "Español"),
     (Some("uk"), "Українська"),
     (Some("pt"), "Português (Brasil)"),
+    (Some("fr"), "Français"),
 ];
 
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
@@ -64,9 +66,11 @@ fn set_current(code: u8) {
 const ENGLISH: u8 = 255;
 /// Brazilian Portuguese, kept in its own table ([`portuguese::TRANSLATIONS`]).
 const PORTUGUESE_COLUMN: u8 = 6;
+/// French, kept in its own table ([`french::TRANSLATIONS`]).
+const FRENCH_COLUMN: u8 = 7;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
-/// is Brazilian Portuguese.
+/// is Brazilian Portuguese, and `fr` any French one.
 fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
@@ -76,6 +80,7 @@ fn column_for_code(code: &str) -> u8 {
         "es" => 4,
         "uk" => 5,
         "pt" => PORTUGUESE_COLUMN,
+        "fr" => FRENCH_COLUMN,
         _ => ENGLISH,
     }
 }
@@ -190,10 +195,10 @@ pub(crate) fn tr(english: &str) -> &str {
     if column == ENGLISH {
         return english;
     }
-    let table = if column == PORTUGUESE_COLUMN {
-        portuguese::table()
-    } else {
-        &tables()[column as usize]
+    let table = match column {
+        PORTUGUESE_COLUMN => portuguese::table(),
+        FRENCH_COLUMN => french::table(),
+        _ => &tables()[column as usize],
     };
     table.get(english).copied().unwrap_or(english)
 }
@@ -1166,6 +1171,19 @@ mod tests {
         assert_eq!(column_for_code("pt"), PORTUGUESE_COLUMN);
         assert_eq!(column_for_language_tag(""), ENGLISH);
         assert!(LANGUAGE_CHOICES.contains(&(Some("pt"), "Português (Brasil)")));
+        assert_eq!(column_for_language_tag("fr-FR"), super::FRENCH_COLUMN);
+        assert_eq!(column_for_language_tag("fr_CA"), super::FRENCH_COLUMN);
+        assert_eq!(column_for_code("fr"), super::FRENCH_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("fr"), "Français")));
+    }
+
+    #[test]
+    fn french_translates_with_its_column() {
+        super::set_current(super::FRENCH_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "Ne pas changer");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Supprimer x ?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
 
     #[test]
