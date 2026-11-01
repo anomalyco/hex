@@ -1,7 +1,7 @@
 //! The clipboard a Linux paste puts back afterwards: every format of the
 //! CLIPBOARD selection, read within a size cap and deadline, then served
 //! again from Hex until another client takes the clipboard. Wayland reads
-//! and serves through wlr-data-control. X11 uses its own selection owner,
+//! and serves through ext-data-control or wlr-data-control. X11 uses its own selection owner,
 //! because `x11-clipboard` serves a single target.
 
 use std::io::{ErrorKind, Read, Write};
@@ -163,256 +163,314 @@ fn write_bounded(fd: OwnedFd, data: &[u8], deadline: Instant) -> Result<()> {
     Ok(())
 }
 
-mod wayland {
-    use std::collections::HashMap;
-    use std::os::fd::AsFd;
+/// The Wayland snapshot and restore over a data-control protocol whose
+/// manager, device, offer, and source modules the caller imports as
+/// `manager`, `device`, `offer`, and `source`: wlroots' and the standard
+/// `ext` one share every request and event Hex uses.
+macro_rules! data_control {
+    ($name:literal) => {
+        use std::collections::HashMap;
+        use std::os::fd::AsFd;
 
-    use wayland_client::backend::ObjectId;
-    use wayland_client::globals::{GlobalListContents, registry_queue_init};
-    use wayland_client::protocol::wl_registry::{self, WlRegistry};
-    use wayland_client::protocol::wl_seat::{self, WlSeat};
-    use wayland_client::{
-        Connection, Dispatch, EventQueue, Proxy, QueueHandle, event_created_child,
-    };
-    use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_device_v1::{
-        self, ZwlrDataControlDeviceV1,
-    };
-    use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_manager_v1::{
-        self, ZwlrDataControlManagerV1,
-    };
-    use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_offer_v1::{
-        self, ZwlrDataControlOfferV1,
-    };
-    use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_source_v1::{
-        self, ZwlrDataControlSourceV1,
-    };
-
-    use super::*;
-
-    #[derive(Default)]
-    struct State {
-        offers: HashMap<ObjectId, Vec<String>>,
-        /// `None` until the device reports the selection.
-        selection: Option<Option<ZwlrDataControlOfferV1>>,
-        served: Vec<(String, Vec<u8>)>,
-        done: bool,
-    }
-
-    struct Session {
-        connection: Connection,
-        queue: EventQueue<State>,
-        state: State,
-        manager: ZwlrDataControlManagerV1,
-        device: ZwlrDataControlDeviceV1,
-    }
-
-    fn connect() -> Result<Session> {
-        let connection =
-            Connection::connect_to_env().wrap_err("could not connect to the compositor")?;
-        let (globals, mut queue) = registry_queue_init::<State>(&connection)?;
-        let handle = queue.handle();
-        let manager: ZwlrDataControlManagerV1 = globals
-            .bind(&handle, 1..=1, ())
-            .wrap_err("the compositor offers no wlr-data-control clipboard access")?;
-        let seat: WlSeat = globals
-            .bind(&handle, 1..=1, ())
-            .wrap_err("the compositor offers no seat")?;
-        let device = manager.get_data_device(&seat, &handle, ());
-        let mut state = State::default();
-        // The device reports the current selection as soon as it exists.
-        for _ in 0..2 {
-            if state.selection.is_some() {
-                break;
-            }
-            queue.roundtrip(&mut state)?;
-        }
-        Ok(Session {
-            connection,
-            queue,
-            state,
-            manager,
-            device,
-        })
-    }
-
-    /// Every format of the selection, or only `only`.
-    pub(super) fn snapshot(only: Option<&str>) -> Result<Snapshot> {
-        let deadline = Instant::now() + READ_DEADLINE;
-        let session = connect()?;
-        let Some(Some(offer)) = session.state.selection.clone() else {
-            return Ok(Snapshot::Empty);
+        use wayland_client::backend::ObjectId;
+        use wayland_client::globals::{GlobalListContents, registry_queue_init};
+        use wayland_client::protocol::wl_registry::{self, WlRegistry};
+        use wayland_client::protocol::wl_seat::{self, WlSeat};
+        use wayland_client::{
+            Connection, Dispatch, EventQueue, Proxy, QueueHandle, event_created_child,
         };
-        let mimes = session
-            .state
-            .offers
-            .get(&offer.id())
-            .cloned()
-            .unwrap_or_default();
-        let mut formats = Vec::new();
-        let mut total = 0;
-        for mime in mimes
-            .into_iter()
-            .filter(|mime| only.is_none_or(|only| only == mime))
-        {
-            let (read, write) = pipe()?;
-            offer.receive(mime.clone(), write.as_fd());
-            drop(write);
-            session.connection.flush()?;
-            let data = read_bounded(read, CAP - total, deadline)
-                .wrap_err_with(|| format!("could not read the clipboard's {mime}"))?;
-            total += data.len();
-            formats.push((mime, data));
-        }
-        Ok(if formats.is_empty() {
-            Snapshot::Empty
-        } else {
-            Snapshot::Wayland(formats)
-        })
-    }
 
-    /// Takes the selection with `formats`, or clears it when there are none,
-    /// and serves it on a thread until another client replaces it.
-    pub(super) fn serve(formats: Vec<(String, Vec<u8>)>) -> Result<()> {
-        let mut session = connect()?;
-        if formats.is_empty() {
-            session.device.set_selection(None);
-            session.queue.roundtrip(&mut session.state)?;
-            session.device.destroy();
-            return Ok(());
+        #[derive(Default)]
+        struct State {
+            offers: HashMap<ObjectId, Vec<String>>,
+            /// `None` until the device reports the selection.
+            selection: Option<Option<Offer>>,
+            served: Vec<(String, Vec<u8>)>,
+            done: bool,
         }
-        let source = session
-            .manager
-            .create_data_source(&session.queue.handle(), ());
-        for (mime, _) in &formats {
-            source.offer(mime.clone());
+
+        struct Session {
+            connection: Connection,
+            queue: EventQueue<State>,
+            state: State,
+            manager: Manager,
+            device: Device,
         }
-        session.device.set_selection(Some(&source));
-        session.state.served = formats;
-        session.queue.roundtrip(&mut session.state)?;
-        thread::Builder::new()
-            .name("hex-clipboard-restore".into())
-            .spawn(move || {
-                while !session.state.done {
-                    if session.queue.blocking_dispatch(&mut session.state).is_err() {
-                        break;
-                    }
+
+        fn connect() -> Result<Session> {
+            let connection =
+                Connection::connect_to_env().wrap_err("could not connect to the compositor")?;
+            let (globals, mut queue) = registry_queue_init::<State>(&connection)?;
+            let handle = queue.handle();
+            let manager: Manager = globals
+                .bind(&handle, 1..=1, ())
+                .wrap_err(concat!("the compositor offers no ", $name, " clipboard access"))?;
+            let seat: WlSeat = globals
+                .bind(&handle, 1..=1, ())
+                .wrap_err("the compositor offers no seat")?;
+            let device = manager.get_data_device(&seat, &handle, ());
+            let mut state = State::default();
+            // The device reports the current selection as soon as it exists.
+            for _ in 0..2 {
+                if state.selection.is_some() {
+                    break;
                 }
-                source.destroy();
+                queue.roundtrip(&mut state)?;
+            }
+            Ok(Session {
+                connection,
+                queue,
+                state,
+                manager,
+                device,
+            })
+        }
+
+        /// Every format of the selection, or only `only`.
+        pub(super) fn snapshot(only: Option<&str>) -> Result<Snapshot> {
+            let deadline = Instant::now() + READ_DEADLINE;
+            let session = connect()?;
+            let Some(Some(offer)) = session.state.selection.clone() else {
+                return Ok(Snapshot::Empty);
+            };
+            let mimes = session
+                .state
+                .offers
+                .get(&offer.id())
+                .cloned()
+                .unwrap_or_default();
+            let mut formats = Vec::new();
+            let mut total = 0;
+            for mime in mimes
+                .into_iter()
+                .filter(|mime| only.is_none_or(|only| only == mime))
+            {
+                let (read, write) = pipe()?;
+                offer.receive(mime.clone(), write.as_fd());
+                drop(write);
+                session.connection.flush()?;
+                let data = read_bounded(read, CAP - total, deadline)
+                    .wrap_err_with(|| format!("could not read the clipboard's {mime}"))?;
+                total += data.len();
+                formats.push((mime, data));
+            }
+            Ok(if formats.is_empty() {
+                Snapshot::Empty
+            } else {
+                Snapshot::Wayland(formats)
+            })
+        }
+
+        /// Takes the selection with `formats`, or clears it when there are none,
+        /// and serves it on a thread until another client replaces it.
+        pub(super) fn serve(formats: Vec<(String, Vec<u8>)>) -> Result<()> {
+            let mut session = connect()?;
+            if formats.is_empty() {
+                session.device.set_selection(None);
+                session.queue.roundtrip(&mut session.state)?;
                 session.device.destroy();
-                let _ = session.connection.flush();
-            })?;
-        Ok(())
-    }
-
-    impl Dispatch<WlRegistry, GlobalListContents> for State {
-        fn event(
-            _: &mut Self,
-            _: &WlRegistry,
-            _: wl_registry::Event,
-            _: &GlobalListContents,
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
-    impl Dispatch<WlSeat, ()> for State {
-        fn event(
-            _: &mut Self,
-            _: &WlSeat,
-            _: wl_seat::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
-    impl Dispatch<ZwlrDataControlManagerV1, ()> for State {
-        fn event(
-            _: &mut Self,
-            _: &ZwlrDataControlManagerV1,
-            _: zwlr_data_control_manager_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
-    impl Dispatch<ZwlrDataControlDeviceV1, ()> for State {
-        fn event(
-            state: &mut Self,
-            _: &ZwlrDataControlDeviceV1,
-            event: zwlr_data_control_device_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            match event {
-                zwlr_data_control_device_v1::Event::DataOffer { id } => {
-                    state.offers.insert(id.id(), Vec::new());
-                }
-                zwlr_data_control_device_v1::Event::Selection { id } => {
-                    if let Some(Some(previous)) = state.selection.take()
-                        && Some(&previous) != id.as_ref()
-                    {
-                        state.offers.remove(&previous.id());
-                        previous.destroy();
+                return Ok(());
+            }
+            let source = session
+                .manager
+                .create_data_source(&session.queue.handle(), ());
+            for (mime, _) in &formats {
+                source.offer(mime.clone());
+            }
+            session.device.set_selection(Some(&source));
+            session.state.served = formats;
+            session.queue.roundtrip(&mut session.state)?;
+            thread::Builder::new()
+                .name("hex-clipboard-restore".into())
+                .spawn(move || {
+                    while !session.state.done {
+                        if session.queue.blocking_dispatch(&mut session.state).is_err() {
+                            break;
+                        }
                     }
-                    state.selection = Some(id);
-                }
-                zwlr_data_control_device_v1::Event::Finished => state.done = true,
-                _ => {}
+                    source.destroy();
+                    session.device.destroy();
+                    let _ = session.connection.flush();
+                })?;
+            Ok(())
+        }
+
+        impl Dispatch<WlRegistry, GlobalListContents> for State {
+            fn event(
+                _: &mut Self,
+                _: &WlRegistry,
+                _: wl_registry::Event,
+                _: &GlobalListContents,
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
             }
         }
 
-        event_created_child!(State, ZwlrDataControlDeviceV1, [
-            zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, ()),
-        ]);
-    }
-
-    impl Dispatch<ZwlrDataControlOfferV1, ()> for State {
-        fn event(
-            state: &mut Self,
-            offer: &ZwlrDataControlOfferV1,
-            event: zwlr_data_control_offer_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            if let zwlr_data_control_offer_v1::Event::Offer { mime_type } = event {
-                state.offers.entry(offer.id()).or_default().push(mime_type);
+        impl Dispatch<WlSeat, ()> for State {
+            fn event(
+                _: &mut Self,
+                _: &WlSeat,
+                _: wl_seat::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
             }
         }
-    }
 
-    impl Dispatch<ZwlrDataControlSourceV1, ()> for State {
-        fn event(
-            state: &mut Self,
-            _: &ZwlrDataControlSourceV1,
-            event: zwlr_data_control_source_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            match event {
-                zwlr_data_control_source_v1::Event::Send { mime_type, fd } => {
-                    if let Some((_, data)) =
-                        state.served.iter().find(|(mime, _)| *mime == mime_type)
-                        && let Err(error) = write_bounded(fd, data, Instant::now() + SERVE_DEADLINE)
-                    {
-                        tracing::debug!(
-                            error = format!("{error:#}"),
-                            mime_type,
-                            "could not serve the restored clipboard"
-                        );
+        impl Dispatch<Manager, ()> for State {
+            fn event(
+                _: &mut Self,
+                _: &Manager,
+                _: manager::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
+            }
+        }
+
+        impl Dispatch<Device, ()> for State {
+            fn event(
+                state: &mut Self,
+                _: &Device,
+                event: device::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
+                match event {
+                    device::Event::DataOffer { id } => {
+                        state.offers.insert(id.id(), Vec::new());
                     }
+                    device::Event::Selection { id } => {
+                        if let Some(Some(previous)) = state.selection.take()
+                            && Some(&previous) != id.as_ref()
+                        {
+                            state.offers.remove(&previous.id());
+                            previous.destroy();
+                        }
+                        state.selection = Some(id);
+                    }
+                    device::Event::Finished => state.done = true,
+                    _ => {}
                 }
-                zwlr_data_control_source_v1::Event::Cancelled => state.done = true,
-                _ => {}
+            }
+
+            event_created_child!(State, Device, [
+                device::EVT_DATA_OFFER_OPCODE => (Offer, ()),
+            ]);
+        }
+
+        impl Dispatch<Offer, ()> for State {
+            fn event(
+                state: &mut Self,
+                offer: &Offer,
+                event: offer::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
+                if let offer::Event::Offer { mime_type } = event {
+                    state.offers.entry(offer.id()).or_default().push(mime_type);
+                }
             }
         }
+
+        impl Dispatch<Source, ()> for State {
+            fn event(
+                state: &mut Self,
+                _: &Source,
+                event: source::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
+                match event {
+                    source::Event::Send { mime_type, fd } => {
+                        if let Some((_, data)) =
+                            state.served.iter().find(|(mime, _)| *mime == mime_type)
+                            && let Err(error) = write_bounded(fd, data, Instant::now() + SERVE_DEADLINE)
+                        {
+                            tracing::debug!(
+                                error = format!("{error:#}"),
+                                mime_type,
+                                "could not serve the restored clipboard"
+                            );
+                        }
+                    }
+                    source::Event::Cancelled => state.done = true,
+                    _ => {}
+                }
+            }
+        }
+    };
+}
+
+/// Wayland reads and serves the clipboard through `ext-data-control` (KWin,
+/// #719) or wlroots' `wlr-data-control`, whichever the compositor offers.
+mod wayland {
+    use super::{Result, Snapshot, eyre};
+
+    pub(super) fn snapshot(only: Option<&str>) -> Result<Snapshot> {
+        if offers(ext::GLOBAL) {
+            ext::snapshot(only)
+        } else if offers(wlr::GLOBAL) {
+            wlr::snapshot(only)
+        } else {
+            Err(missing())
+        }
+    }
+
+    pub(super) fn serve(formats: Vec<(String, Vec<u8>)>) -> Result<()> {
+        if offers(ext::GLOBAL) {
+            ext::serve(formats)
+        } else if offers(wlr::GLOBAL) {
+            wlr::serve(formats)
+        } else {
+            Err(missing())
+        }
+    }
+
+    fn offers(global: &str) -> bool {
+        crate::linux::paste::wayland_offers(global)
+    }
+
+    fn missing() -> color_eyre::eyre::Report {
+        eyre!("the compositor offers no ext-data-control or wlr-data-control clipboard access")
+    }
+
+    mod ext {
+        pub(super) const GLOBAL: &str = "ext_data_control_manager_v1";
+        use wayland_protocols::ext::data_control::v1::client::{
+            ext_data_control_device_v1 as device, ext_data_control_manager_v1 as manager,
+            ext_data_control_offer_v1 as offer, ext_data_control_source_v1 as source,
+        };
+        use device::ExtDataControlDeviceV1 as Device;
+        use manager::ExtDataControlManagerV1 as Manager;
+        use offer::ExtDataControlOfferV1 as Offer;
+        use source::ExtDataControlSourceV1 as Source;
+
+        use super::super::*;
+
+        data_control!("ext-data-control");
+    }
+
+    mod wlr {
+        pub(super) const GLOBAL: &str = "zwlr_data_control_manager_v1";
+        use wayland_protocols_wlr::data_control::v1::client::{
+            zwlr_data_control_device_v1 as device, zwlr_data_control_manager_v1 as manager,
+            zwlr_data_control_offer_v1 as offer, zwlr_data_control_source_v1 as source,
+        };
+        use device::ZwlrDataControlDeviceV1 as Device;
+        use manager::ZwlrDataControlManagerV1 as Manager;
+        use offer::ZwlrDataControlOfferV1 as Offer;
+        use source::ZwlrDataControlSourceV1 as Source;
+
+        use super::super::*;
+
+        data_control!("wlr-data-control");
     }
 }
 

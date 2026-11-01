@@ -478,8 +478,14 @@ is left holding the transcript, and Hex's log says why. When automatic paste
 fails, the transcript stays on the clipboard for Ctrl+V. Nothing confirms the
 target read the paste, so a target stalled past the delay can paste the
 restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
-On Wayland, restoring needs the compositor's `wlr-data-control` protocol
-(wlroots compositors, niri, Hyprland, KDE); without it the transcript stays.
+On Wayland, restoring needs the compositor's `ext-data-control` protocol
+(KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
+compositors, niri, Hyprland); without either the transcript stays.
+
+On GNOME, Hex pastes through the RemoteDesktop portal, and GNOME shows its
+remote-control indicator while that session is open. Hex closes it 15 seconds
+after the last paste and reopens it at the next one with the grant you
+approved, so you're asked only once.
 
 ## Native Wayland Requirements
 

@@ -251,7 +251,7 @@ substitute for source inspection or a second roadmap.
   and paste.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
-  from Hex (wlr-data-control on Wayland, its own selection owner with INCR on
+  from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on
   X11) until another client takes it.
 - `linux/input`: the one shortcut state machine (hold, double-tap lock, toggle,
   double-tap only, Escape, Paste Last, and `hex` commands) and the
@@ -1184,7 +1184,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   clipboard is cleared again; an oversized or unreadable one is not restored,
   and the log says why. A paste that only reached the clipboard keeps it for
   Ctrl+V, and a capture copy is never restored over. Wayland restoration needs
-  wlr-data-control; there is no consumption acknowledgment.
+  ext-data-control (KWin) or wlr-data-control; there is no consumption
+  acknowledgment. The RemoteDesktop paste session closes 15 s after the last
+  paste when its grant restores, so GNOME's remote-control indicator shows
+  only around pastes (#718); the next paste reopens it without a dialog, and
+  only a session that showed the dialog waits the 250 ms focus settle.
 
 ## Development
 
