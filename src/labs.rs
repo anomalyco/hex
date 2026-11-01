@@ -653,7 +653,8 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         );
         return Ok(());
     }
-    let mut settings = AppSettings::load()?;
+    // Listing, or handing the change to a running Hex, never writes the file.
+    let settings = AppSettings::read()?;
     let (name, on) = match command {
         None | Some(LabsCommand::List) => {
             print!("{}", list(&settings));
@@ -687,6 +688,7 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
             }
         };
     }
+    let mut settings = AppSettings::load()?;
     if feature.on(&settings) == on {
         println!("{} is already {state}.", feature.name());
         return Ok(());

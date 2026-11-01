@@ -1301,8 +1301,9 @@ rules on every check; refresh ratcheted ceilings with
 
 Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 --snap <png> --scene <name>` draws one named fixture scene from `SCENES` in
-`src/rune_ui.rs` without starting the runtime, on every OS (`--list-scenes`
-lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
+`src/rune_ui.rs` without starting the runtime or touching the data folder
+(no settings, History, or log; only `live` reads, and never writes), on
+every OS (`--list-scenes` lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
 render). Scenes cover every pane and state the goldens check: the Linux and
 Windows panes (`modes`, `history`, `picker`, `onboarding`,
 `windows-settings`, …) and the macOS ones (`mac-settings`,

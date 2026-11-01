@@ -357,6 +357,14 @@ fn main() -> Result<()> {
             output,
         );
     }
+    // A headless render (`hex app -- --snap …`) draws fixtures: no data
+    // folder, log, lock, or settings, so it never touches the user's Hex.
+    if let Some(Command::App { rune_args, .. }) = &cli.command
+        && !rune_args.is_empty()
+    {
+        rune_ui::render_app(rune_args.clone()).run();
+        return Ok(());
+    }
     let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
 
     let event_path = log_dir.join("live.ndjson");
@@ -374,7 +382,7 @@ fn main() -> Result<()> {
         }
     });
     match command {
-        Command::App { device, rune_args } => open_app(event_path, device, rune_args),
+        Command::App { device, .. } => open_app(event_path, device),
         Command::Listen { device } => {
             let _instance = desktop::instance::acquire("listener")?;
             labs::log_launch();
@@ -562,14 +570,8 @@ fn main() -> Result<()> {
     }
 }
 
-/// Rune reads its own flags (`--snap`, `--scene`, …) from `rune_args`; a
-/// headless run draws fixtures without starting the runtime.
 #[cfg(target_os = "macos")]
-fn open_app(event_path: PathBuf, device: Option<String>, rune_args: Vec<String>) -> Result<()> {
-    if !rune_args.is_empty() {
-        crate::rune_ui::render_app(rune_args).run();
-        return Ok(());
-    }
+fn open_app(event_path: PathBuf, device: Option<String>) -> Result<()> {
     let _instance = desktop::instance::acquire("listener")?;
     labs::log_launch();
     audio::hex_microphone::host_service();

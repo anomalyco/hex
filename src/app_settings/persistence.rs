@@ -36,14 +36,24 @@ impl AppSettings {
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Self> {
+        let (settings, migrated) = Self::read_from(path)?;
+        if migrated && let Err(error) = settings.write_to(path) {
+            tracing::warn!(%error, "could not persist normalized settings");
+        }
+        Ok(settings)
+    }
+
+    /// What `load_from` loads, without writing anything back: true when
+    /// `load_from` would persist a migration.
+    pub(crate) fn read_from(path: &Path) -> Result<(Self, bool)> {
         let data = match fs::read(path) {
             Ok(data) => data,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default());
+                return Ok((Self::default(), false));
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "could not read settings; using defaults without changing the file");
-                return Ok(Self::default());
+                return Ok((Self::default(), false));
             }
         };
         let (mut settings, mut repaired) = decode(&data);
@@ -79,13 +89,9 @@ impl AppSettings {
         }
         // A repair alone never rewrites the user's file. Ordinary migrations
         // keep their existing write-on-load behavior for healthy settings.
-        if !repaired
-            && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
-            && let Err(error) = settings.write_to(path)
-        {
-            tracing::warn!(%error, "could not persist normalized settings");
-        }
-        Ok(settings)
+        let migrated =
+            !repaired && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded);
+        Ok((settings, migrated))
     }
 
     pub(super) fn write_to(&self, path: &Path) -> Result<()> {
