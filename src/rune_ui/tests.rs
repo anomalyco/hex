@@ -1618,15 +1618,16 @@ fn the_wheel_scrolls_a_long_term_list() {
             .unwrap()
     };
     let list = element(&rt, "term-scroll").rect;
-    let before = first(&rt);
-    for x in [list[0] + 40.0, list[0] + list[2] - 8.0] {
+    for x in [list[0] + 1.0, list[0] + 40.0, list[0] + list[2] - 8.0] {
+        let before = first(&rt);
         for _ in 0..10 {
             rt.wheel(x, list[1] + list[3] / 2.0, 30.0);
             rt.frame(1.0 / 60.0);
         }
+        settle(&mut rt);
+        eprintln!("x {x}: {before} -> {} list {list:?}", first(&rt));
     }
-    settle(&mut rt);
-    assert!(first(&rt) < before - 50.0, "the list didn't scroll");
+    panic!("debug");
 }
 
 /// A model whose transcription takes no vocabulary says so on the Vocabulary
