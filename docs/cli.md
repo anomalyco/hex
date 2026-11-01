@@ -408,6 +408,8 @@ observe input-source changes or show these controls.
   second-dictation-shortcut`) and shares no key with another shortcut.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
+- `ui_language` takes `en`, `pl`, `zh`, `ja`, `de`, `es`, `uk`, `pt`, `fr`,
+  or `none` (follow the system language), the same languages Settings offers.
 - `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
   channel it was published on), and checks for updates at once. Choosing
   another channel than the build's offers that channel's current release
