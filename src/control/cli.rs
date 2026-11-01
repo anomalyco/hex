@@ -290,6 +290,9 @@ pub enum ModelCommand {
     },
     /// Labs: rename an imported model.
     Rename { model: String, name: String },
+    /// Labs: check Hex's copy of an import again; a copy whose contents
+    /// still match is ready again.
+    Repair { model: String },
     /// Labs: remove Hex's copy of an imported model.
     Remove { model: String },
 }
@@ -429,6 +432,14 @@ pub fn run(command: ControlCli) -> u8 {
             ModelCommand::Rename { model, name } => report(imported(&model).and_then(|id| {
                 crate::transcription::custom_models::rename(id, &name)?;
                 println!("renamed\t{}", id.as_str());
+                Ok(())
+            })),
+            ModelCommand::Repair { model } => report(imported(&model).and_then(|id| {
+                crate::transcription::custom_models::repair(
+                    id,
+                    &std::sync::atomic::AtomicBool::new(false),
+                )?;
+                println!("ready\t{}", id.as_str());
                 Ok(())
             })),
             ModelCommand::Remove { model } => report(imported(&model).and_then(|id| {
