@@ -3,7 +3,10 @@
 //! and in a live desktop window pauses on `"Your turn"` with a focused
 //! [`rune::TextEdit`] so you can hold `⌥` and test real voice dictation live.
 
+mod replay;
 mod side;
+
+pub(super) use replay::strip;
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -152,6 +155,8 @@ pub(crate) struct Onboard {
     /// A story that plays the whole first run by itself: it presses
     /// the Launch Room's row, and its scripted player ends the game.
     pub(crate) autoplay: bool,
+    /// The real download as the first run shows it.
+    pub(crate) replay: replay::Replay,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -270,6 +275,7 @@ impl Onboard {
             taps: 0,
             toggle: false,
             autoplay: false,
+            replay: replay::Replay::default(),
         }
     }
 

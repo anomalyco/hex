@@ -322,6 +322,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         } else if preparing {
             download.downloaded = downloaded_bytes.min(download.total.saturating_sub(1));
         }
+        s.replay.show(download, now);
     }
 
     // Hex's state arrives between frames, so the first run keeps polling.
@@ -336,6 +337,7 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El
     s.reduced.set(reduced);
     Some(
         super::flows::view(p, s)
+            .children(super::stories::strip(p, s))
             .key("first-run")
             .role("dialog")
             .absolute(0.0, 0.0)

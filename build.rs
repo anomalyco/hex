@@ -4,6 +4,14 @@ use std::process::Command;
 fn main() {
     build_version();
     test_build_commit();
+    // `hex_dev_onboarding`: the first run's replay strip and its swearing
+    // jokes, in debug and `HEX_TEST_BUILD=1` builds only.
+    println!("cargo::rustc-check-cfg=cfg(hex_dev_onboarding)");
+    if std::env::var_os("CARGO_CFG_DEBUG_ASSERTIONS").is_some()
+        || std::env::var("HEX_TEST_BUILD").as_deref() == Ok("1")
+    {
+        println!("cargo::rustc-cfg=hex_dev_onboarding");
+    }
     // `hex_capture`: the `capture` experiment's code, in every macOS, Linux,
     // and Windows build (`scrawl-capture` is their dependency).
     println!("cargo::rustc-check-cfg=cfg(hex_capture)");

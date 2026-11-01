@@ -4,16 +4,21 @@
 //!
 //! [`parse`] reports every mistake with its line number. Renders pick a
 //! scene with `HEX_ONBOARDING_SCENE` (a path) or `HEX_ONBOARDING_VARIANT`
-//! (`A`, `B`, `C`, `C+`); everyone else gets `default.scene`.
+//! (`A`, `B`, `C`, `C+`); everyone else gets `default.scene`. Test and
+//! debug builds (`hex_dev_onboarding`) also switch scenes as they run, from
+//! the first run's replay strip.
 
 use std::fmt;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::fixture::{ANSWER_JAY, Take};
 use super::typing::Glyph;
 
-/// Every bundled scene, by file name.
-pub(crate) const SCENES: [(&str, &str); 5] = [
+/// Every bundled scene, by file name. A and B swear, so only test and
+/// debug builds carry them.
+#[cfg(hex_dev_onboarding)]
+pub(crate) const SCENES: &[(&str, &str)] = &[
     ("default.scene", include_str!("scenes/default.scene")),
     (
         "A-incontinence.scene",
@@ -23,6 +28,19 @@ pub(crate) const SCENES: [(&str, &str); 5] = [
     ("C-v3.scene", include_str!("scenes/C-v3.scene")),
     ("C-plus.scene", include_str!("scenes/C-plus.scene")),
 ];
+#[cfg(not(hex_dev_onboarding))]
+pub(crate) const SCENES: &[(&str, &str)] = &[
+    ("default.scene", include_str!("scenes/default.scene")),
+    ("C-v3.scene", include_str!("scenes/C-v3.scene")),
+    ("C-plus.scene", include_str!("scenes/C-plus.scene")),
+];
+
+/// The bundled scene the replay strip picked, as an index into [`SCENES`];
+/// out of range until it picks one.
+static PICKED: AtomicUsize = AtomicUsize::new(usize::MAX);
+/// The bundled scene this run started on, as [`PICKED`] counts; out of
+/// range for a scene from a path.
+static LAUNCHED: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// The colours a person can have: OpenCode theme scales.
 pub(crate) const COLOURS: [&str; 10] = [
@@ -260,9 +278,15 @@ impl fmt::Debug for ParseErrors {
 }
 
 impl Script<'static> {
-    /// The scene this run plays: a render's choice, else `default.scene`.
-    /// Read once.
+    /// The scene this run plays: the replay strip's pick, else a render's
+    /// choice, else `default.scene`. The render's choice is read once.
     pub(crate) fn chosen() -> &'static Script<'static> {
+        static PARSED: [OnceLock<Script<'static>>; SCENES.len()] =
+            [const { OnceLock::new() }; SCENES.len()];
+        let picked = PICKED.load(Ordering::Relaxed);
+        if let Some(cell) = PARSED.get(picked) {
+            return cell.get_or_init(|| bundled(SCENES[picked].0));
+        }
         static CHOSEN: OnceLock<Script<'static>> = OnceLock::new();
         CHOSEN.get_or_init(|| {
             if let Ok(path) = std::env::var("HEX_ONBOARDING_SCENE")
@@ -283,8 +307,38 @@ impl Script<'static> {
                 Ok("C+" | "c+" | "C-plus" | "plus") => "C-plus.scene",
                 _ => "default.scene",
             };
-            bundled(name)
+            let index = SCENES.iter().position(|(n, _)| *n == name).unwrap_or(0);
+            LAUNCHED.store(index, Ordering::Relaxed);
+            bundled(SCENES[index].0)
         })
+    }
+
+    /// Plays the next bundled scene from now on, and names it.
+    pub(crate) fn choose_next() -> &'static str {
+        let current = PICKED.load(Ordering::Relaxed);
+        let current = if current < SCENES.len() {
+            current
+        } else {
+            Self::chosen();
+            LAUNCHED.load(Ordering::Relaxed)
+        };
+        let next = current.wrapping_add(1) % SCENES.len();
+        PICKED.store(next, Ordering::Relaxed);
+        Self::chosen_name()
+    }
+
+    /// The bundled scene playing, without `.scene`; `custom` for a path's.
+    pub(crate) fn chosen_name() -> &'static str {
+        let picked = PICKED.load(Ordering::Relaxed);
+        let index = if picked < SCENES.len() {
+            picked
+        } else {
+            Self::chosen();
+            LAUNCHED.load(Ordering::Relaxed)
+        };
+        SCENES
+            .get(index)
+            .map_or("custom", |(name, _)| name.trim_end_matches(".scene"))
     }
 }
 
