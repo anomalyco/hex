@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use arboard::SetExtWindows;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -120,8 +121,13 @@ impl WindowsPaster {
                 "the clipboard changed while the transcript was being prepared"
             ));
         }
+        // Marked so Windows keeps the transcript out of clipboard history
+        // (Win+V) and cloud sync, as macOS marks it transient (#851).
         self.clipboard
-            .set_text(text.to_string())
+            .set()
+            .exclude_from_history()
+            .exclude_from_cloud()
+            .text(text.to_string())
             .wrap_err("could not place the transcript on the Windows clipboard")?;
         let transcript_sequence = clipboard_sequence();
         let generation = restore.register(snapshot, original_sequence, transcript_sequence);
