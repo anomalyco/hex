@@ -2126,15 +2126,15 @@ const SCENES: &[Scene] = &[
     }),
     // Onboarding's model list with models found here: as it opens, with
     // the recommended model downloading, and with its exact file found.
-    ("onboarding-model-found", |ui| {
-        found::onboarding_scene(ui, false, false)
-    }),
-    ("onboarding-model-found-downloading", |ui| {
-        found::onboarding_scene(ui, false, true)
-    }),
-    ("onboarding-model-found-recommended", |ui| {
-        found::onboarding_scene(ui, true, false)
-    }),
+    ("onboarding-model-found", found::list_scene),
+    (
+        "onboarding-model-found-downloading",
+        found::downloading_scene,
+    ),
+    (
+        "onboarding-model-found-recommended",
+        found::recommended_scene,
+    ),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
     // The microphone row following a recorded voice (`--video`), and with

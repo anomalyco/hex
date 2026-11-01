@@ -334,7 +334,7 @@ pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
 
 /// Onboarding's model list over [`fixture`]: with the recommended model's
 /// exact file too, or with the recommended model picked and downloading.
-pub(super) fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading: bool) {
+fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading: bool) {
     *ui = super::portal_fixture();
     ui.found.models = fixture();
     if recommended_found {
@@ -347,4 +347,16 @@ pub(super) fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading
         super::onboarding::set_downloaded(ui, 42);
         super::onboarding::poll(ui);
     }
+}
+
+pub(super) fn list_scene(ui: &mut Ui) {
+    onboarding_scene(ui, false, false);
+}
+
+pub(super) fn downloading_scene(ui: &mut Ui) {
+    onboarding_scene(ui, false, true);
+}
+
+pub(super) fn recommended_scene(ui: &mut Ui) {
+    onboarding_scene(ui, true, false);
 }
