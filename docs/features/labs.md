@@ -46,6 +46,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Paste picker    no    labs.paste_picker            (macOS, Dev) hold Paste last dictation to pick one or more recent dictations at the caret
+├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
+├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -382,7 +384,10 @@ test records (945 utterances, batch 8, no timestamps, source revision
 7045d1c; run IDs and scoring or artifact revisions unknown); the catalog's
 7.64 and 10.11 stay as the alternate legacy figures the picker shows with the
 toggle off. QwenCleo-ASR 1.7B names its author's 3,699-utterance Egyptian
-Arabic test; every other figure is English WER with dataset and source
+Arabic test. ivrit.ai Whisper large-v3-turbo carries Hex's own run of
+transcribe.cpp's WER harness on the FLEURS Hebrew test (18.45% WER, 792
+utterances, batch 1, no timestamps, Radeon 8060S over Vulkan, source revision
+7045d1c); every other figure is English WER with dataset and source
 unrecorded. A "Most accurate" badge stays only when its record is comparable
 (`BenchmarkRecord::comparable`: same metric, language, and a known, equal
 dataset) with every other recommended model's for the saved language, so
@@ -420,6 +425,99 @@ The gate is `labs::paste_picker()` where the press starts
 `paste-picker-multiselect` scenes (no golden). Not yet observed: a real Mac,
 caret bounds across apps (terminals and Electron editors expose none and get
 the pointer), or paste into the original app after the list closes.
+
+Use your own speech model (`custom-models`, issues 648 and 743, every OS):
+
+```ts
+Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // labs.custom-models
+├── Header check, before anything loads (transcription::gguf_header): GGUF v2/v3;
+│   general.architecture parakeet | whisper | qwen3_asr | cohere_asr | sensevoice;
+│   stt.variant; general.languages with a code Hex knows; only F32, F16, and
+│   Q8_0 tensors (the types every build runs on Metal and Vulkan); the tensor
+│   data fits the file. Anything else -> "<file> can't be imported: <reason>"
+├── Copy -> models/custom/<16 hex>.gguf while hashing; the copy is checked again;
+│   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime); manifest
+│   <16 hex>.json (name, general.name, family, variant, languages, detection,
+│   file name, licence, repo URL). The original is never touched; a failed or
+│   cancelled import removes only its partial copy; the same file again keeps
+│   the first import
+├── ID custom-<first 16 hex of the SHA-256> (TranscriptionModelId::Custom)
+├── Card -> name from general.name (Rename edits it), languages from the file,
+│   offline only (no streaming), Parakeet without language prompt or Auto,
+│   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
+│   against its receipt instead of downloading)
+├── Remove -> Hex's copy, receipt, and manifest only; not the active model
+├── Changed -> "Check again" rehashes the copy: the recorded SHA-256 again ->
+│   new receipt, ready; else it stays changed. Missing or changed -> "Import
+│   again…": the same file replaces the copy and keeps the import's name
+└── Saved import missing, changed (size or mtime), or toggle off -> the choice
+    stays saved; the listener runs a downloaded fallback (the system language's
+    recommendation if downloaded, else the first downloaded catalog model;
+    custom_models::runnable); General's model row says so; the card warns
+```
+
+The local digest identifies the file Hex copied; it is not a publisher
+checksum and Hex vouches for nothing in it. The selection, recent models,
+and keyboard-language mappings keep an import while it can't run
+(`models::validate_saved`), and a build that doesn't know `custom-…` keeps its
+default for that field without rewriting `settings.json` (#744). `hex model
+import <path> [--name N]`, `hex model rename <id> <name>`, `hex model repair
+<id>`, and `hex model remove <id>` (also `hex models …`) run in the CLI process; a running Hex lists
+the change at once (the registry rereads `models/custom/` when its folder
+changes). `hex model list`, the local API's `/models`, and the Linux and
+Windows tray list ready imports; the macOS menu bar's model list is built at
+launch from the catalog and does not list them yet.
+
+Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01): Parakeet
+primeLine Q8_0 (`handy-computer/parakeet-primeline-gguf`, not in the catalog)
+imported as `custom-dbd1ec2985aea64d`, verified, loaded, and transcribed the
+FLEURS German and English samples through `hex model transcribe` (the Linux
+dictation loader); a junk file and the toggle off were refused; touching or
+moving the copy made it "changed" or "missing" with the saved selection kept;
+rename and remove worked and the original stayed. Not observed: the picker
+flow in a real window, macOS (Metal) and Windows at all.
+Checks: `transcription::gguf_header::tests`,
+`transcription::custom_models::tests`, and the picker golden
+`rune-picker-custom-models-light`.
+
+Parakeet Ultra (`parakeet-ultra`, issue 648, every OS): a pinned catalog
+entry, `parakeet_ultra`, listed and runnable only while the toggle is on
+(`ModelDefinition::available` reads `labs::parakeet_ultra`).
+
+```ts
+Picker card -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
+│   timestamps; v3's "Detects language from audio" note; never recommended
+├── Download -> handy-computer/parakeet-ultra-gguf@a1539be1, parakeet-ultra-Q8_0.gguf,
+│   740,363,168 bytes, SHA-256 007a5976…0a59 (430 F32, 225 Q8_0, 48 F16 tensors)
+├── Details -> languages; peak memory measured on apollo (~0.7 GB GPU, ~0.2 GB
+│   RAM, Radeon 8060S over Vulkan; not measured elsewhere); "Experimental: Hex
+│   has run it only on Linux (Vulkan) so far."; the credit word for word ("Parakeet
+│   Ultra by Moondream, based on NVIDIA Parakeet TDT 0.6B v3. GGUF conversion and
+│   quantization by handy-computer. Creative Commons Attribution 4.0 International
+│   (CC BY 4.0)."); the publisher's NOTICE; Source and License links
+├── "Published conversion benchmarks; not measured in Hex" (folded) -> conditions
+│   (FLEURS test, Q8_0, CUDA, batch 8, each language's hint, no timestamps,
+│   transcribe.cpp 021aa17d; file digest, dataset revision, scorer unknown), then
+│   25 FLEURS WERs from transcribe.cpp 7045d1c's catalog/parakeet-ultra.json
+├── Accuracy 98.2% / Labs › Benchmark details: LibriSpeech test-clean 1.80%
+│   WER, the same published source (2,620 utterances, batch 8, CUDA)
+└── Toggle off while Ultra is the dictation model -> refused (row locked,
+    `hex labs off`, `hex settings set`); a saved Ultra with the toggle off some
+    other way stays saved and the listener runs a downloaded fallback
+```
+
+Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01): the file
+matched its pinned size and SHA-256 (`hex model install` verified it); `hex
+model transcribe` with Ultra, passed and saved, transcribed FLEURS German and
+English and JFK correctly; Ultra ran a FLEURS English clip at 191x against
+Parakeet v3's 211x in transcribe-cli; turning the toggle off while Ultra was
+selected was refused. Not observed: Metal, Windows, the picker in a real window
+(the `picker-parakeet-ultra` scene was rendered once, not as a golden, because
+it lists Ultra only where the saved settings turn the Lab on).
+Checks: `parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives`
+in [models.rs](../../src/transcription/models.rs) and
+`parakeet_ultras_published_scores_cover_its_languages_once` in
+[model_details.rs](../../src/transcription/model_details.rs).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

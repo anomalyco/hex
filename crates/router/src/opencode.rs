@@ -921,22 +921,15 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
             "description": "Scrawl contact sheet: the capture's keyframes in order",
         })]
     } else {
-        inline_images(&directory, &bundle)
+        inline_contact_sheet(&directory, &bundle)
     };
-    let frames = files.len().saturating_sub(1);
-    let attached = match (files.len(), frames) {
-        (0, _) => "No images".to_owned(),
-        (_, 0) => "Attached: the contact sheet (every keyframe in order)".to_owned(),
-        (_, 1) => {
-            "Attached: the contact sheet (every keyframe in order) and 1 keyframe at full size"
-                .to_owned()
-        }
-        (_, n) => format!(
-            "Attached: the contact sheet (every keyframe in order) and {n} keyframes at full size"
-        ),
+    let attached = if files.is_empty() {
+        "No images."
+    } else {
+        "Attached: the contact sheet (every keyframe in order). Full-size keyframes are in frames/ and frames-full/ in that folder if you need a closer look."
     };
     let text = format!(
-        "{}\n\n{attached}. Everything the capture holds is in this message (recorded at {}).\nThis capture is {} ms long.",
+        "{}\n\n{attached}\nRecorded at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
         directory.display(),
         bundle.duration_ms,
@@ -971,65 +964,27 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
-/// What a send attaches at most, so a long capture never makes a prompt
-/// OpenCode refuses: the keyframes after the contact sheet, and their bytes.
-const MAX_INLINE_FRAMES: usize = 8;
+/// The most encoded bytes a send inlines, so a huge sheet never makes a prompt OpenCode refuses.
 const MAX_INLINE_BYTES: usize = 12 << 20;
 
-/// The contact sheet, then the keyframes in order, as `data:` URLs, so an
-/// OpenCode server on another machine gets the pictures without the bundle's
-/// folder. Unreadable files are left out; the budget stops at the first image
-/// that would pass it.
-fn inline_images(directory: &Path, bundle: &ScrawlBundle) -> Vec<serde_json::Value> {
-    let sheet = std::iter::once((
-        bundle.contact_sheet.clone(),
-        "contact-sheet.png".to_owned(),
-        "Scrawl contact sheet: the capture's keyframes in order".to_owned(),
-    ));
-    let frames = bundle
-        .keyframes
-        .iter()
-        .take(MAX_INLINE_FRAMES)
-        .map(|frame| {
-            let seconds = frame.t / 1000;
-            let said = frame
-                .said
-                .as_deref()
-                .map(|said| format!(": \"{said}\""))
-                .unwrap_or_default();
-            (
-                frame.file.clone(),
-                format!("frame-{:02}.png", frame.index),
-                format!(
-                    "Keyframe {} at {}:{:02}{}",
-                    frame.index,
-                    seconds / 60,
-                    seconds % 60,
-                    said
-                ),
-            )
-        });
-    let mut budget = MAX_INLINE_BYTES;
-    let mut files = Vec::new();
-    for (file, name, description) in sheet.chain(frames) {
-        if file.is_empty() {
-            continue;
-        }
-        let Ok(bytes) = fs::read(directory.join(&file)) else {
-            continue;
-        };
-        let encoded = base64(&bytes);
-        if encoded.len() > budget {
-            break;
-        }
-        budget -= encoded.len();
-        files.push(serde_json::json!({
-            "uri": format!("data:image/png;base64,{encoded}"),
-            "name": name,
-            "description": description,
-        }));
+/// The contact sheet as a `data:` URL, so an OpenCode server on another machine gets the
+/// picture without the bundle's folder. Unreadable or oversized, it is left out.
+fn inline_contact_sheet(directory: &Path, bundle: &ScrawlBundle) -> Vec<serde_json::Value> {
+    if bundle.contact_sheet.is_empty() {
+        return Vec::new();
     }
-    files
+    let Ok(bytes) = fs::read(directory.join(&bundle.contact_sheet)) else {
+        return Vec::new();
+    };
+    let encoded = base64(&bytes);
+    if encoded.len() > MAX_INLINE_BYTES {
+        return Vec::new();
+    }
+    vec![serde_json::json!({
+        "uri": format!("data:image/png;base64,{encoded}"),
+        "name": "contact-sheet.png",
+        "description": "Scrawl contact sheet: the capture's keyframes in order",
+    })]
 }
 
 /// The host's summary of a bundle ([`crate::env::Summary`]), else its `summary.md`.

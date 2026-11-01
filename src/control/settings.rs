@@ -363,6 +363,16 @@ const KEYS: &[Key] = &[
         "Labs: hold Paste last dictation to pick from recent dictations (macOS)",
     ),
     key(
+        "labs.custom_models",
+        Kind::Bool,
+        "Labs: the Local transcription picker can add a GGUF speech model from disk (hex model import)",
+    ),
+    key(
+        "labs.parakeet_ultra",
+        Kind::Bool,
+        "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -848,6 +858,11 @@ pub fn apply(
                  shortcut first",
             ));
         }
+        "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
+            if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
+                return Err(invalid(name, why));
+            }
+        }
         "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),
         "show_dock_icon" => effects.push(Effect::DockIcon),
         "updates.channel" => effects.push(Effect::CheckForUpdates),
@@ -1194,12 +1209,17 @@ mod tests {
     /// `OWN_COMMAND` if another `hex` command edits it).
     #[test]
     fn every_persisted_setting_has_a_cli_key() {
-        // Lists left empty are left out of the file; fill them so they count.
+        // Lists left empty and unchosen options are left out of the file;
+        // fill them so they count.
         let settings = AppSettings {
             vocabulary: vec![crate::dictation::vocabulary::VocabularyEntry {
                 term: "Rune".into(),
                 sounds_like: vec!["roon".into()],
             }],
+            meetings: crate::app_settings::MeetingSettings {
+                retention: Some(crate::app_settings::MeetingRetention::Day),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let json = serde_json::to_value(settings).unwrap();

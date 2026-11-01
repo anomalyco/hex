@@ -680,9 +680,14 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         }
         self.reduceMotion = reduceMotion
         pending += min(0.25, max(0.0, dt))
-        while pending >= Self.stepDt {
-            pending -= Self.stepDt
+        var steppedSteps = 0
+        while pending + 1e-6 >= Self.stepDt {
+            pending = max(0.0, pending - Self.stepDt)
             stepOnce(visible: visible, loudness: loudness, reduceMotion: reduceMotion)
+            steppedSteps += 1
+        }
+        if steppedSteps > 0 {
+            beam(hb: Float(steppedSteps) * Self.stepDt)
         }
     }
 
@@ -820,9 +825,6 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         elapsed += h
         time += h
         steps &+= 1
-        if steps.isMultiple(of: 2) {
-            beam(hb: 2.0 * h)
-        }
     }
 
     @inline(__always)
@@ -1100,7 +1102,7 @@ private struct DotScopeMetalUniforms {
     var shadow: SIMD4<Float>
 }
 
-private struct DotSwipeCueMetalUniforms {
+struct DotSwipeCueMetalUniforms {
     var metrics: SIMD4<Float>
     var grid: SIMD4<Float>
     var base: SIMD4<Float>
@@ -1108,7 +1110,7 @@ private struct DotSwipeCueMetalUniforms {
 }
 
 @MainActor
-private final class DotScopeMetalPipeline {
+final class DotScopeMetalPipeline {
     static let shared: DotScopeMetalPipeline? = DotScopeMetalPipeline()
 
     let device: MTLDevice
@@ -1157,7 +1159,7 @@ private final class DotScopeMetalPipeline {
     }
 }
 
-private final class DisplayLinkProxy: NSObject {
+final class DisplayLinkProxy: NSObject {
     var tickHandler: ((CADisplayLink) -> Void)?
 
     @MainActor
@@ -1178,7 +1180,7 @@ final class DotScopeHostView: UIView {
     private let dotBuffer: MTLBuffer?
     private let proxy = DisplayLinkProxy()
     private var displayLink: CADisplayLink?
-    private var lastTimestamp: CFTimeInterval?
+    private var lastTargetTimestamp: CFTimeInterval?
     private var ringIndex = 0
     private var hasSeededSnapshot = false
     private var visibilityObservations: [NSKeyValueObservation] = []
@@ -1242,6 +1244,8 @@ final class DotScopeHostView: UIView {
             metalLayer.pixelFormat = .bgra8Unorm
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
+            metalLayer.allowsNextDrawableTimeout = false
+            metalLayer.maximumDrawableCount = 3
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
 
@@ -1336,7 +1340,7 @@ final class DotScopeHostView: UIView {
             visibilityObservations.removeAll()
             displayLink?.invalidate()
             displayLink = nil
-            lastTimestamp = nil
+            lastTargetTimestamp = nil
         }
     }
 
@@ -1360,14 +1364,16 @@ final class DotScopeHostView: UIView {
         }
         seedForSnapshotIfNeeded()
         updateAnimatingState()
-        renderCurrentFrame(withTransaction: sizeChanged && UIView.inheritedAnimationDuration > 0)
+        if sizeChanged || displayLink?.isPaused != false {
+            renderCurrentFrame(withTransaction: sizeChanged && UIView.inheritedAnimationDuration > 0)
+        }
     }
 
     private func ensureDisplayLink() {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         } else {
             link.preferredFramesPerSecond = 60
         }
@@ -1452,7 +1458,7 @@ final class DotScopeHostView: UIView {
         let targetPaused = !wantsFrames
         if displayLink?.isPaused != targetPaused {
             if !targetPaused {
-                lastTimestamp = nil
+                lastTargetTimestamp = nil
             }
             displayLink?.isPaused = targetPaused
         }
@@ -1460,12 +1466,12 @@ final class DotScopeHostView: UIView {
 
     func stepAndRender(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval) {
         let dt: Float
-        if let prev = lastTimestamp {
-            dt = Float(min(0.1, max(1.0 / 240.0, timestamp - prev)))
+        if let prevTarget = lastTargetTimestamp {
+            dt = Float(min(0.05, max(1.0 / 240.0, targetTimestamp - prevTarget)))
         } else {
-            dt = Float(max(1.0 / 120.0, targetTimestamp - timestamp))
+            dt = Float(min(0.05, max(1.0 / 240.0, targetTimestamp - timestamp)))
         }
-        lastTimestamp = timestamp
+        lastTargetTimestamp = targetTimestamp
 
         let (stage, visible, loudness) = simulationInputs()
         simulation.advance(
@@ -1622,187 +1628,5 @@ struct DotScopeView: UIViewRepresentable {
         uiView.drawPlate = drawPlate
         uiView.phase = phase
         uiView.scheduleVisibilityRefresh()
-    }
-}
-
-// MARK: - `DotSwipeCueView` (Bottom-Edge Directional Return Cue)
-
-@MainActor
-final class DotSwipeCueHostView: UIView {
-    override static var layerClass: AnyClass { CAMetalLayer.self }
-
-    private let proxy = DisplayLinkProxy()
-    private var displayLink: CADisplayLink?
-    private var lastTimestamp: CFTimeInterval?
-    /// Starts mid-glide so initial paint and snapshot stills immediately read as a rightward swipe.
-    private var elapsed: Float = 0.72
-
-    var reduceMotion = false {
-        didSet {
-            if reduceMotion != oldValue {
-                updateAnimatingState()
-                renderCurrentFrame()
-            }
-        }
-    }
-
-    var isPaused = false {
-        didSet {
-            if isPaused != oldValue {
-                updateAnimatingState()
-                renderCurrentFrame()
-            }
-        }
-    }
-
-    private var metalLayer: CAMetalLayer {
-        // swiftlint:disable:next force_cast
-        layer as! CAMetalLayer
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isOpaque = false
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-
-        if let gpu = DotScopeMetalPipeline.shared {
-            metalLayer.device = gpu.device
-            metalLayer.pixelFormat = .bgra8Unorm
-            metalLayer.isOpaque = false
-            metalLayer.framebufferOnly = true
-            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-        }
-
-        proxy.tickHandler = { [weak self] link in
-            self?.tick(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil {
-            ensureDisplayLink()
-            updateAnimatingState()
-            renderCurrentFrame()
-        } else {
-            displayLink?.invalidate()
-            displayLink = nil
-            lastTimestamp = nil
-        }
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let scale = max(1.0, traitCollection.displayScale)
-        metalLayer.contentsScale = scale
-        let pixelSize = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
-        if metalLayer.drawableSize != pixelSize {
-            metalLayer.drawableSize = pixelSize
-        }
-        renderCurrentFrame()
-    }
-
-    private func ensureDisplayLink() {
-        guard displayLink == nil else { return }
-        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
-        if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
-        } else {
-            link.preferredFramesPerSecond = 60
-        }
-        link.isPaused = true
-        link.add(to: .main, forMode: .common)
-        displayLink = link
-    }
-
-    private func updateAnimatingState() {
-        let shouldRun = window != nil && !reduceMotion && !isPaused
-        if displayLink?.isPaused == shouldRun {
-            lastTimestamp = nil
-        }
-        displayLink?.isPaused = !shouldRun
-    }
-
-    private func tick(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval) {
-        let dt: Float
-        if let prev = lastTimestamp {
-            dt = Float(min(0.1, max(1.0 / 240.0, timestamp - prev)))
-        } else {
-            dt = Float(max(1.0 / 120.0, targetTimestamp - timestamp))
-        }
-        lastTimestamp = timestamp
-        elapsed += dt
-        renderCurrentFrame()
-    }
-
-    private func renderCurrentFrame() {
-        guard bounds.width > 4, bounds.height > 4,
-              let gpu = DotScopeMetalPipeline.shared,
-              let swipePipeline = gpu.swipePipeline,
-              let drawable = metalLayer.nextDrawable(),
-              let commandBuffer = gpu.queue.makeCommandBuffer() else {
-            return
-        }
-
-        let scale = Float(max(1.0, metalLayer.contentsScale))
-        let resX = Float(metalLayer.drawableSize.width)
-        let resY = Float(metalLayer.drawableSize.height)
-        let pxPitch = max(3.0, (2.85 * scale).rounded())
-        let pitch = pxPitch / scale
-        let cols = max(15, Int(floor(resX / pxPitch)) - 1)
-        let rawRows = max(3, min(5, Int(floor(resY / pxPitch))))
-        let rows = rawRows.isMultiple(of: 2) ? max(3, rawRows - 1) : rawRows
-
-        var uniforms = DotSwipeCueMetalUniforms(
-            metrics: SIMD4<Float>(resX, resY, scale, pitch),
-            grid: SIMD4<Float>(Float(cols), Float(rows), elapsed, reduceMotion ? 1.0 : 0.0),
-            base: SIMD4<Float>(0.86, 0.83, 0.77, 1.0),
-            core: SIMD4<Float>(0.99, 0.97, 0.93, 24.0)
-        )
-
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-
-        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.setRenderPipelineState(swipePipeline)
-            encoder.setFragmentBytes(
-                &uniforms,
-                length: MemoryLayout<DotSwipeCueMetalUniforms>.stride,
-                index: 0
-            )
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            encoder.endEncoding()
-        }
-
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
-    }
-}
-
-struct DotSwipeCueView: UIViewRepresentable {
-    var isPaused: Bool = false
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-
-    func makeUIView(context: Context) -> DotSwipeCueHostView {
-        let view = DotSwipeCueHostView()
-        view.reduceMotion = reduceMotion
-        view.isPaused = isPaused || scenePhase != .active
-        return view
-    }
-
-    func updateUIView(_ uiView: DotSwipeCueHostView, context: Context) {
-        uiView.reduceMotion = reduceMotion
-        uiView.isPaused = isPaused || scenePhase != .active
     }
 }

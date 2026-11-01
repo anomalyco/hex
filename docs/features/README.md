@@ -148,6 +148,12 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   │       the check as it draws on (0.3 s, no bounce; Reduce Motion: no travel)
 │   ├── Microphone -> macOS prompt; refused -> Privacy pane + "switch Hex on" guide
 │   ├── Accessibility -> Privacy pane + drag guide
+│   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
+│   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
+│   │   │   ignoring `OSStatus -10814` when no bundle is on disk)
+│   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
+│   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
+│   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
 │   │   ├── The app tile lifts out of the row and flies, blurred, into the guide
 │   │   └── macOS 27 names the list "Device Control and Data Access"; row and guide follow
 │   ├── Rows re-read every 400 ms and flip to a check as macOS grants
@@ -195,8 +201,24 @@ General > Speech model or Language
 
 Permissions revoked later
   -> General > Permissions needed: the same rows and Allow control as the tour
+     ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
      └── On, waiting for a relaunch -> "Restart Hex"
 ```
+
+Observed on macOS 26.6.2 and macOS 27.0 VMs (2026-10-31, SIP enabled): unprivileged
+`/usr/bin/tccutil reset` from inside `anomaly.hex` clears `Accessibility`,
+`ScreenCapture`, and `AudioCapture` entries for retired Hex bundles on disk with
+no password prompt (`rc=64` / `OSStatus -10814` when absent from disk), and
+resetting `anomaly.hex` followed by `AXIsProcessTrustedWithOptions` /
+`CGRequestScreenCaptureAccess` replaces a stale `CDHash` entry that stayed grey
+or untrusted in System Settings. Checks:
+`tccutil_exit_codes_distinguish_cleared_absent_and_failed_bundles`,
+`stale_tracker_waits_for_return_from_system_settings_and_ignores_touch_id_focus`,
+`stale_accessibility_row_resets_permission_and_returns_to_waiting` in
+[desktop/onboarding.rs](../../src/desktop/onboarding.rs), and
+`stale_permissions_offer_fix_it_and_reset_entries_across_panes` in
+[rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). Scenes:
+`mac-onboarding-stale`, `mac-settings-permissions-stale`.
 
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.
@@ -237,8 +259,10 @@ Language row is unexercised.
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
-├── Whisper, Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary -> context prompt
-│   (vocabulary.md); output that only repeats it is dropped
+├── Whisper (ivrit.ai's too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
+│   context prompt (vocabulary.md); output that only repeats it is dropped
+├── Hebrew -> ivrit.ai Whisper large-v3-turbo, always with the `he` hint (it
+│   lost Whisper's language detection); stock Whisper turbo also offers it
 └── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 
@@ -271,9 +295,18 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
 ├── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
-└── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
-    a wrapping line: language · dataset/split · source · conditions or "unknown" ·
-    speed qualified; "Most accurate" only between comparable records (labs.md)
+├── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
+│   a wrapping line: language · dataset/split · source · conditions or "unknown" ·
+│   speed qualified; "Most accurate" only between comparable records (labs.md)
+├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
+│   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
+│   published benchmarks "not measured in Hex" (labs.md)
+└── Labs > Use your own speech model (off) -> "Add model file…" in the header;  // setup.custom-models
+    imported cards after the catalog: Imported · family · languages · Not
+    benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";
+    Rename, Remove (not the active model); missing, changed, or off -> warning
+    line and no Use; changed -> Check again; missing or changed -> Import
+    again… (labs.md)
 ```
 
 Only Parakeet Unified English is marked `streams`
@@ -281,7 +314,7 @@ Only Parakeet Unified English is marked `streams`
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
-(also `picker-downloading`, `picker-japanese`).
+(also `picker-downloading`, `picker-japanese`, `picker-custom-models`).
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for
@@ -762,6 +795,9 @@ and Bluetooth detection on hardware, a real Bluetooth headset on Linux, and
 Windows ARM64 (its cross-build stops in `rquickjs-sys` on this host).
 
 Successful settings saves persist and project changes at safe runtime boundaries.
+An invalid saved field falls back independently at launch, with its key and
+reason in the log; the next save preserves the original first. See
+[settings recovery](recovery.md#load-settings-with-invalid-fields).
 Immediate settings controls commit a candidate before changing the saved UI
 choice or applying dependent native/history effects. A failed shortcut save
 stays in capture instead of showing Saved; failed retention saves keep the old

@@ -20,7 +20,10 @@ export interface EmbeddedEndpoint {
 
 const MODEL_ID_SET: ReadonlySet<string> = new Set(MODEL_IDS)
 
-const isModelId = (value: string): value is ModelId => MODEL_ID_SET.has(value)
+const CUSTOM_MODEL_ID = /^custom-[0-9a-f]{16}$/
+
+const isModelId = (value: string): value is ModelId =>
+  MODEL_ID_SET.has(value) || CUSTOM_MODEL_ID.test(value)
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)

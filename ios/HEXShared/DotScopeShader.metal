@@ -259,9 +259,31 @@ fragment float4 dot_scope_fragment(
 }
 
 // ───────────────────── Directional Swipe Return Cue ─────────────────────
-// A 5-row dot-matrix strip in the same LED style where a warm-pearl chevron
-// comet sweeps left-to-right (`═══❯`) and dissolves before wrap so there is
-// never a cycle-reset step.
+// Full-bottom-width Home-Indicator return cue: overlapping rightward waves
+// (`k in {-1, 0, 1}`) combine a sub-pixel continuous warm-pearl silk ribbon
+// along the 5 pt Home-Indicator spine with a 5-row fine micro-dot weave and
+// raised-cosine corner fades so there is zero dot-stepping and zero wrap step.
+
+inline float ds_rcos_ramp(float a, float b, float x) {
+    float t = clamp((x - a) / max(b - a, 1e-4f), 0.0f, 1.0f);
+    return 0.5f - 0.5f * cos(M_PI_F * t);
+}
+
+static inline float ds_softplus(float x) {
+    return max(x, 0.0f) + log(1.0f + exp(-abs(x)));
+}
+
+static inline float ds_swipe_throw_raw(float z) {
+    constexpr float u0 = 0.34f;
+    constexpr float w_imp = 0.080f;
+    constexpr float a_vel = 0.18f;
+    constexpr float b_vel = 1.90f;
+    constexpr float c_drag = 0.16f;
+    float coast = max(z - 0.55f, 0.0f);
+    return a_vel * z
+        + b_vel * w_imp * ds_softplus((z - u0) / w_imp)
+        - c_drag * pow(coast, 2.4f);
+}
 
 fragment float4 dot_swipe_cue_fragment(
     DotScopeVaryings in [[stage_in]],
@@ -269,13 +291,19 @@ fragment float4 dot_swipe_cue_fragment(
 ) {
     float2 resolution = u.metrics.xy;
     float backing_scale = max(u.metrics.z, 1.0f);
-    float pitch = max(u.metrics.w, 1.5f);
+    float pitch = max(u.metrics.w, 1.4f);
     int columns = int(u.grid.x + 0.5f);
     int rows = int(u.grid.y + 0.5f);
     float time = u.grid.z;
     bool still = u.grid.w > 0.5f;
-    float opacity = u.base.w;
-    float edge_fade = max(u.core.w, 8.0f);
+    float opacity = clamp(u.base.w, 0.0f, 1.0f);
+    if (opacity <= 0.001f) {
+        return float4(0.0f);
+    }
+
+    float left_edge_fade = max(u.core.w, 36.0f);
+    float right_edge_fade = left_edge_fade + 10.0f;
+    constexpr float corner_inset = 6.0f;
 
     float2 position = in.uv * resolution;
     float2 point = (position - resolution * 0.5f) / backing_scale;
@@ -283,33 +311,109 @@ fragment float4 dot_swipe_cue_fragment(
     float half_width = width * 0.5f;
     float aa = 0.75f / backing_scale;
 
-    constexpr float period = 1.75f;
-    constexpr float active_duty = 0.92f;
-    float cycle = fract(time / period);
-    float pass_u = still ? 0.52f : clamp(cycle / active_duty, 0.0f, 1.0f);
-    float active_env = still ? 0.85f : (
-        ds_sstep(0.0f, 0.16f, pass_u) * (1.0f - ds_sstep(0.66f, 0.96f, pass_u))
-    );
-    float trail_env = still ? 1.0f : (1.0f - ds_sstep(0.62f, 0.95f, pass_u));
+    float point_fade = ds_rcos_ramp(corner_inset, corner_inset + left_edge_fade, point.x + half_width)
+        * ds_rcos_ramp(corner_inset, corner_inset + right_edge_fade, half_width - point.x);
+    if (point_fade <= 0.0005f) {
+        return float4(0.0f);
+    }
 
-    float s = pass_u * pass_u * (3.0f - 2.0f * pass_u);
-    float decel = 1.0f - pow(1.0f - pass_u, 2.1f);
-    float progress = mix(s, decel, 0.42f);
-    float start_x = -half_width + 4.0f;
-    float end_x = half_width + 28.0f;
-    float head_x = mix(start_x, end_x, progress);
+    // 2.10x wave overlap (`duration / period = 2.60 / 1.24`): as the thrown streak accelerates off
+    // the right half, the next warm bead is already calmly coalescing in the left cradle.
+    constexpr float period = 1.24f;
+    constexpr float duration = 2.60f;
+    float cycle = time / period;
+    float n0 = floor(cycle);
+
+    float wave_heads[3] = { 0.0f, 0.0f, 0.0f };
+    float wave_envs[3] = { 0.0f, 0.0f, 0.0f };
+    float wave_vels[3] = { 0.0f, 0.0f, 0.0f };
+    int wave_count = 0;
+
+    float silk_core = 0.0f;
+    float silk_halo = 0.0f;
+    float y_norm = clamp(abs(point.y) / 5.5f, 0.0f, 1.6f);
+
+    if (still) {
+        float head_x = width * 0.14f;
+        float env = 0.85f;
+        float vel01 = 0.65f;
+        wave_heads[0] = head_x;
+        wave_envs[0] = env;
+        wave_vels[0] = vel01;
+        wave_count = 1;
+
+        float bow_x = (y_norm * y_norm) * (3.5f + 9.5f * vel01);
+        float dx = (head_x - bow_x) - point.x;
+        float pos_dx = max(dx, 0.0f);
+        float lead_g = exp(-0.5f * (dx * dx) / (13.0f * 13.0f));
+        float tail_g = 0.64f * exp(-pos_dx / 68.0f) + 0.36f * exp(-pos_dx / 160.0f);
+        float long_profile = (dx < 0.0f ? lead_g : tail_g) * env;
+        float crest = (dx < 0.0f ? lead_g : exp(-pos_dx / 50.0f)) * env;
+        float sigma_core_y = 1.48f + 0.72f * crest;
+        float sigma_halo_y = 3.85f + 1.40f * crest;
+        silk_core = long_profile * exp(-0.5f * (point.y * point.y) / (sigma_core_y * sigma_core_y));
+        silk_halo = long_profile * exp(-0.5f * (point.y * point.y) / (sigma_halo_y * sigma_halo_y));
+    } else {
+        float raw0 = ds_swipe_throw_raw(0.0f);
+        float inv_raw_span = 1.0f / max(ds_swipe_throw_raw(1.0f) - raw0, 1e-4f);
+        float x_start = -half_width - 14.0f;
+        float span = (half_width + 355.0f) - x_start;
+
+        for (int k = -2; k <= 0; k++) {
+            float u_wave = (cycle - (n0 + float(k))) * (period / duration);
+            if (u_wave <= 0.0f || u_wave >= 1.0f) {
+                continue;
+            }
+            float p = (ds_swipe_throw_raw(u_wave) - raw0) * inv_raw_span;
+            float sig = 1.0f / (1.0f + exp(-(u_wave - 0.34f) / 0.080f));
+            float coast = max(u_wave - 0.55f, 0.0f);
+            float dp = (0.18f + 1.90f * sig - 0.16f * 2.4f * pow(coast, 1.4f)) * inv_raw_span;
+
+            float head_x = x_start + span * p;
+            float vx = span * dp / duration;
+            float vel01 = clamp((vx - 75.0f) / 400.0f, 0.0f, 1.0f);
+
+            float env = ds_rcos_ramp(0.0f, 0.24f, u_wave) * (1.0f - ds_rcos_ramp(0.74f, 1.0f, u_wave));
+            if (env <= 0.0005f) {
+                continue;
+            }
+            wave_heads[wave_count] = head_x;
+            wave_envs[wave_count] = env;
+            wave_vels[wave_count] = vel01;
+            wave_count++;
+
+            float bow_x = (y_norm * y_norm) * (3.5f + 9.5f * vel01);
+            float dx = (head_x - bow_x) - point.x;
+            float pos_dx = max(dx, 0.0f);
+            float lead_sigma = 17.5f - 6.8f * vel01;
+            float tail_near = 22.0f + 72.0f * vel01;
+            float tail_far = 54.0f + 165.0f * vel01;
+
+            float lead_g = exp(-0.5f * (dx * dx) / (lead_sigma * lead_sigma));
+            float tail_g = 0.64f * exp(-pos_dx / tail_near) + 0.36f * exp(-pos_dx / tail_far);
+            float long_profile = (dx < 0.0f ? lead_g : tail_g) * env;
+            float crest = (dx < 0.0f ? lead_g : exp(-pos_dx / (24.0f + 42.0f * vel01))) * env;
+            float sigma_core_y = (1.75f - 0.42f * vel01) + 0.72f * crest;
+            float sigma_halo_y = 3.85f + 1.40f * crest;
+            silk_core += long_profile * exp(-0.5f * (point.y * point.y) / (sigma_core_y * sigma_core_y));
+            silk_halo += long_profile * exp(-0.5f * (point.y * point.y) / (sigma_halo_y * sigma_halo_y));
+        }
+    }
+
+    silk_core = clamp(silk_core, 0.0f, 1.0f);
+    silk_halo = clamp(silk_halo, 0.0f, 1.0f);
 
     float4 result = float4(0.0f);
 
-    float glow_dx = (point.x - (head_x - 14.0f)) / 36.0f;
-    float glow_dy = point.y / 6.0f;
-    float glow_falloff = exp(-0.5f * (glow_dx * glow_dx + glow_dy * glow_dy)) * active_env;
-    float point_fade = ds_sstep(0.0f, edge_fade, point.x + half_width)
-        * ds_sstep(0.0f, edge_fade, half_width - point.x);
-    if (glow_falloff > 0.005f) {
-        ds_composite(result, mix(u.base.rgb, u.core.rgb, 0.45f), 0.14f * glow_falloff * point_fade);
+    // Primary sub-pixel continuous 2D Home-Indicator silk ribbon & thrown aerodynamic wake (zero grid stepping).
+    float rail = exp(-0.5f * (point.y * point.y) / (1.40f * 1.40f)) * 0.08f;
+    float ribbon_alpha = clamp((rail + 0.25f * silk_halo + 0.64f * pow(max(silk_core, 1e-5f), 0.90f)) * point_fade, 0.0f, 1.0f);
+    if (ribbon_alpha > 0.001f) {
+        float3 ribbon_color = mix(u.base.rgb, u.core.rgb, 0.82f * silk_core);
+        ds_composite(result, ribbon_color, ribbon_alpha);
     }
 
+    // Delicate pearlescent micro-dot shimmer woven into the silk ribbon (~18% max alpha, wide 18pt envelope).
     float2 center_offset = float2(float(columns) - 1.0f, float(rows) - 1.0f) * 0.5f;
     int i0 = int(rint(point.x / pitch + center_offset.x));
     int j0 = int(rint(point.y / pitch + center_offset.y));
@@ -323,42 +427,47 @@ fragment float4 dot_swipe_cue_fragment(
                 continue;
             }
             float2 center = (float2(float(i), float(j)) - center_offset) * pitch;
-            float x_from_left = center.x + half_width;
-            float mask = ds_sstep(0.0f, edge_fade, x_from_left)
-                * ds_sstep(0.0f, edge_fade, width - x_from_left);
-            if (mask <= 0.001f) {
+            float cmask = ds_rcos_ramp(corner_inset, corner_inset + left_edge_fade, center.x + half_width)
+                * ds_rcos_ramp(corner_inset, corner_inset + right_edge_fade, half_width - center.x);
+            if (cmask <= 0.001f) {
                 continue;
             }
 
             float row_dist = abs(float(j) - mid_row);
             float row_norm = row_dist / max(mid_row, 1.0f);
-            float row_lag = row_dist * 1.65f * pitch;
-            float delta = (head_x - row_lag) - center.x;
 
-            float lead_sigma = 0.90f * pitch;
-            float lead = exp(-(delta * delta) / (2.0f * lead_sigma * lead_sigma));
-            float trail_len = max(pitch * 2.6f, (16.5f - 2.85f * row_dist) * pitch);
-            float trail = exp(-max(delta, 0.0f) / trail_len) * trail_env;
-
-            float wave = (delta < 0.0f ? lead : trail) * (1.0f - 0.13f * row_dist) * active_env;
-            float power = clamp(wave, 1e-5f, 1.0f);
-            float fresh = clamp((delta < 0.0f ? lead : exp(-delta / (3.2f * pitch))) * active_env, 0.0f, 1.0f);
-
-            // Grounded home-bar runway along the center row so the full bar width is always clear.
-            float floor_alpha = mix(0.185f, 0.068f, row_norm);
-            float alpha = floor_alpha + (0.88f - floor_alpha) * pow(power, 0.82f * mix(1.26f, 1.0f, fresh));
-            float dot_radius = (0.26f + 0.16f * pow(power, 0.6f)) * pitch;
-            float3 color = mix(u.base.rgb, u.core.rgb, clamp(power * 1.05f, 0.0f, 0.9f) * mix(0.35f, 1.0f, fresh));
-            float from_center = length(point - center);
-
-            if (power > 0.06f) {
-                ds_composite(
-                    result,
-                    color,
-                    0.12f * power * power * mask * ds_coverage(from_center - dot_radius * 1.9f, aa)
-                );
+            float dot_wave = 0.0f;
+            float dot_fresh = 0.0f;
+            for (int w = 0; w < wave_count; w++) {
+                float vel01 = wave_vels[w];
+                float bow_lag = (row_norm * row_norm) * (3.5f + 9.5f * vel01);
+                float delta = (wave_heads[w] - bow_lag) - center.x;
+                float pos_delta = max(delta, 0.0f);
+                float env = wave_envs[w];
+                float lead_s = 18.0f - 6.0f * vel01;
+                float lead = exp(-0.5f * (delta * delta) / (lead_s * lead_s));
+                float tail = 0.64f * exp(-pos_delta / (24.0f + 68.0f * vel01))
+                    + 0.36f * exp(-pos_delta / (58.0f + 155.0f * vel01));
+                float w_long = (delta < 0.0f ? lead : tail) * env;
+                float crest_local = (delta < 0.0f ? lead : exp(-pos_delta / (26.0f + 40.0f * vel01))) * env;
+                float sigma_y = 1.65f + 1.85f * crest_local;
+                float v_atten = exp(-0.5f * (center.y * center.y) / (sigma_y * sigma_y));
+                dot_wave += w_long * v_atten;
+                float fresh_w = (delta < 0.0f ? lead : exp(-pos_delta / 26.0f)) * env;
+                dot_fresh = max(dot_fresh, fresh_w);
             }
-            ds_composite(result, color, alpha * mask * ds_coverage(from_center - dot_radius, aa));
+
+            float power = clamp(dot_wave, 1e-5f, 1.0f);
+            float floor_alpha = 0.022f * exp(-2.2f * row_dist * row_dist);
+            float alpha = (floor_alpha + (0.18f - floor_alpha) * pow(power, 0.90f)) * cmask;
+            float dot_radius = (0.31f + 0.05f * pow(power, 0.8f)) * pitch;
+            float from_center = length(point - center);
+            float cov = ds_coverage(from_center - dot_radius, aa);
+            if (cov <= 0.001f) {
+                continue;
+            }
+            float3 color = mix(u.base.rgb, u.core.rgb, clamp(power * 0.92f * mix(0.50f, 1.0f, dot_fresh), 0.0f, 1.0f));
+            ds_composite(result, color, alpha * cov);
         }
     }
 

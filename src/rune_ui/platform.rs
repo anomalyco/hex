@@ -275,6 +275,13 @@ pub(super) struct PlatformState {
     pub(super) permissions: SetupStatus,
     /// Permissions whose Allow was pressed since they were last granted.
     pub(super) permissions_asked: Vec<PermissionKind>,
+    /// Permissions that stayed untrusted after returning from System Settings,
+    /// so their row offers `"Still grey? Fix it"`.
+    pub(super) permissions_stale: Vec<PermissionKind>,
+    /// Untrusted permissions whose row is visible right now, so the native
+    /// host clears retired Hex bundle IDs' stale TCC rows once in the
+    /// background.
+    pub(super) permissions_shown: Vec<PermissionKind>,
     /// Screen & System Audio Recording, for meetings.
     pub(super) system_audio: bool,
     /// `None` while the login item worker checks, or when it is unavailable.
@@ -353,6 +360,8 @@ impl PlatformState {
             input_sources: Vec::new(),
             permissions: crate::desktop::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
+            permissions_stale: Vec::new(),
+            permissions_shown: Vec::new(),
             system_audio: false,
             login_item: None,
             login_item_checking: false,
@@ -455,6 +464,38 @@ impl PlatformState {
     pub(super) fn note_asked(&mut self, kind: PermissionKind) {
         if !self.asked(kind) {
             self.permissions_asked.push(kind);
+        }
+    }
+
+    pub(super) fn stale(&self, kind: PermissionKind) -> bool {
+        self.permissions_stale.contains(&kind)
+    }
+
+    pub(super) fn note_stale(&mut self, kind: PermissionKind) {
+        self.note_asked(kind);
+        if !self.stale(kind) {
+            self.permissions_stale.push(kind);
+        }
+    }
+
+    pub(super) fn clear_stale(&mut self, kind: PermissionKind) {
+        self.permissions_stale.retain(|entry| *entry != kind);
+    }
+
+    pub(super) fn control_for(
+        &self,
+        kind: PermissionKind,
+        permitted: bool,
+    ) -> super::lists::PermissionControl {
+        use super::lists::PermissionControl;
+        if permitted {
+            PermissionControl::Allowed
+        } else if self.stale(kind) {
+            PermissionControl::Stale
+        } else if self.asked(kind) {
+            PermissionControl::Waiting
+        } else {
+            PermissionControl::Allow
         }
     }
 

@@ -5,14 +5,19 @@ export const MODEL_IDS = [
   "whisper_large_v3_turbo",
   "qwen3_asr06_b",
   "qwencleo_asr_1_7b",
+  "ivrit_whisper_large_v3_turbo",
   "sense_voice_small",
   "cohere_transcribe",
   "underdog_bark_3_pro",
   "underdog_bark_3_clean",
+  "parakeet_ultra",
   "apple_speech",
 ] as const
 
-export type ModelId = typeof MODEL_IDS[number]
+/** A model imported with Labs › Use your own speech model. */
+export type CustomModelId = `custom-${string}`
+
+export type ModelId = typeof MODEL_IDS[number] | CustomModelId
 
 export interface Health {
   readonly version: string

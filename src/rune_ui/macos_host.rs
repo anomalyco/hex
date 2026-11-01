@@ -38,7 +38,9 @@ use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::tr;
 use crate::desktop::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
-use crate::desktop::onboarding::{Input, PermissionAction, PermissionKind, PermissionState};
+use crate::desktop::onboarding::{
+    Input, PermissionAction, PermissionKind, PermissionState, StalePermissionTracker,
+};
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
 
@@ -496,13 +498,23 @@ pub(super) fn set_launch_at_login(_: bool) -> Result<bool, String> {
     Err("Launch at login goes through the macOS host".into())
 }
 
-pub(super) fn native_host() -> Box<dyn NativeHost> {
-    Box::new(MacHost::new())
+pub(super) fn native_host(wake: Arc<dyn Fn() + Send + Sync>) -> Box<dyn NativeHost> {
+    Box::new(MacHost::new(wake))
+}
+
+fn stale_slot(kind: PermissionKind) -> Option<usize> {
+    match kind {
+        PermissionKind::Accessibility => Some(0),
+        PermissionKind::SystemAudio => Some(1),
+        PermissionKind::ScreenRecording => Some(2),
+        PermissionKind::Microphone => None,
+    }
 }
 
 /// Performs the panes' OS-only requests and refreshes their state once a
 /// second (permission checks and the driver status are not free per frame).
 struct MacHost {
+    wake: Arc<dyn Fn() + Send + Sync>,
     login: Option<LoginItemWorker>,
     login_checking: bool,
     folder_error: Option<String>,
@@ -513,16 +525,25 @@ struct MacHost {
     /// The meetings folder panel, while it is open.
     folder_choice: Option<crate::desktop::file_dialog::Pending>,
     calendar: CalendarFeed,
+    /// Tracks System Settings return timing for Accessibility, System Audio,
+    /// and Screen Recording.
+    stale: [StalePermissionTracker; 3],
+    /// In-flight `"Still grey? Fix it"` resets, indexed by [`stale_slot`].
+    resetting: [bool; 3],
+    reset_tx: mpsc::Sender<PermissionKind>,
+    reset_rx: Receiver<PermissionKind>,
     #[cfg(hex_capture)]
     scrawl: ScrawlHost,
 }
 
 impl MacHost {
-    fn new() -> Self {
+    fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let login = LoginItemWorker::new()
             .inspect_err(|error| tracing::warn!(%error, "login item worker is unavailable"))
             .ok();
+        let (reset_tx, reset_rx) = mpsc::channel();
         let mut host = Self {
+            wake,
             login,
             login_checking: false,
             folder_error: None,
@@ -532,11 +553,56 @@ impl MacHost {
             practice: None,
             folder_choice: None,
             calendar: CalendarFeed::default(),
+            stale: Default::default(),
+            resetting: [false; 3],
+            reset_tx,
+            reset_rx,
             #[cfg(hex_capture)]
             scrawl: ScrawlHost::default(),
         };
         let _ = host.request_login(LoginItemRequest::Status);
         host
+    }
+
+    fn note_permission_asked(&mut self, kind: PermissionKind) {
+        if let Some(slot) = stale_slot(kind) {
+            self.stale[slot].note_asked(Instant::now());
+        }
+    }
+
+    fn finish_permission_reset(&mut self, kind: PermissionKind) {
+        if let Some(slot) = stale_slot(kind) {
+            self.resetting[slot] = false;
+            self.stale[slot].note_asked(Instant::now());
+        }
+        match kind {
+            PermissionKind::Accessibility => {
+                if crate::desktop::onboarding::status_with_transcription_model(true).accessibility
+                    != PermissionState::Ready
+                {
+                    let _ = crate::desktop::permission_guide::prompt_accessibility_trust();
+                    crate::desktop::permission_guide::show(PermissionKind::Accessibility);
+                }
+            }
+            PermissionKind::SystemAudio => {
+                crate::meeting::reset_system_audio_request();
+                if !crate::meeting::system_audio_ready()
+                    && !crate::meeting::request_system_audio_access()
+                {
+                    crate::desktop::permission_guide::show(PermissionKind::SystemAudio);
+                }
+            }
+            PermissionKind::ScreenRecording => {
+                #[cfg(hex_capture)]
+                crate::capture_host::invalidate_screen_access();
+                if !crate::meeting::screen_recording_permitted() {
+                    let _ = crate::meeting::request_screen_recording();
+                    crate::desktop::permission_guide::show(PermissionKind::ScreenRecording);
+                }
+            }
+            PermissionKind::Microphone => {}
+        }
+        self.refresh_at = Instant::now();
     }
 
     fn request_login(&mut self, request: LoginItemRequest) -> Result<(), String> {
@@ -611,7 +677,22 @@ impl NativeHost for MacHost {
                     || crate::capture_host::screen_access()
                         == crate::capture_host::ScreenAccess::Off
                 {
+                    self.note_permission_asked(kind);
                     crate::desktop::permission_guide::show(kind);
+                }
+            }
+            PlatformRequest::Permission(PermissionAction::ResetAndPrompt(kind)) => {
+                if let Some(slot) = stale_slot(kind)
+                    && !self.resetting[slot]
+                {
+                    self.resetting[slot] = true;
+                    self.stale[slot].note_asked(Instant::now());
+                    let tx = self.reset_tx.clone();
+                    let wake = self.wake.clone();
+                    crate::desktop::permission_guide::reset_and_reopen_async(kind, move |done| {
+                        let _ = tx.send(done);
+                        wake();
+                    });
                 }
             }
             PlatformRequest::Permission(PermissionAction::Restart) => {
@@ -621,6 +702,10 @@ impl NativeHost for MacHost {
                 crate::macos_rune::quit();
             }
             PlatformRequest::SystemAudio => {
+                self.note_permission_asked(PermissionKind::SystemAudio);
+                crate::desktop::permission_guide::clear_legacy_entries_async(
+                    PermissionKind::SystemAudio,
+                );
                 // macOS prompts once; after that the switch is in System
                 // Settings, with the guide beside it.
                 if !crate::meeting::request_system_audio_access() {
@@ -672,6 +757,14 @@ impl NativeHost for MacHost {
 
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
+        for &kind in &state.permissions_shown {
+            crate::desktop::permission_guide::clear_legacy_entries_async(kind);
+        }
+        while let Ok(kind) = self.reset_rx.try_recv() {
+            self.finish_permission_reset(kind);
+            state.clear_stale(kind);
+            changed = true;
+        }
         // The playground's HUD stories change the tuning HUD Lab shows.
         let shared = crate::rune_hud::dot_scope::lab();
         if shared != state.hud.tuning {
@@ -761,6 +854,42 @@ impl NativeHost for MacHost {
             }
         });
         changed |= state.permissions_asked.len() != asked_len;
+        let now = Instant::now();
+        let focus = self
+            .stale
+            .iter()
+            .any(StalePermissionTracker::is_waiting)
+            .then(crate::desktop::permission_guide::settings_focus)
+            .unwrap_or_default();
+        let mut next_stale = Vec::new();
+        for (slot, (kind, untrusted)) in [
+            (
+                PermissionKind::Accessibility,
+                matches!(
+                    permissions.accessibility,
+                    PermissionState::NeedsRequest | PermissionState::NeedsSettings
+                ),
+            ),
+            (PermissionKind::SystemAudio, !system_audio),
+            (PermissionKind::ScreenRecording, {
+                #[cfg(hex_capture)]
+                {
+                    crate::capture_host::screen_access() == crate::capture_host::ScreenAccess::Off
+                }
+                #[cfg(not(hex_capture))]
+                {
+                    false
+                }
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if !self.resetting[slot] && self.stale[slot].poll(now, untrusted, focus) {
+                next_stale.push(kind);
+            }
+        }
+        changed |= update(&mut state.permissions_stale, next_stale);
         changed |= update(&mut state.login_item_checking, self.login_checking);
         changed |= update(
             &mut state.notes,

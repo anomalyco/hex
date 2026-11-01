@@ -125,39 +125,81 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let _ = HUD.set(sender);
 }
 
-/// Why the HUD can't show: Rune tried and could not, or the Wayland
-/// compositor offers no layer-shell (GNOME's Mutter) and there is no
-/// XWayland for Rune to show it on instead. Logged once, the first time it
-/// is known.
+/// Why the HUD can't show, logged once per reason: Hex reaches no display at
+/// all (a service started without the session's environment, #756), the
+/// Wayland compositor offers no layer-shell (GNOME's Mutter) and there is no
+/// XWayland for Rune to show it on instead, or Rune could not open the overlay.
 pub(crate) fn limitation() -> Option<String> {
-    static NO_OVERLAY: OnceLock<bool> = OnceLock::new();
-    static LOGGED: std::sync::Once = std::sync::Once::new();
-    let rune_refused = HUD
+    static DISPLAY: OnceLock<Option<Limitation>> = OnceLock::new();
+    static LOGGED: Mutex<Option<String>> = Mutex::new(None);
+    let refused = HUD
         .get()
-        .is_some_and(|hud| hud.availability() == Availability::Unavailable);
-    let unavailable = rune_refused
-        || *NO_OVERLAY.get_or_init(|| {
-            let no_layer_shell = crate::linux::session::LinuxSession::detect().is_wayland()
-                && wayland_reachable()
-                && !crate::linux::paste::wayland_offers(LAYER_SHELL);
-            if no_layer_shell && xwayland() {
-                tracing::info!("HUD shows on XWayland: compositor has no layer-shell");
-            }
-            no_layer_shell && !xwayland()
-        });
-    if !unavailable {
-        return None;
+        .filter(|hud| hud.availability() == Availability::Unavailable)
+        .map(|hud| Limitation::Refused(hud.failure()));
+    let limitation = match DISPLAY.get_or_init(display_limitation) {
+        Some(Limitation::NoDisplay) => Limitation::NoDisplay,
+        display => refused.or_else(|| display.clone())?,
+    };
+    let (log, user) = limitation.describe();
+    let mut logged = LOGGED.lock().unwrap_or_else(|error| error.into_inner());
+    if logged.as_deref() != Some(log.as_str()) {
+        tracing::warn!("HUD unavailable: {log}; dictation still works");
+        *logged = Some(log);
     }
-    LOGGED.call_once(|| {
-        tracing::warn!(
-            "HUD unavailable: compositor has no layer-shell and XWayland is not running; dictation still works"
-        )
-    });
-    Some(LIMITATION.into())
+    Some(user)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Limitation {
+    /// Neither `WAYLAND_DISPLAY` reaches a compositor nor is `DISPLAY` set.
+    NoDisplay,
+    /// The compositor has no layer-shell, and there is no XWayland.
+    NoLayerShell,
+    /// Rune could not open the overlay, with its reason when it gives one.
+    Refused(Option<String>),
+}
+
+impl Limitation {
+    /// The log line and the text Settings shows.
+    fn describe(&self) -> (String, String) {
+        match self {
+            Self::NoDisplay => (
+                "Hex has no Wayland or X11 display (no WAYLAND_DISPLAY or DISPLAY in its environment)".into(),
+                "Recording HUD unavailable: Hex can't reach your display. If Hex runs as a systemd service, import the session's environment (on Hyprland: exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP). Dictation still works.".into(),
+            ),
+            Self::NoLayerShell => (
+                "compositor has no layer-shell and XWayland is not running".into(),
+                "Recording HUD unavailable: this compositor does not support Wayland layer-shell and XWayland is not running. Dictation still works.".into(),
+            ),
+            Self::Refused(failure) => {
+                let reason = failure.as_deref().unwrap_or("no reason given");
+                (
+                    format!("Rune could not open the overlay ({reason})"),
+                    format!("Recording HUD unavailable: the overlay could not open ({reason}). Dictation still works."),
+                )
+            }
+        }
+    }
+}
+
+/// What the display alone says about the HUD, checked once.
+fn display_limitation() -> Option<Limitation> {
+    let wayland = crate::linux::session::LinuxSession::detect().is_wayland();
+    let reachable = wayland && wayland_reachable();
+    if !reachable && !xwayland() {
+        return Some(Limitation::NoDisplay);
+    }
+    if reachable && !crate::linux::paste::wayland_offers(LAYER_SHELL) {
+        if xwayland() {
+            tracing::info!("HUD shows on XWayland: compositor has no layer-shell");
+            return None;
+        }
+        return Some(Limitation::NoLayerShell);
+    }
+    None
 }
 
 const LAYER_SHELL: &str = "zwlr_layer_shell_v1";
-const LIMITATION: &str = "Recording HUD unavailable: this compositor does not support Wayland layer-shell and XWayland is not running. Dictation still works.";
 
 /// Whether a Wayland connection opens at all, so a missing display is never
 /// read as a compositor without layer-shell.

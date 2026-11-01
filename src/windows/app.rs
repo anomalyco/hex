@@ -503,8 +503,10 @@ impl WindowsDesktopHost {
         }
     }
 
+    /// The saved selection, or the default model while it names an import
+    /// that can't run.
     fn runtime_selection(&self) -> crate::transcription::models::TranscriptionSelection {
-        self.settings.transcription.clone()
+        crate::transcription::custom_models::runnable(&self.settings.transcription)
     }
 
     /// The listener could not load a newly chosen model and still runs the

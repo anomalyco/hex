@@ -196,6 +196,9 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
 pub(super) fn poll(ui: &mut Ui) -> bool {
     let (installed, model) = progress(ui);
     let status = ui.platform.setup_status(installed);
+    let accessibility_stale = ui
+        .platform
+        .stale(crate::desktop::onboarding::PermissionKind::Accessibility);
     let live = ui.live();
     let Some(tour) = &mut ui.tour else {
         return false;
@@ -203,6 +206,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let before = tour.flow.view();
     let step = before.step;
     let mut effect = tour.flow.on(Input::Status(status, model));
+    tour.flow.set_accessibility_stale(accessibility_stale);
     if tour
         .advance_at
         .is_some_and(|at| at.elapsed() >= ADVANCE_BEAT)
@@ -310,6 +314,9 @@ fn apply(ui: &mut Ui, effect: Effect) {
         )),
         Effect::ShowGuide(kind) => ui.ask(PlatformRequest::Permission(
             crate::desktop::onboarding::PermissionAction::ShowGuide(kind),
+        )),
+        Effect::ResetPermission(kind) => ui.ask(PlatformRequest::Permission(
+            crate::desktop::onboarding::PermissionAction::ResetAndPrompt(kind),
         )),
         Effect::Relaunch => ui.ask(PlatformRequest::Relaunch),
         Effect::Finish => ui.tour = None,
@@ -627,6 +634,8 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             super::platform_settings::accessibility_name(ui.platform.accessibility_renamed),
             if row.status == ItemStatus::Restart {
                 tr("Turns on when Hex restarts").into()
+            } else if row.status == ItemStatus::Stale {
+                tr("An older Hex entry can keep this off").into()
             } else if waiting {
                 tr("Drag Hex into the list, or switch it on if it is there").into()
             } else {
@@ -674,6 +683,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             "setup-grant",
             match row.status {
                 ItemStatus::Ready | ItemStatus::Restart => PermissionControl::Allowed,
+                ItemStatus::Stale => PermissionControl::Stale,
                 ItemStatus::Waiting => PermissionControl::Waiting,
                 _ => PermissionControl::Allow,
             },
@@ -1117,6 +1127,7 @@ pub(super) enum MacStep {
     Welcome,
     Setup,
     SetupProgress,
+    SetupStale,
     SetupDenied,
     /// Every permission on, Accessibility waiting for a restart.
     SetupRestart,
@@ -1147,7 +1158,7 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     );
     let permissions = match state {
         MacStep::Welcome | MacStep::Setup | MacStep::SetupDownloadFailed => fresh,
-        MacStep::SetupProgress => crate::desktop::onboarding::SetupStatus {
+        MacStep::SetupProgress | MacStep::SetupStale => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             ..fresh
         },
@@ -1177,10 +1188,14 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     if state != MacStep::Welcome {
         input(ui, Input::Continue);
     }
-    if state == MacStep::SetupProgress {
+    if matches!(state, MacStep::SetupProgress | MacStep::SetupStale) {
         for item in [SetupItem::Microphone, SetupItem::Accessibility] {
             input(ui, Input::Grant(item));
         }
+    }
+    if state == MacStep::SetupStale {
+        ui.platform
+            .note_stale(crate::desktop::onboarding::PermissionKind::Accessibility);
     }
     ui.platform.permissions = permissions;
     match state {
@@ -1326,5 +1341,34 @@ mod tests {
         let view = flow.view();
         assert!(view.dictation_ready);
         assert!(!done_shows_progress(&view));
+    }
+
+    #[test]
+    fn mac_stale_fixture_marks_accessibility_stale_and_dispatches_reset() {
+        let mut ui = crate::rune_ui::mac_fixture();
+        mac_fixture(&mut ui, MacStep::SetupStale);
+        let rows = ui.tour.as_ref().unwrap().flow.view().rows;
+        assert!(
+            rows.iter()
+                .any(|row| row.item == SetupItem::Accessibility && row.status == ItemStatus::Stale)
+        );
+        input(&mut ui, Input::Grant(SetupItem::Accessibility));
+        assert!(
+            !ui.platform
+                .stale(crate::desktop::onboarding::PermissionKind::Accessibility)
+        );
+        match &ui.host {
+            crate::rune_ui::platform::PlatformHost::Fixture(sent) => {
+                assert_eq!(
+                    sent.last(),
+                    Some(&PlatformRequest::Permission(
+                        crate::desktop::onboarding::PermissionAction::ResetAndPrompt(
+                            crate::desktop::onboarding::PermissionKind::Accessibility
+                        )
+                    ))
+                );
+            }
+            _ => panic!("expected fixture host"),
+        }
     }
 }

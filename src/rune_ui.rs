@@ -36,6 +36,8 @@ pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
+mod model_details;
+mod model_import;
 mod models;
 mod modes;
 mod onboarding;
@@ -141,10 +143,14 @@ pub(crate) fn run_app(
 ) {
     use crate::linux::service::{Activation, Control};
     rune::set_app_id(crate::linux::portal::APP_ID);
-    let mut app = self::app(Some(host.clone()))
-        .args(Vec::new())
-        .windowless()
-        .float_on_open();
+    let mut app = self::app(Some(host.clone())).args(Vec::new()).windowless();
+    // Tiling window managers float a window that maps at a fixed size.
+    // Desktops that float every window need no such map, and KWin on X11
+    // keeps a fixed-size window from fitting a small screen, its title bar
+    // out of reach (#736).
+    if !crate::linux::session::floats_windows() {
+        app = app.float_on_open();
+    }
     crate::linux::rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
@@ -205,7 +211,7 @@ pub(crate) fn run_app(
 /// opens.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     onboarding_kit::set_live_window(true);
-    let app = build(connect, PlaygroundMode::Gated);
+    let app = build(move || Ui::load_with(connect), PlaygroundMode::Gated);
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
     app
@@ -245,8 +251,10 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
         .iter()
         .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
     onboarding_kit::set_live_window(playground && !headless);
+    // Fixtures only: a render never reads, migrates, or saves the user's
+    // settings, History, or anything else in the data folder.
     let app = build(
-        Default::default(),
+        Ui::fixture_base,
         if playground && playground::enabled() {
             PlaygroundMode::Attached
         } else {
@@ -304,14 +312,14 @@ enum PlaygroundMode {
     Gated,
 }
 
-fn build(connect: host::Connect, playground: PlaygroundMode) -> rune::App<Ui> {
+fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> rune::App<Ui> {
     let spec = if playground == PlaygroundMode::None {
         spec()
     } else {
         playground::spec(spec())
     };
     let app = rune::App::new(spec)
-        .init(move || Ui::load_with(connect))
+        .init(init)
         .on_close(on_close)
         .compositor(WindowCompositor::default());
     // Linux records shortcuts from the window's keys, so a modifier pressed
@@ -508,6 +516,13 @@ pub(crate) fn meeting_corner_moved(
     ui.settings.meetings.recording_indicator_corner = corner;
 }
 
+/// An error from outside the window, such as settings that could not be read
+/// at launch, shown where save errors show.
+#[cfg(target_os = "macos")]
+pub(crate) fn show_error(ui: &mut Ui, error: String) {
+    ui.error = Some(error);
+}
+
 /// A meeting recording could not start or finish; the Meetings pane says why.
 pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;
@@ -554,7 +569,7 @@ fn spec() -> AppSpec<Ui> {
         size: WINDOW_SIZE,
         // Narrower windows crowd the sidebar and rows.
         min_size: Some((860.0, 560.0)),
-        init: Ui::load,
+        init: Ui::fixture_base,
         view,
         scenes: SCENES,
         fonts: rune_theme_opencode::FONTS,
@@ -806,8 +821,11 @@ struct Drafts {
 }
 
 impl Ui {
-    fn load() -> Self {
-        Self::load_with(host::Connect::default())
+    /// The state a headless render starts from before its scene: default
+    /// settings and a fixture service, built without touching the data
+    /// folder. The goldens start from it too.
+    fn fixture_base() -> Self {
+        Self::with(AppSettings::default(), Service::Fixture(Vec::new()))
     }
 
     fn load_with(connect: host::Connect) -> Self {
@@ -1005,6 +1023,13 @@ impl Ui {
                 {
                     view.screen_recording = true;
                 }
+                self.platform.clear_stale(*kind);
+                self.platform.note_asked(*kind);
+            }
+            platform::PlatformRequest::Permission(
+                crate::desktop::onboarding::PermissionAction::ResetAndPrompt(kind),
+            ) => {
+                self.platform.clear_stale(*kind);
                 self.platform.note_asked(*kind);
             }
             platform::PlatformRequest::SystemAudio => {
@@ -1014,6 +1039,7 @@ impl Ui {
                 if self.host.is_fixture() && self.platform.asked(kind) {
                     self.platform.system_audio = true;
                 }
+                self.platform.clear_stale(kind);
                 self.platform.note_asked(kind);
             }
             #[cfg(hex_capture)]
@@ -1269,7 +1295,11 @@ fn setup(ui: &mut Ui, waker: Waker) {
         let connect = std::mem::take(connect);
         #[cfg(target_os = "macos")]
         {
-            ui.host = platform::PlatformHost::Native(host::native_host());
+            let host_wake: Arc<dyn Fn() + Send + Sync> = {
+                let waker = waker.clone();
+                Arc::new(move || waker())
+            };
+            ui.host = platform::PlatformHost::Native(host::native_host(host_wake));
         }
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || waker());
         ui.service = Service::Live(Box::new(Backend::connect(connect, wake)));
@@ -1310,6 +1340,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
+    changed |= model_import::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
@@ -1324,6 +1355,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         settings::refresh_microphones(ui);
         ui.microphones_listed_at = clock;
     }
+    platform_settings::update_shown_permissions(ui);
     changed |= ui.host.poll(&mut ui.platform);
     #[cfg(not(target_os = "macos"))]
     {
@@ -1889,7 +1921,10 @@ const SCENES: &[Scene] = &[
     // (`--snap`): waits for its first snapshot instead of drawing
     // "Connecting…" at virtual time zero.
     ("live", |ui| {
-        *ui = Ui::load();
+        // Reads the saved settings and the running Hex; writes neither.
+        let settings = AppSettings::read().unwrap_or_default();
+        crate::desktop::i18n::apply(settings.ui_language.as_deref());
+        *ui = Ui::with(settings, Service::Fixture(Vec::new()));
         let mut backend = Backend::connect(Default::default(), Arc::new(|| {}));
         let deadline = Instant::now() + Duration::from_secs(5);
         while backend.state().is_none() && backend.error().is_none() && Instant::now() < deadline {
@@ -2012,6 +2047,18 @@ const SCENES: &[Scene] = &[
     ("picker-downloading", |ui| {
         *ui = portal_fixture();
         picker::fixture(ui, Some(TranscriptionModelId::CohereTranscribe));
+    }),
+    // Labs › Parakeet Ultra: its card's details, credit, and published
+    // benchmarks (lists Ultra only where the saved settings turn it on).
+    ("picker-parakeet-ultra", |ui| {
+        *ui = portal_fixture();
+        picker::parakeet_ultra_fixture(ui);
+    }),
+    // Labs › Use your own speech model: the picker's Add model file….
+    ("picker-custom-models", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.custom_models = true;
+        picker::fixture(ui, None);
     }),
     // Japanese saved: the English-only models say they switch the language.
     ("picker-japanese", |ui| {
@@ -2234,16 +2281,10 @@ const SCENES: &[Scene] = &[
         };
     }),
     ("mac-settings-permissions", |ui| {
-        *ui = mac_fixture();
-        use crate::desktop::onboarding::PermissionState;
-        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
-        ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
-        ui.platform
-            .permissions_asked
-            .push(crate::desktop::onboarding::PermissionKind::Accessibility);
-        ui.platform.login_item =
-            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
-        ui.platform.accessibility_renamed = true;
+        platform_settings::mac_permissions_fixture(ui, false)
+    }),
+    ("mac-settings-permissions-stale", |ui| {
+        platform_settings::mac_permissions_fixture(ui, true)
     }),
     ("mac-settings-pause-browser", |ui| {
         *ui = mac_fixture();
@@ -2490,6 +2531,9 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-progress", |ui| {
         mac_tour(ui, onboarding::MacStep::SetupProgress)
     }),
+    ("mac-onboarding-stale", |ui| {
+        mac_tour(ui, onboarding::MacStep::SetupStale)
+    }),
     ("mac-onboarding-denied", |ui| {
         mac_tour(ui, onboarding::MacStep::SetupDenied)
     }),
@@ -2724,6 +2768,9 @@ mod tests;
 
 #[cfg(test)]
 mod offscreen;
+
+#[cfg(test)]
+mod snap_isolation;
 
 #[cfg(test)]
 mod keyboard_model_tests;

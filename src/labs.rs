@@ -84,10 +84,12 @@ pub enum Feature {
     TapOrHold,
     BenchmarkDetails,
     PastePicker,
+    CustomModels,
+    ParakeetUltra,
 }
 
 impl Feature {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -114,6 +116,8 @@ impl Feature {
         Self::TapOrHold,
         Self::BenchmarkDetails,
         Self::PastePicker,
+        Self::CustomModels,
+        Self::ParakeetUltra,
     ];
 
     /// The features this OS and build have.
@@ -161,9 +165,22 @@ impl Feature {
             | Self::PickerSortFilter
             | Self::SidedChords
             | Self::TapOrHold
-            | Self::BenchmarkDetails => Audience::Everyone,
+            | Self::BenchmarkDetails
+            | Self::CustomModels
+            | Self::ParakeetUltra => Audience::Everyone,
             Self::PastePicker => Audience::Dev,
         }
+    }
+
+    /// Why turning this feature off is refused now: Parakeet Ultra stays on
+    /// while it is the dictation model, until a switch to another succeeds.
+    pub fn off_refusal(self, settings: &AppSettings) -> Option<&'static str> {
+        (self == Self::ParakeetUltra
+            && settings.transcription.model
+                == crate::transcription::models::TranscriptionModelId::ParakeetUltra)
+            .then_some(
+                "Parakeet Ultra is the dictation model; choose another model before turning it off",
+            )
     }
 
     /// The feature `hex settings` key `key` switches (its toggle, or
@@ -203,6 +220,8 @@ impl Feature {
             | Self::SpokenSymbols
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
+            | Self::CustomModels
+            | Self::ParakeetUltra
             | Self::FillerWords => true,
         }
     }
@@ -236,6 +255,8 @@ impl Feature {
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
             Self::PastePicker => "paste-picker",
+            Self::CustomModels => "custom-models",
+            Self::ParakeetUltra => "parakeet-ultra",
         }
     }
 
@@ -268,6 +289,8 @@ impl Feature {
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
             Self::PastePicker => "labs.paste_picker",
+            Self::CustomModels => "labs.custom_models",
+            Self::ParakeetUltra => "labs.parakeet_ultra",
         }
     }
 
@@ -331,6 +354,12 @@ impl Feature {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }
             Self::PastePicker => "Hold Paste last dictation to pick from recent dictations",
+            Self::CustomModels => {
+                "Add a speech model file of your own (GGUF) from the Local transcription picker"
+            }
+            Self::ParakeetUltra => {
+                "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
+            }
         }
     }
 
@@ -367,6 +396,8 @@ impl Feature {
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
             Self::PastePicker => settings.labs.paste_picker,
+            Self::CustomModels => settings.labs.custom_models,
+            Self::ParakeetUltra => settings.labs.parakeet_ultra,
         }
     }
 
@@ -398,6 +429,8 @@ impl Feature {
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::PastePicker => settings.labs.paste_picker = on,
+            Self::CustomModels => settings.labs.custom_models = on,
+            Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
         }
     }
 }
@@ -420,8 +453,10 @@ const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
 const PASTE_PICKER: u32 = 1 << 16;
-/// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 17;
+const CUSTOM_MODELS: u32 = 1 << 17;
+const PARAKEET_ULTRA: u32 = 1 << 18;
+/// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
+const MINUTES_SHIFT: u32 = 19;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -534,6 +569,18 @@ pub fn paste_picker() -> bool {
     on(PASTE_PICKER)
 }
 
+/// Imported speech models join the catalog (read wherever a model is
+/// listed, chosen, or run).
+pub fn custom_models() -> bool {
+    on(CUSTOM_MODELS)
+}
+
+/// Parakeet Ultra joins the catalog (read wherever a model is listed,
+/// chosen, or run).
+pub fn parakeet_ultra() -> bool {
+    on(PARAKEET_ULTRA)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -600,6 +647,12 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
         (Feature::PastePicker, settings.paste_picker, PASTE_PICKER),
+        (Feature::CustomModels, settings.custom_models, CUSTOM_MODELS),
+        (
+            Feature::ParakeetUltra,
+            settings.parakeet_ultra,
+            PARAKEET_ULTRA,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -652,7 +705,8 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         );
         return Ok(());
     }
-    let mut settings = AppSettings::load()?;
+    // Listing, or handing the change to a running Hex, never writes the file.
+    let settings = AppSettings::read()?;
     let (name, on) = match command {
         None | Some(LabsCommand::List) => {
             print!("{}", list(&settings));
@@ -672,6 +726,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
             "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
         ));
     }
+    if !on && let Some(why) = feature.off_refusal(&settings) {
+        return Err(eyre!(why));
+    }
     let state = if on { "on" } else { "off" };
     // A running Hex saves and applies it at once, as its Labs row would.
     if let Some(reply) = crate::control::cli::set_in_running_hex(
@@ -686,6 +743,7 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
             }
         };
     }
+    let mut settings = AppSettings::load()?;
     if feature.on(&settings) == on {
         println!("{} is already {state}.", feature.name());
         return Ok(());

@@ -66,6 +66,12 @@ pub fn screen_access() -> ScreenAccess {
     cached.access
 }
 
+/// Marks the cached Screen Recording state stale so the next [`screen_access`]
+/// read spawns a fresh check.
+pub fn invalidate_screen_access() {
+    CACHED.lock().unwrap_or_else(|e| e.into_inner()).at = None;
+}
+
 /// Reads it now, blocking for up to the helper's 5 s. Off the UI thread.
 pub fn screen_access_now() -> ScreenAccess {
     if crate::meeting::screen_recording_permitted() {

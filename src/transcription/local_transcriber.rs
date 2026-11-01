@@ -455,7 +455,7 @@ pub(crate) struct ModelSwap {
 impl ModelSwap {
     pub(crate) fn new(loaded: &TranscriptionSelection) -> Self {
         Self {
-            loaded: loaded.clone(),
+            loaded: super::custom_models::runnable(loaded),
             loading: None,
             ready: None,
         }
@@ -485,7 +485,9 @@ impl ModelSwap {
     /// Settings now select `selection`; loads it unless it is already the
     /// target.
     pub(crate) fn want(&mut self, selection: &TranscriptionSelection) {
-        let selection = selection.clone();
+        // An import that can't run stays saved; the listener runs the
+        // default model meanwhile.
+        let selection = super::custom_models::runnable(selection);
         if &selection == self.target() {
             return;
         }

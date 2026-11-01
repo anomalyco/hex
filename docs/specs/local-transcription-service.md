@@ -175,11 +175,15 @@ export type ModelId =
   | "whisper_large_v3_turbo"
   | "qwen3_asr06_b"
   | "qwencleo_asr_1_7b"
+  | "ivrit_whisper_large_v3_turbo"
   | "sense_voice_small"
   | "cohere_transcribe"
   | "underdog_bark_3_pro"
   | "underdog_bark_3_clean"
-  | "apple_speech";
+  | "parakeet_ultra"
+  | "apple_speech"
+  // Labs › Use your own speech model: an import, listed while it is ready.
+  | `custom-${string}`;
 
 export interface ModelInfo {
   id: ModelId;

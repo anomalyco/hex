@@ -323,6 +323,22 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
+    rows.push(row(
+        Feature::CustomModels,
+        &HINTS,
+        tr("Use your own speech model"),
+        tr("Add a speech model file of your own (GGUF) from the Local transcription picker"),
+    ));
+    let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
+    rows.push(Row {
+        locked: ultra_locked,
+        about: if ultra_locked {
+            tr("On while it is the dictation model. Choose another model to turn it off.")
+        } else {
+            tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
+        },
+        ..row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "")
+    });
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -370,6 +386,8 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
         Feature::PastePicker => "lab-paste-picker",
+        Feature::CustomModels => "lab-custom-models",
+        Feature::ParakeetUltra => "lab-parakeet-ultra",
     }
 }
 
@@ -378,6 +396,10 @@ fn flip(ui: &mut Ui, feature: Feature) {
         return;
     }
     let on = !feature.on(&ui.settings);
+    // Parakeet Ultra stays on while it dictates; its row says why.
+    if !on && feature.off_refusal(&ui.settings).is_some() {
+        return;
+    }
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,

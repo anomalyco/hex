@@ -44,6 +44,10 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Permissions missing",
     ),
     (
+        "mac-settings-permissions-stale",
+        "Window/General/Permissions · stale entry",
+    ),
+    (
         "mac-microphone-missing",
         "Window/General/Microphone missing",
     ),
@@ -97,6 +101,14 @@ const PATHS: &[(&str, &str)] = &[
     (
         "picker-downloading",
         "Window/Transcription model/Downloading",
+    ),
+    (
+        "picker-parakeet-ultra",
+        "Window/Transcription model/Parakeet Ultra details (Labs)",
+    ),
+    (
+        "picker-custom-models",
+        "Window/Transcription model/Add your own model (Labs)",
     ),
     (
         "picker-japanese",
@@ -200,6 +212,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "mac-onboarding-progress",
         "Window/Onboarding tour/Setup · progress",
+    ),
+    (
+        "mac-onboarding-stale",
+        "Window/Onboarding tour/Setup · stale entry",
     ),
     (
         "mac-onboarding-denied",

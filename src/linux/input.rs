@@ -561,6 +561,16 @@ impl ShortcutKeys {
             .held = 0;
     }
 
+    /// Whether a Hex shortcut is down now (pressed without its release), so
+    /// a newer capture owns the modifiers a paste sees held.
+    pub(crate) fn any_held(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .held
+            != 0
+    }
+
     /// Waits until the shortcut that asked for a paste has plausibly let
     /// go of its modifiers, or a release ends the wait early.
     pub(crate) fn settle(&self, stop: &AtomicBool) -> Result<()> {
@@ -1275,6 +1285,9 @@ impl Backend {
         options: HotkeyOptions,
     ) -> Result<()> {
         let (connection, root, keymap) = connect_x11()?;
+        // A shortcut held while the previous monitor stopped never sends
+        // its release here.
+        dispatcher.keys.released_all();
         let mut grabs = X11Grabs {
             connection: &connection,
             root,
@@ -1380,6 +1393,13 @@ impl Backend {
                 thread::sleep(POLL_INTERVAL);
             }
             for input in inputs {
+                // The X11 paste waits on held modifiers only while one of
+                // Hex's shortcuts is down; see `wait_for_modifiers`.
+                match input {
+                    Input::Pressed(shortcut) => dispatcher.keys.pressed(shortcut),
+                    Input::Released(shortcut) => dispatcher.keys.released(shortcut),
+                    _ => {}
+                }
                 dispatcher.input(input);
             }
             dispatcher.commands();

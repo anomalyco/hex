@@ -386,9 +386,15 @@ impl PortalBus {
             .ok_or_else(|| eyre!("the {} portal returned no session", self.interface))
     }
 
+    /// Closes `session`. One the desktop already ended has no object left
+    /// to close (GNOME 46 answers UnknownMethod, #739): that is closed too.
     pub(crate) fn close_session(&self, session: &str) {
-        if let Err(error) = self.call::<_, ()>(session, SESSION, "Close", &()) {
-            tracing::warn!(%error, "could not close a portal session");
+        match self.call::<_, ()>(session, SESSION, "Close", &()) {
+            Ok(()) => {}
+            Err(error) if unknown(&error) => {
+                tracing::debug!(%error, session, "the portal session was already closed");
+            }
+            Err(error) => tracing::warn!(%error, "could not close a portal session"),
         }
     }
 
@@ -955,6 +961,18 @@ pub(crate) fn readable_trigger(description: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session the desktop already ended answers Close with UnknownMethod
+    /// or UnknownObject (GNOME 46, #739); Hex counts it as closed.
+    #[test]
+    fn a_vanished_session_counts_as_closed() {
+        let gone = |error: zbus::fdo::Error| unknown(&zbus::Error::FDO(Box::new(error)));
+        assert!(gone(zbus::fdo::Error::UnknownMethod(
+            "Object does not exist".into()
+        )));
+        assert!(gone(zbus::fdo::Error::UnknownObject("gone".into())));
+        assert!(!gone(zbus::fdo::Error::AccessDenied("no".into())));
+    }
 
     #[test]
     fn a_loose_binary_gets_a_quoted_exec_line() {

@@ -213,4 +213,52 @@ final class DotScopeTests: XCTestCase {
         }
         XCTAssertGreaterThan(host.debugElapsedTime, tBefore + 0.14)
     }
+
+    func testHomeSwipeCueKeepsGlidingWhileCoolingOutInsteadOfFreezingMidFade() {
+        let cue = DotSwipeCueHostView(frame: CGRect(x: 0, y: 0, width: 402, height: 21))
+        cue.isActive = true
+        cue.stepAndRender(timestamp: 20.0, targetTimestamp: 20.0 + 1.0 / 120.0)
+        XCTAssertEqual(cue.debugVisibility, 1.0, accuracy: 0.01)
+        let elapsedAtDeactivate = cue.debugElapsedTime
+
+        // Deactivating cools `visibilitySpring` smoothly while the wave keeps moving rightward.
+        cue.isActive = false
+        cue.stepAndRender(timestamp: 20.0 + 1.0 / 120.0, targetTimestamp: 20.0 + 2.0 / 120.0)
+        XCTAssertGreaterThan(cue.debugVisibility, 0.85)
+        XCTAssertLessThan(cue.debugVisibility, 1.0)
+        XCTAssertGreaterThan(cue.debugElapsedTime, elapsedAtDeactivate)
+
+        for frame in 2...60 {
+            let t0 = 20.0 + Double(frame) / 120.0
+            cue.stepAndRender(timestamp: t0, targetTimestamp: t0 + 1.0 / 120.0)
+        }
+        XCTAssertEqual(cue.debugVisibility, 0.0, accuracy: 0.005)
+        XCTAssertGreaterThan(cue.debugElapsedTime, elapsedAtDeactivate + 0.45)
+    }
+
+    func testSubSecondRecordingClockUpdatesDoNotInvalidateObservationEveryFrame() {
+        final class Counter: @unchecked Sendable {
+            var count = 0
+        }
+        let defaults = UserDefaults(suiteName: "DotScopeClockChurnTests.\(UUID().uuidString)")!
+        let controller = DictationController(
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            autoPrepareOnInit: false
+        )
+
+        let counter = Counter()
+        withObservationTracking {
+            _ = controller.recordingWholeSeconds
+        } onChange: {
+            counter.count += 1
+        }
+
+        for ms in stride(from: 33, through: 957, by: 33) {
+            controller.updateRecordingDurationForTesting(Double(ms) / 1000.0)
+        }
+        XCTAssertEqual(counter.count, 0, "Sub-second 30 Hz meter ticks must not invalidate SwiftUI on @MainActor")
+
+        controller.updateRecordingDurationForTesting(1.02)
+        XCTAssertEqual(counter.count, 1, "Crossing a whole second should notify SwiftUI once")
+    }
 }

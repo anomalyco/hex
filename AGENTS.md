@@ -159,6 +159,14 @@ substitute for source inspection or a second roadmap.
   installed-only path that never downloads a model.
 - `transcription/models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
+- `transcription/model_details`: what a catalog model's details view adds:
+  licence credit, source and licence links, the publisher's notice, measured
+  memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra).
+- `transcription/custom_models`, `transcription/gguf_header`: Labs › Use your
+  own speech model: GGUF imports checked from their header alone (family,
+  variant, languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under
+  their SHA-256 with a receipt and manifest, `TranscriptionModelId::Custom`
+  IDs, and the default-model fallback for an import that can't run.
 - `transcription/service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
@@ -250,6 +258,12 @@ substitute for source inspection or a second roadmap.
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last,
   and paste.
+- `linux/service` also adopts the session's Wayland display at `hex service`
+  start when the unit has none (Hyprland imports nothing into systemd; #756):
+  the user manager's `WAYLAND_DISPLAY`, else the newest answering
+  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
+  `limitation()` names the HUD's failure: no display, no layer-shell, or
+  Rune's overlay error.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on
@@ -527,6 +541,15 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 ## Invariants
 
+- Settings errors never prevent launch. `app_settings/persistence` defaults
+  only invalid fields in memory and logs each key and reason; unknown keys
+  are ignored. Invalid JSON or unreadable files use defaults without changing
+  the original. Before any save over invalid settings, preserve the exact
+  original beside it as `settings.json.unreadable-<sha256>` (owner-only;
+  identical originals share one backup). A failed backup blocks the save.
+  Keep saved values readable by older builds: an unchosen
+  `meetings.retention` is omitted, not `null`. Do not omit optional fields
+  whose absence restores a nonempty default, such as `paste_last_hotkey`.
 - On a new Mac, release dictation starts only after Microphone, Accessibility,
   and the selected dictation model are ready. Hex never asks for Input
   Monitoring: Accessibility also grants the listen-event access its shortcut
@@ -679,7 +702,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Escape at all, even with other jobs queued.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
-  model and persisted selection.
+  model and persisted selection. An import (Labs › Use your own speech model)
+  is checked from its GGUF header before anything loads and verified against
+  the receipt Hex wrote when it copied the file; that digest is not a
+  publisher's. A saved import that is missing, changed, or off stays saved
+  while the listener runs the default model; never rewrite it away.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
@@ -1277,8 +1304,9 @@ rules on every check; refresh ratcheted ceilings with
 
 Use Rune's headless renders as the desktop-UI iteration loop: `hex app --
 --snap <png> --scene <name>` draws one named fixture scene from `SCENES` in
-`src/rune_ui.rs` without starting the runtime, on every OS (`--list-scenes`
-lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
+`src/rune_ui.rs` without starting the runtime or touching the data folder
+(no settings, History, or log; only `live` reads, and never writes), on
+every OS (`--list-scenes` lists them; `--theme light|dark`, `--size WxH`, and `--scale` adjust the
 render). Scenes cover every pane and state the goldens check: the Linux and
 Windows panes (`modes`, `history`, `picker`, `onboarding`,
 `windows-settings`, …) and the macOS ones (`mac-settings`,
