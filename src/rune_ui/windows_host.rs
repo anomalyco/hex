@@ -16,7 +16,7 @@ use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::HotkeyBinding;
 use crate::desktop::i18n::tr;
-use crate::windows::input::{ChordCapture, ChordPoll, WindowsHotkey};
+use crate::windows::input::{ChordCapture, ChordPoll, NumpadWatch, WindowsHotkey};
 use crate::windows::rune::RuntimeHandle;
 pub(super) use crate::windows::rune::{Request, ShortcutTarget};
 
@@ -144,10 +144,14 @@ impl ChordWatch {
             .name("hex-chord-capture".into())
             .spawn(move || {
                 let mut capture = ChordCapture::default();
+                let numpad = NumpadWatch::install();
                 // The modifiers last shown while the chord is in progress.
                 let mut shown = capture.held();
                 while !worker_stop.load(Ordering::Relaxed) {
                     std::thread::sleep(CHORD_POLL);
+                    if let Some(numpad) = &numpad {
+                        numpad.pump();
+                    }
                     // Keys typed into another application never rebind a
                     // shortcut.
                     if !crate::windows::input::app_is_foreground() {

@@ -628,15 +628,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     if event.dwExtraInfo == HEX_INJECTED {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
-    let vk = numpad_key(event).unwrap_or(event.vkCode);
-    if numpad_key(event).is_some() {
-        // Only the hook tells a numpad key from the key it stands for.
-        if is_down {
-            NUMPAD_DOWN.store(vk, Ordering::Relaxed);
-        } else {
-            let _ = NUMPAD_DOWN.compare_exchange(vk, 0, Ordering::Relaxed, Ordering::Relaxed);
-        }
-    }
+    let vk = track_numpad(event, is_down).unwrap_or(event.vkCode);
     match process_button(vk, is_down, event.time) {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
@@ -1198,16 +1190,16 @@ fn key_down(key: u16) -> bool {
 
 mod chord;
 
-pub(crate) use chord::{ChordCapture, ChordPoll};
+pub(crate) use chord::{ChordCapture, ChordPoll, NumpadWatch};
 
 /// Numpad Enter's code in a binding: Enter's virtual key with the extended
 /// flag, which no virtual key of its own names.
 const NUMPAD_ENTER: u32 = 0x100 | VK_RETURN as u32;
 
-/// The numpad key the keyboard hook last saw go down and not yet up, by its
+/// The numpad key a keyboard hook last saw go down and not yet up, by its
 /// `num` code, for the chord capture: polled key state can't tell Numpad 1
-/// with Num Lock off from End. Zero for none. Without the hook (Hex
-/// disabled) a capture records what the numpad key stands for.
+/// with Num Lock off from End. Zero for none. The capture runs a hook of
+/// its own (`NumpadWatch`), so it doesn't depend on the listener's.
 static NUMPAD_DOWN: AtomicU32 = AtomicU32::new(0);
 
 /// The numpad digit and decimal keys by scan code. With Num Lock off they
@@ -1227,6 +1219,19 @@ const NUMPAD_SCAN_CODES: [(u32, u32); 11] = [
     (0x49, 0x69),
     (0x53, 0x6E),
 ];
+
+/// Notes a numpad key going down or up for the chord capture
+/// (`NUMPAD_DOWN`), and returns its `num` code; `None` for any other key.
+/// Only a hook tells a numpad key from the key it stands for.
+fn track_numpad(event: &KBDLLHOOKSTRUCT, is_down: bool) -> Option<u32> {
+    let vk = numpad_key(event)?;
+    if is_down {
+        NUMPAD_DOWN.store(vk, Ordering::Relaxed);
+    } else {
+        let _ = NUMPAD_DOWN.compare_exchange(vk, 0, Ordering::Relaxed, Ordering::Relaxed);
+    }
+    Some(vk)
+}
 
 /// A numpad key's `num` code, whatever Num Lock says: the digits and the
 /// decimal by scan code, Numpad Enter by Enter's extended flag, and the

@@ -456,6 +456,15 @@ impl HotkeyKey {
             .filter(|number| (1..=32).contains(number))
     }
 
+    /// What its keycap shows: the label, except that on Windows a
+    /// punctuation key shows what it types on the active layout now (#815).
+    pub fn keycap(&self) -> String {
+        #[cfg(target_os = "windows")]
+        return crate::windows::input::keycap_label(&self.label);
+        #[cfg(not(target_os = "windows"))]
+        self.label.clone()
+    }
+
     fn same_key(&self, other: &Self) -> bool {
         if cfg!(target_os = "macos") {
             self.code == other.code
@@ -832,13 +841,7 @@ impl HotkeyBinding {
         self.modifiers
             .keycaps()
             .map(str::to_string)
-            .chain(self.key.iter().map(|key| {
-                // A punctuation key shows what it types on the layout now.
-                #[cfg(target_os = "windows")]
-                return crate::windows::input::keycap_label(&key.label);
-                #[cfg(not(target_os = "windows"))]
-                key.label.clone()
-            }))
+            .chain(self.key.iter().map(HotkeyKey::keycap))
             .collect()
     }
 
@@ -851,7 +854,7 @@ impl HotkeyBinding {
             .chain(
                 self.key
                     .iter()
-                    .map(|key| (key.label.clone(), ModifierSide::Either)),
+                    .map(|key| (key.keycap(), ModifierSide::Either)),
             )
             .collect()
     }
