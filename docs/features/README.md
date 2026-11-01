@@ -910,7 +910,8 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 ```ts
 Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes output*
 ├── Trust prompt -> Allow a config that uses fetch or programs (only when one asks)
-├── Edit with agent -> Copy a prompt naming the steps' keys, `hex settings`, and the transforms docs
+├── Edit with agent -> Copy a prompt naming the steps' keys (the AI rewrite too), `hex settings`,
+│   `hex vocabulary` for names, and the transforms docs
 ├── Open file -> settings.json in the default editor
 ├── Every dictation -> Global's steps, numbered, read-only
 ├── Try -> Global's corrections and built-ins on a typed sentence
@@ -923,8 +924,8 @@ Foreground context -> Select processing
 ├── Otherwise matching application
 └── Otherwise Global
 
-Selected mode                            // replaces Global, does not layer over it
-  -> Corrections
+Selected mode                            // replaces Global's rewrite and transformations
+  -> Global's corrections, then the mode's  // every OS
   -> OpenCode transformation             // optional provider-backed rewrite
   -> Transformations                     // ordered text chain
   -> Paste or Send
