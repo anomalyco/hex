@@ -49,6 +49,7 @@ hex
 │   ├── cancel                     stop a download or load in progress
 │   ├── import <path> [--name N]   Labs: check and copy in a GGUF; prints its custom-… id
 │   ├── rename <id> <name>         Labs: an import's picker name
+│   ├── repair <id>                Labs: rehash Hex's copy; ready again if it still matches
 │   ├── remove <id>                Labs: Hex's copy of an import (not the selected model)
 │   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process
 ├── commands
@@ -125,7 +126,7 @@ same.
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
 
-`model import`, `rename`, and `remove` need Labs › Use your own speech model
+`model import`, `rename`, `repair`, and `remove` need Labs › Use your own speech model
 (`hex labs on custom-models`) and run in this process on every OS; `hex
 models` is an alias for `hex model`. An import's id is `custom-` and the first
 16 hex digits of its SHA-256, and every model command takes it. One that is

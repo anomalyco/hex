@@ -408,9 +408,29 @@ pub fn runnable(selection: &TranscriptionSelection) -> TranscriptionSelection {
     }
 }
 
-/// The model the listener runs in place of an import that can't.
+/// The model the listener runs in place of an import that can't: the one
+/// recommended for the system language when it is downloaded, else the
+/// first downloaded catalog model, so the fallback never waits on a
+/// download. With nothing downloaded it is the recommendation, which setup
+/// then offers to download.
 pub fn fallback() -> TranscriptionSelection {
-    super::models::recommended_selection(&crate::desktop::i18n::preferred_language())
+    let language = crate::desktop::i18n::preferred_language();
+    let recommended = super::models::recommended_selection(&language);
+    let installed = |selection: &TranscriptionSelection| {
+        let model = super::models::definition(selection.model);
+        model.available() && super::models::is_installed(model, &selection.language)
+    };
+    if installed(&recommended) {
+        return recommended;
+    }
+    super::models::MODELS
+        .iter()
+        .map(|model| TranscriptionSelection {
+            model: model.id,
+            language: model.language_for(&recommended.language).to_owned(),
+        })
+        .find(installed)
+        .unwrap_or(recommended)
 }
 
 /// The family name people know for `architecture`.
@@ -572,11 +592,13 @@ fn copy_and_record(
     let id = CustomModelId::from_sha256(&sha256);
     let file = model_file(directory, id);
     let manifest_path = manifest_file(directory, id);
-    if let Some(existing) = fs::read(&manifest_path)
+    let existing = fs::read(&manifest_path)
         .ok()
         .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
-        .filter(|manifest| manifest.sha256 == sha256 && file.is_file())
-    {
+        .filter(|manifest| manifest.sha256 == sha256);
+    // The same file again: an intact copy stays; a missing or changed one is
+    // replaced by this copy, keeping the import's name.
+    if let Some(existing) = existing.clone().filter(|_| intact(&file, &sha256)) {
         fs::remove_file(partial)?;
         if let Some(name) = name {
             write_manifest(
@@ -610,9 +632,10 @@ fn copy_and_record(
         directory,
         id,
         &Manifest {
-            name: match name {
-                Some(name) => valid_name(name)?,
-                None => profile.name.clone(),
+            name: match (name, &existing) {
+                (Some(name), _) => valid_name(name)?,
+                (None, Some(existing)) => existing.name.clone(),
+                (None, None) => profile.name.clone(),
             },
             metadata_name: profile.name,
             architecture: profile.architecture,
@@ -631,6 +654,21 @@ fn copy_and_record(
     )?;
     tracing::info!(id = id.as_str(), bytes, "imported a speech model");
     Ok(id)
+}
+
+/// Whether `file` is still the copy its receipt describes.
+fn intact(file: &Path, sha256: &str) -> bool {
+    let Ok(metadata) = fs::metadata(file) else {
+        return false;
+    };
+    fs::read(receipt_path(file))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Receipt>(&data).ok())
+        .is_some_and(|receipt| {
+            receipt.sha256 == sha256
+                && receipt.bytes == metadata.len()
+                && super::models::modified_ns(&metadata) == Some(receipt.modified_ns)
+        })
 }
 
 fn copy_hashing(source: &Path, destination: &Path, canceled: &AtomicBool) -> Result<(u64, String)> {
@@ -672,6 +710,43 @@ fn valid_name(name: &str) -> Result<String> {
         bail!("an imported model's name can't be empty");
     }
     Ok(name)
+}
+
+/// Checks Hex's copy of an import again: when its contents still match the
+/// digest recorded at import (only its modification time moved, say), the
+/// receipt is rewritten and the import is ready again. A copy that no
+/// longer matches stays changed, and is never trusted on size alone.
+pub fn repair(id: CustomModelId, canceled: &AtomicBool) -> Result<()> {
+    let directory = directory()?;
+    let manifest = fs::read(manifest_file(&directory, id))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
+        .ok_or_else(|| eyre!("no imported model is {}", id.as_str()))?;
+    let file = model_file(&directory, id);
+    if !file.is_file() {
+        bail!(
+            "{} is missing. Import it again, or remove it.",
+            manifest.name
+        );
+    }
+    if super::models::sha256_hex(&file, Some(canceled))? != manifest.sha256 {
+        bail!(
+            "{} no longer matches the file that was imported. Import it again, or remove it.",
+            manifest.name
+        );
+    }
+    let metadata = fs::metadata(&file)?;
+    super::models::write_json_atomically(
+        &receipt_path(&file),
+        &Receipt {
+            bytes: metadata.len(),
+            sha256: manifest.sha256,
+            modified_ns: super::models::modified_ns(&metadata)
+                .ok_or_else(|| eyre!("the copy's modification time is unavailable"))?,
+        },
+    )?;
+    invalidate();
+    Ok(())
 }
 
 /// Renames an import; only the picker's name changes.
@@ -767,6 +842,36 @@ mod tests {
             import(&source, Some("primeLine"), &AtomicBool::new(false)).unwrap(),
             id
         );
+        assert_eq!(super::definition(id).name, "primeLine");
+        // A copy whose time moved but whose contents match repairs; one
+        // that changed stays refused.
+        let copy = super::super::models::model_path(super::definition(id)).unwrap();
+        let receipt = receipt_path(&copy);
+        let written = fs::read(&receipt).unwrap();
+        fs::write(&receipt, br#"{"bytes":0,"sha256":"","modified_ns":0}"#).unwrap();
+        invalidate();
+        repair(id, &AtomicBool::new(false)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Receipt>(&fs::read(&receipt).unwrap())
+                .unwrap()
+                .sha256,
+            serde_json::from_slice::<Receipt>(&written).unwrap().sha256
+        );
+        let mut bytes = fs::read(&copy).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        fs::write(&copy, bytes).unwrap();
+        assert!(
+            repair(id, &AtomicBool::new(false))
+                .unwrap_err()
+                .to_string()
+                .contains("no longer matches")
+        );
+        fs::copy(&source, &copy).unwrap();
+        repair(id, &AtomicBool::new(false)).unwrap();
+        // Importing the file again restores a deleted copy under its name.
+        fs::remove_file(&copy).unwrap();
+        assert_eq!(import(&source, None, &AtomicBool::new(false)).unwrap(), id);
+        assert!(copy.is_file());
         assert_eq!(super::definition(id).name, "primeLine");
         rename(id, "  German  Parakeet ").unwrap();
         assert_eq!(super::definition(id).name, "German Parakeet");

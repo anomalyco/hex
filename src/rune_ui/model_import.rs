@@ -125,7 +125,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         ui.picker.import.worker = None;
         changed = true;
         match result {
-            Ok(id) => tracing::info!(id = id.as_str(), "imported a speech model from the picker"),
+            Ok(id) => tracing::info!(id = id.as_str(), "an imported speech model is ready"),
             Err(error) => ui.picker.import.error = Some(error),
         }
     }
@@ -141,7 +141,7 @@ pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
         Status::Ready => None,
         Status::Missing => Some(tr("Its file is missing. Import it again, or remove it.").into()),
         Status::Changed => Some(
-            tr("Its file changed since it was imported. Import it again, or remove it.").into(),
+            tr("Its file changed since it was imported. Check it again, import it again, or remove it.").into(),
         ),
         Status::Off => Some(tr("Turn on Labs › Use your own speech model to use it.").into()),
     }
@@ -237,7 +237,32 @@ pub(super) fn actions(
             ),
         ];
     }
-    let mut actions = vec![button(
+    let mut actions = Vec::new();
+    // Missing or changed: check Hex's copy again, or import the file again.
+    let status = custom_models::status(id);
+    if status == Status::Changed {
+        actions.push(button(
+            p,
+            "repair-model",
+            if ui.picker.import.busy() {
+                tr("Checking…")
+            } else {
+                tr("Check again")
+            },
+            ButtonKind::Secondary,
+            move |ui: &mut Ui, _| repair(ui, id),
+        ));
+    }
+    if matches!(status, Status::Missing | Status::Changed) {
+        actions.push(button(
+            p,
+            "reimport-model",
+            tr("Import again…"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| choose(ui),
+        ));
+    }
+    actions.push(button(
         p,
         "rename-model",
         tr("Rename"),
@@ -245,7 +270,7 @@ pub(super) fn actions(
         move |ui: &mut Ui, _| {
             ui.picker.import.renaming = Some((id, TextEdit::new(model.name)));
         },
-    )];
+    ));
     if removable {
         let confirming = ui.picker.deletion == Some(model.id);
         let remove_button = button(
@@ -270,6 +295,29 @@ pub(super) fn actions(
         });
     }
     actions
+}
+
+/// Rehashes Hex's copy on a worker; a match makes the import ready again.
+fn repair(ui: &mut Ui, id: CustomModelId) {
+    if !ui.live() || ui.picker.import.busy() {
+        return;
+    }
+    ui.picker.import.error = None;
+    let (sender, receiver) = channel();
+    let wake = wake(ui.modes.waker.clone());
+    let started = std::thread::Builder::new()
+        .name("hex-model-repair".into())
+        .spawn(move || {
+            let result = custom_models::repair(id, &AtomicBool::new(false))
+                .map(|()| id)
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(result);
+            wake();
+        });
+    match started {
+        Ok(_) => ui.picker.import.worker = Some(receiver),
+        Err(error) => ui.picker.import.error = Some(error.to_string()),
+    }
 }
 
 fn save_name(ui: &mut Ui) {

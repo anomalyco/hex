@@ -302,7 +302,8 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
     imported cards after the catalog: Imported · family · languages · Not
     benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";
     Rename, Remove (not the active model); missing, changed, or off -> warning
-    line and no Use (labs.md)
+    line and no Use; changed -> Check again; missing or changed -> Import
+    again… (labs.md)
 ```
 
 Only Parakeet Unified English is marked `streams`

@@ -419,9 +419,13 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // lab
 │   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
 │   against its receipt instead of downloading)
 ├── Remove -> Hex's copy, receipt, and manifest only; not the active model
+├── Changed -> "Check again" rehashes the copy: the recorded SHA-256 again ->
+│   new receipt, ready; else it stays changed. Missing or changed -> "Import
+│   again…": the same file replaces the copy and keeps the import's name
 └── Saved import missing, changed (size or mtime), or toggle off -> the choice
-    stays saved; the listener runs the default model for the system language
-    (custom_models::runnable); General's model row says so; the card warns
+    stays saved; the listener runs a downloaded fallback (the system language's
+    recommendation if downloaded, else the first downloaded catalog model;
+    custom_models::runnable); General's model row says so; the card warns
 ```
 
 The local digest identifies the file Hex copied; it is not a publisher
@@ -429,8 +433,8 @@ checksum and Hex vouches for nothing in it. The selection, recent models,
 and keyboard-language mappings keep an import while it can't run
 (`models::validate_saved`), and a build that doesn't know `custom-…` keeps its
 default for that field without rewriting `settings.json` (#744). `hex model
-import <path> [--name N]`, `hex model rename <id> <name>`, and `hex model
-remove <id>` (also `hex models …`) run in the CLI process; a running Hex lists
+import <path> [--name N]`, `hex model rename <id> <name>`, `hex model repair
+<id>`, and `hex model remove <id>` (also `hex models …`) run in the CLI process; a running Hex lists
 the change at once (the registry rereads `models/custom/` when its folder
 changes). `hex model list`, the local API's `/models`, and the Linux and
 Windows tray list ready imports; the macOS menu bar's model list is built at
