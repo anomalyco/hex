@@ -131,7 +131,10 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   ├── Permissions or the selected model not ready -> the old completion
 │   │   │   no longer counts -> onboarding opens from the start
 │   │   └── Everything ready -> no onboarding; nothing but the ID changes
-│   └── Saved settings are kept; the ID is recorded either way
+│   ├── Saved settings are kept; the ID is recorded either way
+│   └── Setup ready, listener starting -> a running 2.3.1 or Swift Hex   // setup.quit-legacy
+│       (retired bundle IDs) is asked to quit, so both never answer Option;
+│       it stays installed. No check; `macos_rune::quit_legacy_hex`
 ├── Setting up Hex -> speech model download starts at once  // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
