@@ -121,6 +121,7 @@ final class DictationController {
     private(set) var warmDuration: WarmSessionDuration
     private(set) var style: DictationStyle
     private(set) var returnAppID: String?
+    private(set) var quickReturnApps: [HostApp]
     private(set) var allowBluetoothMic: Bool
     private(set) var autoReturnState: AutoReturnState = .idle
     private(set) var handoffNotice: String?
@@ -154,6 +155,7 @@ final class DictationController {
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.returnAppID = resolvedBridge.returnAppID
+        self.quickReturnApps = resolvedBridge.quickReturnApps
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
         self.defaultURLOpener = urlOpener ?? { url in
             await UIApplication.shared.open(url)
@@ -251,6 +253,15 @@ final class DictationController {
         let normalized = (id?.isEmpty == true) ? nil : id
         returnAppID = normalized
         keyboardBridge.returnAppID = normalized
+    }
+
+    /// Unticking the saved return app also forgets it, so the ↩ chip only ever names an app in the list.
+    func setQuickReturnApps(_ apps: [HostApp]) {
+        quickReturnApps = apps
+        keyboardBridge.quickReturnApps = apps
+        if let returnAppID, !apps.contains(where: { $0.id == returnAppID }) {
+            setReturnAppID(nil)
+        }
     }
 
     func setAllowBluetoothMic(_ allow: Bool) {

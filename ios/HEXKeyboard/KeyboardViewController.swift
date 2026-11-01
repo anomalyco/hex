@@ -139,6 +139,11 @@ final class KeyboardViewController: UIInputViewController {
             coldStartJobID = UUID().uuidString
         }
 
+        let quickReturnApps = bridge.quickReturnApps
+        if viewModel.quickReturnApps != quickReturnApps {
+            viewModel.quickReturnApps = quickReturnApps
+        }
+
         viewModel.applyBridgeState(
             hasFullAccess: true,
             snapshot: snap,

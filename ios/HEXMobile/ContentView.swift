@@ -41,6 +41,7 @@ struct ContentView: View {
     @Binding var showSetup: Bool
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var practiceText = ""
+    @State private var showReturnAppsEditor = false
     @FocusState private var practiceFocused: Bool
 
     private static let stageWellHeight: CGFloat = 48
@@ -468,7 +469,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    ForEach(HostAppCatalog.all) { app in
+                    ForEach(dictation.quickReturnApps) { app in
                         Button {
                             dictation.setReturnAppID(app.id)
                         } label: {
@@ -479,9 +480,19 @@ struct ContentView: View {
                             }
                         }
                     }
+
+                    Divider()
+
+                    Button("Edit apps…") { showReturnAppsEditor = true }
                 } label: {
                     menuValueLabel(dictation.selectedReturnApp?.name ?? "Swipe back")
                 }
+            }
+            .sheet(isPresented: $showReturnAppsEditor) {
+                ReturnAppsSheet(
+                    chosen: dictation.quickReturnApps,
+                    onSave: dictation.setQuickReturnApps
+                )
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 48)
@@ -730,7 +741,7 @@ struct ContentView: View {
                     // Quiet app quick-jump strip comfortably above the bottom gesture zone
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(HostAppCatalog.quickChips) { app in
+                            ForEach(dictation.quickReturnApps) { app in
                                 let isSelected = dictation.returnAppID == app.id
                                 Button {
                                     dictation.returnToHostApp(app, remember: true)

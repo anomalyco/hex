@@ -31,7 +31,8 @@ it never accesses the microphone, speech model, or network.
     cannot inspect the host app's bundle ID without private APIs, you pick your
     usual return app once on the `↩` chip (or jump bar), and apps without a
     registered URL scheme fall back cleanly within ~1s to the bottom-edge swipe
-    bar and quick-jump chips.
+    bar and quick-jump chips. **Edit apps…** in the app's return menu picks and
+    orders the apps the keyboard tray and jump bar offer.
   - **GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`):**
     Both `HEXMobile` and `HEXKeyboard` render Hex's desktop menu-bar braided
     oscilloscope (`src/dot_scope.rs`, `src/rune_hud.wgsl`) at native display
