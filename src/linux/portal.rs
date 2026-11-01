@@ -1106,7 +1106,7 @@ mod tests {
             "[Desktop Entry]\n",
         )
         .unwrap();
-        std::fs::write(&root.join("new-hex"), "").unwrap();
+        std::fs::write(root.join("new-hex"), "").unwrap();
         entries.repoint(target).unwrap();
         assert!(!entries.entry().exists());
         let users = "[Desktop Entry]\nExec=/gone/hex\n";
