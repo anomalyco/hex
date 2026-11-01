@@ -1829,6 +1829,32 @@ fn onboarding_downloads_the_model_through_the_service() {
 }
 
 #[test]
+fn the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one() {
+    // Continue with no pick starts the selected, recommended model.
+    let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
+    assert!(sent(&rt).is_empty(), "nothing starts before a pick");
+    tap(&mut rt, "tour-continue");
+    assert!(matches!(
+        sent(&rt),
+        [Request::ChooseModel {
+            model: TranscriptionModelId::ParakeetUnifiedEnglish,
+            ..
+        }]
+    ));
+    // Picking a found catalog model uses it, with no download of ours.
+    let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
+    tap(&mut rt, "model1");
+    assert!(matches!(
+        sent(&rt),
+        [Request::ChooseModel {
+            model: TranscriptionModelId::ParakeetV3,
+            ..
+        }]
+    ));
+    assert_eq!(rt.state.found.picked, Some(1));
+}
+
+#[test]
 fn the_microphone_field_names_the_input_in_use() {
     let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
     let rt = runtime("mac-settings", true, PANE_SIZE);
