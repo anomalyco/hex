@@ -723,6 +723,20 @@ Parakeet's buffered settings live text grows in whole-chunk steps. The final
 text came from the stream 154 ms after release, with 0/40 word differences
 from the whole clip. Synthetic speech; not a physical microphone or the HUD.
 
+**Observed November 1, 2026, apollo (Radeon 8060S, Vulkan), Nemotron 3.5 ASR
+Q8, FLEURS clips replayed at 1× into the production engine with live text:**
+the stream qualified and every clip finished from it in 34–40 ms after the
+release tail (163 ms for the first, cold), against 168–889 ms whole-clip for
+10.6–54.6 s. German (17.9 s and 54.6 s, `de`) and Auto matched the whole clip
+word for word; live text showed its first words 2.4–5.0 s into the audio,
+updated once per 1.12 s chunk, and never rewrote stable text. A 43.7 s English
+clip of five sentences joined by 0.5 s of digital silence lost 13 of 96 words
+against the whole clip, which itself lost a sentence; Parakeet v3 lost more of
+the same clip, so treat long joined FLEURS clips as a weak test, not a
+streaming defect. A clip alternating English and German sentences with Auto
+kept each sentence in its language (1 word different from the whole clip),
+though both paths dropped one English sentence after a gap. Not a microphone, the HUD, macOS, or Windows.
+
 **Live text observed October 28, 2026, Apple M3 Pro, Metal, Unified English Q8,
 `Hex Test.app` at `84f594a` with `live-text`, a physical microphone:** the line
 appeared under the HUD and grew with the words; three dictations in a row

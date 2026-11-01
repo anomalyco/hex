@@ -32,7 +32,7 @@ General › Vocabulary   // vocabulary.settings; after Language
     `hex settings set vocabulary_boost off|light|normal|strong`
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
-Transcription (Parakeet: RNN-T and TDT, Underdog Bark too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
+Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
 ├── Only with Labs › Vocabulary biasing on (`labs.vocabulary_biasing`, off by
 │   default; labs.md) -> off: no run takes the list; the sheet says so, and
 │   rewriting and search still use it
