@@ -126,6 +126,27 @@ fn is_blank(partial: &Partial) -> bool {
     partial.stable.trim().is_empty() && partial.tentative.trim().is_empty()
 }
 
+/// About one space of the plate's font, between right-to-left stable and
+/// tentative words.
+const RTL_SPACE: f32 = 4.0;
+
+/// Whether the line's first strong letter is right-to-left (Hebrew, Arabic,
+/// Persian, Syriac, Thaana, N'Ko, and their presentation forms).
+fn is_right_to_left(stable: &str, tentative: &str) -> bool {
+    stable
+        .chars()
+        .chain(tentative.chars())
+        .find(|c| c.is_alphabetic() || is_rtl_letter(*c))
+        .is_some_and(is_rtl_letter)
+}
+
+fn is_rtl_letter(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}'
+    )
+}
+
 fn view(plate: &Plate, cx: &mut Cx<Plate>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let c = &p.k.c;
@@ -140,24 +161,37 @@ fn view(plate: &Plate, cx: &mut Cx<Plate>) -> El {
         return root;
     }
     // The newest words stay in view: the start gives way with "…".
-    let line = row()
-        .key("line")
-        .min_w(0.0)
-        .shrink()
-        .child(
-            text(plate.stable.trim().to_owned())
-                .key("stable")
-                .truncate_head()
-                .font(p.k.ty.ui)
-                .color(p.text()),
-        )
-        .children((!plate.tentative.trim().is_empty()).then(|| {
-            text(plate.tentative.clone())
-                .key("tentative")
-                .truncate()
-                .font(p.k.ty.ui)
-                .color(p.faint())
-        }));
+    let stable = text(plate.stable.trim().to_owned())
+        .key("stable")
+        .truncate_head()
+        .font(p.k.ty.ui)
+        .color(p.text());
+    let rtl = is_right_to_left(&plate.stable, &plate.tentative);
+    let tentative = (!plate.tentative.trim().is_empty()).then(|| {
+        let words = text(if rtl {
+            // A leading space would sit on the right-to-left line's far
+            // (right) side; the gap goes between the words instead.
+            plate.tentative.trim().to_owned()
+        } else {
+            plate.tentative.clone()
+        })
+        .key("tentative")
+        .truncate()
+        .font(p.k.ty.ui)
+        .color(p.faint());
+        let spaced = rtl
+            && !plate.stable.trim().is_empty()
+            && plate.tentative.starts_with(char::is_whitespace);
+        if spaced { words.mr(RTL_SPACE) } else { words }
+    });
+    let line = row().key("line").min_w(0.0).shrink();
+    // Right-to-left, the newer (tentative) words read after the stable ones,
+    // so they sit to their left.
+    let line = if rtl {
+        line.children(tentative).child(stable)
+    } else {
+        line.child(stable).children(tentative)
+    };
     root.child(
         row()
             .key("plate")
@@ -182,6 +216,7 @@ mod tests {
     const SHORT: &str = "So the plan for today";
     const LONG: &str = "So the plan for today is to finish the release notes, then check the \
         streaming numbers on the M4, and after lunch we can review the onboarding flow together";
+    const HEBREW: &str = "אז התוכנית להיום";
 
     fn runtime(stable: &str, tentative: &str, dark: bool) -> Runtime<Plate> {
         let plate = Plate {
@@ -236,6 +271,24 @@ mod tests {
             assert!(line < PLATE_H, "one line: {line}");
             assert_eq!(rect(&rt, "tentative").is_some(), !tentative.is_empty());
         }
+    }
+
+    #[test]
+    fn tentative_words_follow_the_stable_ones_in_reading_order() {
+        let rt = runtime(SHORT, " is to finish", false);
+        let [sx, _, sw, _] = rect(&rt, "stable").unwrap();
+        let [tx, _, _, _] = rect(&rt, "tentative").unwrap();
+        assert!(tx >= sx + sw - 0.5, "left to right: {sx} {sw} {tx}");
+
+        let rt = runtime(HEBREW, " והיום", false);
+        let [sx, _, _, _] = rect(&rt, "stable").unwrap();
+        let [tx, _, tw, _] = rect(&rt, "tentative").unwrap();
+        assert!(tx + tw < sx, "right to left, after a space: {tx} {tw} {sx}");
+
+        assert!(is_right_to_left(HEBREW, ""));
+        assert!(is_right_to_left("  ", " مرحبا"));
+        assert!(!is_right_to_left(SHORT, " שלום"));
+        assert!(!is_right_to_left("", ""));
     }
 
     #[test]
@@ -295,6 +348,7 @@ mod tests {
             ("short", SHORT, ""),
             ("long", LONG, ""),
             ("tentative", SHORT, " is to finish"),
+            ("rtl", HEBREW, " והיום"),
         ] {
             for dark in [false, true] {
                 let mut rt = runtime(stable, tentative, dark);
