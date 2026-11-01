@@ -65,7 +65,7 @@ export default function App() {
           <div className="show__head" ref={head}>
             <img src={`${import.meta.env.BASE_URL}shout-idle.webp`} alt="" width="640" height="640" decoding="async" fetchPriority="high" />
           </div>
-          <OptionKey phase={shout.phase} onStart={shout.start} onIntent={shout.load} onPress={shout.pressKey} />
+          <OptionKey phase={shout.phase} onStart={shout.start} onIntent={shout.intent} onPress={shout.pressKey} />
         </div>
 
         <section className="hero">

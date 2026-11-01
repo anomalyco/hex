@@ -78,6 +78,13 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
   useEffect(() => () => live.current?.destroy(), [])
 
   const context = useRef<AudioContext | null>(null)
+  // Building an AudioContext blocks the main thread for tens of milliseconds, so it is made when the
+  // visitor reaches for the key; the click still resumes it, inside the gesture.
+  const intent = useCallback(() => {
+    if (!readMuted()) context.current ??= newContext()
+    void load()
+  }, [load])
+
   const pressKey = useCallback((down: boolean, el?: HTMLElement | null) => {
     live.current?.pressKey?.(down, el?.getBoundingClientRect() ?? null)
   }, [])
@@ -88,7 +95,7 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
       if (phase === "starting" || phase === "started") return
       const quiet = readMuted()
       if (!quiet) context.current ??= newContext()
-      void context.current?.resume()
+      const resumed = context.current?.resume()
       const keyRect = el?.getBoundingClientRect() ?? null
       setPhase("starting")
       if (live.current && !reduced.current) {
@@ -98,6 +105,8 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
       void load().then(async (e) => {
         if (!e) return setPhase("idle")
         if (!reduced.current) root.current?.setAttribute("data-key-exploded", "")
+        // A context made before the gesture is still suspended; the engine only sounds once it runs.
+        if (resumed && context.current?.state !== "running") await Promise.race([resumed.catch(() => {}), new Promise((r) => setTimeout(r, 250))])
         await e.start({ context: context.current, muted: quiet, keyRect })
         setPhase("started")
       })
@@ -118,7 +127,7 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
     live.current?.setMuted(next, context.current)
   }, [muted])
 
-  return { phase, muted, start, load, pressKey, toggleMuted }
+  return { phase, muted, start, intent, pressKey, toggleMuted }
 }
 
 export function OptionKey({

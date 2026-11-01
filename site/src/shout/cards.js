@@ -976,6 +976,9 @@ export class Cards {
     for (let i = 0; i < COLS * ROWS; i++) if (!this.ocSlots.includes(i)) this.free.push(i)
     this.dirty = []
     this.version = 0
+    // How many times each slot (keyed by its atlas origin) has been drawn, so anything that copies a
+    // slot's pixels can tell when they changed.
+    this.slotVersions = new Map()
     this.counts = {}
     this.serial = 0
     this.inUse = new Set()
@@ -1129,5 +1132,11 @@ export class Cards {
     ctx.restore()
     this.dirty.push({ x: card.px, y: card.py, w, h })
     this.version++
+    const key = card.px * SIZE + card.py
+    this.slotVersions.set(key, (this.slotVersions.get(key) ?? 0) + 1)
+  }
+
+  slotVersion(px, py) {
+    return this.slotVersions.get(px * SIZE + py) ?? 0
   }
 }

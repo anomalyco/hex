@@ -1174,6 +1174,9 @@ struct VO {
 }
 `
 
+const STAGING_WIDTH = 2048
+// Larger uploads (the words atlas's first full upload) go straight from the atlas, as before.
+const STAGING_MAX_AREA = 1024 * 1024
 const MAX_PROBLEMS = 96
 const MAX_WORDS = 256
 const MAX_SHARDS = 4096
@@ -1209,7 +1212,9 @@ export class GpuRenderer {
     this.fx = shoutFx
     this.fx.onSpawnShards = (list) => this.rawSpawnShards(list)
     this.fx.onSpawnSparks = (list) => this.spawnSparks(list)
-    this.ctx.configure({ device, format, alphaMode: "premultiplied" })
+    // Every frame clears to opaque #070707 and no blend lowers alpha, so the canvas is opaque; saying so
+    // lets the compositor skip blending a full-viewport layer.
+    this.ctx.configure({ device, format, alphaMode: "opaque" })
 
     const U = GPUBufferUsage
     this.uni = device.createBuffer({ size: 288, usage: U.UNIFORM | U.COPY_DST })
@@ -1328,15 +1333,64 @@ export class GpuRenderer {
   }
 
   uploadAtlases() {
+    this.upload(this.sprites.cards, this.probTex, true)
+    this.upload(this.sprites.words, this.wordTex, false)
+  }
+
+  // copyExternalImageToTexture snapshots its whole source canvas on every call: from a 4096² atlas that
+  // is ~15 ms per call (Radeon, Vulkan) however small the rect, several times a frame while cards type.
+  // So each frame's changed rects, once each, are copied 1:1 into a small staging canvas and the texture
+  // is filled from there. Every copy reads the atlas as it is now, exactly as the direct copies did.
+  upload(src, tex, premultipliedAlpha) {
+    if (!src.dirty.length) return
     const q = this.device.queue
-    const up = (src, tex, premultipliedAlpha) => {
-      for (const r of src.dirty) {
-        q.copyExternalImageToTexture({ source: src.canvas, origin: { x: r.x, y: r.y } }, { texture: tex, origin: { x: r.x, y: r.y }, premultipliedAlpha }, [r.w, r.h])
-      }
-      src.dirty.length = 0
+    const rects = []
+    for (const r of src.dirty) {
+      if (!rects.some((o) => o.x <= r.x && o.y <= r.y && o.x + o.w >= r.x + r.w && o.y + o.h >= r.y + r.h)) rects.push(r)
     }
-    up(this.sprites.cards, this.probTex, true)
-    up(this.sprites.words, this.wordTex, false)
+    src.dirty.length = 0
+    const direct = (r) =>
+      q.copyExternalImageToTexture({ source: src.canvas, origin: { x: r.x, y: r.y } }, { texture: tex, origin: { x: r.x, y: r.y }, premultipliedAlpha }, [r.w, r.h])
+    const staged = []
+    let rowX = 0
+    let rowY = 0
+    let rowH = 0
+    let width = 0
+    for (const r of rects) {
+      const whole = [r.x, r.y, r.w, r.h].every(Number.isInteger)
+      const inside = r.x >= 0 && r.y >= 0 && r.w > 0 && r.h > 0 && r.x + r.w <= src.canvas.width && r.y + r.h <= src.canvas.height
+      if (!whole || !inside || r.w * r.h > STAGING_MAX_AREA) {
+        direct(r)
+        continue
+      }
+      if (rowX + r.w > STAGING_WIDTH) {
+        rowY += rowH
+        rowX = 0
+        rowH = 0
+      }
+      staged.push({ r, sx: rowX, sy: rowY })
+      rowX += r.w
+      rowH = Math.max(rowH, r.h)
+      width = Math.max(width, rowX)
+    }
+    if (!staged.length) return
+    const height = rowY + rowH
+    let stage = this.staging
+    if (!stage || stage.canvas.width < width || stage.canvas.height < height) {
+      const canvas = document.createElement("canvas")
+      canvas.width = Math.max(width, stage?.canvas.width ?? 0)
+      canvas.height = Math.max(height, stage?.canvas.height ?? 0)
+      const ctx = canvas.getContext("2d")
+      ctx.imageSmoothingEnabled = false
+      stage = this.staging = { canvas, ctx }
+    }
+    for (const { r, sx, sy } of staged) {
+      stage.ctx.clearRect(sx, sy, r.w, r.h)
+      stage.ctx.drawImage(src.canvas, r.x, r.y, r.w, r.h, sx, sy, r.w, r.h)
+    }
+    for (const { r, sx, sy } of staged) {
+      q.copyExternalImageToTexture({ source: stage.canvas, origin: { x: sx, y: sy } }, { texture: tex, origin: { x: r.x, y: r.y }, premultipliedAlpha }, [r.w, r.h])
+    }
   }
 
   flushRing(list, buffer, max, floats, cursorKey, pack) {

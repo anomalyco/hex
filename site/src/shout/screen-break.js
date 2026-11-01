@@ -63,6 +63,20 @@ function segmentIntersection(ax, ay, bx, by, cx, cy, dx, dy) {
   return null
 }
 
+function line(x0, y0, x1, y1) {
+  const p = new Path2D()
+  p.moveTo(x0, y0)
+  p.lineTo(x1, y1)
+  return p
+}
+
+function curve(x0, y0, cx, cy, x1, y1) {
+  const p = new Path2D()
+  p.moveTo(x0, y0)
+  p.quadraticCurveTo(cx, cy, x1, y1)
+  return p
+}
+
 // When every part of a crack has finished revealing.
 function crackSettle(c) {
   if (c.settle == null) {
@@ -89,6 +103,11 @@ export class ScreenBreak {
     this.canvas.setAttribute("aria-hidden", "true")
     root.appendChild(this.canvas)
     this.ctx = this.canvas.getContext("2d")
+    // A blank full-viewport layer still costs the compositor every frame, so the glass stays out of
+    // the layout until it has something on it.
+    this.drawn = false
+    this.shown = true
+    this.show(false)
 
     this.basePageCanvas = document.createElement("canvas")
     this.basePageCtx = this.basePageCanvas.getContext("2d")
@@ -130,6 +149,7 @@ export class ScreenBreak {
     if (this.canvas.width !== pw || this.canvas.height !== ph) {
       this.canvas.width = pw
       this.canvas.height = ph
+      this.drawn = false
       this.basePageCanvas.width = pw
       this.basePageCanvas.height = ph
       this.pageCanvas.width = pw
@@ -139,6 +159,12 @@ export class ScreenBreak {
       this.crackLayer = null
       for (const c of this.cracks) c.baked = false
     }
+  }
+
+  show(on) {
+    if (this.shown === on) return
+    this.shown = on
+    this.canvas.style.display = on ? "" : "none"
   }
 
   setHeadLight(x, y, R) {
@@ -169,6 +195,7 @@ export class ScreenBreak {
     }
     this.ctx.setTransform(1, 0, 0, 1, 0, 0)
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+    this.drawn = false
   }
 
   destroy() {
@@ -1110,6 +1137,13 @@ export class ScreenBreak {
         for (const mc of c.microCracks) {
           if (age < mc.t0) continue
           const mProg = clamp((age - mc.t0) / 0.018, 0, 1)
+          if (mProg >= 1 && alpha === 1) {
+            mc.done ??= { style: `rgba(232, 244, 255, ${mc.alpha})`, path: line(mc.x0, mc.y0, mc.x1, mc.y1) }
+            ctx.strokeStyle = mc.done.style
+            ctx.lineWidth = 0.48
+            ctx.stroke(mc.done.path)
+            continue
+          }
           const ex = lerp(mc.x0, mc.x1, mProg)
           const ey = lerp(mc.y0, mc.y1, mProg)
           ctx.strokeStyle = `rgba(232, 244, 255, ${mc.alpha * alpha})`
@@ -1132,6 +1166,30 @@ export class ScreenBreak {
         const ndotl = Math.abs((ring.nx * lx + ring.ny * ly) / ld)
         // Gold ONLY as localized glints where close to the glowing head and angled toward it
         const goldGlint = Math.pow(ndotl, 3.8) * clamp(1 - ld / headGlowRange, 0, 1)
+
+        if (rProg >= 1 && alpha === 1) {
+          // Fully grown: the same strokes every frame but the head-lit glint, so keep their paths.
+          const wBase = ring.fine ? 0.52 * taper + 0.2 : 0.85 * taper + 0.24
+          ring.done ??= {
+            shadowStyle: `rgba(0, 4, 10, ${0.76 * taper + 0.14})`,
+            shadow: curve(ring.x0 + 0.85, ring.y0 + 0.85, ring.cx + 0.85, ring.cy + 0.85, ring.x1 + 0.85, ring.y1 + 0.85),
+            lineStyle: `rgba(244, 250, 255, ${Math.min(1, (0.48 + 0.52 * ring.spec) * (taper + 0.15))})`,
+            line: curve(ring.x0, ring.y0, ring.cx, ring.cy, ring.x1, ring.y1),
+          }
+          const d = ring.done
+          ctx.strokeStyle = d.shadowStyle
+          ctx.lineWidth = wBase * 1.45
+          ctx.stroke(d.shadow)
+          if (goldGlint > 0.22) {
+            ctx.strokeStyle = `rgba(255, 222, 138, ${Math.min(0.95, goldGlint * 0.9)})`
+            ctx.lineWidth = wBase * 1.35
+            ctx.stroke(d.line)
+          }
+          ctx.strokeStyle = d.lineStyle
+          ctx.lineWidth = wBase
+          ctx.stroke(d.line)
+          continue
+        }
 
         const xEnd = rProg >= 1 ? ring.x1 : lerp(ring.x0, ring.x1, rProg)
         const yEnd = rProg >= 1 ? ring.y1 : lerp(ring.y0, ring.y1, rProg)
@@ -1190,6 +1248,39 @@ export class ScreenBreak {
         const ndotl = Math.abs((seg.nx * lx + seg.ny * ly) / ld)
         // Localized golden Fresnel glint ONLY near the head on strongly aligned segments
         const goldGlint = Math.pow(ndotl, 3.6) * clamp(1.08 - ld / headGlowRange, 0, 1)
+
+        if (sProg >= 1 && alpha === 1) {
+          // Fully grown: the same strokes every frame but the head-lit glint, so keep their paths.
+          const shOff = 0.95 * taper + 0.28
+          const green = seg.depth === 0 && seg.u0 < 0.42
+          seg.done ??= {
+            shadowStyle: `rgba(0, 3, 9, ${0.84 * taper + 0.16})`,
+            shadow: line(seg.x0 + shOff, seg.y0 + shOff, seg.x1 + shOff, seg.y1 + shOff),
+            greenStyle: green ? `rgba(115, 242, 208, ${0.24 * (1 - seg.u0 / 0.42)})` : null,
+            green: green ? line(seg.x0 - seg.nx * 0.45, seg.y0 - seg.ny * 0.45, seg.x1 - seg.nx * 0.45, seg.y1 - seg.ny * 0.45) : null,
+            gold: line(seg.x0 + seg.nx * 0.35, seg.y0 + seg.ny * 0.35, seg.x1 + seg.nx * 0.35, seg.y1 + seg.ny * 0.35),
+            lineStyle: `rgba(248, 252, 255, ${Math.min(1, (0.55 + 0.45 * seg.spec) * (seg.depth === 0 ? taper + 0.22 : taper + 0.38))})`,
+            line: line(seg.x0, seg.y0, seg.x1, seg.y1),
+          }
+          const d = seg.done
+          ctx.strokeStyle = d.shadowStyle
+          ctx.lineWidth = 1.75 * taper + 0.32
+          ctx.stroke(d.shadow)
+          if (d.green) {
+            ctx.strokeStyle = d.greenStyle
+            ctx.lineWidth = 1.9 * taper + 0.35
+            ctx.stroke(d.green)
+          }
+          if (goldGlint > 0.24) {
+            ctx.strokeStyle = `rgba(255, 212, 108, ${Math.min(0.92, goldGlint * 0.85)})`
+            ctx.lineWidth = 1.55 * taper + 0.28
+            ctx.stroke(d.gold)
+          }
+          ctx.strokeStyle = d.lineStyle
+          ctx.lineWidth = seg.depth === 0 ? 1.18 * taper + 0.26 : seg.depth === 1 ? 0.58 * taper + 0.2 : 0.36
+          ctx.stroke(d.line)
+          continue
+        }
 
         // Pass A: Dark total-internal-reflection shadow bevel
         const shOff = 0.95 * taper + 0.28
@@ -1258,11 +1349,17 @@ export class ScreenBreak {
       if (craterBloom > 0.01) {
         ctx.save()
         const rCore = 32 * c.power * (0.45 + 0.55 * craterBloom)
-        const halo = ctx.createRadialGradient(c.x, c.y, 1.5, c.x, c.y, rCore * 1.4)
-        halo.addColorStop(0, `rgba(255, 255, 255, ${0.96 * craterBloom * alpha})`)
-        halo.addColorStop(0.24, `rgba(246, 251, 255, ${0.78 * craterBloom * alpha})`)
-        halo.addColorStop(0.52, `rgba(215, 236, 248, ${0.26 * craterBloom * alpha})`)
-        halo.addColorStop(1, "rgba(160, 215, 235, 0)")
+        // Once bloomed (and at full alpha) the halo never changes, so its gradient is made once.
+        const settled = craterBloom >= 1 && alpha === 1
+        let halo = settled ? c.halo : null
+        if (!halo) {
+          halo = ctx.createRadialGradient(c.x, c.y, 1.5, c.x, c.y, rCore * 1.4)
+          halo.addColorStop(0, `rgba(255, 255, 255, ${0.96 * craterBloom * alpha})`)
+          halo.addColorStop(0.24, `rgba(246, 251, 255, ${0.78 * craterBloom * alpha})`)
+          halo.addColorStop(0.52, `rgba(215, 236, 248, ${0.26 * craterBloom * alpha})`)
+          halo.addColorStop(1, "rgba(160, 215, 235, 0)")
+          if (settled) c.halo = halo
+        }
         ctx.fillStyle = halo
         ctx.beginPath()
         ctx.arc(c.x, c.y, rCore * 1.4, 0, Math.PI * 2)
@@ -1748,9 +1845,14 @@ export class ScreenBreak {
   }
 
   stepAndDraw(dt, rtime = 0) {
-    if (this.state === "idle" && this.zWords.length === 0 && !this.caption) return
+    if (this.state === "idle" && this.zWords.length === 0 && !this.caption) {
+      if (!this.drawn) this.show(false)
+      return
+    }
     const { ctx, W, H, dpr } = this
     if (!W || !H) return
+    this.show(true)
+    this.drawn = true
     if (this.needsCleanCapture) {
       this.needsCleanCapture = false
       this.captureViewport(this.cleanCtx, { clean: true, skipDownload: true })

@@ -28,6 +28,89 @@ const saiyanCol = (h) => {
 const rgb = (c, a = 1) => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${a})`
 const mix3 = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t)
 
+// Each live shard's face, cut from the card atlas once into its own small canvas. Drawing a pre-cut
+// face is one drawImage; clipping the card to the shard outline every frame, twice for the motion blur,
+// is what sank this renderer during the rapid-fire stretch. The cut keeps the atlas's own pixels (a 1:1
+// copy at integer offsets) and is drawn back with the same mapping, so only the outline's anti-aliasing
+// can differ.
+const SPRITE_PAD = 2
+
+class ShardSprites {
+  constructor(cards) {
+    this.cards = cards
+  }
+
+  // The shard's cut face, or null when it has none (the caller clips as before).
+  get(s) {
+    let sp = s.sprite
+    if (sp === undefined) sp = s.sprite = this.cut(s)
+    if (!sp) return null
+    const version = this.cards.slotVersion(s.entry.px, s.entry.py)
+    if (sp.version !== version) this.paint(s, sp, version)
+    return sp
+  }
+
+  cut(s) {
+    const e = s.entry
+    const ox = -s.base[0] - e.w / 2
+    const oy = -s.base[1] - e.h / 2
+    const pts = s.v3 ? [s.v0, s.v1, s.v2, s.v3] : [s.v0, s.v1, s.v2]
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const [x, y] of pts) {
+      x0 = Math.min(x0, x)
+      y0 = Math.min(y0, y)
+      x1 = Math.max(x1, x)
+      y1 = Math.max(y1, y)
+    }
+    // Atlas pixels, clamped to the card's source rect exactly as the full drawImage was.
+    const u0 = Math.max(e.px, Math.floor(e.px + (x0 - ox) * 2) - SPRITE_PAD)
+    const v0 = Math.max(e.py, Math.floor(e.py + (y0 - oy) * 2) - SPRITE_PAD)
+    const u1 = Math.min(e.px + e.w * 2, Math.ceil(e.px + (x1 - ox) * 2) + SPRITE_PAD)
+    const v1 = Math.min(e.py + e.h * 2, Math.ceil(e.py + (y1 - oy) * 2) + SPRITE_PAD)
+    if (!(u1 > u0 && v1 > v0)) return null
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.ceil(u1 - u0)
+    canvas.height = Math.ceil(v1 - v0)
+    return {
+      canvas,
+      ctx: canvas.getContext("2d"),
+      u0,
+      v0,
+      w: u1 - u0,
+      h: v1 - v0,
+      pts,
+      ox,
+      oy,
+      // Where the cut lands in the shard's local space, at the atlas's half scale.
+      dx: ox + (u0 - e.px) / 2,
+      dy: oy + (v0 - e.py) / 2,
+      version: -1,
+    }
+  }
+
+  paint(s, sp, version) {
+    const e = s.entry
+    const g = sp.ctx
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.clearRect(0, 0, sp.canvas.width, sp.canvas.height)
+    g.save()
+    // The outline in cut pixels: local → atlas is (p - origin) * 2, offset by the cut's corner.
+    g.setTransform(2, 0, 0, 2, e.px - sp.u0 - sp.ox * 2, e.py - sp.v0 - sp.oy * 2)
+    g.beginPath()
+    g.moveTo(...sp.pts[0])
+    for (let k = 1; k < sp.pts.length; k++) g.lineTo(...sp.pts[k])
+    g.closePath()
+    g.clip()
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.drawImage(this.cards.canvas, sp.u0, sp.v0, sp.canvas.width, sp.canvas.height, 0, 0, sp.canvas.width, sp.canvas.height)
+    g.restore()
+    sp.version = version
+  }
+}
+
 export class Canvas2DRenderer {
   constructor(canvas, sprites) {
     this.kind = "canvas2d"
@@ -40,6 +123,7 @@ export class Canvas2DRenderer {
     this.shards = []
     this.sparks = []
     this.dpr = 1
+    this.shardSprites = new ShardSprites(sprites.cards)
   }
   setSaiyan(level) {
     this.fx.setSaiyan(level)
@@ -192,24 +276,32 @@ export class Canvas2DRenderer {
       const t = s.life / s.maxLife
       const fade = Math.min(1, t / (isKeycap ? 0.12 : 0.35))
       const tiltX = 0.4 + 0.6 * Math.abs(Math.cos(s.tumble))
+      const sp = this.shardSprites.get(s)
       for (const k of [-0.2, 0.2]) {
         ctx.save()
         ctx.globalAlpha = fade * 0.55
         ctx.translate(s.x - s.vx * look.shutter * k, s.y - s.vy * look.shutter * k)
         ctx.rotate(s.ang)
         ctx.scale(tiltX, 1)
-        ctx.beginPath()
-        ctx.moveTo(...s.v0)
-        ctx.lineTo(...s.v1)
-        ctx.lineTo(...s.v2)
-        if (s.v3) ctx.lineTo(...s.v3)
-        ctx.closePath()
-        ctx.save()
-        ctx.clip()
-        const e = s.entry
-        ctx.drawImage(atlas, e.px, e.py, e.w * 2, e.h * 2, -s.base[0] - e.w / 2, -s.base[1] - e.h / 2, e.w, e.h)
-        ctx.restore()
-        if ((s.heat > 0.08 || isKeycap) && k > 0) {
+        const outline = (s.heat > 0.08 || isKeycap) && k > 0
+        if (!sp || outline) {
+          ctx.beginPath()
+          ctx.moveTo(...s.v0)
+          ctx.lineTo(...s.v1)
+          ctx.lineTo(...s.v2)
+          if (s.v3) ctx.lineTo(...s.v3)
+          ctx.closePath()
+        }
+        if (sp) {
+          ctx.drawImage(sp.canvas, 0, 0, sp.w, sp.h, sp.dx, sp.dy, sp.w / 2, sp.h / 2)
+        } else {
+          ctx.save()
+          ctx.clip()
+          const e = s.entry
+          ctx.drawImage(atlas, e.px, e.py, e.w * 2, e.h * 2, -s.base[0] - e.w / 2, -s.base[1] - e.h / 2, e.w, e.h)
+          ctx.restore()
+        }
+        if (outline) {
           ctx.strokeStyle = isKeycap
             ? `rgba(255,172,58,${fade * Math.max(0.35, Math.min(1, s.heat))})`
             : rgb(saiyan > 0.25 ? saiyanCol(0.75) : ember(0.75), fade * Math.min(1, s.heat))
