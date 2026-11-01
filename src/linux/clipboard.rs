@@ -443,14 +443,14 @@ mod wayland {
 
     mod ext {
         pub(super) const GLOBAL: &str = "ext_data_control_manager_v1";
-        use wayland_protocols::ext::data_control::v1::client::{
-            ext_data_control_device_v1 as device, ext_data_control_manager_v1 as manager,
-            ext_data_control_offer_v1 as offer, ext_data_control_source_v1 as source,
-        };
         use device::ExtDataControlDeviceV1 as Device;
         use manager::ExtDataControlManagerV1 as Manager;
         use offer::ExtDataControlOfferV1 as Offer;
         use source::ExtDataControlSourceV1 as Source;
+        use wayland_protocols::ext::data_control::v1::client::{
+            ext_data_control_device_v1 as device, ext_data_control_manager_v1 as manager,
+            ext_data_control_offer_v1 as offer, ext_data_control_source_v1 as source,
+        };
 
         use super::super::*;
 
@@ -459,14 +459,14 @@ mod wayland {
 
     mod wlr {
         pub(super) const GLOBAL: &str = "zwlr_data_control_manager_v1";
-        use wayland_protocols_wlr::data_control::v1::client::{
-            zwlr_data_control_device_v1 as device, zwlr_data_control_manager_v1 as manager,
-            zwlr_data_control_offer_v1 as offer, zwlr_data_control_source_v1 as source,
-        };
         use device::ZwlrDataControlDeviceV1 as Device;
         use manager::ZwlrDataControlManagerV1 as Manager;
         use offer::ZwlrDataControlOfferV1 as Offer;
         use source::ZwlrDataControlSourceV1 as Source;
+        use wayland_protocols_wlr::data_control::v1::client::{
+            zwlr_data_control_device_v1 as device, zwlr_data_control_manager_v1 as manager,
+            zwlr_data_control_offer_v1 as offer, zwlr_data_control_source_v1 as source,
+        };
 
         use super::super::*;
 
