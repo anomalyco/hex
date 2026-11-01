@@ -51,9 +51,19 @@ impl SpeechFrames {
         level_db <= (floor_db + QUIET_MARGIN_DB).max(QUIET_MINIMUM_DB)
     }
 
-    /// The frame's level and the noise floor after it, both in dBFS.
+    /// The frame's DC-removed level and the noise floor after it, both in
+    /// dBFS. Some microphones (a Ryzen built-in digital microphone, #841)
+    /// carry a DC offset far louder than the speech on it; counted as level,
+    /// it pins every frame to the floor and the whole dictation reads as a
+    /// pause. The dictation silence gate removes DC the same way.
     fn measure(&mut self, frame: &[f32]) -> (f32, f32) {
-        let energy = frame.iter().map(|sample| sample * sample).sum::<f32>() / frame.len() as f32;
+        let count = frame.len() as f32;
+        let mean = frame.iter().sum::<f32>() / count;
+        let energy = frame
+            .iter()
+            .map(|sample| (sample - mean) * (sample - mean))
+            .sum::<f32>()
+            / count;
         let level_db = if energy.is_finite() {
             10.0 * energy.max(1e-18).log10()
         } else {

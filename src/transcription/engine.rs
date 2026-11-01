@@ -1426,10 +1426,13 @@ mod tests {
     fn quiet_speech_over_steady_noise_is_never_cut_as_a_pause() {
         // #458: -28 dBFS syllables over -35 dBFS noise, too close to the
         // floor for the meeting detector's 12 dB speech margin.
-        assert_quiet_speech_is_kept(-28.0, -35.0);
+        assert_quiet_speech_is_kept(-28.0, -35.0, 0.0);
         // #841: a quiet built-in microphone, whose speech sits under
         // -55 dBFS throughout.
-        assert_quiet_speech_is_kept(-62.0, -72.0);
+        assert_quiet_speech_is_kept(-62.0, -72.0, 0.0);
+        // #841: a built-in digital microphone whose DC offset (-26 dBFS) is
+        // far louder than its speech; only the speech moves the level.
+        assert_quiet_speech_is_kept(-50.0, -58.0, 0.05);
     }
 
     #[test]
@@ -1446,7 +1449,7 @@ mod tests {
         assert!(result.is_err(), "{result:?}");
     }
 
-    fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32) {
+    fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32, dc_offset: f32) {
         use crate::transcription::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
         // 17 s of syllables over steady noise.
         let mut seed = 11;
@@ -1457,6 +1460,9 @@ mod tests {
             for (sample, voice) in clip[start..].iter_mut().zip(burst) {
                 *sample += voice;
             }
+        }
+        for sample in &mut clip {
+            *sample += dc_offset;
         }
         let mut speech = SpeechFrames::default();
         assert!(
