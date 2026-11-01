@@ -17,6 +17,11 @@ unsafe extern "C" {
         value: *mut CfTypeRef,
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout_in_seconds: f32) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: AxUiElementRef,
+        attribute: CfStringRef,
+        value: CfTypeRef,
+    ) -> i32;
     fn AXUIElementCopyParameterizedAttributeValue(
         element: AxUiElementRef,
         parameterized_attribute: CfStringRef,
@@ -59,6 +64,12 @@ unsafe extern "C" {
     fn CFURLGetTypeID() -> usize;
     fn CFURLGetString(url: CfTypeRef) -> CfStringRef;
     fn CFRelease(value: CfTypeRef);
+    fn CFRetain(value: CfTypeRef) -> CfTypeRef;
+    fn CFEqual(left: CfTypeRef, right: CfTypeRef) -> bool;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFArrayGetCount(array: CfTypeRef) -> isize;
+    fn CFArrayGetValueAtIndex(array: CfTypeRef, index: isize) -> CfTypeRef;
+    static kCFBooleanTrue: CfTypeRef;
 }
 
 pub fn focused_window_title(pid: i32) -> Option<String> {
@@ -88,6 +99,117 @@ pub fn focused_web_url(pid: i32) -> Option<String> {
         }
     }
     url
+}
+
+/// Every page a browser's windows show, for a call's address or tab title
+/// when its scripting dictionary can't be asked (#831). Chromium (Arc,
+/// Chrome, Brave, Edge) builds its web accessibility tree only for an
+/// assistive app that asks, which `AXManualAccessibility` does, once per
+/// process; without it a browser behind another app shows windows but no
+/// web areas.
+pub fn browser_pages(pid: i32) -> crate::dictation::browser_page::BrowserPages {
+    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
+    let Some(application) = bounded_element(unsafe { AXUIElementCreateApplication(pid) }) else {
+        return Default::default();
+    };
+    request_web_accessibility(pid, &application);
+    let mut windows: Vec<CfObject> = Vec::new();
+    let candidates = [
+        copy_element(&application, c"AXFocusedWindow"),
+        copy_element(&application, c"AXMainWindow"),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(copy_elements(&application, c"AXWindows"));
+    for window in candidates {
+        // SAFETY: Both are live AXUIElements.
+        if !windows
+            .iter()
+            .any(|known| unsafe { CFEqual(known.0, window.0) })
+        {
+            windows.push(window);
+        }
+    }
+    let mut pages = crate::dictation::browser_page::pages(windows.into_iter().map(Element));
+    // The focused web area, when there is one, is the likeliest page.
+    if let Some(url) = focused_web_url(pid) {
+        pages.urls.retain(|known| known != &url);
+        pages.urls.insert(0, url);
+    }
+    pages
+}
+
+/// Asks a Chromium browser for its web accessibility tree, once per
+/// process. Other apps ignore the attribute.
+fn request_web_accessibility(pid: i32, application: &CfObject) {
+    static ASKED: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+    let mut asked = ASKED.lock().unwrap_or_else(|error| error.into_inner());
+    if asked.contains(&pid) {
+        return;
+    }
+    asked.push(pid);
+    let Some(attribute) = cf_string_literal(c"AXManualAccessibility").map(CfObject) else {
+        return;
+    };
+    // SAFETY: A live application element, a CFString name, and the shared
+    // kCFBooleanTrue constant.
+    let status =
+        unsafe { AXUIElementSetAttributeValue(application.0, attribute.0, kCFBooleanTrue) };
+    if status != 0 {
+        tracing::debug!(
+            status,
+            pid,
+            "the browser has no manual accessibility switch"
+        );
+    }
+}
+
+/// An element as `browser_page` walks it.
+struct Element(CfObject);
+
+impl crate::dictation::browser_page::AxNode for Element {
+    fn role(&self) -> Option<String> {
+        copy_string(&self.0, c"AXRole")
+    }
+
+    fn title(&self) -> Option<String> {
+        copy_string(&self.0, c"AXTitle")
+    }
+
+    fn url(&self) -> Option<String> {
+        copy_url(&self.0, c"AXURL")
+    }
+
+    fn children(&self) -> Vec<Self> {
+        copy_elements(&self.0, c"AXChildren")
+            .into_iter()
+            .map(Element)
+            .collect()
+    }
+}
+
+/// An attribute holding elements (`AXWindows`, `AXChildren`), each bounded.
+fn copy_elements(element: &CfObject, name: &CStr) -> Vec<CfObject> {
+    let Some(array) = copy_attribute(element, name) else {
+        return Vec::new();
+    };
+    if unsafe { CFGetTypeID(array.0) } != unsafe { CFArrayGetTypeID() } {
+        return Vec::new();
+    }
+    let count = unsafe { CFArrayGetCount(array.0) };
+    (0..count)
+        .filter_map(|index| {
+            // SAFETY: Get rule: the array owns the item, so it is retained
+            // before the array goes.
+            let item = unsafe { CFArrayGetValueAtIndex(array.0, index) };
+            if item.is_null() {
+                return None;
+            }
+            let item = CfObject(unsafe { CFRetain(item) });
+            (unsafe { AXUIElementSetMessagingTimeout(item.0, MESSAGING_TIMEOUT_SECS) } == 0)
+                .then_some(item)
+        })
+        .collect()
 }
 
 /// The character just before the insertion point of the application's

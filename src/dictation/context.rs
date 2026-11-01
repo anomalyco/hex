@@ -156,15 +156,33 @@ impl ContextSnapshot {
                 crate::microphone_activity::running_application_by_bundle_id(browser.bundle_id)
                     .map(|(pid, _)| pid)
             });
-            // Chromium browsers behind another app often expose no web area
-            // either; their window title (the tab's) still names a call such
-            // as Google Meet, so the browser's own window is reported rather
-            // than the app in front (#827).
+            // Chromium browsers behind another app expose no focused element,
+            // and Arc's chrome sits between its windows and the page, so every
+            // window's web areas and titles are read (`browser_page`), and a
+            // Meet tab's title still names the call when no address does
+            // (#827, #831). The browser's own window is reported rather than
+            // the app in front.
             if let Some(pid) = pid {
+                let pages = crate::accessibility::browser_pages(pid);
+                let (url, title) = crate::dictation::browser_page::choose(
+                    &pages,
+                    |url| {
+                        web_url(url).is_some_and(|url| crate::meeting::detection::names_call(&url))
+                    },
+                    crate::meeting::detection::title_names_call,
+                );
+                // A call's tab title outranks another tab's address.
+                let title_names_call = title
+                    .as_deref()
+                    .is_some_and(crate::meeting::detection::title_names_call);
+                let url = url
+                    .as_deref()
+                    .and_then(web_url)
+                    .filter(|url| crate::meeting::detection::names_call(url) || !title_names_call);
                 return Ok(Self {
                     application: Some(browser.name.into()),
-                    browser_url: accessibility_web_url(pid),
-                    window_title: crate::accessibility::focused_window_title(pid),
+                    browser_url: url,
+                    window_title: title,
                     input_revision: None,
                 });
             }
@@ -240,8 +258,14 @@ fn browser_url(bundle_id: Option<&str>, pid: i32) -> Option<Url> {
 /// Accessibility.
 #[cfg(target_os = "macos")]
 fn accessibility_web_url(pid: i32) -> Option<Url> {
-    crate::accessibility::focused_web_url(pid)
-        .and_then(|url| Url::parse(&url).ok())
+    crate::accessibility::focused_web_url(pid).and_then(|url| web_url(&url))
+}
+
+/// An http(s) page address.
+#[cfg(target_os = "macos")]
+fn web_url(url: &str) -> Option<Url> {
+    Url::parse(url)
+        .ok()
         .filter(|url| matches!(url.scheme(), "http" | "https"))
 }
 
