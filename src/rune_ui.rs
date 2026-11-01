@@ -2025,6 +2025,12 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         picker::fixture(ui, Some(TranscriptionModelId::CohereTranscribe));
     }),
+    // Labs › Use your own speech model: the picker's Add model file….
+    ("picker-custom-models", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.custom_models = true;
+        picker::fixture(ui, None);
+    }),
     // Japanese saved: the English-only models say they switch the language.
     ("picker-japanese", |ui| {
         *ui = portal_fixture();
