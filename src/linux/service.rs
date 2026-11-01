@@ -522,6 +522,22 @@ pub(crate) fn capture_status() -> crate::control::ControlReply {
         .unwrap_or_else(|_| ControlReply::error("unavailable", "the listener didn't answer"))
 }
 
+/// Whether a Hex instance answers on the single-instance socket, whatever
+/// its protocol. A current Hex serves the socket only after its local API
+/// is up, so one that answers here while the local API doesn't is an older
+/// build an update left running (#915).
+pub(crate) fn instance_answers() -> bool {
+    let Ok(mut stream) = connect() else {
+        return false;
+    };
+    let message = Message {
+        version: VERSION,
+        request: Request::Status,
+    };
+    write_frame(&mut stream, &message).is_ok()
+        && read_frame::<serde_json::Value>(&mut stream).is_ok()
+}
+
 /// Sends one request to the running instance. Never starts one.
 pub(crate) fn request(request: Request) -> std::result::Result<Status, RequestError> {
     let reply = exchange(request, IO_TIMEOUT)?;

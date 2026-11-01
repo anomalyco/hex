@@ -150,6 +150,13 @@ setup, counts as idle. On Linux a Hex its systemd unit runs restarts through
 the unit (after writing this desktop's `session.env`); elsewhere `restart`
 waits for the old Hex to drain and exit, then runs `hex start`.
 
+On Linux, an older Hex an update left running (from before `hex` commands
+moved to the local API) answers only on its `service.sock`. Every control
+command and `hex start` then answer `outdated` (exit 1) instead of
+`not-running`, and `hex restart` restarts its systemd unit into the installed
+build and waits for it to answer (#915); one not run by the unit has to be
+quit from its window or tray.
+
 `model install` with Hex running downloads in the background, as Settings
 does; on Linux and Windows with no Hex running it downloads in this process,
 printing progress (the source-install step `hex model install`). `model
@@ -330,6 +337,7 @@ update              current | checking | available | unavailable
 
 ```ts
 not-running            Hex isn't running (CLI only; exit 3)
+outdated               Linux: an older Hex an update left running; run `hex restart` (CLI only)
 transport              the request couldn't reach Hex or its reply was unreadable (CLI only)
 version-mismatch       this hex speaks another control version; use the running app's hex
 unknown-setting        no such key (the message suggests a near match)
