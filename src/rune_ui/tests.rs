@@ -1829,6 +1829,30 @@ fn onboarding_downloads_the_model_through_the_service() {
 }
 
 #[test]
+fn a_failed_download_names_its_cause_and_offers_a_model_file() {
+    let mut rt = runtime("onboarding-setup", false, PANE_SIZE);
+    if let Some(view) = &mut rt.state.view {
+        view.transcription.preparing = None;
+        view.transcription.error = Some(
+            "Couldn't reach huggingface.co through the proxy proxy.corp:8080: the proxy refused (403)\n\nCheck your connection, then retry, or choose a model file."
+                .into(),
+        );
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(
+            &"Couldn't reach huggingface.co through the proxy proxy.corp:8080: the proxy refused (403)"
+                .to_owned()
+        ),
+        "{shown:?}"
+    );
+    assert!(shown.contains(&"Use a model file…".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Retry".to_owned()), "{shown:?}");
+}
+
+#[test]
 fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list() {
     for scene in ["onboarding", "mac-onboarding"] {
         let mut rt = runtime(scene, false, PANE_SIZE);

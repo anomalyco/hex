@@ -26,6 +26,9 @@ pub(super) struct ImportState {
     pub(super) error: Option<String>,
     /// The import being renamed, with its name field.
     renaming: Option<(CustomModelId, TextEdit)>,
+    /// The file being chosen becomes the selected model once imported
+    /// ([`use_file`]): onboarding's way past a download that can't finish.
+    use_after: bool,
 }
 
 impl ImportState {
@@ -57,11 +60,44 @@ pub(super) fn add_button(ui: &Ui, p: Paint) -> El {
     )
 }
 
+/// "Use a model file…": chooses a GGUF file, imports it, and makes it the
+/// selected model, for when the model can't be downloaded (#894). Errors land
+/// in `ui.picker.import.error`.
+pub(super) fn use_file(ui: &mut Ui) {
+    if !ui.live() || ui.picker.import.busy() {
+        return;
+    }
+    choose(ui);
+    ui.picker.import.use_after = ui.picker.import.chooser.is_some();
+}
+
+/// Why the model couldn't be prepared, in one line: the first line of the
+/// service's error ("Couldn't reach huggingface.co: …"), or the import's.
+pub(super) fn download_failure(ui: &Ui) -> Option<String> {
+    ui.picker
+        .import
+        .error
+        .clone()
+        .or_else(|| {
+            ui.view
+                .as_ref()
+                .and_then(|view| view.transcription.error.clone())
+        })
+        .and_then(|error| error.lines().next().map(str::to_owned))
+        .filter(|line| !line.trim().is_empty())
+}
+
+/// Whether a file chosen with [`use_file`] is being checked and copied.
+pub(super) fn using_file(ui: &Ui) -> bool {
+    ui.picker.import.use_after && ui.picker.import.busy()
+}
+
 fn choose(ui: &mut Ui) {
     if !ui.live() || ui.picker.import.busy() {
         return;
     }
     ui.picker.import.error = None;
+    ui.picker.import.use_after = false;
     ui.picker.import.chooser = Some(crate::desktop::file_dialog::open(
         Dialog {
             title: tr("Add model file").into(),
@@ -105,8 +141,11 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
                     Err(error) => ui.picker.import.error = Some(error.to_string()),
                 }
             }
-            Ok(None) => {}
-            Err(error) => ui.picker.import.error = Some(error),
+            Ok(None) => ui.picker.import.use_after = false,
+            Err(error) => {
+                ui.picker.import.use_after = false;
+                ui.picker.import.error = Some(error);
+            }
         }
     }
     let result = match ui.picker.import.worker.as_ref().map(Receiver::try_recv) {
@@ -117,8 +156,18 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     if let Some(result) = result {
         ui.picker.import.worker = None;
         changed = true;
+        let use_it = std::mem::take(&mut ui.picker.import.use_after);
         match result {
-            Ok(id) => tracing::info!(id = id.as_str(), "an imported speech model is ready"),
+            Ok(id) => {
+                tracing::info!(id = id.as_str(), "an imported speech model is ready");
+                if use_it {
+                    let model = TranscriptionModelId::Custom(id);
+                    let language = crate::transcription::models::definition(model)
+                        .language_for(&ui.settings.transcription.language)
+                        .to_owned();
+                    ui.send(super::Request::ChooseModel { model, language });
+                }
+            }
             Err(error) => ui.picker.import.error = Some(error),
         }
     }
