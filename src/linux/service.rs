@@ -162,7 +162,7 @@ fn newest_wayland_socket(runtime: &Path, uid: u32) -> Option<String> {
                 .then(|| (metadata.modified().ok(), name))
         })
         .collect::<Vec<_>>();
-    sockets.sort_by(|a, b| b.0.cmp(&a.0));
+    sockets.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     sockets
         .into_iter()
         .map(|(_, name)| name)
