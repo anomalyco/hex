@@ -627,7 +627,8 @@ fn model_card(
     // never downloaded again, and only forgotten, never deleted.
     let found_here = !imported
         && ui
-            .found_models
+            .found
+            .models
             .iter()
             .any(|found| found.catalog == Some(model.id));
     let in_place = installed && transcription_models::is_in_place(model);

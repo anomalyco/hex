@@ -793,13 +793,8 @@ pub(crate) struct Ui {
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
-    /// Speech models already on this computer, from the last hub-cache scan
-    /// (the picker and onboarding's model step start one when they open).
-    found_models: Vec<crate::transcription::found_models::Found>,
+    /// Speech models already on this computer, and choosing one.
     found: found::FoundState,
-    /// The model onboarding's choice asked for, which the next model
-    /// download prepares instead of the saved selection.
-    onboarding_choice: Option<crate::transcription::models::TranscriptionSelection>,
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
@@ -898,9 +893,7 @@ impl Ui {
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
-            found_models: Vec::new(),
             found: found::FoundState::default(),
-            onboarding_choice: None,
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
@@ -2038,11 +2031,10 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         picker::fixture(ui, None);
     }),
-    // Models already on this computer: Parakeet v3's exact file on its own
-    // card, and a Whisper Hex hasn't tested in the found section.
+    // Found on this computer: Parakeet v3's exact file and an untested Whisper.
     ("picker-found", |ui| {
         *ui = portal_fixture();
-        ui.found_models = found::fixture();
+        ui.found.models = found::fixture();
         picker::fixture(ui, None);
     }),
     // Japanese saved: the English-only models say they switch the language.
@@ -2131,11 +2123,10 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
     }),
-    // Models already on this computer: Hex's recommended model or a found
-    // one (an exact catalog match and a Whisper Hex hasn't tested).
+    // Onboarding's choice between the recommended model and found ones.
     ("onboarding-model-found", |ui| {
         *ui = portal_fixture();
-        ui.found_models = found::fixture();
+        ui.found.models = found::fixture();
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).

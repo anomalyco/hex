@@ -17,12 +17,13 @@ use crate::transcription::models::{self as transcription_models, TranscriptionSe
 /// Whether the model step offers the choice: something compatible was found
 /// and the model isn't ready yet.
 pub(super) fn offered(ui: &Ui, model_ready: bool) -> bool {
-    !model_ready && !ui.found_models.is_empty()
+    !model_ready && !ui.found.models.is_empty()
 }
 
 /// The found file that is exactly the recommended model, if any.
 fn recommended_on_disk(ui: &Ui) -> Option<&Found> {
-    ui.found_models
+    ui.found
+        .models
         .iter()
         .find(|found| found.catalog == Some(ui.settings.transcription.model))
 }
@@ -58,7 +59,7 @@ pub(super) fn choice(ui: &Ui, p: Paint) -> El {
         .default_button(),
     );
     let mut found_rows: Vec<El> = Vec::new();
-    for (index, found) in ui.found_models.iter().enumerate() {
+    for (index, found) in ui.found.models.iter().enumerate() {
         found_rows.push(found_row(ui, p, index, found));
     }
     col()
@@ -125,7 +126,7 @@ fn found_row(ui: &Ui, p: Paint, index: usize, found: &Found) -> El {
 }
 
 fn choose_recommended(ui: &mut Ui) {
-    ui.onboarding_choice = None;
+    ui.found.choice = None;
     super::onboarding::input(ui, Input::Grant(SetupItem::Model));
 }
 
@@ -133,7 +134,7 @@ fn choose_recommended(ui: &mut Ui) {
 /// place instead of downloading); any other file is hashed and registered
 /// first (`found::adopt`), then prepared.
 fn choose_found(ui: &mut Ui, index: usize) {
-    let Some(found) = ui.found_models.get(index).cloned() else {
+    let Some(found) = ui.found.models.get(index).cloned() else {
         return;
     };
     match found.catalog {
@@ -141,7 +142,7 @@ fn choose_found(ui: &mut Ui, index: usize) {
             let language = transcription_models::definition(model)
                 .language_for(&ui.settings.transcription.language)
                 .to_owned();
-            ui.onboarding_choice = Some(TranscriptionSelection { model, language });
+            ui.found.choice = Some(TranscriptionSelection { model, language });
             super::onboarding::input(ui, Input::Grant(SetupItem::Model));
         }
         None => super::found::adopt(ui, found, true),

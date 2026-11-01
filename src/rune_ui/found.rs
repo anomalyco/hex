@@ -16,6 +16,12 @@ use crate::transcription::models::{CustomModelId, TranscriptionModelId, Transcri
 
 #[derive(Default)]
 pub(super) struct FoundState {
+    /// Compatible models from the last hub-cache scan, which the picker and
+    /// onboarding start when they open.
+    pub(super) models: Vec<Found>,
+    /// The model onboarding's choice asked for, which the next model
+    /// download prepares instead of the saved selection.
+    pub(super) choice: Option<TranscriptionSelection>,
     scan: Option<Receiver<Vec<Found>>>,
     /// Hashing and registering a chosen file; true when onboarding chose it.
     adopting: Option<(Receiver<Result<CustomModelId, String>>, bool)>,
@@ -75,7 +81,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     match ui.found.scan.as_ref().map(Receiver::try_recv) {
         Some(Ok(found)) => {
             ui.found.scan = None;
-            ui.found_models = found;
+            ui.found.models = found;
             changed = true;
         }
         Some(Err(TryRecvError::Disconnected)) => ui.found.scan = None,
@@ -108,7 +114,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
                     .language_for(&ui.settings.transcription.language)
                     .to_owned();
                 if onboarding {
-                    ui.onboarding_choice = Some(TranscriptionSelection { model, language });
+                    ui.found.choice = Some(TranscriptionSelection { model, language });
                     super::onboarding::input(ui, Input::Grant(SetupItem::Model));
                 } else {
                     ui.send(Request::ChooseModel { model, language });
@@ -204,7 +210,8 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
     use rune::{col, row, text};
     use rune_kit::Badge;
     let found: Vec<(usize, &Found)> = ui
-        .found_models
+        .found
+        .models
         .iter()
         .enumerate()
         .filter(|(_, found)| found.catalog.is_none() && !custom_models::uses_path(&found.path))
@@ -236,7 +243,7 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
             },
             super::controls::ButtonKind::Secondary,
             move |ui: &mut Ui, _| {
-                if let Some(found) = ui.found_models.get(index).cloned() {
+                if let Some(found) = ui.found.models.get(index).cloned() {
                     adopt(ui, found, false);
                 }
             },

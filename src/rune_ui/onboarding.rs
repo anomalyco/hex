@@ -199,7 +199,7 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     // chooses (`found_choice`), and nothing is picked for them.
     if ui.tour.is_some() {
         super::found::scan_for_setup(ui);
-        let held = ui.found.scanning() || !ui.found_models.is_empty();
+        let held = ui.found.scanning() || !ui.found.models.is_empty();
         if let Some(tour) = &mut ui.tour {
             tour.flow.hold_download(held);
         }
@@ -308,7 +308,8 @@ fn apply(ui: &mut Ui, effect: Effect) {
         Effect::DownloadModel => {
             // The model onboarding's choice picked, else the recommended one.
             let selection = ui
-                .onboarding_choice
+                .found
+                .choice
                 .take()
                 .unwrap_or_else(|| ui.settings.transcription.clone());
             if crate::transcription::models::validate(&selection).is_ok() {
@@ -1139,7 +1140,7 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
         ui.platform.caps.permissions,
         ui.platform.caps.practice_dictation,
     );
-    flow.hold_download(!ui.found_models.is_empty());
+    flow.hold_download(!ui.found.models.is_empty());
     if step != Step::Welcome {
         flow.on(Input::Continue);
     }
