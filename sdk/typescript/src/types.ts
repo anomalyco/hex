@@ -14,7 +14,7 @@ export const MODEL_IDS = [
   "apple_speech",
 ] as const
 
-/** A model imported with Labs › Use your own speech model. */
+/** A model imported from a file, or found on this computer and used where it is. */
 export type CustomModelId = `custom-${string}`
 
 export type ModelId = typeof MODEL_IDS[number] | CustomModelId

@@ -123,12 +123,16 @@ same.
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
 
-`model import`, `rename`, `repair`, and `remove` need Labs › Use your own speech model
-(`hex labs on custom-models`) and run in this process on every OS; `hex
-models` is an alias for `hex model`. An import's id is `custom-` and the first
-16 hex digits of its SHA-256, and every model command takes it. One that is
-missing, changed, or off answers `model-unavailable` with the reason
-([labs](features/labs.md)).
+`model import`, `rename`, `repair`, and `remove` run in this process on every
+OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and
+the first 16 hex digits of its SHA-256, and every model command takes it. One
+that is missing or changed answers `model-unavailable` with the reason.
+`model list` also looks in the Hugging Face cache and says where each model
+comes from (`download`, `hex`, `imported`, or `found: owner/name@abcdef1`); a
+compatible file there that isn't a catalog model is listed as `custom-<first 16
+hex of its blob>` `(not tested by Hex)`, and `model use` with that id checks it
+in full and uses it where it is. `remove` on a found file only forgets it
+([own models](features/own-models.md)).
 
 `model use` switches only to a downloaded model and checks it on disk; it never
 downloads or repairs one (`model install` does). It keeps that model's own

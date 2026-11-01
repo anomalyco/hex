@@ -1582,6 +1582,32 @@ mod tests {
     }
 
     #[test]
+    fn a_held_download_waits_for_the_person() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.hold_download(true);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "found models are offered first"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Todo);
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel,
+            "choosing still starts it"
+        );
+        let mut released = Flow::new(Step::Welcome, fresh_status(), true, true);
+        released.hold_download(true);
+        released.on(Input::Status(fresh_status(), ModelProgress::default()));
+        released.hold_download(false);
+        assert_eq!(
+            released.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel,
+            "nothing found: the tour downloads as before"
+        );
+    }
+
+    #[test]
     fn a_failed_download_retries_from_any_step() {
         let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
         flow.on(Input::Status(fresh_status(), ModelProgress::default()));
