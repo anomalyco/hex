@@ -25,6 +25,8 @@ struct HEXMobileApp: App {
                 Color.clear
             } else if let keyboardScene = KeyboardSnapshotStage.requestedScene {
                 KeyboardSnapshotStage(scene: keyboardScene)
+            } else if let fullKeyboardScene = FullKeyboardSnapshotStage.requestedScene {
+                FullKeyboardSnapshotStage(scene: fullKeyboardScene)
             } else if let hostedScene = HostedKeyboardConversationStage.requestedScene {
                 HostedKeyboardConversationStage(scene: hostedScene, dictation: dictation)
             } else {

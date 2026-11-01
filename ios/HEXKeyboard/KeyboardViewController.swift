@@ -9,6 +9,10 @@ final class KeyboardViewController: UIInputViewController {
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
     private var lastFullAccessNote: TimeInterval = 0
+    private var surface: UIView?
+    private var fullKeyboard: FullKeyboardView?
+    private var heightConstraint: NSLayoutConstraint?
+    private var pollInterval: TimeInterval = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -19,14 +23,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         coldStartJobID = UUID().uuidString
+        mountSurface()
+        fullKeyboard?.prepareForField()
         syncFromBridge(animated: false)
-
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.syncFromBridge(animated: true)
-            }
-        }
+        schedulePoll(force: true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -35,14 +35,21 @@ final class KeyboardViewController: UIInputViewController {
         pollTimer = nil
     }
 
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        if let fullKeyboard, heightConstraint?.constant != fullKeyboard.preferredHeight {
+            heightConstraint?.constant = fullKeyboard.preferredHeight
+        }
+    }
+
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         updateKeyboardTraits()
+        fullKeyboard?.textDidChange()
     }
 
     private func configureView() {
         view.backgroundColor = .clear
-        preferredContentSize.height = 140
 
         viewModel.inputViewController = self
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
@@ -72,23 +79,72 @@ final class KeyboardViewController: UIInputViewController {
             ContainingAppOpener.open(url, from: self)
         }
 
-        let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
-        hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        hosting.view.backgroundColor = .clear
-        addChild(hosting)
-        view.addSubview(hosting.view)
-        hosting.didMove(toParent: self)
-
         let heightConstraint = view.heightAnchor.constraint(equalToConstant: 140)
         heightConstraint.priority = UILayoutPriority(999)
+        heightConstraint.isActive = true
+        self.heightConstraint = heightConstraint
+        mountSurface()
+    }
 
+    /// The dictation bar, or the full keyboard when its experiment is on (iPhone only).
+    /// Only switches while idle.
+    private func mountSurface() {
+        let wantsFull = FullKeyboardSettings().isEnabled && UIDevice.current.userInterfaceIdiom == .phone
+        guard surface == nil || wantsFull != (fullKeyboard != nil) else { return }
+        guard surface == nil || viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
+
+        children.forEach { child in
+            child.willMove(toParent: nil)
+            child.removeFromParent()
+        }
+        surface?.removeFromSuperview()
+        fullKeyboard = nil
+
+        let mounted: UIView
+        if wantsFull {
+            let keyboard = FullKeyboardView(
+                model: viewModel,
+                target: DocumentProxyTextTarget { [unowned self] in self.textDocumentProxy }
+            )
+            keyboard.hostController = self
+            keyboard.allowsHaptics = { [weak self] in self?.hasFullAccess ?? false }
+            fullKeyboard = keyboard
+            mounted = keyboard
+            heightConstraint?.constant = keyboard.preferredHeight
+        } else {
+            let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
+            hosting.view.backgroundColor = .clear
+            addChild(hosting)
+            hosting.didMove(toParent: self)
+            mounted = hosting.view
+            heightConstraint?.constant = 140
+        }
+        preferredContentSize.height = heightConstraint?.constant ?? 140
+        mounted.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(mounted)
         NSLayoutConstraint.activate([
-            heightConstraint,
-            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            mounted.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            mounted.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            mounted.topAnchor.constraint(equalTo: view.topAnchor),
+            mounted.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        surface = mounted
+        schedulePoll(force: false)
+    }
+
+    /// The dictation bar polls at 25 Hz; the full keyboard at 4 Hz, and 30 Hz while recording.
+    private func schedulePoll(force: Bool) {
+        let busy = viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing
+            || viewModel.pendingCommand != nil
+        let interval: TimeInterval = fullKeyboard == nil ? 0.04 : (busy ? 1.0 / 30 : 0.25)
+        guard force || (pollTimer != nil && interval != pollInterval) else { return }
+        pollInterval = interval
+        pollTimer?.invalidate()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.syncFromBridge(animated: true)
+            }
+        }
     }
 
     private func syncFromBridge(animated: Bool) {
@@ -134,6 +190,7 @@ final class KeyboardViewController: UIInputViewController {
                 afterContext: textDocumentProxy.documentContextAfterInput
             )
             textDocumentProxy.insertText(insertion)
+            fullKeyboard?.didInsertDictation(insertion)
             bridge.lastInsertedResultID = resultID
             insertedResult = true
             coldStartJobID = UUID().uuidString
@@ -151,12 +208,14 @@ final class KeyboardViewController: UIInputViewController {
         )
 
         refreshColdStartURL(now: now, force: false)
+        schedulePoll(force: false)
     }
 
     private func refreshColdStartURL(now: TimeInterval, force: Bool) {
         let bucket = Int(now / 2.0)
         guard force || bucket != lastURLRefreshBucket else { return }
         lastURLRefreshBucket = bucket
+        mountSurface()
 
         let request: KeyboardLaunchRequest
         if bridge.isModelInstalled {

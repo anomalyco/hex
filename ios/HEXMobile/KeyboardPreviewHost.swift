@@ -156,7 +156,12 @@ struct HostedKeyboardConversationStage: View {
     }
 
     private var usesLightAppearance: Bool {
-        scene.hasSuffix("-light")
+        scene.hasSuffix("-light") || usesDarkField
+    }
+
+    /// A light app whose field asks for a dark keyboard.
+    private var usesDarkField: Bool {
+        scene.hasSuffix("-dark-field")
     }
 
     var body: some View {
@@ -261,7 +266,8 @@ struct HostedKeyboardConversationStage: View {
                 PlainKeyboardHostTextField(
                     text: $draft,
                     placeholder: "Message",
-                    isLight: isLight
+                    isLight: isLight,
+                    darkKeyboard: usesDarkField
                 )
                 .frame(height: 36)
                 .padding(.horizontal, 13)
@@ -280,6 +286,7 @@ private struct PlainKeyboardHostTextField: UIViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let isLight: Bool
+    var darkKeyboard = false
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: PlainKeyboardHostTextField
@@ -307,7 +314,7 @@ private struct PlainKeyboardHostTextField: UIViewRepresentable {
         tf.spellCheckingType = .no
         tf.smartInsertDeleteType = .no
         tf.returnKeyType = .send
-        tf.keyboardAppearance = isLight ? .light : .dark
+        tf.keyboardAppearance = isLight && !darkKeyboard ? .light : .dark
         tf.inputAssistantItem.leadingBarButtonGroups = []
         tf.inputAssistantItem.trailingBarButtonGroups = []
         tf.attributedPlaceholder = NSAttributedString(
@@ -329,7 +336,7 @@ private struct PlainKeyboardHostTextField: UIViewRepresentable {
         uiView.textColor = isLight
             ? UIColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x19 / 255.0, alpha: 1)
             : UIColor(white: 0.95, alpha: 1)
-        uiView.keyboardAppearance = isLight ? .light : .dark
+        uiView.keyboardAppearance = isLight && !darkKeyboard ? .light : .dark
         if uiView.text != text {
             uiView.text = text
         }
