@@ -82,7 +82,18 @@ explicitly clear stale Wayland/X11 values inherited by the user manager; missing
 locale and data-directory variables are left to the user manager. A saved
 `XAUTHORITY` whose file is gone (Xwayland writes a new cookie at each login, so
 a reboot strands the old path) is replaced at startup by the user manager's
-current value, or dropped so Xlib uses `~/.Xauthority`. No
+current value, or dropped so Xlib uses `~/.Xauthority`. A unit started with no
+display at all (the desktop never imported its environment into systemd) adopts
+the user manager's `WAYLAND_DISPLAY`, else the newest Wayland socket of yours in
+`XDG_RUNTIME_DIR` that answers. Hyprland imports nothing by default; add this to
+its config so the service, its paste helpers, and the HUD get your session:
+
+```ini
+exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+```
+
+When the HUD can't show, Hex's log says why: no display, no layer-shell (and
+no XWayland), or the overlay failing to open, with its error. No
 permissions are granted. The unit is `PartOf=graphical-session.target`;
 desktops managing a custom session target must bind its lifetime to their
 login/logout lifecycle. Systemd restarts a crashed Hex (`Restart=on-failure`)

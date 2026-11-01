@@ -96,7 +96,15 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         )),
         command => command,
     };
+    // Before the log, which starts a thread: the service may need the
+    // session's Wayland display (#756).
+    let adopted = matches!(command, Command::Service { embedded: false })
+        .then(crate::linux::service::adopt_wayland_display)
+        .flatten();
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
+    if let Some(wayland_display) = adopted {
+        tracing::info!(%wayland_display, "adopted the session's Wayland display");
+    }
 
     let event_path = log_dir.join("live.ndjson");
     match command {

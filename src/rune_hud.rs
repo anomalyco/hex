@@ -183,6 +183,12 @@ impl HudSender {
     pub(crate) fn availability(&self) -> rune::Availability {
         self.overlay.availability()
     }
+
+    /// Why Rune could not open the overlay, when it says.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn failure(&self) -> Option<String> {
+        self.overlay.failure()
+    }
 }
 
 /// The overlay's state: the model and what it last drew.

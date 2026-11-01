@@ -250,6 +250,12 @@ substitute for source inspection or a second roadmap.
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last,
   and paste.
+- `linux/service` also adopts the session's Wayland display at `hex service`
+  start when the unit has none (Hyprland imports nothing into systemd; #756):
+  the user manager's `WAYLAND_DISPLAY`, else the newest answering
+  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
+  `limitation()` names the HUD's failure: no display, no layer-shell, or
+  Rune's overlay error.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on

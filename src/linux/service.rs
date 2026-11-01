@@ -120,6 +120,61 @@ pub(crate) fn refresh_x_authority() {
     }
 }
 
+/// A service the user manager started before the desktop imported its
+/// environment has no display: Hyprland, for one, imports nothing into
+/// systemd unless its config runs `dbus-update-activation-environment`
+/// (#756). Adopts the user manager's current `WAYLAND_DISPLAY`, else the
+/// newest Wayland socket of this user's in `XDG_RUNTIME_DIR` that accepts a
+/// connection. Returns the display it adopted. Called on the main thread
+/// before Hex starts any other thread.
+pub(crate) fn adopt_wayland_display() -> Option<String> {
+    if graphical_session() {
+        return None;
+    }
+    let uid = unsafe { libc::getuid() };
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}")));
+    let display = manager_environment("WAYLAND_DISPLAY")
+        .filter(|display| wayland_socket(&runtime.join(display), uid))
+        .or_else(|| newest_wayland_socket(&runtime, uid))?;
+    unsafe {
+        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+        std::env::set_var("WAYLAND_DISPLAY", &display);
+    }
+    Some(display)
+}
+
+/// The newest `wayland-*` socket in `runtime` that `uid` owns and that
+/// accepts a connection.
+fn newest_wayland_socket(runtime: &Path, uid: u32) -> Option<String> {
+    let mut sockets = fs::read_dir(runtime)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let metadata = entry.metadata().ok()?;
+            (name.starts_with("wayland-")
+                && !name.ends_with(".lock")
+                && metadata.file_type().is_socket()
+                && metadata.uid() == uid)
+                .then(|| (metadata.modified().ok(), name))
+        })
+        .collect::<Vec<_>>();
+    sockets.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    sockets
+        .into_iter()
+        .map(|(_, name)| name)
+        .find(|name| wayland_socket(&runtime.join(name), uid))
+}
+
+fn wayland_socket(path: &Path, uid: u32) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_socket() && metadata.uid() == uid)
+        && UnixStream::connect(path).is_ok()
+}
+
 /// A variable in the systemd user manager's environment, which the desktop
 /// session imports at each login.
 fn manager_environment(key: &str) -> Option<String> {
