@@ -25,6 +25,9 @@ pub(crate) struct Failure {
     pub(crate) reason: String,
     /// Seconds since the Unix epoch.
     pub(crate) at: u64,
+    /// It worked, but slower than the CPU (#484), rather than failing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) slow: bool,
 }
 
 /// The failures on disk, read once.
@@ -86,6 +89,16 @@ pub(crate) fn failed(device: &Device) -> bool {
 
 /// Remembers that `device` failed under the driver installed now.
 pub(crate) fn record(device: &Device, reason: &str) {
+    remember(device, reason, false);
+}
+
+/// Remembers that `device` ran the model slower than the CPU under the
+/// driver installed now (#484).
+pub(crate) fn record_slow(device: &Device, reason: &str) {
+    remember(device, reason, true);
+}
+
+fn remember(device: &Device, reason: &str, slow: bool) {
     let failure = Failure {
         device: device_key(device),
         driver: driver(),
@@ -93,13 +106,23 @@ pub(crate) fn record(device: &Device, reason: &str) {
         at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs()),
+        slow,
     };
-    tracing::warn!(
-        device = failure.device,
-        driver = failure.driver,
-        reason = failure.reason,
-        "the GPU failed while transcribing; Auto transcribes on the CPU on it until its driver changes"
-    );
+    if slow {
+        tracing::info!(
+            device = failure.device,
+            driver = failure.driver,
+            reason = failure.reason,
+            "the CPU runs the model faster than this GPU; Auto uses the CPU on it until its driver changes"
+        );
+    } else {
+        tracing::warn!(
+            device = failure.device,
+            driver = failure.driver,
+            reason = failure.reason,
+            "the GPU failed while transcribing; Auto transcribes on the CPU on it until its driver changes"
+        );
+    }
     with_failures(|failures| {
         failures.retain(|old| old.device != failure.device || old.driver != failure.driver);
         failures.push(failure);

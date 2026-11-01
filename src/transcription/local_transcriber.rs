@@ -29,7 +29,18 @@ pub struct LocalTranscriber {
     gpu: Option<transcribe_cpp::Device>,
     /// The device setting it loaded for.
     preference: TranscriptionDevice,
+    /// A warm run of [`PREWARM_SAMPLES`] once loaded, in milliseconds.
+    warm_ms: u128,
 }
+
+/// 1.5 s of silence: what loading runs to warm a model and time it.
+const PREWARM_SAMPLES: usize = 24_000;
+
+/// An integrated GPU slower than this on a warm 1.5 s run (a fifth of real
+/// time) may lose to the CPU, so Auto times the CPU too (#484). Healthy
+/// GPUs run it in tens of milliseconds; the UHD 620 and Iris Plus 655 that
+/// missed streaming deadlines ran a 35 s clip at about 0.4× real time.
+const SLOW_WARM_MS: u128 = 300;
 
 /// Settings › Speech engine (`transcription_device`), for every later load.
 static DEVICE: AtomicU8 = AtomicU8::new(0);
@@ -251,6 +262,9 @@ impl LocalTranscriber {
                 {
                     gpu_health::forget(gpu);
                 }
+                if preference == TranscriptionDevice::Auto && loaded.slow_igpu() {
+                    return Ok(loaded.or_faster_cpu());
+                }
                 Ok(loaded)
             }
             Err(error) => {
@@ -342,9 +356,10 @@ impl LocalTranscriber {
             )
             .then(|| device.clone()),
             preference,
+            warm_ms: 0,
         };
         let started = Instant::now();
-        transcriber.transcribe(&vec![0.0; 24_000])?;
+        transcriber.transcribe(&vec![0.0; PREWARM_SAMPLES])?;
         tracing::info!(
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed local transcription model"
@@ -352,6 +367,11 @@ impl LocalTranscriber {
         transcriber.stream = transcriber
             .session
             .probe_stream(&transcriber.options, &architecture);
+        // Warm now, so this times the device rather than its first run's
+        // shader compiles.
+        let started = Instant::now();
+        transcriber.transcribe(&vec![0.0; PREWARM_SAMPLES])?;
+        transcriber.warm_ms = started.elapsed().as_millis();
         Ok(transcriber)
     }
 
@@ -385,7 +405,7 @@ impl LocalTranscriber {
         if self.session.ran_recently() {
             return Ok(());
         }
-        self.transcribe(&vec![0.0; 24_000])
+        self.transcribe(&vec![0.0; PREWARM_SAMPLES])
             .wrap_err("could not prewarm transcription model")
             .map(drop)
     }
@@ -436,6 +456,50 @@ impl LocalTranscriber {
             }
             result => result,
         }
+    }
+
+    /// Whether this model runs on an integrated GPU slow enough that the
+    /// CPU may be faster.
+    fn slow_igpu(&self) -> bool {
+        self.warm_ms > SLOW_WARM_MS
+            && self
+                .gpu
+                .as_ref()
+                .is_some_and(|gpu| gpu.device_type == transcribe_cpp::DeviceType::Igpu)
+    }
+
+    /// This model, or the same one on the CPU when the CPU runs it faster;
+    /// then the GPU is remembered as slow, so later loads go straight to the
+    /// CPU (#484).
+    fn or_faster_cpu(self) -> Self {
+        let cpu = match Self::load_on(&self.selection, Backend::Cpu, None, self.preference) {
+            Ok(cpu) => cpu,
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not time the model on the CPU; keeping the GPU"
+                );
+                return self;
+            }
+        };
+        tracing::info!(
+            gpu_ms = self.warm_ms,
+            cpu_ms = cpu.warm_ms,
+            "timed a warm 1.5 s run on the integrated GPU and the CPU"
+        );
+        if cpu.warm_ms >= self.warm_ms {
+            return self;
+        }
+        if let Some(gpu) = &self.gpu {
+            gpu_health::record_slow(
+                gpu,
+                &format!(
+                    "a warm 1.5 s run took {} ms on the GPU and {} ms on the CPU",
+                    self.warm_ms, cpu.warm_ms
+                ),
+            );
+        }
+        cpu
     }
 
     /// Whether `error` came from the GPU this model runs on failing.
