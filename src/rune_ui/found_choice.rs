@@ -67,19 +67,12 @@ pub(super) fn choice(ui: &Ui, p: Paint) -> El {
         .filter(|(_, found)| found.catalog != Some(ui.settings.transcription.model))
         .map(|(index, found)| found_row(p, index, found))
         .collect();
-    let mut actions = row().key("choice-actions").gap(8.0).center_y();
-    // With only the recommended copy found, there is nothing else to show.
-    if !others.is_empty() {
-        actions = actions.child(button(
-            p,
-            "show-found",
-            tr("Use a model already on this computer"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| ui.found.expanded = !ui.found.expanded,
-        ));
-    }
-    actions = actions.child(rune::spacer());
-    actions = if on_disk.is_some() {
+    let actions = row()
+        .key("choice-actions")
+        .gap(8.0)
+        .center_y()
+        .child(rune::spacer());
+    let actions = if on_disk.is_some() {
         actions
             .child(button(
                 p,
@@ -121,6 +114,16 @@ pub(super) fn choice(ui: &Ui, p: Paint) -> El {
         .gap(16.0)
         .child(card(p, "recommended-card", vec![recommended]))
         .child(actions);
+    // With only the recommended copy found, there is nothing else to show.
+    if !others.is_empty() {
+        page = page.child(row().key("show-found-row").child(button(
+            p,
+            "show-found",
+            tr("Use a model already on this computer"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.found.expanded = !ui.found.expanded,
+        )));
+    }
     if ui.found.expanded && !others.is_empty() {
         page = page.child(
             col()
