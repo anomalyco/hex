@@ -1,6 +1,7 @@
 //! What a staged dev build changed: the dev channel's notes
 //! (`dev-notes.json`, written by the Release workflow's dev-notes jobs) from
 //! the offered build back to the running one, shown with Restart to update.
+//! What's new opens the changelog at those builds (`?since=<running>`).
 //! Notes are a nicety: any failure leaves the update without them.
 
 use std::path::Path;
@@ -77,7 +78,11 @@ pub fn parse(text: &str, running: &str, offered: &str) -> Option<UpdateNotes> {
     }
     Some(UpdateNotes {
         items,
-        url: format!("{PAGE}#{offered}"),
+        url: if is_dev_version(running) {
+            format!("{PAGE}?since={running}#{offered}")
+        } else {
+            format!("{PAGE}#{offered}")
+        },
     })
 }
 
@@ -97,13 +102,18 @@ mod tests {
     fn lists_the_changes_from_the_offered_build_back_to_the_running_one() {
         let notes = parse(NOTES, "0.0.0-dev-8", "0.0.0-dev-11").unwrap();
         assert_eq!(notes.items, ["Fix A", "Fix B", "Fix C"]);
-        assert_eq!(notes.url, "https://anoma.ly/hex/dev#0.0.0-dev-11");
+        assert_eq!(
+            notes.url,
+            "https://anoma.ly/hex/dev?since=0.0.0-dev-8#0.0.0-dev-11"
+        );
     }
 
     #[test]
     fn an_install_older_than_the_notes_gets_every_listed_change() {
         let notes = parse(NOTES, "0.0.0-dev-2", "0.0.0-dev-9").unwrap();
         assert_eq!(notes.items, ["Fix A", "Fix C", "Already running"]);
+        let from_stable = parse(NOTES, "3.1.1", "0.0.0-dev-9").unwrap();
+        assert_eq!(from_stable.url, "https://anoma.ly/hex/dev#0.0.0-dev-9");
     }
 
     #[test]
