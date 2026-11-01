@@ -192,6 +192,7 @@ pub(crate) fn run_app(
                         });
                     }
                     Control::Quit => {
+                        close_before_quit(&window);
                         quit.quit();
                         break;
                     }
@@ -205,6 +206,25 @@ pub(crate) fn run_app(
     if let Some(meetings) = meetings {
         meetings.join();
     }
+}
+
+/// Closes an open window and gives the event loop a moment to tear its
+/// surface down before Hex quits. Quitting with the window still open
+/// destroyed it during the loop's exit, which crashed NVIDIA's driver on
+/// Wayland (#821); closing it first, as the window's own close does, exits
+/// cleanly. Bounded, so a loop that never answers still quits.
+#[cfg(target_os = "linux")]
+fn close_before_quit(window: &rune::AppHandle<Ui>) {
+    if !window.is_visible() {
+        return;
+    }
+    window.close();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while window.is_visible() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // The surface goes with the loop's next turns, after the close itself.
+    std::thread::sleep(Duration::from_millis(100));
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
