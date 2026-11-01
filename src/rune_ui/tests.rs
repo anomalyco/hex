@@ -2093,6 +2093,8 @@ fn goldens() {
     }
     check_golden("commands", true, GOLDEN_SIZE);
     check_golden("menus", false, GOLDEN_SIZE);
+    // A list longer than the window fades at its scrolling edge (#840).
+    check_golden("language-menu", false, GOLDEN_SIZE);
     check_golden("modes-opencode-not-running", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);
