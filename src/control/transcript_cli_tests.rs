@@ -105,6 +105,56 @@ fn history_filters_and_order_apply_before_the_limit() {
 }
 
 #[test]
+fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
+    let query = args(&["stats", "--since", "3d", "--json"]);
+    assert!(matches!(
+        query.action,
+        Some(HistoryAction::Stats { ref since, json: true, .. }) if since.as_deref() == Some("3d")
+    ));
+    const DAY: u64 = 86_400_000;
+    let entry = |id: u64, age_days: u64, raw: &str, final_text: &str| HistoryEntry {
+        id,
+        timestamp_ms: NOW - age_days * DAY,
+        kind: HistoryKind::Dictation,
+        raw_text: raw.into(),
+        final_text: final_text.into(),
+        application: Some("Zed".into()),
+        processing: None,
+        audio_ms: 6_000,
+        inference_ms: 0,
+        total_ms: 0,
+    };
+    let entries = [
+        entry(1, 10, "expired by retention", "expired by retention"),
+        entry(2, 1, "so um yes", "Yes."),
+        entry(3, 0, "ten words", "ten words"),
+    ];
+    let utc = |ms: u64| (ms / DAY) as i64;
+    let output = stats_output(&entries, None, None, HistoryRetention::Week, NOW, utc).unwrap();
+    assert_eq!(output.stats.dictations, 2);
+    assert_eq!(output.stats.words, 3);
+    assert_eq!(output.stats.words_per_minute, Some(15));
+    assert_eq!(output.stats.changed_by_output, 1);
+    assert_eq!(output.stats.streak_days, 2);
+    assert_eq!(output.stats.top_apps[0].dictations, 2);
+    let json = serde_json::to_value(&output).unwrap();
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["words"], 3);
+    let today = stats_output(
+        &entries,
+        Some("today"),
+        None,
+        HistoryRetention::Week,
+        NOW,
+        utc,
+    );
+    assert!(today.unwrap().stats.dictations <= 1);
+    assert!(stats_text(&HistoryStats::default()).starts_with("No retained"));
+    assert!(require_history_stats(false).is_err());
+    assert!(require_history_stats(true).is_ok());
+}
+
+#[test]
 fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
     let mut entries = entries();
     entries.push(HistoryEntry {

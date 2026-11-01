@@ -10,6 +10,7 @@ use super::list_detail::{self as ld, Item};
 use super::lists::{error_panel, section_label};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
+use crate::history::stats::HistoryStats;
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
 
 #[derive(Default)]
@@ -23,6 +24,8 @@ pub(super) struct HistoryPane {
     pub(super) clear_armed: bool,
     pub(super) copied: Option<u64>,
     error: Option<String>,
+    /// Labs › Dictation stats: every retained entry summed up, while on.
+    pub(super) stats: Option<HistoryStats>,
 }
 
 impl HistoryPane {
@@ -37,8 +40,13 @@ impl HistoryPane {
         }
     }
 
-    /// Refreshes the bounded snapshot for the current query.
+    /// Refreshes the bounded snapshot for the current query, and the stats.
     pub(super) fn reload(&mut self) {
+        self.reload_entries();
+        self.reload_stats();
+    }
+
+    fn reload_entries(&mut self) {
         self.searched = self.search.text.clone();
         let Some(store) = &self.store else {
             return;
@@ -52,14 +60,29 @@ impl HistoryPane {
         }
     }
 
-    /// While the pane shows, picks up new dictations and search edits.
+    /// Sums up every retained entry, only while Labs › Dictation stats is
+    /// on; off, nothing is read for it.
+    fn reload_stats(&mut self) {
+        self.stats = match &self.store {
+            Some(store) if crate::labs::history_stats() => Some(store.stats()),
+            _ => None,
+        };
+    }
+
+    /// While the pane shows, picks up new dictations and search edits. The
+    /// stats are summed again only when the entries or the toggle changed.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
         if !visible || self.store.is_none() {
             return false;
         }
         let previous = std::mem::take(&mut self.entries);
-        self.reload();
-        self.entries != previous
+        self.reload_entries();
+        let changed = self.entries != previous;
+        if changed || self.stats.is_some() != crate::labs::history_stats() {
+            self.reload_stats();
+            return true;
+        }
+        false
     }
 
     fn entry(&self, id: u64) -> Option<&HistoryEntry> {
@@ -184,6 +207,11 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             error,
         ));
     }
+    if ui.settings.labs.history_stats
+        && let Some(stats) = pane.stats.as_ref().filter(|stats| stats.dictations > 0)
+    {
+        notices.push(stats_block(p, stats));
+    }
     let searching = !pane.searched.trim().is_empty();
     let body = match empty(ui, p).filter(|_| !searching) {
         Some(empty) => empty,
@@ -233,6 +261,58 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
             .child(body),
     )
+}
+
+/// Labs › Dictation stats: every retained dictation summed up, above the
+/// list. Shown only while something is retained.
+fn stats_block(p: Paint, stats: &HistoryStats) -> El {
+    let wpm = stats
+        .words_per_minute
+        .map_or_else(|| "–".to_owned(), |wpm| wpm.to_string());
+    let mut lines = vec![
+        tr_named(
+            "Dictations: {count} · Words: {words} · Words per minute: {wpm}",
+            &[
+                ("count", &stats.dictations.to_string()),
+                ("words", &stats.words.to_string()),
+                ("wpm", &wpm),
+            ],
+        ),
+        tr_named(
+            "Changed by Output: {percent}% · Daily streak: {days}",
+            &[
+                (
+                    "percent",
+                    &stats.changed_percent().unwrap_or_default().to_string(),
+                ),
+                ("days", &stats.streak_days.to_string()),
+            ],
+        ),
+    ];
+    if !stats.top_apps.is_empty() {
+        let apps = stats
+            .top_apps
+            .iter()
+            .map(|app| format!("{} ({})", app.application, app.dictations))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(tr_fill("Top apps: {}", &apps));
+    }
+    col()
+        .key("history-stats")
+        .gap(4.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(p.k.radius.md)
+        .fill(p.k.c.layer_01)
+        .child(section_label(p, "label", tr("Dictation stats")))
+        .children(lines.into_iter().enumerate().map(|(index, line)| {
+            text(line)
+                .key(format!("line{index}"))
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap()
+        }))
 }
 
 /// Retention as a borderless menu, and Clear all beside it while there is

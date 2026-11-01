@@ -317,6 +317,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
     rows.push(row(
+        Feature::HistoryStats,
+        &HINTS,
+        tr("Dictation stats"),
+        tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
         &HINTS,
         tr("Sort and filter models"),
@@ -393,6 +399,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::CustomModels => "lab-custom-models",
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
+        Feature::HistoryStats => "lab-history-stats",
     }
 }
 

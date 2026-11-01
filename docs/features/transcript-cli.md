@@ -8,7 +8,11 @@ Agent or terminal                                // transcripts.cli; macOS relea
 │   │   (raw + final text count as one document)
 │   ├── --raw -> Include the stored pre-processing transcript
 │   ├── --oldest-first -> Reverse timestamp order
-│   └── --json -> Version 1 response, with truncation flag
+│   ├── --json -> Version 1 response, with truncation flag
+│   └── stats [--since/--until] [--json] -> Labs › Dictation stats (labs.history_stats):
+│       dictations, words, words per minute, changed by Output, daily streak,
+│       top apps over every retained entry; toggle off -> fails naming
+│       `hex labs on history-stats` before History is read
 └── hex meetings
     ├── list -> Newest first, overlapping time range, live status
     ├── show <id|latest> -> Markdown or versioned JSON with notes and entries
@@ -21,7 +25,9 @@ Agent or terminal                                // transcripts.cli; macOS relea
     └── search <query> -> MCP's stemmed, fuzzy BM25 passages; exact stems first
 ```
 
-Commands work beside the running app and independently of feature opt-ins.
+Commands work beside the running app and independently of feature opt-ins,
+except `hex history stats` (and `meetings show --srt|--vtt`), which need their
+Labs toggle.
 `control/transcript_cli` dispatches before logging, instance locking, local
 API, GUI, permissions, and Hex Microphone. Nothing is created or repaired.
 Debug `meeting list/show` shares this path; recording remains debug-only.

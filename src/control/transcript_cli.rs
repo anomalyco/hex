@@ -9,6 +9,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::vocabulary::VocabularyEntry;
+use crate::history::stats::HistoryStats;
 use crate::history::{HistoryEntry, HistoryKind, HistoryRetention};
 use crate::meeting::query::{
     ChapterView, Library, ListQuery, Meeting, OffsetRange, SearchQuery, TextHit, TimeRange,
@@ -55,6 +56,19 @@ pub enum HistoryAction {
         yes: bool,
         #[command(flatten)]
         output: crate::control::cli::Output,
+    },
+    /// Sum up the retained dictations: words, speaking speed, top apps,
+    /// how often Output changed the text, and the daily streak (Labs ›
+    /// Dictation stats). Read-only.
+    Stats {
+        /// Lower time bound: 3d, today, YYYY-MM-DD, or RFC 3339.
+        #[arg(long)]
+        since: Option<String>,
+        /// Exclusive upper bound; a date includes that entire local day.
+        #[arg(long)]
+        until: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -286,7 +300,107 @@ fn retention(root: &Path) -> Result<HistoryRetention> {
     Ok(settings.history_retention)
 }
 
+#[derive(Serialize)]
+struct StatsOutput {
+    version: u32,
+    retention: HistoryRetention,
+    #[serde(flatten)]
+    stats: HistoryStats,
+}
+
+/// The retained entries in the range, summed up.
+fn stats_output(
+    entries: &[HistoryEntry],
+    since: Option<&str>,
+    until: Option<&str>,
+    retention: HistoryRetention,
+    now: u64,
+    day_of: impl Fn(u64) -> i64,
+) -> Result<StatsOutput> {
+    let range = TimeRange::parse(since, until, now)?;
+    let cutoff = retention.max_age_ms().map(|age| now.saturating_sub(age));
+    let stats = crate::history::stats::summarize(
+        entries
+            .iter()
+            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
+            .filter(|entry| range.contains(entry.timestamp_ms)),
+        day_of(now),
+        day_of,
+    );
+    Ok(StatsOutput {
+        version: 1,
+        retention,
+        stats,
+    })
+}
+
+/// Dictation stats are a Labs feature, refused before History is read
+/// while its toggle is off.
+fn require_history_stats(on: bool) -> Result<()> {
+    if on {
+        Ok(())
+    } else {
+        Err(eyre!(
+            "Dictation stats are a Labs feature and are off. Turn them on with `hex labs on history-stats` or in Settings › Labs."
+        ))
+    }
+}
+
+/// `hex history stats`.
+fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result<()> {
+    require_history_stats(crate::labs::history_stats())?;
+    let root = crate::app_paths::support_dir()?;
+    let entries = crate::history::read_snapshot(&root.join("history.json"))
+        .wrap_err("could not read history.json")?;
+    let output = stats_output(
+        &entries,
+        since,
+        until,
+        retention(&root)?,
+        crate::desktop::events::now_ms(),
+        crate::history::stats::local_day,
+    )?;
+    let mut out = io::stdout().lock();
+    if json {
+        return write_json(&mut out, &output);
+    }
+    write!(out, "{}", stats_text(&output.stats))?;
+    Ok(())
+}
+
+fn stats_text(stats: &HistoryStats) -> String {
+    if stats.dictations == 0 {
+        return "No retained dictations.\n".into();
+    }
+    let mut text = format!("Dictations: {}\nWords: {}\n", stats.dictations, stats.words);
+    match stats.words_per_minute {
+        Some(wpm) => text.push_str(&format!("Words per minute: {wpm}\n")),
+        None => text.push_str("Words per minute: unknown (no recorded audio)\n"),
+    }
+    text.push_str(&format!(
+        "Changed by Output: {} ({}%)\n",
+        stats.changed_by_output,
+        stats.changed_percent().unwrap_or(0)
+    ));
+    text.push_str(&format!(
+        "Daily streak: {} (active days: {})\n",
+        stats.streak_days, stats.active_days
+    ));
+    if !stats.top_apps.is_empty() {
+        let apps: Vec<String> = stats
+            .top_apps
+            .iter()
+            .map(|app| format!("{} {}", app.application, app.dictations))
+            .collect();
+        text.push_str(&format!("Top apps: {}\n", apps.join(", ")));
+    }
+    text
+}
+
 pub fn history(args: &HistoryArgs) -> Result<()> {
+    if let Some(HistoryAction::Stats { since, until, json }) = &args.action {
+        return history_stats(since.as_deref(), until.as_deref(), *json);
+    }
     let root = crate::app_paths::support_dir()?;
     let entries = crate::history::read_snapshot(&root.join("history.json"))
         .wrap_err("could not read history.json")?;

@@ -48,6 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
+├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -530,6 +531,28 @@ in [app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs).
 Not yet observed: a real GNOME Wayland session granting Menu through the
 portal, or an X11 grab of it; the Labs page goldens need regenerating on Linux
 with the new row.
+
+Dictation stats (`history-stats`, issue 790, every OS): while on, the History
+pane shows a "Dictation stats" block above the list once anything is retained:
+dictations, words, words per minute, how often Output changed the text, the
+daily streak, and the top five apps; `hex history stats [--since] [--until]
+[--json]` prints the same ([transcript-cli.md](../transcript-cli.md)). It sums
+every entry within retention (`History::stats`, `history/stats.rs`), not the
+pane's 200-entry search, so it ends with what retention removes; the rollup that
+outlives retention, streak notifications, and per-replacement counts are not
+built. The gates are `labs::history_stats()`, read when the pane reloads (off,
+it reads nothing for stats, and sums again only when the entries or the toggle
+change) and where `hex history stats` starts (off, it fails naming `hex labs on
+history-stats` before History is read), and the window's own setting for the
+block. Off, History is exactly as before. Checks: the tests in
+[history/stats.rs](../../src/history/stats.rs) (words, speed, changes, top
+apps, streak across a gap, expired entries skipped past the search cap);
+`history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
+[control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
+`history_stats_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: the block in a real window;
+there is no `--snap` scene for it (the fixture has no store), and the Labs
+page goldens need regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
