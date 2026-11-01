@@ -40,6 +40,8 @@ pub(crate) struct RemoteDesktop {
     restorable: bool,
     /// The desktop showed its approval dialog for this session.
     prompted: bool,
+    /// The desktop already ended the session, so there is nothing to close.
+    ended: bool,
 }
 
 impl RemoteDesktop {
@@ -108,6 +110,7 @@ impl RemoteDesktop {
             session,
             restorable,
             prompted,
+            ended: false,
         })
     }
 
@@ -123,11 +126,15 @@ impl RemoteDesktop {
 
     /// Whether the desktop ended the session, as when the user revokes it.
     pub(crate) fn closed(&mut self) -> bool {
-        let session = self.session.as_str().to_owned();
-        self.bus
-            .events()
-            .into_iter()
-            .any(|(closed, event)| closed == session && event == Event::Closed)
+        if !self.ended {
+            let session = self.session.as_str().to_owned();
+            self.ended = self
+                .bus
+                .events()
+                .into_iter()
+                .any(|(closed, event)| closed == session && event == Event::Closed);
+        }
+        self.ended
     }
 
     /// Presses and releases Ctrl+V, or Ctrl+Shift+V for terminals.
@@ -149,7 +156,11 @@ impl RemoteDesktop {
 
 impl Drop for RemoteDesktop {
     fn drop(&mut self) {
-        self.bus.close_session(&self.session);
+        // Closing a session the desktop already ended (the user stopped it
+        // from GNOME's remote-control indicator) only fails (#718).
+        if !self.closed() {
+            self.bus.close_session(&self.session);
+        }
     }
 }
 
