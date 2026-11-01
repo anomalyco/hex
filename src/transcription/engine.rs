@@ -1424,14 +1424,36 @@ mod tests {
 
     #[test]
     fn quiet_speech_over_steady_noise_is_never_cut_as_a_pause() {
+        // #458: -28 dBFS syllables over -35 dBFS noise, too close to the
+        // floor for the meeting detector's 12 dB speech margin.
+        assert_quiet_speech_is_kept(-28.0, -35.0);
+        // #841: a quiet built-in microphone, whose speech sits under
+        // -55 dBFS throughout.
+        assert_quiet_speech_is_kept(-62.0, -72.0);
+    }
+
+    #[test]
+    fn a_stream_that_heard_only_quiet_audio_falls_back_to_the_whole_clip() {
+        use crate::transcription::pause_segmenter::tests::noise;
+        // #841: the cap took a whole dictation for one pause and the stream
+        // kept only its first 2.5 s; that stream must not be used.
+        let mut seed = 3;
+        let clip = noise(6_000, -80.0, &mut seed);
+        let mut fake = FakeStream::default();
+        let mut capped = PauseCap::new(&mut fake, 0);
+        let result = finish_stream(&mut capped, &clip, 0);
+        assert!(capped.dropped > 0);
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32) {
         use crate::transcription::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
-        // #458: 17 s of -28 dBFS syllables over -35 dBFS noise, too close
-        // to the floor for the meeting detector's 12 dB speech margin.
+        // 17 s of syllables over steady noise.
         let mut seed = 11;
-        let mut clip = noise(17_000, -35.0, &mut seed);
+        let mut clip = noise(17_000, noise_db, &mut seed);
         let mut voice_seed = 5;
         for start in (0..clip.len()).step_by(4_800) {
-            let burst = noise(240, -28.0, &mut voice_seed);
+            let burst = noise(240, speech_db, &mut voice_seed);
             for (sample, voice) in clip[start..].iter_mut().zip(burst) {
                 *sample += voice;
             }
