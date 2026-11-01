@@ -268,6 +268,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Sided modifier chords"),
                 tr("Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥"),
             ));
+            // macOS's shortcut machine reads it at each Toggle release.
+            rows.push(row(
+                Feature::TapOrHold,
+                &KEYBOARD,
+                tr("Tap or hold"),
+                tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
+            ));
         }
     }
     rows.push(row(
@@ -350,6 +357,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SpokenSymbols => "lab-spoken-symbols",
         Feature::PickerSortFilter => "lab-picker-sort-filter",
         Feature::SidedChords => "lab-sided-modifier-chords",
+        Feature::TapOrHold => "lab-tap-or-hold",
     }
 }
 

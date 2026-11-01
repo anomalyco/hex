@@ -348,6 +348,11 @@ const KEYS: &[Key] = &[
         "Labs: the shortcut recorder keeps which side each modifier of a modifier-only chord is on, such as Right Command + Right Option (macOS)",
     ),
     key(
+        "labs.tap_or_hold",
+        Kind::Bool,
+        "Labs: in Toggle mode, a press held past the hold threshold dictates until it lifts; a short tap still starts and stops (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
