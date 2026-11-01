@@ -44,6 +44,7 @@ mod modes;
 mod onboarding;
 mod onboarding_kit;
 mod output;
+mod paste_access;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -855,8 +856,14 @@ impl Ui {
         };
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let store = host::history(&connect, settings.history_retention);
+        #[cfg(target_os = "linux")]
+        let paste = connect.is_some().then(paste_access::detect).flatten();
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
+        #[cfg(target_os = "linux")]
+        {
+            ui.platform.paste = paste;
+        }
         // A mouse-button shortcut went back to its default: say so once.
         if ui.settings.mouse_shortcut_notice {
             ui.settings.mouse_shortcut_notice = false;
@@ -1342,6 +1349,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
+    changed |= paste_access::poll(ui);
     changed |= labs::poll_flash(ui, now);
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
@@ -2161,6 +2169,10 @@ const SCENES: &[Scene] = &[
     ("onboarding-waiting", |ui| {
         first_run(ui, FirstRun::Downloading, Page::Waiting)
     }),
+    // GNOME and KDE on Wayland: why the desktop asks before the first paste.
+    ("onboarding-paste", |ui| {
+        first_run(ui, FirstRun::PasteAccess, Page::Permissions)
+    }),
     ("onboarding-try", |ui| {
         first_run(ui, FirstRun::Ready, Page::Try)
     }),
@@ -2584,6 +2596,9 @@ enum FirstRun {
     Failed,
     /// The model is installed.
     Ready,
+    /// The model is installed, and the desktop asks before Hex's first
+    /// paste (GNOME and KDE on Wayland).
+    PasteAccess,
 }
 
 fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {
@@ -2598,12 +2613,15 @@ fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {
                 view.transcription.error = Some("The connection was reset.".into());
             }
         }
-        FirstRun::Ready => {
+        FirstRun::Ready | FirstRun::PasteAccess => {
             ui.picker.installed = Some(vec![ui.settings.transcription.model]);
             if let Some(view) = &mut ui.view {
                 view.transcription.preparing = None;
             }
         }
+    }
+    if state == FirstRun::PasteAccess {
+        ui.platform.paste = Some(paste_access::PasteAccess::Ask);
     }
     onboarding::poll(ui);
     onboarding_kit::live::fixture(ui, page);

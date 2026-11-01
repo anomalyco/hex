@@ -23,6 +23,7 @@ use rune::{El, TextEdit, Transition, Tx, text};
 
 use super::super::controls::Paint;
 use super::super::found_choice::{self, ChoiceRow};
+use super::super::paste_access::{self, PasteAccess};
 use super::super::platform::Os;
 use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
@@ -64,6 +65,9 @@ pub(crate) struct Live {
     pub(crate) reopen: bool,
     /// macOS needed a restart and Hex couldn't relaunch itself.
     pub(crate) relaunch_failed: bool,
+    /// The desktop's paste permission on GNOME and KDE Wayland: the
+    /// permissions page explains it and asks before the practice pastes.
+    pub(crate) paste: Option<PasteAccess>,
     /// The model step: the models found on this computer, while it shows.
     pub(crate) models: Vec<ChoiceRow>,
     /// Where the model step stands.
@@ -132,6 +136,15 @@ fn clock(ui: &Ui) -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64() + 1.0
 }
 
+/// Every permission is ready, the desktop's paste permission included
+/// (or passed over), so the story needs no permissions page.
+fn granted(status: SetupStatus, paste: Option<PasteAccess>) -> bool {
+    use crate::desktop::onboarding::PermissionState::Ready;
+    status.microphone == Ready
+        && status.accessibility == Ready
+        && paste.is_none_or(PasteAccess::settled)
+}
+
 fn english(selection: &TranscriptionSelection) -> bool {
     selection.model == TranscriptionModelId::ParakeetUnifiedEnglish
 }
@@ -186,8 +199,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     set_other_label(transcription_models::language_name(&other.language));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let granted = granted(status, ui.platform.paste);
 
     let mut s = Onboard::new(Flow::FirstRun);
     s.speech = Speech::AfterDownload;
@@ -212,6 +224,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         accessibility_renamed: ui.platform.accessibility_renamed,
         reopen: false,
         relaunch_failed: false,
+        paste: ui.platform.paste,
         models: Vec::new(),
         model_step: ModelStep::None,
         pick_started: false,
@@ -398,6 +411,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let asks_permissions = ui.platform.caps.permissions;
     let accessibility_renamed = ui.platform.accessibility_renamed;
     let relaunch_failed = ui.platform.relaunch_failed;
+    let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
     let Some(s) = ui.first_run.as_mut() else {
         return false;
@@ -411,6 +425,8 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         live.microphone = ItemStatus::Ready;
         live.accessibility = ItemStatus::Ready;
     }
+
+    live.paste = paste;
 
     // Permissions, as the tour's setup rows show them.
     if let Some(view) = &view {
@@ -447,8 +463,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         // A model already on this computer needs no download pill.
         s.had_model = tour_model == ItemStatus::Ready;
     }
-    let granted = status.microphone == crate::desktop::onboarding::PermissionState::Ready
-        && status.accessibility == crate::desktop::onboarding::PermissionState::Ready;
+    let granted = granted(status, paste);
     if granted {
         live.granted_at.get_or_insert(now);
     } else {
@@ -628,6 +643,20 @@ pub(super) fn retry_download(ui: &mut Ui) {
 /// Allow on a permission row.
 pub(super) fn allow(item: SetupItem) -> impl Fn(&mut Ui) + 'static {
     move |ui: &mut Ui| onboarding::input(ui, Input::Grant(item))
+}
+
+/// Allow on the paste permission: the desktop's dialog opens.
+pub(super) fn allow_paste(ui: &mut Ui) {
+    paste_access::ask(ui);
+}
+
+/// Continue after the desktop's paste permission was refused: the desktop
+/// asks again at the first paste.
+pub(super) fn paste_later(ui: &mut Ui) {
+    paste_access::later(ui);
+    if let Some(s) = ui.first_run.as_mut() {
+        s.move_on();
+    }
 }
 
 /// "Restart Hex" once macOS applies a grant only after a restart.
