@@ -311,7 +311,7 @@ only with accessibility turned on: launch them with
 `~/.config/chrome-flags.conf`), or run a screen reader. Without it, the
 application rule applies. Completed dictations are kept in History.
 
-**Microphone mode** can release the microphone between dictations; it then opens
+**Turn off the mic when not dictating** (General) releases the microphone between dictations; it then opens
 on the shortcut press without pre-roll. **While dictating** can mute the default
 output through `wpctl` (PipeWire) or `pactl` (PulseAudio), or pause playing
 MPRIS media players over D-Bus, once the hold passes 300 ms, so shortcut chords
@@ -328,14 +328,14 @@ hands-free profile (HFP/HSP): mono, call-quality sound in both directions.
 This is how Bluetooth audio works, not something Hex chooses, and how quickly
 the headset switches back depends on the headset and WirePlumber's settings.
 
-If Hex records from the headset's microphone, the two **Microphone mode**
-choices trade off differently:
+If Hex records from the headset's microphone, **Turn off the mic when not
+dictating** trades off differently on and off:
 
-- **Release when idle** opens the microphone only when you press the shortcut,
+- **On** opens the microphone only when you press the shortcut,
   so each dictation switches the headset to hands-free and back. Playback
   drops out or pauses during the switch, and the microphone takes longer to
   open, so the first words can be lost.
-- **Keep ready** keeps the microphone open, so the headset stays in hands-free
+- **Off** (the default) keeps the microphone open, so the headset stays in hands-free
   mode, with call-quality playback, for as long as Hex listens.
 
 The recommended setup is a separate microphone for input (the laptop's

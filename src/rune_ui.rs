@@ -772,7 +772,6 @@ pub(crate) struct Ui {
     /// properties, which can block, so it runs off the UI thread.
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
-    confirm_release: bool,
     mic_level: general::MicLevel,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
@@ -878,7 +877,6 @@ impl Ui {
             microphones_listed_at: 0.0,
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
-            confirm_release: false,
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
@@ -1953,7 +1951,6 @@ const SCENES: &[Scene] = &[
             default_is_hex_microphone: false,
             ..Default::default()
         });
-        ui.confirm_release = true;
     }),
     ("history", |ui| {
         *ui = portal_fixture();
