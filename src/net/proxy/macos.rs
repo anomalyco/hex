@@ -10,11 +10,20 @@ type CFTypeRef = *const c_void;
 const UTF8: u32 = 0x0800_0100;
 const SINT32: isize = 3;
 
-#[link(name = "CoreFoundation", kind = "framework")]
 #[link(name = "CFNetwork", kind = "framework")]
 unsafe extern "C" {
     fn CFNetworkCopySystemProxySettings() -> CFTypeRef;
     fn CFNetworkCopyProxiesForURL(url: CFTypeRef, settings: CFTypeRef) -> CFTypeRef;
+
+    static kCFProxyTypeKey: CFTypeRef;
+    static kCFProxyHostNameKey: CFTypeRef;
+    static kCFProxyPortNumberKey: CFTypeRef;
+    static kCFProxyTypeHTTP: CFTypeRef;
+    static kCFProxyTypeHTTPS: CFTypeRef;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
     fn CFURLCreateWithBytes(
         allocator: CFTypeRef,
         bytes: *const u8,
@@ -26,16 +35,15 @@ unsafe extern "C" {
     fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
     fn CFDictionaryGetValue(dictionary: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
     fn CFEqual(left: CFTypeRef, right: CFTypeRef) -> u8;
-    fn CFStringGetCString(string: CFTypeRef, buffer: *mut c_char, size: isize, encoding: u32)
-    -> u8;
+    // As `accessibility` declares it: one signature per symbol.
+    fn CFStringGetCString(
+        string: CFTypeRef,
+        buffer: *mut c_char,
+        size: isize,
+        encoding: u32,
+    ) -> bool;
     fn CFNumberGetValue(number: CFTypeRef, kind: isize, value: *mut c_void) -> u8;
     fn CFRelease(object: CFTypeRef);
-
-    static kCFProxyTypeKey: CFTypeRef;
-    static kCFProxyHostNameKey: CFTypeRef;
-    static kCFProxyPortNumberKey: CFTypeRef;
-    static kCFProxyTypeHTTP: CFTypeRef;
-    static kCFProxyTypeHTTPS: CFTypeRef;
 }
 
 /// Releases a Core Foundation object when dropped.
@@ -103,7 +111,7 @@ unsafe fn string(value: CFTypeRef) -> Option<String> {
     // SAFETY: `value` is a CFString from the proxy dictionary; the buffer is
     // writable for its length.
     let ok = unsafe { CFStringGetCString(value, buffer.as_mut_ptr(), buffer.len() as isize, UTF8) };
-    if ok == 0 {
+    if !ok {
         return None;
     }
     // SAFETY: CFStringGetCString NUL-terminates on success.
