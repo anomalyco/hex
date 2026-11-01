@@ -1209,7 +1209,6 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
         )
 }
 
-/// An icon row choosing one of `labels` from a quiet select.
 /// Where the speech model runs (#856): Auto, GPU or CPU, and why Auto
 /// stays on the CPU after a GPU failed.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1259,6 +1258,7 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
     .into()
 }
 
+/// An icon row choosing one of `labels` from a quiet select.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pick_row(
     ui: &Ui,
