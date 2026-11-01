@@ -2096,6 +2096,8 @@ fn goldens() {
     check_golden("modes-opencode-not-running", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);
+    check_golden("picker-found", false, PANE_SIZE);
+    check_golden("onboarding-model-found", false, PANE_SIZE);
 }
 
 mod panes;

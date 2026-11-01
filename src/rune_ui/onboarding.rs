@@ -194,6 +194,16 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
 /// Feeds the flow fresh permission and model state; true when the tour
 /// changed.
 pub(super) fn poll(ui: &mut Ui) -> bool {
+    // Onboarding looks for models already on this computer once, and holds
+    // its own download until the scan answers; with one found, the person
+    // chooses (`found_choice`), and nothing is picked for them.
+    if ui.tour.is_some() {
+        super::found::scan_for_setup(ui);
+        let held = ui.found.scanning() || !ui.found_models.is_empty();
+        if let Some(tour) = &mut ui.tour {
+            tour.flow.hold_download(held);
+        }
+    }
     let (installed, model) = progress(ui);
     let status = ui.platform.setup_status(installed);
     let accessibility_stale = ui
@@ -296,8 +306,12 @@ fn focus_practice(tour: &mut Tour, live: bool) -> bool {
 fn apply(ui: &mut Ui, effect: Effect) {
     match effect {
         Effect::DownloadModel => {
-            if crate::transcription::models::validate(&ui.settings.transcription).is_ok() {
-                let selection = ui.settings.transcription.clone();
+            // The model onboarding's choice picked, else the recommended one.
+            let selection = ui
+                .onboarding_choice
+                .take()
+                .unwrap_or_else(|| ui.settings.transcription.clone());
+            if crate::transcription::models::validate(&selection).is_ok() {
                 ui.send(Request::ChooseModel {
                     model: selection.model,
                     language: selection.language,
@@ -559,7 +573,34 @@ fn welcome(ui: &Ui, p: Paint) -> El {
 
 fn setup(ui: &Ui, p: Paint, view: &View) -> El {
     let permissions = ui.platform.caps.permissions;
-    let rows = view.rows.iter().map(|row| setup_row(ui, p, *row)).collect();
+    let model_ready = view
+        .rows
+        .iter()
+        .any(|row| row.item == SetupItem::Model && row.status == ItemStatus::Ready);
+    // A compatible model on this computer: the person chooses between it
+    // and the recommended download, which the model row would otherwise do.
+    let choosing = super::found_choice::offered(ui, model_ready)
+        && view.rows.iter().any(|row| {
+            row.item == SetupItem::Model
+                && matches!(row.status, ItemStatus::Todo | ItemStatus::Failed)
+        });
+    let rows: Vec<El> = view
+        .rows
+        .iter()
+        .filter(|row| !(choosing && row.item == SetupItem::Model))
+        .map(|row| setup_row(ui, p, *row))
+        .collect();
+    if choosing {
+        let mut page = col().key("setup").gap(24.0).child(title(
+            p,
+            tr("Choose a speech model"),
+            Some(tr("Hex found speech models already on this computer.")),
+        ));
+        if !rows.is_empty() {
+            page = page.child(card(p, "setup-card", rows));
+        }
+        return page.child(super::found_choice::choice(ui, p));
+    }
     let mut page = col()
         .key("setup")
         .gap(28.0)
@@ -1098,6 +1139,7 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
         ui.platform.caps.permissions,
         ui.platform.caps.practice_dictation,
     );
+    flow.hold_download(!ui.found_models.is_empty());
     if step != Step::Welcome {
         flow.on(Input::Continue);
     }

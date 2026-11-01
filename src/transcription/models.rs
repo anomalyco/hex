@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use super::custom_models::CustomModelId;
+pub use super::languages::{LANGUAGES, language_name};
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
 pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 
-/// A catalog model, or one imported with Labs › Use your own speech model.
+/// A catalog model, or one imported or found on this computer.
 /// Saved as its wire name (`parakeet_v3`, `custom-<16 hex digits>`); a name
 /// this build doesn't know fails to decode, so the lenient settings loader
 /// keeps the default for it without rewriting the file (#744).
@@ -712,51 +713,6 @@ pub const MODELS: &[ModelDefinition] = &[
 
 pub const AUTO_LANGUAGE: &str = "auto";
 
-pub const LANGUAGES: &[(&str, &str)] = &[
-    (AUTO_LANGUAGE, "Auto"),
-    ("en", "English"),
-    ("zh", "Mandarin Chinese"),
-    ("yue", "Cantonese"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-    ("es", "Spanish"),
-    ("fr", "French"),
-    ("de", "German"),
-    ("pt", "Portuguese"),
-    ("it", "Italian"),
-    ("ar", "Arabic"),
-    ("hi", "Hindi"),
-    ("bn", "Bangla"),
-    ("vi", "Vietnamese"),
-    ("ru", "Russian"),
-    ("uk", "Ukrainian"),
-    ("nl", "Dutch"),
-    ("pl", "Polish"),
-    ("tr", "Turkish"),
-    ("sv", "Swedish"),
-    ("da", "Danish"),
-    ("fi", "Finnish"),
-    ("cs", "Czech"),
-    ("el", "Greek"),
-    ("ro", "Romanian"),
-    ("hu", "Hungarian"),
-    ("id", "Indonesian"),
-    ("ms", "Malay"),
-    ("th", "Thai"),
-    ("fa", "Persian"),
-    ("he", "Hebrew"),
-    ("bg", "Bulgarian"),
-    ("hr", "Croatian"),
-    ("et", "Estonian"),
-    ("lv", "Latvian"),
-    ("lt", "Lithuanian"),
-    ("mt", "Maltese"),
-    ("sk", "Slovak"),
-    ("sl", "Slovenian"),
-    ("mk", "Macedonian"),
-    ("fil", "Filipino"),
-];
-
 pub fn definition(id: TranscriptionModelId) -> &'static ModelDefinition {
     if let TranscriptionModelId::Custom(id) = id {
         return super::custom_models::definition(id);
@@ -777,13 +733,6 @@ pub fn all_models() -> Vec<&'static ModelDefinition> {
                 .map(|import| import.definition),
         )
         .collect()
-}
-
-pub fn language_name(code: &str) -> &str {
-    LANGUAGES
-        .iter()
-        .find_map(|(candidate, name)| (*candidate == code).then_some(*name))
-        .unwrap_or(code)
 }
 
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
@@ -975,7 +924,27 @@ pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is managed by macOS and has no model path", model.name);
     };
-    Ok(models_dir()?.join(artifact.filename))
+    let managed = models_dir()?.join(artifact.filename);
+    // A catalog model another app downloaded (one already in use, or an
+    // exact match the last scan found), used where it is.
+    if !model.id.is_custom()
+        && !managed.exists()
+        && let Some(found) = super::found_models::catalog_candidate(model)
+    {
+        return Ok(found);
+    }
+    Ok(managed)
+}
+
+/// Whether `model` runs from a file another app downloaded (Delete forgets it).
+pub fn is_in_place(model: &ModelDefinition) -> bool {
+    !model.id.is_custom() && model_path(model).is_ok_and(|path| in_place(&path) && path.is_file())
+}
+
+/// Whether `path` is outside Hex's own models folder: a found file Hex
+/// reads in place and never writes, moves, or deletes.
+fn in_place(path: &Path) -> bool {
+    models_dir().is_ok_and(|directory| !path.starts_with(directory))
 }
 
 pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
@@ -993,15 +962,28 @@ pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
 }
 
 pub fn is_verified(model: &ModelDefinition) -> bool {
+    if let TranscriptionModelId::Custom(id) = model.id {
+        return super::custom_models::status(id) == super::custom_models::Status::Ready;
+    }
     let Ok(path) = model_path(model) else {
         return false;
     };
+    if in_place(&path) {
+        return super::found_models::catalog_verified(model);
+    }
     verification_receipt_matches(&path, model)
 }
 
 pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Result<PathBuf> {
     check_canceled(canceled)?;
+    if let TranscriptionModelId::Custom(id) = model.id {
+        return super::custom_models::verify(id, canceled);
+    }
     let path = model_path(model)?;
+    // Receipts for found files live with Hex, never beside the file.
+    if in_place(&path) {
+        return super::found_models::adopt_catalog(model, &path, canceled);
+    }
     verify_installed_at(&path, model, canceled)?;
     Ok(path)
 }
@@ -1034,7 +1016,12 @@ pub fn remove_installed(model: &ModelDefinition) -> Result<()> {
     if !matches!(model.runtime, ModelRuntime::Gguf(_)) {
         bail!("{} is managed by macOS and cannot be deleted", model.name);
     }
-    remove_installed_at(&model_path(model)?)
+    let path = model_path(model)?;
+    // A found file is only forgotten.
+    if in_place(&path) {
+        return super::found_models::forget_catalog(model);
+    }
+    remove_installed_at(&path)
 }
 
 pub(crate) fn remove_installed_at(path: &Path) -> Result<()> {
@@ -1183,8 +1170,9 @@ pub fn download_with_stage_progress(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is installed and managed by macOS", model.name);
     };
-    // An import has nothing to download: Hex checks its own copy.
-    let path = if model.id.is_custom() {
+    // An import has nothing to download: Hex checks its own copy. A catalog
+    // model another app already downloaded is checked and used where it is.
+    let path = if model.id.is_custom() || model_path(model).is_ok_and(|path| in_place(&path)) {
         ModelPreparationStage::Verifying.store(stage);
         let path = verify_installed(model, canceled)?;
         downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
@@ -1572,7 +1560,7 @@ mod tests {
                 .is_some()
         );
         assert!(
-            crate::labs::Feature::CustomModels
+            crate::labs::Feature::BenchmarkDetails
                 .off_refusal(&settings)
                 .is_none()
         );

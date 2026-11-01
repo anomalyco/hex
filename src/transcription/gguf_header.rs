@@ -33,6 +33,8 @@ pub(crate) struct GgufHeader {
     pub(crate) tensor_types: BTreeMap<u32, usize>,
     /// Where the tensor data ends: the file must be at least this long.
     pub(crate) data_end: u64,
+    /// The tensor data's size: what loading the weights takes, roughly.
+    pub(crate) tensor_bytes: u64,
 }
 
 impl GgufHeader {
@@ -167,6 +169,7 @@ impl<R: Read + Seek> Reader<R> {
         let position = self.inner.stream_position()?;
         let data_start = position.div_ceil(alignment) * alignment;
         header.data_end = data_start + extent;
+        header.tensor_bytes = extent;
         Ok(header)
     }
 

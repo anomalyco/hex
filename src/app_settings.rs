@@ -1410,9 +1410,6 @@ pub struct LabsSettings {
     /// The Local transcription picker shows each model's raw error rate
     /// (WER or CER), its benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
-    /// The Local transcription picker can add a GGUF speech model from disk
-    /// (issues 648 and 743).
-    pub custom_models: bool,
     /// Parakeet Ultra joins the Local transcription picker (issue 648).
     pub parakeet_ultra: bool,
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
@@ -1446,7 +1443,6 @@ impl Default for LabsSettings {
             sided_modifier_chords: false,
             tap_or_hold: false,
             benchmark_details: false,
-            custom_models: false,
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,

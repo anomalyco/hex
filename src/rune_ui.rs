@@ -16,6 +16,8 @@ mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
 mod explainer;
+mod found;
+mod found_choice;
 mod fun;
 mod general;
 mod hero;
@@ -791,6 +793,13 @@ pub(crate) struct Ui {
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
+    /// Speech models already on this computer, from the last hub-cache scan
+    /// (the picker and onboarding's model step start one when they open).
+    found_models: Vec<crate::transcription::found_models::Found>,
+    found: found::FoundState,
+    /// The model onboarding's choice asked for, which the next model
+    /// download prepares instead of the saved selection.
+    onboarding_choice: Option<crate::transcription::models::TranscriptionSelection>,
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
@@ -889,6 +898,9 @@ impl Ui {
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
+            found_models: Vec::new(),
+            found: found::FoundState::default(),
+            onboarding_choice: None,
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
@@ -1339,6 +1351,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
+    changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
@@ -2020,10 +2033,16 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         picker::parakeet_ultra_fixture(ui);
     }),
-    // Labs › Use your own speech model: the picker's Add model file….
+    // The picker's Add model file….
     ("picker-custom-models", |ui| {
         *ui = portal_fixture();
-        ui.settings.labs.custom_models = true;
+        picker::fixture(ui, None);
+    }),
+    // Models already on this computer: Parakeet v3's exact file on its own
+    // card, and a Whisper Hex hasn't tested in the found section.
+    ("picker-found", |ui| {
+        *ui = portal_fixture();
+        ui.found_models = found::fixture();
         picker::fixture(ui, None);
     }),
     // Japanese saved: the English-only models say they switch the language.
@@ -2111,6 +2130,13 @@ const SCENES: &[Scene] = &[
     ("onboarding-setup", |ui| {
         *ui = portal_fixture();
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
+    }),
+    // Models already on this computer: Hex's recommended model or a found
+    // one (an exact catalog match and a Whisper Hex hasn't tested).
+    ("onboarding-model-found", |ui| {
+        *ui = portal_fixture();
+        ui.found_models = found::fixture();
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),

@@ -39,6 +39,12 @@ export interface ModelInfo {
   readonly downloadBytes: number | null
   readonly languages: readonly string[]
   readonly supportsLanguageDetection: boolean
+  /**
+   * Where the file is or comes from: `download`, `hex`, `imported`, or
+   * `found: owner/name@abcdef1` (another app's Hugging Face download, used
+   * where it is). `null` from hosts older than this field.
+   */
+  readonly source: string | null
 }
 
 export type ModelProgress =

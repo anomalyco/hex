@@ -562,21 +562,15 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
 /// process; a running Hex lists it at once.
 fn import_model(path: &std::path::Path, name: Option<&str>) -> color_eyre::Result<()> {
     use crate::transcription::custom_models;
-    if !crate::labs::custom_models() {
-        color_eyre::eyre::bail!(custom_models::OFF);
-    }
     let id = custom_models::import(path, name, &std::sync::atomic::AtomicBool::new(false))?;
     let definition = custom_models::definition(id);
     println!("imported\t{}\t{}", id.as_str(), definition.name);
     Ok(())
 }
 
-/// The import `model` names, while Labs › Use your own speech model is on.
+/// The import or found model in use that `model` names.
 fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::CustomModelId> {
     use crate::transcription::custom_models;
-    if !crate::labs::custom_models() {
-        color_eyre::eyre::bail!(custom_models::OFF);
-    }
     crate::transcription::models::CustomModelId::parse(model)
         .filter(|id| custom_models::is_registered(*id))
         .ok_or_else(|| {

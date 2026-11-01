@@ -108,7 +108,11 @@ const PATHS: &[(&str, &str)] = &[
     ),
     (
         "picker-custom-models",
-        "Window/Transcription model/Add your own model (Labs)",
+        "Window/Transcription model/Add your own model",
+    ),
+    (
+        "picker-found",
+        "Window/Transcription model/Found on this computer",
     ),
     (
         "picker-japanese",
@@ -266,6 +270,10 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("onboarding", "Linux & Windows/Onboarding"),
     ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
+    (
+        "onboarding-model-found",
+        "Linux & Windows/Onboarding · models on this computer",
+    ),
 ];
 
 /// Labs › Playground is on.

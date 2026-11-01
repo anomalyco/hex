@@ -334,12 +334,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
-    rows.push(row(
-        Feature::CustomModels,
-        &HINTS,
-        tr("Use your own speech model"),
-        tr("Add a speech model file of your own (GGUF) from the Local transcription picker"),
-    ));
     let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     rows.push(Row {
         locked: ultra_locked,
@@ -396,7 +390,6 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
-        Feature::CustomModels => "lab-custom-models",
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
