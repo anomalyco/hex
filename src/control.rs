@@ -714,9 +714,31 @@ pub fn model_selection(
     model: &str,
     language: Option<&str>,
 ) -> Result<crate::transcription::models::TranscriptionSelection, ControlError> {
-    let id = model
-        .parse::<crate::transcription::models::TranscriptionModelId>()
-        .ok()
+    use crate::transcription::custom_models::{self, Status};
+    use crate::transcription::models::TranscriptionModelId;
+    let parsed = model.parse::<TranscriptionModelId>().ok();
+    // A known import says why it can't be used rather than that it's unknown.
+    if let Some(TranscriptionModelId::Custom(id)) = parsed
+        && custom_models::is_registered(id)
+    {
+        let why = match custom_models::status(id) {
+            Status::Ready => None,
+            Status::Missing => Some("its file is missing; import it again or remove it"),
+            Status::Changed => {
+                Some("its file changed since it was imported; import it again or remove it")
+            }
+            Status::Off => {
+                Some("turn on Labs › Use your own speech model: hex labs on custom-models")
+            }
+        };
+        if let Some(why) = why {
+            return Err(ControlError::new(
+                "model-unavailable",
+                format!("`{model}` can't be used: {why}"),
+            ));
+        }
+    }
+    let id = parsed
         .filter(|id| crate::transcription::models::definition(*id).available())
         .ok_or_else(|| {
             ControlError::new(
