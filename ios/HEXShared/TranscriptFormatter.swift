@@ -41,11 +41,11 @@ nonisolated enum TranscriptFormatter {
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: removePauseEllipses(in: trimmed))
             return polishSentences(cleaned)
 
         case .casual:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: removePauseEllipses(in: trimmed))
             var lowered = collapseHorizontalSpaces(in: cleaned).lowercased()
             // Keep standalone "i" and "i'm"/"i'll"/"i've"/"i'd" capitalized naturally, or pure casual lowercase?
             // Pure texting style: lowercase start and drop single-sentence trailing period, keep ? and !.
@@ -56,9 +56,15 @@ nonisolated enum TranscriptFormatter {
             return lowered.trimmingCharacters(in: .whitespacesAndNewlines)
 
         case .notes:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: removePauseEllipses(in: trimmed))
             return formatNotes(cleaned)
         }
+    }
+
+    /// Polished's sentence pass on its own: sentence-case starts and a closing period.
+    /// Used after an on-device cleanup pass rewrote the punctuation.
+    static func finishPolished(_ text: String) -> String {
+        polishSentences(removePauseEllipses(in: text.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
     /// Joins dictated text cleanly with existing text around the insertion cursor.
@@ -108,6 +114,52 @@ nonisolated enum TranscriptFormatter {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let stripped = regex.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
         return collapseHorizontalSpaces(in: stripped)
+    }
+
+    /// Speech models write "..." or "…" where the speaker paused, often mid-sentence.
+    /// A pause is not a sentence end: a mid-text ellipsis becomes a space and the
+    /// word after it keeps a lowercase start; a leading or trailing one is dropped.
+    private static func removePauseEllipses(in text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\s*(?:\.{2,}|…)+\s*"#) else { return text }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return text }
+
+        let result = NSMutableString(string: text)
+        for match in matches.reversed() {
+            let atStart = match.range.location == 0
+            let atEnd = NSMaxRange(match.range) == ns.length
+            if atStart || atEnd {
+                result.replaceCharacters(in: match.range, with: "")
+                continue
+            }
+            let wordStart = NSMaxRange(match.range)
+            let wordRange = (ns.substring(from: wordStart) as NSString)
+                .rangeOfCharacter(from: CharacterSet.letters.union(CharacterSet(charactersIn: "'’")).inverted)
+            let wordLength = wordRange.location == NSNotFound ? ns.length - wordStart : wordRange.location
+            let word = ns.substring(with: NSRange(location: wordStart, length: wordLength))
+            var replacement = " "
+            if let lowered = lowercasedPauseContinuation(word) {
+                replacement += lowered
+                result.replaceCharacters(
+                    in: NSRange(location: match.range.location, length: match.range.length + wordLength),
+                    with: replacement
+                )
+            } else {
+                result.replaceCharacters(in: match.range, with: replacement)
+            }
+        }
+        return result as String
+    }
+
+    /// The word after a pause, lowercased, when the model only capitalized it because
+    /// it guessed a new sentence. "I", its contractions, and acronyms stay as they are.
+    private static func lowercasedPauseContinuation(_ word: String) -> String? {
+        guard let first = word.first, first.isUppercase else { return nil }
+        let rest = word.dropFirst()
+        guard !rest.contains(where: \.isUppercase) else { return nil }
+        if word == "I" || word.hasPrefix("I'") || word.hasPrefix("I’") { return nil }
+        return first.lowercased() + rest
     }
 
     private static func polishSentences(_ text: String) -> String {

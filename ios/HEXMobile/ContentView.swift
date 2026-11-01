@@ -452,6 +452,51 @@ struct ContentView: View {
 
             rowDivider
 
+            if dictation.cleanupAvailable && dictation.style == .polished {
+                Toggle(
+                    isOn: Binding(
+                        get: { dictation.appleIntelligenceCleanup },
+                        set: { dictation.setAppleIntelligenceCleanup($0) }
+                    )
+                ) {
+                    rowTitle("Clean up with Apple Intelligence")
+                }
+                .tint(HexTheme.success)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 48)
+
+                rowDivider
+            }
+
+            if dictation.canChooseSpeechModel {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        rowTitle("Speech model")
+                        Spacer(minLength: 8)
+                        compactSegments(
+                            items: SpeechModel.allCases,
+                            selected: dictation.speechModel,
+                            label: \.label,
+                            onSelect: { model in
+                                withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                                    dictation.selectSpeechModel(model)
+                                }
+                            }
+                        )
+                    }
+                    if let error = dictation.speechModelError {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(HexTheme.danger)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 50)
+
+                rowDivider
+            }
+
             HStack(spacing: 12) {
                 rowTitle("Return to")
                 Spacer(minLength: 8)

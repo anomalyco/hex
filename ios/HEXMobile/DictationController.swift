@@ -8,6 +8,7 @@ import UIKit
 @Observable
 final class DictationController {
     static let shared = DictationController(
+        cleaner: AppleIntelligenceCleaner(),
         autoPrepareOnInit: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     )
 
@@ -58,7 +59,8 @@ final class DictationController {
     }
 
     private var transcriber: any LocalTranscribing
-    private let transcriberFactory: () async -> any LocalTranscribing
+    private let transcriberFactory: (() async -> any LocalTranscribing)?
+    private let cleaner: (any TranscriptCleaning)?
     private let audio: any AudioManaging
     private let keyboardBridge: KeyboardBridge
     private let fileManager: FileManager
@@ -122,6 +124,12 @@ final class DictationController {
     private(set) var style: DictationStyle
     private(set) var returnAppID: String?
     private(set) var allowBluetoothMic: Bool
+    private(set) var speechModel: SpeechModel
+    private(set) var speechModelError: String?
+    /// Apple Speech exists on this device, so the speech model is a real choice.
+    private(set) var canChooseSpeechModel: Bool
+    private(set) var appleIntelligenceCleanup: Bool
+    private(set) var cleanupAvailable: Bool
     private(set) var autoReturnState: AutoReturnState = .idle
     private(set) var handoffNotice: String?
     private(set) var engineName = "Local speech"
@@ -136,6 +144,7 @@ final class DictationController {
         keyboardBridge: KeyboardBridge? = nil,
         transcriber: (any LocalTranscribing)? = nil,
         transcriberFactory: (() async -> any LocalTranscribing)? = nil,
+        cleaner: (any TranscriptCleaning)? = nil,
         fileManager: FileManager = .default,
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         autoPrepareOnInit: Bool = true,
@@ -148,13 +157,18 @@ final class DictationController {
         self.audio = resolvedAudio
         self.keyboardBridge = resolvedBridge
         self.transcriber = initialTranscriber
-        self.transcriberFactory = transcriberFactory ?? Self.defaultTranscriber
+        self.transcriberFactory = transcriberFactory
+        self.cleaner = cleaner
         self.fileManager = fileManager
         self.now = now
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.returnAppID = resolvedBridge.returnAppID
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
+        self.speechModel = resolvedBridge.speechModel
+        self.canChooseSpeechModel = Self.appleSpeechSupported
+        self.appleIntelligenceCleanup = resolvedBridge.appleIntelligenceCleanup
+        self.cleanupAvailable = cleaner?.isAvailable ?? false
         self.defaultURLOpener = urlOpener ?? { url in
             await UIApplication.shared.open(url)
         }
@@ -171,10 +185,12 @@ final class DictationController {
         }
 
         if autoPrepareOnInit {
-            if hasCachedModel {
+            if speechModel == .parakeet || !canChooseSpeechModel {
                 engineName = "Parakeet V2"
-                prepareModel()
-            } else if #available(iOS 26.0, *), AppleSpeechTranscriber.isAvailable {
+                if hasCachedModel {
+                    prepareModel()
+                }
+            } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
                     if await AppleSpeechTranscriber.preferredLocale() != nil {
@@ -182,6 +198,9 @@ final class DictationController {
                         self.prepareModel()
                     } else {
                         self.engineName = "Parakeet V2"
+                        if hasCachedModel {
+                            self.prepareModel()
+                        }
                     }
                 }
             }
@@ -260,6 +279,32 @@ final class DictationController {
         if keyboardSessionEnabled, phase == .ready {
             try? audio.startKeepalive(allowBluetooth: allow)
         }
+    }
+
+    /// Switches the speech model. A model that is not on the phone yet downloads with
+    /// progress; if that fails, the model that was ready stays in use.
+    func selectSpeechModel(_ model: SpeechModel) {
+        guard model != speechModel else { return }
+        switch phase {
+        case .recording, .transcribing, .requestingPermission:
+            return
+        default:
+            break
+        }
+        let previous = speechModel
+        speechModel = model
+        keyboardBridge.speechModel = model
+        speechModelError = nil
+        prepareModel(fallback: isModelReady ? previous : nil)
+    }
+
+    func setAppleIntelligenceCleanup(_ enabled: Bool) {
+        appleIntelligenceCleanup = enabled
+        keyboardBridge.appleIntelligenceCleanup = enabled
+    }
+
+    private func cleansUp(_ style: DictationStyle) -> Bool {
+        style == .polished && appleIntelligenceCleanup && cleaner != nil
     }
 
     // MARK: - Standalone & System Actions
@@ -614,6 +659,10 @@ final class DictationController {
     // MARK: - Model Preparation
 
     func prepareModel() {
+        prepareModel(fallback: nil)
+    }
+
+    private func prepareModel(fallback: SpeechModel?) {
         modelPrepGeneration &+= 1
         let prepGen = modelPrepGeneration
         phase = .preparingModel
@@ -625,7 +674,11 @@ final class DictationController {
 
         Task {
             do {
-                let candidate = await transcriberFactory()
+                let candidate = if let transcriberFactory {
+                    await transcriberFactory()
+                } else {
+                    await Self.makeTranscriber(for: self.speechModel)
+                }
                 guard self.modelPrepGeneration == prepGen else { return }
                 engineName = candidate.displayName
                 try await candidate.prepare { [weak self] progress in
@@ -646,6 +699,18 @@ final class DictationController {
                 }
             } catch {
                 guard self.modelPrepGeneration == prepGen else { return }
+                if let fallback {
+                    self.speechModel = fallback
+                    self.keyboardBridge.speechModel = fallback
+                    self.speechModelError = error.localizedDescription
+                    self.engineName = self.transcriber.displayName
+                    self.phase = .ready
+                    self.publishKeyboardSnapshot()
+                    if self.pendingHandoff != nil {
+                        self.activateWarmSessionAndRunHandoff()
+                    }
+                    return
+                }
                 self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
                 self.pendingHandoff = nil
                 self.phase = .failed(error.localizedDescription)
@@ -654,8 +719,17 @@ final class DictationController {
         }
     }
 
-    private static func defaultTranscriber() async -> any LocalTranscribing {
-        if #available(iOS 26.0, *),
+    private static var appleSpeechSupported: Bool {
+        if #available(iOS 26.0, *) {
+            return AppleSpeechTranscriber.isAvailable
+        }
+        return false
+    }
+
+    /// Apple Speech when chosen and it supports the phone's language, else Parakeet.
+    private static func makeTranscriber(for model: SpeechModel) async -> any LocalTranscribing {
+        if model == .apple,
+           #available(iOS 26.0, *),
            AppleSpeechTranscriber.isAvailable,
            let locale = await AppleSpeechTranscriber.preferredLocale() {
             return AppleSpeechTranscriber(locale: locale)
@@ -687,6 +761,9 @@ final class DictationController {
         transcriptionTask?.cancel()
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
+        if cleansUp(effectiveStyle) {
+            cleaner?.prewarm()
+        }
 
         phase = .requestingPermission
         copied = false
@@ -795,7 +872,15 @@ final class DictationController {
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                let formatted = TranscriptFormatter.format(rawText, style: session.style)
+                var formatted = TranscriptFormatter.format(rawText, style: session.style)
+                if self.cleansUp(session.style), let cleaner = self.cleaner {
+                    if let cleaned = await cleaner.clean(formatted) {
+                        formatted = TranscriptFormatter.finishPolished(cleaned)
+                    }
+                    guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
+                        return
+                    }
+                }
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {
@@ -1200,6 +1285,8 @@ final class DictationController {
         let scene = args[flagIndex + 1]
         controller.engineName = "Apple Speech"
         controller.transcriptionLanguage = "English"
+        controller.canChooseSpeechModel = true
+        controller.cleanupAvailable = true
         controller.keyboardBridge.setModelInstalled(true)
         controller.isModelReady = true
 

@@ -5,7 +5,9 @@
 (`HEXWidgets`). The containing app records a generation-scoped temporary WAV,
 transcribes on-device with Apple Speech (`SpeechTranscriber` on iOS 26+) or
 FluidAudio Parakeet V2 (iOS 18+), and removes each capture's file after
-inference, cancellation, or failure. The keyboard extension sends commands and
+inference, cancellation, or failure. **Speech model** (`Apple` / `Parakeet`,
+default Apple) picks between them on iOS 26; Parakeet downloads with progress
+the first time it is picked, and a failed download keeps the ready model. The keyboard extension sends commands and
 inserts completed text over the shared App Group (`group.com.kitlangton.hex.mobile`);
 it never accesses the microphone, speech model, or network.
 
@@ -47,7 +49,16 @@ it never accesses the microphone, speech model, or network.
   - **Styles:** `Polished` (sentence case + punctuation + filler trim),
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
-    insertion spacing and repeating backspace.
+    insertion spacing and repeating backspace. Every style but `Verbatim`
+    treats `...` / `…` as a pause, not a sentence end: mid-text it becomes a
+    space and the next word keeps its lowercase start.
+  - **Apple Intelligence cleanup (`TranscriptCleanup.swift`):** For `Polished`,
+    when `SystemLanguageModel.default` is available, the app (never the
+    keyboard) runs one FoundationModels pass that only fixes punctuation and
+    capitalization, joining sentences a pause split. The result is used only
+    if its lowercased, punctuation-free words equal the input's and it
+    answers within 1.5 s; otherwise the formatter's text stands. It defaults
+    on and logs before/after text and latency under the `cleanup` category.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
