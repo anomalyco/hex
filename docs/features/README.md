@@ -1299,8 +1299,9 @@ Linux beta                               // not macOS feature parity
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
-│   ├── Display -> picked at each capture start, kept until it hides (#486)
-│   │   ├── X11 -> the monitor under the pointer (XRandR monitors)
+│   ├── Display -> picked at each capture start (#486)
+│   │   ├── X11 -> the monitor under the pointer (XRandR monitors); while shown,
+│   │   │   checked every 250 ms and moved at once to the pointer's (#807)
 │   │   ├── Layer-shell (niri, Sway, Hyprland) -> no output pinned: the
 │   │   │   compositor's focused output
 │   │   └── GNOME, KDE (XDG_CURRENT_DESKTOP) -> the primary display
@@ -1435,7 +1436,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │       Hex updates or the file is deleted (#662; not run on Windows)
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
-│   start, inside that monitor's work area, at its own DPI (#486)
+│   start, inside that monitor's work area, at its own DPI (#486); while
+│   shown, checked every 250 ms and moved at once to the pointer's (#807)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch

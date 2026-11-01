@@ -1204,9 +1204,12 @@ capture starts, as macOS does (#486; `rune_hud::display`). Windows and X11
 read the pointer and pick its monitor; Windows keeps it inside that
 monitor's work area and draws it at that monitor's scale. A layer-shell
 surface pins no output, so niri, Sway and Hyprland put it on the focused
-output. GNOME and KDE keep the primary display. The display stays picked
-until the HUD hides, so it never jumps mid-capture (tested by reading the
-code only, not on multi-monitor hardware). On Windows the window is a topmost,
+output. GNOME and KDE keep the primary display. On Windows and X11, while
+the HUD shows it checks the pointer's display every 250 ms (`Hud::follow_pointer`,
+Rune's `refollow_pointer`), and the HUD and live text move there at once,
+without animating or taking focus, when it changed (#807). A position change
+or the next capture places it again (tested by reading the code only, not on
+multi-monitor hardware). On Windows the window is a topmost,
 click-through tool window with no redirection bitmap, drawn through
 DirectComposition. Rune shows and hides it with Win32 calls alone and
 re-asserts its styles on each show; winit never sees its visibility. The
