@@ -27,6 +27,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcut side", "Côté du raccourci"),
     ("Labs", "Labs"),
     ("Tap or hold", "Appuyer ou maintenir"),
+    ("Skip long pauses", "Sauter les longues pauses"),
+    ("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner", "Raccourcit les longues pauses avant d'envoyer une dictée entière au modèle, pour que les ordinateurs lents collent plus tôt"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "En mode bascule, maintenez le raccourci pour dicter jusqu'à ce que vous le relâchiez ; un appui bref démarre et arrête toujours"),
     ("Copy recent dictations", "Copier les dictées récentes"),
     ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", "Copiez l'une de vos cinq dernières dictées depuis la barre des menus, sous Coller la dernière dictée"),

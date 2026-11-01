@@ -378,6 +378,11 @@ const KEYS: &[Key] = &[
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
     ),
     key(
+        "labs.skip_pauses",
+        Kind::Bool,
+        "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

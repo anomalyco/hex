@@ -666,7 +666,9 @@ impl TranscriptionEngine {
         self.finish_with(
             stream,
             clip,
-            Box::new(|model, mut clip| {
+            Box::new(|model, clip| {
+                // Labs › Skip long pauses, asked as the run starts.
+                let mut clip = whole_clip(clip, crate::labs::skip_pauses());
                 crate::dictation::pad_for_parakeet(&mut clip);
                 model
                     .transcribe(&clip)
@@ -1447,6 +1449,61 @@ mod tests {
         let result = finish_stream(&mut capped, &clip, 0);
         assert!(capped.dropped > 0);
         assert!(result.is_err(), "{result:?}");
+    }
+
+    #[test]
+    fn skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends() {
+        // #899: quiet pre-roll, speech, a 1 s pause, speech, a 10 s pause,
+        // speech, and a 5 s trailing pause.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 160_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 80_000]);
+        let (kept, dropped) = skip_long_pauses(&clip).expect("long pauses are cut");
+        let long = 160_000 - PAUSE_HEAD_SAMPLES - PAUSE_TAIL_SAMPLES;
+        let trailing = 80_000 - PAUSE_HEAD_SAMPLES;
+        assert_eq!(dropped, long + trailing);
+        assert_eq!(kept.len(), clip.len() - dropped);
+        // The short pause passes whole, and the speech after the long one
+        // follows its head and tail.
+        assert_eq!(kept[..56_000], clip[..56_000]);
+        let resumed = 56_000 + PAUSE_HEAD_SAMPLES + PAUSE_TAIL_SAMPLES;
+        assert_eq!(kept[resumed..resumed + 16_000], clip[216_000..232_000]);
+        // The trailing pause keeps its head.
+        assert_eq!(kept.len(), resumed + 16_000 + PAUSE_HEAD_SAMPLES);
+    }
+
+    #[test]
+    fn skipping_pauses_leaves_short_pauses_and_quiet_only_clips_whole() {
+        use crate::transcription::pause_segmenter::tests::noise;
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(16_000));
+        assert!(skip_long_pauses(&clip).is_none());
+        assert_eq!(whole_clip(clip.clone(), true), clip);
+        // #841: nothing above the floor, so nothing is taken for a pause.
+        let mut seed = 3;
+        let quiet = noise(6_000, -80.0, &mut seed);
+        assert!(skip_long_pauses(&quiet).is_none());
+        assert_eq!(whole_clip(quiet.clone(), true), quiet);
+    }
+
+    #[test]
+    fn with_skip_pauses_off_the_whole_clip_is_untouched() {
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 160_000]);
+        clip.extend(tone(16_000));
+        let untouched = whole_clip(clip.clone(), false);
+        assert_eq!(
+            untouched.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+            clip.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        );
+        assert!(whole_clip(clip.clone(), true).len() < clip.len());
     }
 
     fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32, dc_offset: f32) {

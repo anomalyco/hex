@@ -49,6 +49,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
+├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -527,6 +528,32 @@ logs a warning if it has gone. Checks:
 only); `recent_dictations_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the submenu on a real Mac;
 the row renders only in macOS builds, so no golden changes.
+
+Skip long pauses (`skip-pauses`, issue 899, Linux and Windows): for slow
+CPUs and older integrated GPUs, where a dictation is transcribed as a whole
+clip (no stream, or the fallback after a failed or late stream) and every
+second of silence goes through the model. While on, the engine's whole-clip
+run (`TranscriptionEngine::finish` in
+[transcription/engine.rs](../../src/transcription/engine.rs)) reads
+`labs::skip_pauses()` as it starts and transcribes the clip as a dictation
+stream hears it (`skip_long_pauses` in
+[engine/streaming.rs](../../src/transcription/engine/streaming.rs), the same
+`PauseCap`): each pause at the noise floor keeps its first 2.5 s and last
+0.3 s, a trailing pause only its first 2.5 s, and shorter pauses pass whole.
+A clip in which no frame rose above the noise floor is left whole, as the
+stream does for #841. The job deadline, History's duration, and the silence
+discard still use the full clip; process.log adds a `skipped long pauses
+before whole-clip transcription` line with `pauses_dropped_ms`. macOS,
+streams, meetings, captures, and the local API are unchanged, and off the
+clip is passed through untouched. Checks:
+`skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends`,
+`skipping_pauses_leaves_short_pauses_and_quiet_only_clips_whole`, and
+`with_skip_pauses_off_the_whole_clip_is_untouched` in
+[transcription/engine.rs](../../src/transcription/engine.rs);
+`skip_pauses_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs).
+Not yet observed: a real dictation with the toggle on in Hex (the reporter
+measured their own branch on an i5-8259U); the Labs page goldens need
+regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

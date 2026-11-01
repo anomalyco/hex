@@ -252,6 +252,24 @@ Menu bar > Copy Recent Dictation (under Paste Last Dictation)  // dictate.copy-r
 
 Details and checks in [labs.md](labs.md).
 
+### Skip Long Pauses (Labs, Linux and Windows)
+
+A dictation transcribed as a whole clip (no stream on this model or device,
+or the fallback after a failed or late stream) sends every second of silence
+through the model. With Labs › Skip long pauses on (`labs.skip_pauses`, off
+by default, issue 899):
+
+```ts
+Whole-clip run starts -> labs::skip_pauses()        // dictate.skip-pauses
+├── Off -> The clip, untouched (as before)
+├── On -> Each pause at the noise floor keeps its first 2.5 s and last 0.3 s,
+│   a trailing pause its first 2.5 s; shorter pauses pass whole (the stream's PauseCap)
+├── Nothing heard above the floor -> The clip, untouched (#841)
+└── Job deadline, History duration, silence discard -> The full clip
+```
+
+Details and checks in [labs.md](labs.md).
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,
