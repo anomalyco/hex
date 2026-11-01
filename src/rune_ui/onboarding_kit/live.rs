@@ -510,6 +510,30 @@ pub(super) fn press_continue(ui: &mut Ui) {
     }
 }
 
+/// Skip: ends onboarding now and marks it done, so the next launch doesn't
+/// open it (Run setup again still replays it). A model that isn't ready
+/// keeps downloading behind it: the one picked from the model step, else
+/// the recommended one, even while a scan or the list held it (#894).
+pub(super) fn skip(ui: &mut Ui) {
+    let model = ui
+        .tour
+        .as_ref()
+        .map_or(ItemStatus::Todo, |tour| tour.flow.view().model);
+    if found_choice::pending(ui, model) {
+        found_choice::start_selected(ui);
+    } else if matches!(model, ItemStatus::Todo | ItemStatus::Failed) {
+        onboarding::input(ui, Input::Grant(SetupItem::Model));
+    }
+    if ui.live()
+        && !crate::desktop::onboarding::completion_recorded()
+        && let Err(error) = crate::desktop::onboarding::record_completion()
+    {
+        tracing::warn!(%error, "could not record onboarding completion");
+    }
+    ui.first_run = None;
+    ui.tour = None;
+}
+
 /// "Start using Hex": closes the first run and the tour under it.
 pub(super) fn finish(ui: &mut Ui) {
     let installed = ui.picker.selected_installed(&ui.settings);

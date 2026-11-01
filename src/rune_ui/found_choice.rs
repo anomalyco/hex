@@ -165,7 +165,9 @@ pub(super) fn pick(ui: &mut Ui, index: usize) {
 /// Prepares `selection` for onboarding: through the tour the first time,
 /// so its progress shows, and as a newer choice afterwards.
 pub(super) fn prepare(ui: &mut Ui, selection: TranscriptionSelection) {
-    let requested = ui.tour.as_ref().is_some_and(|tour| {
+    // Skipped onboarding (no tour) still finishes a found file's check and
+    // uses it.
+    let requested = ui.tour.as_ref().is_none_or(|tour| {
         !matches!(
             tour.flow.view().model,
             ItemStatus::Todo | ItemStatus::Failed

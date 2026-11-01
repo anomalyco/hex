@@ -43,6 +43,38 @@ pub(super) const SCENES: &[&str] = &[
     "mac-onboarding-ready",
 ];
 
+/// Skip on every page: it shows on each scene but Hex is ready, ends
+/// onboarding at once, and leaves the model downloading (the recommended
+/// one, also when the model step held it).
+#[test]
+fn onboarding_skip() {
+    for scene in SCENES {
+        let rt = runtime(scene, true, PANE_SIZE);
+        let last = scene.ends_with("-ready");
+        assert_eq!(rt.find("skip").is_some(), !last, "{scene}: Skip");
+    }
+    for scene in [
+        "onboarding",
+        "onboarding-model-found",
+        "mac-onboarding-permissions",
+        "onboarding-try",
+    ] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        tap(&mut rt, "skip");
+        assert!(rt.state.first_run.is_none(), "{scene}: onboarding closed");
+        assert!(rt.state.tour.is_none(), "{scene}: and its tour");
+        let installed = rt.state.picker.selected_installed(&rt.state.settings);
+        assert!(
+            installed
+                || sent(&rt)
+                    .iter()
+                    .any(|request| matches!(request, Request::ChooseModel { .. })),
+            "{scene}: the model keeps downloading, sent {:?}",
+            sent(&rt)
+        );
+    }
+}
+
 #[test]
 fn onboarding_goldens() {
     let _goldens = Goldens::collect();
@@ -148,6 +180,7 @@ fn onboarding_walkthrough() {
     settle(&mut rt);
     assert_eq!(step(&rt), Some(Step::TryIt));
     assert!(texts(&rt).contains(&"Clear your messages".to_owned()));
+    assert!(rt.find("skip").is_some(), "Skip shows on the practice too");
     tap(&mut rt, "done");
     assert!(texts(&rt).contains(&"Hex is ready".to_owned()));
     tap(&mut rt, "start-using-hex");
