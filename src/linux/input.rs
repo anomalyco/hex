@@ -1148,7 +1148,13 @@ impl Backend {
         }
         // Every shortcut goes in this one bind: a second bind would replace
         // the set on KDE. Escape is never among them (#786).
-        if let Err(error) = portal.forget_legacy_kde_shortcuts() {
+        // On KDE, ids of shortcuts changed since keep holding their keys,
+        // which a new id could then never take; they go first (#898).
+        let keep = shortcuts
+            .iter()
+            .map(|shortcut| shortcut.id.as_str())
+            .collect::<Vec<_>>();
+        if let Err(error) = portal.forget_legacy_kde_shortcuts(&keep) {
             tracing::warn!(
                 error = format!("{error:#}"),
                 "could not remove Hex's old shortcuts from KDE"
