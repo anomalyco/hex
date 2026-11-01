@@ -1377,6 +1377,9 @@ pub struct LabsSettings {
     /// In Toggle mode, a press held past the hold threshold dictates until
     /// it lifts; a short tap still starts and stops (macOS, issue 711).
     pub tap_or_hold: bool,
+    /// The Local transcription picker shows each model's raw error rate
+    /// (WER or CER), its benchmark, source, and conditions (issue 647).
+    pub benchmark_details: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1404,6 +1407,7 @@ impl Default for LabsSettings {
             picker_sort_filter: false,
             sided_modifier_chords: false,
             tap_or_hold: false,
+            benchmark_details: false,
         }
     }
 }

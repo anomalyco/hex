@@ -20,8 +20,9 @@ use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::transcription::models::{
-    self as transcription_models, AUTO_LANGUAGE, ModelDefinition, ModelPreparationStage,
-    ModelRuntime, TranscriptionModelId, TranscriptionSelection, language_name,
+    self as transcription_models, AUTO_LANGUAGE, BenchmarkRecord, ModelDefinition,
+    ModelPreparationStage, ModelRuntime, Recommendation, TranscriptionModelId,
+    TranscriptionSelection, language_name,
 };
 
 const MODAL_WIDTH: f32 = 620.0;
@@ -117,6 +118,86 @@ pub(super) fn open(ui: &mut Ui) {
 fn sort_filter_on(ui: &Ui) -> bool {
     let feature = crate::labs::Feature::PickerSortFilter;
     feature.shipped() && feature.on(&ui.settings)
+}
+
+/// Whether Labs › Benchmark details is on.
+fn benchmark_details_on(ui: &Ui) -> bool {
+    let feature = crate::labs::Feature::BenchmarkDetails;
+    feature.shipped() && feature.on(&ui.settings)
+}
+
+/// The badge a card shows. With Benchmark details on, "Most accurate" stays
+/// only when its figure is comparable with the other recommendations'.
+fn shown_recommendation(
+    recommendation: Option<Recommendation>,
+    model: &ModelDefinition,
+    language: &str,
+    details: bool,
+) -> Option<Recommendation> {
+    recommendation.filter(|recommendation| {
+        !details
+            || *recommendation != Recommendation::MostAccurate
+            || transcription_models::most_accurate_is_comparable(model, language)
+    })
+}
+
+/// The raw error rate with its direction: `7.57% CER · lower is better`.
+fn benchmark_rate(record: &BenchmarkRecord) -> String {
+    tr_named(
+        "{rate} · lower is better",
+        &[("rate", record.rate_label().as_str())],
+    )
+}
+
+/// One line of where a figure comes from: language, dataset and split,
+/// source, conditions, and the speed figure's qualification. Whatever the
+/// source did not record reads as unknown.
+fn benchmark_detail(record: &BenchmarkRecord) -> String {
+    let mut parts = vec![
+        language_name(record.language).to_owned(),
+        record
+            .dataset
+            .map_or_else(|| tr("Dataset unknown").to_owned(), str::to_owned),
+        match (record.source, record.source_revision) {
+            (Some(source), Some(revision)) => tr_named(
+                "Source: {source} at {revision}",
+                &[("source", source), ("revision", revision)],
+            ),
+            (Some(source), None) => tr_named("Source: {source}", &[("source", source)]),
+            (None, _) => tr("Source unrecorded").to_owned(),
+        },
+    ];
+    if record.utterances.is_none()
+        && record.batch_size.is_none()
+        && record.timestamps.is_none()
+        && record.hardware.is_none()
+    {
+        parts.push(tr("Conditions unknown").to_owned());
+    } else {
+        if let Some(utterances) = record.utterances {
+            parts.push(tr_fill("{} utterances", &utterances.to_string()));
+        }
+        if let Some(batch) = record.batch_size {
+            parts.push(tr_fill("Batch size {}", &batch.to_string()));
+        }
+        if let Some(timestamps) = record.timestamps {
+            parts.push(
+                if timestamps {
+                    tr("With timestamps")
+                } else {
+                    tr("Without timestamps")
+                }
+                .to_owned(),
+            );
+        }
+        parts.push(
+            record
+                .hardware
+                .map_or_else(|| tr("Hardware unknown").to_owned(), str::to_owned),
+        );
+    }
+    parts.push(tr("Speed: upstream figure; hardware and method unknown").to_owned());
+    parts.join(" · ")
 }
 
 type PickerModel = (
@@ -603,7 +684,12 @@ fn model_card(
                 .font(p.k.ty.body_medium)
                 .color(p.text()),
         );
-    if let Some(recommendation) = recommendation {
+    // Labs › Benchmark details: raw error rates with their provenance.
+    let details = benchmark_details_on(ui);
+    let record = details
+        .then(|| transcription_models::benchmark(model))
+        .flatten();
+    if let Some(recommendation) = shown_recommendation(recommendation, model, language, details) {
         title = title.child(Badge::new(tr(recommendation.label())).build(p.k));
     }
     if model.streams {
@@ -657,12 +743,24 @@ fn model_card(
                 .gap(20.0)
                 .child(metric("speed", tr("Speed"), tr(model.realtime).into()))
                 .child(metric("size", tr("Size"), model.size_label()))
-                .child(metric(
-                    "accuracy",
-                    tr("Accuracy"),
-                    model.accuracy_label().unwrap_or_else(|| "System".into()),
-                )),
+                .child(match &record {
+                    Some(record) => metric("error-rate", tr("Error rate"), benchmark_rate(record)),
+                    None => metric(
+                        "accuracy",
+                        tr("Accuracy"),
+                        model.accuracy_label().unwrap_or_else(|| "System".into()),
+                    ),
+                }),
         );
+    if let Some(record) = &record {
+        card = card.child(
+            text(benchmark_detail(record))
+                .key("benchmark")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
     if !model.supports_language(language) {
         card = card.child(
             text(tr_named(
@@ -802,6 +900,64 @@ mod tests {
         );
         assert_eq!(hidden_model(&shown, Some(visible), Some(visible)), None);
         assert_eq!(hidden_model(&shown, None, None), None);
+    }
+
+    #[test]
+    fn benchmark_details_show_raw_rates_and_mark_unknowns() {
+        let qwen = transcription_models::definition(TranscriptionModelId::Qwen3Asr06B);
+        let record = transcription_models::benchmark(qwen).unwrap();
+        assert_eq!(benchmark_rate(&record), "7.57% CER · lower is better");
+        let detail = benchmark_detail(&record);
+        for part in [
+            "Mandarin Chinese",
+            "FLEURS test",
+            "at 7045d1c",
+            "945 utterances",
+            "Batch size 8",
+            "Without timestamps",
+            "Hardware unknown",
+            "Speed: upstream figure",
+        ] {
+            assert!(detail.contains(part), "{detail:?} lacks {part:?}");
+        }
+        let parakeet = transcription_models::definition(TranscriptionModelId::ParakeetV2);
+        let detail = benchmark_detail(&transcription_models::benchmark(parakeet).unwrap());
+        for part in [
+            "English",
+            "Dataset unknown",
+            "Source unrecorded",
+            "Conditions unknown",
+        ] {
+            assert!(detail.contains(part), "{detail:?} lacks {part:?}");
+        }
+        let apple = transcription_models::definition(TranscriptionModelId::AppleSpeech);
+        assert!(transcription_models::benchmark(apple).is_none());
+    }
+
+    #[test]
+    fn most_accurate_needs_comparable_figures_only_with_benchmark_details() {
+        let cohere = transcription_models::definition(TranscriptionModelId::CohereTranscribe);
+        let badge = Some(Recommendation::MostAccurate);
+        assert_eq!(shown_recommendation(badge, cohere, "en", false), badge);
+        assert_eq!(shown_recommendation(badge, cohere, "en", true), None);
+        let recommended = Some(Recommendation::Recommended);
+        assert_eq!(
+            shown_recommendation(recommended, cohere, "el", true),
+            recommended
+        );
+    }
+
+    #[test]
+    fn benchmark_details_are_off_by_default() {
+        let ui = Ui::with(
+            AppSettings::default(),
+            super::super::Service::Fixture(Vec::new()),
+        );
+        assert!(!benchmark_details_on(&ui));
+        let mut settings = AppSettings::default();
+        settings.labs.benchmark_details = true;
+        let ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
+        assert!(benchmark_details_on(&ui));
     }
 
     #[test]
