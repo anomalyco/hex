@@ -378,11 +378,14 @@ impl Io {
 
 /// Takes one of `limit` slots in `counter`, if one is free.
 fn reserve(counter: &AtomicUsize, limit: usize) -> bool {
-    counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-            (count < limit).then_some(count + 1)
-        })
-        .is_ok()
+    let mut count = counter.load(Ordering::Acquire);
+    while count < limit {
+        match counter.compare_exchange_weak(count, count + 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(actual) => count = actual,
+        }
+    }
+    false
 }
 
 /// The `hex:io` object: `start(kind, spec, resolve, reject)` returns an
