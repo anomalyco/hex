@@ -89,7 +89,8 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: SettingsCommand,
     },
-    /// List, switch, and install transcription models.
+    /// List, switch, install, and import transcription models.
+    #[command(visible_alias = "models")]
     Model {
         #[command(subcommand)]
         command: ModelCommand,
@@ -279,6 +280,18 @@ pub enum ModelCommand {
         #[arg(long)]
         language: Option<String>,
     },
+    /// Labs: copy a GGUF speech model into Hex after checking its header,
+    /// and print its id. The original is left as it is.
+    Import {
+        path: std::path::PathBuf,
+        /// The name the picker shows (default: the file's general.name).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Labs: rename an imported model.
+    Rename { model: String, name: String },
+    /// Labs: remove Hex's copy of an imported model.
+    Remove { model: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -412,6 +425,26 @@ pub fn run(command: ControlCli) -> u8 {
                 output,
             } => install_model(model, language, output),
             ModelCommand::Cancel { output } => send(ControlCommand::ModelCancel, output),
+            ModelCommand::Import { path, name } => report(import_model(&path, name.as_deref())),
+            ModelCommand::Rename { model, name } => {
+                report(imported(&model).and_then(|id| {
+                    crate::transcription::custom_models::rename(id, &name)?;
+                    println!("renamed\t{}", id.as_str());
+                    Ok(())
+                }))
+            }
+            ModelCommand::Remove { model } => report(imported(&model).and_then(|id| {
+                let settings = crate::app_settings::AppSettings::load().unwrap_or_default();
+                if settings.transcription.model == crate::transcription::models::TranscriptionModelId::Custom(id) {
+                    color_eyre::eyre::bail!(
+                        "{} is the selected model; choose another with `hex model use` first",
+                        id.as_str()
+                    );
+                }
+                crate::transcription::custom_models::remove(id)?;
+                println!("removed\t{}", id.as_str());
+                Ok(())
+            })),
             command => offline_model(command),
         },
         ControlCli::Window { command } => match command {
@@ -505,6 +538,30 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
         }));
     }
     send(ControlCommand::ModelInstall { model, language }, output)
+}
+
+/// `hex model import`: checks, copies, and records the file here, in this
+/// process; a running Hex lists it at once.
+fn import_model(path: &std::path::Path, name: Option<&str>) -> color_eyre::Result<()> {
+    use crate::transcription::custom_models;
+    if !crate::labs::custom_models() {
+        color_eyre::eyre::bail!(custom_models::OFF);
+    }
+    let id = custom_models::import(path, name, &std::sync::atomic::AtomicBool::new(false))?;
+    let definition = custom_models::definition(id);
+    println!("imported\t{}\t{}", id.as_str(), definition.name);
+    Ok(())
+}
+
+/// The import `model` names, while Labs › Use your own speech model is on.
+fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::CustomModelId> {
+    use crate::transcription::custom_models;
+    if !crate::labs::custom_models() {
+        color_eyre::eyre::bail!(custom_models::OFF);
+    }
+    crate::transcription::models::CustomModelId::parse(model)
+        .filter(|id| custom_models::is_registered(*id))
+        .ok_or_else(|| color_eyre::eyre::eyre!("no imported model is {model}; run `hex model list`"))
 }
 
 /// The selection a local model command names: `model` with its remembered

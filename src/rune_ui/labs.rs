@@ -319,6 +319,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
+    rows.push(row(
+        Feature::CustomModels,
+        &HINTS,
+        tr("Use your own speech model"),
+        tr("Add a speech model file of your own (GGUF) from the Local transcription picker"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -365,6 +371,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
+        Feature::CustomModels => "lab-custom-models",
     }
 }
 

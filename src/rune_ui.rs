@@ -37,6 +37,7 @@ pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
 mod models;
+mod model_import;
 mod modes;
 mod onboarding;
 mod onboarding_kit;
@@ -1322,6 +1323,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
+    changed |= model_import::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an

@@ -939,7 +939,7 @@ pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     });
                 }),
             }];
-            choices.extend(transcription_models::MODELS.iter().filter_map(|model| {
+            choices.extend(transcription_models::all_models().into_iter().filter_map(|model| {
                 let fallback = ui.settings.transcription_for_model(model.id).language;
                 if !model.available()
                     || !matches!(model.runtime, transcription_models::ModelRuntime::Gguf(_))
@@ -1064,7 +1064,9 @@ pub(super) fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::C
     if let Some(error) = &transcription.error {
         return Some((error.clone(), p.danger()));
     }
-    let model = transcription.preparing?;
+    let Some(model) = transcription.preparing else {
+        return super::model_import::selection_notice(ui).map(|notice| (notice, p.warning()));
+    };
     let name = transcription_models::definition(model).name;
     let stage = match transcription.preparation_stage {
         Some(ModelPreparationStage::Verifying) => tr("Verifying model").to_string(),

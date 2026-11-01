@@ -13,34 +13,47 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub use super::custom_models::CustomModelId;
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
 pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// A catalog model, or one imported with Labs › Use your own speech model.
+/// Saved as its wire name (`parakeet_v3`, `custom-<16 hex digits>`); a name
+/// this build doesn't know fails to decode, so the lenient settings loader
+/// keeps the default for it without rewriting the file (#744).
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum TranscriptionModelId {
     #[default]
-    #[serde(rename = "parakeet_unified_en")]
     ParakeetUnifiedEnglish,
     ParakeetV2,
     ParakeetV3,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
-    #[serde(rename = "qwencleo_asr_1_7b")]
     QwenCleoAsr17B,
-    #[serde(rename = "ivrit_whisper_large_v3_turbo")]
     IvritWhisperLargeV3Turbo,
     SenseVoiceSmall,
     CohereTranscribe,
-    #[serde(rename = "underdog_bark_3_pro")]
     UnderdogBark3Pro,
-    #[serde(rename = "underdog_bark_3_clean")]
     UnderdogBark3Clean,
     AppleSpeech,
+    Custom(CustomModelId),
+}
+
+impl Serialize for TranscriptionModelId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TranscriptionModelId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        name.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl TranscriptionModelId {
-    pub const fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::ParakeetUnifiedEnglish => "parakeet_unified_en",
             Self::ParakeetV2 => "parakeet_v2",
@@ -54,7 +67,12 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::AppleSpeech => "apple_speech",
+            Self::Custom(id) => id.as_str(),
         }
+    }
+
+    pub const fn is_custom(self) -> bool {
+        matches!(self, Self::Custom(_))
     }
 }
 
@@ -75,7 +93,9 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "apple_speech" => Ok(Self::AppleSpeech),
-            _ => Err(eyre!("unknown transcription model: {value}")),
+            _ => CustomModelId::parse(value)
+                .map(Self::Custom)
+                .ok_or_else(|| eyre!("unknown transcription model: {value}")),
         }
     }
 }
@@ -208,8 +228,15 @@ impl GgufArtifact {
 }
 
 impl ModelDefinition {
-    pub const fn available(&self) -> bool {
-        !matches!(self.runtime, ModelRuntime::AppleSpeech)
+    /// A catalog GGUF model, or an import that is on, present, and unchanged.
+    pub fn available(&self) -> bool {
+        match (self.runtime, self.id) {
+            (ModelRuntime::AppleSpeech, _) => false,
+            (ModelRuntime::Gguf(_), TranscriptionModelId::Custom(id)) => {
+                super::custom_models::usable(id)
+            }
+            (ModelRuntime::Gguf(_), _) => true,
+        }
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -686,10 +713,25 @@ pub const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 pub fn definition(id: TranscriptionModelId) -> &'static ModelDefinition {
+    if let TranscriptionModelId::Custom(id) = id {
+        return super::custom_models::definition(id);
+    }
     MODELS
         .iter()
         .find(|model| model.id == id)
         .expect("every transcription model id has a definition")
+}
+
+/// Every catalog model, then the imports while their Labs toggle is on.
+pub fn all_models() -> Vec<&'static ModelDefinition> {
+    MODELS
+        .iter()
+        .chain(
+            super::custom_models::imported()
+                .into_iter()
+                .map(|import| import.definition),
+        )
+        .collect()
 }
 
 pub fn language_name(code: &str) -> &str {
@@ -777,6 +819,10 @@ pub(crate) fn picker_models(
         .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id));
     let (supporting, switching): (Vec<_>, Vec<_>) =
         others.partition(|model| model.supports_language(language));
+    // Imports follow, ready or not, so one that can't run can still be removed.
+    let imported = super::custom_models::imported()
+        .into_iter()
+        .map(|import| import.definition);
     recommended
         .iter()
         .map(|choice| (choice.model, Some(choice.recommendation)))
@@ -784,6 +830,7 @@ pub(crate) fn picker_models(
             supporting
                 .into_iter()
                 .chain(switching)
+                .chain(imported)
                 .map(|model| (model, None)),
         )
         .collect()
@@ -804,7 +851,29 @@ const WHISPER_LANGUAGES: &[&str] = &[
 /// Whether `language` is a code Hex knows: one Settings lists, or one of
 /// Whisper's, which only models that accept any language support.
 pub fn is_known_language(language: &str) -> bool {
-    LANGUAGES.iter().any(|(code, _)| *code == language) || WHISPER_LANGUAGES.contains(&language)
+    known_language(language).is_some()
+}
+
+/// `language` as Hex's own `'static` code, when Hex knows it.
+pub(crate) fn known_language(language: &str) -> Option<&'static str> {
+    LANGUAGES
+        .iter()
+        .map(|(code, _)| *code)
+        .chain(WHISPER_LANGUAGES.iter().copied())
+        .find(|code| *code == language)
+}
+
+/// Whether a saved selection stays saved: one `validate` accepts, or an
+/// import with a known language, kept while it is missing, changed, or off
+/// so the choice survives until it is fixed ([`super::custom_models::runnable`]).
+pub fn validate_saved(selection: &TranscriptionSelection) -> Result<()> {
+    if selection.model.is_custom() {
+        if !is_known_language(&selection.language) {
+            bail!("unsupported transcription language: {}", selection.language);
+        }
+        return Ok(());
+    }
+    validate(selection).map(drop)
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -836,6 +905,11 @@ pub fn models_dir() -> Result<PathBuf> {
 #[cfg(test)]
 thread_local! {
     static TEST_MODELS_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_models_dir(directory: Option<PathBuf>) {
+    TEST_MODELS_DIR.with(|models| *models.borrow_mut() = directory);
 }
 
 pub fn max_audio_chunk_samples(architecture: &str, max_audio_ms: i64) -> Option<usize> {
@@ -890,6 +964,9 @@ pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Resul
 fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBool) -> Result<()> {
     check_canceled(canceled)?;
     if !path.is_file() {
+        if model.id.is_custom() {
+            bail!("{} is missing. Import it again.", model.name);
+        }
         bail!(
             "{} is no longer installed. Open Settings to download it.",
             model.name
@@ -906,13 +983,16 @@ fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBo
 /// Deletes a downloaded model with its verification receipt and any partial
 /// download. Refuses instead of waiting while a download owns the directory.
 pub fn remove_installed(model: &ModelDefinition) -> Result<()> {
+    if let TranscriptionModelId::Custom(id) = model.id {
+        return super::custom_models::remove(id);
+    }
     if !matches!(model.runtime, ModelRuntime::Gguf(_)) {
         bail!("{} is managed by macOS and cannot be deleted", model.name);
     }
     remove_installed_at(&model_path(model)?)
 }
 
-fn remove_installed_at(path: &Path) -> Result<()> {
+pub(crate) fn remove_installed_at(path: &Path) -> Result<()> {
     let directory = path.parent().expect("model directory");
     if !directory.is_dir() {
         return Ok(());
@@ -1058,7 +1138,15 @@ pub fn download_with_stage_progress(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is installed and managed by macOS", model.name);
     };
-    let path = download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?;
+    // An import has nothing to download: Hex checks its own copy.
+    let path = if model.id.is_custom() {
+        ModelPreparationStage::Verifying.store(stage);
+        let path = verify_installed(model, canceled)?;
+        downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
+        path
+    } else {
+        download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?
+    };
     // In the background, so an installed model activates at once even
     // offline. Until the detector lands, dictation and meetings keep their
     // level-only silence handling.

@@ -358,6 +358,11 @@ const KEYS: &[Key] = &[
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
     ),
     key(
+        "labs.custom_models",
+        Kind::Bool,
+        "Labs: the Local transcription picker can add a GGUF speech model from disk (hex model import)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

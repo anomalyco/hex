@@ -83,10 +83,11 @@ pub enum Feature {
     SidedChords,
     TapOrHold,
     BenchmarkDetails,
+    CustomModels,
 }
 
 impl Feature {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -112,6 +113,7 @@ impl Feature {
         Self::SidedChords,
         Self::TapOrHold,
         Self::BenchmarkDetails,
+        Self::CustomModels,
     ];
 
     /// The features this OS and build have.
@@ -159,7 +161,8 @@ impl Feature {
             | Self::PickerSortFilter
             | Self::SidedChords
             | Self::TapOrHold
-            | Self::BenchmarkDetails => Audience::Everyone,
+            | Self::BenchmarkDetails
+            | Self::CustomModels => Audience::Everyone,
         }
     }
 
@@ -199,6 +202,7 @@ impl Feature {
             | Self::SpokenSymbols
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
+            | Self::CustomModels
             | Self::FillerWords => true,
         }
     }
@@ -231,6 +235,7 @@ impl Feature {
             Self::SidedChords => "sided-modifier-chords",
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
+            Self::CustomModels => "custom-models",
         }
     }
 
@@ -262,6 +267,7 @@ impl Feature {
             Self::SidedChords => "labs.sided_modifier_chords",
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
+            Self::CustomModels => "labs.custom_models",
         }
     }
 
@@ -324,6 +330,9 @@ impl Feature {
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }
+            Self::CustomModels => {
+                "Add a speech model file of your own (GGUF) from the Local transcription picker"
+            }
         }
     }
 
@@ -359,6 +368,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords,
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
+            Self::CustomModels => settings.labs.custom_models,
         }
     }
 
@@ -389,6 +399,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
+            Self::CustomModels => settings.labs.custom_models = on,
         }
     }
 }
@@ -410,8 +421,9 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
-/// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 16;
+const CUSTOM_MODELS: u32 = 1 << 16;
+/// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
+const MINUTES_SHIFT: u32 = 17;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -517,6 +529,12 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
+/// Imported speech models join the catalog (read wherever a model is
+/// listed, chosen, or run).
+pub fn custom_models() -> bool {
+    on(CUSTOM_MODELS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -582,6 +600,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             SIDED_CHORDS,
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
+        (Feature::CustomModels, settings.custom_models, CUSTOM_MODELS),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))

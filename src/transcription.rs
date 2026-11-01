@@ -6,7 +6,9 @@ pub(crate) mod benchmark;
     any(target_os = "linux", target_os = "windows")
 ))]
 pub(crate) mod cpu_floor;
+pub(crate) mod custom_models;
 pub(crate) mod engine;
+pub(crate) mod gguf_header;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) mod gguf_session;
 pub(crate) mod keyboard_model_switching;

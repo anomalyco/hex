@@ -684,8 +684,8 @@ pub fn model_infos(
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> Vec<ModelInfo> {
     use crate::transcription::models::VocabularyUse;
-    crate::transcription::models::MODELS
-        .iter()
+    crate::transcription::models::all_models()
+        .into_iter()
         .filter(|model| model.available())
         .map(|model| ModelInfo {
             id: model.id.as_str().into(),

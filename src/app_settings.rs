@@ -1395,6 +1395,9 @@ pub struct LabsSettings {
     /// The Local transcription picker shows each model's raw error rate
     /// (WER or CER), its benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
+    /// The Local transcription picker can add a GGUF speech model from disk
+    /// (issues 648 and 743).
+    pub custom_models: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1423,6 +1426,7 @@ impl Default for LabsSettings {
             sided_modifier_chords: false,
             tap_or_hold: false,
             benchmark_details: false,
+            custom_models: false,
         }
     }
 }
@@ -1968,10 +1972,16 @@ pub struct KeyboardModelChoice {
 impl KeyboardModelChoice {
     /// The picker's downloadable models only; Apple Speech is never mapped.
     pub fn validate(&self) -> Result<()> {
-        let model = crate::transcription::models::validate(&TranscriptionSelection {
+        let selection = TranscriptionSelection {
             model: self.model,
             language: self.language.clone(),
-        })?;
+        };
+        // An import stays mapped while it is missing or off, like the
+        // saved selection; switching to it then runs the default model.
+        if self.model.is_custom() {
+            return crate::transcription::models::validate_saved(&selection);
+        }
+        let model = crate::transcription::models::validate(&selection)?;
         match model.runtime {
             crate::transcription::models::ModelRuntime::Gguf(_) => Ok(()),
             crate::transcription::models::ModelRuntime::AppleSpeech => {
@@ -1993,7 +2003,7 @@ impl AppSettings {
             return self.transcription.clone();
         }
         if let Some(selection) = self.transcription_recents.iter().rev().find(|selection| {
-            selection.model == id && crate::transcription::models::validate(selection).is_ok()
+            selection.model == id && crate::transcription::models::validate_saved(selection).is_ok()
         }) {
             return selection.clone();
         }
@@ -2015,7 +2025,7 @@ impl AppSettings {
         let mut seen = std::collections::HashSet::new();
         self.transcription_recents.reverse();
         self.transcription_recents.retain(|selection| {
-            crate::transcription::models::validate(selection).is_ok()
+            crate::transcription::models::validate_saved(selection).is_ok()
                 && seen.insert(selection.model)
         });
         self.transcription_recents.reverse();
@@ -2216,7 +2226,8 @@ impl AppSettings {
                     .keyboard_model_switching
                     .mappings
                     .retain(|_, choice| choice.validate().is_ok());
-                if let Err(error) = crate::transcription::models::validate(&settings.transcription)
+                if let Err(error) =
+                    crate::transcription::models::validate_saved(&settings.transcription)
                 {
                     tracing::warn!(%error, "using the default transcription model");
                     settings.transcription = Self::default().transcription;
@@ -2350,7 +2361,11 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.runtime_hotkeys();
-        set_transcription_selection(&self.transcription);
+        // An import that can't run stays saved; the listener runs the
+        // default model until it is fixed.
+        set_transcription_selection(&crate::transcription::custom_models::runnable(
+            &self.transcription,
+        ));
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
         crate::dictation::config::update_dictation_profiles(&self.dictation_processing);
@@ -2488,7 +2503,9 @@ impl AppSettings {
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
-        if crate::transcription::models::definition(self.transcription.model).available() {
+        if self.transcription.model.is_custom()
+            || crate::transcription::models::definition(self.transcription.model).available()
+        {
             return;
         }
         tracing::warn!(

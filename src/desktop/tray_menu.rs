@@ -5,7 +5,9 @@
 //! onto its own runtime.
 
 use crate::app_settings::AppSettings;
-use crate::transcription::models::{MODELS, ModelDefinition, TranscriptionModelId, language_name};
+use crate::transcription::models::{
+    ModelDefinition, TranscriptionModelId, all_models, language_name,
+};
 
 /// One downloaded model in a menu's model picker.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,8 +26,8 @@ pub(crate) fn model_menu_entries(
     preparing: bool,
     installed: impl Fn(&ModelDefinition, &str) -> bool,
 ) -> Vec<ModelMenuEntry> {
-    MODELS
-        .iter()
+    all_models()
+        .into_iter()
         .filter(|model| model.available())
         .filter_map(|model| {
             let selection = settings.transcription_for_model(model.id);
