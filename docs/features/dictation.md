@@ -798,6 +798,18 @@ speech over −72 dBFS noise) and
 `a_stream_that_heard_only_quiet_audio_falls_back_to_the_whole_clip`
 (synthetic noise, a fake stream; no microphone run).
 
+**Fixed November 1, 2026 (issue 841, follow-up):** on 3.1.2 the same
+microphone (a Ryzen built-in digital microphone) still kept exactly 2.5 s in
+the stream and relied on the fallback. Its level was measured with the DC
+offset included, which the dictation silence gate already removes; a steady
+offset louder than the speech pins every frame to the noise floor.
+`SpeechFrames` now removes each 20 ms frame's mean before measuring, for the
+pause cap and the meeting pause detector alike. Check:
+`quiet_speech_over_steady_noise_is_never_cut_as_a_pause` (now also −50 dBFS
+speech over −58 dBFS noise on a −26 dBFS DC offset; synthetic, a fake
+stream). The DC offset is inferred from the reporter's logs (clips that pass
+the −50 dBFS silence gate yet read as quiet), not measured on the device.
+
 ### Ongoing Jobs And Output
 
 ```ts
