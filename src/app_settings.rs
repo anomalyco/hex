@@ -3583,9 +3583,10 @@ mod tests {
         let saved = serde_json::to_value(AppSettings::default()).unwrap();
         assert!(saved["meetings"].get("retention").is_none());
 
-        // Only a file that isn't JSON fails.
+        // Even malformed JSON defaults in memory and stays in place.
         fs::write(&dir.path, "{ not json").unwrap();
-        assert!(AppSettings::load_from(&dir.path).is_err());
+        assert_eq!(AppSettings::load_from(&dir.path).unwrap(), defaults);
+        assert_eq!(fs::read_to_string(&dir.path).unwrap(), "{ not json");
     }
 
     #[cfg(target_os = "macos")]
