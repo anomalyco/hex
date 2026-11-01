@@ -1623,10 +1623,19 @@ fn the_wheel_scrolls_a_long_term_list() {
         element(rt, "term0").rect[1]
     };
     let list = element(&rt, "term-scroll").rect;
-    for x in [list[0] + 1.0, list[0] + 40.0, list[0] + list[2] - 8.0] {
+    for (x, precise) in [(list[0] + 1.0, false), (list[0] + 40.0, true), (list[0] + list[2] - 8.0, true)] {
         let before = first(&rt);
-        for _ in 0..10 {
-            rt.wheel_xy(x, list[1] + list[3] / 2.0, 0.0, -30.0);
+        let y = list[1] + list[3] / 2.0;
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        let (px, py) = rt.pointer().unwrap();
+        for step in 0..10 {
+            let phase = match step {
+                0 => rune::GesturePhase::Began,
+                9 => rune::GesturePhase::Ended,
+                _ => rune::GesturePhase::Moved,
+            };
+            rt.wheel_event(rune::WheelEvent::new(0.0, -30.0).at(px, py).phase(phase).precise(precise));
             rt.frame(1.0 / 60.0);
         }
         settle(&mut rt);
