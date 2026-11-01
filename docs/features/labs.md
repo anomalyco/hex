@@ -48,6 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
+├── Brazilian Portuguese interface no labs.portuguese_interface  Português (Brasil) joins Interface language, and a pt system language picks it (#867)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -504,6 +505,28 @@ apps, streak across a gap, expired entries skipped past the search cap);
 [labs.rs](../../src/labs.rs). Not yet observed: the block in a real window;
 there is no `--snap` scene for it (the fixture has no store), and the Labs
 page goldens need regenerating on Linux with the new row.
+
+Brazilian Portuguese interface (`portuguese-interface`, issue 867, every
+OS): while on, General › Advanced › Interface language lists Português
+(Brasil) (`ui_language: "pt"`, also `hex settings set ui_language pt`), and
+System picks it when the system's first language is Portuguese (`pt-BR`,
+`pt_BR`, any `pt`). Its strings live in their own table,
+`desktop/i18n/portuguese.rs` (dictation "ditado", vocabulary "vocabulário",
+replacements "substituições", meetings "reuniões"); a string it lacks shows in
+English. The gate is where the language is chosen: `i18n::apply` reads
+`labs::portuguese_interface()` (the row reapplies it at once), and
+`i18n::language_choices` lists Portuguese only while it is on. Off, the
+dropdown and the System language are exactly as before; a saved `pt` is kept
+untouched and follows the system until the toggle is on again. Checks:
+`portuguese_is_a_language_only_with_its_labs_switch` and
+`portuguese_translates_with_its_column` in
+[desktop/i18n.rs](../../src/desktop/i18n.rs);
+`every_interface_string_has_a_portuguese_translation` in
+[desktop/i18n/portuguese.rs](../../src/desktop/i18n/portuguese.rs);
+`portuguese_interface_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a native-speaker review of
+the strings, or a real window in Portuguese; the Labs page goldens need
+regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

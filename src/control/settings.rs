@@ -373,6 +373,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.portuguese_interface",
+        Kind::Bool,
+        "Labs: Português (Brasil) as an interface language, chosen with ui_language pt or a pt system language",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -485,8 +490,8 @@ const KEYS: &[Key] = &[
     ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk"]),
-        "Interface language; none follows the system",
+        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt"]),
+        "Interface language; none follows the system; pt needs labs.portuguese_interface",
     ),
     key(
         "transcription_device",

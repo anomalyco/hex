@@ -34,7 +34,9 @@ button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each card's raw WER or CER with its language, dataset, source,
-and conditions (#647).
+and conditions (#647); its Brazilian Portuguese interface toggle (off by
+default) adds Português (Brasil) to General › Advanced › Interface language
+and uses it when the system language is `pt-BR` (#867).
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
 models another app already downloaded.

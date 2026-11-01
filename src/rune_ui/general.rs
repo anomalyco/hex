@@ -1097,7 +1097,9 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
-    let languages = crate::desktop::i18n::LANGUAGE_CHOICES;
+    // Português (Brasil) is listed only while Labs › Brazilian Portuguese
+    // interface is on.
+    let languages = crate::desktop::i18n::language_choices(settings.labs.portuguese_interface);
     rows.push(pick_row(
         ui,
         p,
@@ -1110,9 +1112,14 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .position(|(code, _)| *code == settings.ui_language.as_deref())
             .unwrap_or(0),
         |ui, index| {
-            let code = crate::desktop::i18n::LANGUAGE_CHOICES[index]
-                .0
-                .map(str::to_string);
+            let languages =
+                crate::desktop::i18n::language_choices(ui.settings.labs.portuguese_interface);
+            let Some(code) = languages
+                .get(index)
+                .map(|(code, _)| code.map(str::to_string))
+            else {
+                return;
+            };
             if ui.update(|settings| settings.ui_language = code.clone()) {
                 crate::desktop::i18n::apply(code.as_deref());
             }
