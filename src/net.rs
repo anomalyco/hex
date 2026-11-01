@@ -54,12 +54,31 @@ pub fn reason(error: &ureq::Error) -> String {
         ureq::Error::HostNotFound => "the name couldn't be looked up (DNS)".into(),
         ureq::Error::ConnectProxyFailed(detail) => format!("the proxy refused ({detail})"),
         ureq::Error::Tls(detail) => format!("certificate or TLS error ({detail})"),
-        ureq::Error::NativeTls(detail) => format!("certificate or TLS error ({detail})"),
+        // SChannel, Security.framework, and OpenSSL report a rejected
+        // certificate as an I/O error naming it.
+        ureq::Error::Io(detail) if looks_like_tls(&detail.to_string()) => {
+            format!("certificate or TLS error ({detail})")
+        }
         ureq::Error::Timeout(_) => "the connection timed out".into(),
         ureq::Error::ConnectionFailed => "the connection failed".into(),
         ureq::Error::Io(detail) => format!("the connection failed ({detail})"),
         error => error.to_string(),
     }
+}
+
+fn looks_like_tls(detail: &str) -> bool {
+    let detail = detail.to_ascii_lowercase();
+    [
+        "certificate",
+        "tls",
+        "ssl",
+        "handshake",
+        "trust",
+        "x509",
+        "schannel",
+    ]
+    .iter()
+    .any(|word| detail.contains(word))
 }
 
 /// "Couldn't reach `host`: `reason`", naming the proxy when one was used.
