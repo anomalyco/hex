@@ -125,6 +125,11 @@ with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 Launch Hex, setup incomplete              // setup.tour; every build and OS, full window
 ├── One onboarding: the first-run story (rune_ui/onboarding_kit/live.rs) over
 │   the tour state machine (desktop::onboarding::Flow); no flag, no other tour
+├── Skip (quiet, top-right, every page but Hex is ready)    // setup.skip
+│   ├── Ends onboarding at once and marks it done; Run setup again replays it
+│   └── A model not ready yet keeps downloading: the one picked, else the
+│       recommended one, also when the model step or the scan held it, so a
+│       blocked network (#894) never traps the person in onboarding
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch

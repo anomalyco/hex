@@ -762,7 +762,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   (resumed at its saved step), or an upgrader from 2.3.1 or earlier whose
   setup isn't ready (#475). Run setup again (Labs) and `hex onboarding reset`
   replay it from the start on every build. Start using Hex records completion
-  only once setup is ready.
+  only once setup is ready. A quiet Skip shows on every page but the last;
+  it ends onboarding at once and records completion, and a model that isn't
+  ready keeps downloading (the one picked, else the recommended one).
 - Onboarding shows its model step only when the scan found a compatible
   model; otherwise Setting up Hex is unchanged and the recommended model
   downloads by itself. The step is one card of radio rows with no buttons or

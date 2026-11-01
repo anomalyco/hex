@@ -15,7 +15,9 @@
 #      (HEX_UPDATE_GOLDENS=1 cargo test --bin hex onboarding_goldens). A GPU
 #      adapter is required (Mesa's lavapipe will do), so the check never
 #      passes by skipping.
-#   2. Walks a first run through the real onboarding in a clean temporary
+#   2. Checks Skip: it shows on every scene but Hex is ready, ends onboarding
+#      at once, and leaves the model downloading.
+#   3. Walks a first run through the real onboarding in a clean temporary
 #      data folder (fresh settings, no models, an empty Hugging Face cache, an
 #      English locale): it downloads and verifies the model onboarding picks,
 #      plays the practice game, and reaches Hex is ready.
@@ -52,7 +54,7 @@ run_one() {
 
 scenes=$(awk '/^pub\(super\) const SCENES/,/^\];/' src/rune_ui/tests/onboarding_check.rs | grep -c '^    "')
 expected=$((scenes * 2))
-status=0 goldens=pass walkthrough=pass
+status=0 goldens=pass skip=pass walkthrough=pass
 
 echo "== Onboarding scenes against their goldens"
 if ! run_one "$work/goldens.log" rune_ui::tests::onboarding_check::onboarding_goldens \
@@ -65,6 +67,11 @@ if [ "$rendered" != "$expected" ]; then
   goldens=fail status=1
 fi
 changed=$(grep -oE '^[a-z0-9-]+: [0-9]+ pixels differ|rune-[a-z0-9-]+\.png is missing' "$work/goldens.log" || true)
+
+echo "== Skip on every page"
+if ! run_one "$work/skip.log" rune_ui::tests::onboarding_check::onboarding_skip; then
+  skip=fail status=1
+fi
 
 echo "== First run in a clean data folder"
 if ! run_one "$work/walkthrough.log" rune_ui::tests::onboarding_check::onboarding_walkthrough \
@@ -82,6 +89,7 @@ fi
     echo "- Changed scenes:"
     printf '%s\n' "$changed" | sed 's/^/  - /'
   fi
+  echo "- Skip on every page, model still downloading: $skip"
   echo "- First run in a clean data folder: $walkthrough"
   grep -h '^onboarding walkthrough:' "$work/walkthrough.log" | sed 's/^/  - /' || true
 } > "$out/summary.md"

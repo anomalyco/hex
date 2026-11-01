@@ -70,7 +70,10 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             Some(d) if !s.had_model && !centred && s.step != Step::Ready => pill(p, d, s.closed),
             _ => slot(),
         });
-    let top = top.children(back(p, s)).children(reopen(p, s));
+    let top = top
+        .children(back(p, s))
+        .children(reopen(p, s))
+        .children(skip(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
         super::super::title_bar(top)
@@ -98,6 +101,27 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .pb(TOP_BAR)
             .child(page),
     ]
+}
+
+/// Skip, quiet in the top-right corner of every page but the last: ends
+/// onboarding at once, with the model still downloading behind it.
+fn skip(p: Paint, s: &Onboard) -> Option<El> {
+    s.live.as_ref().filter(|_| s.step != Step::Ready).map(|_| {
+        row()
+            .key("skip-corner")
+            .absolute(0.0, 8.0)
+            .w_full()
+            .pr(20.0)
+            .justify_end()
+            .child(
+                Button::new(tr("Skip"))
+                    .variant(ButtonVariant::Ghost)
+                    .control_size(rune_kit::ControlSize::Small)
+                    .on_press(live::skip)
+                    .build(p.k)
+                    .key("skip"),
+            )
+    })
 }
 
 /// Hex's shortcut didn't start after setup and Hex won't relaunch itself
