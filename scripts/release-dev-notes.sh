@@ -78,7 +78,7 @@ while IFS=$'\t' read -r sha subject; do
   # case, at most 200.
   jq -nc --arg title "$title" --arg url "$url" '
     ($title | explode | map(select(. >= 32 and (. < 127 or . > 159))) | implode) as $clean
-    | ($clean[:1] | ascii_upcase) + $clean[1:200] as $title
+    | (($clean[:1] | ascii_upcase) + $clean[1:200]) as $title
     | select($title | length > 0)
     | {title: $title, url: $url}' >> "$work/items.jsonl"
 done < <(git log --first-parent --format='%H%x09%s' "${range[@]}")
