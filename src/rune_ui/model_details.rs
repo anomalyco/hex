@@ -20,6 +20,16 @@ pub(super) struct DetailsState {
     published: bool,
 }
 
+impl DetailsState {
+    /// `model`'s details open with the benchmark table unfolded, for scenes.
+    pub(super) fn open_with_table(model: TranscriptionModelId) -> Self {
+        Self {
+            open: Some(model),
+            published: true,
+        }
+    }
+}
+
 fn link(p: Paint, key: &str, label: &str, url: &'static str) -> El {
     Button::new(label)
         .variant(ButtonVariant::Ghost)

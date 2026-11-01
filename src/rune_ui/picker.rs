@@ -866,6 +866,23 @@ fn model_card(
     card
 }
 
+/// Parakeet Ultra's card first with its details and benchmark table open
+/// (Maltese saved, sorted by name, only models for Maltese). It lists Ultra
+/// only where Labs › Parakeet Ultra is on in the saved settings.
+pub(super) fn parakeet_ultra_fixture(ui: &mut Ui) {
+    ui.settings.labs.parakeet_ultra = true;
+    ui.settings.labs.picker_sort_filter = true;
+    ui.settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetV3,
+        language: "mt".into(),
+    };
+    ui.picker.open = true;
+    ui.picker.sort = Sort::Name;
+    ui.picker.supported_only = true;
+    ui.picker.details =
+        super::model_details::DetailsState::open_with_table(TranscriptionModelId::ParakeetUltra);
+}
+
 /// The picker open with English and Parakeet saved; `downloading` shows a
 /// model mid-download.
 pub(super) fn fixture(ui: &mut Ui, downloading: Option<TranscriptionModelId>) {
