@@ -47,6 +47,9 @@ hex
 │   ├── use <id> [--language L]    installed models only; never downloads or repairs
 │   ├── install [id] [--language L] download, then switch to it (default: the selected model)
 │   ├── cancel                     stop a download or load in progress
+│   ├── import <path> [--name N]   Labs: check and copy in a GGUF; prints its custom-… id
+│   ├── rename <id> <name>         Labs: an import's picker name
+│   ├── remove <id>                Labs: Hex's copy of an import (not the selected model)
 │   └── status|devices|check|transcribe <wav>  Linux and Windows, run in this process
 ├── commands
 │   ├── init                       create ~/.config/hex (local, no running Hex needed)
@@ -121,6 +124,13 @@ same.
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
+
+`model import`, `rename`, and `remove` need Labs › Use your own speech model
+(`hex labs on custom-models`) and run in this process on every OS; `hex
+models` is an alias for `hex model`. An import's id is `custom-` and the first
+16 hex digits of its SHA-256, and every model command takes it. One that is
+missing, changed, or off answers `model-unavailable` with the reason
+([labs](features/labs.md)).
 
 `model use` switches only to a downloaded model and checks it on disk; it never
 downloads or repairs one (`model install` does). It keeps that model's own
@@ -327,6 +337,7 @@ confirmation-required  clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
 not-found              no such capture, or it has no scrawl.json yet
 unknown-model          no such model id (`hex model list`)
+model-unavailable      an imported model that is missing, changed, or behind its Labs toggle
 not-installed          `model use` on a model that isn't downloaded (`hex model install`)
 feature-off            the command needs an opt-in that is off (Meetings)
 not-ready              Hex is waiting for setup (permissions or the dictation model)

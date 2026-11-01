@@ -180,7 +180,9 @@ export type ModelId =
   | "cohere_transcribe"
   | "underdog_bark_3_pro"
   | "underdog_bark_3_clean"
-  | "apple_speech";
+  | "apple_speech"
+  // Labs › Use your own speech model: an import, listed while it is ready.
+  | `custom-${string}`;
 
 export interface ModelInfo {
   id: ModelId;

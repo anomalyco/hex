@@ -159,6 +159,11 @@ substitute for source inspection or a second roadmap.
   installed-only path that never downloads a model.
 - `transcription/models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
+- `transcription/custom_models`, `transcription/gguf_header`: Labs › Use your
+  own speech model: GGUF imports checked from their header alone (family,
+  variant, languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under
+  their SHA-256 with a receipt and manifest, `TranscriptionModelId::Custom`
+  IDs, and the default-model fallback for an import that can't run.
 - `transcription/service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
@@ -685,7 +690,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Escape at all, even with other jobs queued.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
-  model and persisted selection.
+  model and persisted selection. An import (Labs › Use your own speech model)
+  is checked from its GGUF header before anything loads and verified against
+  the receipt Hex wrote when it copied the file; that digest is not a
+  publisher's. A saved import that is missing, changed, or off stays saved
+  while the listener runs the default model; never rewrite it away.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
