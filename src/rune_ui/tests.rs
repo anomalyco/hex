@@ -2100,6 +2100,7 @@ fn goldens() {
     check_golden("picker-custom-models", false, PANE_SIZE);
     check_golden("picker-found", false, PANE_SIZE);
     check_golden("onboarding-model-found", false, PANE_SIZE);
+    check_golden("onboarding-model-found-downloading", false, PANE_SIZE);
     check_golden("onboarding-model-found-recommended", false, PANE_SIZE);
 }
 

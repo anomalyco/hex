@@ -195,11 +195,16 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
 /// changed.
 pub(super) fn poll(ui: &mut Ui) -> bool {
     // Onboarding looks for models already on this computer once, and holds
-    // its own download until the scan answers; with one found, the person
-    // chooses (`found_choice`), and nothing is picked for them.
+    // its own download until the scan answers; with one found, the model
+    // list (`found_choice`) starts the row the person picks.
     if ui.tour.is_some() {
         super::found::scan_for_setup(ui);
-        let held = ui.found.scanning() || !ui.found.models.is_empty();
+        // Only until setup: past it, the recommended model downloads.
+        let held = (ui.found.scanning() || !ui.found.models.is_empty())
+            && ui
+                .tour
+                .as_ref()
+                .is_some_and(|tour| matches!(tour.flow.step(), Step::Welcome | Step::Setup));
         if let Some(tour) = &mut ui.tour {
             tour.flow.hold_download(held);
         }
@@ -265,6 +270,13 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
 }
 
 pub(super) fn input(ui: &mut Ui, input: Input) {
+    if input == Input::Continue
+        && let Some(tour) = &ui.tour
+        && tour.flow.step() == Step::Setup
+        && super::found_choice::pending(ui, tour.flow.view().model)
+    {
+        super::found_choice::start_selected(ui);
+    }
     let live = ui.live();
     let Some(tour) = &mut ui.tour else {
         return;
@@ -361,7 +373,13 @@ pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let primary = match view.step {
         Step::Welcome => Some((tr("Get started"), true, Input::Continue)),
         Step::Setup if view.restart => Some((tr("Restart Hex"), true, Input::Restart)),
-        Step::Setup => Some((tr("Continue"), view.ready, Input::Continue)),
+        // A model list waiting for its first pick: Continue starts the
+        // selected row.
+        Step::Setup => Some((
+            tr("Continue"),
+            view.ready || super::found_choice::pending(ui, view.model),
+            Input::Continue,
+        )),
         Step::TryIt if view.practice == Practice::Landed => {
             Some((tr("Continue"), true, Input::Continue))
         }
@@ -574,33 +592,21 @@ fn welcome(ui: &Ui, p: Paint) -> El {
 
 fn setup(ui: &Ui, p: Paint, view: &View) -> El {
     let permissions = ui.platform.caps.permissions;
-    let model_ready = view
-        .rows
-        .iter()
-        .any(|row| row.item == SetupItem::Model && row.status == ItemStatus::Ready);
-    // A compatible model on this computer: the person chooses between it
-    // and the recommended download, which the model row would otherwise do.
-    let choosing = super::found_choice::offered(ui, model_ready)
-        && view.rows.iter().any(|row| {
-            row.item == SetupItem::Model
-                && matches!(row.status, ItemStatus::Todo | ItemStatus::Failed)
-        });
+    // A compatible model on this computer: the model row becomes the list
+    // of models to choose from (`found_choice`).
+    let choosing = super::found_choice::offered(ui, view.model);
     let rows: Vec<El> = view
         .rows
         .iter()
         .filter(|row| !(choosing && row.item == SetupItem::Model))
         .map(|row| setup_row(ui, p, *row))
         .collect();
-    if choosing {
-        let mut page = col().key("setup").gap(24.0).child(title(
-            p,
-            tr("Choose a speech model"),
-            Some(tr("Hex found speech models already on this computer.")),
-        ));
-        if !rows.is_empty() {
-            page = page.child(card(p, "setup-card", rows));
-        }
-        return page.child(super::found_choice::choice(ui, p));
+    if choosing && rows.is_empty() {
+        return col()
+            .key("setup")
+            .gap(28.0)
+            .child(title(p, tr("Choose a speech model"), None))
+            .child(super::found_choice::choice(ui, p, view.model));
     }
     let mut page = col()
         .key("setup")
@@ -629,6 +635,9 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
             )
         })
         .child(card(p, "setup-card", rows));
+    if choosing {
+        page = page.child(super::found_choice::choice(ui, p, view.model));
+    }
     if ui.platform.relaunch_failed {
         page = page.child(card(
             p,
@@ -1152,7 +1161,7 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
     }
 }
 
-fn set_downloaded(ui: &mut Ui, percent: u64) {
+pub(super) fn set_downloaded(ui: &mut Ui, percent: u64) {
     if let Some(view) = &mut ui.view {
         let model = ui.settings.transcription.model;
         let bytes = crate::transcription::models::definition(model)

@@ -1,211 +1,193 @@
-//! Onboarding's model choice, shown only when the hub-cache scan found a
-//! compatible model (`found_models`). Hex's recommended model is the default
-//! (Return picks it): its exact copy already on this computer when the cache
-//! holds one, with Download instead beside it, else its download. Other
-//! models on this computer sit behind "Use a model already on this
-//! computer": known catalog models first, then unverified ones. Nothing is
-//! picked for the person, and without a found model the step is exactly as
-//! before.
+//! Onboarding's speech model list, shown only when the hub-cache scan found
+//! a compatible model (`found_models`): one card of selectable rows, Hex's
+//! recommended model first and selected, then the models already on this
+//! computer. Picking a row starts it at once: ours downloads (or, when its
+//! exact file is already here, is used in place), and a found model is used
+//! where it is. Continue starts the selected row when none was picked.
+//! Without a found model the step is exactly as before.
 
-use rune::{El, col, row, text};
-use rune_kit::{Badge, glyphs};
+use rune::{El, Tx, row};
+use rune_kit::{Badge, RadioItem};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, icon_row_tagged};
-use crate::desktop::i18n::{tr, tr_named};
-use crate::desktop::onboarding::{Input, SetupItem};
+use super::controls::{Paint, card};
+use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::onboarding::{Input, ItemStatus, SetupItem};
 use crate::transcription::found_models::Found;
 use crate::transcription::models::{self as transcription_models, TranscriptionSelection};
 
-/// Whether the model step offers the choice: something compatible was found
-/// and the model isn't ready yet.
-pub(super) fn offered(ui: &Ui, model_ready: bool) -> bool {
-    !model_ready && !ui.found.models.is_empty()
+/// Whether onboarding shows the list: something compatible was found and
+/// the model isn't ready yet.
+pub(super) fn offered(ui: &Ui, model: ItemStatus) -> bool {
+    model != ItemStatus::Ready && !ui.found.models.is_empty()
 }
 
-/// The found file that is exactly the recommended model, if any.
-fn recommended_on_disk(ui: &Ui) -> Option<&Found> {
-    ui.found
-        .models
-        .iter()
-        .find(|found| found.catalog == Some(ui.settings.transcription.model))
+/// Whether the list waits for its first pick, so Continue starts the
+/// selected row.
+pub(super) fn pending(ui: &Ui, model: ItemStatus) -> bool {
+    offered(ui, model)
+        && matches!(model, ItemStatus::Todo | ItemStatus::Failed)
+        && ui.found.picked.is_none()
+        && !ui.found.adopting()
 }
 
-/// The recommended model, then the models already on this computer behind
-/// a secondary button. The primary action is the recommended copy already
-/// here when the cache holds it exactly (Download instead stays possible),
-/// else downloading it.
-pub(super) fn choice(ui: &Ui, p: Paint) -> El {
-    let model = transcription_models::definition(ui.settings.transcription.model);
-    let on_disk = recommended_on_disk(ui);
-    let detail = format!(
-        "{} · {}\n{}",
-        model.name,
-        model.size_label(),
-        match on_disk {
-            Some(found) => tr_named(
-                "Already on this computer: {source}",
-                &[("source", &found.source())],
-            ),
-            None => tr("Tested by Hex for quality and reliability").to_owned(),
-        }
-    );
-    let recommended = icon_row_tagged(
-        p,
-        "choice-recommended",
-        &glyphs::SPARKLE,
-        tr("Hex's recommended model"),
-        Some(Badge::new(tr("Recommended")).build(p.k)),
-        Some(&detail),
-        row(),
-    );
-    let others: Vec<El> = ui
+/// One row of the list: Hex's recommended model, or a found file.
+enum Entry<'a> {
+    Recommended { on_disk: bool },
+    Found(&'a Found),
+}
+
+fn entries(ui: &Ui) -> Vec<Entry<'_>> {
+    let recommended = ui.settings.transcription.model;
+    let on_disk = ui
         .found
         .models
         .iter()
-        .enumerate()
-        .filter(|(_, found)| found.catalog != Some(ui.settings.transcription.model))
-        .map(|(index, found)| found_row(p, index, found))
-        .collect();
-    let actions = row()
-        .key("choice-actions")
-        .gap(8.0)
-        .center_y()
-        .child(rune::spacer());
-    let actions = if on_disk.is_some() {
-        actions
-            .child(button(
-                p,
-                "download-instead",
-                tr("Download instead"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| {
-                    crate::transcription::found_models::decline(ui.settings.transcription.model);
-                    choose_recommended(ui);
-                },
-            ))
-            .child(
-                button(
-                    p,
-                    "use-recommended",
-                    tr("Use the copy already on this computer"),
-                    ButtonKind::Primary,
-                    |ui: &mut Ui, _| {
-                        crate::transcription::found_models::accept(ui.settings.transcription.model);
-                        choose_recommended(ui);
-                    },
-                )
-                .default_button(),
-            )
-    } else {
-        actions.child(
-            button(
-                p,
-                "download-recommended",
-                tr("Download recommended model"),
-                ButtonKind::Primary,
-                |ui: &mut Ui, _| choose_recommended(ui),
-            )
-            .default_button(),
+        .any(|found| found.catalog == Some(recommended));
+    std::iter::once(Entry::Recommended { on_disk })
+        .chain(
+            ui.found
+                .models
+                .iter()
+                .filter(|found| found.catalog != Some(recommended))
+                .map(Entry::Found),
         )
-    };
-    let mut page = col()
-        .key("model-choice")
-        .gap(16.0)
-        .child(card(p, "recommended-card", vec![recommended]))
-        .child(actions);
-    // With only the recommended copy found, there is nothing else to show.
-    if !others.is_empty() {
-        page = page.child(row().key("show-found-row").child(button(
-            p,
-            "show-found",
-            tr("Use a model already on this computer"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| ui.found.expanded = !ui.found.expanded,
-        )));
-    }
-    if ui.found.expanded && !others.is_empty() {
-        page = page.child(
-            col()
-                .key("found")
-                .gap(8.0)
-                .child(card(p, "found-card", others))
-                .child(
-                    text(tr(
-                        "Compatible doesn't mean accurate: a model that loads can still transcribe poorly.",
-                    ))
-                    .key("found-note")
-                    .font(DESCRIPTION)
-                    .color(p.muted())
-                    .wrap(),
-                ),
-        );
-    }
-    page
+        .collect()
 }
 
-/// A found file: exact catalog matches (first, from the scan's order) are
-/// known models; any other is unverified and not benchmarked.
-fn found_row(p: Paint, index: usize, found: &Found) -> El {
-    let catalog = found.catalog.map(transcription_models::definition);
-    let name = catalog.map_or(found.name.as_str(), |model| model.name);
-    let mut detail = tr_named(
-        "{revision} · {compression} · {source}",
-        &[
-            ("revision", found.short_revision()),
-            ("compression", found.compression),
-            ("source", &found.repository),
-        ],
-    );
-    detail.push('\n');
-    detail.push_str(if catalog.is_some() {
-        tr("Already downloaded, no download needed")
-    } else {
-        tr("Not verified by Hex · Not benchmarked")
-    });
-    let tag = if catalog.is_some() {
-        Badge::new(tr("Known model")).build(p.k)
-    } else {
-        Badge::new(tr("Not tested by Hex")).build(p.k)
-    };
-    icon_row_tagged(
-        p,
-        &format!("found-{index}"),
-        &glyphs::SPARKLE,
-        name,
-        Some(tag),
-        Some(&detail),
-        button(
-            p,
-            &format!("use-found-{index}"),
-            tr("Use"),
-            ButtonKind::Secondary,
-            move |ui: &mut Ui, _| choose_found(ui, index),
-        ),
-    )
+/// The list, one radio row per model.
+pub(super) fn choice(ui: &Ui, p: Paint, model: ItemStatus) -> El {
+    let selected = ui.found.picked.unwrap_or(0);
+    let rows: Vec<El> = entries(ui)
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| model_row(ui, p, index, &entry, index == selected, model))
+        .collect();
+    card(p, "model-list", rows)
 }
 
-fn choose_recommended(ui: &mut Ui) {
-    ui.found.choice = None;
-    super::onboarding::input(ui, Input::Grant(SetupItem::Model));
-}
-
-/// A catalog match prepares that catalog model (Hex verifies the file in
-/// place instead of downloading); any other file is hashed and registered
-/// first (`found::adopt`), then prepared.
-fn choose_found(ui: &mut Ui, index: usize) {
-    let Some(found) = ui.found.models.get(index).cloned() else {
-        return;
-    };
-    match found.catalog {
-        Some(model) => {
-            crate::transcription::found_models::accept(model);
-            let language = transcription_models::definition(model)
-                .language_for(&ui.settings.transcription.language)
-                .to_owned();
-            ui.found.choice = Some(TranscriptionSelection { model, language });
-            super::onboarding::input(ui, Input::Grant(SetupItem::Model));
+fn model_row(
+    ui: &Ui,
+    p: Paint,
+    index: usize,
+    entry: &Entry<'_>,
+    selected: bool,
+    model: ItemStatus,
+) -> El {
+    let name = match entry {
+        Entry::Recommended { .. } => {
+            transcription_models::definition(ui.settings.transcription.model).name
         }
-        None => super::found::adopt(ui, found, true),
+        Entry::Found(found) => found.catalog.map_or(found.name.as_str(), |id| {
+            transcription_models::definition(id).name
+        }),
+    };
+    let started = selected && ui.found.picked.is_some();
+    let line = match (entry, started, model) {
+        (_, true, ItemStatus::Failed) => tr("Couldn't prepare this model").to_owned(),
+        (Entry::Recommended { on_disk: false }, true, ItemStatus::Downloading(progress)) => {
+            tr_fill(
+                "Downloading… {}%",
+                &((progress * 100.0).round() as u32).to_string(),
+            )
+        }
+        (_, true, _) if ui.found.adopting() || model != ItemStatus::Ready => {
+            tr("Checking…").to_owned()
+        }
+        (Entry::Recommended { on_disk: false }, ..) => tr_fill(
+            "{} download",
+            &transcription_models::definition(ui.settings.transcription.model).size_label(),
+        ),
+        (Entry::Recommended { on_disk: true }, ..) => tr("On this computer").to_owned(),
+        (Entry::Found(found), ..) if found.catalog.is_some() => tr("On this computer").to_owned(),
+        (Entry::Found(_), ..) => tr("On this computer · not tested by Hex").to_owned(),
+    };
+    let radio = RadioItem::new(name, selected)
+        .description(line)
+        .on_select_tx(move |ui: &mut Ui, tx: &mut Tx| {
+            tx.instant();
+            pick(ui, index);
+        })
+        .build(p.k)
+        .key("radio")
+        .grow(1.0);
+    let tag = matches!(entry, Entry::Recommended { .. })
+        .then(|| Badge::new(tr("Recommended")).build(p.k).key("recommended"));
+    row()
+        .key(format!("model{index}"))
+        .min_h(super::controls::METRICS.row_h_described)
+        .px(super::controls::METRICS.row_px)
+        .py(10.0)
+        .gap(12.0)
+        .center_y()
+        .radius(p.k.radius.md)
+        .hover(p.k.c.hover)
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
+            tx.instant();
+            pick(ui, index);
+        })
+        .child(radio)
+        .children(tag)
+}
+
+/// Starts the selected row when the person continues without picking one.
+pub(super) fn start_selected(ui: &mut Ui) {
+    pick(ui, ui.found.picked.unwrap_or(0));
+}
+
+/// Picks row `index` and starts it. A newer pick supersedes one still
+/// preparing, as the picker's does.
+fn pick(ui: &mut Ui, index: usize) {
+    let failed = ui
+        .tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.view().model == ItemStatus::Failed);
+    if (ui.found.picked == Some(index) && !failed) || ui.found.adopting() {
+        return;
+    }
+    let recommended = ui.settings.transcription.model;
+    let found = match entries(ui).get(index) {
+        None => return,
+        Some(Entry::Recommended { .. }) => None,
+        Some(Entry::Found(found)) => Some((*found).clone()),
+    };
+    ui.found.picked = Some(index);
+    ui.found.error = None;
+    match found {
+        None => {
+            crate::transcription::found_models::accept(recommended);
+            prepare(ui, ui.settings.transcription.clone());
+        }
+        Some(found) => match found.catalog {
+            Some(model) => {
+                crate::transcription::found_models::accept(model);
+                let language = transcription_models::definition(model)
+                    .language_for(&ui.settings.transcription.language)
+                    .to_owned();
+                prepare(ui, TranscriptionSelection { model, language });
+            }
+            // Hashed once and registered in place first, then prepared.
+            None => super::found::adopt(ui, found, true),
+        },
+    }
+}
+
+/// Prepares `selection` for onboarding: through the tour the first time,
+/// so its progress shows, and as a newer choice afterwards.
+pub(super) fn prepare(ui: &mut Ui, selection: TranscriptionSelection) {
+    let requested = ui.tour.as_ref().is_some_and(|tour| {
+        !matches!(
+            tour.flow.view().model,
+            ItemStatus::Todo | ItemStatus::Failed
+        )
+    });
+    if requested {
+        ui.send(super::Request::ChooseModel {
+            model: selection.model,
+            language: selection.language,
+        });
+    } else {
+        ui.found.choice = Some(selection);
+        super::onboarding::input(ui, Input::Grant(SetupItem::Model));
     }
 }

@@ -275,6 +275,10 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · models on this computer",
     ),
     (
+        "onboarding-model-found-downloading",
+        "Linux & Windows/Onboarding · recommended model downloading",
+    ),
+    (
         "onboarding-model-found-recommended",
         "Linux & Windows/Onboarding · recommended model on this computer",
     ),
