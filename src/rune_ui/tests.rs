@@ -1429,7 +1429,7 @@ fn mode_applications_refuse_one_another_modes_use() {
 #[test]
 fn the_transcription_picker_asks_the_service_for_a_model() {
     let mut rt = runtime("picker", true, PANE_SIZE);
-    tap(&mut rt, "model2/top/actions/choose-model");
+    tap(&mut rt, "model2/action/cell/slot/choose-model");
     assert!(matches!(
         sent(&rt),
         [Request::ChooseModel {
@@ -1445,13 +1445,24 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
     assert!(!rt.state.picker.open);
 }
 
-/// The card index of `model` in the picker over `language`.
-fn picker_card(language: &str, model: TranscriptionModelId) -> String {
-    let index = crate::transcription::models::picker_models(language)
-        .iter()
-        .position(|(candidate, _)| candidate.id == model)
-        .expect("every available model is listed");
-    format!("model{index}")
+/// Scrolls the full model list until `key` is inside it, then presses it.
+fn tap_in_model_list(rt: &mut Runtime<Ui>, key: &str) {
+    for _ in 0..400 {
+        let target = element(rt, key).rect;
+        let list = element(rt, "model-scroll").rect;
+        let middle = target[1] + target[3] / 2.0;
+        if middle > list[1] && middle < list[1] + list[3] {
+            break;
+        }
+        let dy = if middle > list[1] + list[3] {
+            20.0
+        } else {
+            -20.0
+        };
+        rt.wheel(list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, dy);
+        rt.frame(1.0 / 60.0);
+    }
+    tap(rt, key);
 }
 
 #[test]
@@ -1464,13 +1475,15 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     rt.state.picker.installed = Some(Vec::new());
     rt.invalidate();
     settle(&mut rt);
-    let card = picker_card("he", TranscriptionModelId::ParakeetUnifiedEnglish);
+    // Parakeet is folded away with the models that don't speak Hebrew.
+    tap(&mut rt, "more-models");
+    tap(&mut rt, "other-languages");
     let shown = texts(&rt);
     assert!(
-        shown.contains(&"Doesn't support Hebrew; switches the language to English".to_owned()),
+        shown.contains(&"Choosing it switches the language to English".to_owned()),
         "{shown:?}"
     );
-    tap(&mut rt, &format!("{card}/top/actions/choose-model"));
+    tap_in_model_list(&mut rt, "model-parakeet_unified_en/actions/choose-model");
     assert_eq!(
         sent(&rt),
         [Request::ChooseModel {
@@ -1686,7 +1699,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
 #[test]
 fn a_download_in_progress_can_be_cancelled() {
     let mut rt = runtime("picker-downloading", true, PANE_SIZE);
-    tap(&mut rt, "model1/top/actions/cancel-model");
+    tap(&mut rt, "model1/action/cell/slot/preparing/cancel-model");
     assert!(matches!(sent(&rt), [Request::CancelModel]));
 }
 

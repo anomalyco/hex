@@ -44,7 +44,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
-├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
+├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
@@ -345,8 +345,8 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 on. The row renders only in macOS builds, so no golden changes.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
-on, the Local transcription picker shows one row between its header and the
-cards: a sort (By recommendation, the default and the catalog's order; By
+on, the speech model picker's Every model view shows one row between its
+header and the list: a sort (By recommendation, the default and the catalog's order; By
 size, smallest model file first with unknown sizes last; By name) and a
 switch, "Only models that support <saved language>" ("Only models that
 detect the language automatically" when the language is Auto), which keeps
@@ -368,11 +368,9 @@ in a real window; there is no `--snap` scene for the picker with the Lab on,
 and the Labs page goldens need regenerating on Linux with the new row.
 
 Benchmark details (`benchmark-details`, issue 647, every OS): while on,
-each Local transcription picker card that has a benchmark record
-(`transcription::models::benchmark`; Apple Speech has none and keeps
-"Accuracy: System") shows "Error rate" as the raw figure with its direction,
-such as "7.57% CER · lower is better", in place of the transformed accuracy
-percentage, and one wrapping line under the metrics: the measured language,
+each row in the speech model picker's Every model view that has a benchmark
+record (`transcription::models::benchmark`; Apple Speech has none) adds one
+wrapping line under its facts: the raw figure, such as "7.57% CER", then the measured language,
 the dataset and split, the source as plain text (with its source-record
 revision), the conditions (utterances, batch size, timestamps, hardware), and
 "Speed: upstream figure; hardware and method unknown". Anything the source
@@ -390,14 +388,14 @@ utterances, batch 1, no timestamps, Radeon 8060S over Vulkan, source revision
 unrecorded. A "Most accurate" badge stays only when its record is comparable
 (`BenchmarkRecord::comparable`: same metric, language, and a known, equal
 dataset) with every other recommended model's for the saved language, so
-today it drops everywhere. The gate is the picker's card (`benchmark_details_on`);
+today it drops everywhere. The gate is the picker (`benchmark_details_on`);
 the feature does no other work. Off, the picker is exactly as before.
 Checks: `benchmark_details_show_raw_rates_and_mark_unknowns`,
 `most_accurate_needs_comparable_figures_only_with_benchmark_details`, and
 `benchmark_details_are_off_by_default` in
 [picker.rs](../../src/rune_ui/picker.rs);
 `only_figures_on_the_same_metric_language_and_dataset_compare` in
-[models.rs](../../src/transcription/models.rs). Not yet observed: the cards
+[models.rs](../../src/transcription/models.rs). Not yet observed: the rows
 rendered with the toggle on; there is no `--snap` scene for it, and the Labs
 page goldens need regenerating on Linux with the new row.
 
@@ -412,7 +410,7 @@ entry, `parakeet_ultra`, listed and runnable only while the toggle is on
 (`ModelDefinition::available` reads `labs::parakeet_ultra`).
 
 ```ts
-Picker card -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
+Picker row -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
 │   timestamps; v3's "Detects language from audio" note; never recommended
 ├── Download -> handy-computer/parakeet-ultra-gguf@a1539be1, parakeet-ultra-Q8_0.gguf,
 │   740,363,168 bytes, SHA-256 007a5976…0a59 (430 F32, 225 Q8_0, 48 F16 tensors)

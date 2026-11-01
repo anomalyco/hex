@@ -33,7 +33,7 @@ Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
-default) shows each card's raw WER or CER with its language, dataset, source,
+default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
@@ -231,11 +231,13 @@ Apple Speech is currently excluded from the desktop picker.
 
 ```ts
 General > Dictation > Speech model, then Language below it   // setup.language-select; every desktop root
-├── Speech model -> Picker lists every available model; never changes the language
-│   ├── Saved language's recommendations first with their tags, then the
-│   │   models that support it, then those that do not
-│   ├── Model without the saved language -> Card: "Doesn't support Japanese;
-│   │   switches the language to English"
+├── Speech model -> Picker: Compare, then every model; never changes the language
+│   ├── Compare -> "Speech model for Japanese": three columns from the saved
+│   │   language's models, recommendations first; "{n} more models" -> every model
+│   ├── Every model -> the saved language's models, Your model files, then a fold
+│   │   "{n} more that don't speak Japanese"
+│   ├── Model without the saved language -> Row: "Choosing it switches the
+│   │   language to English"
 │   └── Choose it -> ChooseModel(model, model's default: English, else its first)
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
@@ -256,7 +258,7 @@ Checks: `the_picker_lists_every_model_with_the_language_s_recommendations_first`
 `browsing_the_picker_never_changes_the_language`,
 `changing_only_the_language_prepares_the_same_model_again`, and
 `settings_opens_the_picker_and_names_the_model_and_language_apart`. Scenes:
-`picker-japanese`, `language-fallback`, `language-menu`. Fixture renders and
+`picker-japanese`, `picker-japanese-all`, `language-fallback`, `language-menu`. Fixture renders and
 recorded requests only; a live model switch with a fallback has not been
 observed. Apple Speech stays excluded, so its per-locale install through the
 Language row is unexercised.
@@ -291,25 +293,31 @@ Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 [transcription/gguf_session.rs](../../src/transcription/gguf_session.rs).
 
 ```ts
-Settings picker or setup > model card     // setup.model-card; shared by every desktop root
-├── Title row -> Name, recommendation tag, "Streams" tag    // at most two tags
-│   ├── Recommendation -> For the saved language from the catalog (English: Unified English first)
-│   └── Streams -> Catalog `streams` (pinned artifact advertises streaming)
-├── Detail line -> "Transcribes while you speak" (non-macOS: "… on a GPU"),
-│                  coverage, benchmark, timestamps, Installed
+Settings picker > Compare                 // setup.model-card; shared by every desktop root
+├── Column head -> Role (Recommended, Fewest wrong words, Fastest, Most languages,
+│   Reads your vocabulary; from the catalog for the saved language), name, one-line blurb
+├── Rows -> Wait when you stop (30 s ÷ realtime; "None" when it streams), Wrong
+│   words or characters "1 in N" (benchmark in the saved language, else "Not
+│   measured"; row hidden when none is measured), Languages, Reads your vocabulary,
+│   Download size; one strictly best value is medium weight, ties get none
+├── Action cell -> exactly one: In use dot, progress with Cancel, Use, or
+│   Download <size>; Primary only on the recommended column when it can be chosen
+├── The model in use or preparing replaces the last column when it would be left out
+└── "{n} more models" -> Every model
+
+Settings picker > Every model row          // fixed height; scrolls
+├── Name, role, blurb, then "No wait · 1 in 50 words wrong · 25 languages · 2.5 GB"
 ├── Saved language unsupported -> Warning line naming the language it switches to
-├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
-├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
-├── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
-├── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
-│   a wrapping line: language · dataset/split · source · conditions or "unknown" ·
+├── Trailing edge -> In use dot; progress with Cancel; else Use/Download; Delete when downloaded
+├── Labs > Benchmark details (off) -> raw error rate "7.57% CER", a wrapping line:
+│   language · dataset/split · source · conditions or "unknown" ·
 │   speed qualified; "Most accurate" only between comparable records (labs.md)
-├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
+├── Labs > Parakeet Ultra (off) -> its row with a Labs tag and Details: languages,  // setup.parakeet-ultra
 │   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
 │   published benchmarks "not measured in Hex" (labs.md)
 ├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
 │   Imported · family · languages · Not benchmarked · file · licence · SHA-256
-│   prefix; Speed and Accuracy "Unknown"; Rename, Remove (not the active
+│   prefix; Rename, Remove (not the active
 │   model); missing or changed -> warning line and no Use (own-models.md)
 └── Found on this computer -> a scan of the Hugging Face cache when the picker  // setup.found-models
     opens: other compatible files at the top (Not tested by Hex, Use); a catalog
@@ -323,8 +331,8 @@ are the models marked `streams`
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
-(also `picker-downloading`, `picker-japanese`, `picker-custom-models`,
-`picker-found`).
+(also `picker-downloading`, `picker-japanese`, `picker-japanese-all`,
+`picker-custom-models`, `picker-found`).
 
 Nemotron 3.5 ASR (#834; NVIDIA's `nemotron-3.5-asr-streaming-0.6b`, OpenMDW-1.1)
 streams in 27 of Hex's languages and detects the language with Auto: Hex sends
@@ -549,9 +557,9 @@ desktop.
 ### Delete downloaded models
 
 ```ts
-Settings picker > Downloaded model card   // setup.delete-model; macOS
+Settings picker > Every model > Downloaded row   // setup.delete-model; macOS
 ├── Delete -> "Delete <size>?" -> Delete again
-│   ├── Success -> Model file, receipt, and partial download removed; card offers Download
+│   ├── Success -> Model file, receipt, and partial download removed; row offers Download
 │   └── Download in progress -> Nothing removed; "Model could not be deleted." with reason
 ├── Selected dictation model (any language) -> No Delete
 ├── Preparing or Apple Speech model -> No Delete
