@@ -489,6 +489,21 @@ fn input_is_down(state: u32, code: u16) -> bool {
     }
 }
 
+/// Whether a key or mouse button the shortcut machine tracks still reads as
+/// held. Combined-session state can keep a key down for good after a system
+/// shortcut swallows its release (Tab after Command-Tab, Q after Command-Q;
+/// #612), which blocked every shortcut press until Hex restarted, so a
+/// keyboard key also needs HID state, the physical keyboard, to agree.
+fn input_is_held(code: u16) -> bool {
+    reads_held(code, input_is_down)
+}
+
+fn reads_held(code: u16, down: impl Fn(u32, u16) -> bool) -> bool {
+    down(COMBINED_SESSION_STATE, code)
+        && (crate::app_settings::HotkeyKey::mouse_button(code).is_some()
+            || down(HID_SYSTEM_STATE, code))
+}
+
 /// What the observation tap adds in builds with captures, while the
 /// `capture` experiment is on: the pointer moving and scrolling. Clicks and
 /// drags already reach the key tap, for mouse shortcuts. The callback drops
@@ -1551,7 +1566,7 @@ impl PhysicalKeyboard {
         Self {
             // SAFETY: Read-only queries of a documented event-source state.
             flags: || unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) },
-            key_down: |code| unsafe { CGEventSourceKeyState(COMBINED_SESSION_STATE, code) },
+            key_down: input_is_held,
         }
     };
 }
@@ -1740,7 +1755,7 @@ impl DictationHotkey {
             CaptureInstant::now,
             // Match the annotated-session tap, including assistive keyboard input.
             || unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) },
-            |code| input_is_down(COMBINED_SESSION_STATE, code),
+            input_is_held,
         );
     }
 
@@ -2594,6 +2609,25 @@ mod tests {
             ),
             "{tapped:?}"
         );
+    }
+
+    #[test]
+    fn a_key_latched_only_in_session_state_reads_as_released() {
+        const TAB: u16 = 48;
+        let state = |session: bool, hid: bool| {
+            move |source: u32, _: u16| {
+                if source == COMBINED_SESSION_STATE {
+                    session
+                } else {
+                    hid
+                }
+            }
+        };
+        // Command-Tab swallowed Tab's release: the session still says down,
+        // the physical keyboard says up (#612).
+        assert!(!reads_held(TAB, state(true, false)));
+        assert!(reads_held(TAB, state(true, true)));
+        assert!(!reads_held(TAB, state(false, true)));
     }
 
     #[test]

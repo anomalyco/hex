@@ -129,6 +129,9 @@ Command-Tab -> Tab still tracked (IDLE, DIRTY, or LOCKED)
               └── older delayed release of the key -> ignored
   -> any check fails -> press ignored (logged with reason + key_codes)
                      -> 100 ms poll as before
+tracked key down in combined-session state but up in HID state  // #612
+  -> reads as up for both the press check and the poll   // a latched Tab or Q
+     no longer blocks every press until Hex restarts
 LOCKED + Escape -> Nothing, stale keys or not (#786)
 fenced edges, edges before a disabled tap, suspension -> no neutral evidence
 ```
@@ -142,7 +145,9 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `stale_press_waits_for_recovery_while_anything_else_is_held`,
 `stale_press_requires_a_neutral_keyboard_after_the_tracked_keys`,
 `stale_press_finishes_a_lock_and_leaves_escape_unchanged`,
-`toggle_mode_finishes_after_command_tab_while_recording`. Unit tests read a keyboard
+`toggle_mode_finishes_after_command_tab_while_recording`,
+`a_key_latched_only_in_session_state_reads_as_released` (the state rule only;
+no real latched key has been observed by a test). Unit tests read a keyboard
 that is all up unless a test sets one, so every shortcut test can take this
 path.
 A binding press ignored while stale or DIRTY logs `shortcut press ignored` to
