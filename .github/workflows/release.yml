@@ -115,15 +115,38 @@ jobs:
       version: ${{ needs.plan.outputs.release-version }}
       channel: ${{ needs.plan.outputs.release-channel }}
 
+  # ---- Full test suites: check and stable only; repository code, no secrets ---
+  # Pull requests only compile and dev pushes run no checks (CI is minimal),
+  # so the candidate's full suites run here. A stable run publishes nothing
+  # until all three pass.
+
+  check-linux:
+    needs: plan
+    if: needs.plan.outputs.channel == 'stable' || needs.plan.outputs.channel == 'check'
+    uses: ./.github/workflows/check-linux.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+
+  check-macos:
+    needs: plan
+    if: needs.plan.outputs.channel == 'stable' || needs.plan.outputs.channel == 'check'
+    uses: ./.github/workflows/check-macos.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+
+  check-windows:
+    needs: plan
+    if: needs.plan.outputs.channel == 'stable' || needs.plan.outputs.channel == 'check'
+    uses: ./.github/workflows/check-windows.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+
   # Onboarding gates every stable release (AGENTS.md): every onboarding scene
   # against its approved golden, and a first run through the real tour in a
   # clean data folder (scripts/check-onboarding.sh, Linux; the macOS and
   # Windows scenes are fixtures of the same window, rendered here), from
-  # repository code with no secrets. A stable run also needs the candidate's
-  # Check Linux, Check macOS, and Check Windows to have passed (a commit
-  # their paths skip gets one with `gh workflow run <check> --ref
-  # production`). Publishing waits for this job; its scene images go into the
-  # go/no-go given to Dax.
+  # repository code with no secrets. Publishing waits for this job and the
+  # three suites above; its scene images go into the go/no-go given to Dax.
   onboarding:
     needs: plan
     if: needs.plan.outputs.channel == 'stable' || needs.plan.outputs.channel == 'check'
@@ -131,26 +154,13 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
-      actions: read
     env:
-      SHA: ${{ needs.plan.outputs.sha }}
       CARGO_PROFILE_DEV_DEBUG: "0"
       BLA_VENDOR: OpenBLAS
       OPENSSL_NO_VENDOR: "1"
       CC: clang
       CXX: clang++
     steps:
-      - name: The candidate's checks passed on every OS
-        if: needs.plan.outputs.channel == 'stable'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for workflow in check-linux.yml check-macos.yml check-windows.yml; do
-            conclusion=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$SHA" \
-              --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion // "missing"')
-            [ "$conclusion" = success ] ||
-              { echo "::error::$workflow is $conclusion on $SHA; run it with gh workflow run $workflow --ref production."; exit 1; }
-          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.sha }}
@@ -489,10 +499,12 @@ jobs:
   # The only job that publishes to the release service; its OIDC token is the
   # credential. Publishes every signed platform (stable requires them all).
   publish:
-    needs: [plan, build, sign-macos, verify-macos, sign-windows, installers, sign-windows-installers, onboarding]
+    needs: [plan, build, sign-macos, verify-macos, sign-windows, installers, sign-windows-installers, onboarding, check-linux, check-macos, check-windows]
     if: >-
       ${{ !cancelled() && needs.plan.outputs.channel != 'check'
-      && (needs.plan.outputs.channel != 'stable' || needs.onboarding.result == 'success')
+      && (needs.plan.outputs.channel != 'stable'
+          || (needs.onboarding.result == 'success' && needs.check-linux.result == 'success'
+              && needs.check-macos.result == 'success' && needs.check-windows.result == 'success'))
       && needs.build.result == 'success' && needs.installers.result == 'success'
       && needs.sign-windows.result == 'success'
       && (needs.plan.outputs.channel == 'dev'

@@ -1,25 +1,25 @@
 name: Check Windows
 
+# The full Windows suite (x64 with Vulkan and ARM64: tests, clippy, the
+# no-Visual-C++-runtime check). It runs where it matters: Release's check and
+# stable channels call it on the candidate commit and publish nothing until it
+# passes, and anyone can run it by hand. Pull requests only compile x64
+# (compile.yml).
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [dev]
+  workflow_call:
+    inputs:
+      sha:
+        description: The commit to test
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a pull request cancels its stale run. Every push and manual run
-# keeps its own group, so each dev commit gets a result.
-concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
-  cancel-in-progress: true
-
 jobs:
   x64:
     name: x64 (Vulkan)
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -27,6 +27,9 @@ jobs:
       TRANSCRIBE_CMAKE_ARGS: -DGGML_NATIVE=OFF
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -67,7 +70,6 @@ jobs:
 
   arm64:
     name: ARM64 (CPU)
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-11-arm
     timeout-minutes: 90
     env:
@@ -86,6 +88,9 @@ jobs:
       TRANSCRIBE_CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
