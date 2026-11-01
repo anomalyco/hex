@@ -832,7 +832,13 @@ impl HotkeyBinding {
         self.modifiers
             .keycaps()
             .map(str::to_string)
-            .chain(self.key.iter().map(|key| key.label.clone()))
+            .chain(self.key.iter().map(|key| {
+                // A punctuation key shows what it types on the layout now.
+                #[cfg(target_os = "windows")]
+                return crate::windows::input::keycap_label(&key.label);
+                #[cfg(not(target_os = "windows"))]
+                key.label.clone()
+            }))
             .collect()
     }
 

@@ -17,6 +17,33 @@ impl HotkeyKey {
         is_scroll_lock(name)
             || matches!(name.trim().to_ascii_lowercase().as_str(), "menu" | "pause")
     }
+
+    /// Insert, Home, End, Page Up, or Page Down: keys that type nothing,
+    /// which Labs › Special keys alone lets a Windows shortcut use alone
+    /// (issue 794).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_navigation(&self) -> bool {
+        !self.is_mouse() && Self::navigation_name(&self.label)
+    }
+
+    /// Whether `name` names Insert, Home, End, Page Up, or Page Down.
+    pub fn navigation_name(name: &str) -> bool {
+        matches!(
+            name.trim()
+                .to_ascii_lowercase()
+                .replace([' ', '_'], "")
+                .as_str(),
+            "insert" | "home" | "end" | "pageup" | "pagedown"
+        )
+    }
+}
+
+impl HotkeyBinding {
+    /// A navigation key alone (`HotkeyKey::is_navigation`).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_lone_navigation_key(&self) -> bool {
+        self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_navigation)
+    }
 }
 
 /// `scrolllock`, `scroll_lock`, or `Scroll Lock`.
@@ -27,10 +54,11 @@ pub(super) fn is_scroll_lock(name: &str) -> bool {
 }
 
 impl AppSettings {
-    /// Whether a shortcut may use Menu, Pause, or Scroll Lock: Linux, with
-    /// Labs › Special keys alone on.
+    /// Whether Labs › Special keys alone is on: on Linux a shortcut may use
+    /// Menu, Pause, or Scroll Lock; on Windows, which takes those anyway,
+    /// a navigation key alone.
     pub fn special_keys_allowed(&self) -> bool {
-        cfg!(target_os = "linux")
+        cfg!(any(target_os = "linux", target_os = "windows"))
             && self.labs.standalone_special_keys
             && crate::labs::Feature::StandaloneSpecialKeys.shipped()
     }
@@ -54,12 +82,23 @@ impl AppSettings {
     /// or Scroll Lock goes back to its default (an optional one is unbound),
     /// so the listener never registers one. Other OSes keep theirs.
     pub(crate) fn repair_special_keys(&mut self) {
-        if !cfg!(target_os = "linux") || self.special_keys_allowed() {
+        if self.special_keys_allowed() {
             return;
         }
-        if self.reset_shortcuts(|binding| binding.key.as_ref().is_some_and(HotkeyKey::is_special)) {
+        if cfg!(target_os = "linux")
+            && self
+                .reset_shortcuts(|binding| binding.key.as_ref().is_some_and(HotkeyKey::is_special))
+        {
             tracing::info!(
                 "reset Menu, Pause, and Scroll Lock shortcuts: Labs › Special keys alone is off"
+            );
+        }
+        // Windows: a navigation key alone needs the toggle.
+        if cfg!(target_os = "windows")
+            && self.reset_shortcuts(HotkeyBinding::is_lone_navigation_key)
+        {
+            tracing::info!(
+                "reset navigation-key shortcuts without a modifier: Labs › Special keys alone is off"
             );
         }
     }
@@ -130,7 +169,10 @@ mod tests {
         on.labs.standalone_special_keys = true;
         on.repair_special_keys();
         assert_eq!(on.dictation_hotkey, menu());
-        assert_eq!(on.special_keys_allowed(), cfg!(target_os = "linux"));
+        assert_eq!(
+            on.special_keys_allowed(),
+            cfg!(any(target_os = "linux", target_os = "windows"))
+        );
         settings.repair_special_keys();
         if cfg!(target_os = "linux") {
             assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());

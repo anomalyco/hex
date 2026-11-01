@@ -1125,12 +1125,14 @@ pub fn parse_hotkey(
         if binding.is_bare_primary_click() {
             return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
         }
-        // Menu, Pause, and Scroll Lock alone are checked against their Labs
-        // toggle when set (`special_key_refusal`).
+        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
+        // keys alone, are checked against their Labs toggle when set
+        // (`special_key_refusal`).
         if modifiers.is_empty()
             && !is_function_key(&key.label)
             && !key.is_mouse()
             && !HotkeyKey::special_name(&key.label)
+            && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -1141,9 +1143,19 @@ pub fn parse_hotkey(
 }
 
 /// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
-/// Linux they need Labs › Special keys alone; elsewhere one alone still
+/// Linux they need Labs › Special keys alone; Windows takes them alone, and
+/// a navigation key alone needs the toggle there; elsewhere one alone still
 /// needs a modifier.
 fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
+    if cfg!(target_os = "windows") {
+        let key = binding.key.as_ref()?;
+        return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
+            format!(
+                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
+                key.label.to_lowercase().replace(' ', "")
+            )
+        });
+    }
     let key = binding.key.as_ref().filter(|key| key.is_special())?;
     if settings.special_keys_allowed() {
         return None;

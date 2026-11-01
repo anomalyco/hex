@@ -160,6 +160,10 @@ impl ChordWatch {
                             Chord::Held(HotkeyBinding::from(&shown).modifiers)
                         }
                         ChordPoll::Cancelled => Chord::Cancelled,
+                        ChordPoll::Unsupported => {
+                            shown = capture.held();
+                            Chord::Captured(Err(tr("Unsupported key")))
+                        }
                         ChordPoll::Captured(hotkey) => {
                             // A rejected chord: record the next one from
                             // scratch.

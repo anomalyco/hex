@@ -201,7 +201,7 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::StandaloneSpecialKeys => cfg!(target_os = "linux"),
+            Self::StandaloneSpecialKeys => cfg!(any(target_os = "linux", target_os = "windows")),
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -358,6 +358,9 @@ impl Feature {
             }
             Self::ParakeetUltra => {
                 "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
+            }
+            Self::StandaloneSpecialKeys if cfg!(target_os = "windows") => {
+                "Use Insert, Home, End, Page Up, or Page Down alone as a shortcut"
             }
             Self::StandaloneSpecialKeys => {
                 "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
