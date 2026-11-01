@@ -1,15 +1,14 @@
-//! HTTPS through the platform's curl: the polled manifest with
-//! `If-None-Match`, and resumable downloads checked against the manifest's
-//! size and SHA-256 before any byte is used. Requests carry nothing about
-//! the install beyond `User-Agent: hex/<channel>/<version>`.
+//! HTTPS through `net` (the system's proxy and trusted roots): the polled
+//! manifest with `If-None-Match`, and resumable downloads checked against
+//! the manifest's size and SHA-256 before any byte is used. Requests carry
+//! nothing about the install beyond `User-Agent: hex/<channel>/<version>`.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 
 use super::protocol::Target;
 
@@ -30,117 +29,71 @@ pub struct ManifestCache {
     body: Option<String>,
 }
 
-fn curl(user_agent: &str) -> Command {
-    let mut command = crate::desktop::background_process::command(if cfg!(windows) {
-        "curl.exe"
-    } else {
-        "curl"
-    });
-    command.args([
-        "--silent",
-        "--show-error",
-        "--location",
-        "--proto",
-        "=https",
-        "--proto-redir",
-        "=https",
-        "--connect-timeout",
-        "15",
-        "--user-agent",
-        user_agent,
-    ]);
-    command.stdin(Stdio::null());
-    command
-}
-
 impl ManifestCache {
-    /// Fetches `url` into `scratch`, returning the manifest text: the cached
-    /// one when the service answers 304.
+    /// Fetches `url`, returning the manifest text: the cached one when the
+    /// service answers 304. `scratch` is unused since requests run in process.
     pub fn fetch(
         &mut self,
         url: &str,
         user_agent: &str,
-        scratch: &Path,
+        _scratch: &Path,
         max_time: Duration,
     ) -> Result<String> {
-        let body = scratch.join("manifest.json.partial");
-        let headers = scratch.join("manifest.headers");
-        let _ = fs::remove_file(&body);
         if self.url.as_deref() != Some(url) {
             *self = Self {
                 url: Some(url.to_owned()),
                 ..Self::default()
             };
         }
-        let mut command = curl(user_agent);
-        command
-            .arg("--max-time")
-            .arg(max_time.as_secs().max(1).to_string())
-            .arg("--max-filesize");
-        command.arg(MAX_MANIFEST_BYTES.to_string());
+        let agent = crate::net::agent(url, |config| {
+            config
+                .https_only(true)
+                .max_redirects(10)
+                .http_status_as_error(false)
+                .timeout_global(Some(max_time.max(Duration::from_secs(1))))
+        });
+        let mut request = agent.get(url).header("User-Agent", user_agent);
         if let (Some(etag), Some(_)) = (&self.etag, &self.body) {
-            command
-                .arg("--header")
-                .arg(format!("If-None-Match: {etag}"));
+            request = request.header("If-None-Match", etag.as_str());
         }
-        let output = command
-            .arg("--output")
-            .arg(&body)
-            .arg("--dump-header")
-            .arg(&headers)
-            .args(["--write-out", "%{http_code}"])
-            .arg(url)
-            .output()
-            .wrap_err("could not run curl for the update manifest")?;
-        let status = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        let header_text = fs::read_to_string(&headers).unwrap_or_default();
-        let _ = fs::remove_file(&headers);
-        let result = match status.as_str() {
-            "304" => self.body.clone().ok_or_else(|| {
-                color_eyre::eyre::eyre!("the update service sent 304 for nothing cached")
-            }),
-            "200" if output.status.success() => {
-                let text = read_bounded(&body, MAX_MANIFEST_BYTES)?;
-                self.etag = last_etag(&header_text);
+        let mut response = request
+            .call()
+            .map_err(|error| eyre!("{}", crate::net::unreachable(url, &error)))?;
+        match response.status().as_u16() {
+            304 => self
+                .body
+                .clone()
+                .ok_or_else(|| eyre!("the update service sent 304 for nothing cached")),
+            200 => {
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.trim().to_owned())
+                    .filter(|etag| valid_etag(etag));
+                let mut text = String::new();
+                response
+                    .body_mut()
+                    .with_config()
+                    .limit(MAX_MANIFEST_BYTES + 1)
+                    .reader()
+                    .take(MAX_MANIFEST_BYTES + 1)
+                    .read_to_string(&mut text)
+                    .wrap_err("the update manifest is not UTF-8")?;
+                if text.len() as u64 > MAX_MANIFEST_BYTES {
+                    bail!("the update manifest is too large");
+                }
+                self.etag = etag;
                 self.body = Some(text.clone());
                 Ok(text)
             }
-            _ => Err(color_eyre::eyre::eyre!(
-                "the update manifest request failed with HTTP {status}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )),
-        };
-        let _ = fs::remove_file(&body);
-        result
+            status => bail!("the update manifest request failed with HTTP {status}"),
+        }
     }
 }
 
-/// The ETag of the final response; redirects dump several header blocks.
-fn last_etag(headers: &str) -> Option<String> {
-    headers
-        .split("\r\n\r\n")
-        .filter(|block| !block.trim().is_empty())
-        .last()?
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.trim()
-                .eq_ignore_ascii_case("etag")
-                .then(|| value.trim().to_owned())
-        })
-        .filter(|etag| !etag.is_empty() && !etag.chars().any(char::is_control))
-}
-
-fn read_bounded(path: &Path, max_bytes: u64) -> Result<String> {
-    let mut text = String::new();
-    File::open(path)?
-        .take(max_bytes + 1)
-        .read_to_string(&mut text)
-        .wrap_err("the update manifest is not UTF-8")?;
-    if text.len() as u64 > max_bytes {
-        bail!("the update manifest is too large");
-    }
-    Ok(text)
+fn valid_etag(etag: &str) -> bool {
+    !etag.is_empty() && !etag.chars().any(char::is_control)
 }
 
 /// Downloads `target` from `url` into `directory`, resuming an earlier
@@ -172,22 +125,17 @@ pub fn download(url: &str, user_agent: &str, target: &Target, directory: &Path) 
     drop(options.open(&partial)?);
     let complete = fs::metadata(&partial)?.len() == target.size;
     if !complete {
-        let output = curl(user_agent)
-            .args(["--fail", "--max-time", "1800", "--continue-at", "-"])
-            .arg("--max-filesize")
-            .arg(target.size.to_string())
-            .arg("--output")
-            .arg(&partial)
-            .arg(url)
-            .stdout(Stdio::null())
-            .output()
-            .wrap_err("could not run curl for the update download")?;
-        if !output.status.success() {
-            bail!(
-                "the update download failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
+        crate::net::download(
+            &crate::net::Download {
+                url,
+                user_agent,
+                size: Some(target.size),
+                canceled: None,
+            },
+            &partial,
+            |_| {},
+        )
+        .wrap_err("the update download failed")?;
     }
     if let Err(error) = verify(&partial, target) {
         // A mismatch at full size can never resume into the right bytes.
@@ -247,11 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn the_final_responses_etag_wins() {
-        let headers =
-            "HTTP/2 302\r\nlocation: x\r\netag: \"old\"\r\n\r\nHTTP/2 200\r\nETag: \"new\"\r\n\r\n";
-        assert_eq!(last_etag(headers).as_deref(), Some("\"new\""));
-        assert_eq!(last_etag("HTTP/2 200\r\n\r\n"), None);
+    fn etags_with_control_characters_are_dropped() {
+        assert!(valid_etag("\"new\""));
+        assert!(!valid_etag(""));
+        assert!(!valid_etag("\"a\nb\""));
     }
 
     #[test]
