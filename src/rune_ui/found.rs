@@ -28,6 +28,8 @@ pub(super) struct FoundState {
     pub(super) error: Option<String>,
     /// Whether this window has scanned since it opened the picker or step.
     scanned: bool,
+    /// Whether onboarding shows the models already on this computer.
+    pub(super) expanded: bool,
 }
 
 impl FoundState {
@@ -158,30 +160,9 @@ pub(super) fn adopt(ui: &mut Ui, found: Found, onboarding: bool) {
 /// Two found files for scenes: Parakeet v3's pinned file (an exact catalog
 /// match) and a Whisper Small Q8_0 Hex hasn't tested.
 pub(super) fn fixture() -> Vec<Found> {
-    let v3 = crate::transcription::models::definition(TranscriptionModelId::ParakeetV3);
-    let crate::transcription::models::ModelRuntime::Gguf(artifact) = v3.runtime else {
-        unreachable!("Parakeet v3 is a GGUF model");
-    };
     let hub = std::path::Path::new("/home/you/.cache/huggingface/hub");
     vec![
-        Found {
-            path: hub.join(
-                "models--handy-computer--parakeet-tdt-0.6b-v3-gguf/snapshots/85ac09ea12fc4b1112fa76810059364bc6adc9de/parakeet-tdt-0.6b-v3-Q8_0.gguf",
-            ),
-            repository: artifact.repository.into(),
-            revision: artifact.revision.into(),
-            file_name: artifact.filename.into(),
-            bytes: artifact.bytes,
-            blob_sha256: Some(artifact.sha256.into()),
-            catalog: Some(v3.id),
-            name: "Parakeet TDT 0.6B v3".into(),
-            architecture: "parakeet".into(),
-            variant: artifact.variant.into(),
-            languages: v3.languages.iter().map(|code| (*code).to_owned()).collect(),
-            compression: "Q8_0",
-            tensor_bytes: artifact.bytes - 2_000_000,
-            too_big: false,
-        },
+        fixture_catalog(TranscriptionModelId::ParakeetV3),
         Found {
             path: hub.join(
                 "models--handy-computer--whisper-small-gguf/snapshots/3b8e0c4f9d2a7e61c5f0a9b8d7c6e5f4a3b2c1d0/whisper-small-Q8_0.gguf",
@@ -312,4 +293,51 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
             .wrap(),
         ),
     )
+}
+
+/// `model`'s pinned file, as a scene's hub cache holds it.
+pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
+    let definition = crate::transcription::models::definition(model);
+    let crate::transcription::models::ModelRuntime::Gguf(artifact) = definition.runtime else {
+        unreachable!("scenes use GGUF models");
+    };
+    let folder = format!("models--{}", artifact.repository.replacen('/', "--", 1));
+    Found {
+        path: std::path::Path::new("/home/you/.cache/huggingface/hub")
+            .join(folder)
+            .join("snapshots")
+            .join(artifact.revision)
+            .join(artifact.filename),
+        repository: artifact.repository.into(),
+        revision: artifact.revision.into(),
+        file_name: artifact.filename.into(),
+        bytes: artifact.bytes,
+        blob_sha256: Some(artifact.sha256.into()),
+        catalog: Some(model),
+        name: definition.name.into(),
+        architecture: artifact.architecture.into(),
+        variant: artifact.variant.into(),
+        languages: definition
+            .languages
+            .iter()
+            .map(|code| (*code).to_owned())
+            .collect(),
+        compression: "Q8_0",
+        tensor_bytes: artifact.bytes,
+        too_big: false,
+    }
+}
+
+/// Onboarding's choice over [`fixture`]: with the recommended model's exact
+/// file too, or else with the other models listed.
+pub(super) fn onboarding_scene(ui: &mut Ui, recommended_found: bool) {
+    *ui = super::portal_fixture();
+    ui.found.models = fixture();
+    if recommended_found {
+        let recommended = fixture_catalog(ui.settings.transcription.model);
+        ui.found.models.insert(0, recommended);
+    } else {
+        ui.found.expanded = true;
+    }
+    super::onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
 }

@@ -364,9 +364,40 @@ pub fn adopted_catalog(model: &ModelDefinition) -> Option<PathBuf> {
         .filter(|path| fs::metadata(path).is_ok_and(|metadata| metadata.len() == artifact.bytes))
 }
 
+/// Catalog models the person chose to download even though a copy is on
+/// this computer ("Download instead"), until Hex quits.
+static DECLINED: LazyLock<Mutex<Vec<TranscriptionModelId>>> = LazyLock::new(Mutex::default);
+
+/// Downloads `model` the usual way from now on, instead of using the copy
+/// found on this computer. The found file stays where it is.
+pub fn decline(model: TranscriptionModelId) {
+    let mut declined = DECLINED.lock().unwrap_or_else(|error| error.into_inner());
+    if !declined.contains(&model) {
+        declined.push(model);
+    }
+}
+
+/// Uses the copy on this computer again after [`decline`].
+pub fn accept(model: TranscriptionModelId) {
+    DECLINED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|declined| *declined != model);
+}
+
+fn declined(model: TranscriptionModelId) -> bool {
+    DECLINED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains(&model)
+}
+
 /// The cached file this catalog model could use instead of a download: one
 /// already adopted, else an exact match the last scan found.
 pub fn catalog_candidate(model: &ModelDefinition) -> Option<PathBuf> {
+    if declined(model.id) {
+        return None;
+    }
     adopted_catalog(model).or_else(|| {
         last()
             .into_iter()
@@ -550,6 +581,35 @@ mod tests {
         }
         files.sort();
         files
+    }
+
+    #[test]
+    fn download_instead_stops_using_the_found_copy() {
+        let model = super::super::models::definition(TranscriptionModelId::SenseVoiceSmall);
+        let path = PathBuf::from("/nowhere/sense-voice.gguf");
+        let found = vec![Found {
+            path: path.clone(),
+            repository: String::new(),
+            revision: String::new(),
+            file_name: String::new(),
+            bytes: 0,
+            blob_sha256: None,
+            catalog: Some(model.id),
+            name: String::new(),
+            architecture: String::new(),
+            variant: String::new(),
+            languages: Vec::new(),
+            compression: "Q8_0",
+            tensor_bytes: 0,
+            too_big: false,
+        }];
+        CACHE.lock().unwrap().last = found;
+        assert_eq!(catalog_candidate(model), Some(path.clone()));
+        decline(model.id);
+        assert_eq!(catalog_candidate(model), None);
+        accept(model.id);
+        assert_eq!(catalog_candidate(model), Some(path));
+        CACHE.lock().unwrap().last.clear();
     }
 
     #[test]

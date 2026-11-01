@@ -736,8 +736,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   chosen (against the pin or the blob name), and removing one only forgets it.
 - Onboarding shows its model choice only when the scan found a compatible
   model; otherwise the flow is unchanged. Its own download is held while the
-  scan runs and while the choice shows. Hex's recommended model is the default
-  button, and a found model is never picked for the person.
+  scan runs and while the choice shows. The default button is the
+  recommended model's exact copy on this computer (same SHA-256) with
+  Download instead beside it, else downloading the recommended model; other
+  found models sit behind a secondary action, known catalog models first and
+  the rest marked unverified and not benchmarked. A found model is never
+  picked for the person.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
