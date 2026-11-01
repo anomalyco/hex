@@ -698,9 +698,11 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             &glyphs::SPARKLE,
             tr("Speech model"),
             match (row.status, model) {
-                (ItemStatus::Failed, _) => {
-                    tr("The download stopped. Check your connection and try again.").into()
-                }
+                // The real reason, such as a proxy or certificate (#894).
+                (ItemStatus::Failed, _) => super::model_import::download_failure(ui)
+                    .unwrap_or_else(|| {
+                        tr("The download stopped. Check your connection and try again.").into()
+                    }),
                 (_, Some(model)) => format!("{} · {}", model.name, model.size_label()),
                 (_, None) => tr("Runs entirely on this computer").into(),
             },
@@ -721,9 +723,26 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
                 .build(p.k)
                 .key("download")
                 .w(160.0),
-            ItemStatus::Failed => {
-                button(p, "setup-grant", tr("Retry"), kind, move |ui, _| grant(ui))
-            }
+            // A network that blocks the download: retry, or use a model file
+            // brought some other way (#894).
+            ItemStatus::Failed => rune::row()
+                .key("setup-failed-actions")
+                .gap(8.0)
+                .center_y()
+                .child(button(
+                    p,
+                    "setup-use-file",
+                    if super::model_import::using_file(ui) {
+                        tr("Adding model…")
+                    } else {
+                        tr("Use a model file…")
+                    },
+                    ButtonKind::Secondary,
+                    |ui, _| super::model_import::use_file(ui),
+                ))
+                .child(button(p, "setup-grant", tr("Retry"), kind, move |ui, _| {
+                    grant(ui)
+                })),
             _ => button(p, "setup-grant", tr("Download"), kind, move |ui, _| {
                 grant(ui)
             }),

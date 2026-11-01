@@ -2,7 +2,6 @@ use crate::durable::{sync_directory, sync_file};
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread;
@@ -1173,56 +1172,26 @@ fn download_artifact(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = crate::desktop::background_process::command("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--retry",
-            "3",
-            "--connect-timeout",
-            "15",
-            "--speed-limit",
-            "1024",
-            "--speed-time",
-            "60",
-            "--continue-at",
-            "-",
-            "--silent",
-            "--show-error",
-            "--output",
-        ])
-        .arg(&partial)
-        .arg(artifact.download_url())
-        .stderr(Stdio::piped())
-        .spawn()
-        .wrap_err("could not start model download")?;
-    let status = loop {
-        downloaded_bytes.store(
-            fs::metadata(&partial).map_or(0, |metadata| metadata.len()),
-            Ordering::Relaxed,
-        );
-        if canceled.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("model download canceled");
-        }
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        thread::sleep(Duration::from_millis(100));
-    };
-    if !status.success() {
-        let mut stderr = String::new();
-        if let Some(mut pipe) = child.stderr.take() {
-            pipe.read_to_string(&mut stderr)?;
-        }
+    // In-process HTTPS with the system's proxy and trusted roots (`net`), so
+    // managed networks with a proxy or TLS inspection work (#894).
+    let url = artifact.download_url();
+    let fetched = crate::net::download(
+        &crate::net::Download {
+            url: &url,
+            user_agent: &format!("hex/{}", crate::VERSION),
+            size: Some(artifact.bytes),
+            canceled: Some(canceled),
+        },
+        &partial,
+        |bytes| downloaded_bytes.store(bytes, Ordering::Relaxed),
+    );
+    if let Err(error) = fetched {
+        check_canceled(canceled)?;
+        // The first line is the reason onboarding and Settings show.
         bail!(
-            "Could not download the model from huggingface.co or its download CDN. \
-             Check your connection, then retry in Settings. On a managed network, \
-             ask IT to allow Hugging Face model downloads. \
-             The app download uses a separate host. Download progress is kept for retry. \
-             Details ({status}): {}",
-            stderr.trim()
+            "{error}\n\nCheck your connection, then retry, or choose a model file. \
+             On a managed network, ask IT to allow downloads from huggingface.co and \
+             its download CDN. Download progress is kept for retry."
         );
     }
     check_canceled(canceled)?;

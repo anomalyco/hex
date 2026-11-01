@@ -300,6 +300,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("{model} is hidden by the language filter: {state}", ["{model} jest ukryty przez filtr języka: {state}", "{model} 已被语言筛选隐藏：{state}", "{model} は言語の絞り込みで非表示です: {state}", "{model} ist durch den Sprachfilter ausgeblendet: {state}", "{model} está oculto por el filtro de idioma: {state}", "{model} приховано фільтром мови: {state}"]),
     ("Add model file…", ["Dodaj plik modelu…", "添加模型文件…", "モデルファイルを追加…", "Modelldatei hinzufügen…", "Añadir archivo de modelo…", "Додати файл моделі…"]),
     ("Adding model…", ["Dodawanie modelu…", "正在添加模型…", "モデルを追加中…", "Modell wird hinzugefügt…", "Añadiendo modelo…", "Додавання моделі…"]),
+    ("Use a model file…", ["Użyj pliku modelu…", "使用模型文件…", "モデルファイルを使う…", "Modelldatei verwenden…", "Usar un archivo de modelo…", "Використати файл моделі…"]),
     ("Add model file", ["Dodaj plik modelu", "添加模型文件", "モデルファイルを追加", "Modelldatei hinzufügen", "Añadir archivo de modelo", "Додати файл моделі"]),
     ("GGUF speech models", ["Modele mowy GGUF", "GGUF 语音模型", "GGUF 音声モデル", "GGUF-Sprachmodelle", "Modelos de voz GGUF", "Моделі мовлення GGUF"]),
     ("The import stopped.", ["Import został przerwany.", "导入已停止。", "取り込みが止まりました。", "Der Import wurde abgebrochen.", "La importación se detuvo.", "Імпорт зупинився."]),

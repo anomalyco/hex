@@ -227,7 +227,7 @@ substitute for source inspection or a second roadmap.
   and managed `hex.d.ts` typings, watch-reloaded transformation calls with
   per-transformation timeouts and a runtime memory limit, status snapshots,
   and `hex commands init|check`. Its host APIs are thin native bindings:
-  `fetch` over ureq with the platform's TLS (`personal_commands/fetch`),
+  `fetch` through `net` (`personal_commands/fetch`),
   `node:child_process` `exec`/`execFile` over `std::process` with a process
   group or job object per run (`personal_commands/process`), and timers,
   settled through QuickJS's job queue by `personal_commands/io`. They work
@@ -350,11 +350,17 @@ substitute for source inspection or a second roadmap.
   lists too. Each tray maps a `TrayCommand` onto its own runtime.
 - `linux/login_item`: Launch at login on Linux, the managed XDG autostart
   entry the installer also writes; the file is the only state.
+- `net`: Hex's own HTTPS (model downloads, update checks, transformation
+  `fetch`): ureq over the platform's TLS and trusted roots, the proxy the
+  computer uses (environment variables everywhere, then Windows' WinHTTP
+  settings with PAC/WPAD or macOS' CFNetwork settings), bounded resumable
+  ranged downloads, and failures named for a person (`docs/downloads.md`).
+  Use it for any new outbound request; don't shell out to curl.
 - `updater`: the in-app updater on every OS, a client of the Anomaly release
   service (`docs/plans/release-service.md`). `updater/protocol` is the
   protocol's strict SemVer, lenient manifest parsing, and client rules (the
   service's shared test vectors in `tests/fixtures/release-protocol`);
-  `updater/transport` is curl with `If-None-Match` and resumable,
+  `updater/transport` is `net` with `If-None-Match` and resumable,
   size- and SHA-256-checked downloads; `updater/{linux,macos,windows}` detect
   the install method, verify (OS code signature on macOS and Windows), stage,
   and restart into an update.

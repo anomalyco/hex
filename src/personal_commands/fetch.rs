@@ -1,6 +1,6 @@
 //! The HTTP requests behind a script's `fetch`: one blocking ureq request on
-//! its own thread, TLS through the platform (`native-tls`: Security.framework,
-//! SChannel, or OpenSSL) and its trusted roots. Requests and responses are
+//! its own thread, through `net` (TLS through the platform and its trusted
+//! roots, and the system's proxy). Requests and responses are
 //! whole bodies, never streams. Logs name the host, never the path, query,
 //! headers, or bodies.
 
@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use ureq::ResponseExt;
-use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 /// The most response body a script can read.
 const MAX_RESPONSE_BYTES: u64 = 16 << 20;
@@ -77,18 +76,13 @@ pub fn send(request: FetchRequest, timeout: Duration) -> Result<FetchResponse, S
 }
 
 fn exchange(request: FetchRequest, timeout: Duration) -> Result<FetchResponse, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .max_redirects(MAX_REDIRECTS)
-        .timeout_global(Some(timeout))
-        .tls_config(
-            TlsConfig::builder()
-                .provider(TlsProvider::NativeTls)
-                .root_certs(RootCerts::PlatformVerifier)
-                .build(),
-        )
-        .build()
-        .into();
+    // The system's proxy and trusted roots, as model downloads use (`net`).
+    let agent = crate::net::agent(&request.url, |config| {
+        config
+            .http_status_as_error(false)
+            .max_redirects(MAX_REDIRECTS)
+            .timeout_global(Some(timeout))
+    });
     let mut builder = ureq::http::Request::builder()
         .method(request.method.as_str())
         .uri(request.url.as_str());
@@ -137,6 +131,6 @@ fn describe(error: &ureq::Error) -> String {
         ureq::Error::BodyExceedsLimit(_) => {
             format!("the response is larger than {MAX_RESPONSE_BYTES} bytes")
         }
-        error => error.to_string(),
+        error => crate::net::reason(error),
     }
 }
