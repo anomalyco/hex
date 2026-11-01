@@ -564,8 +564,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
   Uncached headless lookups retain live-layout resolution, with all native
   lookup and snapshot construction serialized by the same lock.
-- macOS launch order: `main` calls `rune::prewarm_gpu_on(rune::GpuBackend::Metal)` (`prewarm_gpu()` on
-  other OSes) right after parsing
+- macOS launch order: `main` calls `rune::prewarm_gpu()` (macOS draws with Rune's native Metal
+  backend by default; Hex never picks a backend) right after parsing
   the command line, only when it will run the app (`hex app` without Rune's
   headless flags, or the bundled executable with no command), never for a CLI
   command. A hidden or login launch prewarms too and Rune drops it: whether
