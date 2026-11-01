@@ -16,8 +16,10 @@ mod windows;
 
 const KEEP: Duration = Duration::from_secs(60);
 
-static ANSWERS: LazyLock<Mutex<HashMap<String, (Instant, Option<String>)>>> =
-    LazyLock::new(Mutex::default);
+/// Each scheme and host's proxy, and when it was looked up.
+type Answers = HashMap<String, (Instant, Option<String>)>;
+
+static ANSWERS: LazyLock<Mutex<Answers>> = LazyLock::new(Mutex::default);
 
 /// The proxy for `url`, or `None` to connect directly.
 pub fn proxy_for(url: &str) -> Option<ureq::Proxy> {
