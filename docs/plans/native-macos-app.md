@@ -481,7 +481,7 @@ Surface & Pane Architecture
 
 ### Project Generator & Build Graph
 
-We use **XcodeGen (`macos/project.yml`)** (or checked-in minimal `Hex.xcodeproj` wrapping `HexMacPackage/Package.swift`) so that adding Swift files under `macos/HexMacPackage/Sources/` never touches `.pbxproj` merge conflicts.
+We use **Keel (`macos/Project.swift`)** (`keel ensure` materializes gitignored `macos/Hex.xcodeproj`) so that adding Swift files under `macos/HexMacPackage/Sources/` or `macos/HexMacApp/` never touches `.pbxproj` merge conflicts.
 
 ```ts
 Build Pipeline (scripts/build-app.sh)
@@ -657,7 +657,7 @@ Verification Pyramid
 3. **Decision: `NSMenu` vs SwiftUI `MenuBarExtra` for the Status Item**
    - *Recommendation:* Use AppKit `NSStatusItem` + `NSMenu` (`NSMenuDelegate`). SwiftUI `MenuBarExtra` (both `.menu` and `.window` styles) has well-known macOS bugs with dynamic submenu updates, keyboard shortcuts, and stealing focus from the active application when invoking "Paste Last Dictation".
 4. **Decision: Xcode Project Management (`Hex.xcodeproj` vs `XcodeGen`)**
-   - *Recommendation:* Keep all Swift feature, bridge, and UI code in `macos/HexMacPackage/Package.swift` (where source files are discovered automatically by directory without project file edits) and use a tiny, stable `macos/Hex.xcodeproj` (generated from `macos/project.yml` via `xcodegen`) solely for the `@main` app bundle wrapper, `Assets.xcassets`, `AppIcon.icon`, entitlements, and `Sparkle.framework` embedding.
+   - *Recommendation:* Keep all Swift feature, bridge, and UI code in `macos/HexMacPackage/Package.swift` (where source files are discovered automatically by directory without project file edits) and use a tiny, stable `macos/Hex.xcodeproj` (generated from `macos/Project.swift` via `keel ensure`) solely for the `@main` app bundle wrapper, `Assets.xcassets`, `AppIcon.icon`, entitlements, and `Sparkle.framework` embedding.
 5. **Decision: Merging `origin/feat/meetings-ux` Before vs During M0**
    - *Recommendation:* Merge `feat/meetings-ux` into `main` first (or rebase `M0` directly on `feat/meetings-ux`), because `feat/meetings-ux` already cleanly separates the Rust meeting backend (`meeting_transcript.rs`, `meeting_echo.rs`, `meeting_notes.rs`, `pause_segmenter.rs`, `apple_intelligence.rs`) from the UI presentation.
 
