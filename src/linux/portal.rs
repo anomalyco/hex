@@ -1017,31 +1017,31 @@ mod tests {
     /// a data directory provides is never written at all.
     #[test]
     fn the_fallback_is_written_once_and_only_when_nothing_provides_it() {
-        let (root, entries) = entries("once");
-        assert_eq!(entries.ensure("/opt/hex").unwrap(), Some(entries.entry()));
-        let written = std::fs::metadata(entries.entry())
+        let (root, fallback) = entries("once");
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), Some(fallback.entry()));
+        let written = std::fs::metadata(fallback.entry())
             .unwrap()
             .modified()
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
-        assert_eq!(entries.tidy().unwrap(), None);
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), None);
+        assert_eq!(fallback.tidy().unwrap(), None);
         assert_eq!(
-            std::fs::metadata(entries.entry())
+            std::fs::metadata(fallback.entry())
                 .unwrap()
                 .modified()
                 .unwrap(),
             written
         );
         std::fs::remove_dir_all(root).unwrap();
-        let (root, entries) = entries("provided");
+        let (root, provided) = entries("provided");
         std::fs::write(
-            entries.system[0].join("anomaly.hex.desktop"),
+            provided.system[0].join("anomaly.hex.desktop"),
             "[Desktop Entry]\n",
         )
         .unwrap();
-        assert_eq!(entries.ensure("/opt/hex").unwrap(), None);
-        assert!(!entries.entry().exists());
+        assert_eq!(provided.ensure("/opt/hex").unwrap(), None);
+        assert!(!provided.entry().exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
