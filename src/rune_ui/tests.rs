@@ -1459,15 +1459,15 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     let mut rt = runtime("picker", true, PANE_SIZE);
     rt.state.settings.transcription = TranscriptionSelection {
         model: TranscriptionModelId::WhisperLargeV3Turbo,
-        language: "ja".into(),
+        language: "he".into(),
     };
     rt.state.picker.installed = Some(Vec::new());
     rt.invalidate();
     settle(&mut rt);
-    let card = picker_card("ja", TranscriptionModelId::ParakeetUnifiedEnglish);
+    let card = picker_card("he", TranscriptionModelId::ParakeetUnifiedEnglish);
     let shown = texts(&rt);
     assert!(
-        shown.contains(&"Doesn't support Japanese; switches the language to English".to_owned()),
+        shown.contains(&"Doesn't support Hebrew; switches the language to English".to_owned()),
         "{shown:?}"
     );
     tap(&mut rt, &format!("{card}/top/actions/choose-model"));
@@ -1489,7 +1489,7 @@ fn a_model_without_the_saved_language_falls_back_to_its_own_visibly() {
     let shown = texts(&rt);
     assert!(
         shown.contains(
-            &"Parakeet Unified English doesn't support Japanese, so the language changed to English"
+            &"Parakeet Unified English doesn't support Hebrew, so the language changed to English"
                 .to_owned()
         ),
         "{shown:?}"
