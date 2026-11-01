@@ -255,6 +255,12 @@ substitute for source inspection or a second roadmap.
   process (host thread, window on demand through one seam, Quit), the hotkey
   capture-transcribe-paste loop with Paste Last,
   and paste.
+- `linux/service` also adopts the session's Wayland display at `hex service`
+  start when the unit has none (Hyprland imports nothing into systemd; #756):
+  the user manager's `WAYLAND_DISPLAY`, else the newest answering
+  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
+  `limitation()` names the HUD's failure: no display, no layer-shell, or
+  Rune's overlay error.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on
@@ -532,12 +538,15 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 ## Invariants
 
-- Settings never stop a launch (#744). A field this build can't read (`null`,
-  a choice a newer build added, a wrong type) keeps its default with a
-  warning, and the file is not rewritten; only a file that isn't JSON fails
-  `AppSettings::load`, and then `load_for_launch` moves it aside, starts with
-  defaults, and the window shows why. Never write a value an older build
-  can't read: leave an unset option out of the file instead of `null`.
+- Settings errors never prevent launch. `app_settings/persistence` defaults
+  only invalid fields in memory and logs each key and reason; unknown keys
+  are ignored. Invalid JSON or unreadable files use defaults without changing
+  the original. Before any save over invalid settings, preserve the exact
+  original beside it as `settings.json.unreadable-<sha256>` (owner-only;
+  identical originals share one backup). A failed backup blocks the save.
+  Keep saved values readable by older builds: an unchosen
+  `meetings.retention` is omitted, not `null`. Do not omit optional fields
+  whose absence restores a nonempty default, such as `paste_last_hotkey`.
 - On a new Mac, release dictation starts only after Microphone, Accessibility,
   and the selected dictation model are ready. Hex never asks for Input
   Monitoring: Accessibility also grants the listen-event access its shortcut

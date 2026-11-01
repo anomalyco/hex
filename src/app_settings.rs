@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
-mod lenient;
-use lenient::{decode_leniently, legacy_recognition_hints};
+mod persistence;
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -1128,7 +1127,7 @@ pub struct MeetingSettings {
     /// `None` until the user chooses: meetings recorded since the default
     /// began are kept 24 hours, and older ones stay. Left out of the file
     /// while unchosen: a build from before it can't read `null` (#744).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<MeetingRetention>,
 }
 
@@ -2093,6 +2092,7 @@ impl AppSettings {
             }
             if imported
                 && path.exists()
+                && persistence::healthy_file(&path)
                 && let Err(error) = settings.write_to(&path)
             {
                 tracing::warn!(%error, "could not record the Scrawl settings import");
@@ -2198,55 +2198,6 @@ impl AppSettings {
         serde_json::from_slice::<File>(&data).ok()?.updates.channel
     }
 
-    pub(crate) fn load_from(path: &std::path::Path) -> Result<Self> {
-        match fs::read(path) {
-            Ok(data) => {
-                let (mut settings, dropped) = decode_leniently(&data)?;
-                let loaded = serde_json::to_value(&settings)?;
-                let hints = legacy_recognition_hints(&data);
-                if let Err(error) = settings.validate_recording_duck_volume() {
-                    tracing::warn!(%error, "using the default recording_duck_volume");
-                    settings.recording_duck_volume = Self::default().recording_duck_volume;
-                }
-                settings.dictation_processing.default_mode.name = "Global".into();
-                settings.repair_bare_primary_clicks();
-                #[cfg(target_os = "macos")]
-                settings.repair_mouse_shortcuts();
-                settings.normalize_double_tap_settings();
-                settings.migrate_legacy_replacements();
-                settings.normalize_mode_application_names();
-                settings.migrate_disabled_transcription_model();
-                for hints in &hints {
-                    crate::dictation::vocabulary::fold_hints(&mut settings.vocabulary, hints);
-                }
-                settings.apply_one_time_migrations();
-                settings.normalize_transcription_recents();
-                // A model that is gone, or a language it lost, maps to nothing.
-                settings
-                    .keyboard_model_switching
-                    .mappings
-                    .retain(|_, choice| choice.validate().is_ok());
-                if let Err(error) =
-                    crate::transcription::models::validate_saved(&settings.transcription)
-                {
-                    tracing::warn!(%error, "using the default transcription model");
-                    settings.transcription = Self::default().transcription;
-                }
-                // A value this build can't read may be a newer build's, so
-                // the file is rewritten only once it reads in full.
-                if dropped.is_empty()
-                    && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
-                    && let Err(error) = settings.write_to(path)
-                {
-                    tracing::warn!(%error, "could not persist normalized settings");
-                }
-                Ok(settings)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(error) => Err(error.into()),
-        }
-    }
-
     pub fn save(&self) -> Result<()> {
         let path = path()?;
         self.write_to(&path)?;
@@ -2260,21 +2211,6 @@ impl AppSettings {
         {
             return Err(eyre!("recording_duck_volume must be between 0 and 1"));
         }
-        Ok(())
-    }
-
-    fn write_to(&self, path: &std::path::Path) -> Result<()> {
-        self.validate_recording_duck_volume()?;
-        let parent = path
-            .parent()
-            .ok_or_else(|| eyre!("settings path has no parent"))?;
-        fs::create_dir_all(parent)?;
-        #[cfg(target_os = "macos")]
-        if !path.exists() {
-            // Saving new preferences does not imply onboarding completion.
-            crate::desktop::onboarding::record_pending_at(parent)?;
-        }
-        crate::durable::write(path, &serde_json::to_vec_pretty(self)?)?;
         Ok(())
     }
 
@@ -3663,9 +3599,10 @@ mod tests {
         let saved = serde_json::to_value(AppSettings::default()).unwrap();
         assert!(saved["meetings"].get("retention").is_none());
 
-        // Only a file that isn't JSON fails.
+        // Even malformed JSON defaults in memory and stays in place.
         fs::write(&dir.path, "{ not json").unwrap();
-        assert!(AppSettings::load_from(&dir.path).is_err());
+        assert_eq!(AppSettings::load_from(&dir.path).unwrap(), defaults);
+        assert_eq!(fs::read_to_string(&dir.path).unwrap(), "{ not json");
     }
 
     #[cfg(target_os = "macos")]
