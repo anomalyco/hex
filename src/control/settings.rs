@@ -373,6 +373,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.recent_dictations",
+        Kind::Bool,
+        "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

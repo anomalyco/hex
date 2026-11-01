@@ -86,10 +86,11 @@ pub enum Feature {
     ParakeetUltra,
     StandaloneSpecialKeys,
     HistoryStats,
+    RecentDictations,
 }
 
 impl Feature {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -118,6 +119,7 @@ impl Feature {
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
+        Self::RecentDictations,
     ];
 
     /// The features this OS and build have.
@@ -168,7 +170,8 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
-            | Self::HistoryStats => Audience::Everyone,
+            | Self::HistoryStats
+            | Self::RecentDictations => Audience::Everyone,
         }
     }
 
@@ -209,7 +212,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold => cfg!(target_os = "macos"),
+            | Self::TapOrHold
+            | Self::RecentDictations => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -257,6 +261,7 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
+            Self::RecentDictations => "recent-dictations",
         }
     }
 
@@ -291,6 +296,7 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
+            Self::RecentDictations => "labs.recent_dictations",
         }
     }
 
@@ -365,6 +371,9 @@ impl Feature {
             Self::HistoryStats => {
                 "Show a summary of your retained dictations at the top of History, with hex history stats"
             }
+            Self::RecentDictations => {
+                "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
+            }
         }
     }
 
@@ -403,6 +412,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
+            Self::RecentDictations => settings.labs.recent_dictations,
         }
     }
 
@@ -435,6 +445,7 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
+            Self::RecentDictations => settings.labs.recent_dictations = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -463,8 +474,9 @@ const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
 const PARAKEET_ULTRA: u32 = 1 << 17;
 const HISTORY_STATS: u32 = 1 << 18;
+const RECENT_DICTATIONS: u32 = 1 << 19;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 19;
+const MINUTES_SHIFT: u32 = 20;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -582,6 +594,13 @@ pub fn history_stats() -> bool {
     on(HISTORY_STATS)
 }
 
+/// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
+/// menu opens).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn recent_dictations() -> bool {
+    on(RECENT_DICTATIONS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -653,6 +672,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             PARAKEET_ULTRA,
         ),
         (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
+        (
+            Feature::RecentDictations,
+            settings.recent_dictations,
+            RECENT_DICTATIONS,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -988,6 +1012,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HISTORY_STATS, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn recent_dictations_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & RECENT_DICTATIONS, 0);
+        labs.recent_dictations = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & RECENT_DICTATIONS, 0);
+        assert_eq!(state & HISTORY_STATS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

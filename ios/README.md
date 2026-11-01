@@ -41,6 +41,9 @@ it never accesses the microphone, speech model, or network.
     settled in idle. Lock Screen / Dynamic Island Live Activities render a
     matching `Canvas` dot-matrix badge (`HexDotMatrixBadge`) because WidgetKit
     archives static view snapshots rather than hosting live `CAMetalLayer`s.
+    Meter polling stays alive through a temporary non-recording state of the
+    same capture; it resumes app levels and keyboard snapshots when the recorder
+    is ready again. Capture completion, interruption, and Stop end polling.
   - **Warm session (`Off`, `5m`, `15m`, `1h`):** Picking a duration on **Keep
     mic warm** starts an `AVAudioEngine` input session immediately (default
     `15m`) so subsequent taps on **Dictate** record directly inside the
@@ -92,9 +95,14 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   across `HEXMobile`, `HEXKeyboard`, and `HEXWidgets`; App Group command/snapshot
   framing; the `DictationController` generation/expiry race and 30s post-close
   transcript delivery; 10s handoff window + URL-scheme auto-return fallback;
-  interruption handling; deterministic style formatting; and UI layouts.
+  interruption handling; meter recovery after injected startup and mid-capture
+  recorder unavailability (including keyboard levels and heartbeat); deterministic
+  style formatting; and UI layouts.
 - **Requires a physical iPhone:** Real `AVAudioSession` background keepalive
   survival across lock/app switches, live orange indicator behavior, on-device
   `SpeechTranscriber` / Neural Engine Parakeet latency, URL-scheme return into
   installed third-party apps (Messages, Slack, Claude, ChatGPT), Dynamic Island
-  Live Activity interaction, and hardware Action Button invocation.
+  Live Activity interaction, and hardware Action Button invocation. Transient
+  `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
+  changes have not been reproduced on hardware; the meter recovery tests inject
+  that condition through `ActiveAudioCapture`.

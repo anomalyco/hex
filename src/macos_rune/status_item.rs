@@ -24,6 +24,8 @@ pub enum StatusItemAction {
     SelectModel(TranscriptionModelId),
     CancelModelPreparation,
     PasteLast,
+    /// Copy History entry `id` (Labs › Copy recent dictations).
+    CopyRecentDictation(u64),
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
@@ -77,6 +79,22 @@ objc2::define_class!(
         #[unsafe(method(pasteLast:))]
         fn paste_last(&self, _sender: &AnyObject) {
             let _ = self.ivars().actions.try_send(StatusItemAction::PasteLast);
+        }
+
+        #[unsafe(method(copyRecentDictation:))]
+        fn copy_recent_dictation(&self, sender: &NSMenuItem) {
+            if let Ok(id) = u64::try_from(sender.tag()) {
+                let _ = self
+                    .ivars()
+                    .actions
+                    .try_send(StatusItemAction::CopyRecentDictation(id));
+            }
+        }
+
+        /// The status menu's delegate: it is about to open.
+        #[unsafe(method(menuNeedsUpdate:))]
+        fn menu_needs_update(&self, _menu: &NSMenu) {
+            refresh_recent_dictations();
         }
 
         #[unsafe(method(startMeeting:))]
@@ -154,6 +172,9 @@ struct StatusItemController {
     meeting_open: Retained<NSMenuItem>,
     meeting_separator: Retained<NSMenuItem>,
     meeting_button: RefCell<(String, bool)>,
+    /// Labs › Copy recent dictations: hidden until the menu opens with it on.
+    recent: Retained<NSMenuItem>,
+    recent_menu: Retained<NSMenu>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
     /// A checkmark for `capture.show_overlays_in_recordings`, in builds
@@ -222,6 +243,14 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         sel!(pasteLast:),
         mtm,
     );
+    let recent_menu = NSMenu::initWithTitle(
+        NSMenu::alloc(mtm),
+        &NSString::from_str("Copy Recent Dictation"),
+    );
+    let recent = plain_item("Copy Recent Dictation", mtm);
+    recent.setSubmenu(Some(&recent_menu));
+    recent.setHidden(true);
+    menu.addItem(&recent);
     add_item(&menu, &target, "Settings…", sel!(openSettings:), mtm);
     #[cfg(hex_capture)]
     let overlays_in_recordings = {
@@ -313,6 +342,11 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     let symbol = status_bar_icon(IDLE_ICON_PNG, "Hex")?;
     let recording_symbol = status_bar_icon(RECORDING_ICON_PNG, "Hex is recording a meeting")?;
     button.setImage(Some(&symbol));
+    // SAFETY: the target answers `menuNeedsUpdate:` and outlives the menu's
+    // weak delegate reference (both live in STATUS_ITEM for the app's life).
+    unsafe {
+        let _: () = msg_send![&*menu, setDelegate: &*target];
+    }
     item.setMenu(Some(&menu));
 
     STATUS_ITEM.with(|status_item| {
@@ -330,6 +364,8 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_open,
             meeting_separator,
             meeting_button: RefCell::new((String::new(), false)),
+            recent,
+            recent_menu,
             update,
             update_title: RefCell::new("Check for Updates…".into()),
             #[cfg(hex_capture)]
@@ -510,6 +546,55 @@ fn menu_title(title: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
+/// How many dictations Copy Recent Dictation lists.
+const RECENT_DICTATIONS: usize = 5;
+
+/// A dictation on one menu line: whitespace and line breaks collapsed, then
+/// cut like a meeting title.
+fn recent_title(text: &str) -> String {
+    menu_title(&text.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// Rebuilds Copy Recent Dictation as the menu opens. History is read only
+/// while Labs › Copy recent dictations is on; the item stays hidden while
+/// it is off, History is off, or nothing is listed.
+fn refresh_recent_dictations() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let entries = if crate::labs::recent_dictations() {
+        crate::macos_rune::runtime()
+            .and_then(|runtime| runtime.history())
+            .map(|history| history.recent(RECENT_DICTATIONS))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    STATUS_ITEM.with(|controller| {
+        let controller = controller.borrow();
+        let Some(controller) = controller.as_ref() else {
+            return;
+        };
+        controller.recent_menu.removeAllItems();
+        let mut listed = false;
+        for entry in &entries {
+            let Ok(tag) = isize::try_from(entry.id) else {
+                continue;
+            };
+            let item = add_item(
+                &controller.recent_menu,
+                &controller.target,
+                &recent_title(&entry.final_text),
+                sel!(copyRecentDictation:),
+                mtm,
+            );
+            item.setTag(tag);
+            listed = true;
+        }
+        controller.recent.setHidden(!listed);
+    });
+}
+
 fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
     use crate::desktop::host::DesktopUpdateStatus;
     match status {
@@ -669,6 +754,19 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+    }
+
+    #[test]
+    fn recent_dictations_show_on_one_short_line() {
+        assert_eq!(
+            recent_title("  Hello\nthere,\n\n  world  "),
+            "Hello there, world"
+        );
+        let long = recent_title(
+            "A long dictation that goes on\nand on well past what fits on one menu line",
+        );
+        assert_eq!(long, "A long dictation that goes on and on well past…");
+        assert_eq!(long.chars().count(), 47);
     }
 
     #[test]
