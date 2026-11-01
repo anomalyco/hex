@@ -1993,7 +1993,10 @@ fn decode_leniently(data: &[u8]) -> Result<(AppSettings, Vec<String>)> {
     let mut dropped = Vec::new();
     merge_leniently(&mut accepted, &file, String::new(), &mut dropped)?;
     for path in &dropped {
-        tracing::warn!(setting = path, "a setting could not be read; using its default");
+        tracing::warn!(
+            setting = path,
+            "a setting could not be read; using its default"
+        );
     }
     Ok((serde_json::from_value(accepted)?, dropped))
 }
@@ -2353,7 +2356,9 @@ impl AppSettings {
                 "Hex couldn't read its settings and started with defaults. The old file is at {}. ({error:#})",
                 aside.display()
             ),
-            None => format!("Hex couldn't read its settings and started with defaults. ({error:#})"),
+            None => {
+                format!("Hex couldn't read its settings and started with defaults. ({error:#})")
+            }
         };
         (Self::default(), Some(message))
     }
@@ -3745,13 +3750,26 @@ mod tests {
         assert_eq!(settings.history_retention, defaults.history_retention);
         assert_eq!(settings.show_dock_icon, defaults.show_dock_icon);
         assert_eq!(settings.meetings.retention, None);
-        assert_eq!(settings.recording_duck_volume, defaults.recording_duck_volume);
-        assert_eq!(fs::read_to_string(&dir.path).unwrap(), file, "not rewritten");
+        assert_eq!(
+            settings.recording_duck_volume,
+            defaults.recording_duck_volume
+        );
+        assert_eq!(
+            fs::read_to_string(&dir.path).unwrap(),
+            file,
+            "not rewritten"
+        );
 
         // `null` reads as unchosen, and unchosen is never written as `null`,
         // which 3.1.0 can't read.
         fs::write(&dir.path, r#"{"meetings": {"retention": null}}"#).unwrap();
-        assert_eq!(AppSettings::load_from(&dir.path).unwrap().meetings.retention, None);
+        assert_eq!(
+            AppSettings::load_from(&dir.path)
+                .unwrap()
+                .meetings
+                .retention,
+            None
+        );
         let saved = serde_json::to_value(AppSettings::default()).unwrap();
         assert!(saved["meetings"].get("retention").is_none());
 
