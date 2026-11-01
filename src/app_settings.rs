@@ -466,17 +466,27 @@ impl HotkeyKey {
 }
 
 /// The keycap label for a key name: one character in uppercase, otherwise
-/// the name with a leading capital ("space" -> "Space", "f12" -> "F12").
+/// each word with a leading capital ("space" -> "Space", "f12" -> "F12",
+/// "num enter" -> "Num Enter").
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn key_label(name: &str) -> String {
     let name = name.trim();
-    let mut characters = name.chars();
-    match characters.next() {
-        _ if shortcut_repair::is_scroll_lock(name) => "Scroll Lock".into(),
-        Some(first) if name.chars().count() == 1 => first.to_uppercase().collect(),
-        Some(first) => first.to_uppercase().chain(characters).collect(),
-        None => String::new(),
+    if shortcut_repair::is_scroll_lock(name) {
+        return "Scroll Lock".into();
     }
+    if name.chars().count() == 1 {
+        return name.to_uppercase();
+    }
+    name.split(' ')
+        .map(|word| {
+            let mut characters = word.chars();
+            characters
+                .next()
+                .map(|first| first.to_uppercase().chain(characters).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A shortcut as a chord: the set of keys held together, any order and
