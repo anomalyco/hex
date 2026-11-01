@@ -56,7 +56,10 @@ fn onboarding_goldens() {
 /// Hugging Face cache): the real settings load, the real decision to open the
 /// tour, the real download and verification of the model the tour picks, and
 /// every step to Done. Downloads the recommended model, so only
-/// scripts/check-onboarding.sh runs it.
+/// scripts/check-onboarding.sh runs it. The window here is a fixture, not
+/// connected to a service: the test does the service's download itself,
+/// calls the found-models scan directly, and nothing writes the completion
+/// marker.
 #[test]
 #[ignore = "downloads a speech model; run by scripts/check-onboarding.sh"]
 fn onboarding_walkthrough() {
