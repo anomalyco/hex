@@ -1,0 +1,9 @@
+{
+  // Paths are relative to the repository root, which is each variant's folder: run strobe from there.
+  "build": { "command": "bun run build", "cwd": "site", "output": "site/.cloudflare/output/v0/workers/default/assets" },
+  "serve": {
+    "command": "bun perf/serve.ts {port}",
+    "cwd": "site",
+    "ready": "http://127.0.0.1:{port}/hex/"
+  }
+}

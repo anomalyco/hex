@@ -42,8 +42,11 @@ renders it, with a Canvas 2D fallback (`?canvas2d` forces it).
   manifest are fetched on start, the opening clips first. The sound toggle in the
   header remembers its choice in `localStorage`.
 - It pauses when the tab is hidden or the hero is off screen, runs the idle head at
-  30 fps, caps the pixel ratio (1.5 on phones), and thins the messages on small
-  screens. Reduced motion keeps the still until the key is pressed, then runs only
+  30 fps on a timer (no frame callback between its frames), caps the pixel ratio
+  (1.5 on phones), and thins the messages on small screens. The option key's glow
+  pulses at 30 fps from `src/glow.ts`, set by the key until the engine runs and then
+  by the engine in the head's frame: as a CSS animation it restyled the page on every
+  vsync. Reduced motion keeps the still until the key is pressed, then runs only
   the calm stage with no shake or flashes.
 - Dax, Jay and Frank (teammates) appear with their real X avatars; everyone else is
   invented with a generated portrait (`src/shout/assets/people.webp`). Brand glyphs
@@ -56,6 +59,18 @@ Regenerate the idle still after changing the head:
 ```sh
 VITE_SHOUT_CAPTURE=1 bunx vite --port 5531
 HEX_SITE_URL=http://127.0.0.1:5531 bun run generate:poster
+```
+
+## Performance
+
+`perf/hex.bench.ts` is a [strobe](https://github.com/Hona/strobe) bench: load to
+the live head, the idle head for 8 s, and the first 20 s of the show after a click
+on the key. `strobe.json` builds the site and serves the Build Output under `/hex/`
+with `perf/serve.ts`. From the repository root, against a checkout of `dev` that
+has the same two files:
+
+```sh
+strobe bench site/perf/hex.bench.ts --base <dev checkout> --head .
 ```
 
 ## Social image

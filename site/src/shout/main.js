@@ -11,6 +11,7 @@ import { GpuRenderer } from "./gpu.js"
 import { Words } from "./words.js"
 import { AudioEngine } from "./audio.js"
 import { ScreenBreak } from "./screen-break.js"
+import { setGlow } from "../glow.ts"
 
 const CAPTURE = import.meta.env.VITE_SHOUT_CAPTURE === "1"
 // The poster box is this many head radii wide (head, hair, and halo).
@@ -2442,8 +2443,12 @@ on(root, "pointerdown", (e) => {
 // idle head runs at a reduced rate; reduced motion draws one still frame.
 let last = performance.now()
 let raf = 0
+let idleTimer = 0
+const keycap = root.querySelector(".keycap")
 let visible = true
 let idleAcc = 0
+const IDLE_STEP = 1 / 31
+const IDLE_LEAD_MS = 16
 const frame = (now) => {
   raf = 0
   const dt = (now - last) / 1000
@@ -2452,15 +2457,29 @@ const frame = (now) => {
   else {
     // Idle: 30 fps is plenty for a breathing head and halves the GPU work before the click.
     idleAcc += dt
-    if (idleAcc >= 1 / 31) {
+    if (idleAcc >= IDLE_STEP) {
       step(idleAcc)
       idleAcc = 0
+      // The key's glow pulse moves in the head's frame (../glow.ts).
+      if (keycap) setGlow(keycap, now)
     }
   }
-  if (visible && !document.hidden && !(reduced && !started)) raf = requestAnimationFrame(frame)
+  if (!visible || document.hidden || (reduced && !started)) return
+  if (started) raf = requestAnimationFrame(frame)
+  else {
+    // Between idle steps a timer waits, not a frame callback per vsync: on a 165 Hz display those were
+    // 135 wakeups a second that drew nothing. It wakes about a frame and a half early: a page that asks for a
+    // frame from idle gets a slot already under way, and a step drawn in it showed a vsync late every time.
+    idleTimer = setTimeout(() => {
+      idleTimer = 0
+      raf = requestAnimationFrame(frame)
+    }, Math.max(0, (IDLE_STEP - idleAcc) * 1000 - IDLE_LEAD_MS))
+  }
 }
 const wake = () => {
   if (raf || !visible || document.hidden || (reduced && !started) || capture) return
+  clearTimeout(idleTimer)
+  idleTimer = 0
   last = performance.now()
   raf = requestAnimationFrame(frame)
 }
@@ -2572,6 +2591,8 @@ return {
     screenBreak.destroy()
     if (raf) cancelAnimationFrame(raf)
     raf = 0
+    clearTimeout(idleTimer)
+    idleTimer = 0
     visible = false
     audio.close()
   },
