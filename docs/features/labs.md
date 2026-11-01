@@ -46,6 +46,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
+├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -451,6 +452,45 @@ flow in a real window, macOS (Metal) and Windows at all.
 Checks: `transcription::gguf_header::tests`,
 `transcription::custom_models::tests`, and the picker golden
 `rune-picker-custom-models-light`.
+
+Parakeet Ultra (`parakeet-ultra`, issue 648, every OS): a pinned catalog
+entry, `parakeet_ultra`, listed and runnable only while the toggle is on
+(`ModelDefinition::available` reads `labs::parakeet_ultra`).
+
+```ts
+Picker card -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
+│   timestamps; v3's "Detects language from audio" note; never recommended
+├── Download -> handy-computer/parakeet-ultra-gguf@a1539be1, parakeet-ultra-Q8_0.gguf,
+│   740,363,168 bytes, SHA-256 007a5976…0a59 (430 F32, 225 Q8_0, 48 F16 tensors)
+├── Details -> languages; peak memory measured on apollo (~0.7 GB GPU, ~0.2 GB
+│   RAM, Radeon 8060S over Vulkan; not measured elsewhere); "Experimental: Hex
+│   has run it only on Linux (Vulkan) so far."; the credit word for word ("Parakeet
+│   Ultra by Moondream, based on NVIDIA Parakeet TDT 0.6B v3. GGUF conversion and
+│   quantization by handy-computer. Creative Commons Attribution 4.0 International
+│   (CC BY 4.0)."); the publisher's NOTICE; Source and License links
+├── "Published conversion benchmarks; not measured in Hex" (folded) -> conditions
+│   (FLEURS test, Q8_0, CUDA, batch 8, each language's hint, no timestamps,
+│   transcribe.cpp 021aa17d; file digest, dataset revision, scorer unknown), then
+│   25 FLEURS WERs from transcribe.cpp 7045d1c's catalog/parakeet-ultra.json
+├── Accuracy 98.2% / Labs › Benchmark details: LibriSpeech test-clean 1.80%
+│   WER, the same published source (2,620 utterances, batch 8, CUDA)
+└── Toggle off while Ultra is the dictation model -> refused (row locked,
+    `hex labs off`, `hex settings set`); a saved Ultra with the toggle off some
+    other way stays saved and the listener runs a downloaded fallback
+```
+
+Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01): the file
+matched its pinned size and SHA-256 (`hex model install` verified it); `hex
+model transcribe` with Ultra, passed and saved, transcribed FLEURS German and
+English and JFK correctly; Ultra ran a FLEURS English clip at 191x against
+Parakeet v3's 211x in transcribe-cli; turning the toggle off while Ultra was
+selected was refused. Not observed: Metal, Windows, the picker in a real window
+(the `picker-parakeet-ultra` scene was rendered once, not as a golden, because
+it lists Ultra only where the saved settings turn the Lab on).
+Checks: `parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives`
+in [models.rs](../../src/transcription/models.rs) and
+`parakeet_ultras_published_scores_cover_its_languages_once` in
+[model_details.rs](../../src/transcription/model_details.rs).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

@@ -95,6 +95,8 @@ pub(super) fn section(ui: &Ui, p: Paint, model: &ModelDefinition) -> Option<El> 
         .key("details")
         .gap(6.0)
         .pt(4.0)
+        // Reading the details never chooses the card's model.
+        .on_press(|_: &mut Ui| {})
         .child(line(
             p,
             "languages",
