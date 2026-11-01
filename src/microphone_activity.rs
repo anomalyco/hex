@@ -159,7 +159,10 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 20] = [
+const EXECUTABLES: [(&str, &str); 22] = [
+    // Gather for Windows.
+    ("gather", "com.gather.GatherV2"),
+    ("gatherv2", "com.gather.GatherV2"),
     // WhatsApp for Windows, before and after its WinUI rewrite.
     ("whatsapp", "net.whatsapp.WhatsApp"),
     ("whatsapp.root", "net.whatsapp.WhatsApp"),
@@ -210,6 +213,9 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         // The native (Catalyst) app, and the older Electron one.
         ("net.whatsapp.whatsapp", "net.whatsapp.WhatsApp"),
         ("desktop.whatsapp", "net.whatsapp.WhatsApp"),
+        // Gather V2 and its Electron helpers, and Gather V1.
+        ("com.gather.gatherv2", "com.gather.GatherV2"),
+        ("com.gather.gather", "com.gather.GatherV2"),
         ("com.google.chrome", "com.google.Chrome"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
@@ -234,6 +240,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.tinyspeck.slackmacgap" => Some("Slack"),
         "com.apple.FaceTime" => Some("FaceTime"),
         "net.whatsapp.WhatsApp" => Some("WhatsApp"),
+        "com.gather.GatherV2" => Some("Gather"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),
