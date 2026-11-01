@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
-pub use super::model_benchmarks::{BenchmarkRecord, ErrorMetric, benchmark};
+pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1499,6 +1499,7 @@ mod tests {
 
     #[test]
     fn only_figures_on_the_same_metric_language_and_dataset_compare() {
+        use crate::transcription::model_benchmarks::ErrorMetric;
         let qwen = benchmark(definition(TranscriptionModelId::Qwen3Asr06B)).unwrap();
         let sensevoice = benchmark(definition(TranscriptionModelId::SenseVoiceSmall)).unwrap();
         assert_eq!(qwen.rate_label(), "7.57% CER");
