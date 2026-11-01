@@ -239,6 +239,8 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.needsGlobeKey != globe {
             viewModel.needsGlobeKey = globe
         }
+        // Fields that ask for a dark keyboard get one even in light mode, like the system keyboard.
+        overrideUserInterfaceStyle = textDocumentProxy.keyboardAppearance == .dark ? .dark : .unspecified
         let nextReturn: String = switch textDocumentProxy.returnKeyType {
         case .send: "Send"
         case .search: "Search"
