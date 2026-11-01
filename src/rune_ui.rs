@@ -2127,6 +2127,16 @@ const SCENES: &[Scene] = &[
     ("onboarding-model-found", |ui| {
         *ui = portal_fixture();
         ui.found.models = found::fixture();
+        ui.found.expanded = true;
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
+    }),
+    // The recommended model's exact file is on this computer: Use it first.
+    ("onboarding-model-found-recommended", |ui| {
+        *ui = portal_fixture();
+        let recommended = found::fixture_catalog(ui.settings.transcription.model);
+        ui.found.models = std::iter::once(recommended)
+            .chain(found::fixture())
+            .collect();
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, false);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).

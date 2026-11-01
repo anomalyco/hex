@@ -364,9 +364,40 @@ pub fn adopted_catalog(model: &ModelDefinition) -> Option<PathBuf> {
         .filter(|path| fs::metadata(path).is_ok_and(|metadata| metadata.len() == artifact.bytes))
 }
 
+/// Catalog models the person chose to download even though a copy is on
+/// this computer ("Download instead"), until Hex quits.
+static DECLINED: LazyLock<Mutex<Vec<TranscriptionModelId>>> = LazyLock::new(Mutex::default);
+
+/// Downloads `model` the usual way from now on, instead of using the copy
+/// found on this computer. The found file stays where it is.
+pub fn decline(model: TranscriptionModelId) {
+    let mut declined = DECLINED.lock().unwrap_or_else(|error| error.into_inner());
+    if !declined.contains(&model) {
+        declined.push(model);
+    }
+}
+
+/// Uses the copy on this computer again after [`decline`].
+pub fn accept(model: TranscriptionModelId) {
+    DECLINED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|declined| *declined != model);
+}
+
+fn declined(model: TranscriptionModelId) -> bool {
+    DECLINED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains(&model)
+}
+
 /// The cached file this catalog model could use instead of a download: one
 /// already adopted, else an exact match the last scan found.
 pub fn catalog_candidate(model: &ModelDefinition) -> Option<PathBuf> {
+    if declined(model.id) {
+        return None;
+    }
     adopted_catalog(model).or_else(|| {
         last()
             .into_iter()

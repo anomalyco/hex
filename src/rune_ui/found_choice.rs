@@ -1,10 +1,13 @@
 //! Onboarding's model choice, shown only when the hub-cache scan found a
-//! compatible model (`found_models`): Hex's recommended model, marked
-//! Recommended and the default (Return picks it), or one already on this
-//! computer. Nothing is picked for the person, and without a found model
-//! the step is exactly as before.
+//! compatible model (`found_models`). Hex's recommended model is the default
+//! (Return picks it): its exact copy already on this computer when the cache
+//! holds one, with Download instead beside it, else its download. Other
+//! models on this computer sit behind "Use a model already on this
+//! computer": known catalog models first, then unverified ones. Nothing is
+//! picked for the person, and without a found model the step is exactly as
+//! before.
 
-use rune::{El, col, text};
+use rune::{El, col, row, text};
 use rune_kit::{Badge, glyphs};
 
 use super::Ui;
@@ -28,18 +31,23 @@ fn recommended_on_disk(ui: &Ui) -> Option<&Found> {
         .find(|found| found.catalog == Some(ui.settings.transcription.model))
 }
 
-/// The two options under the setup card.
+/// The recommended model, then the models already on this computer behind
+/// a secondary button. The primary action is the recommended copy already
+/// here when the cache holds it exactly (Download instead stays possible),
+/// else downloading it.
 pub(super) fn choice(ui: &Ui, p: Paint) -> El {
     let model = transcription_models::definition(ui.settings.transcription.model);
-    let on_disk = recommended_on_disk(ui).is_some();
+    let on_disk = recommended_on_disk(ui);
     let detail = format!(
         "{} · {}\n{}",
         model.name,
         model.size_label(),
-        if on_disk {
-            tr("Already downloaded, no download needed")
-        } else {
-            tr("Tested by Hex for quality and reliability")
+        match on_disk {
+            Some(found) => tr_named(
+                "Already on this computer: {source}",
+                &[("source", &found.source())],
+            ),
+            None => tr("Tested by Hex for quality and reliability").to_owned(),
         }
     );
     let recommended = icon_row_tagged(
@@ -49,34 +57,76 @@ pub(super) fn choice(ui: &Ui, p: Paint) -> El {
         tr("Hex's recommended model"),
         Some(Badge::new(tr("Recommended")).build(p.k)),
         Some(&detail),
-        button(
-            p,
-            "use-recommended",
-            if on_disk { tr("Use") } else { tr("Download") },
-            ButtonKind::Primary,
-            |ui: &mut Ui, _| choose_recommended(ui),
-        )
-        .default_button(),
+        row(),
     );
-    let mut found_rows: Vec<El> = Vec::new();
-    for (index, found) in ui.found.models.iter().enumerate() {
-        found_rows.push(found_row(ui, p, index, found));
+    let others: Vec<El> = ui
+        .found
+        .models
+        .iter()
+        .enumerate()
+        .filter(|(_, found)| found.catalog != Some(ui.settings.transcription.model))
+        .map(|(index, found)| found_row(p, index, found))
+        .collect();
+    let mut actions = row().key("choice-actions").gap(8.0).center_y();
+    // With only the recommended copy found, there is nothing else to show.
+    if !others.is_empty() {
+        actions = actions.child(button(
+            p,
+            "show-found",
+            tr("Use a model already on this computer"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.found.expanded = !ui.found.expanded,
+        ));
     }
-    col()
+    actions = actions.child(rune::spacer());
+    actions = if on_disk.is_some() {
+        actions
+            .child(button(
+                p,
+                "download-instead",
+                tr("Download instead"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| {
+                    crate::transcription::found_models::decline(ui.settings.transcription.model);
+                    choose_recommended(ui);
+                },
+            ))
+            .child(
+                button(
+                    p,
+                    "use-recommended",
+                    tr("Use the copy already on this computer"),
+                    ButtonKind::Primary,
+                    |ui: &mut Ui, _| {
+                        crate::transcription::found_models::accept(ui.settings.transcription.model);
+                        choose_recommended(ui);
+                    },
+                )
+                .default_button(),
+            )
+    } else {
+        actions.child(
+            button(
+                p,
+                "download-recommended",
+                tr("Download recommended model"),
+                ButtonKind::Primary,
+                |ui: &mut Ui, _| choose_recommended(ui),
+            )
+            .default_button(),
+        )
+    };
+    let mut page = col()
         .key("model-choice")
         .gap(16.0)
         .child(card(p, "recommended-card", vec![recommended]))
-        .child(
+        .child(actions);
+    if ui.found.expanded && !others.is_empty() {
+        page = page.child(
             col()
                 .key("found")
                 .gap(8.0)
-                .child(
-                    text(tr("Use a model already on this computer"))
-                        .key("found-title")
-                        .font(p.k.ty.body_medium)
-                        .color(p.text()),
-                )
-                .child(card(p, "found-card", found_rows))
+                .child(card(p, "found-card", others))
                 .child(
                     text(tr(
                         "Compatible doesn't mean accurate: a model that loads can still transcribe poorly.",
@@ -86,10 +136,14 @@ pub(super) fn choice(ui: &Ui, p: Paint) -> El {
                     .color(p.muted())
                     .wrap(),
                 ),
-        )
+        );
+    }
+    page
 }
 
-fn found_row(ui: &Ui, p: Paint, index: usize, found: &Found) -> El {
+/// A found file: exact catalog matches (first, from the scan's order) are
+/// known models; any other is unverified and not benchmarked.
+fn found_row(p: Paint, index: usize, found: &Found) -> El {
     let catalog = found.catalog.map(transcription_models::definition);
     let name = catalog.map_or(found.name.as_str(), |model| model.name);
     let mut detail = tr_named(
@@ -104,16 +158,19 @@ fn found_row(ui: &Ui, p: Paint, index: usize, found: &Found) -> El {
     detail.push_str(if catalog.is_some() {
         tr("Already downloaded, no download needed")
     } else {
-        tr("Not tested by Hex")
+        tr("Not verified by Hex · Not benchmarked")
     });
-    let tag = (found.catalog == Some(ui.settings.transcription.model))
-        .then(|| Badge::new(tr("Recommended")).build(p.k));
+    let tag = if catalog.is_some() {
+        Badge::new(tr("Known model")).build(p.k)
+    } else {
+        Badge::new(tr("Not tested by Hex")).build(p.k)
+    };
     icon_row_tagged(
         p,
         &format!("found-{index}"),
         &glyphs::SPARKLE,
         name,
-        tag,
+        Some(tag),
         Some(&detail),
         button(
             p,
@@ -139,6 +196,7 @@ fn choose_found(ui: &mut Ui, index: usize) {
     };
     match found.catalog {
         Some(model) => {
+            crate::transcription::found_models::accept(model);
             let language = transcription_models::definition(model)
                 .language_for(&ui.settings.transcription.language)
                 .to_owned();
