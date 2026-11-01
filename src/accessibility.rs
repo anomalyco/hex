@@ -65,7 +65,7 @@ unsafe extern "C" {
     fn CFURLGetString(url: CfTypeRef) -> CfStringRef;
     fn CFRelease(value: CfTypeRef);
     fn CFRetain(value: CfTypeRef) -> CfTypeRef;
-    fn CFEqual(left: CfTypeRef, right: CfTypeRef) -> bool;
+    fn CFEqual(left: CfTypeRef, right: CfTypeRef) -> u8;
     fn CFArrayGetTypeID() -> usize;
     fn CFArrayGetCount(array: CfTypeRef) -> isize;
     fn CFArrayGetValueAtIndex(array: CfTypeRef, index: isize) -> CfTypeRef;
@@ -125,7 +125,7 @@ pub fn browser_pages(pid: i32) -> crate::dictation::browser_page::BrowserPages {
         // SAFETY: Both are live AXUIElements.
         if !windows
             .iter()
-            .any(|known| unsafe { CFEqual(known.0, window.0) })
+            .any(|known| unsafe { CFEqual(known.0, window.0) } != 0)
         {
             windows.push(window);
         }
