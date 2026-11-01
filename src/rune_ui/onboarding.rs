@@ -725,7 +725,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
                 .w(160.0),
             // A network that blocks the download: retry, or use a model file
             // brought some other way (#894).
-            ItemStatus::Failed => row()
+            ItemStatus::Failed => rune::row()
                 .key("setup-failed-actions")
                 .gap(8.0)
                 .center_y()
