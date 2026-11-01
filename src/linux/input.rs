@@ -331,7 +331,19 @@ fn keysym_name(key: &str) -> Result<String> {
         {
             return Ok(key.to_ascii_uppercase());
         }
-        _ => return Err(eyre!("unsupported shortcut key: {key}")),
+        // A portal shortcut holds its key from every app, so the portal
+        // never binds Escape (#786).
+        "escape" => {
+            return Err(eyre!(
+                "the shortcuts portal can't bind Escape; it would take Escape from every app"
+            ));
+        }
+        // Navigation and editing keys, named as GNOME's accelerators name
+        // them, so both Linux paths accept the same keys (#846).
+        key => match crate::linux::gnome_shortcuts::named_keysym(key) {
+            Some(name) => name,
+            None => return Err(eyre!("unsupported shortcut key: {key}")),
+        },
     };
     Ok(name.into())
 }
@@ -2060,6 +2072,46 @@ mod tests {
             assert_eq!(hotkey.portal_trigger().unwrap(), portal);
             assert_eq!(keysym(&hotkey.key).unwrap(), keysym_value);
             assert_eq!(HotkeyBinding::from(&hotkey), saved);
+        }
+    }
+
+    /// #846: navigation and editing keys GNOME's accelerators accept reach
+    /// the portal under the same xkb names, alone or with modifiers.
+    #[test]
+    fn navigation_keys_have_portal_triggers() {
+        for (name, portal) in [
+            ("home", "Home"),
+            ("end", "End"),
+            ("pageup", "Page_Up"),
+            ("pagedown", "Page_Down"),
+            ("up", "Up"),
+            ("down", "Down"),
+            ("left", "Left"),
+            ("right", "Right"),
+            ("insert", "Insert"),
+            ("delete", "Delete"),
+            ("print", "Print"),
+        ] {
+            let saved = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let hotkey = LinuxHotkey::from(&saved);
+            assert!(hotkey.validate().is_ok());
+            assert_eq!(hotkey.portal_trigger().unwrap(), portal);
+            assert_eq!(
+                crate::linux::gnome_shortcuts::named_keysym(name),
+                Some(portal)
+            );
+            assert_eq!(HotkeyBinding::from(&hotkey), saved);
+            let with_control = LinuxHotkey {
+                control: true,
+                ..hotkey
+            };
+            assert_eq!(
+                with_control.portal_trigger().unwrap(),
+                format!("CTRL+{portal}")
+            );
         }
     }
 

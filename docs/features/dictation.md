@@ -50,6 +50,16 @@ bindings from X11 appear ungranted on Wayland; they do not prevent keyboard
 shortcuts from registering. Hex does not use raw input devices or XWayland to
 bypass the compositor. See the [XDG shortcut specification](https://specifications.freedesktop.org/shortcuts/latest/).
 
+**Fixed November 1, 2026 (issue 846):** the portal path refused navigation and
+editing keys ("unsupported shortcut key: home"), though GNOME's custom
+shortcuts took them. Both now share one named-key table
+(`gnome_shortcuts::named_keysym`): Home, End, Page Up/Down, the arrows,
+Insert, Delete, and Print reach the portal as `Home`, `End`, `Page_Up`, … ,
+alone or with modifiers. Escape stays refused by the portal, which never binds
+it (#786). Check: `navigation_keys_have_portal_triggers` in
+`linux/input.rs` (constructed bindings; no desktop portal run). X11 grabs
+don't resolve these keys yet.
+
 Linux with Labs › Special keys alone on (`labs.standalone_special_keys`, off
 by default; issue 767): Menu, Pause, and Scroll Lock may be any shortcut's
 key, alone like a function key or with modifiers, for example Caps Lock
