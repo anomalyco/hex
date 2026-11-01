@@ -880,11 +880,26 @@ pub(crate) fn picker_models(
         .collect()
 }
 
+/// Whisper large-v3's language codes, for its `"*"` catalog entry: the local
+/// API accepts these beyond the languages Settings lists.
+const WHISPER_LANGUAGES: &[&str] = &[
+    "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv", "it",
+    "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no", "th", "ur",
+    "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
+    "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si",
+    "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo",
+    "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln",
+    "ha", "ba", "jw", "su", "yue",
+];
+
+/// Whether `language` is a code Hex knows: one Settings lists, or one of
+/// Whisper's, which only models that accept any language support.
+pub fn is_known_language(language: &str) -> bool {
+    LANGUAGES.iter().any(|(code, _)| *code == language) || WHISPER_LANGUAGES.contains(&language)
+}
+
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
-    if !LANGUAGES
-        .iter()
-        .any(|(code, _)| *code == selection.language)
-    {
+    if !is_known_language(&selection.language) {
         bail!("unsupported transcription language: {}", selection.language);
     }
     let model = definition(selection.model);
@@ -1506,6 +1521,27 @@ mod tests {
                 "{language}"
             );
         }
+    }
+
+    #[test]
+    fn whisper_accepts_its_languages_beyond_the_settings_list() {
+        for language in ["ta", "te"] {
+            let whisper = TranscriptionSelection {
+                model: TranscriptionModelId::WhisperLargeV3Turbo,
+                language: language.into(),
+            };
+            assert!(validate(&whisper).is_ok(), "{language}");
+            let qwen = TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: language.into(),
+            };
+            assert!(validate(&qwen).is_err(), "{language}");
+        }
+        let unknown = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "xx".into(),
+        };
+        assert!(validate(&unknown).is_err());
     }
 
     #[test]
