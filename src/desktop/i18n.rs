@@ -9,9 +9,17 @@ use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
+mod portuguese;
+
+/// A persisted interface-language code (`None` follows the system) and its
+/// native name.
+pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
+
 /// The selectable interface languages: persisted code and native name. The
-/// leading `None` entry follows the system display language.
-pub(crate) const LANGUAGE_CHOICES: &[(Option<&str>, &str)] = &[
+/// leading `None` entry follows the system display language. The last,
+/// Português (Brasil), is offered only with Labs › Brazilian Portuguese
+/// interface on.
+const LANGUAGES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
     (Some("pl"), "Polski"),
@@ -20,7 +28,21 @@ pub(crate) const LANGUAGE_CHOICES: &[(Option<&str>, &str)] = &[
     (Some("de"), "Deutsch"),
     (Some("es"), "Español"),
     (Some("uk"), "Українська"),
+    (Some(PORTUGUESE), "Português (Brasil)"),
 ];
+
+/// The persisted code of Brazilian Portuguese, a Labs language.
+const PORTUGUESE: &str = "pt";
+
+/// The interface languages to offer: Português (Brasil) only while its Labs
+/// switch is on.
+pub(crate) fn language_choices(portuguese: bool) -> &'static [LanguageChoice] {
+    if portuguese {
+        LANGUAGES
+    } else {
+        &LANGUAGES[..LANGUAGES.len() - 1]
+    }
+}
 
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
 #[cfg(not(test))]
@@ -54,8 +76,12 @@ fn set_current(code: u8) {
 }
 
 const ENGLISH: u8 = 255;
+/// Brazilian Portuguese, kept in its own table ([`portuguese::TRANSLATIONS`]).
+const PORTUGUESE_COLUMN: u8 = 6;
 
-fn column_for_code(code: &str) -> u8 {
+/// The column for a persisted code. Portuguese is a column only while
+/// `portuguese` (its Labs switch) is on.
+fn column_for_code(code: &str, portuguese: bool) -> u8 {
     match code {
         "pl" => 0,
         "zh" => 1,
@@ -63,24 +89,28 @@ fn column_for_code(code: &str) -> u8 {
         "de" => 3,
         "es" => 4,
         "uk" => 5,
+        PORTUGUESE if portuguese => PORTUGUESE_COLUMN,
         _ => ENGLISH,
     }
 }
 
 /// Resolve and activate the persisted language choice; `None` follows the
-/// system locale. Safe to call again whenever the setting changes.
+/// system locale. Safe to call again whenever the setting changes. A saved
+/// Portuguese choice is kept but follows the system while its Labs switch
+/// is off, as the Interface language row then shows System.
 pub(crate) fn apply(setting: Option<&str>) {
-    let code = match setting {
-        Some(code) => column_for_code(code),
-        None => column_for_language_tag(&preferred_language()),
+    let portuguese = crate::labs::portuguese_interface();
+    let code = match setting.filter(|code| portuguese || *code != PORTUGUESE) {
+        Some(code) => column_for_code(code, portuguese),
+        None => column_for_language_tag(&preferred_language(), portuguese),
     };
     set_current(code);
 }
 
 /// The column for a system language tag such as `zh-Hans-CN` or `pl`;
 /// unknown or empty tags stay English.
-fn column_for_language_tag(tag: &str) -> u8 {
-    primary_subtag(tag).map_or(ENGLISH, |code| column_for_code(&code))
+fn column_for_language_tag(tag: &str, portuguese: bool) -> u8 {
+    primary_subtag(tag).map_or(ENGLISH, |code| column_for_code(&code, portuguese))
 }
 
 pub(crate) fn system_language() -> String {
@@ -177,10 +207,12 @@ pub(crate) fn tr(english: &str) -> &str {
     if column == ENGLISH {
         return english;
     }
-    tables()[column as usize]
-        .get(english)
-        .copied()
-        .unwrap_or(english)
+    let table = if column == PORTUGUESE_COLUMN {
+        portuguese::table()
+    } else {
+        &tables()[column as usize]
+    };
+    table.get(english).copied().unwrap_or(english)
 }
 
 /// Translate a `{}` template and substitute the dynamic value, keeping
@@ -1137,6 +1169,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Apple Intelligence is unavailable", ["Apple Intelligence jest niedostępne", "Apple 智能不可用", "Apple Intelligence は利用できません", "Apple Intelligence ist nicht verfügbar", "Apple Intelligence no está disponible", "Немає доступу до Apple Intelligence"]),
     ("Still grey? Fix it", ["Nadal szare? Napraw", "还是灰色的？修复", "まだグレーのまま？修復", "Noch grau? Beheben", "¿Sigue gris? Reparar", "Ще сіре? Виправити"]),
     ("An older Hex entry can keep this off", ["Starszy wpis Hex może to blokować", "旧版 Hex 条目可能会导致此项无法开启", "古い Hex の項目が妨げになっている場合があります", "Ein älterer Hex-Eintrag kann dies blockieren", "Una entrada anterior de Hex puede impedirlo", "Старий запис Hex може блокувати це"]),
+    ("Brazilian Portuguese interface", ["Interfejs w języku portugalskim (Brazylia)", "巴西葡萄牙语界面", "ブラジルポルトガル語のインターフェイス", "Oberfläche auf brasilianischem Portugiesisch", "Interfaz en portugués de Brasil", "Інтерфейс бразильською португальською"]),
+    ("Offer Português (Brasil) as an interface language and use it when the system language is Portuguese", ["Udostępnia Português (Brasil) jako język interfejsu i używa go, gdy językiem systemu jest portugalski", "提供 Português (Brasil) 作为界面语言，并在系统语言为葡萄牙语时使用", "インターフェイスの言語に Português (Brasil) を追加し、システムの言語がポルトガル語のときに使います", "Bietet Português (Brasil) als Oberflächensprache an und nutzt sie, wenn die Systemsprache Portugiesisch ist", "Ofrece Português (Brasil) como idioma de la interfaz y lo usa cuando el idioma del sistema es portugués", "Пропонує Português (Brasil) як мову інтерфейсу й використовує її, коли мова системи португальська"]),
 ];
 
 #[cfg(test)]
@@ -1147,11 +1181,50 @@ mod tests {
     #[test]
     fn system_language_tags_choose_their_interface_column() {
         use super::{ENGLISH, column_for_code, column_for_language_tag};
-        assert_eq!(column_for_language_tag("zh-Hans-CN"), column_for_code("zh"));
-        assert_eq!(column_for_language_tag("zh"), column_for_code("zh"));
-        assert_eq!(column_for_language_tag("pl"), column_for_code("pl"));
-        assert_eq!(column_for_language_tag("pt-BR"), ENGLISH);
-        assert_eq!(column_for_language_tag(""), ENGLISH);
+        assert_eq!(
+            column_for_language_tag("zh-Hans-CN", false),
+            column_for_code("zh", false)
+        );
+        assert_eq!(
+            column_for_language_tag("zh", false),
+            column_for_code("zh", false)
+        );
+        assert_eq!(
+            column_for_language_tag("pl", false),
+            column_for_code("pl", false)
+        );
+        assert_eq!(column_for_language_tag("pt-BR", false), ENGLISH);
+        assert_eq!(column_for_language_tag("", false), ENGLISH);
+    }
+
+    #[test]
+    fn portuguese_is_a_language_only_with_its_labs_switch() {
+        use super::{
+            ENGLISH, PORTUGUESE_COLUMN, column_for_code, column_for_language_tag, language_choices,
+        };
+        assert_eq!(column_for_language_tag("pt-BR", true), PORTUGUESE_COLUMN);
+        assert_eq!(column_for_language_tag("pt_BR", true), PORTUGUESE_COLUMN);
+        assert_eq!(column_for_code("pt", true), PORTUGUESE_COLUMN);
+        assert_eq!(column_for_language_tag("pt-BR", false), ENGLISH);
+        assert_eq!(column_for_code("pt", false), ENGLISH);
+        assert_eq!(column_for_code("de", true), column_for_code("de", false));
+        assert!(language_choices(true).contains(&(Some("pt"), "Português (Brasil)")));
+        assert!(
+            language_choices(false)
+                .iter()
+                .all(|(code, _)| *code != Some("pt"))
+        );
+        assert_eq!(language_choices(false), &language_choices(true)[..8]);
+    }
+
+    #[test]
+    fn portuguese_translates_with_its_column() {
+        super::set_current(super::PORTUGUESE_COLUMN);
+        assert_eq!(super::tr("Labs"), "Labs");
+        assert_eq!(super::tr("Don't switch"), "Não trocar");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Remover x?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
 
     #[test]
