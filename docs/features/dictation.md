@@ -1058,6 +1058,14 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Loader keeps running; later tones play once the output opens
 ```
 
+**Fixed November 1, 2026 (issue 873):** on macOS the HUD remembered its last
+placement and skipped sending it to Rune again when it matched, so a HUD Rune
+had put in the wrong spot on a second display (offset by the display's origin,
+with a different backing scale) stayed there on every later dictation. Each
+capture's start and each hide now forget the placement, so the next show sends
+the display and rectangle again, as Linux and Windows already do. Not run on a
+two-display Mac; the misplacement inside Rune itself is not addressed here.
+
 ```ts
 Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 ├── Default / older settings -> Classic
