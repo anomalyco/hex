@@ -1748,7 +1748,7 @@ Capture                                  // hex app and hex dictate
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
-│       nothing pasted
+│       nothing pasted, no error sound or note; the log has its level
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
 └── Dictation pasted -> Done sound; failures play the error sound
 ```
