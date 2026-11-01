@@ -429,7 +429,10 @@ fn general_hides_advanced_options_until_asked() {
     );
     tap(&mut rt, "advanced-toggle");
     assert!(rt.find("shortcut-mode").is_none());
-    assert!(rt.find("microphone-mode").is_some(), "the mic switch is in General");
+    assert!(
+        rt.find("microphone-mode").is_some(),
+        "the mic switch is in General"
+    );
 }
 
 /// General's level bars follow what the microphone hears, settle once it
