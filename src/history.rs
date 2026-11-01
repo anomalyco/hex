@@ -376,6 +376,25 @@ impl HistoryStore {
             .collect()
     }
 
+    /// The newest `count` entries within retention that a paste could
+    /// reuse: never a printed one or one with no text, as Paste Last.
+    /// Nothing while retention is Off.
+    pub fn recent(&self, count: usize, now_ms: u64) -> Vec<&HistoryEntry> {
+        if self.retention.is_off() {
+            return Vec::new();
+        }
+        let cutoff = self
+            .retention
+            .max_age_ms()
+            .map(|max_age| now_ms.saturating_sub(max_age));
+        self.entries()
+            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
+            .filter(|entry| entry.kind != HistoryKind::Printed)
+            .filter(|entry| !entry.final_text.trim().is_empty())
+            .take(count)
+            .collect()
+    }
+
     /// The idle worker's expiry: reread whatever another process wrote first,
     /// so pruning never writes a stale copy over its records or deletions.
     fn expire_shared(&mut self, now_ms: u64) {
@@ -522,6 +541,26 @@ impl History {
             .into_iter()
             .cloned()
             .collect()
+    }
+
+    /// The newest `count` reusable entries, newest first
+    /// ([`HistoryStore::recent`]).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn recent(&self, count: usize) -> Vec<HistoryEntry> {
+        self.synced()
+            .recent(count, now_ms())
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// The text entry `id` inserted, if it is still retained.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn final_text(&self, id: u64) -> Option<String> {
+        self.synced()
+            .entries()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.final_text.clone())
     }
 
     fn synced(&self) -> std::sync::MutexGuard<'_, HistoryStore> {
@@ -902,6 +941,41 @@ mod tests {
             2,
             "blank queries list everything"
         );
+    }
+
+    #[test]
+    fn recent_lists_the_newest_reusable_entries_within_retention() {
+        let path = temp_path("recent");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        store.record(draft("expired"), 1_000).unwrap();
+        for (index, text) in ["one", "two", "  ", "three"].into_iter().enumerate() {
+            store.record(draft(text), day_ms + index as u64).unwrap();
+        }
+        store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::Printed,
+                    ..draft("printed")
+                },
+                day_ms + 10,
+            )
+            .unwrap();
+        store.record(draft("four"), day_ms + 20).unwrap();
+
+        let texts = |store: &HistoryStore, count| {
+            store
+                .recent(count, day_ms + 1_001)
+                .into_iter()
+                .map(|entry| entry.final_text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts(&store, 5), ["four", "three", "two", "one"]);
+        assert_eq!(texts(&store, 2), ["four", "three"]);
+        store
+            .set_retention(HistoryRetention::Off, day_ms + 1_001)
+            .unwrap();
+        assert!(texts(&store, 5).is_empty(), "Off lists nothing");
     }
 
     #[test]
