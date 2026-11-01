@@ -81,13 +81,18 @@ struct HexControlReveal: ViewModifier {
     var blur: CGFloat = 2.5
     var anchor: UnitPoint = .center
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let base = content
             .opacity(shown ? 1.0 : 0.0)
             .scaleEffect(shown || reduceMotion ? 1.0 : scale, anchor: anchor)
-            .blur(radius: (shown || reduceMotion) ? 0.0 : blur)
             .allowsHitTesting(shown)
             .accessibilityHidden(!shown)
+        if blur > 0 {
+            base.blur(radius: (shown || reduceMotion) ? 0.0 : blur)
+        } else {
+            base
+        }
     }
 }
 

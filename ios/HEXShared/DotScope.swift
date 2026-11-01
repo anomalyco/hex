@@ -1244,6 +1244,8 @@ final class DotScopeHostView: UIView {
             metalLayer.pixelFormat = .bgra8Unorm
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
+            metalLayer.allowsNextDrawableTimeout = false
+            metalLayer.maximumDrawableCount = 3
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
 
@@ -1362,14 +1364,16 @@ final class DotScopeHostView: UIView {
         }
         seedForSnapshotIfNeeded()
         updateAnimatingState()
-        renderCurrentFrame(withTransaction: sizeChanged && UIView.inheritedAnimationDuration > 0)
+        if sizeChanged || displayLink?.isPaused != false {
+            renderCurrentFrame(withTransaction: sizeChanged && UIView.inheritedAnimationDuration > 0)
+        }
     }
 
     private func ensureDisplayLink() {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         } else {
             link.preferredFramesPerSecond = 60
         }
