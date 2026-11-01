@@ -136,7 +136,13 @@ pub(crate) fn adopt_wayland_display() -> Option<String> {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}")));
-    let display = manager_environment("WAYLAND_DISPLAY")
+    // A custom data root never asks the user's systemd manager (see `supervised`).
+    let managed = if custom_root() {
+        None
+    } else {
+        manager_environment("WAYLAND_DISPLAY")
+    };
+    let display = managed
         .filter(|display| wayland_socket(&runtime.join(display), uid))
         .or_else(|| newest_wayland_socket(&runtime, uid))?;
     unsafe {
@@ -787,9 +793,7 @@ fn unit() -> String {
 /// default data root. `HEX_SYSTEMD_UNIT` names another unit, for isolated
 /// tests with a custom data root.
 pub(crate) fn supervised() -> bool {
-    if std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
-        && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
-    {
+    if custom_root() {
         return false;
     }
     Command::new("systemctl")
@@ -800,6 +804,13 @@ pub(crate) fn supervised() -> bool {
         .is_ok_and(|output| {
             output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "loaded"
         })
+}
+
+/// A custom data root without its own unit (isolated tests) never touches
+/// the user's systemd manager.
+fn custom_root() -> bool {
+    std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
+        && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
 }
 
 fn systemctl(arguments: &[&str]) -> Result<()> {
