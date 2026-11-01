@@ -5753,17 +5753,19 @@ mod tests {
         let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         for at in [now, now + Duration::from_secs(300)] {
-            assert_eq!(
-                hotkey.process(
-                    InputEvent::Key {
-                        code: ESCAPE_KEY_CODE,
-                        down: true,
-                        flags: OPTION_KEY_MASK,
-                    },
-                    at,
-                ),
-                None
-            );
+            for down in [true, false] {
+                assert_eq!(
+                    hotkey.process(
+                        InputEvent::Key {
+                            code: ESCAPE_KEY_CODE,
+                            down,
+                            flags: OPTION_KEY_MASK,
+                        },
+                        at,
+                    ),
+                    None
+                );
+            }
             assert!(hotkey.is_recording());
         }
         assert_eq!(
