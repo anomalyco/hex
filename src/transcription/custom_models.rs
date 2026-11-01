@@ -318,7 +318,7 @@ pub fn definition(id: CustomModelId) -> &'static ModelDefinition {
     if let Some(entry) = registry.entry(id) {
         return entry.definition;
     }
-    *registry.placeholders.entry(id).or_insert_with(|| {
+    registry.placeholders.entry(id).or_insert_with(|| {
         build(
             id,
             &Manifest {
@@ -479,7 +479,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     Ok(Profile {
         name: header
             .string("general.name")
-            .map_or_else(|| file_name.to_owned(), |name| clamp_name(name)),
+            .map_or_else(|| file_name.to_owned(), clamp_name),
         architecture: architecture.to_owned(),
         variant: variant.to_owned(),
         languages,
