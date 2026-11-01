@@ -332,13 +332,7 @@ pub(crate) fn run(
     }
     crate::labs::log_launch();
     crate::audio::hex_microphone::host_service();
-    let (settings, error) = match AppSettings::load() {
-        Ok(settings) => (settings, None),
-        Err(error) => (
-            AppSettings::default(),
-            Some(format!("Could not load settings: {error:#}")),
-        ),
-    };
+    let (settings, error) = AppSettings::load_for_launch();
     crate::linux::dictation::initialize_feedback(&settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::transcription::local_transcriber::initialize_backends();

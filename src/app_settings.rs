@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{OnceLock, RwLock};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
 #[cfg(target_os = "macos")]
@@ -1123,7 +1123,9 @@ pub struct MeetingSettings {
     pub calendar: CalendarSettings,
     /// How long finished meetings are kept before they move to the Trash.
     /// `None` until the user chooses: meetings recorded since the default
-    /// began are kept 24 hours, and older ones stay.
+    /// began are kept 24 hours, and older ones stay. Left out of the file
+    /// while unchosen: a build from before it can't read `null` (#744).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub retention: Option<MeetingRetention>,
 }
 
@@ -1976,6 +1978,80 @@ impl KeyboardModelChoice {
     }
 }
 
+/// Reads `settings.json`, one bad field at a time: a value this build can't
+/// read (`null` where it wants a choice, a choice a newer build added, a
+/// wrong type) keeps that setting's default, with a warning, instead of
+/// failing the whole load. Only a file that isn't JSON at all fails. Returns
+/// the settings and the paths that fell back.
+fn decode_leniently(data: &[u8]) -> Result<(AppSettings, Vec<String>)> {
+    if let Ok(settings) = serde_json::from_slice(data) {
+        return Ok((settings, Vec::new()));
+    }
+    let file: serde_json::Value =
+        serde_json::from_slice(data).wrap_err("settings.json is not valid JSON")?;
+    let mut accepted = serde_json::to_value(AppSettings::default())?;
+    let mut dropped = Vec::new();
+    merge_leniently(&mut accepted, &file, String::new(), &mut dropped)?;
+    for path in &dropped {
+        tracing::warn!(setting = path, "a setting could not be read; using its default");
+    }
+    Ok((serde_json::from_value(accepted)?, dropped))
+}
+
+/// Copies `file` into `accepted` key by key, keeping each value only while
+/// the whole still decodes. Objects on both sides merge field by field, so
+/// one bad leaf costs only itself.
+fn merge_leniently(
+    accepted: &mut serde_json::Value,
+    file: &serde_json::Value,
+    path: String,
+    dropped: &mut Vec<String>,
+) -> Result<()> {
+    let serde_json::Value::Object(fields) = file else {
+        return Ok(());
+    };
+    for (key, value) in fields {
+        let child = if path.is_empty() {
+            key.clone()
+        } else {
+            format!("{path}.{key}")
+        };
+        let target = object_at(accepted, &path);
+        let previous = target.get(key).cloned();
+        if value.is_object() && previous.as_ref().is_some_and(serde_json::Value::is_object) {
+            merge_leniently(accepted, value, child, dropped)?;
+            continue;
+        }
+        target.insert(key.clone(), value.clone());
+        if serde_json::from_value::<AppSettings>(accepted.clone()).is_err() {
+            let target = object_at(accepted, &path);
+            match previous {
+                Some(previous) => target.insert(key.clone(), previous),
+                None => target.remove(key),
+            };
+            dropped.push(child);
+        }
+    }
+    Ok(())
+}
+
+/// The object at dotted `path` inside `root`, which [`merge_leniently`]
+/// only walks through objects.
+fn object_at<'a>(
+    root: &'a mut serde_json::Value,
+    path: &str,
+) -> &'a mut serde_json::Map<String, serde_json::Value> {
+    let mut value = root;
+    for key in path.split('.').filter(|key| !key.is_empty()) {
+        value = value
+            .get_mut(key)
+            .expect("merge_leniently walks existing objects");
+    }
+    value
+        .as_object_mut()
+        .expect("merge_leniently walks objects")
+}
+
 /// Recognition hints saved before they merged into the vocabulary: the
 /// selected model's, then the recent models' from newest. `load_from` folds
 /// them into the vocabulary and the rewritten file drops them.
@@ -2211,10 +2287,13 @@ impl AppSettings {
     pub(crate) fn load_from(path: &std::path::Path) -> Result<Self> {
         match fs::read(path) {
             Ok(data) => {
-                let mut settings: Self = serde_json::from_slice(&data)?;
+                let (mut settings, dropped) = decode_leniently(&data)?;
                 let loaded = serde_json::to_value(&settings)?;
                 let hints = legacy_recognition_hints(&data);
-                settings.validate_recording_duck_volume()?;
+                if let Err(error) = settings.validate_recording_duck_volume() {
+                    tracing::warn!(%error, "using the default recording_duck_volume");
+                    settings.recording_duck_volume = Self::default().recording_duck_volume;
+                }
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.repair_bare_primary_clicks();
                 #[cfg(target_os = "macos")]
@@ -2233,8 +2312,15 @@ impl AppSettings {
                     .keyboard_model_switching
                     .mappings
                     .retain(|_, choice| choice.validate().is_ok());
-                crate::transcription::models::validate(&settings.transcription)?;
-                if (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
+                if let Err(error) = crate::transcription::models::validate(&settings.transcription)
+                {
+                    tracing::warn!(%error, "using the default transcription model");
+                    settings.transcription = Self::default().transcription;
+                }
+                // A value this build can't read may be a newer build's, so
+                // the file is rewritten only once it reads in full.
+                if dropped.is_empty()
+                    && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded)
                     && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist normalized settings");
@@ -2244,6 +2330,32 @@ impl AppSettings {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// The settings an app launches with, never failing: a file that can't
+    /// be read at all is moved aside, so no save overwrites it, and the app
+    /// starts with defaults and the returned message to show (#744).
+    pub fn load_for_launch() -> (Self, Option<String>) {
+        let error = match Self::load() {
+            Ok(settings) => return (settings, None),
+            Err(error) => error,
+        };
+        tracing::error!(error = format!("{error:#}"), "could not load settings");
+        let kept = path().ok().filter(|path| path.exists()).and_then(|path| {
+            let aside = path.with_file_name(format!(
+                "settings.unreadable-{}.json",
+                crate::desktop::events::now_ms()
+            ));
+            fs::rename(&path, &aside).ok().map(|()| aside)
+        });
+        let message = match kept {
+            Some(aside) => format!(
+                "Hex couldn't read its settings and started with defaults. The old file is at {}. ({error:#})",
+                aside.display()
+            ),
+            None => format!("Hex couldn't read its settings and started with defaults. ({error:#})"),
+        };
+        (Self::default(), Some(message))
     }
 
     pub fn save(&self) -> Result<()> {
@@ -3611,6 +3723,41 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.directory);
         }
+    }
+
+    /// #744: a value this build can't read costs only that setting, and the
+    /// file (perhaps a newer build's) is left as it was.
+    #[test]
+    fn an_unreadable_setting_keeps_its_default_and_the_rest_loads() {
+        let dir = TestSettingsDir::new("lenient");
+        let file = r#"{
+            "sound_effects": false,
+            "history_retention": null,
+            "show_dock_icon": "sometimes",
+            "meetings": {"enabled": true, "retention": "quarterly"},
+            "recording_duck_volume": 7.0
+        }"#;
+        fs::write(&dir.path, file).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        let defaults = AppSettings::default();
+        assert!(!settings.sound_effects);
+        assert!(settings.meetings.enabled);
+        assert_eq!(settings.history_retention, defaults.history_retention);
+        assert_eq!(settings.show_dock_icon, defaults.show_dock_icon);
+        assert_eq!(settings.meetings.retention, None);
+        assert_eq!(settings.recording_duck_volume, defaults.recording_duck_volume);
+        assert_eq!(fs::read_to_string(&dir.path).unwrap(), file, "not rewritten");
+
+        // `null` reads as unchosen, and unchosen is never written as `null`,
+        // which 3.1.0 can't read.
+        fs::write(&dir.path, r#"{"meetings": {"retention": null}}"#).unwrap();
+        assert_eq!(AppSettings::load_from(&dir.path).unwrap().meetings.retention, None);
+        let saved = serde_json::to_value(AppSettings::default()).unwrap();
+        assert!(saved["meetings"].get("retention").is_none());
+
+        // Only a file that isn't JSON fails.
+        fs::write(&dir.path, "{ not json").unwrap();
+        assert!(AppSettings::load_from(&dir.path).is_err());
     }
 
     #[cfg(target_os = "macos")]

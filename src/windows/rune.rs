@@ -36,7 +36,6 @@ use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop::i18n::tr_fill;
 use crate::desktop::tray_menu::{TrayCommand, TrayView};
 use crate::history::History;
 use crate::rune_ui::Ui;
@@ -162,16 +161,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
-    let (settings, settings_error) = match AppSettings::load() {
-        Ok(settings) => (settings, None),
-        Err(error) => (
-            AppSettings::default(),
-            Some(tr_fill(
-                "Could not load settings: {}",
-                &format!("{error:#}"),
-            )),
-        ),
-    };
+    let (settings, settings_error) = AppSettings::load_for_launch();
     let history = History::open_default(settings.history_retention)
         .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
         .ok();

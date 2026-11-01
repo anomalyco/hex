@@ -285,7 +285,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
-    let mut settings = AppSettings::load()?;
+    // Never a silent launch failure: unreadable settings start with defaults
+    // and the window says why (#744).
+    let (mut settings, settings_error) = AppSettings::load_for_launch();
     // Preload bundled feedback sounds on a worker so onboarding and the Sounds
     // sheet play immediately even before permissions let `recognition` start.
     // Opens no audio output device until a tone actually plays.
@@ -434,12 +436,16 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let _ = WINDOW.set(window.clone());
     // The status item is created inside the loop; Hex can't run without a
     // way back to its window, so a failed item opens the window there.
-    let open_at_launch = crate::meeting::watcher::should_open_app_on_launch(
-        settings.show_dock_icon,
-        setup_ready,
-        onboarding_completed,
-        true,
-    );
+    let open_at_launch = settings_error.is_some()
+        || crate::meeting::watcher::should_open_app_on_launch(
+            settings.show_dock_icon,
+            setup_ready,
+            onboarding_completed,
+            true,
+        );
+    if let Some(error) = settings_error {
+        window.update(move |ui, _| crate::rune_ui::show_error(ui, error));
+    }
     app = if open_at_launch {
         app.keep_running()
     } else {

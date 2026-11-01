@@ -510,6 +510,13 @@ pub(crate) fn meeting_corner_moved(
     ui.settings.meetings.recording_indicator_corner = corner;
 }
 
+/// An error from outside the window, such as settings that could not be read
+/// at launch, shown where save errors show.
+#[cfg(target_os = "macos")]
+pub(crate) fn show_error(ui: &mut Ui, error: String) {
+    ui.error = Some(error);
+}
+
 /// A meeting recording could not start or finish; the Meetings pane says why.
 pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;

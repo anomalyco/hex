@@ -527,6 +527,12 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 ## Invariants
 
+- Settings never stop a launch (#744). A field this build can't read (`null`,
+  a choice a newer build added, a wrong type) keeps its default with a
+  warning, and the file is not rewritten; only a file that isn't JSON fails
+  `AppSettings::load`, and then `load_for_launch` moves it aside, starts with
+  defaults, and the window shows why. Never write a value an older build
+  can't read: leave an unset option out of the file instead of `null`.
 - On a new Mac, release dictation starts only after Microphone, Accessibility,
   and the selected dictation model are ready. Hex never asks for Input
   Monitoring: Accessibility also grants the listen-event access its shortcut

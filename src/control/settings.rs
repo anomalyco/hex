@@ -1189,12 +1189,17 @@ mod tests {
     /// `OWN_COMMAND` if another `hex` command edits it).
     #[test]
     fn every_persisted_setting_has_a_cli_key() {
-        // Lists left empty are left out of the file; fill them so they count.
+        // Lists left empty and unchosen options are left out of the file;
+        // fill them so they count.
         let settings = AppSettings {
             vocabulary: vec![crate::dictation::vocabulary::VocabularyEntry {
                 term: "Rune".into(),
                 sounds_like: vec!["roon".into()],
             }],
+            meetings: crate::app_settings::MeetingSettings {
+                retention: Some(crate::app_settings::MeetingRetention::Day),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let json = serde_json::to_value(settings).unwrap();
