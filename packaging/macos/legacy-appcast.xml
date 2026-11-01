@@ -5,10 +5,9 @@
   those installs get one informational update: Sparkle shows these notes and
   a button to https://anoma.ly/hex, and never downloads or installs anything.
   The item has no enclosure and 2.3.1 does not set SURequireSignedFeed, so no
-  Sparkle EdDSA key is needed. Before publishing (Legacy appcast workflow),
-  set the version to the first anomaly.hex release; sparkle:version is
-  CFBundleVersion (major*10000 + minor*100 + patch) and must exceed 2.3.1's
-  20301.
+  Sparkle EdDSA key is needed. The version is the anomaly.hex release
+  current when it was published (3.1.1); sparkle:version is CFBundleVersion
+  (major*10000 + minor*100 + patch) and must exceed 2.3.1's 20301.
 -->
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
@@ -17,22 +16,23 @@
     <description>Hex has moved to Anomaly.</description>
     <language>en</language>
     <item>
-      <title>Hex 2.4.0</title>
-      <pubDate>Sat, 24 Oct 2026 14:21:21 +0000</pubDate>
-      <sparkle:version>20400</sparkle:version>
-      <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
+      <title>Hex 3.1.1</title>
+      <pubDate>Sun, 01 Nov 2026 06:15:00 +0000</pubDate>
+      <sparkle:version>30101</sparkle:version>
+      <sparkle:shortVersionString>3.1.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
       <sparkle:informationalUpdate></sparkle:informationalUpdate>
       <link>https://anoma.ly/hex</link>
       <description><![CDATA[
         <h2>Hex is now published by Anomaly</h2>
-        <p>The new Hex is a separate app that updates itself. Download it from
-        <a href="https://anoma.ly/hex">anoma.ly/hex</a> and drag it to Applications,
-        replacing this one. Your settings, history, and models carry over.</p>
-        <p>macOS treats it as a new app: grant Microphone, Accessibility,
-        and (for meetings) Screen &amp; System Audio Recording once
-        more. If System Settings still lists the old Hex, remove it with −
-        first. Turn Launch at login on again in Hex's settings.</p>
+        <p>The new Hex is a separate app that updates itself. Quit this Hex,
+        download the new one from <a href="https://anoma.ly/hex">anoma.ly/hex</a>,
+        and drag it to Applications, replacing this one. Your settings,
+        history, and models carry over.</p>
+        <p>macOS treats it as a new app, so grant Microphone and Accessibility
+        again (and Screen &amp; System Audio Recording for meetings), and turn
+        Launch at login back on in Hex's settings.</p>
         <p>This version of Hex will not receive further updates.</p>
       ]]></description>
     </item>
