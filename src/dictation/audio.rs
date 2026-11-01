@@ -375,6 +375,23 @@ impl DictationAudio {
         }
     }
 
+    /// Waits up to `timeout` for recognition audio, then takes every chunk
+    /// already queued behind it (at most the queue's capacity), so a reader
+    /// that polls once per pass keeps up with the microphone instead of
+    /// letting the backlog overflow into stale chunks.
+    pub fn recv_ready(&self, timeout: Duration) -> Result<Vec<RecognitionAudio>> {
+        let Some(first) = self.recv_timeout(timeout)? else {
+            return Ok(Vec::new());
+        };
+        let mut ready = vec![first];
+        ready.extend(
+            self.recognition
+                .try_iter()
+                .take(RECOGNITION_QUEUE_CAPACITY - 1),
+        );
+        Ok(ready)
+    }
+
     /// The loss of the current capture, when its event is still queued: a
     /// finish that found nothing to finish because the microphone failed
     /// first can still use the audio a programmatic capture kept. A kept
@@ -1712,6 +1729,33 @@ mod tests {
         });
         control(&mut owner, |reply| Command::Cancel { reply });
         assert_eq!(input.capture_generation(), generation);
+    }
+
+    #[test]
+    fn a_reader_polling_once_per_pass_keeps_the_meter_current() {
+        // #769: with the microphone released while idle, each listener pass
+        // can outlast a chunk. Reading one chunk per pass let the backlog
+        // overflow, leaving only stale chunks for the meter.
+        let (mut owner, input, _samples) = owner_for_test(true);
+        let mut through = capture_time();
+        for _pass in 0..50 {
+            // Three 10 ms chunks arrive during each pass.
+            for _ in 0..3 {
+                through = through + Duration::from_millis(10);
+                owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                    samples: vec![0.25; 480],
+                    captured_through: through,
+                });
+            }
+            let ready = input.recv_ready(Duration::ZERO).unwrap();
+            assert_eq!(ready.len(), 3);
+            assert!(
+                ready
+                    .iter()
+                    .all(|audio| audio.is_current(input.recognition_generation()))
+            );
+        }
+        assert!(input.recv_ready(Duration::ZERO).unwrap().is_empty());
     }
 
     #[test]
