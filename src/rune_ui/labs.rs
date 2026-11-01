@@ -277,6 +277,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             ));
         }
     }
+    // Linux's X11 grabs and shortcuts portal take these keys alone.
+    if caps.os == super::platform::Os::Linux {
+        rows.push(row(
+            Feature::StandaloneSpecialKeys,
+            &KEYBOARD,
+            tr("Special keys alone"),
+            tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
+        ));
+    }
     rows.push(row(
         Feature::UnloadIdle,
         &TIMER,
@@ -383,6 +392,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::BenchmarkDetails => "lab-benchmark-details",
         Feature::CustomModels => "lab-custom-models",
         Feature::ParakeetUltra => "lab-parakeet-ultra",
+        Feature::StandaloneSpecialKeys => "lab-special-keys",
     }
 }
 

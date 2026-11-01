@@ -368,6 +368,11 @@ const KEYS: &[Key] = &[
         "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",
     ),
     key(
+        "labs.standalone_special_keys",
+        Kind::Bool,
+        "Labs: shortcuts may use Menu, Pause, or Scroll Lock, alone or with modifiers (Linux); off puts such a shortcut back to its default",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -808,6 +813,9 @@ pub fn apply(
                         "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
                     ));
                 }
+                if let Some(why) = special_key_refusal(&candidate, binding) {
+                    return Err(invalid(name, &why));
+                }
                 (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
                 if settings.hotkey_in_use(slot, binding) {
                     return Err(ControlError::new(
@@ -853,6 +861,7 @@ pub fn apply(
                  shortcut first",
             ));
         }
+        "labs.standalone_special_keys" => candidate.repair_special_keys(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
                 return Err(invalid(name, why));
@@ -1111,13 +1120,39 @@ pub fn parse_hotkey(
         if binding.is_bare_primary_click() {
             return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
         }
-        if modifiers.is_empty() && !is_function_key(&key.label) && !key.is_mouse() {
+        // Menu, Pause, and Scroll Lock alone are checked against their Labs
+        // toggle when set (`special_key_refusal`).
+        if modifiers.is_empty()
+            && !is_function_key(&key.label)
+            && !key.is_mouse()
+            && !HotkeyKey::special_name(&key.label)
+        {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
     } else if modifiers.is_empty() {
         return Err("expected at least one modifier or key".into());
     }
     Ok(binding)
+}
+
+/// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
+/// Linux they need Labs › Special keys alone; elsewhere one alone still
+/// needs a modifier.
+fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
+    let key = binding.key.as_ref().filter(|key| key.is_special())?;
+    if settings.special_keys_allowed() {
+        return None;
+    }
+    let name = key.label.to_lowercase().replace(' ', "");
+    if cfg!(target_os = "linux") {
+        return Some(format!(
+            "{name} needs Labs › Special keys alone: hex labs on special-keys"
+        ));
+    }
+    binding
+        .modifiers
+        .is_empty()
+        .then(|| format!("add a modifier, such as option+{name}"))
 }
 
 fn is_function_key(label: &str) -> bool {
@@ -1172,6 +1207,10 @@ mod tests {
                 "left" => Ok(HotkeyKey {
                     code: 123,
                     label: "Left".into(),
+                }),
+                "menu" => Ok(HotkeyKey {
+                    code: 0,
+                    label: "Menu".into(),
                 }),
                 name if name.chars().count() == 1 => Ok(HotkeyKey {
                     code: u16::from(name.as_bytes()[0]),
@@ -1422,6 +1461,40 @@ mod tests {
                 crate::history::HistoryRetention::Month
             )]
         );
+    }
+
+    /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
+    /// shortcut only with Labs › Special keys alone on, and turning the
+    /// toggle off puts it back to the default.
+    #[test]
+    fn menu_alone_needs_its_labs_toggle() {
+        assert!(parse_hotkey("menu", rules().key_named).is_ok());
+        assert!(parse_hotkey("space", rules().key_named).is_err());
+        let settings = AppSettings::default();
+        assert_eq!(
+            apply(&settings, "dictation_hotkey", "menu", &rules())
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
+        let on = apply(&settings, "labs.standalone_special_keys", "on", &rules())
+            .unwrap()
+            .settings;
+        let change = apply(&on, "dictation_hotkey", "menu", &rules());
+        if cfg!(target_os = "linux") {
+            let change = change.unwrap();
+            assert_eq!(format_hotkey(&change.settings.dictation_hotkey), "menu");
+            let off = apply(
+                &change.settings,
+                "labs.standalone_special_keys",
+                "off",
+                &rules(),
+            )
+            .unwrap();
+            assert_eq!(off.settings.dictation_hotkey, HotkeyBinding::default());
+        } else {
+            assert!(change.is_err(), "only Linux has the toggle");
+        }
     }
 
     #[test]

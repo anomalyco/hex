@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
 mod persistence;
+mod shortcut_repair;
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -471,6 +472,7 @@ fn key_label(name: &str) -> String {
     let name = name.trim();
     let mut characters = name.chars();
     match characters.next() {
+        _ if shortcut_repair::is_scroll_lock(name) => "Scroll Lock".into(),
         Some(first) if name.chars().count() == 1 => first.to_uppercase().collect(),
         Some(first) => first.to_uppercase().chain(characters).collect(),
         None => String::new(),
@@ -1399,6 +1401,8 @@ pub struct LabsSettings {
     pub custom_models: bool,
     /// Parakeet Ultra joins the Local transcription picker (issue 648).
     pub parakeet_ultra: bool,
+    /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
+    pub standalone_special_keys: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1429,6 +1433,7 @@ impl Default for LabsSettings {
             benchmark_details: false,
             custom_models: false,
             parakeet_ultra: false,
+            standalone_special_keys: false,
         }
     }
 }
@@ -2504,40 +2509,6 @@ impl AppSettings {
     /// A shortcut saved as a bare left click swallowed every click, so its
     /// owner couldn't change it in Settings. Such a shortcut goes back to its
     /// default when settings load.
-    /// With Labs › Mouse shortcuts off, a mouse-button shortcut (issue 209)
-    /// goes back to its default and the window notes it once.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    fn repair_mouse_shortcuts(&mut self) {
-        if self.labs.mouse_shortcuts {
-            return;
-        }
-        let mouse = |binding: &HotkeyBinding| binding.key.as_ref().is_some_and(HotkeyKey::is_mouse);
-        if mouse(&self.dictation_hotkey) {
-            self.dictation_hotkey = HotkeyBinding::default();
-            self.mouse_shortcut_notice = true;
-        }
-        if self.paste_last_hotkey.as_ref().is_some_and(mouse) {
-            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
-            self.mouse_shortcut_notice = true;
-        }
-        if self.raw_dictation_hotkey.as_ref().is_some_and(mouse) {
-            self.raw_dictation_hotkey = None;
-            self.mouse_shortcut_notice = true;
-        }
-        if self.second_dictation_hotkey.as_ref().is_some_and(mouse) {
-            self.second_dictation_hotkey = None;
-            self.mouse_shortcut_notice = true;
-        }
-        #[cfg(hex_capture)]
-        if mouse(&self.capture.hotkey) {
-            self.capture.hotkey = HotkeyBinding::capture_default();
-            self.mouse_shortcut_notice = true;
-        }
-        if self.mouse_shortcut_notice {
-            tracing::info!("reset mouse-button shortcuts: Labs › Mouse shortcuts is off");
-        }
-    }
-
     fn repair_bare_primary_clicks(&mut self) {
         if self.dictation_hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click dictation shortcut with the default");

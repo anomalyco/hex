@@ -319,6 +319,10 @@ fn keysym_name(key: &str) -> Result<String> {
         "," | "comma" => "comma",
         "." | "period" => "period",
         "/" | "slash" => "slash",
+        // Labs › Special keys alone; settings hold these only while it's on.
+        "menu" => "Menu",
+        "pause" => "Pause",
+        "scroll lock" | "scrolllock" | "scroll_lock" => "Scroll_Lock",
         key if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() => key,
         key if key.starts_with('f')
             && key[1..]
@@ -1665,6 +1669,9 @@ fn keysym(key: &str) -> Result<u32> {
         "enter" | "return" => Ok(0xff0d),
         "tab" => Ok(0xff09),
         "backspace" => Ok(0xff08),
+        "menu" => Ok(0xff67),
+        "pause" => Ok(0xff13),
+        "scroll lock" | "scrolllock" | "scroll_lock" => Ok(0xff14),
         key if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() => {
             Ok(u32::from(key.as_bytes()[0]))
         }
@@ -2084,6 +2091,27 @@ mod tests {
         };
         assert_eq!(binding.label(), "F12");
         assert!(binding.validate().is_ok());
+    }
+
+    /// Issue 767: Menu, Pause, and Scroll Lock, as a saved binding names
+    /// them, reach the portal and X11 under their xkb names.
+    #[test]
+    fn special_keys_have_portal_and_x11_names() {
+        for (name, portal, keysym_value) in [
+            ("menu", "Menu", 0xff67),
+            ("pause", "Pause", 0xff13),
+            ("scrolllock", "Scroll_Lock", 0xff14),
+        ] {
+            let saved = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let hotkey = LinuxHotkey::from(&saved);
+            assert!(hotkey.validate().is_ok());
+            assert_eq!(hotkey.portal_trigger().unwrap(), portal);
+            assert_eq!(keysym(&hotkey.key).unwrap(), keysym_value);
+            assert_eq!(HotkeyBinding::from(&hotkey), saved);
+        }
     }
 
     #[test]

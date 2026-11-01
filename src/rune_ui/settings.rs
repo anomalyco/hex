@@ -341,6 +341,17 @@ pub(super) fn validate(
     if binding.is_bare_primary_click() {
         return Err(tr("Add a modifier"));
     }
+    // Menu, Pause, and Scroll Lock need Labs › Special keys alone (Linux).
+    if cfg!(target_os = "linux")
+        && binding.key.as_ref().is_some_and(HotkeyKey::is_special)
+        && !settings.special_keys_allowed()
+    {
+        return Err(if binding.modifiers.is_empty() {
+            tr("Add a modifier")
+        } else {
+            tr("Unsupported key")
+        });
+    }
     host::validate_hotkey(target, binding)?;
     if conflicts(settings, target, binding) {
         return Err(tr("Already in use"));
@@ -1328,6 +1339,31 @@ pub(super) fn updates_itself(ui: &Ui) -> bool {
                 | DesktopUpdateStatus::SwitchAvailable { .. }
         )
     })
+}
+
+/// Issue 767: the window takes Menu alone only with Labs › Special keys
+/// alone on.
+#[cfg(all(test, target_os = "linux"))]
+mod special_keys_tests {
+    use super::*;
+
+    #[test]
+    fn menu_alone_needs_its_labs_toggle() {
+        let menu = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("menu")),
+        };
+        let mut settings = AppSettings::default();
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &menu),
+            Err(tr("Add a modifier"))
+        );
+        settings.labs.standalone_special_keys = true;
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &menu),
+            Ok(())
+        );
+    }
 }
 
 #[cfg(test)]
