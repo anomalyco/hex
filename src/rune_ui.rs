@@ -54,6 +54,8 @@ mod spark;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;
+#[cfg(target_os = "macos")]
+pub(crate) mod words_to_caret;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

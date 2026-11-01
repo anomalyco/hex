@@ -379,9 +379,13 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-spoken-symbols",
+        "lab-words-to-caret",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
+    assert!(!rt.state.settings.labs.words_to_caret);
+    tap(&mut rt, "lab-words-to-caret");
+    assert!(rt.state.settings.labs.words_to_caret);
     assert!(!rt.state.settings.labs.spoken_formatting);
     tap(&mut rt, "lab-spoken-formatting");
     assert!(rt.state.settings.labs.spoken_formatting);

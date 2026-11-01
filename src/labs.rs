@@ -83,10 +83,11 @@ pub enum Feature {
     SidedChords,
     TapOrHold,
     BenchmarkDetails,
+    WordsToCaret,
 }
 
 impl Feature {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -112,6 +113,7 @@ impl Feature {
         Self::SidedChords,
         Self::TapOrHold,
         Self::BenchmarkDetails,
+        Self::WordsToCaret,
     ];
 
     /// The features this OS and build have.
@@ -160,6 +162,7 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::BenchmarkDetails => Audience::Everyone,
+            Self::WordsToCaret => Audience::Dev,
         }
     }
 
@@ -188,7 +191,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold => cfg!(target_os = "macos"),
+            | Self::TapOrHold
+            | Self::WordsToCaret => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -231,6 +235,7 @@ impl Feature {
             Self::SidedChords => "sided-modifier-chords",
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
+            Self::WordsToCaret => "words-to-caret",
         }
     }
 
@@ -262,6 +267,7 @@ impl Feature {
             Self::SidedChords => "labs.sided_modifier_chords",
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
+            Self::WordsToCaret => "labs.words_to_caret",
         }
     }
 
@@ -324,6 +330,7 @@ impl Feature {
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }
+            Self::WordsToCaret => "Pasted words fly from the HUD to the text cursor",
         }
     }
 
@@ -359,6 +366,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords,
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
+            Self::WordsToCaret => settings.labs.words_to_caret,
         }
     }
 
@@ -389,6 +397,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
+            Self::WordsToCaret => settings.labs.words_to_caret = on,
         }
     }
 }
@@ -410,8 +419,9 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
+const WORDS_TO_CARET: u32 = 1 << 16;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 16;
+const MINUTES_SHIFT: u32 = 17;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -517,6 +527,13 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
+/// A pasted dictation's words fly from the HUD to the text cursor (macOS;
+/// read as each paste commits).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn words_to_caret() -> bool {
+    on(WORDS_TO_CARET)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -582,6 +599,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             SIDED_CHORDS,
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
+        (
+            Feature::WordsToCaret,
+            settings.words_to_caret,
+            WORDS_TO_CARET,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -772,6 +794,18 @@ mod tests {
     }
 
     #[test]
+    fn words_to_caret_runs_only_in_dev_builds() {
+        assert_eq!(Feature::WordsToCaret.audience(), Audience::Dev);
+        let labs = LabsSettings {
+            words_to_caret: true,
+            ..LabsSettings::default()
+        };
+        let reaches = |dev_build| move |feature: Feature| feature.audience().reaches(dev_build);
+        assert_eq!(encode_where(&labs, reaches(false)) & WORDS_TO_CARET, 0);
+        assert_ne!(encode_where(&labs, reaches(true)) & WORDS_TO_CARET, 0);
+    }
+
+    #[test]
     fn settings_keys_name_their_feature() {
         for feature in Feature::ALL {
             assert_eq!(
@@ -880,6 +914,19 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & SIDED_CHORDS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn words_to_caret_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & WORDS_TO_CARET, 0);
+        labs.words_to_caret = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & WORDS_TO_CARET, 0);
+        assert_eq!(state & SMART_SPACING, 0);
+        assert_eq!(state & SPOKEN_SYMBOLS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

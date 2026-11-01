@@ -27,7 +27,7 @@ mod dictated;
 mod field_text;
 mod first_run;
 mod fixture;
-mod flight;
+pub(super) mod flight;
 mod flows;
 mod game;
 pub(crate) mod game_fx;
