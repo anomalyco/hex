@@ -145,7 +145,6 @@ fn pick(ui: &mut Ui, index: usize) {
     if (ui.found.picked == Some(index) && !failed) || ui.found.adopting() {
         return;
     }
-    let recommended = ui.settings.transcription.model;
     let found = match entries(ui).get(index) {
         None => return,
         Some(Entry::Recommended { .. }) => None,
@@ -154,13 +153,9 @@ fn pick(ui: &mut Ui, index: usize) {
     ui.found.picked = Some(index);
     ui.found.error = None;
     match found {
-        None => {
-            crate::transcription::found_models::accept(recommended);
-            prepare(ui, ui.settings.transcription.clone());
-        }
+        None => prepare(ui, ui.settings.transcription.clone()),
         Some(found) => match found.catalog {
             Some(model) => {
-                crate::transcription::found_models::accept(model);
                 let language = transcription_models::definition(model)
                     .language_for(&ui.settings.transcription.language)
                     .to_owned();

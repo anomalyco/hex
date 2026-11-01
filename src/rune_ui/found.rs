@@ -9,7 +9,6 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use rune::Waker;
 
 use super::{Request, Ui};
-use crate::desktop::onboarding::{Input, SetupItem};
 use crate::transcription::custom_models;
 use crate::transcription::found_models::{self, Found};
 use crate::transcription::models::{CustomModelId, TranscriptionModelId, TranscriptionSelection};
