@@ -1118,7 +1118,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   in one session with one BindShortcuts call, and that set never changes
   while Hex runs: desktops keep one set per app, and KDE replaces it with
   each call (a second session once wiped Hex's shortcuts,
-  [#482](https://github.com/anomalyco/hex/issues/482)). Enable and Disable
+  [#482](https://github.com/anomalyco/hex/issues/482)). Keys the desktop
+  changes in its own settings arrive as ShortcutsChanged and work at once; Hex
+  shows the granted trigger in Settings (row note and the Status hint) and in
+  `hex status --json` (`listener.shortcuts`). On GNOME the Linux dictation
+  default is Ctrl+Alt+Space (GNOME keeps Alt+Space), Settings flags a shortcut
+  on a key GNOME keeps for itself, and Annotate's shortcut shows beside
+  dictation's in General (#723). Enable and Disable
   (window, tray) also save `enable_on_launch`, so a disabled Hex stays disabled
   after a restart (#575). On GNOME only, Disable then binds an empty set in a
   fresh session: GNOME Settings stores exactly the set an app binds, so Hex's

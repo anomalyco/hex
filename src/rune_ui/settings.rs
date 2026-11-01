@@ -568,7 +568,15 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         }
         None => tr("Connecting…").to_string(),
     };
-    let shortcut = ui.settings.dictation_hotkey.keycaps().join("+");
+    // The key the desktop granted, which it may have changed in its own
+    // settings (#723), else the one Hex records.
+    let shortcut = match portal_grant(ui, ShortcutTarget::Dictation) {
+        Some(DesktopGrantedShortcut {
+            trigger: Some(trigger),
+            ..
+        }) => trigger.clone(),
+        _ => ui.settings.dictation_hotkey.keycaps().join("+"),
+    };
     let hint = match (running, ui.settings.shortcut_mode) {
         _ if !ui.records_shortcuts() => {
             tr("Ready anywhere · Use your desktop's shortcuts to dictate").to_string()
