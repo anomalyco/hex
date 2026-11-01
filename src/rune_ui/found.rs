@@ -30,6 +30,8 @@ pub(super) struct FoundState {
     /// The onboarding list's row the person picked, which started; until
     /// then the recommended model's row is selected.
     pub(super) picked: Option<usize>,
+    /// The recommended model when the list first showed (`found_choice`).
+    pub(super) recommended: Option<TranscriptionSelection>,
 }
 
 impl FoundState {

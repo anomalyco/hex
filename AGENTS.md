@@ -744,7 +744,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   selected (its exact copy on this computer is that same row), then the found
   files. Picking a row starts it, and Continue starts the selected row. The
   tour's own download is held while the scan runs and until a pick, and only
-  through setup. A found model is never picked for the person.
+  through setup. Once a pick is ready the list stays until the tour moves
+  on, and Back returns to it. A found model is never picked for the person.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer

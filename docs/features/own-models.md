@@ -99,6 +99,11 @@ Onboarding opens -> scan; the tour's own download waits until it answers  // set
     ├── Continue with no pick starts the selected row (the recommended one),
     │   then works as today: it waits for the model where setup needs it
     │   (Linux, Windows) and moves on while it downloads where it doesn't
+    ├── Once a pick is ready the list stays (the row says "Ready", the rows
+    │   keep the recommendation they opened with) until the tour moves on;
+    │   the old "Download a speech model" page never shows
+    ├── Back from the next step returns to the list to change the pick
+    │   (Flow::show_model_choice), even with the model ready
     └── The held download is released once the tour passes setup, so a tour
         that skips the step still gets the recommended model
 ```

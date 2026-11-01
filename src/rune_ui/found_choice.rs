@@ -17,9 +17,10 @@ use crate::transcription::found_models::Found;
 use crate::transcription::models::{self as transcription_models, TranscriptionSelection};
 
 /// Whether onboarding shows the list: something compatible was found and
-/// the model isn't ready yet.
+/// the model isn't ready yet, or the person picked from it (it stays, so a
+/// ready pick moves on from the list and Back returns to it).
 pub(super) fn offered(ui: &Ui, model: ItemStatus) -> bool {
-    model != ItemStatus::Ready && !ui.found.models.is_empty()
+    !ui.found.models.is_empty() && (model != ItemStatus::Ready || ui.found.picked.is_some())
 }
 
 /// Whether the list waits for its first pick, so Continue starts the
@@ -31,6 +32,15 @@ pub(super) fn pending(ui: &Ui, model: ItemStatus) -> bool {
         && !ui.found.adopting()
 }
 
+/// Hex's recommended model as the list first showed it: picking a found
+/// model changes the saved selection, and the rows stay as they were.
+fn recommended(ui: &Ui) -> TranscriptionSelection {
+    ui.found
+        .recommended
+        .clone()
+        .unwrap_or_else(|| ui.settings.transcription.clone())
+}
+
 /// One row of the list: Hex's recommended model, or a found file.
 enum Entry<'a> {
     Recommended { on_disk: bool },
@@ -38,7 +48,7 @@ enum Entry<'a> {
 }
 
 fn entries(ui: &Ui) -> Vec<Entry<'_>> {
-    let recommended = ui.settings.transcription.model;
+    let recommended = recommended(ui).model;
     let on_disk = ui
         .found
         .models
@@ -75,9 +85,7 @@ fn model_row(
     model: ItemStatus,
 ) -> El {
     let name = match entry {
-        Entry::Recommended { .. } => {
-            transcription_models::definition(ui.settings.transcription.model).name
-        }
+        Entry::Recommended { .. } => transcription_models::definition(recommended(ui).model).name,
         Entry::Found(found) => found.catalog.map_or(found.name.as_str(), |id| {
             transcription_models::definition(id).name
         }),
@@ -85,6 +93,7 @@ fn model_row(
     let started = selected && ui.found.picked.is_some();
     let line = match (entry, started, model) {
         (_, true, ItemStatus::Failed) => tr("Couldn't prepare this model").to_owned(),
+        (_, true, ItemStatus::Ready) if !ui.found.adopting() => tr("Ready").to_owned(),
         (Entry::Recommended { on_disk: false }, true, ItemStatus::Downloading(progress)) => {
             tr_fill(
                 "Downloading… {}%",
@@ -96,7 +105,7 @@ fn model_row(
         }
         (Entry::Recommended { on_disk: false }, ..) => tr_fill(
             "{} download",
-            &transcription_models::definition(ui.settings.transcription.model).size_label(),
+            &transcription_models::definition(recommended(ui).model).size_label(),
         ),
         (Entry::Recommended { on_disk: true }, ..) => tr("On this computer").to_owned(),
         (Entry::Found(found), ..) if found.catalog.is_some() => tr("On this computer").to_owned(),
@@ -153,11 +162,11 @@ fn pick(ui: &mut Ui, index: usize) {
     ui.found.picked = Some(index);
     ui.found.error = None;
     match found {
-        None => prepare(ui, ui.settings.transcription.clone()),
+        None => prepare(ui, recommended(ui)),
         Some(found) => match found.catalog {
             Some(model) => {
                 let language = transcription_models::definition(model)
-                    .language_for(&ui.settings.transcription.language)
+                    .language_for(&recommended(ui).language)
                     .to_owned();
                 prepare(ui, TranscriptionSelection { model, language });
             }

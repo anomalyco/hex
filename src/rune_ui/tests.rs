@@ -1829,6 +1829,42 @@ fn onboarding_downloads_the_model_through_the_service() {
 }
 
 #[test]
+fn a_found_model_moves_on_from_the_list_and_back_returns_to_it() {
+    let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
+    tap(&mut rt, "model1");
+    // The service saves the pick and has the found file ready: the list
+    // stays (no "Download a speech model" page) until the tour moves on.
+    rt.state.settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetV3,
+        language: "en".into(),
+    };
+    rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
+    settle(&mut rt);
+    // The list may already be leaving for the next step (the advance beat).
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(&"Choose a speech model".to_owned()),
+        "{shown:?}"
+    );
+    assert!(
+        !shown.contains(&"Download a speech model".to_owned()),
+        "{shown:?}"
+    );
+    assert!(
+        shown.contains(&"Parakeet Unified English".to_owned()),
+        "the rows stay"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    settle(&mut rt);
+    let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().unwrap().flow.step();
+    assert_eq!(step(&rt), crate::desktop::onboarding::Step::TryIt);
+    // Back returns to the list to change the pick.
+    tap(&mut rt, "tour-back");
+    assert_eq!(step(&rt), crate::desktop::onboarding::Step::Setup);
+    assert!(rt.find("model-list").is_some());
+}
+
+#[test]
 fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list() {
     for scene in ["onboarding", "mac-onboarding"] {
         let mut rt = runtime(scene, false, PANE_SIZE);
