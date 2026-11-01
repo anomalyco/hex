@@ -15,6 +15,7 @@ platforms, and dependencies.
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
+- [Load settings with invalid fields](#load-settings-with-invalid-fields).
 
 ## How To Get To It
 
@@ -37,6 +38,34 @@ This is a map of existing checks, not a verified end-to-end recovery driver.
 Unless an executed result is dated below, checks are locators rather than passing
 runs. Capture evidence is macOS-specific unless stated otherwise; each sketch
 puts its source and proof limit beside it.
+
+### Load Settings With Invalid Fields
+
+`recover.settings`: a settings file written by another build, or edited by
+hand, cannot prevent the app from opening.
+
+```ts
+Launch -> read settings.json
+├── Unknown keys -> ignored
+├── Invalid field -> log its key and reason -> that field's default
+│   └── Valid siblings and unrelated sections stay
+├── Invalid JSON / unreadable file -> log why -> defaults in memory
+└── Save over invalid settings -> preserve exact original first
+    ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
+    └── Backup fails / original cannot be read -> save fails, original stays
+```
+
+Loading repaired settings does not itself rewrite the file. A later settings
+save (including a migration save) takes the backup before replacing it.
+Backups are never automatically removed. Unchosen `meetings.retention` is
+written as an absent key, so older builds with a non-optional retention still
+read the file; existing `null` values also load in the current build.
+
+Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
+and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
+invalid enums, nested types, list entries, unknown keys, invalid JSON,
+exactly-once private backups, interrupted saves, and backup failure. These
+checks use temporary files; they do not exercise a real app launch.
 
 ### Cancel Without Losing Other Work
 
@@ -669,4 +698,3 @@ consumer, without using the user's clipboard.
 Do not reset settings or loosen shortcut matching to make a recovery check pass.
 Keep automatic recovery, explicit retry, and defects that prevent recovery
 distinct. Test cleanup must preserve failure evidence.
-
