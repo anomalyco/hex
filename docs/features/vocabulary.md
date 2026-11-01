@@ -83,6 +83,18 @@ hex vocabulary                           // vocabulary.cli
 ├── remove <term> -> Any case
 └── Running Hex saves and reloads settings; an open window adopts the change
 
+A mode's own vocabulary                  // vocabulary.modes; DictationMode::vocabulary
+├── settings.json `dictation_processing.modes[].vocabulary`, same entries; no
+│   window editor yet (Output lists it as the mode's first step; Edit with
+│   agent's prompt explains it)
+├── Its terms come first, then the shared list's, each term once (any case),
+│   so the 64-term cap keeps them
+├── OpenCode rewriting -> every OS, the mode chosen for the dictation
+└── Transcription -> macOS dictation only: the mode of the app and page last
+    seen by the context monitor (≤ 0.5 s old) when the stream or whole-clip run
+    starts; meetings, captures, the local API, Linux, and Windows hear with
+    the shared list
+
 OpenCode rewriting (Modes)               // vocabulary.prompt
 └── Prompt gains "Vocabulary (spell these exactly when the speaker means them):
     term (may be transcribed as a, b); …" before the foreground application
@@ -100,8 +112,10 @@ Search                                   // vocabulary.search
 └── Aliases never count as exact; exact hits always rank first
 ```
 
-The list lives in `settings.json` as `vocabulary: [{term, sounds_like?}]`,
-written only when non-empty, so older files load unchanged and are not
+The list lives in `settings.json` as `vocabulary`, each entry a plain term
+(`"Rune"`) or `{term, sounds_like}`; both load, and Hex writes a term without
+spellings as a plain string. `hex vocabulary list --json` keeps the object form.
+It is written only when non-empty, so older files load unchanged and are not
 rewritten. Terms are unique ignoring case; at most 500 terms, 64 characters
 each, and 16 spellings per term. Read-only commands (`hex history`,
 `hex meetings`, `hex mcp`) read the field straight from the file and never load

@@ -950,7 +950,9 @@ impl Worker {
                     partials,
                 } => {
                     self.dictating.store(true, Ordering::Release);
-                    self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                    crate::dictation::vocabulary::for_dictation(|| {
+                        self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                    });
                     self.dictating.store(false, Ordering::Release);
                 }
                 Command::BeginYielding {
@@ -980,7 +982,9 @@ impl Worker {
                         None => Source::Offline,
                     };
                     self.dictating.store(true, Ordering::Release);
-                    self.run_offline(clip, offline, source, job);
+                    crate::dictation::vocabulary::for_dictation(|| {
+                        self.run_offline(clip, offline, source, job);
+                    });
                     self.dictating.store(false, Ordering::Release);
                 }
                 Command::Foreground { clip, offline, job } => {

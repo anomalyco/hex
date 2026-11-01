@@ -92,10 +92,23 @@ struct Step {
     runner: Runner,
 }
 
-/// A mode's steps in the order they run: its corrections, its
-/// transformations, then OpenCode rewriting when it is on.
+/// A mode's steps in the order they run: the names it hears, its
+/// corrections, OpenCode rewriting when it is on, then its transformations.
 fn steps(ui: &Ui, mode: &DictationMode) -> Vec<Step> {
     let mut steps = Vec::new();
+    if !mode.vocabulary.is_empty() {
+        let terms = mode
+            .vocabulary
+            .iter()
+            .map(|entry| entry.term.as_str())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        steps.push(Step {
+            title: tr("Vocabulary").into(),
+            detail: Some(terms),
+            runner: Runner::BuiltIn,
+        });
+    }
     if !mode.replacements.is_empty() {
         let pairs = mode
             .replacements
@@ -115,6 +128,13 @@ fn steps(ui: &Ui, mode: &DictationMode) -> Vec<Step> {
             title: tr("Replace words").into(),
             detail: (!pairs.is_empty()).then_some(pairs),
             runner: Runner::BuiltIn,
+        });
+    }
+    if mode.post_processing.enabled {
+        steps.push(Step {
+            title: tr("Rewrite with OpenCode").into(),
+            detail: mode.post_processing.model.clone(),
+            runner: Runner::Rewrite,
         });
     }
     for id in &mode.transformations {
@@ -137,13 +157,6 @@ fn steps(ui: &Ui, mode: &DictationMode) -> Vec<Step> {
                     runner: Runner::Script,
                 }
             }
-        });
-    }
-    if mode.post_processing.enabled {
-        steps.push(Step {
-            title: tr("Rewrite with OpenCode").into(),
-            detail: mode.post_processing.model.clone(),
-            runner: Runner::Rewrite,
         });
     }
     steps
@@ -668,11 +681,13 @@ fn agent_prompt() -> String {
          (run `hex commands init` for its typings; the API, including fetch and \
          node:child_process, is documented at {TRANSFORMS_DOCS}).\n\
          \n\
-         Names Hex should know (people, products, projects) go in the shared vocabulary, \
-         not in replacements: `hex vocabulary add <term> --sounds-like a,b` (and `list`, \
-         `remove`). Every app uses it, and the AI rewrite spells its terms right. Use \
-         replacements for fixed swaps and deletions, such as a word to an emoji or \
-         dropping \"um\".\n\
+         Names Hex should know (people, products, projects) go in a vocabulary, not in \
+         replacements. Hex hears them better and the AI rewrite spells them right. The \
+         shared list covers every app: `hex vocabulary add <term> --sounds-like a,b` \
+         (and `list`, `remove`). A mode can add its own in `vocabulary`, a list of \
+         terms (\"Rune\") or {{\"term\", \"sounds_like\": [...]}} for words it's often \
+         heard as. Use replacements for fixed swaps and deletions, such as a word to an \
+         emoji or dropping \"um\".\n\
          \n\
          Read the current value with `hex settings get dictation_processing`, then \
          change it with `hex settings set dictation_processing.default_mode '<json>'` \
