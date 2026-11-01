@@ -584,6 +584,36 @@ mod tests {
     }
 
     #[test]
+    fn download_instead_stops_using_the_found_copy() {
+        let model = super::super::models::definition(TranscriptionModelId::SenseVoiceSmall);
+        let path = PathBuf::from("/nowhere/sense-voice.gguf");
+        let mut found = Vec::new();
+        found.push(Found {
+            path: path.clone(),
+            repository: String::new(),
+            revision: String::new(),
+            file_name: String::new(),
+            bytes: 0,
+            blob_sha256: None,
+            catalog: Some(model.id),
+            name: String::new(),
+            architecture: String::new(),
+            variant: String::new(),
+            languages: Vec::new(),
+            compression: "Q8_0",
+            tensor_bytes: 0,
+            too_big: false,
+        });
+        CACHE.lock().unwrap().last = found;
+        assert_eq!(catalog_candidate(model), Some(path.clone()));
+        decline(model.id);
+        assert_eq!(catalog_candidate(model), None);
+        accept(model.id);
+        assert_eq!(catalog_candidate(model), Some(path));
+        CACHE.lock().unwrap().last.clear();
+    }
+
+    #[test]
     fn a_scan_finds_catalog_matches_and_compatible_files_without_writing() {
         let hub = temporary("scan");
         let v3 = super::super::models::definition(TranscriptionModelId::ParakeetV3);

@@ -359,9 +359,10 @@ Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 prove rendering, not clean-account permission grants or model preparation.
 
 When the Hugging Face cache holds a compatible speech model, the setup step
-asks "Choose a speech model" between Hex's recommended model (Recommended, the
-default button) and the found files, and holds the tour's download until the
-person chooses; with nothing found the step is unchanged
+asks "Choose a speech model": the recommended model's exact copy there (the
+default, with Download instead) or its download, and the other found files
+behind "Use a model already on this computer"; it holds the tour's download
+until the person chooses; with nothing found the step is unchanged
 ([own-models.md](own-models.md#onboarding-choice), scene
 `onboarding-model-found`).
 
