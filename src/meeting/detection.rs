@@ -29,7 +29,10 @@ const BROWSER_PAGE_MEMORY: Duration = Duration::from_secs(60);
 
 /// Websites whose pages are calls whenever a browser holds the microphone on
 /// them. Google Meet is separate: only its meeting paths are calls.
-const CALL_SITES: [(&str, MeetingSource); 1] = [("banshee.app", MeetingSource::Banshee)];
+const CALL_SITES: [(&str, MeetingSource); 2] = [
+    ("banshee.app", MeetingSource::Banshee),
+    ("web.whatsapp.com", MeetingSource::WhatsApp),
+];
 
 /// How long a condition has held across observations, by the monotonic
 /// clock, so a slow loop iteration cannot stretch a threshold.
@@ -217,7 +220,8 @@ impl MeetingCandidate {
 
     fn required_stability(&self) -> Duration {
         match self.source {
-            MeetingSource::BrowserCall => BROWSER_STABLE_FOR,
+            // WhatsApp also takes the microphone for voice notes (#835).
+            MeetingSource::BrowserCall | MeetingSource::WhatsApp => BROWSER_STABLE_FOR,
             _ => STABLE_FOR,
         }
     }
@@ -262,6 +266,7 @@ pub enum MeetingSource {
     Teams,
     SlackHuddle,
     FaceTime,
+    WhatsApp,
     BrowserCall,
 }
 
@@ -275,6 +280,7 @@ impl MeetingSource {
             Self::Teams => "Microsoft Teams",
             Self::SlackHuddle => "Slack Huddle",
             Self::FaceTime => "FaceTime",
+            Self::WhatsApp => "WhatsApp",
             Self::BrowserCall => "Browser call",
         }
     }
@@ -558,6 +564,7 @@ pub fn candidate_from_microphone(
         "com.microsoft.teams2" => (MeetingSource::Teams, "Microsoft Teams meeting"),
         "com.tinyspeck.slackmacgap" => (MeetingSource::SlackHuddle, "Slack huddle"),
         "com.apple.FaceTime" => (MeetingSource::FaceTime, "FaceTime call"),
+        "net.whatsapp.WhatsApp" => (MeetingSource::WhatsApp, "WhatsApp call"),
         _ => return None,
     };
     let mut candidate = candidate(source, canonical_bundle, title);
@@ -912,6 +919,45 @@ mod tests {
             ))
             .is_none()
         );
+    }
+
+    #[test]
+    fn whatsapp_calls_are_detected_after_a_voice_note_would_have_ended() {
+        let mut offers = Vec::new();
+        for (bundle_id, name) in [
+            ("net.whatsapp.WhatsApp", "WhatsApp"),
+            ("desktop.WhatsApp", "WhatsApp"),
+            ("WhatsApp.Root.exe", "WhatsApp"),
+            ("whatsapp.exe", "WhatsApp"),
+        ] {
+            let app = ActiveMicrophoneApplication {
+                pid: 7,
+                bundle_id: bundle_id.into(),
+                name: name.into(),
+            };
+            let call = candidate_from_microphone(&app, &ContextSnapshot::default())
+                .unwrap_or_else(|| panic!("{bundle_id} is WhatsApp"));
+            assert_eq!(call.source, MeetingSource::WhatsApp);
+            assert_eq!(call.application.as_deref(), Some("net.whatsapp.WhatsApp"));
+            offers.push(call);
+        }
+        // Voice notes hold the microphone too, so it takes about 20 s.
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&offers[0]), &[], 19_500).is_empty());
+        assert_eq!(watch.run(Some(&offers[0]), &[], 1_000).len(), 1);
+
+        let web = candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://web.whatsapp.com/"),
+                "WhatsApp",
+            ),
+        )
+        .unwrap();
+        assert_eq!(web.source, MeetingSource::WhatsApp);
+        assert_eq!(web.required_stability(), BROWSER_STABLE_FOR);
+        assert_eq!(known_provider_label("net.whatsapp.WhatsApp"), Some("WhatsApp"));
     }
 
     #[test]
