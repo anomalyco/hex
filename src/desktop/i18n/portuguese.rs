@@ -261,6 +261,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("GPU", "GPU"),
     ("CPU", "CPU"),
     ("Speech engine", "Mecanismo de voz"),
+    ("Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway.", "O automático usa a CPU porque ela reconhece a fala mais rápido que {device}. Escolha GPU para usá-la mesmo assim."),
     ("Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.", "O automático usa a CPU porque {device} parou de responder. Escolha GPU para tentar de novo."),
     ("Dictation HUD", "HUD de ditado"),
     ("Call recording", "Gravação de chamadas"),

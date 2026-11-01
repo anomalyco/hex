@@ -1235,7 +1235,11 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
         .flatten();
     let note = failed.map(|failure| {
         tr_named(
-            "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.",
+            if failure.slow {
+                "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
+            } else {
+                "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
+            },
             &[("device", failure.device.as_str())],
         )
     });

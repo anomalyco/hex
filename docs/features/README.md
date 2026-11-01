@@ -1290,6 +1290,9 @@ Linux beta                               // not macOS feature parity
 │   ├── A GPU load, prewarm or run that fails with a device error (hang,
 │   │   reset, lost device, out of memory) -> reloads on the CPU; once the CPU
 │   │   works, that GPU is recorded
+│   ├── An integrated GPU whose warm 1.5 s run takes over 300 ms -> Auto times
+│   │   the CPU too and keeps the faster; a slower GPU is recorded (slow), so
+│   │   later loads go straight to the CPU (#484: UHD 620, Iris Plus 655)
 │   ├── GPU -> tries the GPU anyway; working, it clears that GPU's record
 │   └── CPU -> CPU only
 │   // checked on apollo with a planted record (RADV); a real i915 hang not reproduced

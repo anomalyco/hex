@@ -5,7 +5,9 @@ compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire system
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
 to the CPU. A GPU that hangs or fails while transcribing is remembered for
 its current driver, and Auto transcribes on the CPU on it until the driver
-changes; General › Advanced › **Speech engine** picks Auto, GPU, or CPU
+changes. An integrated GPU slow enough to miss streaming deadlines is timed
+against the CPU once, and Auto keeps whichever is faster. General › Advanced ›
+**Speech engine** picks Auto, GPU, or CPU
 (`hex settings set transcription_device cpu`). The window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
 or a software Vulkan driver. See the Wayland requirements below.
