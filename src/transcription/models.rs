@@ -25,6 +25,8 @@ pub enum TranscriptionModelId {
     Qwen3Asr06B,
     #[serde(rename = "qwencleo_asr_1_7b")]
     QwenCleoAsr17B,
+    #[serde(rename = "ivrit_whisper_large_v3_turbo")]
+    IvritWhisperLargeV3Turbo,
     SenseVoiceSmall,
     CohereTranscribe,
     #[serde(rename = "underdog_bark_3_pro")]
@@ -43,6 +45,7 @@ impl TranscriptionModelId {
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
             Self::QwenCleoAsr17B => "qwencleo_asr_1_7b",
+            Self::IvritWhisperLargeV3Turbo => "ivrit_whisper_large_v3_turbo",
             Self::SenseVoiceSmall => "sense_voice_small",
             Self::CohereTranscribe => "cohere_transcribe",
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
@@ -63,6 +66,7 @@ impl FromStr for TranscriptionModelId {
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
             "qwencleo_asr_1_7b" => Ok(Self::QwenCleoAsr17B),
+            "ivrit_whisper_large_v3_turbo" => Ok(Self::IvritWhisperLargeV3Turbo),
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
@@ -419,6 +423,24 @@ const QWENCLEO_RECORD: BenchmarkRecord = BenchmarkRecord {
     ..BenchmarkRecord::unrecorded(ErrorMetric::Wer, 19.85, "ar")
 };
 
+/// Hex's own run of transcribe.cpp's WER harness (`scripts/wer/run.py` and
+/// `score.py`, language `he`, greedy, no timestamps) over the full FLEURS
+/// Hebrew test split on apollo. Stock Whisper large-v3-turbo scored 29.69%
+/// on the same run, so the fine-tune makes 38% fewer word errors; the
+/// reporter of #752 measured 18.46% against 29.51% (37%) on an RTX 3090.
+const IVRIT_WHISPER_RECORD: BenchmarkRecord = BenchmarkRecord {
+    metric: ErrorMetric::Wer,
+    value: 18.45,
+    language: "he",
+    dataset: Some("FLEURS test"),
+    source: Some("Hex's run of the transcribe.cpp WER harness"),
+    source_revision: Some("7045d1c"),
+    utterances: Some(792),
+    batch_size: Some(1),
+    timestamps: Some(false),
+    hardware: Some("Radeon 8060S (Vulkan)"),
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -426,6 +448,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::Qwen3Asr06B => Some(QWEN3_ASR_RECORD),
         TranscriptionModelId::SenseVoiceSmall => Some(SENSEVOICE_RECORD),
         TranscriptionModelId::QwenCleoAsr17B => Some(QWENCLEO_RECORD),
+        TranscriptionModelId::IvritWhisperLargeV3Turbo => Some(IVRIT_WHISPER_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model
@@ -519,6 +542,21 @@ const QWENCLEO_ARTIFACT: GgufArtifact = GgufArtifact {
     sha256: "43bae9d5d7a26684b4a0faf1abc6e872b5825cc9147dbb7200da9ff4c5d12f87",
     architecture: "qwen3_asr",
     variant: "qwen3-asr-1.7b",
+};
+// ivrit.ai's Hebrew fine-tune of Whisper large-v3-turbo (Apache-2.0), from
+// ivrit-ai/whisper-large-v3-turbo at f33172a8. Converted with transcribe.cpp
+// 7045d1c's Whisper converter, with the variant's display name added
+// (`ivrit.ai Whisper Large v3 Turbo`; author and repository come from the
+// source), and quantized to Q8_0; rebuilding it that way reproduces this
+// file byte for byte.
+const IVRIT_WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "ivrit-whisper-large-v3-turbo-Q8_0.gguf",
+    revision: "a12befaff80add995ac6a8fe10cbb7f38438c7b5",
+    repository: "adolan/ivrit-whisper-large-v3-turbo-gguf",
+    bytes: 886_381_536,
+    sha256: "23756afa3d3c52cd3cb55e259c8373373eba6d19c3858a67531ba2772b7f272f",
+    architecture: "whisper",
+    variant: "ivrit-whisper-large-v3-turbo",
 };
 const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "SenseVoiceSmall-Q8_0.gguf",
@@ -663,6 +701,24 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: false,
     },
     ModelDefinition {
+        id: TranscriptionModelId::IvritWhisperLargeV3Turbo,
+        name: "ivrit.ai Whisper large-v3-turbo",
+        // The same architecture and size as Whisper large-v3-turbo; on apollo
+        // it ran a 9.8 s Hebrew clip as fast as the stock model (38x and 36x).
+        realtime: "~19x",
+        word_error_rate: Some(18.45),
+        quality_context: "Hebrew benchmark",
+        coverage: "Hebrew",
+        timestamps: "Segment timestamps",
+        streams: false,
+        runtime: ModelRuntime::Gguf(&IVRIT_WHISPER_ARTIFACT),
+        // ivrit.ai: the fine-tune lost language detection and translation, so
+        // it always runs with the Hebrew hint.
+        languages: &["he"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
         id: TranscriptionModelId::SenseVoiceSmall,
         name: "SenseVoice Small",
         realtime: "~72x",
@@ -769,6 +825,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("ms", "Malay"),
     ("th", "Thai"),
     ("fa", "Persian"),
+    ("he", "Hebrew"),
     ("bg", "Bulgarian"),
     ("hr", "Croatian"),
     ("et", "Estonian"),
@@ -798,8 +855,8 @@ pub fn language_name(code: &str) -> &str {
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
-        CohereTranscribe, ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall,
-        WhisperLargeV3Turbo,
+        CohereTranscribe, IvritWhisperLargeV3Turbo, ParakeetUnifiedEnglish, ParakeetV3,
+        Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
         AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
@@ -832,6 +889,11 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             (CohereTranscribe, MostAccurate),
         ],
         "tr" | "ms" | "fil" | "fa" | "mk" => &[(WhisperLargeV3Turbo, Recommended)],
+        // FLEURS Hebrew test: 18.45% WER against stock Whisper's 29.69%.
+        "he" => &[
+            (IvritWhisperLargeV3Turbo, Recommended),
+            (WhisperLargeV3Turbo, Vocabulary),
+        ],
         "vi" => &[
             (Qwen3Asr06B, Recommended),
             (CohereTranscribe, MostAccurate),
@@ -1492,6 +1554,28 @@ mod tests {
     }
 
     #[test]
+    fn hebrew_recommends_the_ivrit_fine_tune_with_its_hint() {
+        use Recommendation::{Recommended, Vocabulary};
+        use TranscriptionModelId::{IvritWhisperLargeV3Turbo, WhisperLargeV3Turbo};
+        let hebrew: Vec<_> = choices_for_runtime("he")
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect();
+        assert_eq!(
+            hebrew,
+            [
+                (IvritWhisperLargeV3Turbo, Recommended),
+                (WhisperLargeV3Turbo, Vocabulary)
+            ]
+        );
+        let ivrit = definition(IvritWhisperLargeV3Turbo);
+        assert_eq!(ivrit.language_choices(), ["he"]);
+        assert_eq!(ivrit.runtime_language_hint("he"), Some("he"));
+        assert!(!ivrit.supports_language(AUTO_LANGUAGE));
+        assert_eq!(language_name("he"), "Hebrew");
+    }
+
+    #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
         assert_eq!(
@@ -1649,6 +1733,10 @@ mod tests {
             ),
             (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
             (TranscriptionModelId::QwenCleoAsr17B, "qwencleo_asr_1_7b"),
+            (
+                TranscriptionModelId::IvritWhisperLargeV3Turbo,
+                "ivrit_whisper_large_v3_turbo",
+            ),
             (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
             (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
             (
@@ -1983,7 +2071,12 @@ mod tests {
         };
         assert_eq!(
             by(VocabularyUse::Prompt),
-            [WhisperLargeV3Turbo, Qwen3Asr06B, QwenCleoAsr17B]
+            [
+                WhisperLargeV3Turbo,
+                Qwen3Asr06B,
+                QwenCleoAsr17B,
+                IvritWhisperLargeV3Turbo
+            ]
         );
         assert_eq!(
             by(VocabularyUse::Bias),
