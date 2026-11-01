@@ -1874,6 +1874,8 @@ fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
         .key(key)
         .grow(1.0)
         .shrink()
+        // Shrinks below its content in a fixed-height parent (#906).
+        .min_h(0.0)
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(ScrollSpec {
             stick_bottom: false,
