@@ -863,6 +863,8 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    rows.push(speech_engine_row(ui, p, layer));
     rows
 }
 
@@ -964,8 +966,6 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         },
         layer,
     ));
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    rows.push(speech_engine_row(ui, p, layer));
     if ui.platform.caps.terminal_paste {
         rows.push(
             icon_toggle_row(
