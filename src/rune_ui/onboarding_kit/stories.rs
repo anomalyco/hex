@@ -857,7 +857,7 @@ fn park(s: &mut Onboard, now: f64) {
 }
 
 /// Starts the first run at `now`; the story's next beat is due after the
-/// returned seconds, or waits for the Launch Room's row.
+/// returned seconds.
 pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> Option<f64> {
     s.now = now;
     s.flow_hud = FlowHud::default();
@@ -871,7 +871,7 @@ pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> Option<f64> {
         s.closed = 1.0;
         s.closed_from = None;
         park(s, now);
-        None
+        Some(WATCH_AFTER)
     } else {
         s.sfx.on_download_start(now);
         Some(DOWNLOAD_HOLD)
@@ -982,9 +982,11 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::Pick | Step::Started => {
             park(s, now);
-            s.autoplay.then_some(WATCH_AFTER)
+            Some(WATCH_AFTER)
         }
-        Step::Parked if s.autoplay && s.typing_from.is_none() => {
+        // The pointer clicks the Launch Room's row open unless the user
+        // already has.
+        Step::Parked if s.typing_from.is_none() => {
             let at = s.parked_from.unwrap_or(now) + WATCH_AFTER;
             if at - now > 1e-3 {
                 return Some(at - now);
@@ -1067,8 +1069,9 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
 /// Short presses on the practice before it offers tap to start instead.
 pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
 
-/// How long an autoplaying story waits on the Launch Room's row.
-const WATCH_AFTER: f64 = 2.4;
+/// How long the first run waits on the Launch Room's row before the
+/// pointer clicks it open.
+const WATCH_AFTER: f64 = super::inbox::CLICK_AT;
 
 /// How long `"Without Hex"`'s last line holds before the first run moves on.
 const COMEDY_HOLD: f64 = 1.6;
@@ -1405,18 +1408,19 @@ mod tests {
     }
 
     #[test]
-    fn without_hex_waits_for_the_launch_room() {
+    fn the_pointer_clicks_the_launch_room_open() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.had_model = true;
         s.begin_live(0.0);
         let mut tx = Tx::default();
-        poll(&mut s, 30.0, &mut tx);
+        poll(&mut s, WATCH_AFTER - 0.1, &mut tx);
         assert_eq!(s.step, Step::Parked);
         assert!(versus::waiting_to_start(&s));
-        s.start_scene();
+        poll(&mut s, WATCH_AFTER, &mut tx);
+        assert!(!versus::waiting_to_start(&s));
         // It opens on Jay's question, with him typing again.
-        let opened = 30.0 + typing::INTRO;
-        assert_eq!(s.scene.shown(30.0 - opened), 2);
+        let opened = WATCH_AFTER + typing::INTRO;
+        assert_eq!(s.scene.shown(WATCH_AFTER - opened), 2);
         assert!(s.scene.dots(-0.2).is_some());
         let end = opened + s.scene.duration();
         poll(&mut s, end - 0.05, &mut tx);

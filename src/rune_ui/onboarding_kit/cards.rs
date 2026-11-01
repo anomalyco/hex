@@ -3,8 +3,8 @@
 //! theme tokens.
 
 use rune::{
-    Color, El, LineCap, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col, el,
-    row, text,
+    Anim, Color, El, LineCap, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col,
+    el, row, text,
 };
 
 use super::super::controls::{KeySize, Paint, key_tray, keycap};
@@ -255,6 +255,33 @@ const BUBBLE_FONT: TextStyle = FIELD_FONT.lh(17.0);
 /// Older lines fade out under the header over this much.
 const THREAD_FADE: f32 = 28.0;
 
+/// How [`chat`] looks, and how it opens out of a row in a Messages list
+/// ([`super::inbox`]).
+#[derive(Default)]
+pub(crate) struct Look {
+    /// In the header in place of the app's icon: a group's faces.
+    pub(crate) icon: Option<El>,
+    /// Ids the header's icon and title share with the row they fly over
+    /// from ([`El::matched`]).
+    pub(crate) matched: Option<[&'static str; 2]>,
+    /// No surface of its own: a plate grows into its place from the row.
+    pub(crate) bare: bool,
+    /// While it opens, how far what doesn't fly over from the row has faded
+    /// in, `0..=1`.
+    pub(crate) reveal: Option<f32>,
+}
+
+/// `el` at `reveal`'s opacity while the conversation opens around the
+/// parts that fly over from a row. It is set each frame rather than left to
+/// an entrance: the card's parts all mount with it, so they ride its
+/// entrance and an `enter_delay` of theirs would never hold.
+pub(crate) fn revealed(el: El, reveal: Option<f32>) -> El {
+    match reveal {
+        Some(reveal) => el.opacity(reveal).opacity_motion(Anim::INSTANT),
+        None => el,
+    }
+}
+
 /// Height of [`chat`] with a reply field `lines` tall.
 pub(crate) fn chat_height(lines: usize) -> f32 {
     2.0 * CARD_PAD + HEADER_H + 10.0 + THREAD_H + 10.0 + 2.0 * FIELD_PY + lines as f32 * FIELD_LINE
@@ -265,6 +292,7 @@ pub(crate) fn chat_height(lines: usize) -> f32 {
 /// under a soft edge), and the reply field.
 /// `banner`, such as [`presenting`], sits at the header's right end, level
 /// with the title, where Messages puts a live call.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn chat(
     p: Paint,
     n: &Notice,
@@ -273,6 +301,7 @@ pub(crate) fn chat(
     reply: Reply<'_>,
     mark: Option<(usize, usize)>,
     field_opacity: f32,
+    look: Look,
 ) -> El {
     let k = p.k;
     let title = text(n.from)
@@ -282,6 +311,17 @@ pub(crate) fn chat(
             ..k.ty.ui_medium
         })
         .color(p.text());
+    let mut icon = look.icon.unwrap_or_else(|| app_icon(p, n.app));
+    let title = match look.matched {
+        Some([faces, name]) => {
+            icon = icon.matched(faces).motion(OPEN_SPRING);
+            // At its own width, so it flies as itself rather than as the
+            // header's whole width.
+            title.matched(name).motion(OPEN_SPRING).self_start()
+        }
+        None => title,
+    };
+    let banner = banner.map(|banner| revealed(banner, look.reveal));
     let title = match banner {
         Some(banner) => row()
             .key("title-row")
@@ -297,14 +337,15 @@ pub(crate) fn chat(
         .h(HEADER_H)
         .gap(10.0)
         .center_y()
-        .child(app_icon(p, n.app))
+        .child(icon)
         .child(
-            col().key("who").grow(1.0).child(title).child(
+            col().key("who").grow(1.0).child(title).child(revealed(
                 text(n.place.unwrap_or(n.field))
                     .key("app")
                     .font(k.ty.small)
                     .color(p.faint()),
-            ),
+                look.reveal,
+            )),
         );
     let thread = col()
         .key("thread")
@@ -314,7 +355,6 @@ pub(crate) fn chat(
         .gap(6.0)
         .clip_fade(0.0, THREAD_FADE, 0.0, 0.0)
         .children(thread);
-    let (fill, rim) = material(p);
     let card = col()
         .key(n.key)
         .w(CHAT_W)
@@ -322,18 +362,38 @@ pub(crate) fn chat(
         .gap(10.0)
         .radius(RADIUS)
         .continuous_corners()
-        .fill(fill)
-        .backdrop_blur(24.0)
-        .border(p.hair, rim)
         .child(head)
         .child(thread)
-        .child(
-            field(p, n, reply, field_text::CHAT, mark)
+        .child(match look.reveal {
+            Some(reveal) => revealed(
+                field(p, n, reply, field_text::CHAT, mark),
+                Some(field_opacity * reveal),
+            ),
+            None => field(p, n, reply, field_text::CHAT, mark)
                 .opacity(field_opacity)
                 .opacity_motion(Spring::new(0.32, 0.0)),
-        );
-    k.elevate(card, &k.elevation.floating)
+        });
+    if look.bare {
+        return card;
+    }
+    chat_surface(p, card)
 }
+
+/// [`chat`]'s surface on `el`: also the plate a row grows into it on.
+pub(crate) fn chat_surface(p: Paint, el: El) -> El {
+    let (fill, rim) = material(p);
+    let el = el
+        .radius(RADIUS)
+        .continuous_corners()
+        .fill(fill)
+        .backdrop_blur(24.0)
+        .border(p.hair, rim);
+    p.k.elevate(el, &p.k.elevation.floating)
+}
+
+/// The spring the parts flying over from a row land on, with the plate's
+/// height.
+pub(crate) const OPEN_SPRING: Spring = Spring::new(0.42, 0.0);
 
 /// Who a [`bubble`] is from.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -391,6 +451,31 @@ pub(crate) fn bubble(
     opacity: f32,
     reduced: bool,
 ) -> El {
+    carried_bubble(p, key, side, caption, copy, taps, opacity, reduced, None)
+}
+
+/// A line whose words fly over from a row as the conversation opens
+/// ([`El::matched`] `id`): the line itself arrives at once, and the bubble
+/// around the words stands at `reveal`'s opacity.
+#[derive(Clone, Copy)]
+pub(crate) struct Carry {
+    pub(crate) id: &'static str,
+    pub(crate) reveal: f32,
+}
+
+/// [`bubble`], its words carried over from a row when `carry` says so.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn carried_bubble(
+    p: Paint,
+    key: String,
+    side: Side,
+    caption: Caption<'_>,
+    copy: &str,
+    taps: &[Glyph],
+    opacity: f32,
+    reduced: bool,
+    carry: Option<Carry>,
+) -> El {
     let k = p.k;
     let (fill, rim) = match side {
         Side::Them => (
@@ -402,25 +487,41 @@ pub(crate) fn bubble(
             rune_theme_opencode::scale("cobalt", k.dark, if k.dark { 7 } else { 6 }),
         ),
     };
+    let words = text(copy.to_string())
+        .key("msg")
+        .font(BUBBLE_FONT)
+        .color(p.text())
+        .wrap()
+        .shrink();
     let bubble = row()
         .key("bubble")
         .max_w(BUBBLE_MAX)
         .px(11.0)
         .py(5.0)
         .radius(13.0)
-        .continuous_corners()
-        .fill(fill)
-        .border(p.hair, rim)
-        .child(
-            text(copy.to_string())
-                .key("msg")
-                .font(BUBBLE_FONT)
-                .color(p.text())
-                .wrap()
-                .shrink(),
-        )
-        .children(tapbacks(p, side, taps, reduced));
+        .continuous_corners();
+    let bubble = match carry {
+        // The surface is the words' sibling, so its fade never dims them.
+        Some(carry) => bubble
+            .child(revealed(
+                el().key("surface")
+                    .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                    .radius(13.0)
+                    .continuous_corners()
+                    .fill(fill)
+                    .border(p.hair, rim),
+                Some(carry.reveal),
+            ))
+            .child(words.matched(carry.id).motion(OPEN_SPRING)),
+        None => bubble.fill(fill).border(p.hair, rim).child(words),
+    }
+    .children(tapbacks(p, side, taps, reduced));
     let line = line(key, side, opacity, reduced);
+    let line = if carry.is_some() {
+        line.transition(Transition::identity())
+    } else {
+        line
+    };
     let line = if taps.is_empty() {
         line
     } else {
@@ -434,18 +535,21 @@ pub(crate) fn bubble(
                 .gap(FACE_GAP)
                 .items_end()
                 .shrink()
-                .child(face_slot(p, sender))
+                .child(revealed(face_slot(p, sender), carry.map(|c| c.reveal)))
                 .child(
                     col()
                         .key("named")
                         .gap(2.0)
                         .shrink()
                         .children(sender.first.then(|| {
-                            text(sender.name.to_string())
-                                .key("from")
-                                .font(k.ty.small)
-                                .color(p.faint())
-                                .ml(12.0)
+                            revealed(
+                                text(sender.name.to_string())
+                                    .key("from")
+                                    .font(k.ty.small)
+                                    .color(p.faint())
+                                    .ml(12.0),
+                                carry.map(|c| c.reveal),
+                            )
                         }))
                         .child(bubble.shrink()),
                 ),

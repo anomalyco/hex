@@ -20,14 +20,16 @@ use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, te
 
 use super::super::controls::Paint;
 use super::cards::{
-    App, CHAT_W, Caption, FIELD_FONT, Notice, Notify, Reply, Sender, Side, bubble, chat,
-    chat_height, field_text_origin, presenting, system_line, typing_dots,
+    App, CHAT_W, Caption, Carry, FIELD_FONT, Look, Notice, Notify, OPEN_SPRING, Reply, Sender,
+    Side, bubble, carried_bubble, chat, chat_height, chat_surface, field_text_origin, presenting,
+    revealed, system_line, typing_dots,
 };
 use super::field_text::{self, CHAT};
 use super::fixture::Take;
 use super::flight::{Flight, flicker, flying, typeset};
 use super::flows::continue_button;
 use super::hud_stage::voice_or_idle_slot;
+use super::inbox::{self, MATCHED};
 use super::keyboard::{self, keyboard_lit};
 use super::landing::{LEAD, UI_SPRING, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
@@ -434,16 +436,93 @@ fn opened_at(s: &Onboard) -> Option<f64> {
 
 /// Where the Launch Room's row waits on the stage.
 const INBOX_TOP: f32 = 170.0;
+const INBOX_AT: [f32; 2] = [CENTRE_X - inbox::ROW_W * 0.5, INBOX_TOP];
+
+/// How long the row takes to grow into the conversation: its width on
+/// `snap`, its height on [`OPEN_SPRING`] with the parts that fly over.
+const OPEN_SECS: f64 = 0.75;
+const WIDTH_SPRING: f64 = 0.28;
+
+/// How far what doesn't fly over from the row has faded in, `age` seconds
+/// into the opening: it waits for the flights to clear its place.
+fn reveal(age: f64) -> f32 {
+    let u = ((age - 0.24) / 0.3).clamp(0.0, 1.0) as f32;
+    u * u * (3.0 - 2.0 * u)
+}
+/// The group's faces in the conversation's header, each this wide.
+const HEADER_FACE: f32 = 17.0;
+
+/// Seconds since the conversation opened, while the row still grows into
+/// it. Reduce Motion opens it with a fade instead.
+fn opening(s: &Onboard) -> Option<f64> {
+    opened_at(s)
+        .map(|at| s.now - at)
+        .filter(|&age| age < OPEN_SECS && s.step == Step::Parked && !s.reduced.get())
+}
+
+/// A zero-bounce spring's progress `t` seconds after it starts.
+fn settled(t: f64, response: f64) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    let w = std::f64::consts::TAU / response;
+    (1.0 - (1.0 + w * t) * (-w * t).exp()) as f32
+}
+
+/// The surface the pressed row grows into the conversation on, `age`
+/// seconds after the click: wider first, then taller, its centre on one
+/// straight line. It lands exactly on the conversation's own surface.
+/// Otherwise it is there but empty: taking it out remounts the card.
+fn plate(p: Paint, age: Option<f64>) -> El {
+    let Some(age) = age else {
+        return el().key("plate").absolute(0.0, 0.0).instant_changes();
+    };
+    let wide = settled(age, WIDTH_SPRING);
+    let tall = settled(age, OPEN_SPRING.response() as f64);
+    let from = [inbox::ROW_W * inbox::PRESSED, inbox::ROW_H * inbox::PRESSED];
+    let to = [CHAT_W, chat_height(WITHOUT_LINES)];
+    let w = from[0] + (to[0] - from[0]) * wide;
+    let h = from[1] + (to[1] - from[1]) * tall;
+    let from_y = INBOX_TOP + inbox::ROW_H * 0.5;
+    let to_y = CARD_TOP + to[1] * 0.5;
+    let y = from_y + (to_y - from_y) * tall;
+    chat_surface(
+        p,
+        el().key("plate")
+            .absolute(CENTRE_X - w * 0.5, y - h * 0.5)
+            .size(w, h)
+            .instant_changes()
+            .transition(Transition::identity()),
+    )
+}
+
+/// How the Launch Room's conversation looks, growing out of its row while
+/// `opening`.
+fn look(p: Paint, opening: Option<f64>) -> Look {
+    Look {
+        icon: Some(inbox::group_faces(p, HEADER_FACE)),
+        matched: Some([MATCHED[0], MATCHED[1]]),
+        bare: opening.is_some(),
+        reveal: opening.map(reveal),
+    }
+}
 
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
+    let since_parked = s.parked_from.map_or(0.0, |from| s.now - from);
     if waiting_to_start(s) {
-        let since = s.parked_from.map_or(0.0, |from| s.now - from);
-        return el().key("stage").size(STAGE_W, STAGE_H).child(
-            el().key("inbox-slot")
-                .absolute(CENTRE_X - super::inbox::ROW_W * 0.5, INBOX_TOP)
-                .child(super::inbox::launch_row(p, s, since)),
-        );
+        return el()
+            .key("stage")
+            .size(STAGE_W, STAGE_H)
+            // Unwrapped, so its own quick exit is the one that plays.
+            .child(inbox::launch_row(p, s, since_parked).absolute(INBOX_AT[0], INBOX_AT[1]))
+            .children(inbox::pointer(
+                INBOX_AT,
+                since_parked,
+                None,
+                s.reduced.get(),
+            ));
     }
+    let opening = opening(s);
     let (kw, kh) = keyboard::size();
     let voice_phase = s.step >= Step::YourTurn;
     let reduced = s.reduced.get();
@@ -545,13 +624,20 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     // One card throughout, so `"With Hex"` rewinds the same thread.
     let card = match since {
         Some(since) => with_hex_card(p, s, since),
-        None => without_hex_card(p, s, focus, frozen),
+        None => without_hex_card(p, s, focus, frozen, opening),
+    };
+    // It grows out of the row rather than fading in, unless Reduce Motion.
+    let fade = Transition::opacity();
+    let enter = if reduced {
+        fade
+    } else {
+        Transition::identity()
     };
     let card = el()
         .key("card")
         .absolute(CARD_X, CARD_TOP)
         .w(CHAT_W)
-        .transition(Transition::opacity().springs(SpringPair::new(
+        .transition(Transition::asymmetric(enter, fade).springs(SpringPair::new(
             Spring::new(0.3, 0.0),
             Spring::new(0.16, 0.0),
         )))
@@ -560,11 +646,22 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 .offset_motion(Anim::INSTANT),
         );
 
+    // The pointer stays to lift off the row it clicked, unless the user's
+    // own click opened it first.
+    let clicked = |at: f64| {
+        s.parked_from
+            .is_some_and(|from| at - from >= inbox::CLICK_AT - 0.05)
+    };
+    let pointer = opened_at(s)
+        .filter(|&at| clicked(at))
+        .and_then(|at| inbox::pointer(INBOX_AT, since_parked, Some(s.now - at), reduced));
     el().key("stage")
         .size(STAGE_W, STAGE_H)
         .child(keys_el)
         .children(hud_el)
+        .child(plate(p, opening))
         .child(card)
+        .children(pointer)
         .child(words(p, s, nudge))
         .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
         .children(take_time(s).and_then(|t| {
@@ -722,10 +819,21 @@ fn boss_typing(p: Paint, now: f64, reduced: bool) -> El {
 /// `"Without Hex"`'s thread at `t`: every line so far, each at
 /// `opacity(line index, line)` with `"Read"` under the one it reads, and
 /// Jay's typing dots.
-fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f32) -> Vec<El> {
+/// The thread at scene time `t`. While the conversation opens out of its
+/// row, `reveal` holds back every line but Jay's question, which flies over
+/// from the row.
+fn thread_at(
+    p: Paint,
+    s: &Onboard,
+    t: f64,
+    reveal: Option<f32>,
+    opacity: impl Fn(usize, &Line) -> f32,
+) -> Vec<El> {
     let reduced = s.reduced.get();
     let scene = &s.scene;
     let lines = &scene.lines()[..scene.shown(t)];
+    let asked = scene.lines().iter().rposition(|l| l.at < 0.0);
+    let held = |line: El, o: f32| revealed(line, reveal.map(|reveal| o * reveal));
     let receipt_at = scene.read(t);
     let mut thread = Vec::new();
     let mut sent = 0;
@@ -745,7 +853,11 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
                     Some(next) => next.who != line.who,
                     None => who != 0 || scene.dots(t).is_none(),
                 };
-                bubble(
+                let carry = reveal.filter(|_| Some(i) == asked).map(|reveal| Carry {
+                    id: MATCHED[2],
+                    reveal,
+                });
+                let line = carried_bubble(
                     p,
                     format!("l{i}"),
                     Side::Them,
@@ -754,7 +866,9 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
                     &taps,
                     o,
                     reduced,
-                )
+                    carry,
+                );
+                if carry.is_some() { line } else { held(line, o) }
             }
             Who::You => {
                 sent += 1;
@@ -778,14 +892,14 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
         });
     }
     if scene.dots(t).is_some() {
-        thread.push(boss_typing(p, s.now, reduced));
+        thread.push(held(boss_typing(p, s.now, reduced), 1.0));
     }
     thread
 }
 
 /// The conversation as `"Without Hex"` stands now, Jay's question already
 /// there before the button.
-fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
+fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool, opening: Option<f64>) -> El {
     let scene = &s.scene;
     let t = thread_time(s).unwrap_or(-1e-3);
     let shown = scene.shown(t);
@@ -810,7 +924,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
         _ if shown - i <= STACK => RECENT,
         _ => OLDER,
     };
-    let thread = thread_at(p, s, t, opacity);
+    let thread = thread_at(p, s, t, opening.map(reveal), opacity);
     let room = room(scene.title(t));
     if removed {
         let locked = scene.locked();
@@ -822,6 +936,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
             Reply::Locked(&locked),
             None,
             1.0,
+            look(p, None),
         );
     }
     let (draft, caret) = scene.draft(t);
@@ -848,6 +963,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool) -> El {
         },
         scene.mark(t),
         if focus == Focus::Field { 1.0 } else { 0.6 },
+        look(p, opening),
     )
 }
 
@@ -869,13 +985,13 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let rewinding = since < REWIND && !reduced;
     let mut thread = if rewinding {
         let end = s.scene.duration();
-        let mut all = thread_at(p, s, end, |i, _| if i < asked { 1.0 } else { 0.5 });
+        let mut all = thread_at(p, s, end, None, |i, _| if i < asked { 1.0 } else { 0.5 });
         let gone = ((since / REWIND_STAGGER) as usize + 1).min(all.len() - asked);
         all.truncate(all.len() - gone);
         all
     } else {
         let question = if composing { 1.0 } else { OLDER };
-        thread_at(p, s, -1e-3, |_, _| question)
+        thread_at(p, s, -1e-3, None, |_, _| question)
     };
     if sent {
         let taps: Vec<Glyph> = beats
@@ -959,6 +1075,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             Reply::Locked(&locked),
             None,
             1.0,
+            look(p, None),
         );
     }
     // The field waits, unfocused, until the shortcut goes down.
@@ -985,6 +1102,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         },
         None,
         if composing { 1.0 } else { 0.6 },
+        look(p, None),
     )
 }
 
