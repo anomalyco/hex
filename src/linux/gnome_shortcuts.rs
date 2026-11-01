@@ -142,7 +142,22 @@ fn accelerator(binding: &HotkeyBinding) -> Option<String> {
 
 /// A key's lowercase name as the X keysym GTK reads.
 fn keysym(name: &str) -> String {
-    let named = match name {
+    if let Some(named) = named_keysym(name) {
+        return named.into();
+    }
+    match name.strip_prefix('f') {
+        Some(number) if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) => {
+            format!("F{number}")
+        }
+        _ => name.into(),
+    }
+}
+
+/// The X keysym of a named (non-character) key, by its lowercase name as
+/// Settings records it. GNOME's accelerators and the shortcuts portal's
+/// triggers share it, so both Linux paths accept the same keys.
+pub(crate) fn named_keysym(name: &str) -> Option<&'static str> {
+    Some(match name {
         "return" | "enter" => "Return",
         "tab" => "Tab",
         "escape" => "Escape",
@@ -159,17 +174,8 @@ fn keysym(name: &str) -> String {
         "right" => "Right",
         "print" => "Print",
         "pause" => "Pause",
-        _ => "",
-    };
-    if !named.is_empty() {
-        return named.into();
-    }
-    match name.strip_prefix('f') {
-        Some(number) if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) => {
-            format!("F{number}")
-        }
-        _ => name.into(),
-    }
+        _ => return None,
+    })
 }
 
 /// `word` as one argument for GNOME, which splits the command as a shell
