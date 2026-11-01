@@ -75,7 +75,9 @@ unicode-segmentation = "1.13.3"
 url = "2.5.8"
 # Hex's HTTPS (`net`): model downloads, update checks, and transformation
 # scripts' `fetch`, over the platform's TLS and trusted roots.
-ureq = { version = "3.4.2", default-features = false, features = ["native-tls-no-default"] }
+# `native-tls`, not `native-tls-no-default`: ureq 3.4 checks the former's
+# name and panics on any https request without it.
+ureq = { version = "3.4.2", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard = { version = "3.6.1", default-features = false }
