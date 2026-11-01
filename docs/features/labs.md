@@ -44,6 +44,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
+├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -361,6 +362,37 @@ are not built yet. Checks: `recommended_keeps_the_catalogs_order_and_the_others_
 [picker.rs](../../src/rune_ui/picker.rs). Not yet observed: the row rendered
 in a real window; there is no `--snap` scene for the picker with the Lab on,
 and the Labs page goldens need regenerating on Linux with the new row.
+
+Benchmark details (`benchmark-details`, issue 647, every OS): while on,
+each Local transcription picker card that has a benchmark record
+(`transcription::models::benchmark`; Apple Speech has none and keeps
+"Accuracy: System") shows "Error rate" as the raw figure with its direction,
+such as "7.57% CER · lower is better", in place of the transformed accuracy
+percentage, and one wrapping line under the metrics: the measured language,
+the dataset and split, the source as plain text (with its source-record
+revision), the conditions (utterances, batch size, timestamps, hardware), and
+"Speed: upstream figure; hardware and method unknown". Anything the source
+didn't record reads "Dataset unknown", "Source unrecorded", "Hardware
+unknown", or "Conditions unknown". Qwen3-ASR 0.6B (7.57% CER) and SenseVoice
+Small (10.12% CER) carry transcribe.cpp's legacy-published Mandarin FLEURS
+test records (945 utterances, batch 8, no timestamps, source revision
+7045d1c; run IDs and scoring or artifact revisions unknown); the catalog's
+7.64 and 10.11 stay as the alternate legacy figures the picker shows with the
+toggle off. QwenCleo-ASR 1.7B names its author's 3,699-utterance Egyptian
+Arabic test; every other figure is English WER with dataset and source
+unrecorded. A "Most accurate" badge stays only when its record is comparable
+(`BenchmarkRecord::comparable`: same metric, language, and a known, equal
+dataset) with every other recommended model's for the saved language, so
+today it drops everywhere. The gate is the picker's card (`benchmark_details_on`);
+the feature does no other work. Off, the picker is exactly as before.
+Checks: `benchmark_details_show_raw_rates_and_mark_unknowns`,
+`most_accurate_needs_comparable_figures_only_with_benchmark_details`, and
+`benchmark_details_are_off_by_default` in
+[picker.rs](../../src/rune_ui/picker.rs);
+`only_figures_on_the_same_metric_language_and_dataset_compare` in
+[models.rs](../../src/transcription/models.rs). Not yet observed: the cards
+rendered with the toggle on; there is no `--snap` scene for it, and the Labs
+page goldens need regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

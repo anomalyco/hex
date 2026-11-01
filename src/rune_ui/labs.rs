@@ -313,6 +313,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Sort and filter models"),
         tr("Sort the Local transcription picker by size or name and show only models for the saved language"),
     ));
+    rows.push(row(
+        Feature::BenchmarkDetails,
+        &HINTS,
+        tr("Benchmark details"),
+        tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
+    ));
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
@@ -358,6 +364,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::PickerSortFilter => "lab-picker-sort-filter",
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
+        Feature::BenchmarkDetails => "lab-benchmark-details",
     }
 }
 

@@ -353,6 +353,11 @@ const KEYS: &[Key] = &[
         "Labs: in Toggle mode, a press held past the hold threshold dictates until it lifts; a short tap still starts and stops (macOS)",
     ),
     key(
+        "labs.benchmark_details",
+        Kind::Bool,
+        "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

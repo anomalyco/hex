@@ -32,7 +32,9 @@ Agents can [read retained transcripts](transcript-cli.md) and
 Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
-Local transcription picker (#645).
+Local transcription picker (#645); its Benchmark details toggle (off by
+default) shows each card's raw WER or CER with its language, dataset, source,
+and conditions (#647).
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
@@ -268,7 +270,10 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Saved language unsupported -> Warning line naming the language it switches to
 ├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
-└── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
+├── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
+└── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
+    a wrapping line: language · dataset/split · source · conditions or "unknown" ·
+    speed qualified; "Most accurate" only between comparable records (labs.md)
 ```
 
 Only Parakeet Unified English is marked `streams`

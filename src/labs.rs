@@ -82,10 +82,11 @@ pub enum Feature {
     PickerSortFilter,
     SidedChords,
     TapOrHold,
+    BenchmarkDetails,
 }
 
 impl Feature {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -110,6 +111,7 @@ impl Feature {
         Self::PickerSortFilter,
         Self::SidedChords,
         Self::TapOrHold,
+        Self::BenchmarkDetails,
     ];
 
     /// The features this OS and build have.
@@ -156,7 +158,8 @@ impl Feature {
             | Self::SpokenSymbols
             | Self::PickerSortFilter
             | Self::SidedChords
-            | Self::TapOrHold => Audience::Everyone,
+            | Self::TapOrHold
+            | Self::BenchmarkDetails => Audience::Everyone,
         }
     }
 
@@ -195,6 +198,7 @@ impl Feature {
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::PickerSortFilter
+            | Self::BenchmarkDetails
             | Self::FillerWords => true,
         }
     }
@@ -226,6 +230,7 @@ impl Feature {
             Self::PickerSortFilter => "picker-sort-filter",
             Self::SidedChords => "sided-modifier-chords",
             Self::TapOrHold => "tap-or-hold",
+            Self::BenchmarkDetails => "benchmark-details",
         }
     }
 
@@ -256,6 +261,7 @@ impl Feature {
             Self::PickerSortFilter => "labs.picker_sort_filter",
             Self::SidedChords => "labs.sided_modifier_chords",
             Self::TapOrHold => "labs.tap_or_hold",
+            Self::BenchmarkDetails => "labs.benchmark_details",
         }
     }
 
@@ -315,6 +321,9 @@ impl Feature {
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
+            Self::BenchmarkDetails => {
+                "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
+            }
         }
     }
 
@@ -349,6 +358,7 @@ impl Feature {
             Self::PickerSortFilter => settings.labs.picker_sort_filter,
             Self::SidedChords => settings.labs.sided_modifier_chords,
             Self::TapOrHold => settings.labs.tap_or_hold,
+            Self::BenchmarkDetails => settings.labs.benchmark_details,
         }
     }
 
@@ -378,6 +388,7 @@ impl Feature {
             Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
             Self::TapOrHold => settings.labs.tap_or_hold = on,
+            Self::BenchmarkDetails => settings.labs.benchmark_details = on,
         }
     }
 }
