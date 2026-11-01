@@ -20,6 +20,8 @@ use crate::parakeet::{
 };
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputEvent, InputMonitor};
 
+mod paste_picker;
+
 const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);
 const PROGRAMMATIC_COMPLETION_LIMIT: usize = 16;
 /// `/finish` on a programmatic capture the microphone ended before any audio.
@@ -402,6 +404,7 @@ pub fn listen(
     #[cfg(hex_capture)]
     let capture_environment = recording_environment.clone();
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
+    let mut paste_picker = paste_picker::Picker::new(history.clone());
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
         transformations.clone(),
@@ -902,6 +905,7 @@ pub fn listen(
         if hotkey_capture_suspended || programmatic.is_some() {
             capture_shortcut.reset();
         }
+        paste_picker.sync(hotkey_capture_suspended || programmatic.is_some());
         while let Ok(observed) = input_monitor.events.try_recv() {
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
@@ -913,6 +917,16 @@ pub fn listen(
                 continue;
             }
             if hotkey_capture_suspended {
+                continue;
+            }
+            if paste_picker.on_event(
+                input_event,
+                capture_at,
+                &dictation_worker,
+                &input,
+                &mut events,
+            )? {
+                hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }
             #[cfg(hex_capture)]
@@ -967,6 +981,17 @@ pub fn listen(
             for (shortcut, action) in hotkeys.process(input_event, capture_at) {
                 if action == HotkeyAction::Start {
                     hotkeys.raw_capture = shortcut == Shortcut::Raw;
+                    paste_picker.dismiss();
+                }
+                if action == HotkeyAction::PasteLast
+                    && paste_picker.on_paste_last(
+                        capture_at,
+                        &dictation_worker,
+                        &input,
+                        &mut events,
+                    )?
+                {
+                    continue;
                 }
                 let accepted = handle_hotkey_action(
                     action,
@@ -1005,6 +1030,7 @@ pub fn listen(
         if !hotkey_capture_suspended && input_monitor.pending_events().oldest().is_none() {
             hotkeys.break_chords(CaptureInstant::now());
         }
+        paste_picker.tick(&dictation_worker, &input, &mut events)?;
         let mut received_worker_event = false;
         while let Some(event) = dictation_worker.try_recv() {
             received_worker_event = true;
@@ -1079,7 +1105,7 @@ pub fn listen(
         input_monitor.set_escape_cancels(claims_escape(
             programmatic.is_some(),
             hotkeys.any_recording(),
-            capture_escape,
+            capture_escape || paste_picker.holding(),
             || dictation_worker.has_escape_cancellable_job(),
         ));
         if received_worker_event {
@@ -1172,7 +1198,7 @@ pub fn listen(
             }
         }
 
-        let audio = input.recv_timeout(Duration::from_millis(20))?;
+        let audio = input.recv_timeout(paste_picker.wait())?;
         if let (Some(active), Some(audio)) = (&mut programmatic, &audio) {
             if active.last_level.elapsed() >= Duration::from_millis(30) {
                 let _ = active.levels.try_send(level_for(&audio.samples));
@@ -1199,6 +1225,7 @@ pub fn listen(
     if let Some(host) = &mut capture_host {
         host.shutdown(&input);
     }
+    crate::paste_picker::close();
     drop(personal_commands);
     events.emit(&VoiceEvent::State {
         timestamp_ms: now_ms(),
@@ -1985,7 +2012,7 @@ fn handle_dictation_event(
             result: Ok(text),
         } => {
             let phase = match kind {
-                PasteKind::LastTranscript => DictationPhase::Repasted,
+                PasteKind::LastTranscript | PasteKind::Picked => DictationPhase::Repasted,
                 PasteKind::MeetingDelta => DictationPhase::MeetingPasted,
             };
             events.dictation(phase, text)?;

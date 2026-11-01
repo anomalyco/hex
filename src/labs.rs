@@ -83,10 +83,11 @@ pub enum Feature {
     SidedChords,
     TapOrHold,
     BenchmarkDetails,
+    PastePicker,
 }
 
 impl Feature {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -112,6 +113,7 @@ impl Feature {
         Self::SidedChords,
         Self::TapOrHold,
         Self::BenchmarkDetails,
+        Self::PastePicker,
     ];
 
     /// The features this OS and build have.
@@ -160,6 +162,7 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::BenchmarkDetails => Audience::Everyone,
+            Self::PastePicker => Audience::Dev,
         }
     }
 
@@ -188,7 +191,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold => cfg!(target_os = "macos"),
+            | Self::TapOrHold
+            | Self::PastePicker => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -231,6 +235,7 @@ impl Feature {
             Self::SidedChords => "sided-modifier-chords",
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
+            Self::PastePicker => "paste-picker",
         }
     }
 
@@ -262,6 +267,7 @@ impl Feature {
             Self::SidedChords => "labs.sided_modifier_chords",
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
+            Self::PastePicker => "labs.paste_picker",
         }
     }
 
@@ -324,6 +330,7 @@ impl Feature {
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }
+            Self::PastePicker => "Hold Paste last dictation to pick from recent dictations",
         }
     }
 
@@ -359,6 +366,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords,
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
+            Self::PastePicker => settings.labs.paste_picker,
         }
     }
 
@@ -389,6 +397,7 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
+            Self::PastePicker => settings.labs.paste_picker = on,
         }
     }
 }
@@ -410,8 +419,9 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
+const PASTE_PICKER: u32 = 1 << 16;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 16;
+const MINUTES_SHIFT: u32 = 17;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -517,6 +527,13 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
+/// Holding Paste last dictation opens the recent-dictations picker (macOS;
+/// read as Paste last is pressed).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn paste_picker() -> bool {
+    on(PASTE_PICKER)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -582,6 +599,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             SIDED_CHORDS,
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
+        (Feature::PastePicker, settings.paste_picker, PASTE_PICKER),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -881,6 +899,27 @@ mod tests {
         assert_ne!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & SIDED_CHORDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn paste_picker_is_a_dev_feature_with_its_own_bit_off_by_default() {
+        let dev = |feature: Feature| feature.audience().reaches(true);
+        let stable = |feature: Feature| feature.audience().reaches(false);
+        assert_eq!(Feature::PastePicker.audience(), Audience::Dev);
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, dev) & PASTE_PICKER, 0);
+        labs.paste_picker = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, dev);
+        assert_ne!(state & PASTE_PICKER, 0);
+        assert_eq!(state & TAP_OR_HOLD, 0);
+        assert_eq!(state & SIDED_CHORDS, 0);
+        assert_eq!(state & SPOKEN_SYMBOLS, 0);
+        assert_eq!(state & SMART_SPACING, 0);
+        assert_eq!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_where(&labs, stable) & PASTE_PICKER, 0);
+        assert!(resolve("paste-picker", stable).is_err());
     }
 
     #[test]

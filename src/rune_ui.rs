@@ -41,6 +41,8 @@ mod modes;
 mod onboarding;
 mod onboarding_kit;
 mod output;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod paste_picker;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -762,6 +764,8 @@ pub(crate) struct Ui {
     lab_flash: Option<(crate::labs::Feature, Instant)>,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
+    /// A scene previewing the Paste picker overlay over a focused editor.
+    paste_picker_preview: Option<crate::paste_picker::PickerSnapshot>,
     capture: Capture,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
@@ -859,6 +863,7 @@ impl Ui {
             labs_open: false,
             lab_flash: None,
             build_preview: None,
+            paste_picker_preview: None,
             capture: Capture::Idle,
             vocabulary,
             preparing: None,
@@ -1448,6 +1453,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
+    }
+    if let Some(stage) = paste_picker::scene_overlay(ui, p) {
+        layer.push(stage);
     }
     let mut tour_layer = Vec::new();
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
@@ -2441,6 +2449,14 @@ const SCENES: &[Scene] = &[
     ("mac-production", |ui| {
         *ui = mac_fixture();
         ui.settings.meetings.enabled = false;
+    }),
+    ("paste-picker", |ui| {
+        *ui = mac_fixture();
+        paste_picker::fixture_single(ui);
+    }),
+    ("paste-picker-multiselect", |ui| {
+        *ui = mac_fixture();
+        paste_picker::fixture_multiselect(ui);
     }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();

@@ -707,6 +707,24 @@ fn cf_data(value: CfDataRef) -> Result<Vec<u8>> {
     Ok(unsafe { std::slice::from_raw_parts(bytes, length as usize) }.to_vec())
 }
 
+/// Joins picked transcripts in selection order with the same spacing and
+/// sentence-case continuation rules as consecutive pastes.
+pub fn join_sequence<'a>(pieces: impl IntoIterator<Item = &'a str>) -> String {
+    let mut combined = String::new();
+    for piece in pieces {
+        if piece.is_empty() {
+            continue;
+        }
+        if combined.is_empty() {
+            combined.push_str(piece);
+        } else {
+            let appended = join(&combined, piece);
+            combined.push_str(&appended);
+        }
+    }
+    combined
+}
+
 fn join(previous: &str, next: &str) -> String {
     let sentence_start = ends_sentence(previous);
     let mut next = set_initial_case(next, sentence_start);
@@ -1065,6 +1083,22 @@ mod tests {
     fn preserves_likely_proper_nouns_mid_sentence() {
         assert_eq!(join("Open", "GitHub next."), " GitHub next.");
         assert_eq!(join("Message", "Slack now."), " Slack now.");
+    }
+
+    #[test]
+    fn join_sequence_combines_picked_dictations_in_selection_order() {
+        assert_eq!(
+            join_sequence([
+                "First check the Metal shader.",
+                "then run the golden scene.",
+                "And open the draft PR."
+            ]),
+            "First check the Metal shader. Then run the golden scene. And open the draft PR."
+        );
+        assert_eq!(
+            join_sequence(["Because if I hold Option,", "And pick two rows."]),
+            "Because if I hold Option, and pick two rows."
+        );
     }
 
     #[test]

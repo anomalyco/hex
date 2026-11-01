@@ -224,7 +224,7 @@ impl HotkeyModifiers {
 
     /// Every key `required` names is among these held ones; others may be
     /// held too.
-    fn contains(self, required: Self) -> bool {
+    pub(crate) fn contains(self, required: Self) -> bool {
         side_covers(self.control, required.control)
             && side_covers(self.option, required.option)
             && side_covers(self.shift, required.shift)
@@ -1390,6 +1390,9 @@ pub struct LabsSettings {
     /// The Local transcription picker shows each model's raw error rate
     /// (WER or CER), its benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
+    /// Holding Paste last dictation opens a floating list of recent
+    /// dictations at the text caret (macOS).
+    pub paste_picker: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1418,6 +1421,7 @@ impl Default for LabsSettings {
             sided_modifier_chords: false,
             tap_or_hold: false,
             benchmark_details: false,
+            paste_picker: false,
         }
     }
 }

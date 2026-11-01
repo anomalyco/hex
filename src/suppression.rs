@@ -9,6 +9,8 @@ use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 
+mod paste_picker;
+
 #[cfg(test)]
 use crate::app_settings::HotkeyBinding;
 use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
@@ -965,6 +967,11 @@ unsafe extern "C" fn event_callback(
             event
         };
     }
+    let picker_swallows = match paste_picker::tap(event_type, event) {
+        paste_picker::Swallow::No => false,
+        paste_picker::Swallow::Only => return ptr::null_mut(),
+        paste_picker::Swallow::AfterListener => true,
+    };
     #[cfg(hex_capture)]
     let list_swallows = match list_tap(event_type, event) {
         ListSwallow::No => false,
@@ -1090,10 +1097,11 @@ unsafe extern "C" fn event_callback(
     if let Some(key) = capture_key
         && !suppress
         && !list_swallows
+        && !picker_swallows
     {
         crate::capture_host::report_input(capture_at, key);
     }
-    if suppress || list_swallows {
+    if suppress || list_swallows || picker_swallows {
         ptr::null_mut()
     } else {
         event

@@ -196,7 +196,13 @@ pub(crate) fn tr_named(template: &str, values: &[(&str, &str)]) -> String {
 
 /// A compact, translated age label for an event timestamp.
 pub(crate) fn event_age(timestamp_ms: u64) -> String {
-    let seconds = crate::history::now_ms().saturating_sub(timestamp_ms) / 1_000;
+    event_age_at(timestamp_ms, crate::history::now_ms())
+}
+
+/// A compact, translated age label measured from `now_ms` (deterministic in
+/// fixture scenes and tests).
+pub(crate) fn event_age_at(timestamp_ms: u64, now_ms: u64) -> String {
+    let seconds = now_ms.saturating_sub(timestamp_ms) / 1_000;
     let (template, value) = match seconds {
         0..=59 => ("{}s ago", seconds),
         60..=3_599 => ("{}m ago", seconds / 60),
@@ -292,6 +298,12 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Another shortcut that dictates like the main one, such as a key on an external keyboard", ["Kolejny skrót, który dyktuje jak główny, np. klawisz na zewnętrznej klawiaturze", "另一个与主快捷键一样听写的快捷键，例如外接键盘上的按键", "メインと同じように音声入力するもう1つのショートカット。外付けキーボードのキーなど", "Ein weiteres Kürzel, das wie das Hauptkürzel diktiert, etwa eine Taste auf einer externen Tastatur", "Otro atajo que dicta como el principal, como una tecla de un teclado externo", "Ще одна комбінація, що диктує як основна, наприклад клавіша на зовнішній клавіатурі"]),
     ("Smart spacing", ["Inteligentne odstępy", "智能空格", "スマートスペース", "Intelligente Leerzeichen", "Espaciado inteligente", "Розумні пробіли"]),
     ("Add a space before a dictation pasted right after a word", ["Dodaje spację przed dyktowaniem wklejonym tuż po słowie", "在紧接单词粘贴的听写前添加空格", "単語の直後に貼り付ける音声入力の前にスペースを入れます", "Fügt ein Leerzeichen vor einem Diktat ein, das direkt nach einem Wort eingefügt wird", "Añade un espacio antes de un dictado pegado justo después de una palabra", "Додає пробіл перед диктуванням, вставленим одразу після слова"]),
+    ("Paste picker", ["Wybór wklejania", "粘贴选择器", "貼り付けピッカー", "Einfüge-Auswahl", "Selector de pegado", "Вибір вставлення"]),
+    ("Hold Paste last dictation to pick from recent dictations", ["Przytrzymaj Wklej ostatnie dyktowanie, aby wybrać spośród ostatnich dyktowań", "按住“粘贴上次听写”即可从最近的听写中选择", "「前回の音声入力を貼り付け」を押したままにして、最近の音声入力から選びます", "Halte „Letztes Diktat einfügen“ gedrückt, um aus letzten Diktaten zu wählen", "Mantén pulsado Pegar último dictado para elegir entre dictados recientes", "Утримуйте «Вставити останнє диктування», щоб вибрати з нещодавніх диктувань"]),
+    ("No recent dictations", ["Brak ostatnich dyktowań", "暂无最近的听写", "最近の音声入力はありません", "Keine letzten Diktate", "No hay dictados recientes", "Немає нещодавніх диктувань"]),
+    ("V / ↑↓ move · ⇧ select", ["V / ↑↓ wybór · ⇧ zaznacz", "V / ↑↓ 移动 · ⇧ 多选", "V / ↑↓ 移動 · ⇧ 選択", "V / ↑↓ bewegen · ⇧ wählen", "V / ↑↓ mover · ⇧ elegir", "V / ↑↓ рух · ⇧ вибір"]),
+    ("Paste {} in order", ["Wklej {} po kolei", "按顺序粘贴 {} 条", "{} 件を順番に貼り付け", "{} der Reihe nach einfügen", "Pegar {} en orden", "Вставити {} по черзі"]),
+    ("⏎ paste · Esc", ["⏎ wklej · Esc", "⏎ 粘贴 · Esc", "⏎ 貼り付け · Esc", "⏎ einfügen · Esc", "⏎ pegar · Esc", "⏎ вставити · Esc"]),
     ("Sided modifier chords", ["Skróty ze stronami modyfikatorów", "区分左右的修饰键组合", "左右を区別する修飾キーの組み合わせ", "Modifikator-Kombinationen mit Seite", "Combinaciones de modificadores con lado", "Комбінації модифікаторів із боком"]),
     ("Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥", ["Zapisuje, po której stronie jest każdy modyfikator skrótu, np. prawy ⌘ + prawy ⌥", "录制快捷键中每个修饰键位于哪一侧，例如右 ⌘ + 右 ⌥", "ショートカットの各修飾キーが左右どちらかを記録します。例: 右 ⌘ + 右 ⌥", "Nimmt auf, auf welcher Seite jeder Modifikator eines Kürzels liegt, etwa rechte ⌘ + rechte ⌥", "Graba en qué lado está cada modificador de un atajo, como ⌘ derecha + ⌥ derecha", "Записує, з якого боку кожен модифікатор комбінації, наприклад правий ⌘ + правий ⌥"]),
     ("Dictates like the shortcut above", ["Dyktuje jak skrót powyżej", "与上方快捷键一样听写", "上のショートカットと同じように音声入力します", "Diktiert wie das Kürzel oben", "Dicta como el atajo de arriba", "Диктує як комбінація вище"]),
@@ -1126,6 +1138,7 @@ mod tests {
         include_str!("../rune_ui/modes.rs"),
         include_str!("../rune_ui/onboarding.rs"),
         include_str!("../rune_ui/output.rs"),
+        include_str!("../rune_ui/paste_picker.rs"),
         include_str!("../rune_ui/picker.rs"),
         include_str!("../rune_ui/platform_settings.rs"),
         #[cfg(hex_capture)]
