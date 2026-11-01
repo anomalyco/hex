@@ -1329,6 +1329,13 @@ Linux beta                               // not macOS feature parity
         removed once a package ships anomaly.hex.desktop
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
+GNOME portal shortcuts (#723)            // linux.gnome-shortcuts
+├── New GNOME setup -> dictation default Ctrl+Alt+Space (GNOME keeps Alt+Space)
+├── Granted key GNOME keeps (Alt+Space, Super+Space, Alt+Tab, Print, …) -> red note under the row
+├── Keys changed in GNOME Settings -> ShortcutsChanged -> pressing them dictates at once;
+│   the row note, the Status hint and `hex status --json` listener.shortcuts show them
+└── Annotate's shortcut -> its own row under dictation's in General
+    // observed on apollo: gnome-control-center 51.1 provider, portal-gnome 50, stand-in Shell
 Enable / Disable (General, tray)         // linux.listener-persist
 ├── Saves enable_on_launch -> a disabled Hex stays disabled after a restart (#575)
 └── GNOME (XDG_CURRENT_DESKTOP) Disable -> after the listener's session closes, a

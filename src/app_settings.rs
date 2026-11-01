@@ -656,7 +656,8 @@ impl<'de> Deserialize<'de> for HotkeyBinding {
 }
 
 impl Default for HotkeyBinding {
-    /// Option on macOS, Ctrl+Space on Windows, Alt+Space on Linux.
+    /// Option on macOS, Ctrl+Space on Windows, Alt+Space on Linux, and
+    /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723).
     fn default() -> Self {
         #[cfg(target_os = "macos")]
         let binding = Self {
@@ -666,12 +667,21 @@ impl Default for HotkeyBinding {
         #[cfg(target_os = "windows")]
         let binding = Self::chord(HotkeyModifiers::control(), "space");
         #[cfg(target_os = "linux")]
-        let binding = Self::chord(HotkeyModifiers::option(), "space");
+        let binding = Self::linux_dictation_default(crate::linux::portal::gnome());
         binding
     }
 }
 
 impl HotkeyBinding {
+    #[cfg(target_os = "linux")]
+    fn linux_dictation_default(gnome: bool) -> Self {
+        if gnome {
+            Self::chord(HotkeyModifiers::control_option(), "space")
+        } else {
+            Self::chord(HotkeyModifiers::option(), "space")
+        }
+    }
+
     /// Modifiers plus a key identified by name (Windows and Linux).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn chord(modifiers: HotkeyModifiers, key: &str) -> Self {
@@ -3020,6 +3030,22 @@ pub fn exists() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GNOME's window menu takes Alt+Space, so new GNOME setups dictate
+    /// with Ctrl+Alt+Space; it shares no key with Paste last or Annotate.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gnome_dictates_with_a_key_gnome_leaves_free() {
+        assert_eq!(
+            HotkeyBinding::linux_dictation_default(false).keycaps(),
+            ["Alt", "Space"]
+        );
+        let gnome = HotkeyBinding::linux_dictation_default(true);
+        assert_eq!(gnome.keycaps(), ["Ctrl", "Alt", "Space"]);
+        assert_ne!(gnome, HotkeyBinding::paste_last_default());
+        #[cfg(hex_capture)]
+        assert_ne!(gnome, HotkeyBinding::capture_default());
+    }
 
     /// Annotate is on out of the box, so its shortcut and the rest of the
     /// defaults share no key on any OS.

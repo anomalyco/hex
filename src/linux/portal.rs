@@ -899,7 +899,8 @@ fn string_list_text(items: &[&str]) -> String {
     format!("[{}]", quoted.join(", "))
 }
 
-fn gnome() -> bool {
+/// Whether the session's desktop is GNOME.
+pub(crate) fn gnome() -> bool {
     desktop_is("GNOME")
 }
 

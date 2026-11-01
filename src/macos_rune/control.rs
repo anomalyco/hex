@@ -852,6 +852,7 @@ fn status(
             } else {
                 published.listener.status.clone()
             },
+            shortcuts: Vec::new(),
         },
         capture,
         meeting,
