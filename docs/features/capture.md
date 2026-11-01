@@ -619,11 +619,11 @@ hex capture stop                         // capture.stop
 
 What a send carries                      // capture.send (router opencode::send_bundle)
 ├── One prompt: the summary (transcript, marks, notes) as text, then the
-│   contact sheet and up to 8 keyframes as inline `data:image/png;base64`
-│   file parts (12 MiB of encoded images at most; past it, later frames are
-│   left out). Nothing in it depends on the bundle's folder, so an OpenCode
-│   server on another machine reads all of it; the text only names where it
-│   was recorded
+│   contact sheet as one inline `data:image/png;base64` file part
+│   (12 MiB encoded at most; past it, no image). The keyframes are not
+│   attached; the text says they are in `frames/` and `frames-full/` of the
+│   capture folder. The picture does not depend on the folder, so an OpenCode
+│   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
 │   (service.json); a service that isn't up is never started
 ├── With an agent host (routing's agentHost) the bundle is synced there and
@@ -631,7 +631,7 @@ What a send carries                      // capture.send (router opencode::send_
 │   images
 ├── No video: a capture's movie is too large for a prompt
 └── Check: router opencode tests; a send from apollo to a throwaway session
-    on OpenCode V2 stored the contact sheet and keyframe as inline image/png
+    on OpenCode V2 stored the contact sheet and keyframe as inline image/png (before one-sheet)
     (2026-10-29)
 
 Where it goes                            // capture.route; capture.routing's autoSend on
