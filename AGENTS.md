@@ -137,7 +137,11 @@ substitute for source inspection or a second roadmap.
   the CPU and downloaded in the background, that keeps speechless dictation
   captures and meeting chunks away from the transcription models.
 - `transcription/local_transcriber`: the Linux and Windows GGUF loader, prewarm, whole-clip
-  transcription, and stream entry point.
+  transcription, and stream entry point. Loads where Settings › Speech engine
+  (`transcription_device`: Auto/GPU/CPU) says; a GPU device error reloads
+  on the CPU mid-run.
+- `transcription/gpu_health`: GPUs that failed while transcribing, remembered
+  per device and driver in `gpu-failures.json` (#856), which Auto skips.
 - `transcription/engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
   whole-clip runs, and (macOS) model loads and switches. The capture owns its

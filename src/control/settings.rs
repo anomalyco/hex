@@ -489,6 +489,11 @@ const KEYS: &[Key] = &[
         "Interface language; none follows the system",
     ),
     key(
+        "transcription_device",
+        Kind::Choice(&["auto", "gpu", "cpu"]),
+        "Where the speech model runs: auto (a GPU unless it failed before), gpu, or cpu (Linux and Windows)",
+    ),
+    key(
         "indicator_position",
         Kind::Choice(&["top", "bottom", "hidden"]),
         "Where the dictation HUD appears",

@@ -1276,6 +1276,16 @@ update from an older supported build.
 ```ts
 Linux beta                               // not macOS feature parity
 ├── hex start -> One per-user Hex -> Alt-Space capture -> Stream (Vulkan GPU) -> Paste
+├── Speech engine (General › Advanced › Dictation; transcription_device) -> Auto | GPU | CPU (#856)
+│   ├── Auto -> best GPU unless gpu-failures.json lists it under its current driver
+│   │   (kernel + Vulkan driver libraries), then another GPU, then the CPU;
+│   │   the row says which GPU stopped responding
+│   ├── A GPU load, prewarm or run that fails with a device error (hang,
+│   │   reset, lost device, out of memory) -> reloads on the CPU; once the CPU
+│   │   works, that GPU is recorded
+│   ├── GPU -> tries the GPU anyway; working, it clears that GPU's record
+│   └── CPU -> CPU only
+│   // checked on apollo with a planted record (RADV); a real i915 hang not reproduced
 │   └── CPU or a model that cannot stream -> Transcribe the whole clip after release
 ├── hex / hex app -> Window in the same process; closing it leaves Hex running
 │   └── Ctrl+Q in the window or Quit Hex in the sidebar -> quits Hex (#808)
@@ -1465,7 +1475,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
-│   a failed GPU load retries on the CPU
+│   a failed GPU load retries on the CPU; the GPU record and Settings ›
+│   Speech engine work as on Linux (#856)
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the
 │       data folder, same version) -> CPU only, warned in process.log, until
 │       Hex updates or the file is deleted (#662; not run on Windows)

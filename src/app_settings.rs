@@ -1480,6 +1480,17 @@ pub fn default_meeting_output_folder() -> PathBuf {
         })
 }
 
+/// Where Linux and Windows run the speech model (#856): Auto picks a GPU
+/// unless it failed before under its current driver, then the CPU.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionDevice {
+    #[default]
+    Auto,
+    Gpu,
+    Cpu,
+}
+
 /// Where the recording HUD appears while dictating.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1827,6 +1838,8 @@ pub struct AppSettings {
     pub second_dictation_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
+    /// Where the speech model runs (Linux and Windows).
+    pub transcription_device: TranscriptionDevice,
     pub transcription_recents: Vec<TranscriptionSelection>,
     pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
@@ -1952,6 +1965,7 @@ impl Default for AppSettings {
             second_dictation_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
+            transcription_device: TranscriptionDevice::Auto,
             transcription_recents: Vec::new(),
             keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -2264,6 +2278,8 @@ impl AppSettings {
         crate::feedback::set_sound_set(self.sound_theme);
         crate::desktop::i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
+        #[cfg(not(target_os = "macos"))]
+        crate::transcription::local_transcriber::set_device(self.transcription_device);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);
