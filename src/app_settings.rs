@@ -85,9 +85,8 @@ pub const LEFT_OPTION_MASK: u64 = 0x0000_0020;
 pub const RIGHT_OPTION_MASK: u64 = 0x0000_0040;
 pub const RIGHT_CONTROL_MASK: u64 = 0x0000_2000;
 
-/// Which of a modifier's keys a shortcut holds. `Either` is one key on
-/// either side (or both, as before chords); `Both` is the left and the
-/// right key together, such as both Options.
+/// Which of a modifier's keys a shortcut holds. `Either` is one key on either side (or both,
+/// as before chords); `Both` is the left and the right key together, such as both Options.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModifierSide {
@@ -225,8 +224,7 @@ impl HotkeyModifiers {
         }
     }
 
-    /// Every key `required` names is among these held ones; others may be
-    /// held too.
+    /// Every key `required` names is among these held ones; others may be held too.
     fn contains(self, required: Self) -> bool {
         side_covers(self.control, required.control)
             && side_covers(self.option, required.option)
