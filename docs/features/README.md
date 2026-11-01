@@ -695,7 +695,7 @@ General                                  // settings
 ├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
 │   ├── Collapse -> drops a pending release confirmation
 │   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
-│   │   Double-tap only, Microphone mode, keyboard-language mappings (while its Labs toggle is on),
+│   │   Double-tap only, keyboard-language mappings (while its Labs toggle is on),
 │   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
 │   │   microphone instead of Bluetooth")
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
@@ -710,13 +710,12 @@ General                                  // settings
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
-├── Microphone mode (Advanced; default Keep ready)
-│   ├── The row always says what the mode means, in each OS's words (issue 61):
-│   │   macOS the menu-bar dot, Windows the microphone privacy icon, Linux the
-│   │   desktop's indicator (GNOME's)
-│   ├── Keep ready (fast) -> Open while idle; pre-roll available; the OS shows the mic in use the whole time
-│   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay;
-│       the first moment of speech may be cut; the indicator shows only while recording
+├── Turn off the mic when not dictating (General, under Microphone; off)   // release_microphone_while_idle
+│   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
+│   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
+│   │   Open while idle; pre-roll available
+│   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
+│       Open on press; no pre-roll; startup delay
 ├── While dictating -> Mute / Pause media / Lower audio / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords

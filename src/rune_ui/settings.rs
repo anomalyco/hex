@@ -1318,44 +1318,6 @@ pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
         && settings.dictation_hotkey.key.is_some()
 }
 
-pub(super) fn release_confirmation(_ui: &Ui, p: Paint) -> El {
-    setting_row(
-        p,
-        "confirm-release",
-        tr("Release the microphone when idle?"),
-        Some(tr(
-            "The microphone opens only while you dictate, so the first moment of speech may be cut.",
-        )),
-        row()
-            .key("actions")
-            .gap(8.0)
-            .child(button(
-                p,
-                "cancel-release",
-                tr("Cancel"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| {
-                    ui.confirm_release = false;
-                },
-            ))
-            .child(
-                button(
-                    p,
-                    "confirm-release",
-                    tr("Release microphone"),
-                    ButtonKind::Primary,
-                    |ui: &mut Ui, _| {
-                        if ui.update(|settings| settings.release_microphone_while_idle = true) {
-                            ui.confirm_release = false;
-                        }
-                    },
-                )
-                .default_button(),
-            ),
-    )
-    .fill(p.k.c.hover)
-}
-
 /// Stable or Dev shows only while this install updates itself: test,
 /// source, managed, and package-manager installs never check a channel.
 pub(super) fn updates_itself(ui: &Ui) -> bool {

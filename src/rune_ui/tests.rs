@@ -230,18 +230,9 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 #[test]
 fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
     let mut rt = runtime("portal", true, TALL_SIZE);
-    rt.state.settings.release_microphone_while_idle = true;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(rt.find("microphone-mode").is_none(), "closed even in use");
-    rt.state.settings.release_microphone_while_idle = false;
+    assert!(rt.find("double-tap-only").is_none(), "closed at first");
     tap(&mut rt, "advanced-toggle");
-    pick(&mut rt, "microphone-mode", 1);
-    assert!(rt.state.confirm_release);
     tap(&mut rt, "advanced-toggle");
-    assert!(!rt.state.confirm_release, "collapsing drops the question");
-    assert!(rt.find("microphone-mode").is_none());
-
     tap(&mut rt, "advanced-toggle");
     rt.state.settings.double_tap_lock = true;
     rt.state.settings.double_tap_only = true;
@@ -409,15 +400,20 @@ fn enabling_sends_the_listener_action() {
 }
 
 #[test]
-fn releasing_the_microphone_asks_first() {
+fn the_microphone_switch_sits_beside_the_picker_and_needs_no_confirmation() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
-    tap(&mut rt, "advanced-toggle");
-    pick(&mut rt, "microphone-mode", 1);
-    assert!(rt.state.confirm_release);
-    assert!(!rt.state.settings.release_microphone_while_idle);
-    tap(&mut rt, "confirm-release/actions/confirm-release");
+    assert!(
+        rt.find("basics/microphone-mode").is_some(),
+        "in General, not Advanced"
+    );
+    let ready = "The mic stays ready so dictation starts instantly; your system shows it in use";
+    let released = "The mic opens only while you dictate; the first moment can be clipped";
+    assert!(texts(&rt).iter().any(|text| text == ready));
+    tap(&mut rt, "microphone-mode");
     assert!(rt.state.settings.release_microphone_while_idle);
-    assert!(!rt.state.confirm_release);
+    assert!(texts(&rt).iter().any(|text| text == released));
+    tap(&mut rt, "microphone-mode");
+    assert!(!rt.state.settings.release_microphone_while_idle);
 }
 
 #[test]

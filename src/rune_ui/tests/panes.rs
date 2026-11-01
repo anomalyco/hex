@@ -419,16 +419,20 @@ fn contributed_options_are_labs_toggles_off_by_default() {
 #[test]
 fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    assert!(rt.find("microphone-mode").is_none());
+    assert!(rt.find("shortcut-mode").is_none());
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_some());
+    assert!(rt.find("shortcut-mode").is_some());
     assert_eq!(
         rt.find("double-tap-only").is_some(),
         rt.state.settings.dictation_hotkey.key.is_some(),
         "double-tap only needs a key chord"
     );
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_none());
+    assert!(rt.find("shortcut-mode").is_none());
+    assert!(
+        rt.find("microphone-mode").is_some(),
+        "the mic switch is in General"
+    );
 }
 
 /// General's level bars follow what the microphone hears, settle once it

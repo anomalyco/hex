@@ -195,6 +195,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .into(),
     );
     rows.extend(microphone_rows(ui, p, layer));
+    rows.push(microphone_release_row(ui, p));
     rows.extend(launch_at_login_rows(ui, p));
     card(p, "basics", rows)
 }
@@ -317,30 +318,28 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
         })
 }
 
-/// What the microphone mode means for speed and privacy (issue 61), in the
-/// words each OS uses for its microphone-in-use indicator.
-fn microphone_mode_note(os: super::platform::Os, release: bool) -> &'static str {
-    use super::platform::Os;
-    match (os, release) {
-        (Os::Macos, false) => tr(
-            "The microphone stays open, so dictation starts instantly. macOS shows the microphone dot in the menu bar the whole time.",
-        ),
-        (Os::Windows, false) => tr(
-            "The microphone stays open, so dictation starts instantly. Windows shows the microphone privacy icon the whole time.",
-        ),
-        (Os::Linux, false) => tr(
-            "The microphone stays open, so dictation starts instantly. Your desktop shows it in use the whole time, such as GNOME's microphone indicator.",
-        ),
-        (Os::Macos, true) => tr(
-            "The microphone opens only while you dictate, so the first moment of speech may be cut. The menu-bar dot shows only while recording.",
-        ),
-        (Os::Windows, true) => tr(
-            "The microphone opens only while you dictate, so the first moment of speech may be cut. The microphone privacy icon shows only while recording.",
-        ),
-        (Os::Linux, true) => tr(
-            "The microphone opens only while you dictate, so the first moment of speech may be cut. Your desktop's microphone indicator shows only while recording.",
-        ),
-    }
+/// Whether the microphone closes between dictations, beside the microphone
+/// picker: one switch, no confirmation, and a line saying what it means
+/// (issues 61 and #870's copy). The default keeps it ready.
+fn microphone_release_row(ui: &Ui, p: Paint) -> CardRow {
+    let release = ui.settings.release_microphone_while_idle;
+    icon_toggle_row(
+        p,
+        "microphone-mode",
+        &ZAP,
+        tr("Turn off the mic when not dictating"),
+        if release {
+            tr("The mic opens only while you dictate; the first moment can be clipped")
+        } else {
+            tr("The mic stays ready so dictation starts instantly; your system shows it in use")
+        },
+        release,
+        |ui: &mut Ui| {
+            let release = !ui.settings.release_microphone_while_idle;
+            ui.update(|settings| settings.release_microphone_while_idle = release);
+        },
+    )
+    .into()
 }
 
 /// Labs › Also pause the browser's permission, under Pause media on macOS:
@@ -824,42 +823,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             )
         }),
     ));
-    rows.push(
-        icon_row(
-            p,
-            "microphone-mode",
-            &ZAP,
-            tr("Microphone mode"),
-            Some(microphone_mode_note(
-                ui.platform.caps.os,
-                settings.release_microphone_while_idle,
-            )),
-            pick_select(
-                ui,
-                p,
-                "microphone-mode",
-                vec![tr("Keep ready (fast)"), tr("Release when idle")],
-                usize::from(settings.release_microphone_while_idle),
-                |ui, index| {
-                    let release = index == 1;
-                    if release && !ui.settings.release_microphone_while_idle {
-                        ui.confirm_release = true;
-                        return;
-                    }
-                    ui.confirm_release = false;
-                    if ui.settings.release_microphone_while_idle != release {
-                        ui.update(|settings| settings.release_microphone_while_idle = release);
-                    }
-                },
-                layer,
-            ),
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "release-confirmation-fold",
-        ui.confirm_release.then(|| s::release_confirmation(ui, p)),
-    ));
     // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
         rows.push(folding(
@@ -1214,7 +1177,6 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
         .on_press(move |ui: &mut Ui| {
             if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
                 ui.advanced.remove(index);
-                ui.confirm_release = false;
             } else {
                 ui.advanced.push(pane);
             }
