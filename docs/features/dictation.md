@@ -286,6 +286,18 @@ silence or a timeout. Checks:
 [linux/input.rs](../../src/linux/input.rs) (constructed inputs; not run on
 GNOME).
 
+**Fixed October 31, 2026 (issue 733):** an X11 paste waited, with no bound,
+until the X server reported no modifiers held. XWayland's modifier state goes
+stale while a Wayland window has focus and only a later key event clears it,
+so a finished dictation sat in Transcribing for about a minute. The paste now
+waits for held modifiers only while one of Hex's shortcuts is down (a newer
+capture owns them); otherwise it waits at most 2 s, logs that modifiers still
+read as held, and pastes. Checks:
+`stale_modifiers_without_a_held_shortcut_stop_holding_the_paste` and
+`accepted_output_waits_through_another_capture` in
+[linux/paste.rs](../../src/linux/paste.rs) (constructed state; not run on a
+desktop).
+
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
 pressing the digit, which 2.3.0 and the Swift app both ignored after the
 threshold. Any non-modifier key pressed while a modifier-only shortcut is still

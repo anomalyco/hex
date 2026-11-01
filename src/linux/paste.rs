@@ -36,6 +36,8 @@ const PORTAL_IDLE: Duration = Duration::from_secs(15);
 /// How long after the paste shortcut the previous clipboard comes back, as
 /// on macOS. Nothing acknowledges that the target read the paste.
 const RESTORE_DELAY: Duration = Duration::from_millis(500);
+/// How long an X11 paste waits for modifiers no Hex shortcut holds.
+const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 pub(crate) struct LinuxPaster {
     backend: Backend,
@@ -344,7 +346,9 @@ impl LinuxPaster {
     fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
         let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
-            Backend::X11(paster) => paster.paste(mime, bytes, &self.stop, paste_with_shift)?,
+            Backend::X11(paster) => {
+                paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?
+            }
             Backend::Wayland(wayland) => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", mime.wayland()]);
@@ -432,9 +436,10 @@ impl X11Paster {
         mime: Mime,
         bytes: &[u8],
         stop: &AtomicBool,
+        keys: &ShortcutKeys,
         paste_with_shift: bool,
     ) -> Result<()> {
-        self.wait_for_modifier_release(stop)?;
+        self.wait_for_modifier_release(stop, keys)?;
         let atoms = &self.clipboard.getter.atoms;
         let target = match mime {
             Mime::Text => atoms.utf8_string,
@@ -465,13 +470,21 @@ impl X11Paster {
         Ok(())
     }
 
-    fn wait_for_modifier_release(&self, stop: &AtomicBool) -> Result<()> {
-        wait_for_modifiers(stop, || {
-            let mask = self.connection.query_pointer(self.root)?.reply()?.mask;
-            let held = mask
-                & (KeyButMask::SHIFT | KeyButMask::CONTROL | KeyButMask::MOD1 | KeyButMask::MOD4);
-            Ok(held != KeyButMask::default())
-        })
+    fn wait_for_modifier_release(&self, stop: &AtomicBool, keys: &ShortcutKeys) -> Result<()> {
+        wait_for_modifiers(
+            stop,
+            MODIFIER_WAIT_LIMIT,
+            || keys.any_held(),
+            || {
+                let mask = self.connection.query_pointer(self.root)?.reply()?.mask;
+                let held = mask
+                    & (KeyButMask::SHIFT
+                        | KeyButMask::CONTROL
+                        | KeyButMask::MOD1
+                        | KeyButMask::MOD4);
+                Ok(held != KeyButMask::default())
+            },
+        )
     }
 }
 
@@ -502,7 +515,19 @@ fn paste_keys(with_shift: bool) -> Vec<String> {
     keys
 }
 
-fn wait_for_modifiers(stop: &AtomicBool, mut held: impl FnMut() -> Result<bool>) -> Result<()> {
+/// Waits until the X server reports no held modifiers. While one of Hex's
+/// shortcuts is down, a newer capture owns them, so its predecessor stays
+/// queued for as long as it is held. Otherwise the wait ends after `limit`
+/// and the paste goes ahead: XWayland's modifier state goes stale while a
+/// Wayland window has focus and only a later key event clears it, which
+/// held accepted output back for a minute (#733).
+fn wait_for_modifiers(
+    stop: &AtomicBool,
+    limit: Duration,
+    shortcut_held: impl Fn() -> bool,
+    mut held: impl FnMut() -> Result<bool>,
+) -> Result<()> {
+    let began = Instant::now();
     loop {
         if stop.load(Ordering::Acquire) {
             return Err(eyre!("paste cancelled while stopping the listener"));
@@ -510,8 +535,13 @@ fn wait_for_modifiers(stop: &AtomicBool, mut held: impl FnMut() -> Result<bool>)
         if !held()? {
             return Ok(());
         }
-        // Another capture may own these modifiers. Keep its predecessor queued
-        // instead of throwing away accepted output after an arbitrary timeout.
+        if began.elapsed() >= limit && !shortcut_held() {
+            tracing::warn!(
+                waited_ms = began.elapsed().as_millis() as u64,
+                "modifiers still read as held with no Hex shortcut down; pasting anyway"
+            );
+            return Ok(());
+        }
         thread::sleep(Duration::from_millis(20));
     }
 }
@@ -717,19 +747,47 @@ mod tests {
     fn accepted_output_waits_through_another_capture() {
         let start = Instant::now();
         let mut checks = 0;
-        wait_for_modifiers(&AtomicBool::new(false), || {
-            checks += 1;
-            Ok(start.elapsed() < Duration::from_millis(550))
-        })
+        // The newer capture's shortcut stays down past the limit.
+        wait_for_modifiers(
+            &AtomicBool::new(false),
+            Duration::from_millis(100),
+            || true,
+            || {
+                checks += 1;
+                Ok(start.elapsed() < Duration::from_millis(550))
+            },
+        )
         .unwrap();
         assert!(checks > 1);
+        assert!(start.elapsed() >= Duration::from_millis(550));
+    }
+
+    /// XWayland can report a modifier held long after it came up (#733).
+    #[test]
+    fn stale_modifiers_without_a_held_shortcut_stop_holding_the_paste() {
+        let start = Instant::now();
+        wait_for_modifiers(
+            &AtomicBool::new(false),
+            Duration::from_millis(100),
+            || false,
+            || Ok(true),
+        )
+        .unwrap();
+        let waited = start.elapsed();
+        assert!(waited >= Duration::from_millis(100));
+        assert!(waited < Duration::from_secs(2));
     }
 
     #[test]
     fn stopping_breaks_the_modifier_wait_without_checking_the_keyboard() {
         assert!(
-            wait_for_modifiers(&AtomicBool::new(true), || panic!("should not read devices"))
-                .is_err()
+            wait_for_modifiers(
+                &AtomicBool::new(true),
+                MODIFIER_WAIT_LIMIT,
+                || false,
+                || panic!("should not read devices")
+            )
+            .is_err()
         );
         assert!(run_helper(shell("exit 0"), &[], &AtomicBool::new(true), HELPER_TIMEOUT).is_err());
     }
