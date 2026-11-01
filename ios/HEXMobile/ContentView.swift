@@ -156,6 +156,7 @@ struct ContentView: View {
                 }
 
                 settingsCard
+                ExperimentsCard()
                 practiceField
             }
             .frame(maxWidth: 500)
