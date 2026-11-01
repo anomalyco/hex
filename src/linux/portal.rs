@@ -415,7 +415,6 @@ impl Drop for PortalBus {
 static ENTRY_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Tidies Hex's launcher entry at startup: see [`DesktopEntries::tidy`].
-
 pub(crate) fn tidy_desktop_entries() -> Result<()> {
     let _writing = ENTRY_WRITES
         .lock()
