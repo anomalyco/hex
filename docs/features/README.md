@@ -918,7 +918,12 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
 
-Website context per OS: macOS asks the front tab of Safari, Orion, Chrome,
+Website context per OS: macOS reads no page at all until something uses it: a
+mode chosen by website, an OpenCode rewrite (its prompt names the site), or a
+script transformation (it receives the address)
+(`dictation::config::reads_browser`), so dictation's page reads never prompt
+without one (Meetings and media pause still ask browsers when on). Otherwise
+it asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).

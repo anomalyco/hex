@@ -225,8 +225,10 @@ substitute for source inspection or a second roadmap.
   replacements applied longest-match-first to transcripts.
 - `dictation/config`: dictation profiles.
 - `dictation/context`: the foreground context snapshot and selectors for modes,
-  plus native macOS capture. Browser host is the domain concept. macOS
-  reads the front tab of a table of scriptable browsers (Safari and Chromium
+  plus native macOS capture. Browser host is the domain concept. Only while a
+  website mode, an OpenCode rewrite, or a script transformation is set up,
+  macOS reads the front tab of a table of
+  scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
   `AXURL`; `windows/context` reads any browser through UI Automation and
   `linux/atspi` through AT-SPI.
@@ -362,7 +364,8 @@ substitute for source inspection or a second roadmap.
   meeting selection, search, and Markdown with `meeting::query` / MCP.
 - `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
-  pane are read-only projections.
+  pane are read-only projections. Context events name the foreground app,
+  never a page address.
 - `desktop/activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop/host`: the in-process listener, transcription, shortcut, and update
