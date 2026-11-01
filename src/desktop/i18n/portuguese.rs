@@ -1,6 +1,6 @@
 //! Brazilian Portuguese (pt-BR) interface strings, keyed by the English
-//! source string like [`super::TRANSLATIONS`], offered only with Labs ›
-//! Brazilian Portuguese interface on. Terms: dictation is "ditado",
+//! source string like [`super::TRANSLATIONS`]; used for any Portuguese
+//! system language. Not yet reviewed by a native speaker. Terms: dictation is "ditado",
 //! vocabulary "vocabulário", replacements "substituições", and meetings
 //! "reuniões".
 
@@ -910,8 +910,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("The microphone opens only while you dictate, so the first moment of speech may be cut. The microphone privacy icon shows only while recording.", "O microfone abre só enquanto você dita, então o início da fala pode ser cortado. O ícone de privacidade do microfone aparece só durante a gravação."),
     ("The microphone opens only while you dictate, so the first moment of speech may be cut. Your desktop's microphone indicator shows only while recording.", "O microfone abre só enquanto você dita, então o início da fala pode ser cortado. O indicador de microfone do seu ambiente de trabalho aparece só durante a gravação."),
     ("The microphone opens only while you dictate, so the first moment of speech may be cut.", "O microfone abre só enquanto você dita, então o início da fala pode ser cortado."),
-    ("Brazilian Portuguese interface", "Interface em português do Brasil"),
-    ("Offer Português (Brasil) as an interface language and use it when the system language is Portuguese", "Oferece o Português (Brasil) como idioma da interface e o usa quando o idioma do sistema é português"),
 ];
 
 #[cfg(test)]

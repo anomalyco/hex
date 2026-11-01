@@ -86,11 +86,10 @@ pub enum Feature {
     ParakeetUltra,
     StandaloneSpecialKeys,
     HistoryStats,
-    PortugueseInterface,
 }
 
 impl Feature {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 28] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -119,7 +118,6 @@ impl Feature {
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
-        Self::PortugueseInterface,
     ];
 
     /// The features this OS and build have.
@@ -170,8 +168,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
-            | Self::HistoryStats
-            | Self::PortugueseInterface => Audience::Everyone,
+            | Self::HistoryStats => Audience::Everyone,
         }
     }
 
@@ -225,7 +222,6 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
-            | Self::PortugueseInterface
             | Self::FillerWords => true,
         }
     }
@@ -261,7 +257,6 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
-            Self::PortugueseInterface => "portuguese-interface",
         }
     }
 
@@ -296,7 +291,6 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
-            Self::PortugueseInterface => "labs.portuguese_interface",
         }
     }
 
@@ -371,9 +365,6 @@ impl Feature {
             Self::HistoryStats => {
                 "Show a summary of your retained dictations at the top of History, with hex history stats"
             }
-            Self::PortugueseInterface => {
-                "Offer Português (Brasil) as an interface language, and use it when the system language is Portuguese"
-            }
         }
     }
 
@@ -412,7 +403,6 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
-            Self::PortugueseInterface => settings.labs.portuguese_interface,
         }
     }
 
@@ -445,7 +435,6 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
-            Self::PortugueseInterface => settings.labs.portuguese_interface = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -472,7 +461,6 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
-const PORTUGUESE_INTERFACE: u32 = 1 << 16;
 const PARAKEET_ULTRA: u32 = 1 << 17;
 const HISTORY_STATS: u32 = 1 << 18;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
@@ -594,12 +582,6 @@ pub fn history_stats() -> bool {
     on(HISTORY_STATS)
 }
 
-/// Português (Brasil) is an interface language (read wherever the
-/// interface language is applied or offered).
-pub fn portuguese_interface() -> bool {
-    on(PORTUGUESE_INTERFACE)
-}
-
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -671,11 +653,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             PARAKEET_ULTRA,
         ),
         (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
-        (
-            Feature::PortugueseInterface,
-            settings.portuguese_interface,
-            PORTUGUESE_INTERFACE,
-        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -1010,19 +987,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HISTORY_STATS, 0);
-        assert_eq!(state & PARAKEET_ULTRA, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
-    fn portuguese_interface_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & PORTUGUESE_INTERFACE, 0);
-        labs.portuguese_interface = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & PORTUGUESE_INTERFACE, 0);
-        assert_eq!(state & HISTORY_STATS, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }

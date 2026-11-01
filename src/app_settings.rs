@@ -1354,9 +1354,10 @@ impl Default for ExperimentalSettings {
     }
 }
 
-/// The `labs` switches (`crate::labs`), each off by default (`history_stats`: #790, `portuguese_interface`: #867).
-/// Features that already had a home keep it: `meetings.enabled`, `paste_with_shift`, `experimental.hex_microphone`,
-/// `keyboard_model_switching.enabled`, `pause_browser_media`, `share_dictation_shortcut`; old `labs.enabled` is ignored.
+/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790).
+/// Labs features that already had a home keep it: `meetings.enabled`, `paste_with_shift`,
+/// `experimental.hex_microphone`, `keyboard_model_switching.enabled`, `pause_browser_media`,
+/// and `share_dictation_shortcut`. An older `labs.enabled` master switch is read and ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -1410,7 +1411,6 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
-    pub portuguese_interface: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1442,7 +1442,6 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
-            portuguese_interface: false,
         }
     }
 }
