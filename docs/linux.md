@@ -395,18 +395,35 @@ dictation rules:
   nothing happens until you bind one in your config, and the key Settings
   records is not used. Hex can't tell whether your config binds it. Prefer
   keys without modifiers, because Hyprland adds every modifier you still hold
-  to Hex's paste (see [Native Wayland Requirements](#native-wayland-requirements)). For example:
+  to Hex's paste (see [Native Wayland Requirements](#native-wayland-requirements)).
+  Hyprland names each shortcut `anomaly.hex:<shortcut>-<trigger>`: Hex's app
+  id, the shortcut, and the key Settings records with `+` written as `-`.
+  With the default keys these are `anomaly.hex:dictation-ALT-space` and
+  `anomaly.hex:paste-last-CTRL-ALT-v` (Annotate: `anomaly.hex:capture-F9`).
+  The name changes when you record another key in Settings, so list the
+  current names with `hyprctl globalshortcuts` while Hex runs and bind those.
+  For example:
 
 ```lua
-hl.bind("End", hl.dsp.global("hex:dictation"))
-hl.bind("F9", hl.dsp.global("hex:paste-last"))
+hl.bind("End", hl.dsp.global("anomaly.hex:dictation-ALT-space"))
+hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last-CTRL-ALT-v"))
 ```
 
-  Older Hyprland configs write `bind = , End, global, hex:dictation`.
-  Remove any `hex:cancel-dictation` bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
+  Traditional Hyprland configs write
+  `bind = , End, global, anomaly.hex:dictation-ALT-space`. Binds to
+  `hex:dictation` or `hex:paste-last` (names from before Hex's app id was
+  `anomaly.hex`) do nothing; replace them. Remove any `cancel-dictation`
+  bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues
   until the next press and release, so lift the key first or use Toggle.
+  For hold-to-talk that doesn't depend on the portal's release, bind Hex's
+  own commands instead (below), for example
+  `bind = , End, exec, hex dictation start` with
+  `bindr = , End, exec, hex dictation stop`, or one
+  `bind = , End, exec, hex dictation toggle`. Pasting into a terminal needs
+  **Terminal paste shortcut** (Ctrl+Shift+V) unless the terminal accepts
+  Ctrl+V.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
   keyboard configuration:
