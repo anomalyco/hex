@@ -1,9 +1,10 @@
-//! Labs › Use your own speech model in the Local transcription picker: "Add
-//! model file…" opens the native dialog for a GGUF file, which is checked
+//! Your own speech models in the Local transcription picker: "Add model
+//! file…" opens the native dialog for a GGUF file, which is checked
 //! and copied on a worker (`custom_models::import`) while the picker stays
 //! responsive. Imported cards say what the file declared, can be renamed,
-//! and can be removed; one that is missing, changed, or behind its toggle
-//! says so instead of offering Use.
+//! and can be removed; one that is missing or changed says so instead of
+//! offering Use. A file found on this computer (`found`) is used in place,
+//! and Remove only forgets it.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -33,12 +34,6 @@ impl ImportState {
     }
 }
 
-/// Whether Labs › Use your own speech model is on.
-pub(super) fn on(ui: &Ui) -> bool {
-    let feature = crate::labs::Feature::CustomModels;
-    feature.shipped() && feature.on(&ui.settings)
-}
-
 fn wake(waker: Option<Waker>) -> impl Fn() + Send + 'static {
     move || {
         if let Some(waker) = &waker {
@@ -47,21 +42,19 @@ fn wake(waker: Option<Waker>) -> impl Fn() + Send + 'static {
     }
 }
 
-/// The header's "Add model file…" button while the Lab is on.
-pub(super) fn add_button(ui: &Ui, p: Paint) -> Option<El> {
-    on(ui).then(|| {
-        button(
-            p,
-            "add-model-file",
-            if ui.picker.import.busy() {
-                tr("Adding model…")
-            } else {
-                tr("Add model file…")
-            },
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| choose(ui),
-        )
-    })
+/// The header's "Add model file…" button.
+pub(super) fn add_button(ui: &Ui, p: Paint) -> El {
+    button(
+        p,
+        "add-model-file",
+        if ui.picker.import.busy() {
+            tr("Adding model…")
+        } else {
+            tr("Add model file…")
+        },
+        ButtonKind::Secondary,
+        |ui: &mut Ui, _| choose(ui),
+    )
 }
 
 fn choose(ui: &mut Ui) {
@@ -143,7 +136,6 @@ pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
         Status::Changed => Some(
             tr("Its file changed since it was imported. Check it again, import it again, or remove it.").into(),
         ),
-        Status::Off => Some(tr("Turn on Labs › Use your own speech model to use it.").into()),
     }
 }
 
@@ -174,9 +166,6 @@ pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
         Status::Changed => {
             "{model} changed since it was imported, so Hex uses {fallback} until you import it again or choose another model"
         }
-        Status::Off => {
-            "{model} needs Labs › Use your own speech model, so Hex uses {fallback} until you turn it on or choose another model"
-        }
     };
     Some(tr_named(notice, &[("model", name), ("fallback", fallback)]))
 }
@@ -190,20 +179,31 @@ pub(super) fn metadata(model: &ModelDefinition) -> String {
         [only] => crate::transcription::models::language_name(only).to_owned(),
         languages => crate::desktop::i18n::tr_fill("{} languages", &languages.len().to_string()),
     };
+    let origin = import.as_ref().and_then(|import| import.origin.clone());
     let mut parts = vec![
-        tr("Imported").to_owned(),
+        origin
+            .as_ref()
+            .map_or(tr("Imported"), |_| tr("Found on this computer"))
+            .to_owned(),
         custom_models::family(import.as_ref().map_or("", |import| import.architecture)).to_owned(),
         languages,
         tr("Not benchmarked").to_owned(),
     ];
     if let Some(import) = import {
-        parts.push(import.source);
+        parts.push(origin.unwrap_or(import.source));
         if let Some(license) = import.license {
             parts.push(license);
         }
         parts.push(format!("SHA-256 {}…", &import.sha256[..12]));
     }
     parts.join(" · ")
+}
+
+/// Whether `id` is a found file used where it is, which Remove only forgets.
+fn in_place(id: CustomModelId) -> bool {
+    custom_models::imported().into_iter().any(|import| {
+        import.definition.id == TranscriptionModelId::Custom(id) && import.origin.is_some()
+    })
 }
 
 /// Rename and Remove for an imported card, or its name field while renaming.
@@ -246,6 +246,7 @@ pub(super) fn actions(
     let mut actions = Vec::new();
     // Missing or changed: check Hex's copy again, or import the file again.
     let status = custom_models::status(id);
+    let in_place = in_place(id);
     if status == Status::Changed {
         actions.push(button(
             p,
@@ -259,7 +260,7 @@ pub(super) fn actions(
             move |ui: &mut Ui, _| repair(ui, id),
         ));
     }
-    if matches!(status, Status::Missing | Status::Changed) {
+    if !in_place && matches!(status, Status::Missing | Status::Changed) {
         actions.push(button(
             p,
             "reimport-model",
@@ -282,10 +283,11 @@ pub(super) fn actions(
         let remove_button = button(
             p,
             "remove-model",
-            &if confirming {
-                crate::desktop::i18n::tr_fill("Remove {}?", &model.size_label())
-            } else {
-                tr("Remove").to_owned()
+            &match (in_place, confirming) {
+                (true, true) => tr("Forget it?").to_owned(),
+                (true, false) => tr("Forget").to_owned(),
+                (false, true) => crate::desktop::i18n::tr_fill("Remove {}?", &model.size_label()),
+                (false, false) => tr("Remove").to_owned(),
             },
             if confirming {
                 ButtonKind::Danger

@@ -45,7 +45,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
-├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
@@ -401,59 +400,11 @@ Checks: `benchmark_details_show_raw_rates_and_mark_unknowns`,
 rendered with the toggle on; there is no `--snap` scene for it, and the Labs
 page goldens need regenerating on Linux with the new row.
 
-Use your own speech model (`custom-models`, issues 648 and 743, every OS):
-
-```ts
-Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // labs.custom-models
-├── Header check, before anything loads (transcription::gguf_header): GGUF v2/v3;
-│   general.architecture parakeet | whisper | qwen3_asr | cohere_asr | sensevoice;
-│   stt.variant; general.languages with a code Hex knows; only F32, F16, and
-│   Q8_0 tensors (the types every build runs on Metal and Vulkan); the tensor
-│   data fits the file. Anything else -> "<file> can't be imported: <reason>"
-├── Copy -> models/custom/<16 hex>.gguf while hashing; the copy is checked again;
-│   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime); manifest
-│   <16 hex>.json (name, general.name, family, variant, languages, detection,
-│   file name, licence, repo URL). The original is never touched; a failed or
-│   cancelled import removes only its partial copy; the same file again keeps
-│   the first import
-├── ID custom-<first 16 hex of the SHA-256> (TranscriptionModelId::Custom)
-├── Card -> name from general.name (Rename edits it), languages from the file,
-│   offline only (no streaming), Parakeet without language prompt or Auto,
-│   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
-│   against its receipt instead of downloading)
-├── Remove -> Hex's copy, receipt, and manifest only; not the active model
-├── Changed -> "Check again" rehashes the copy: the recorded SHA-256 again ->
-│   new receipt, ready; else it stays changed. Missing or changed -> "Import
-│   again…": the same file replaces the copy and keeps the import's name
-└── Saved import missing, changed (size or mtime), or toggle off -> the choice
-    stays saved; the listener runs a downloaded fallback (the system language's
-    recommendation if downloaded, else the first downloaded catalog model;
-    custom_models::runnable); General's model row says so; the card warns
-```
-
-The local digest identifies the file Hex copied; it is not a publisher
-checksum and Hex vouches for nothing in it. The selection, recent models,
-and keyboard-language mappings keep an import while it can't run
-(`models::validate_saved`), and a build that doesn't know `custom-…` keeps its
-default for that field without rewriting `settings.json` (#744). `hex model
-import <path> [--name N]`, `hex model rename <id> <name>`, `hex model repair
-<id>`, and `hex model remove <id>` (also `hex models …`) run in the CLI process; a running Hex lists
-the change at once (the registry rereads `models/custom/` when its folder
-changes). `hex model list`, the local API's `/models`, and the Linux and
-Windows tray list ready imports; the macOS menu bar's model list is built at
-launch from the catalog and does not list them yet.
-
-Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01): Parakeet
-primeLine Q8_0 (`handy-computer/parakeet-primeline-gguf`, not in the catalog)
-imported as `custom-dbd1ec2985aea64d`, verified, loaded, and transcribed the
-FLEURS German and English samples through `hex model transcribe` (the Linux
-dictation loader); a junk file and the toggle off were refused; touching or
-moving the copy made it "changed" or "missing" with the saved selection kept;
-rename and remove worked and the original stayed. Not observed: the picker
-flow in a real window, macOS (Metal) and Windows at all.
-Checks: `transcription::gguf_header::tests`,
-`transcription::custom_models::tests`, and the picker golden
-`rune-picker-custom-models-light`.
+Use your own speech model (`custom-models`) graduated: adding a model file
+and models found on this computer are always on now
+([own-models.md](own-models.md)). `hex labs on|off custom-models` still
+answers with that and exits 0 (`labs::GRADUATED`); the saved
+`labs.custom_models` key is ignored.
 
 Parakeet Ultra (`parakeet-ultra`, issue 648, every OS): a pinned catalog
 entry, `parakeet_ultra`, listed and runnable only while the toggle is on

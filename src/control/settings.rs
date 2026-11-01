@@ -358,11 +358,6 @@ const KEYS: &[Key] = &[
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
     ),
     key(
-        "labs.custom_models",
-        Kind::Bool,
-        "Labs: the Local transcription picker can add a GGUF speech model from disk (hex model import)",
-    ),
-    key(
         "labs.parakeet_ultra",
         Kind::Bool,
         "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",

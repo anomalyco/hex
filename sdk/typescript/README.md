@@ -136,7 +136,10 @@ Use `models.list()` to discover available models rather than treating the export
 `MODEL_IDS` as an availability list. `apple_speech` remains in the public type but
 is currently unavailable in the native catalog. The optional `language` argument
 to `models.list()` affects readiness metadata, not language filtering; inspect
-each model's `languages` and `supportsLanguageDetection` fields.
+each model's `languages` and `supportsLanguageDetection` fields. `source` says
+where the file comes from: `download`, `hex`, `imported`, or
+`found: owner/name@abcdef1` for a model another app downloaded to the Hugging Face
+cache, which Hex uses where it is.
 
 ## Connect to HEX Desktop
 

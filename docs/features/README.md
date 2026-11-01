@@ -36,6 +36,8 @@ Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each card's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
+[Your own speech models](own-models.md) covers adding a GGUF file and using
+models another app already downloaded.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
 The other capabilities stay here until they need their own verification recipe.
@@ -301,12 +303,14 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
 │   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
 │   published benchmarks "not measured in Hex" (labs.md)
-└── Labs > Use your own speech model (off) -> "Add model file…" in the header;  // setup.custom-models
-    imported cards after the catalog: Imported · family · languages · Not
-    benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";
-    Rename, Remove (not the active model); missing, changed, or off -> warning
-    line and no Use; changed -> Check again; missing or changed -> Import
-    again… (labs.md)
+├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
+│   Imported · family · languages · Not benchmarked · file · licence · SHA-256
+│   prefix; Speed and Accuracy "Unknown"; Rename, Remove (not the active
+│   model); missing or changed -> warning line and no Use (own-models.md)
+└── Found on this computer -> a scan of the Hugging Face cache when the picker  // setup.found-models
+    opens: other compatible files at the top (Not tested by Hex, Use); a catalog
+    model already downloaded there says so and offers Use; a found file's
+    Delete is Forget (own-models.md)
 ```
 
 Only Parakeet Unified English is marked `streams`
@@ -314,7 +318,8 @@ Only Parakeet Unified English is marked `streams`
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
-(also `picker-downloading`, `picker-japanese`, `picker-custom-models`).
+(also `picker-downloading`, `picker-japanese`, `picker-custom-models`,
+`picker-found`).
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for
@@ -352,6 +357,13 @@ Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
 [transcription/models.rs](../../src/transcription/models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
+
+When the Hugging Face cache holds a compatible speech model, the setup step
+asks "Choose a speech model" between Hex's recommended model (Recommended, the
+default button) and the found files, and holds the tour's download until the
+person chooses; with nothing found the step is unchanged
+([own-models.md](own-models.md#onboarding-choice), scene
+`onboarding-model-found`).
 
 The tour is the pure `desktop::onboarding::Flow` (steps, row states, background
 download, practice hints, one-relaunch guard) drawn by

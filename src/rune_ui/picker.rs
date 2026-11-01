@@ -82,7 +82,7 @@ pub(super) struct Picker {
     /// Installed models for fixtures; live windows ask the filesystem.
     pub(super) installed: Option<Vec<TranscriptionModelId>>,
     pub(super) fallback: Option<LanguageFallback>,
-    /// Labs › Use your own speech model: the file dialog, the import
+    /// Your own speech models: the file dialog, the import
     /// worker, and the name being edited.
     pub(super) import: super::model_import::ImportState,
     /// The card whose details are open (Parakeet Ultra's credit and
@@ -116,6 +116,8 @@ pub(super) fn open(ui: &mut Ui) {
     ui.open = None;
     ui.picker.open = true;
     ui.picker.clear_deletion();
+    // Models already on this computer: headers only, on a worker.
+    super::found::scan(ui);
     ui.picker.sort = Sort::default();
     ui.picker.supported_only = false;
 }
@@ -369,6 +371,19 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             error,
         ));
     }
+    if let Some(error) = &ui.found.error {
+        models = models.child(error_panel(
+            p,
+            "found-error",
+            tr("Model could not be used."),
+            error,
+        ));
+    }
+    // Models already on this computer that aren't catalog models; a catalog
+    // one shows on its own card.
+    if let Some(found) = super::found::section(ui, p) {
+        models = models.child(found);
+    }
     let shown = shown_models(ui, &language);
     for (index, (model, recommendation)) in shown.iter().copied().enumerate() {
         models = models.child(model_card(ui, p, index, model, recommendation, &language));
@@ -386,7 +401,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.text())
                 .grow(1.0),
         )
-        .children(super::model_import::add_button(ui, p).map(|add| add.mr(8.0)))
+        .child(super::model_import::add_button(ui, p).mr(8.0))
         .child(
             IconButton::new(p.k.glyph.close)
                 .variant(IconButtonVariant::Ghost)
@@ -608,6 +623,15 @@ fn model_card(
         Status::Available { installed }
     };
     let imported = model.id.is_custom();
+    // Another app's download of this exact catalog model: used in place,
+    // never downloaded again, and only forgotten, never deleted.
+    let found_here = !imported
+        && ui
+            .found
+            .models
+            .iter()
+            .any(|found| found.catalog == Some(model.id));
+    let in_place = installed && transcription_models::is_in_place(model);
     let deletable = installed
         && !preparing
         && !imported
@@ -626,7 +650,8 @@ fn model_card(
                 tr(model.quality_context),
                 tr(model.timestamps),
             ])
-            .chain((installed && !active).then(|| tr("Installed")))
+            .chain((installed && !active && !in_place).then(|| tr("Installed")))
+            .chain((in_place || (found_here && !installed)).then(|| tr("Found on this computer")))
             .collect::<Vec<_>>()
             .join(" · ")
     };
@@ -664,10 +689,11 @@ fn model_card(
                 }
             }
             if deletable {
-                let label = if confirming {
-                    tr_fill("Delete {}?", &model.size_label())
-                } else {
-                    tr("Delete").into()
+                let label = match (in_place, confirming) {
+                    (true, true) => tr("Forget it?").into(),
+                    (true, false) => tr("Forget").into(),
+                    (false, true) => tr_fill("Delete {}?", &model.size_label()),
+                    (false, false) => tr("Delete").into(),
                 };
                 let delete_button = button(
                     p,
@@ -690,7 +716,7 @@ fn model_card(
                 actions = actions.child(button(
                     p,
                     "choose-model",
-                    if *installed {
+                    if *installed || found_here {
                         tr("Use")
                     } else {
                         tr("Download")

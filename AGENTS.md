@@ -162,11 +162,16 @@ substitute for source inspection or a second roadmap.
 - `transcription/model_details`: what a catalog model's details view adds:
   licence credit, source and licence links, the publisher's notice, measured
   memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra).
-- `transcription/custom_models`, `transcription/gguf_header`: Labs › Use your
-  own speech model: GGUF imports checked from their header alone (family,
-  variant, languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under
-  their SHA-256 with a receipt and manifest, `TranscriptionModelId::Custom`
-  IDs, and the default-model fallback for an import that can't run.
+- `transcription/custom_models`, `transcription/gguf_header`: your own speech
+  models: GGUF imports checked from their header alone (family, variant,
+  languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under their
+  SHA-256 with a receipt and manifest (or recorded in place for a found file),
+  `TranscriptionModelId::Custom` IDs, and the default-model fallback for an
+  import that can't run.
+- `transcription/found_models`: the Hugging Face cache scan (headers only, a
+  per-file cache keyed by path, size, mtime, and file ID), exact catalog
+  matches by pinned SHA-256 blob name, adopted catalog records in
+  `models/found/`, and the GPU memory estimate.
 - `transcription/service`: bounded host-audio admission, hostile WAV validation,
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
@@ -718,11 +723,21 @@ CoreAudio formats, AppleScript details, or event serialization.
   ends an abandoned one. While one records, Hex claims no Escape at all.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
-  model and persisted selection. An import (Labs › Use your own speech model)
-  is checked from its GGUF header before anything loads and verified against
-  the receipt Hex wrote when it copied the file; that digest is not a
-  publisher's. A saved import that is missing, changed, or off stays saved
-  while the listener runs the default model; never rewrite it away.
+  model and persisted selection. An import is checked from its GGUF header
+  before anything loads and verified against the receipt Hex wrote when it
+  copied the file; that digest is not a publisher's. A saved import that is
+  missing or changed stays saved while the listener runs the default model;
+  never rewrite it away.
+- Models found in the Hugging Face cache are scanned only when the picker or
+  onboarding opens (or `hex model list` runs), never in the background, and
+  only their headers are read. A found file is used in place and is
+  read-only: Hex never writes, moves, or deletes anything in the cache, keeps
+  its receipts in its own models folder, hashes a file in full once when it is
+  chosen (against the pin or the blob name), and removing one only forgets it.
+- Onboarding shows its model choice only when the scan found a compatible
+  model; otherwise the flow is unchanged. Its own download is held while the
+  scan runs and while the choice shows. Hex's recommended model is the default
+  button, and a found model is never picked for the person.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer

@@ -277,6 +277,9 @@ pub struct Flow {
     /// The setup screen keeps its page dot once it has been needed.
     setup_needed: bool,
     download_requested: bool,
+    /// The recommended model waits for the person: a scan for models already
+    /// on this computer is running, or found one and they choose.
+    download_held: bool,
     advance_due: bool,
     reopen: bool,
     relaunching: bool,
@@ -302,6 +305,7 @@ impl Flow {
             practice: Practice::Waiting,
             setup_needed: false,
             download_requested: false,
+            download_held: false,
             advance_due: false,
             reopen: false,
             relaunching: false,
@@ -317,6 +321,12 @@ impl Flow {
             flow.forward_from(start)
         };
         flow
+    }
+
+    /// Holds (or releases) the download the tour starts by itself, while the
+    /// person can choose a model already on this computer instead.
+    pub fn hold_download(&mut self, held: bool) {
+        self.download_held = held;
     }
 
     pub fn step(&self) -> Step {
@@ -449,6 +459,7 @@ impl Flow {
             && model.downloading.is_none()
             && !model.failed
             && !self.download_requested
+            && !self.download_held
         {
             self.download_requested = true;
             return Effect::DownloadModel;
@@ -1568,6 +1579,32 @@ mod tests {
             flow
         };
         assert!(!installed_flow.view().show_download);
+    }
+
+    #[test]
+    fn a_held_download_waits_for_the_person() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.hold_download(true);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "found models are offered first"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Todo);
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel,
+            "choosing still starts it"
+        );
+        let mut released = Flow::new(Step::Welcome, fresh_status(), true, true);
+        released.hold_download(true);
+        released.on(Input::Status(fresh_status(), ModelProgress::default()));
+        released.hold_download(false);
+        assert_eq!(
+            released.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel,
+            "nothing found: the tour downloads as before"
+        );
     }
 
     #[test]
