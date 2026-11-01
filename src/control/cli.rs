@@ -426,16 +426,16 @@ pub fn run(command: ControlCli) -> u8 {
             } => install_model(model, language, output),
             ModelCommand::Cancel { output } => send(ControlCommand::ModelCancel, output),
             ModelCommand::Import { path, name } => report(import_model(&path, name.as_deref())),
-            ModelCommand::Rename { model, name } => {
-                report(imported(&model).and_then(|id| {
-                    crate::transcription::custom_models::rename(id, &name)?;
-                    println!("renamed\t{}", id.as_str());
-                    Ok(())
-                }))
-            }
+            ModelCommand::Rename { model, name } => report(imported(&model).and_then(|id| {
+                crate::transcription::custom_models::rename(id, &name)?;
+                println!("renamed\t{}", id.as_str());
+                Ok(())
+            })),
             ModelCommand::Remove { model } => report(imported(&model).and_then(|id| {
                 let settings = crate::app_settings::AppSettings::load().unwrap_or_default();
-                if settings.transcription.model == crate::transcription::models::TranscriptionModelId::Custom(id) {
+                if settings.transcription.model
+                    == crate::transcription::models::TranscriptionModelId::Custom(id)
+                {
                     color_eyre::eyre::bail!(
                         "{} is the selected model; choose another with `hex model use` first",
                         id.as_str()
@@ -561,7 +561,9 @@ fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::Cus
     }
     crate::transcription::models::CustomModelId::parse(model)
         .filter(|id| custom_models::is_registered(*id))
-        .ok_or_else(|| color_eyre::eyre::eyre!("no imported model is {model}; run `hex model list`"))
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!("no imported model is {model}; run `hex model list`")
+        })
 }
 
 /// The selection a local model command names: `model` with its remembered

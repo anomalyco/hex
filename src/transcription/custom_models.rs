@@ -55,12 +55,15 @@ impl CustomModelId {
 
     pub fn parse(text: &str) -> Option<Self> {
         let digits = text.strip_prefix(PREFIX)?;
-        (digits.len() == DIGITS && digits.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
-            .then(|| {
-                let mut id = [0_u8; PREFIX.len() + DIGITS];
-                id.copy_from_slice(text.as_bytes());
-                Self(id)
-            })
+        (digits.len() == DIGITS
+            && digits
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
+        .then(|| {
+            let mut id = [0_u8; PREFIX.len() + DIGITS];
+            id.copy_from_slice(text.as_bytes());
+            Self(id)
+        })
     }
 
     pub fn as_str(&self) -> &str {
@@ -129,7 +132,6 @@ pub struct Imported {
     pub sha256: String,
     pub source: String,
     pub license: Option<String>,
-    pub repository: Option<String>,
 }
 
 struct Entry {
@@ -188,7 +190,10 @@ impl Registry {
                 let Some(id) = path
                     .file_stem()
                     .and_then(|stem| stem.to_str())
-                    .filter(|_| path.extension().is_some_and(|extension| extension == "json"))
+                    .filter(|_| {
+                        path.extension()
+                            .is_some_and(|extension| extension == "json")
+                    })
                     .and_then(|stem| CustomModelId::parse(&format!("{PREFIX}{stem}")))
                 else {
                     continue;
@@ -389,7 +394,6 @@ pub fn imported() -> Vec<Imported> {
             sha256: entry.manifest.sha256.clone(),
             source: entry.manifest.source.clone(),
             license: entry.manifest.license.clone(),
-            repository: entry.manifest.repository.clone(),
         })
         .collect()
 }
@@ -441,7 +445,10 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
         );
     }
     let Some(variant) = header.string("stt.variant") else {
-        bail!("it has no stt.variant; convert it with transcribe.cpp's converter for {}", family(architecture));
+        bail!(
+            "it has no stt.variant; convert it with transcribe.cpp's converter for {}",
+            family(architecture)
+        );
     };
     if header.tensor_types.is_empty() {
         bail!("it has no tensors");
@@ -494,7 +501,8 @@ fn clamp_name(name: &str) -> String {
 /// Checks `path` without copying it: what an import would say, or why it
 /// would refuse.
 pub fn check(path: &Path) -> Result<String> {
-    let header = gguf_header::read(path).map_err(|error| eyre!("{} can't be imported: {error}", display_name(path)))?;
+    let header = gguf_header::read(path)
+        .map_err(|error| eyre!("{} can't be imported: {error}", display_name(path)))?;
     let profile = profile(&header, &file_stem(path))
         .map_err(|error| eyre!("{} can't be imported: {error}", display_name(path)))?;
     Ok(format!(
@@ -507,13 +515,17 @@ pub fn check(path: &Path) -> Result<String> {
 }
 
 fn display_name(path: &Path) -> String {
-    path.file_name()
-        .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 fn file_stem(path: &Path) -> String {
-    path.file_stem()
-        .map_or_else(|| "Imported model".into(), |stem| stem.to_string_lossy().into_owned())
+    path.file_stem().map_or_else(
+        || "Imported model".into(),
+        |stem| stem.to_string_lossy().into_owned(),
+    )
 }
 
 /// Why an import is refused while its Labs toggle is off.
@@ -567,10 +579,14 @@ fn copy_and_record(
     {
         fs::remove_file(partial)?;
         if let Some(name) = name {
-            write_manifest(directory, id, &Manifest {
-                name: valid_name(name)?,
-                ..existing
-            })?;
+            write_manifest(
+                directory,
+                id,
+                &Manifest {
+                    name: valid_name(name)?,
+                    ..existing
+                },
+            )?;
         }
         return Ok(id);
     }
@@ -665,10 +681,14 @@ pub fn rename(id: CustomModelId, name: &str) -> Result<()> {
         .ok()
         .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
         .ok_or_else(|| eyre!("no imported model is {}", id.as_str()))?;
-    write_manifest(&directory, id, &Manifest {
-        name: valid_name(name)?,
-        ..manifest
-    })
+    write_manifest(
+        &directory,
+        id,
+        &Manifest {
+            name: valid_name(name)?,
+            ..manifest
+        },
+    )
 }
 
 /// Removes Hex's copy of an import, its receipt, and its manifest. The file
@@ -737,9 +757,16 @@ mod tests {
             artifact.sha256,
             super::super::models::sha256_hex(&source, None).unwrap()
         );
-        assert!(super::super::models::model_path(definition).unwrap().is_file());
+        assert!(
+            super::super::models::model_path(definition)
+                .unwrap()
+                .is_file()
+        );
         // The same file again keeps the one import.
-        assert_eq!(import(&source, Some("primeLine"), &AtomicBool::new(false)).unwrap(), id);
+        assert_eq!(
+            import(&source, Some("primeLine"), &AtomicBool::new(false)).unwrap(),
+            id
+        );
         assert_eq!(super::definition(id).name, "primeLine");
         rename(id, "  German  Parakeet ").unwrap();
         assert_eq!(super::definition(id).name, "German Parakeet");
@@ -757,9 +784,22 @@ mod tests {
     fn a_refused_or_canceled_import_leaves_nothing_behind() {
         let models = temporary_models_dir();
         let source = models.join("llama.gguf");
-        fs::write(&source, gguf(&[("general.architecture", "llama")], &[], &[], &[("a", 0, 4)])).unwrap();
+        fs::write(
+            &source,
+            gguf(
+                &[("general.architecture", "llama")],
+                &[],
+                &[],
+                &[("a", 0, 4)],
+            ),
+        )
+        .unwrap();
         let error = import(&source, None, &AtomicBool::new(false)).unwrap_err();
-        assert!(error.to_string().starts_with("llama.gguf can't be imported: its architecture is llama"));
+        assert!(
+            error
+                .to_string()
+                .starts_with("llama.gguf can't be imported: its architecture is llama")
+        );
         let good = models.join("good.gguf");
         fs::write(&good, parakeet("Good")).unwrap();
         assert!(import(&good, None, &AtomicBool::new(true)).is_err());
@@ -789,7 +829,12 @@ mod tests {
         let id = CustomModelId::from_sha256(&"ab12".repeat(16));
         assert_eq!(id.as_str(), "custom-ab12ab12ab12ab12");
         assert_eq!(CustomModelId::parse(id.as_str()), Some(id));
-        for bad in ["custom-AB12AB12AB12AB12", "custom-ab12", "parakeet_v3", "custom-ab12ab12ab12ab1z"] {
+        for bad in [
+            "custom-AB12AB12AB12AB12",
+            "custom-ab12",
+            "parakeet_v3",
+            "custom-ab12ab12ab12ab1z",
+        ] {
             assert_eq!(CustomModelId::parse(bad), None, "{bad}");
         }
     }
@@ -812,18 +857,40 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         };
-        assert!(reason(gguf(&[("general.architecture", "llama")], &[], &[], &[("a", 0, 4)])).contains("its architecture is llama"));
+        assert!(
+            reason(gguf(
+                &[("general.architecture", "llama")],
+                &[],
+                &[],
+                &[("a", 0, 4)]
+            ))
+            .contains("its architecture is llama")
+        );
         assert!(reason(gguf(&[], &[], &[], &[("a", 0, 4)])).contains("no general.architecture"));
-        assert!(reason(gguf(&[("general.architecture", "whisper")], &[], &[], &[("a", 0, 4)])).contains("no stt.variant"));
+        assert!(
+            reason(gguf(
+                &[("general.architecture", "whisper")],
+                &[],
+                &[],
+                &[("a", 0, 4)]
+            ))
+            .contains("no stt.variant")
+        );
         let quantized = gguf(
-            &[("general.architecture", "whisper"), ("stt.variant", "whisper-small")],
+            &[
+                ("general.architecture", "whisper"),
+                ("stt.variant", "whisper-small"),
+            ],
             &[("general.languages", &["en"])],
             &[],
             &[("a", 12, 256)],
         );
         assert!(reason(quantized).contains("Q4_K (1) tensors"));
         let no_languages = gguf(
-            &[("general.architecture", "whisper"), ("stt.variant", "whisper-small")],
+            &[
+                ("general.architecture", "whisper"),
+                ("stt.variant", "whisper-small"),
+            ],
             &[("general.languages", &["xx"])],
             &[],
             &[("a", 0, 4)],

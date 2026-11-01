@@ -191,6 +191,7 @@ pub(super) fn metadata(model: &ModelDefinition) -> String {
         tr("Not benchmarked").to_owned(),
     ];
     if let Some(import) = import {
+        parts.push(import.source);
         if let Some(license) = import.license {
             parts.push(license);
         }
@@ -200,7 +201,12 @@ pub(super) fn metadata(model: &ModelDefinition) -> String {
 }
 
 /// Rename and Remove for an imported card, or its name field while renaming.
-pub(super) fn actions(ui: &Ui, p: Paint, model: &'static ModelDefinition, removable: bool) -> Vec<El> {
+pub(super) fn actions(
+    ui: &Ui,
+    p: Paint,
+    model: &'static ModelDefinition,
+    removable: bool,
+) -> Vec<El> {
     let TranscriptionModelId::Custom(id) = model.id else {
         return Vec::new();
     };
@@ -222,7 +228,13 @@ pub(super) fn actions(ui: &Ui, p: Paint, model: &'static ModelDefinition, remova
                 .on_submit(move |ui: &mut Ui, _| save_name(ui))
                 .build(p.k)
                 .key("rename-field"),
-            button(p, "save-name", tr("Save"), ButtonKind::Secondary, |ui: &mut Ui, _| save_name(ui)),
+            button(
+                p,
+                "save-name",
+                tr("Save"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| save_name(ui),
+            ),
         ];
     }
     let mut actions = vec![button(

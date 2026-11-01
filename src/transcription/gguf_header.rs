@@ -66,7 +66,10 @@ pub(crate) fn read(path: &Path) -> Result<GgufHeader> {
     };
     let header = reader.header()?;
     if header.data_end > length {
-        bail!("the file is cut short: its tensors need {} bytes, it has {length}", header.data_end);
+        bail!(
+            "the file is cut short: its tensors need {} bytes, it has {length}",
+            header.data_end
+        );
     }
     Ok(header)
 }
@@ -333,7 +336,10 @@ pub(crate) mod tests {
     #[test]
     fn metadata_and_tensor_types_are_read_without_the_weights() {
         let header = read_bytes(gguf(
-            &[("general.architecture", "whisper"), ("stt.variant", "whisper-small")],
+            &[
+                ("general.architecture", "whisper"),
+                ("stt.variant", "whisper-small"),
+            ],
             &[("general.languages", &["en", "de"])],
             &[("stt.capability.lang_detect", true)],
             &[("a", 0, 8), ("b", 1, 8), ("c", 8, 64)],
@@ -357,7 +363,12 @@ pub(crate) mod tests {
     fn junk_and_truncated_files_are_refused() {
         let junk = read_bytes(b"PK\x03\x04 not a model".to_vec()).unwrap_err();
         assert_eq!(junk.to_string(), "it is not a GGUF file");
-        let mut cut = gguf(&[("general.architecture", "parakeet")], &[], &[], &[("a", 0, 1024)]);
+        let mut cut = gguf(
+            &[("general.architecture", "parakeet")],
+            &[],
+            &[],
+            &[("a", 0, 1024)],
+        );
         cut.truncate(cut.len() - 100);
         assert!(read_bytes(cut).is_err());
         let mut header = gguf(&[("general.architecture", "parakeet")], &[], &[], &[]);

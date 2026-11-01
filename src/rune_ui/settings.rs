@@ -939,40 +939,44 @@ pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     });
                 }),
             }];
-            choices.extend(transcription_models::all_models().into_iter().filter_map(|model| {
-                let fallback = ui.settings.transcription_for_model(model.id).language;
-                if !model.available()
-                    || !matches!(model.runtime, transcription_models::ModelRuntime::Gguf(_))
-                    || !ui.picker.installed(model, &fallback)
-                {
-                    return None;
-                }
-                let language = match &mapped {
-                    Some(choice) if model.supports_language(&choice.language) => {
-                        choice.language.clone()
-                    }
-                    _ => source.language_for(model, &fallback),
-                };
-                let source_id = source.id.clone();
-                let id = model.id;
-                Some(Choice {
-                    label: model.name.into(),
-                    detail: None,
-                    selected: mapped.as_ref().is_some_and(|choice| choice.model == id),
-                    choose: Box::new(move |ui| {
-                        ui.open = None;
-                        ui.update(|settings| {
-                            settings.keyboard_model_switching.mappings.insert(
-                                source_id.clone(),
-                                KeyboardModelChoice {
-                                    model: id,
-                                    language: language.clone(),
-                                },
-                            );
-                        });
+            choices.extend(
+                transcription_models::all_models()
+                    .into_iter()
+                    .filter_map(|model| {
+                        let fallback = ui.settings.transcription_for_model(model.id).language;
+                        if !model.available()
+                            || !matches!(model.runtime, transcription_models::ModelRuntime::Gguf(_))
+                            || !ui.picker.installed(model, &fallback)
+                        {
+                            return None;
+                        }
+                        let language = match &mapped {
+                            Some(choice) if model.supports_language(&choice.language) => {
+                                choice.language.clone()
+                            }
+                            _ => source.language_for(model, &fallback),
+                        };
+                        let source_id = source.id.clone();
+                        let id = model.id;
+                        Some(Choice {
+                            label: model.name.into(),
+                            detail: None,
+                            selected: mapped.as_ref().is_some_and(|choice| choice.model == id),
+                            choose: Box::new(move |ui| {
+                                ui.open = None;
+                                ui.update(|settings| {
+                                    settings.keyboard_model_switching.mappings.insert(
+                                        source_id.clone(),
+                                        KeyboardModelChoice {
+                                            model: id,
+                                            language: language.clone(),
+                                        },
+                                    );
+                                });
+                            }),
+                        })
                     }),
-                })
-            }));
+            );
             let label = mapped.as_ref().map_or_else(
                 || tr("Don't switch").to_string(),
                 |choice| {
