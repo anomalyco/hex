@@ -603,7 +603,13 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         .view
         .as_ref()
         .and_then(|view| view.listener.warning.clone())
-        .map(|failure| tr_fill("Last dictation failed: {}", &failure));
+        .map(|failure| tr_fill("Last dictation failed: {}", &failure))
+        // A dictation discarded for silence stays noted until one goes
+        // through (#782).
+        .or_else(|| {
+            crate::dictation::silence::last()
+                .map(|silence| tr_fill("Last dictation discarded: {}", silence.note()))
+        });
     let error = ui
         .error
         .clone()

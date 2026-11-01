@@ -13,6 +13,7 @@ pub(crate) mod live_text;
 pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
+pub(crate) mod silence;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod text_replacements;
@@ -204,11 +205,18 @@ impl DictationClip {
         }
     }
 
-    /// Whether the capture holds no speech worth transcribing: its level stays
-    /// below the silence threshold or, once the speech detector is installed,
-    /// the detector finds no speech in it (a key click, the start tone, or a
-    /// noisy room).
+    /// Whether the capture holds no speech worth transcribing.
+    #[cfg(test)]
     pub fn is_near_silent(&self) -> bool {
+        self.silence().is_some()
+    }
+
+    /// Why the capture holds no speech worth transcribing, if it doesn't: its
+    /// level stays below the silence threshold or, once the speech detector
+    /// is installed, the detector finds no speech in it (a key click, the
+    /// start tone, a noisy room, or a microphone turned down too far, #782).
+    /// Logs the measured level and peak against the thresholds.
+    pub fn silence(&self) -> Option<silence::Silence> {
         let level_dbfs = self.loudest_window_dbfs();
         let silent = level_dbfs < SILENCE_THRESHOLD_DBFS;
         if silent {
@@ -235,19 +243,25 @@ impl DictationClip {
                 since_glitch_ms = ms(source.and_then(|source| source.since_glitch)),
                 "discarded near-silent dictation without transcribing it"
             );
-            return true;
+            return Some(silence::Silence::TooQuiet);
         }
         let released = self.samples.len().saturating_sub(self.tail_samples);
         let started = std::time::Instant::now();
         match crate::transcription::speech_detector::contains_speech(&self.samples[..released]) {
             Some(false) => {
+                let peak = self.samples[..released]
+                    .iter()
+                    .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
                 tracing::info!(
                     level_dbfs,
+                    silence_threshold_dbfs = SILENCE_THRESHOLD_DBFS,
+                    peak_dbfs = 20.0 * peak.max(f32::MIN_POSITIVE).log10(),
+                    speech_threshold = crate::transcription::speech_detector::THRESHOLD,
                     audio_ms = self.duration_ms(),
                     vad_ms = started.elapsed().as_millis() as u64,
                     "discarded dictation without detected speech"
                 );
-                true
+                Some(silence::Silence::NoSpeech)
             }
             Some(true) => {
                 tracing::debug!(
@@ -255,9 +269,9 @@ impl DictationClip {
                     vad_ms = started.elapsed().as_millis() as u64,
                     "speech detected in dictation"
                 );
-                false
+                None
             }
-            None => false,
+            None => None,
         }
     }
 
