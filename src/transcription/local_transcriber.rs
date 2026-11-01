@@ -557,15 +557,14 @@ impl WarmLocal {
 /// changes to. A new selection loads on a worker thread while dictation goes
 /// on with the old model; the listener swaps it in once nothing records or
 /// waits on the old one. A model the host already prepared skips the load.
+/// A model loading on a worker thread.
+type Loading = std::sync::mpsc::Receiver<std::result::Result<LocalTranscriber, String>>;
+
 pub(crate) struct ModelSwap {
     loaded: TranscriptionSelection,
     /// The device setting the running model loaded for.
     device: TranscriptionDevice,
-    loading: Option<(
-        TranscriptionSelection,
-        TranscriptionDevice,
-        std::sync::mpsc::Receiver<std::result::Result<LocalTranscriber, String>>,
-    )>,
+    loading: Option<(TranscriptionSelection, TranscriptionDevice, Loading)>,
     ready: Option<(TranscriptionSelection, LocalTranscriber)>,
 }
 
