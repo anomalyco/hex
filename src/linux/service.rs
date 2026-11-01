@@ -128,7 +128,7 @@ pub(crate) fn refresh_x_authority() {
 /// connection. Returns the display it adopted. Called on the main thread
 /// before Hex starts any other thread.
 pub(crate) fn adopt_wayland_display() -> Option<String> {
-    if graphical_session() {
+    if custom_root() || graphical_session() {
         return None;
     }
     let uid = unsafe { libc::getuid() };
@@ -136,13 +136,7 @@ pub(crate) fn adopt_wayland_display() -> Option<String> {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}")));
-    // A custom data root never asks the user's systemd manager (see `supervised`).
-    let managed = if custom_root() {
-        None
-    } else {
-        manager_environment("WAYLAND_DISPLAY")
-    };
-    let display = managed
+    let display = manager_environment("WAYLAND_DISPLAY")
         .filter(|display| wayland_socket(&runtime.join(display), uid))
         .or_else(|| newest_wayland_socket(&runtime, uid))?;
     unsafe {
@@ -184,6 +178,9 @@ fn wayland_socket(path: &Path, uid: u32) -> bool {
 /// A variable in the systemd user manager's environment, which the desktop
 /// session imports at each login.
 fn manager_environment(key: &str) -> Option<String> {
+    if custom_root() {
+        return None;
+    }
     let output = std::process::Command::new("systemctl")
         .args(["--user", "show-environment"])
         .stdin(std::process::Stdio::null())
@@ -790,8 +787,7 @@ fn unit() -> String {
 
 /// Whether launches start Hex through its systemd user unit: the unit is
 /// installed (by the installer or Home Manager) and this process uses the
-/// default data root. `HEX_SYSTEMD_UNIT` names another unit, for isolated
-/// tests with a custom data root.
+/// default data root, or explicitly names an isolated test unit.
 pub(crate) fn supervised() -> bool {
     if custom_root() {
         return false;
@@ -806,8 +802,9 @@ pub(crate) fn supervised() -> bool {
         })
 }
 
-/// A custom data root without its own unit (isolated tests) never touches
-/// the user's systemd manager.
+/// A custom data root uses only its supplied desktop environment, not the
+/// user's manager or discovered display sockets. `HEX_SYSTEMD_UNIT` opts an
+/// isolated test into a managed unit explicitly.
 fn custom_root() -> bool {
     std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
         && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()

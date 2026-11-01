@@ -1548,6 +1548,8 @@ Linux process                            // maintain.linux-service
 ├── hex / hex app -> Hex running? -> Activate{activation token} over the socket -> exit 0
 │   ├── No Hex, hex.service loaded -> session.env -> systemctl start (Type=notify) -> Activate
 │   ├── No Hex, no unit or custom data dir -> This process becomes Hex
+│   │   └── Custom data dir -> Keep the supplied desktop environment; no user-manager query
+│   │       or Wayland socket discovery (unless HEX_SYSTEMD_UNIT explicitly opts in)
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
@@ -1597,6 +1599,8 @@ points, so a delayed listener start cannot reset a newer live volume selection.
 Checks: [test-linux-service.py](../../scripts/test-linux-service.py) exercises
 the real socket and process lifetime without a display, installed model, or
 audio device; it passed on apollo (Arch, niri) on 2026-10-22.
+It also checks custom-root isolation with a stale Xauthority path and an
+answering Wayland socket nearby: no `systemctl` call or adopted display.
 `closing_the_window_cancels_only_an_uncommitted_capture`,
 `commands_route_only_to_a_started_listener`, and
 `adopting_saved_settings_restarts_only_for_listener_settings` use controlled
