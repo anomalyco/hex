@@ -155,6 +155,9 @@ pub(crate) struct PortalBus {
     /// The portal interface this bus serves and its version.
     interface: &'static str,
     pub(crate) version: u32,
+    /// The portal knows Hex as `anomaly.hex` (xdg-desktop-portal 1.20 and
+    /// newer register host apps); older ones may not know Hex's app id.
+    pub(crate) registered: bool,
 }
 
 impl PortalBus {
@@ -210,6 +213,7 @@ impl PortalBus {
             next_token: 0,
             interface,
             version: 0,
+            registered: false,
         };
         match bus.call::<_, OwnedVariant>(
             DESKTOP_PATH,
@@ -231,20 +235,23 @@ impl PortalBus {
             "org.freedesktop.host.portal.Registry",
             "Register",
             &(APP_ID, HashMap::<&str, Variant<'_>>::new()),
-        ) && !unknown(&error)
-        {
-            // The portal finds the app id through anomaly.hex.desktop and the caller's
-            // /proc entry, which setgid wrappers such as newgrp make unreadable.
-            let fix = match written {
-                Some(entry) => format!(
-                    "Hex wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
-                    entry.display()
-                ),
-                None => "run Hex without setuid or setgid wrappers such as newgrp".into(),
-            };
-            return Err(eyre!(
-                "the desktop portal could not identify Hex ({error}); {fix}"
-            ));
+        ) {
+            if !unknown(&error) {
+                // The portal finds the app id through anomaly.hex.desktop and the caller's
+                // /proc entry, which setgid wrappers such as newgrp make unreadable.
+                let fix = match written {
+                    Some(entry) => format!(
+                        "Hex wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
+                        entry.display()
+                    ),
+                    None => "run Hex without setuid or setgid wrappers such as newgrp".into(),
+                };
+                return Err(eyre!(
+                    "the desktop portal could not identify Hex ({error}); {fix}"
+                ));
+            }
+        } else {
+            bus.registered = true;
         }
         if stop.load(Ordering::Acquire) {
             return Err(eyre!("portal registration canceled"));
@@ -403,8 +410,15 @@ impl Drop for PortalBus {
     }
 }
 
+/// Portal threads and startup check and write the launcher entry one at a
+/// time, so none sees another's half-done write.
+static ENTRY_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Tidies Hex's launcher entry at startup: see [`DesktopEntries::tidy`].
 pub(crate) fn tidy_desktop_entries() -> Result<()> {
+    let _writing = ENTRY_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(entries) = DesktopEntries::current() {
         entries.tidy()?;
     }
@@ -414,6 +428,9 @@ pub(crate) fn tidy_desktop_entries() -> Result<()> {
 /// The portal identifies a host app by a desktop entry named for its id,
 /// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
+    let _writing = ENTRY_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match DesktopEntries::current() {
         Some(entries) => {
             let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
@@ -1010,6 +1027,38 @@ mod tests {
         std::os::unix::fs::symlink(&target, &user).unwrap();
         entries.tidy().unwrap();
         assert!(user.is_symlink());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A fallback already there is never written again (#810), and one that
+    /// a data directory provides is never written at all.
+    #[test]
+    fn the_fallback_is_written_once_and_only_when_nothing_provides_it() {
+        let (root, fallback) = entries("once");
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), Some(fallback.entry()));
+        let written = std::fs::metadata(fallback.entry())
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), None);
+        assert_eq!(fallback.tidy().unwrap(), None);
+        assert_eq!(
+            std::fs::metadata(fallback.entry())
+                .unwrap()
+                .modified()
+                .unwrap(),
+            written
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        let (root, provided) = entries("provided");
+        std::fs::write(
+            provided.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        assert_eq!(provided.ensure("/opt/hex").unwrap(), None);
+        assert!(!provided.entry().exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

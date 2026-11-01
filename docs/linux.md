@@ -166,6 +166,12 @@ version layout, `~/.local/bin/hex`, a desktop launcher, and an XDG autostart
 entry and a `hex.service` user unit. It does not start recording during installation.
 General › **Launch at login** turns that autostart entry on or off
 (`~/.config/autostart/anomaly.hex.desktop`); Hex leaves an entry it did not write alone.
+Where the desktop has the Background portal (GNOME, KDE), Hex asks it at startup
+to run in the background, and Launch at login goes through it: the portal writes
+and removes that same autostart entry (marked `X-XDP-Autostart=anomaly.hex`).
+Elsewhere Hex writes the entry itself. The launcher entry below is written only
+when no installed package or data directory provides one, and never rewritten
+while it's there.
 The launcher entry is `~/.local/share/applications/anomaly.hex.desktop`, named
 for Hex's app id `anomaly.hex`, which its windows also report. Earlier installs
 named both entries `hex.desktop`; Hex and the installer rename Hex's own.

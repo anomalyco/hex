@@ -1173,7 +1173,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   the managed entries it or the installer wrote (#652). The PNGs carry an
   `X-Hex-Managed=true` text chunk: Hex replaces and the installer removes only
   marked regular files, never a user's own icon or a symlink. Launch at login is
-  `~/.config/autostart/anomaly.hex.desktop`. At startup Hex renames its own
+  `~/.config/autostart/anomaly.hex.desktop`; where the Background portal exists
+  (`linux/background`, #812) Hex asks it at startup to run in the background
+  and Launch at login goes through it (the portal writes or removes that file,
+  `X-XDP-Autostart=anomaly.hex`). Every RequestBackground rewrites or removes
+  the file, so Hex asks only while it is absent or Hex's (managed or the
+  portal's); the installer treats the portal's entry as Hex's too. At startup Hex renames its own
   managed `hex.desktop` entries (the names before #579) and never touches
   unmanaged ones. Only a loose binary without any entry writes its own
   managed one so the portal can identify it, NoDisplay beside an older

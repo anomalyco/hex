@@ -1,6 +1,7 @@
 pub(crate) mod app;
 pub(crate) mod atspi;
 pub(crate) mod audio_control;
+pub(crate) mod background;
 pub(crate) mod clipboard;
 pub(crate) mod context;
 pub(crate) mod dictation;

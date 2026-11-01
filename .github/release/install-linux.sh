@@ -69,6 +69,12 @@ managed_directory() {
   chmod 700 "$path"
 }
 
+# Hex's desktop entries: its own, or the autostart entry the desktop's
+# Background portal writes for it (#812).
+hex_entry() {
+  grep -Fxq 'X-Hex-Managed=true' "$1" || grep -Fxq 'X-XDP-Autostart=anomaly.hex' "$1"
+}
+
 uninstall() {
   if [ -f "$unit" ] && grep -Fxq '# X-Hex-Managed=true' "$unit"; then
     if command -v systemctl >/dev/null 2>&1; then
@@ -104,7 +110,7 @@ uninstall() {
     "$applications/hex.desktop" \
     "$autostart/hex.desktop"
   do
-    if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+    if [ -f "$desktop" ] && [ ! -L "$desktop" ] && hex_entry "$desktop"; then
       rm -f "$desktop"
     fi
   done
@@ -372,7 +378,7 @@ for desktop in "$application_entry" "$autostart_entry"; do
   if [ -L "$desktop" ]; then
     fail "Refusing to replace a desktop-entry symlink: $desktop"
   fi
-  if [ -e "$desktop" ] && ! grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+  if [ -e "$desktop" ] && ! hex_entry "$desktop"; then
     fail "Refusing to replace an unmanaged desktop entry: $desktop"
   fi
 done
