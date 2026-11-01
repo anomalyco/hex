@@ -13,7 +13,10 @@ export const MODEL_IDS = [
   "apple_speech",
 ] as const
 
-export type ModelId = typeof MODEL_IDS[number]
+/** A model imported with Labs › Use your own speech model. */
+export type CustomModelId = `custom-${string}`
+
+export type ModelId = typeof MODEL_IDS[number] | CustomModelId
 
 export interface Health {
   readonly version: string

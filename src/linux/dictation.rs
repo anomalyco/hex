@@ -212,8 +212,14 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
-    let transcriber =
-        transcriber.map_or_else(|| LocalTranscriber::load(&settings.transcription), Ok)?;
+    let transcriber = transcriber.map_or_else(
+        || {
+            LocalTranscriber::load(&crate::transcription::custom_models::runnable(
+                &settings.transcription,
+            ))
+        },
+        Ok,
+    )?;
     crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.

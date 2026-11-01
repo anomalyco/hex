@@ -36,6 +36,7 @@ pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
+mod model_import;
 mod models;
 mod modes;
 mod onboarding;
@@ -1322,6 +1323,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
+    changed |= model_import::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
@@ -2022,6 +2024,12 @@ const SCENES: &[Scene] = &[
     ("picker-downloading", |ui| {
         *ui = portal_fixture();
         picker::fixture(ui, Some(TranscriptionModelId::CohereTranscribe));
+    }),
+    // Labs › Use your own speech model: the picker's Add model file….
+    ("picker-custom-models", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.custom_models = true;
+        picker::fixture(ui, None);
     }),
     // Japanese saved: the English-only models say they switch the language.
     ("picker-japanese", |ui| {

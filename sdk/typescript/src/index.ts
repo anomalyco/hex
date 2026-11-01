@@ -6,6 +6,7 @@ export type {
   Capabilities,
   ConnectOptions,
   CreateOptions,
+  CustomModelId,
   DictationHandle,
   DictationLevel,
   DictationStartOptions,

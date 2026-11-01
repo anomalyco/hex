@@ -103,6 +103,10 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Transcription model/Downloading",
     ),
     (
+        "picker-custom-models",
+        "Window/Transcription model/Add your own model (Labs)",
+    ),
+    (
         "picker-japanese",
         "Window/Transcription model/Japanese saved",
     ),

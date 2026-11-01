@@ -71,7 +71,8 @@ impl AppSettings {
             .keyboard_model_switching
             .mappings
             .retain(|_, choice| choice.validate().is_ok());
-        if let Err(error) = crate::transcription::models::validate(&settings.transcription) {
+        // A saved import that can't run stays saved (`validate_saved`).
+        if let Err(error) = crate::transcription::models::validate_saved(&settings.transcription) {
             warn("transcription", &error.to_string());
             settings.transcription = Self::default().transcription;
             repaired = true;
@@ -202,7 +203,7 @@ fn needs_backup(data: &[u8]) -> bool {
         return true;
     };
     settings.validate_recording_duck_volume().is_err()
-        || crate::transcription::models::validate(&settings.transcription).is_err()
+        || crate::transcription::models::validate_saved(&settings.transcription).is_err()
 }
 
 #[cfg(hex_capture)]

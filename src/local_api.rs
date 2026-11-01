@@ -1053,8 +1053,8 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
     if !crate::transcription::models::is_known_language(&language) {
         return Err("unsupported-language");
     }
-    Ok(crate::transcription::models::MODELS
-        .iter()
+    Ok(crate::transcription::models::all_models()
+        .into_iter()
         .filter(|model| model.available())
         .map(|model| {
             let managed = matches!(

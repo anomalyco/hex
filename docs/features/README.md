@@ -295,9 +295,14 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
 ├── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
-└── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
-    a wrapping line: language · dataset/split · source · conditions or "unknown" ·
-    speed qualified; "Most accurate" only between comparable records (labs.md)
+├── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
+│   a wrapping line: language · dataset/split · source · conditions or "unknown" ·
+│   speed qualified; "Most accurate" only between comparable records (labs.md)
+└── Labs > Use your own speech model (off) -> "Add model file…" in the header;  // setup.custom-models
+    imported cards after the catalog: Imported · family · languages · Not
+    benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";
+    Rename, Remove (not the active model); missing, changed, or off -> warning
+    line and no Use (labs.md)
 ```
 
 Only Parakeet Unified English is marked `streams`
@@ -305,7 +310,7 @@ Only Parakeet Unified English is marked `streams`
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
-(also `picker-downloading`, `picker-japanese`).
+(also `picker-downloading`, `picker-japanese`, `picker-custom-models`).
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for

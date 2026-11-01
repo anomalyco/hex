@@ -76,12 +76,15 @@ pub(super) struct Picker {
     /// Only models that support the saved language (or detect it, for Auto),
     /// while Labs › Sort and filter models is on.
     supported_only: bool,
-    /// The model whose Delete is armed.
-    deletion: Option<TranscriptionModelId>,
+    /// The model whose Delete (an import's Remove) is armed.
+    pub(super) deletion: Option<TranscriptionModelId>,
     deletion_error: Option<String>,
     /// Installed models for fixtures; live windows ask the filesystem.
     pub(super) installed: Option<Vec<TranscriptionModelId>>,
     pub(super) fallback: Option<LanguageFallback>,
+    /// Labs › Use your own speech model: the file dialog, the import
+    /// worker, and the name being edited.
+    pub(super) import: super::model_import::ImportState,
 }
 
 impl Picker {
@@ -347,6 +350,14 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             &error,
         ));
     }
+    if let Some(error) = &ui.picker.import.error {
+        models = models.child(error_panel(
+            p,
+            "import-error",
+            tr("Model could not be added."),
+            error,
+        ));
+    }
     if let Some(error) = &ui.picker.deletion_error {
         models = models.child(error_panel(
             p,
@@ -372,6 +383,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.text())
                 .grow(1.0),
         )
+        .children(super::model_import::add_button(ui, p).map(|add| add.mr(8.0)))
         .child(
             IconButton::new(p.k.glyph.close)
                 .variant(IconButtonVariant::Ghost)
@@ -592,23 +604,31 @@ fn model_card(
     } else {
         Status::Available { installed }
     };
+    let imported = model.id.is_custom();
     let deletable = installed
         && !preparing
+        && !imported
         && matches!(model.runtime, ModelRuntime::Gguf(_))
         && ui.settings.transcription.model != model.id;
     let confirming = ui.picker.deletion == Some(model.id);
-    let metadata = model
-        .streams
-        .then(|| tr("Transcribes while you speak on a GPU"))
-        .into_iter()
-        .chain([
-            tr(model.coverage),
-            tr(model.quality_context),
-            tr(model.timestamps),
-        ])
-        .chain((installed && !active).then(|| tr("Installed")))
-        .collect::<Vec<_>>()
-        .join(" · ");
+    let metadata = if imported {
+        super::model_import::metadata(model)
+    } else {
+        model
+            .streams
+            .then(|| tr("Transcribes while you speak on a GPU"))
+            .into_iter()
+            .chain([
+                tr(model.coverage),
+                tr(model.quality_context),
+                tr(model.timestamps),
+            ])
+            .chain((installed && !active).then(|| tr("Installed")))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    };
+    // An import that can't run (missing, changed, or off) offers no Use.
+    let usable = model.available();
     let mut actions = row().key("actions").gap(8.0).center_y();
     match &status {
         Status::Active => {
@@ -627,6 +647,16 @@ fn model_card(
             );
         }
         Status::Available { installed } => {
+            if imported {
+                for action in super::model_import::actions(
+                    ui,
+                    p,
+                    model,
+                    !preparing && ui.settings.transcription.model != model.id,
+                ) {
+                    actions = actions.child(action);
+                }
+            }
             if deletable {
                 let label = if confirming {
                     tr_fill("Delete {}?", &model.size_label())
@@ -650,17 +680,19 @@ fn model_card(
                     delete_button
                 });
             }
-            actions = actions.child(button(
-                p,
-                "choose-model",
-                if *installed {
-                    tr("Use")
-                } else {
-                    tr("Download")
-                },
-                ButtonKind::Secondary,
-                move |ui: &mut Ui, _| choose(ui, model),
-            ));
+            if usable {
+                actions = actions.child(button(
+                    p,
+                    "choose-model",
+                    if *installed {
+                        tr("Use")
+                    } else {
+                        tr("Download")
+                    },
+                    ButtonKind::Secondary,
+                    move |ui: &mut Ui, _| choose(ui, model),
+                ));
+            }
         }
         Status::Preparing { .. } => {
             actions = actions.child(button(
@@ -748,7 +780,13 @@ fn model_card(
                     None => metric(
                         "accuracy",
                         tr("Accuracy"),
-                        model.accuracy_label().unwrap_or_else(|| "System".into()),
+                        model.accuracy_label().unwrap_or_else(|| {
+                            if imported {
+                                tr("Unknown").into()
+                            } else {
+                                "System".into()
+                            }
+                        }),
                     ),
                 }),
         );
@@ -760,6 +798,9 @@ fn model_card(
                 .color(p.muted())
                 .wrap(),
         );
+    }
+    if let Some(note) = super::model_import::note(p, model) {
+        card = card.child(note);
     }
     if !model.supports_language(language) {
         card = card.child(
@@ -799,7 +840,7 @@ fn model_card(
         };
         card = card.child(bar.build(p.k).key("progress"));
     }
-    if !active && !preparing {
+    if !active && !preparing && usable {
         card = card
             .role("button")
             .hover(c.hover)
