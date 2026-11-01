@@ -70,7 +70,12 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
         return None;
     }
     if let Some(paste) = paste_permission(ui, p) {
-        return Some(section(p, "permissions", tr("Permissions needed"), vec![paste]));
+        return Some(section(
+            p,
+            "permissions",
+            tr("Permissions needed"),
+            vec![paste],
+        ));
     }
     if !ui.platform.caps.permissions {
         return None;
@@ -129,7 +134,10 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
 /// The desktop's paste permission on GNOME and KDE Wayland until it is
 /// allowed, for people who skipped onboarding (#932).
 fn paste_permission(ui: &Ui, p: Paint) -> Option<El> {
-    let paste = ui.platform.paste.filter(|paste| *paste != PasteAccess::Allowed)?;
+    let paste = ui
+        .platform
+        .paste
+        .filter(|paste| *paste != PasteAccess::Allowed)?;
     let description = if paste == PasteAccess::Declined {
         tr("Without it, Hex copies your words and you press Ctrl+V.")
     } else {

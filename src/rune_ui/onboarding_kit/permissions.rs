@@ -15,10 +15,10 @@ use rune::{Anim, Color, El, Spring, TextStyle, Transition, col, el, icon, row, t
 use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
+use super::super::paste_access::PasteAccess;
 use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
-use super::super::paste_access::PasteAccess;
 use super::live::Live;
 use super::stories::Onboard;
 use crate::desktop::i18n::tr;
