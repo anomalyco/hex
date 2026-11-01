@@ -421,24 +421,29 @@ pub(crate) fn tidy_desktop_entries() -> Result<()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(entries) = DesktopEntries::current() {
         entries.tidy()?;
+        entries.repoint(&executable()?)?;
     }
     Ok(())
 }
 
 /// The portal identifies a host app by a desktop entry named for its id,
 /// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
+/// What Hex's launcher entry starts: the same stable path as Launch at
+/// login, so a version manager's upgrade doesn't strand it (#810).
+fn executable() -> Result<String> {
+    let executable = crate::linux::login_item::launcher()?;
+    executable
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))
+}
+
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
     let _writing = ENTRY_WRITES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     match DesktopEntries::current() {
-        Some(entries) => {
-            let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
-            let executable = executable
-                .to_str()
-                .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
-            entries.ensure(executable)
-        }
+        Some(entries) => entries.ensure(&executable()?),
         None => Ok(None),
     }
 }
@@ -548,13 +553,49 @@ impl DesktopEntries {
         Ok(None)
     }
 
+    /// Points Hex's own launcher entry at `executable` when the program it
+    /// starts is gone, as after a version manager (mise, asdf) removes the
+    /// version that wrote it. An entry whose program is still there is left
+    /// as it is, and so is any entry Hex didn't write.
+    fn repoint(&self, executable: &str) -> Result<()> {
+        let entry = self.entry();
+        let Entry::File(current) = read_entry(&entry)? else {
+            return Ok(());
+        };
+        let Some(program) = crate::linux::login_item::program(&current) else {
+            return Ok(());
+        };
+        if !managed(&current)
+            || !crate::linux::login_item::superseded(&program, Path::new(executable))
+        {
+            return Ok(());
+        }
+        // A package now ships Hex's entry: the stranded fallback only hid it.
+        if !program.is_file() && self.shipped(&format!("{APP_ID}.desktop")) {
+            std::fs::remove_file(&entry)
+                .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
+            tracing::info!(entry = %entry.display(), "removed Hex's stranded desktop entry");
+            return Ok(());
+        }
+        let repointed = desktop_entry(executable, no_display(&current));
+        if repointed == current {
+            return Ok(());
+        }
+        write_entry(&self.applications, &entry, &repointed)
+            .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+        tracing::info!(entry = %entry.display(), "pointed Hex's desktop entry at this Hex");
+        Ok(())
+    }
+
     /// After [`Self::tidy`], with no entry anywhere, writes a minimal one
     /// that runs `executable`, marked managed so an install may replace it,
     /// and hidden from launchers when an older package's or the user's own
     /// `hex.desktop` already shows Hex. Returns the entry it wrote.
     fn ensure(&self, executable: &str) -> Result<Option<PathBuf>> {
-        if let Some(moved) = self.tidy()? {
-            return Ok(Some(moved));
+        let moved = self.tidy()?;
+        self.repoint(executable)?;
+        if moved.is_some() {
+            return Ok(moved);
         }
         let entry = self.entry();
         if !matches!(read_entry(&entry)?, Entry::Missing)
@@ -649,7 +690,7 @@ fn desktop_entry(executable: &str, hidden: bool) -> String {
 
 /// One quoted Exec argument: quoting escapes, then string escapes, as the
 /// Desktop Entry spec reads them, with `%` doubled for field codes.
-fn exec_argument(argument: &str) -> String {
+pub(crate) fn exec_argument(argument: &str) -> String {
     let mut quoted = String::from("\"");
     for character in argument.chars() {
         match character {
@@ -1027,6 +1068,51 @@ mod tests {
         std::os::unix::fs::symlink(&target, &user).unwrap();
         entries.tidy().unwrap();
         assert!(user.is_symlink());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Hex's own entry whose program is gone points at this Hex; one whose
+    /// program is there, or the user's, stays (#810).
+    #[test]
+    fn a_stranded_fallback_follows_hex() {
+        let (root, entries) = entries("repoint");
+        let program = root.join("hex");
+        std::fs::write(&program, "").unwrap();
+        let program = program.to_str().unwrap();
+        let target = root.join("new-hex");
+        std::fs::write(&target, "").unwrap();
+        let target = target.to_str().unwrap();
+        entries.ensure(program).unwrap();
+        let written = std::fs::read_to_string(entries.entry()).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), written);
+        std::fs::remove_file(program).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entries.entry()).unwrap(),
+            desktop_entry(target, false)
+        );
+        // Nothing to point at: left as it is.
+        std::fs::remove_file(target).unwrap();
+        std::fs::write(entries.entry(), desktop_entry(program, false)).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entries.entry()).unwrap(),
+            desktop_entry(program, false)
+        );
+        // A package ships Hex's entry now: the stranded fallback goes.
+        std::fs::write(
+            entries.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("new-hex"), "").unwrap();
+        entries.repoint(target).unwrap();
+        assert!(!entries.entry().exists());
+        let users = "[Desktop Entry]\nExec=/gone/hex\n";
+        std::fs::write(entries.entry(), users).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), users);
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -170,8 +170,12 @@ Where the desktop has the Background portal (GNOME, KDE), Hex asks it at startup
 to run in the background, and Launch at login goes through it: the portal writes
 and removes that same autostart entry (marked `X-XDP-Autostart=anomaly.hex`).
 Elsewhere Hex writes the entry itself. The launcher entry below is written only
-when no installed package or data directory provides one, and never rewritten
-while it's there.
+when no installed package or data directory provides one, and left as it is
+while the program it starts is there. Installed by a version manager (mise,
+asdf), both entries start its shim (`~/.local/share/mise/shims/hex`), which
+outlives each version, so an upgrade can't strand them. An entry Hex wrote
+whose program is gone points at this Hex the next time it starts, or goes
+once a package ships its own.
 The launcher entry is `~/.local/share/applications/anomaly.hex.desktop`, named
 for Hex's app id `anomaly.hex`, which its windows also report. Earlier installs
 named both entries `hex.desktop`; Hex and the installer rename Hex's own.
