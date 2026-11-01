@@ -32,6 +32,12 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
     root = Path(directory)
     support = root / "data"
     support.mkdir(mode=0o700)
+    runtime = root / "runtime"
+    runtime.mkdir(mode=0o700)
+    # A custom root must not discover a display it wasn't explicitly given.
+    wayland = socket.socket(socket.AF_UNIX)
+    wayland.bind(str(runtime / "wayland-test"))
+    wayland.listen(8)
     # Never listen: no microphone, no shortcuts portal registration.
     (support / "settings.json").write_text(json.dumps({"enable_on_launch": False}))
     alsa = root / "alsa.conf"
@@ -48,6 +54,9 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
         # Hex tidies its launcher and autostart entries at startup.
         "XDG_DATA_HOME": str(root / "xdg-data"),
         "XDG_CONFIG_HOME": str(root / "xdg-config"),
+        "XDG_RUNTIME_DIR": str(runtime),
+        # A stale Xauthority must not query the user's manager either.
+        "XAUTHORITY": str(root / "missing-xauthority"),
         "ALSA_CONFIG_PATH": str(alsa),
         "PATH": f'{fakebin}:{os.environ["PATH"]}',
     }
@@ -187,10 +196,20 @@ with tempfile.TemporaryDirectory(prefix="hex-instance-", dir=os.environ.get("TMP
         assert not path.exists()
         assert (support / "settings.json").exists()
 
+        # The service entry point also stays headless with an answering
+        # Wayland socket nearby, rather than adopting the user's desktop.
+        instance = spawn("service")
+        state = wait_for(status)
+        assert state["pid"] == instance.pid
+        assert state["session"]["display"] == "", state["session"]
+        assert run("quit").returncode == 0
+        assert instance.wait(timeout=8) == 0
+
         for command in (["quit"], ["dictation", "start"], ["paste-last"]):
             assert run(*command).returncode == 3, command
         assert not marker.exists(), "a custom data root ran systemctl"
     finally:
+        wayland.close()
         for child in children:
             if child.poll() is None:
                 child.kill()
