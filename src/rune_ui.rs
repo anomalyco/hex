@@ -1874,9 +1874,7 @@ fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
         .key(key)
         .grow(1.0)
         .shrink()
-        // Without it a column won't shrink below its content, so a body in
-        // a fixed-height parent (the Vocabulary sheet's terms) never
-        // overflows and never scrolls (#906).
+        // Shrinks below its content in a fixed-height parent (#906).
         .min_h(0.0)
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(ScrollSpec {
