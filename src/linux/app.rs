@@ -332,6 +332,10 @@ pub(crate) fn run(
     if let Err(error) = crate::linux::login_item::tidy() {
         tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
+    // Off the main thread: the portal may take a moment to answer.
+    let _ = std::thread::Builder::new()
+        .name("hex-background-portal".into())
+        .spawn(crate::linux::login_item::announce_background);
     crate::labs::log_launch();
     crate::audio::hex_microphone::host_service();
     let (settings, error) = AppSettings::load_for_launch();
