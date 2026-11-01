@@ -1595,6 +1595,40 @@ fn add_term_scrolls_the_new_row_into_view() {
     );
 }
 
+/// The wheel scrolls a term list longer than the sheet, wherever the
+/// pointer is over it: on a row's field or between rows (#906).
+#[test]
+fn the_wheel_scrolls_a_long_term_list() {
+    let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
+    rt.state.settings.vocabulary = (0..20)
+        .map(|index| crate::dictation::vocabulary::VocabularyEntry {
+            term: format!("term {index}"),
+            sounds_like: Vec::new(),
+        })
+        .collect();
+    rt.state.vocabulary = super::vocabulary::VocabularyEditor::new(&rt.state.settings.vocabulary);
+    rt.state.vocabulary.open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let first = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.key.as_deref().is_some_and(|key| key.starts_with("term")) && e.path.contains("/terms/"))
+            .map(|e| e.rect[1])
+            .unwrap()
+    };
+    let list = element(&rt, "term-scroll").rect;
+    let before = first(&rt);
+    for x in [list[0] + 40.0, list[0] + list[2] - 8.0] {
+        for _ in 0..10 {
+            rt.wheel(x, list[1] + list[3] / 2.0, 30.0);
+            rt.frame(1.0 / 60.0);
+        }
+    }
+    settle(&mut rt);
+    assert!(first(&rt) < before - 50.0, "the list didn't scroll");
+}
+
 /// A model whose transcription takes no vocabulary says so on the Vocabulary
 /// row and in its sheet; Parakeet-based and prompt-reading models show none.
 #[test]
