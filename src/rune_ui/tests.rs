@@ -388,6 +388,13 @@ fn quit_hex_in_the_sidebar_asks_the_host_to_quit() {
 }
 
 #[test]
+fn ctrl_q_quits_hex() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    key(&mut rt, Key::Command('q'), Mods::default());
+    assert!(rt.state.quit_requested);
+}
+
+#[test]
 fn enabling_sends_the_listener_action() {
     let mut rt = runtime("disabled", true, GOLDEN_SIZE);
     tap(&mut rt, "toggle-listening");

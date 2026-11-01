@@ -1210,6 +1210,13 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         tx.toggle_playground();
         return true;
     }
+    // Ctrl+Q quits Hex on Linux, as Quit Hex in the sidebar does (#808).
+    // macOS's menu bar owns ⌘Q; Windows quits from its tray.
+    #[cfg(target_os = "linux")]
+    if event.key == rune::Key::Command('q') && !event.mods.shift && !event.mods.alt {
+        ui.quit();
+        return true;
+    }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
         && !ui.picker.open
