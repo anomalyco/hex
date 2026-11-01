@@ -4,13 +4,15 @@
 //!
 //! One keyboard-only session lives as long as its `RemoteDesktop`. The
 //! user approves it once: the portal's restore token, kept owner-only in
-//! Application Support, restores later sessions without a dialog.
+//! Application Support, restores later sessions without a dialog, so the
+//! paster can close an idle session and reopen it at the next paste.
 
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use zbus::{OwnedObjectPath, Variant};
@@ -26,10 +28,18 @@ const XK_SHIFT_L: i32 = 0xffe1;
 const XK_V: i32 = 0x76;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
+/// A restored grant starts in tens of milliseconds; a start that takes
+/// longer waited for the person in the desktop's dialog.
+const DIALOG_THRESHOLD: Duration = Duration::from_millis(500);
 
 pub(crate) struct RemoteDesktop {
     bus: PortalBus,
     session: OwnedObjectPath,
+    /// The portal handed out a restore token, so a later session restores
+    /// this grant without a dialog.
+    restorable: bool,
+    /// The desktop showed its approval dialog for this session.
+    prompted: bool,
 }
 
 impl RemoteDesktop {
@@ -38,6 +48,7 @@ impl RemoteDesktop {
     pub(crate) fn start(stop: &AtomicBool) -> Result<Self> {
         let mut bus = PortalBus::open(INTERFACE, stop)?
             .ok_or_else(|| eyre!("the desktop has no RemoteDesktop portal ({INTERFACE})"))?;
+        let began = Instant::now();
         let session = bus.create_session(stop)?;
         let persists = bus.version >= 2;
         let restore = persists.then(load_restore_token).flatten();
@@ -77,18 +88,37 @@ impl RemoteDesktop {
             bus.close_session(&session);
             return Err(eyre!("the desktop did not allow Hex to use the keyboard"));
         }
+        let prompted = restore.is_none() || began.elapsed() >= DIALOG_THRESHOLD;
         // Restore tokens are single-use: each start hands out the next one.
+        let mut restorable = false;
         if let Some(token) = started
             .get("restore_token")
             .and_then(|token| <&str>::try_from(token).ok())
-            && let Err(error) = save_restore_token(token)
         {
-            tracing::warn!(
-                error = format!("{error:#}"),
-                "could not save the RemoteDesktop grant"
-            );
+            match save_restore_token(token) {
+                Ok(()) => restorable = true,
+                Err(error) => tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not save the RemoteDesktop grant"
+                ),
+            }
         }
-        Ok(Self { bus, session })
+        Ok(Self {
+            bus,
+            session,
+            restorable,
+            prompted,
+        })
+    }
+
+    /// Whether a later session restores this grant without a dialog.
+    pub(crate) fn restorable(&self) -> bool {
+        self.restorable
+    }
+
+    /// Whether the desktop showed its approval dialog for this session.
+    pub(crate) fn prompted(&self) -> bool {
+        self.prompted
     }
 
     /// Whether the desktop ended the session, as when the user revokes it.
