@@ -27,9 +27,10 @@ use crate::feedback::{
     self, CLACK_KEYS, KeySoundStyle, OnboardingTone, SoundSet, TRIUMPHS, Tapback, Tone,
 };
 
-/// The heartbeat's level, in percent, calm and in full panic.
-const HEART_QUIET: f32 = 30.0;
-const HEART_LOUD: f32 = 75.0;
+/// The heartbeat's level, in percent, calm and in full panic: well under
+/// the keys and the dings.
+const HEART_QUIET: f32 = 10.0;
+const HEART_LOUD: f32 = 28.0;
 
 /// The triumph candidate a render plays, `HEX_ONBOARDING_TRIUMPH=1..3`
 /// (the first by default) until one is chosen.
@@ -536,11 +537,11 @@ mod tests {
             .iter()
             .filter(|&&(_, t, _)| t == Tone::Onboarding(OnboardingTone::Heartbeat))
             .collect();
-        assert!(hearts.len() >= 16);
-        let trouble = scene.trouble().unwrap();
+        assert!(hearts.len() >= 10);
+        let noticed = scene.noticed().unwrap();
         assert!(
-            hearts.iter().all(|&&(at, ..)| at >= trouble),
-            "silent until the typing goes wrong"
+            hearts.iter().all(|&&(at, ..)| at >= noticed),
+            "silent until the first typo goes out"
         );
         assert!(
             hearts

@@ -930,12 +930,22 @@ impl Scene {
         self.trouble.or_else(|| self.strokes.first().map(|s| s.at))
     }
 
-    /// The heartbeat under the typing: from the first moment it goes wrong
-    /// ([`Self::trouble`]), quicker and louder with panic, one long low beat
+    /// The first typo everyone sees: your first reply going out, else
+    /// [`Self::trouble`].
+    pub(crate) fn noticed(&self) -> Option<f64> {
+        self.lines
+            .iter()
+            .find(|l| l.who == Who::You && l.at >= 0.0)
+            .map(|l| l.at)
+            .or_else(|| self.trouble())
+    }
+
+    /// The heartbeat under the typing: from the first typo everyone sees
+    /// ([`Self::noticed`]), quicker and louder with panic, one long low beat
     /// in slow motion, and never a beat still ringing when you're removed.
     pub(crate) fn heartbeats(&self) -> Vec<Beat> {
         let mut beats = Vec::new();
-        let Some(mut at) = self.trouble() else {
+        let Some(mut at) = self.noticed() else {
             return beats;
         };
         let stop = self.removal().unwrap_or(self.end);
@@ -1342,13 +1352,14 @@ mod tests {
     fn the_heartbeat_quickens_and_stops_dead_at_the_removal() {
         let scene = Scene::default();
         let beats = scene.heartbeats();
-        assert!(beats.len() >= 16, "{}", beats.len());
-        // Not from the first key: from the first typo, `"Ys"` of `"Yse"`.
-        let trouble = scene.trouble().unwrap();
-        let wrong = scene.strokes().iter().find(|s| s.at == trouble).unwrap();
-        assert_eq!(wrong.text, "Ys");
-        assert!(trouble > scene.strokes()[0].at + 0.5);
-        assert_eq!(beats[0].at, trouble);
+        assert!(beats.len() >= 10, "{}", beats.len());
+        // Not from the first typo: from the first one sent, "deady" going
+        // out by mistake.
+        let noticed = scene.noticed().unwrap();
+        let sent = scene.lines().iter().find(|l| l.at == noticed).unwrap();
+        assert_eq!(sent.who, Who::You);
+        assert!(noticed > scene.trouble().unwrap() + 1.0);
+        assert_eq!(beats[0].at, noticed);
         let removal = scene.removal().unwrap();
         assert!(
             beats
