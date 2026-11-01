@@ -618,9 +618,11 @@ impl BrowserPageMemory {
 }
 
 fn is_browser_application(application_lower: &str) -> bool {
-    ["brave", "chrome", "safari", "firefox", "edge"]
-        .iter()
-        .any(|browser| application_lower.contains(browser))
+    // Arc's name is too short to match as a substring.
+    application_lower == "arc"
+        || ["brave", "chrome", "safari", "firefox", "edge"]
+            .iter()
+            .any(|browser| application_lower.contains(browser))
 }
 
 fn context_matches_browser(
@@ -641,6 +643,7 @@ fn context_matches_browser(
         "com.apple.Safari" => lower.contains("safari"),
         "org.mozilla.firefox" => lower.contains("firefox"),
         "com.microsoft.edgemac" => lower.contains("edge"),
+        "company.thebrowser.Browser" => lower == "arc",
         _ => false,
     }
 }
@@ -1574,6 +1577,39 @@ mod tests {
             .snooze_calendar_call(vec!["meet.google.com".into()], 1_000);
         watch.wall_ms = 10;
         assert_eq!(watch.stable(&meet, &[]), None);
+    }
+
+    #[test]
+    fn a_google_meet_call_in_arc_records_after_about_two_seconds() {
+        let arc_helper = ActiveMicrophoneApplication {
+            pid: 5120,
+            bundle_id: "company.thebrowser.browser.helper".into(),
+            name: "Browser Helper".into(),
+        };
+        assert!(arc_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &arc_helper,
+            &context(
+                "Arc",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(
+            meet.application.as_deref(),
+            Some("company.thebrowser.Browser")
+        );
+        assert_eq!(meet.application_name.as_deref(), Some("Arc"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&meet), &always, 2_000).is_empty());
+        assert_eq!(
+            watch.run(Some(&meet), &always, 500),
+            [(2_000, Detection::Record(meet))]
+        );
     }
 
     #[test]
