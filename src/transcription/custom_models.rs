@@ -122,7 +122,7 @@ pub enum Status {
 
 /// One imported model, as the picker, `hex model list`, and the local API
 /// show it.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Imported {
     pub definition: &'static ModelDefinition,
     pub architecture: &'static str,
