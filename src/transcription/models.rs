@@ -1534,6 +1534,51 @@ mod tests {
     }
 
     #[test]
+    fn parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives() {
+        let ultra = definition(TranscriptionModelId::ParakeetUltra);
+        assert_eq!(ultra.available(), crate::labs::parakeet_ultra());
+        assert!(!ultra.streams && !ultra.accepts_language_hint);
+        assert_eq!(ultra.languages, PARAKEET_V3_LANGUAGES);
+        for language in [AUTO_LANGUAGE, "en", "de"] {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != ultra.id),
+                "Ultra is never recommended ({language})"
+            );
+        }
+        let saved = TranscriptionSelection {
+            model: ultra.id,
+            language: "de".into(),
+        };
+        assert!(validate_saved(&saved).is_ok());
+        if !crate::labs::parakeet_ultra() {
+            assert!(validate(&saved).is_err());
+            assert_eq!(
+                super::super::custom_models::runnable(&saved),
+                super::super::custom_models::fallback()
+            );
+        }
+        let mut settings = crate::app_settings::AppSettings::default();
+        assert!(
+            crate::labs::Feature::ParakeetUltra
+                .off_refusal(&settings)
+                .is_none()
+        );
+        settings.transcription = saved;
+        assert!(
+            crate::labs::Feature::ParakeetUltra
+                .off_refusal(&settings)
+                .is_some()
+        );
+        assert!(
+            crate::labs::Feature::CustomModels
+                .off_refusal(&settings)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn hebrew_recommends_the_ivrit_fine_tune_with_its_hint() {
         use Recommendation::{Recommended, Vocabulary};
         use TranscriptionModelId::{IvritWhisperLargeV3Turbo, WhisperLargeV3Turbo};
@@ -1728,6 +1773,7 @@ mod tests {
                 TranscriptionModelId::UnderdogBark3Clean,
                 "underdog_bark_3_clean",
             ),
+            (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -2067,6 +2113,7 @@ mod tests {
                 ParakeetV3,
                 UnderdogBark3Pro,
                 UnderdogBark3Clean,
+                ParakeetUltra,
             ]
         );
     }
