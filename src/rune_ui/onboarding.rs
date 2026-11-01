@@ -205,8 +205,20 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
                 .tour
                 .as_ref()
                 .is_some_and(|tour| matches!(tour.flow.step(), Step::Welcome | Step::Setup));
+        let choosing = super::found_choice::offered(
+            ui,
+            ui.tour
+                .as_ref()
+                .map_or(ItemStatus::Todo, |tour| tour.flow.view().model),
+        );
+        if choosing && ui.found.recommended.is_none() {
+            ui.found.recommended = Some(ui.settings.transcription.clone());
+        }
         if let Some(tour) = &mut ui.tour {
             tour.flow.hold_download(held);
+            if choosing && tour.flow.step() == Step::Setup {
+                tour.flow.show_model_choice();
+            }
         }
     }
     let (installed, model) = progress(ui);

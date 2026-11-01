@@ -280,6 +280,9 @@ pub struct Flow {
     /// The recommended model waits for the person: a scan for models already
     /// on this computer is running, or found one and they choose.
     download_held: bool,
+    /// Setup showed the model list, so Back returns to it even once the
+    /// model is ready, to change the pick.
+    model_choice: bool,
     advance_due: bool,
     reopen: bool,
     relaunching: bool,
@@ -306,6 +309,7 @@ impl Flow {
             setup_needed: false,
             download_requested: false,
             download_held: false,
+            model_choice: false,
             advance_due: false,
             reopen: false,
             relaunching: false,
@@ -327,6 +331,11 @@ impl Flow {
     /// person can choose a model already on this computer instead.
     pub fn hold_download(&mut self, held: bool) {
         self.download_held = held;
+    }
+
+    /// Notes that setup showed the model list, which Back keeps reachable.
+    pub fn show_model_choice(&mut self) {
+        self.model_choice = true;
     }
 
     pub fn step(&self) -> Step {
@@ -548,8 +557,9 @@ impl Flow {
         let mut index = step.position();
         while index > 0 {
             index -= 1;
-            if !self.passes(Step::TOUR[index]) {
-                return Step::TOUR[index];
+            let step = Step::TOUR[index];
+            if !self.passes(step) || (step == Step::Setup && self.model_choice) {
+                return step;
             }
         }
         step
@@ -1579,6 +1589,19 @@ mod tests {
             flow
         };
         assert!(!installed_flow.view().show_download);
+    }
+
+    #[test]
+    fn back_returns_to_a_model_list_setup_showed() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), false, true);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Setup);
+        flow.show_model_choice();
+        flow.on(Input::Status(ready_status(), ModelProgress::default()));
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+        flow.on(Input::Back);
+        assert_eq!(flow.step(), Step::Setup, "the list is one Back away");
     }
 
     #[test]
