@@ -1198,26 +1198,30 @@ pub fn listen(
             }
         }
 
-        let audio = input.recv_timeout(paste_picker.wait())?;
-        if let (Some(active), Some(audio)) = (&mut programmatic, &audio) {
-            if active.last_level.elapsed() >= Duration::from_millis(30) {
-                let _ = active.levels.try_send(level_for(&audio.samples));
-                active.last_level = Instant::now();
-            }
-            if let Some(sender) = &active.audio {
-                match sender.try_send(DictationAudioChunk {
-                    samples: audio.samples.clone(),
-                }) {
-                    Ok(()) | Err(TrySendError::Full(_)) => {}
-                    Err(TrySendError::Disconnected(_)) => active.audio = None,
+        // Every chunk already queued, not one per pass: a pass can take
+        // longer than a chunk lasts, and a backlog that overflows leaves the
+        // meter only stale audio.
+        for audio in input.recv_ready(paste_picker.wait())? {
+            if let Some(active) = &mut programmatic {
+                if active.last_level.elapsed() >= Duration::from_millis(30) {
+                    let _ = active.levels.try_send(level_for(&audio.samples));
+                    active.last_level = Instant::now();
+                }
+                if let Some(sender) = &active.audio {
+                    match sender.try_send(DictationAudioChunk {
+                        samples: audio.samples.clone(),
+                    }) {
+                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                        Err(TrySendError::Disconnected(_)) => active.audio = None,
+                    }
                 }
             }
-        }
-        if let Some(audio) = audio.filter(|audio| audio.is_current(input.recognition_generation()))
-            && (programmatic.is_some() || hotkeys.suppresses_recognition())
-            && let Some(indicator) = &indicator
-        {
-            indicator.meter(&audio.samples);
+            if audio.is_current(input.recognition_generation())
+                && (programmatic.is_some() || hotkeys.suppresses_recognition())
+                && let Some(indicator) = &indicator
+            {
+                indicator.meter(&audio.samples);
+            }
         }
     }
 

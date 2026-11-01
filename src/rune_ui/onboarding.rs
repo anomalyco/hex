@@ -1251,6 +1251,62 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     }
 }
 
+/// A `--snap` scene of the macOS tour's microphone step.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MicScene {
+    /// Recording, and Hex hears the person.
+    Hearing,
+    /// Its menu of inputs open.
+    Open,
+    /// Recording, and Hex hears nothing.
+    Silent,
+    /// The lid closed and no other input.
+    LidClosed,
+}
+
+pub(super) fn mic_tour(ui: &mut Ui, scene: MicScene) {
+    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
+    super::mac_tour(
+        ui,
+        if recording {
+            MacStep::TryItListening
+        } else {
+            MacStep::TryIt
+        },
+    );
+    let built_in = "MacBook Pro Microphone".to_owned();
+    ui.microphones = Ok(if scene == MicScene::LidClosed {
+        crate::audio::InputDevices {
+            names: vec![built_in.clone()],
+            system_default: None,
+            off_with_lid_closed: Some(built_in),
+            default_is_off_with_lid_closed: true,
+            ..Default::default()
+        }
+    } else {
+        crate::audio::InputDevices {
+            names: vec![
+                "Kit Pods".into(),
+                built_in.clone(),
+                "Studio Display Microphone".into(),
+            ],
+            system_default: Some(built_in),
+            ..Default::default()
+        }
+    });
+    if scene == MicScene::Open {
+        ui.open = Some(super::Menu::TourMicrophone);
+    }
+    let microphone = ui.settings.microphone.clone();
+    if let Some(tour) = &mut ui.tour {
+        match scene {
+            MicScene::Hearing => tour.mic.level = 0.6,
+            MicScene::Silent => tour.mic.silent = Some(microphone),
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

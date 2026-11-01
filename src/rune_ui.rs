@@ -2558,13 +2558,17 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
-    ("mac-onboarding-mic", |ui| mic_tour(ui, MicScene::Hearing)),
-    ("mac-onboarding-mic-open", |ui| mic_tour(ui, MicScene::Open)),
+    ("mac-onboarding-mic", |ui| {
+        onboarding::mic_tour(ui, onboarding::MicScene::Hearing)
+    }),
+    ("mac-onboarding-mic-open", |ui| {
+        onboarding::mic_tour(ui, onboarding::MicScene::Open)
+    }),
     ("mac-onboarding-mic-silent", |ui| {
-        mic_tour(ui, MicScene::Silent)
+        onboarding::mic_tour(ui, onboarding::MicScene::Silent)
     }),
     ("mac-onboarding-mic-lid", |ui| {
-        mic_tour(ui, MicScene::LidClosed)
+        onboarding::mic_tour(ui, onboarding::MicScene::LidClosed)
     }),
     // The welcome hero animating (`--video`, or a live window), and settled as
     // Reduce Motion shows it.
@@ -2652,61 +2656,6 @@ fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
 }
 
 /// What the tour's practice microphone shows in a scene.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MicScene {
-    /// Recording, and Hex hears the person.
-    Hearing,
-    /// Its menu of inputs open.
-    Open,
-    /// Recording, and Hex hears nothing.
-    Silent,
-    /// The lid closed and no other input.
-    LidClosed,
-}
-
-fn mic_tour(ui: &mut Ui, scene: MicScene) {
-    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
-    mac_tour(
-        ui,
-        if recording {
-            onboarding::MacStep::TryItListening
-        } else {
-            onboarding::MacStep::TryIt
-        },
-    );
-    let built_in = "MacBook Pro Microphone".to_owned();
-    ui.microphones = Ok(if scene == MicScene::LidClosed {
-        crate::audio::InputDevices {
-            names: vec![built_in.clone()],
-            system_default: None,
-            off_with_lid_closed: Some(built_in),
-            default_is_off_with_lid_closed: true,
-            ..Default::default()
-        }
-    } else {
-        crate::audio::InputDevices {
-            names: vec![
-                "Kit Pods".into(),
-                built_in.clone(),
-                "Studio Display Microphone".into(),
-            ],
-            system_default: Some(built_in),
-            ..Default::default()
-        }
-    });
-    if scene == MicScene::Open {
-        ui.open = Some(Menu::TourMicrophone);
-    }
-    let microphone = ui.settings.microphone.clone();
-    if let Some(tour) = &mut ui.tour {
-        match scene {
-            MicScene::Hearing => tour.mic.level = 0.6,
-            MicScene::Silent => tour.mic.silent = Some(microphone),
-            _ => {}
-        }
-    }
-}
-
 fn portal_fixture() -> Ui {
     fixture(DesktopShortcuts::Portal(vec![
         DesktopGrantedShortcut {

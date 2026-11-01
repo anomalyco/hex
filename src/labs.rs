@@ -86,10 +86,11 @@ pub enum Feature {
     PastePicker,
     CustomModels,
     ParakeetUltra,
+    StandaloneSpecialKeys,
 }
 
 impl Feature {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -118,6 +119,7 @@ impl Feature {
         Self::PastePicker,
         Self::CustomModels,
         Self::ParakeetUltra,
+        Self::StandaloneSpecialKeys,
     ];
 
     /// The features this OS and build have.
@@ -167,7 +169,8 @@ impl Feature {
             | Self::TapOrHold
             | Self::BenchmarkDetails
             | Self::CustomModels
-            | Self::ParakeetUltra => Audience::Everyone,
+            | Self::ParakeetUltra
+            | Self::StandaloneSpecialKeys => Audience::Everyone,
             Self::PastePicker => Audience::Dev,
         }
     }
@@ -201,6 +204,7 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::StandaloneSpecialKeys => cfg!(target_os = "linux"),
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -257,6 +261,7 @@ impl Feature {
             Self::PastePicker => "paste-picker",
             Self::CustomModels => "custom-models",
             Self::ParakeetUltra => "parakeet-ultra",
+            Self::StandaloneSpecialKeys => "special-keys",
         }
     }
 
@@ -291,6 +296,7 @@ impl Feature {
             Self::PastePicker => "labs.paste_picker",
             Self::CustomModels => "labs.custom_models",
             Self::ParakeetUltra => "labs.parakeet_ultra",
+            Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
         }
     }
 
@@ -360,6 +366,9 @@ impl Feature {
             Self::ParakeetUltra => {
                 "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
             }
+            Self::StandaloneSpecialKeys => {
+                "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
+            }
         }
     }
 
@@ -398,6 +407,7 @@ impl Feature {
             Self::PastePicker => settings.labs.paste_picker,
             Self::CustomModels => settings.labs.custom_models,
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
+            Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
         }
     }
 
@@ -431,6 +441,11 @@ impl Feature {
             Self::PastePicker => settings.labs.paste_picker = on,
             Self::CustomModels => settings.labs.custom_models = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
+            // Off, no shortcut keeps a key only the feature allows.
+            Self::StandaloneSpecialKeys => {
+                settings.labs.standalone_special_keys = on;
+                settings.repair_special_keys();
+            }
         }
     }
 }
