@@ -685,6 +685,19 @@ fn opaque_key(source: MeetingSource, identity: &str) -> String {
     format!("meeting-{:016x}", hasher.finish())
 }
 
+/// Whether a page address is a call this detection knows: a Google Meet
+/// call or a known call site.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn names_call(url: &Url) -> bool {
+    is_google_meet_call(url) || url.host_str().and_then(call_site_source).is_some()
+}
+
+/// Whether a browser tab's title names a call (a Google Meet call's).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn title_names_call(title: &str) -> bool {
+    is_google_meet_call_title(title)
+}
+
 fn is_google_meet_call(url: &Url) -> bool {
     if url.host_str() != Some("meet.google.com") {
         return false;
