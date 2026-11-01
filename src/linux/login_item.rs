@@ -22,15 +22,16 @@ fn entry_path() -> Result<PathBuf> {
 
 /// Renames Hex's managed `hex.desktop` autostart entry, the name before
 /// #579, to the app id's, unless an entry already has the new name, then
-/// names Hex's icon in its managed entry (#652). A symlink is the user's,
-/// whatever it points to.
+/// keeps Hex's managed entry current: its icon (#652), and its command when
+/// the program it starts is gone, as after a downloaded binary moved or a
+/// package replaced it (#736). A symlink is the user's, whatever it points to.
 pub fn tidy() -> Result<()> {
     let directory = autostart_dir()?;
     move_legacy_entry_in(&directory)?;
-    name_icon_in(&directory)
+    refresh_in(&directory, &launcher()?)
 }
 
-fn name_icon_in(directory: &Path) -> Result<()> {
+fn refresh_in(directory: &Path, launcher: &Path) -> Result<()> {
     let entry = directory.join(format!("{}.desktop", crate::linux::portal::APP_ID));
     match fs::symlink_metadata(&entry) {
         Ok(metadata) if metadata.is_file() => {}
@@ -45,11 +46,38 @@ fn name_icon_in(directory: &Path) -> Result<()> {
     if !current.lines().any(|line| line.trim() == MANAGED_MARK) {
         return Ok(());
     }
-    let named = crate::linux::portal::with_icon(&current);
-    if named == current {
+    let refreshed =
+        if starts(&current) && !program(&current).is_some_and(|program| program.is_file()) {
+            tracing::info!(entry = %entry.display(), "pointed Launch at login at this Hex");
+            self::entry(launcher)
+        } else {
+            crate::linux::portal::with_icon(&current)
+        };
+    if refreshed == current {
         return Ok(());
     }
-    write_atomically(&entry, &named)
+    write_atomically(&entry, &refreshed)
+}
+
+/// The program a managed entry's `Exec=` starts: its first argument, quoted
+/// as [`exec_argument`] writes it.
+fn program(entry: &str) -> Option<PathBuf> {
+    let exec = entry
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Exec="))?;
+    let mut characters = exec.strip_prefix('"')?.chars();
+    let mut program = String::new();
+    loop {
+        match characters.next()? {
+            '"' => return Some(PathBuf::from(program)),
+            '\\' => program.push(characters.next()?),
+            '%' => {
+                characters.next()?;
+                program.push('%');
+            }
+            character => program.push(character),
+        }
+    }
 }
 
 fn move_legacy_entry_in(directory: &Path) -> Result<()> {
@@ -226,12 +254,39 @@ mod tests {
             "[Desktop Entry]\nIcon=audio-input-microphone\nX-Hex-Managed=true\n",
         )
         .unwrap();
-        name_icon_in(&directory).unwrap();
+        refresh_in(&directory, Path::new("/bin/sh")).unwrap();
         assert!(
             fs::read_to_string(&entry)
                 .unwrap()
                 .contains("\nIcon=anomaly.hex\n")
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_entry_whose_program_is_gone_starts_this_hex() {
+        assert_eq!(
+            program(&entry(Path::new("/home/a b/100%/hex$"))),
+            Some(PathBuf::from("/home/a b/100%/hex$"))
+        );
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("hex-autostart-refresh-{unique}"));
+        fs::create_dir_all(&directory).unwrap();
+        let launcher = directory.join("hex");
+        fs::write(&launcher, "").unwrap();
+        let path = directory.join("anomaly.hex.desktop");
+        // A downloaded binary that has since moved.
+        fs::write(&path, entry(&directory.join("Downloads/hex"))).unwrap();
+        refresh_in(&directory, &launcher).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), entry(&launcher));
+        // Turned off in the desktop's settings: left off.
+        let off = format!("{}Hidden=true\n", entry(&directory.join("gone")));
+        fs::write(&path, &off).unwrap();
+        refresh_in(&directory, &launcher).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("gone"));
         fs::remove_dir_all(directory).unwrap();
     }
 

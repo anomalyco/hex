@@ -139,10 +139,14 @@ pub(crate) fn run_app(
 ) {
     use crate::linux::service::{Activation, Control};
     rune::set_app_id(crate::linux::portal::APP_ID);
-    let mut app = self::app(Some(host.clone()))
-        .args(Vec::new())
-        .windowless()
-        .float_on_open();
+    let mut app = self::app(Some(host.clone())).args(Vec::new()).windowless();
+    // Tiling window managers float a window that maps at a fixed size.
+    // Desktops that float every window need no such map, and KWin on X11
+    // keeps a fixed-size window from fitting a small screen, its title bar
+    // out of reach (#736).
+    if !crate::linux::session::floats_windows() {
+        app = app.float_on_open();
+    }
     crate::linux::rune_hud::install(&mut app);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
