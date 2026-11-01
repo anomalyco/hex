@@ -19,14 +19,16 @@ const INTERFACE: &str = "org.freedesktop.portal.Background";
 
 /// Asks the portal to let Hex run in the background, starting `launcher`
 /// at login when `autostart`. Returns whether the portal now starts Hex at
-/// login; `None` when there is no portal, or `launcher`'s path would not
-/// survive the portal's unquoted `Exec=` line.
+/// login; `None` when there is no portal, the portal predates host app
+/// registration (xdg-desktop-portal before 1.20, which may not know Hex's app
+/// id and would name the autostart entry wrongly), or `launcher`'s path would
+/// not survive the portal's unquoted `Exec=` line.
 pub(crate) fn request(autostart: bool, launcher: &Path) -> Result<Option<bool>> {
     let Some(launcher) = launcher.to_str().filter(|path| plain(path)) else {
         return Ok(None);
     };
     let stop = AtomicBool::new(false);
-    let Some(mut bus) = PortalBus::open(INTERFACE, &stop)? else {
+    let Some(mut bus) = PortalBus::open(INTERFACE, &stop)?.filter(|bus| bus.registered) else {
         return Ok(None);
     };
     let commandline = vec![launcher.to_owned(), "start".to_owned()];
@@ -66,7 +68,8 @@ pub(crate) fn request(autostart: bool, launcher: &Path) -> Result<Option<bool>> 
 
 /// Whether `path` reads the same in an `Exec=` line without quoting.
 fn plain(path: &str) -> bool {
-    !path.is_empty()
+    path.starts_with('/')
+        && path.len() <= 256
         && path
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c))
@@ -82,5 +85,7 @@ mod tests {
         assert!(plain("/usr/bin/hex"));
         assert!(!plain("/home/a b/hex"));
         assert!(!plain("/tmp/100%/hex"));
+        assert!(!plain("hex"));
+        assert!(!plain(&format!("/{}", "a".repeat(300))));
     }
 }

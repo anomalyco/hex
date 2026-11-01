@@ -117,6 +117,10 @@ pub fn is_enabled() -> Result<bool> {
 /// Writes or removes Hex's autostart entry: through the desktop's Background
 /// portal where it has one (#812), else Hex's own managed file.
 pub fn set_enabled(enabled: bool) -> Result<()> {
+    let mut changed = CHANGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *changed = true;
     let path = entry_path()?;
     let existing = read(&path)?;
     if let Some(entry) = &existing
@@ -149,6 +153,13 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
 /// the background, keeping Launch at login as it is. Asked only while the
 /// autostart entry is absent or Hex's: any request rewrites or removes it.
 pub fn announce_background() {
+    let changed = CHANGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A Launch at login change already told the portal.
+    if *changed {
+        return;
+    }
     let ask = || -> Result<()> {
         let path = entry_path()?;
         let existing = read(&path)?;
@@ -164,7 +175,21 @@ pub fn announce_background() {
     }
 }
 
+/// Launch at login changes and the startup announcement, one at a time:
+/// whether a change has run.
+static CHANGES: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+
+/// The autostart entry's contents; a symlink or anything but a regular file
+/// reads as empty, which is never Hex's, so Hex leaves it alone.
 fn read(path: &Path) -> Result<Option<String>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => return Ok(Some(String::new())),
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
+        }
+    }
     match fs::read_to_string(path) {
         Ok(entry) => Ok(Some(entry)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
@@ -259,6 +284,20 @@ mod tests {
         assert!(entry.contains("Exec=\"/home/a b/100%%/hex\\$\" start\n"));
         assert!(entry.contains("X-Hex-Managed=true\n"));
         assert!(starts(&entry));
+    }
+
+    #[test]
+    fn a_symlinked_entry_is_never_hexs() {
+        let root = std::env::temp_dir().join(format!("hex-login-link-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.desktop");
+        fs::write(&target, "[Desktop Entry]\nX-XDP-Autostart=anomaly.hex\n").unwrap();
+        assert!(ours(&read(&target).unwrap().unwrap()));
+        let link = root.join("anomaly.hex.desktop");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(!ours(&read(&link).unwrap().unwrap()));
+        assert_eq!(read(&root.join("missing.desktop")).unwrap(), None);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
