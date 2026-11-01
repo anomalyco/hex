@@ -1378,6 +1378,18 @@ Linux beta                               // not macOS feature parity
 │           // check: only_requested_shortcuts_are_shown (a stale grant stays
 │           // out), kde_actions_hex_no_longer_binds_are_removed (the list only);
 │           // the KDE removal is not run on a Plasma session
+│       └── KDE's approval dialog -> Hex waits for it up to 30 min, not 60 s:
+│           giving up closed the session, and KDE then kept every shortcut
+│           with no key and never asked again (#898). A bind left unapproved
+│           (dismissed, canceled, abandoned) is noted in
+│           `kde-unapproved-shortcuts`; the next bind removes those ids while
+│           they still have no key, so the dialog asks again; a key set in
+│           System Settings since stays
+│           // checked in a headless KWin 6.8 session (xdg-desktop-portal-kde
+│           // 6.8.2): the dialog stays up with Hex "Enabling…"; with the note,
+│           // keyless ids are removed and the dialog returns; without it they
+│           // stay; Hex is listed under Applications in System Settings ›
+│           // Shortcuts. Approving with OK was not exercised (no input there)
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
@@ -1457,7 +1469,9 @@ Linux beta                               // not macOS feature parity
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
 GNOME portal shortcuts (#723)            // linux.gnome-shortcuts
-├── New GNOME setup -> dictation default Ctrl+Alt+Space (GNOME keeps Alt+Space)
+├── New GNOME or KDE Plasma setup -> dictation default Ctrl+Alt+Space (GNOME's
+│   window menu and Plasma's KRunner keep Alt+Space; #898)
+│   // checked in a headless KWin 6.8 session: the portal's dialog flags Alt+Space
 ├── Granted key GNOME keeps (Alt+Space, Super+Space, Alt+Tab, Print, …) -> red note under the row
 ├── Keys changed in GNOME Settings -> ShortcutsChanged -> pressing them dictates at once;
 │   the row note, the Status hint and `hex status --json` listener.shortcuts show them

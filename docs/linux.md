@@ -379,7 +379,10 @@ dictation rules:
   any it refused. A desktop may keep an older binding when you record a new
   shortcut (KDE does); where its portal supports it, **Desktop shortcuts >
   Open** shows the desktop's own dialog for Hex's shortcuts, and Settings
-  follows what you choose there. The portal identifies Hex by its app id
+  follows what you choose there. KDE asks once in a "Global Shortcuts
+  Requested" dialog; Hex waits for your answer, and if you cancel it KDE asks
+  again the next time Hex binds. Hex's shortcuts are listed under **Hex** in
+  System Settings › Keyboard › Shortcuts. The portal identifies Hex by its app id
   `anomaly.hex`, its installed `anomaly.hex.desktop` entry, and by inspecting
   the Hex process. A downloaded executable has no entry, so Hex writes a minimal
   `~/.local/share/applications/anomaly.hex.desktop` that runs it (a managed
@@ -387,8 +390,8 @@ dictation rules:
   `systemctl --user restart xdg-desktop-portal`. Run `hex service` directly:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
-  focused application. On GNOME, new setups dictate with Ctrl+Alt+Space, because GNOME keeps
-  Alt+Space for the window menu; Settings warns when a shortcut uses a key GNOME
+  focused application. On GNOME and KDE Plasma, new setups dictate with Ctrl+Alt+Space,
+  because GNOME keeps Alt+Space for the window menu and Plasma for KRunner; Settings warns when a shortcut uses a key GNOME
   keeps for itself. Keys you change in GNOME Settings › Keyboard work at once,
   and Hex's Settings and `hex status --json` show them. Annotate's shortcut (F9
   by default) sits under the dictation shortcut in General. **Disable** (General or the tray) keeps Hex disabled
