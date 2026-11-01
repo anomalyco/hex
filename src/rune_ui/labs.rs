@@ -334,12 +334,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
-    rows.push(row(
-        Feature::PortugueseInterface,
-        &GLOBE,
-        tr("Brazilian Portuguese interface"),
-        tr("Offer Português (Brasil) as an interface language and use it when the system language is Portuguese"),
-    ));
     let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     rows.push(Row {
         locked: ultra_locked,
@@ -399,7 +393,6 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
-        Feature::PortugueseInterface => "lab-portuguese-interface",
     }
 }
 
@@ -415,13 +408,6 @@ fn flip(ui: &mut Ui, feature: Feature) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
-        // The interface language follows the switch at once.
-        Feature::PortugueseInterface => {
-            if ui.live() {
-                crate::labs::apply(&ui.settings.labs);
-            }
-            crate::desktop::i18n::apply(ui.settings.ui_language.as_deref());
-        }
         // Hex hears the browser through System Audio Recording.
         Feature::PauseBrowser if on && !ui.platform.system_audio => {
             ui.ask(super::platform::PlatformRequest::SystemAudio);

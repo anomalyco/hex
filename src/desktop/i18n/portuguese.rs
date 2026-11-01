@@ -1,6 +1,6 @@
 //! Brazilian Portuguese (pt-BR) interface strings, keyed by the English
-//! source string like [`super::TRANSLATIONS`], offered only with Labs ›
-//! Brazilian Portuguese interface on. Terms: dictation is "ditado",
+//! source string like [`super::TRANSLATIONS`]; used for any Portuguese
+//! system language. Not yet reviewed by a native speaker. Terms: dictation is "ditado",
 //! vocabulary "vocabulário", replacements "substituições", and meetings
 //! "reuniões".
 
@@ -899,8 +899,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On this computer · not tested by Hex", "Neste computador · não testado pelo Hex"),
     ("Downloading… {}%", "Baixando… {}%"),
     ("Couldn't prepare this model", "Não foi possível preparar este modelo"),
-    ("Brazilian Portuguese interface", "Interface em português do Brasil"),
-    ("Offer Português (Brasil) as an interface language and use it when the system language is Portuguese", "Oferece o Português (Brasil) como idioma da interface e o usa quando o idioma do sistema é português"),
 ];
 
 #[cfg(test)]

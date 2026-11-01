@@ -1065,30 +1065,48 @@ impl Backend {
 
     fn run_wayland(
         self,
-        dispatcher: Dispatcher,
+        mut dispatcher: Dispatcher,
         binding: LinuxHotkey,
         options: HotkeyOptions,
     ) -> Result<()> {
-        match crate::linux::portal::Portal::connect(&self.stop)? {
-            Some(portal) => self.run_portal(portal, dispatcher, binding, options),
+        let portal = match crate::linux::portal::Portal::connect(&self.stop)? {
+            Some(portal) => portal,
             None => {
-                tracing::info!("no GlobalShortcuts portal; dictation follows the hex commands");
-                self.run_commands(dispatcher)
+                tracing::warn!(
+                    desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+                    "{}",
+                    crate::linux::portal::MISSING_SHORTCUTS_PORTAL
+                );
+                match self.wait_for_portal(&mut dispatcher)? {
+                    Some(portal) => portal,
+                    None => return Ok(()),
+                }
             }
-        }
+        };
+        self.run_portal(portal, dispatcher, binding, options)
     }
 
-    /// Only `hex` commands bound in the desktop drive dictation.
-    fn run_commands(self, mut dispatcher: Dispatcher) -> Result<()> {
+    /// Serves `hex` commands while looking for the shortcuts portal again
+    /// from time to time: a portal started before the desktop's session
+    /// environment exposes none until it is restarted (#875). Returns the
+    /// portal once it appears, or `None` when the listener stops.
+    fn wait_for_portal(
+        &self,
+        dispatcher: &mut Dispatcher,
+    ) -> Result<Option<crate::linux::portal::Portal>> {
         self.mark_ready(DesktopShortcuts::Commands);
+        let mut probe = crate::linux::portal::PortalProbe::new(self.stop.clone());
         while !self.stopping() {
             dispatcher.commands();
             if !dispatcher.flush()? {
-                break;
+                return Ok(None);
+            }
+            if let Some(portal) = probe.poll()? {
+                return Ok(Some(portal));
             }
             thread::sleep(POLL_INTERVAL);
         }
-        Ok(())
+        Ok(None)
     }
 
     fn run_portal(
@@ -2805,12 +2823,15 @@ mod tests {
         // A starting listener claims no shortcut kind, not even X11's.
         assert_eq!(status.shortcuts(), DesktopShortcuts::Unregistered);
         let worker = thread::spawn(move || {
-            backend.run_commands(Dispatcher::new(
-                &HotkeyOptions::default(),
-                sender,
-                receiver.into(),
-                ShortcutKeys::default(),
-            ))
+            // Stopped well before its first portal check.
+            backend
+                .wait_for_portal(&mut Dispatcher::new(
+                    &HotkeyOptions::default(),
+                    sender,
+                    receiver.into(),
+                    ShortcutKeys::default(),
+                ))
+                .map(|portal| assert!(portal.is_none()))
         });
         readiness.recv().unwrap().unwrap();
         assert_eq!(status.shortcuts(), DesktopShortcuts::Commands);

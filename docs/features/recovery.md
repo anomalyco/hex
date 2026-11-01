@@ -448,6 +448,24 @@ X11, Annotate drawing -> grab Escape (AnyModifier, else bare + lock variants)
   └── BadAccess -> warn once, keep drawing; other grab errors stop the listener
 ```
 
+`recover.linux-portal`: on Wayland, a missing GlobalShortcuts portal is
+looked for again instead of leaving shortcuts off for the session (#875).
+
+```ts
+listener starts -> no GlobalShortcuts portal
+  -> warn (desktop name, restart-the-portal hint) -> hex commands drive dictation
+  -> check again on its own thread: after 15 s, doubling up to every 2 min
+     └── portal appears (e.g. xdg-desktop-portal restarted) -> bind shortcuts as usual
+```
+
+**Fixed after dev-520** ([#875](https://github.com/anomalyco/hex/issues/875)):
+on KDE Plasma Wayland, xdg-desktop-portal started before Plasma exported its
+session environment picked the wrong backend and offered no shortcuts
+interface; Hex fell back to commands and never checked again. Source:
+`Backend::wait_for_portal` in [linux/input.rs](../../src/linux/input.rs);
+`commands_alone_drive_a_listener_without_shortcuts` covers the command loop,
+not the portal appearing. Not run on a live Plasma session.
+
 **Fixed after dev-249** ([#482](https://github.com/anomalyco/hex/issues/482),
 reported by ohlmann on KDE Plasma): Hex bound Escape in a second portal session
 when recording started. KDE keys shortcuts by app, so that session's
