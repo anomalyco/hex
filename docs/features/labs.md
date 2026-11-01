@@ -48,6 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
+├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -504,6 +505,28 @@ apps, streak across a gap, expired entries skipped past the search cap);
 [labs.rs](../../src/labs.rs). Not yet observed: the block in a real window;
 there is no `--snap` scene for it (the fixture has no store), and the Labs
 page goldens need regenerating on Linux with the new row.
+
+Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
+the menu-bar menu shows a Copy Recent Dictation submenu right under Paste
+Last Dictation. It lists the five newest History entries within retention,
+newest first, skipping printed (`hex dictation stop --print`) and empty ones
+as Paste Last does, each on one line (whitespace and line breaks collapsed,
+cut to 48 characters with "…"). Clicking one puts its full final text on the
+clipboard as an ordinary entry; nothing is pasted. The gate is the menu's
+delegate (`menuNeedsUpdate:` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs)): History is
+read only as the menu opens and only with `labs::recent_dictations()` on;
+off, with History retention Off, or with nothing to list, the item stays
+hidden and the menu is exactly as before. The copy itself
+(`StatusItemAction::CopyRecentDictation`) looks the entry up by ID again and
+logs a warning if it has gone. Checks:
+`recent_lists_the_newest_reusable_entries_within_retention` in
+[history.rs](../../src/history.rs);
+`recent_dictations_show_on_one_short_line` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS
+only); `recent_dictations_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: the submenu on a real Mac;
+the row renders only in macOS builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
