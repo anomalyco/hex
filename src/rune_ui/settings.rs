@@ -1324,7 +1324,7 @@ pub(super) fn release_confirmation(_ui: &Ui, p: Paint) -> El {
         "confirm-release",
         tr("Release the microphone when idle?"),
         Some(tr(
-            "Opens the microphone on shortcut press without pre-roll.",
+            "The microphone opens only while you dictate, so the first moment of speech may be cut.",
         )),
         row()
             .key("actions")
