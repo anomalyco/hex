@@ -107,6 +107,8 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
 /// onboarding at once, with the model still downloading behind it.
 fn skip(p: Paint, s: &Onboard) -> Option<El> {
     s.live.as_ref().filter(|_| s.step != Step::Ready).map(|_| {
+        let label = tr("Skip");
+        let quiet = p.muted();
         row()
             .key("skip-corner")
             .absolute(0.0, 8.0)
@@ -114,11 +116,11 @@ fn skip(p: Paint, s: &Onboard) -> Option<El> {
             .pr(20.0)
             .justify_end()
             .child(
-                Button::new(tr("Skip"))
+                Button::new(label)
                     .variant(ButtonVariant::Ghost)
-                    .control_size(rune_kit::ControlSize::Small)
+                    .label_with(move |font, _| text(label).key("label").font(font).color(quiet))
                     .on_press(live::skip)
-                    .build(p.k)
+                    .build_push(p.k)
                     .key("skip"),
             )
     })
