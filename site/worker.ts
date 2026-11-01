@@ -182,7 +182,7 @@ async function devNotes(request: Request, env: Env): Promise<Response> {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
   })
   secure(headers)
-  const body = request.method === "HEAD" ? null : renderDevNotes(parseDevNotes(value), DEV_DOWNLOAD_PATH)
+  const body = request.method === "HEAD" ? null : renderDevNotes(parseDevNotes(value), DEV_DOWNLOAD_PATH, new URL(request.url).searchParams.get("since"))
   return new Response(body, { headers })
 }
 
