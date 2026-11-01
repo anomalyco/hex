@@ -5,13 +5,10 @@ private struct AppRecordingClockLabel: View {
     let dictation: DictationController
 
     var body: some View {
-        let formatted = HexTheme.formatClock(dictation.recordingDuration)
-        Text(formatted)
+        Text(HexTheme.formatClock(TimeInterval(dictation.recordingWholeSeconds)))
             .font(.system(size: 13, weight: .medium))
             .monospacedDigit()
-            .contentTransition(.numericText())
             .foregroundStyle(HexTheme.textBase)
-            .animation(.easeOut(duration: 0.16), value: formatted)
     }
 }
 
@@ -19,10 +16,9 @@ private struct AppWarmRemainingLabel: View {
     let dictation: DictationController
 
     var body: some View {
-        Text(HexTheme.formatRemaining(dictation.keyboardSessionRemaining))
+        Text(dictation.keyboardSessionDisplayRemaining)
             .font(.system(size: 13, weight: .medium))
             .monospacedDigit()
-            .contentTransition(.numericText())
             .foregroundStyle(HexTheme.textMuted)
     }
 }
@@ -702,7 +698,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: handoffWellHeight)
                             .clipShape(Capsule())
-                            .hexControlReveal(showScope, reduceMotion: reduceMotion, scale: 0.96, blur: 2.5)
+                            .hexControlReveal(showScope, reduceMotion: reduceMotion, scale: 0.96, blur: 0.0)
 
                             VStack(spacing: 12) {
                                 ProgressView(value: dictation.modelPreparation.fractionCompleted)

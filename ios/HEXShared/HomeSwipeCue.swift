@@ -11,12 +11,14 @@ final class DotSwipeCueHostView: UIView {
     override static var layerClass: AnyClass { CAMetalLayer.self }
 
     private static let fadeSpec = DotSpringSpec(duration: 0.34, bounce: 0.0)
+    /// Exact integer multiple of shader `period` (`1.24s * 512`) so `Float(elapsed)` never loses mantissa precision.
+    private static let elapsedWrapPeriod: CFTimeInterval = 1.24 * 512.0
 
     private let proxy = DisplayLinkProxy()
     private var displayLink: CADisplayLink?
     private var lastTargetTimestamp: CFTimeInterval?
-    /// Starts mid-glide so initial paint and snapshot stills immediately read as a rightward sweep.
-    private var elapsed: Float = 0.86
+    /// Starts mid-throw so initial paint and snapshot stills immediately read as a rightward sweep.
+    private var elapsed: CFTimeInterval = 1.38
     private var visibilitySpring = DotSpring(at: 0.0)
     private var hasSeededVisibility = false
 
@@ -51,7 +53,7 @@ final class DotSwipeCueHostView: UIView {
         }
     }
 
-    var debugElapsedTime: Float { elapsed }
+    var debugElapsedTime: Float { Float(elapsed) }
     var debugVisibility: Float { visibilitySpring.x }
     var debugIsPaused: Bool { displayLink?.isPaused ?? true }
 
@@ -71,6 +73,9 @@ final class DotSwipeCueHostView: UIView {
             metalLayer.pixelFormat = .bgra8Unorm
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
+            metalLayer.presentsWithTransaction = false
+            metalLayer.allowsNextDrawableTimeout = false
+            metalLayer.maximumDrawableCount = 3
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
 
@@ -104,11 +109,14 @@ final class DotSwipeCueHostView: UIView {
         let scale = max(1.0, traitCollection.displayScale)
         metalLayer.contentsScale = scale
         let pixelSize = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
-        if metalLayer.drawableSize != pixelSize {
+        let sizeChanged = metalLayer.drawableSize != pixelSize
+        if sizeChanged {
             metalLayer.drawableSize = pixelSize
         }
         updateAnimatingState()
-        renderCurrentFrame()
+        if sizeChanged || displayLink?.isPaused != false {
+            renderCurrentFrame()
+        }
     }
 
     private func seedVisibilityIfNeeded() {
@@ -121,7 +129,9 @@ final class DotSwipeCueHostView: UIView {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+            // `minimum: 60` lets both 60 Hz displays/Simulators and 120 Hz ProMotion panels lock
+            // cleanly to hardware vsync without CoreAnimation pacing stalls.
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         } else {
             link.preferredFramesPerSecond = 60
         }
@@ -150,12 +160,14 @@ final class DotSwipeCueHostView: UIView {
 
     func stepAndRender(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval) {
         seedVisibilityIfNeeded()
-        let dt: Float
+        let rawDelta: CFTimeInterval
         if let prevTarget = lastTargetTimestamp {
-            dt = Float(min(0.05, max(1.0 / 240.0, targetTimestamp - prevTarget)))
+            rawDelta = targetTimestamp - prevTarget
         } else {
-            dt = Float(min(0.05, max(1.0 / 240.0, targetTimestamp - timestamp)))
+            rawDelta = targetTimestamp - timestamp
         }
+        let clampedDelta = min(0.12, max(1.0 / 240.0, rawDelta))
+        let dt = Float(clampedDelta)
         lastTargetTimestamp = targetTimestamp
 
         let target: Float = isActive ? 1.0 : 0.0
@@ -166,7 +178,10 @@ final class DotSwipeCueHostView: UIView {
         }
 
         if !reduceMotion {
-            elapsed += dt
+            elapsed += clampedDelta
+            if elapsed >= Self.elapsedWrapPeriod {
+                elapsed -= Self.elapsedWrapPeriod
+            }
         }
 
         renderCurrentFrame()
@@ -193,9 +208,9 @@ final class DotSwipeCueHostView: UIView {
 
         var uniforms = DotSwipeCueMetalUniforms(
             metrics: SIMD4<Float>(resX, resY, scale, pitch),
-            grid: SIMD4<Float>(Float(cols), Float(rows), elapsed, reduceMotion ? 1.0 : 0.0),
+            grid: SIMD4<Float>(Float(cols), Float(rows), Float(elapsed), reduceMotion ? 1.0 : 0.0),
             base: SIMD4<Float>(0.86, 0.83, 0.77, opacity),
-            core: SIMD4<Float>(0.99, 0.97, 0.93, 42.0)
+            core: SIMD4<Float>(0.99, 0.97, 0.93, 54.0)
         )
 
         let pass = MTLRenderPassDescriptor()
