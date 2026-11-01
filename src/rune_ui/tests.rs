@@ -2163,6 +2163,7 @@ fn goldens() {
     // A list longer than the window fades at its scrolling edge (#840).
     check_golden("language-menu", false, GOLDEN_SIZE);
     check_golden("modes-opencode-not-running", false, PANE_SIZE);
+    check_golden("output-trust", false, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);
     check_golden("picker-found", false, PANE_SIZE);
 }
@@ -2194,4 +2195,26 @@ fn the_recorder_still_gets_space_and_enter_after_a_menu_closes() {
             );
         }
     }
+}
+
+/// The trust prompt shows what an unapproved config reaches, and Allow
+/// pins this config's hash and hides it.
+#[test]
+fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
+    let mut rt = runtime("output-trust", false, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Your transformations want to use the network and run programs")
+    );
+    assert!(shown.iter().any(|text| text == "Hosts: localhost"));
+    assert!(shown.iter().any(|text| text == "Programs: pandoc, say"));
+    tap(&mut rt, "allow-transformations");
+    settle(&mut rt);
+    assert_eq!(
+        rt.state.modes.approved.as_deref(),
+        Some("0".repeat(64).as_str())
+    );
+    assert!(rt.find("allow-transformations").is_none());
 }

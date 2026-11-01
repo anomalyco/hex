@@ -908,7 +908,8 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 ```ts
 Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes output*
-├── Edit with agent -> Copy a prompt naming the steps' keys and `hex settings`
+├── Trust prompt -> Allow a config that uses fetch or programs (only when one asks)
+├── Edit with agent -> Copy a prompt naming the steps' keys, `hex settings`, and the transforms docs
 ├── Open file -> settings.json in the default editor
 ├── Every dictation -> Global's steps, numbered, read-only
 ├── Try -> Global's corrections and built-ins on a typed sentence
@@ -931,9 +932,35 @@ Stage fails -> Preserve its input        // failed chain discards partial result
 ```
 
 Built-in text transformations run natively. Custom transformations come from
-`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine with a 1 s
-limit per call. OpenCode rewriting sends documented
+`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
+under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
+60 s cap). OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
+
+```ts
+Transform host APIs                      // personal_commands/{io,fetch,process,trust}.rs
+├── fetch(url, { method, headers, body, signal }) -> Response (ureq, platform TLS)
+├── node:child_process execFile / exec (+ node:util promisify, input option)
+├── setTimeout, AbortController, AbortSignal.timeout
+└── First use -> Output pane trust prompt (hosts, programs, or capability)
+    ├── Allow -> hash of every loaded file pinned in transform-trust.json
+    ├── Any edit -> asks again
+    └── Not allowed -> call throws -> chain fails -> text pasted unchanged
+Timeout or settle -> requests abandoned, process group / job object killed
+```
+
+The API is documented for agents at
+[anoma.ly/hex/docs/transforms](../../site/public/docs/transforms.md), linked
+from `llms.txt`, the managed `AGENTS.md`, and Edit with agent's prompt. Checks:
+[tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs) runs
+`fetch` against a local server (approval, re-ask on edit, abort, network
+error) and `exec`/`execFile` (exit codes, stdin `input`, promisify, `timeout`,
+`maxBuffer`, process-tree kill on Linux, fallback through dictation's
+processing stage); [trust.rs](../../src/personal_commands/trust.rs) covers the
+scan and hash; `the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed`
+and the `output-trust` golden cover the prompt. Windows `cmd` quoting is a
+pure-function test only; the job object and macOS paths compile on CI but are
+not run against real programs there. No check reaches a remote TLS host.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
 last removes only the final contiguous run of sentence marks (including

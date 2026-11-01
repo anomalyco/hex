@@ -10,7 +10,7 @@ use rune_kit::{Button, ButtonVariant, TextInput};
 
 use super::controls::{
     ButtonKind, CardRow, DESCRIPTION, METRICS, Paint, PushSize, button, card, folding, note, page,
-    raised,
+    raised, status_dot,
 };
 use super::icons::MIC;
 use super::lists::{Tone, tone_tag};
@@ -36,6 +36,8 @@ const RULE_STEPS: [&str; 8] = [
     "rule6-steps",
     "rule7-steps",
 ];
+/// The transformation API's docs, written for coding agents.
+const TRANSFORMS_DOCS: &str = "https://anoma.ly/hex/docs/transforms";
 /// A step's number sits in a disc this wide, on the row text's edge.
 const STEP_BADGE: f32 = 20.0;
 
@@ -175,6 +177,7 @@ fn preview(mode: &DictationMode, input: &str) -> String {
 pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
     let processing = &ui.settings.dictation_processing;
     let mut content = page("output-content")
+        .children(trust_card(ui, p))
         .child(agent_card(ui, p, reduced))
         .child(every_dictation(ui, p, &processing.default_mode))
         .child(try_card(ui, p, &processing.default_mode));
@@ -241,6 +244,80 @@ fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
                     .child(open)
                     .child(edit),
             ),
+    )
+}
+
+/// The trust prompt: the config can reach the network or run programs, and
+/// the person has not allowed this version of it. Until they do, those
+/// transformations fail and dictation pastes the words unchanged.
+fn trust_card(ui: &Ui, p: Paint) -> Option<El> {
+    let permissions = ui.modes.status.permissions.as_ref()?;
+    if ui.modes.approved.as_deref() == Some(permissions.hash.as_str()) {
+        return None;
+    }
+    let title = match (permissions.fetch, permissions.exec) {
+        (true, true) => tr("Your transformations want to use the network and run programs"),
+        (true, false) => tr("Your transformations want to use the network"),
+        _ => tr("Your transformations want to run programs"),
+    };
+    let more = if permissions.partial { ", …" } else { "" };
+    let mut lines = Vec::new();
+    if !permissions.hosts.is_empty() {
+        lines.push(tr_fill(
+            "Hosts: {}",
+            &format!("{}{more}", permissions.hosts.join(", ")),
+        ));
+    }
+    if !permissions.programs.is_empty() {
+        lines.push(tr_fill(
+            "Programs: {}",
+            &format!("{}{more}", permissions.programs.join(", ")),
+        ));
+    }
+    lines.push(
+        tr("Hex asks again whenever the config changes. Until you allow it, they paste your words unchanged")
+            .into(),
+    );
+    let hash = permissions.hash.clone();
+    let allow = button(
+        p,
+        "allow-transformations",
+        tr("Allow"),
+        ButtonKind::Secondary,
+        move |ui: &mut Ui, _: &mut Tx| allow_config(ui, &hash),
+    );
+    Some(
+        raised(p, "trust-card").child(
+            row()
+                .key("trust")
+                .px(METRICS.row_px)
+                .py(14.0)
+                .gap(12.0)
+                .center_y()
+                .child(status_dot(p.warning()))
+                .child(
+                    col()
+                        .key("copy")
+                        .grow(1.0)
+                        .shrink()
+                        .gap(2.0)
+                        .child(
+                            text(title)
+                                .key("title")
+                                .font(p.k.ty.ui)
+                                .color(p.text())
+                                .wrap(),
+                        )
+                        .children(lines.into_iter().enumerate().map(|(index, line)| {
+                            text(line)
+                                .key(format!("line{index}"))
+                                .font(DESCRIPTION)
+                                .color(p.muted())
+                                .wrap()
+                        })),
+                )
+                .child(allow),
+        ),
     )
 }
 
@@ -547,6 +624,18 @@ fn open_settings_file(ui: &mut Ui) {
     }
 }
 
+/// Allows the config whose files hash to `hash` to use `fetch` and
+/// programs, from the next transformation on.
+fn allow_config(ui: &mut Ui, hash: &str) {
+    if ui.live()
+        && let Err(error) = crate::personal_commands::approve_config(hash)
+    {
+        ui.error = Some(format!("{error:#}"));
+        return;
+    }
+    ui.modes.approved = Some(hash.into());
+}
+
 /// What Edit with agent copies: where the steps live, their shape, the
 /// built-in ones, and how to change them while Hex runs, so any coding
 /// agent can do it.
@@ -567,7 +656,9 @@ fn agent_prompt() -> String {
          \n\
          Built-in transformations: \"lowercase\", \"no-trailing-punctuation\", \
          \"spongebob-case\". Others are functions in ~/.config/hex/hex.config.ts \
-         (run `hex commands init` for its typings). Leave `post_processing.enabled` false.\n\
+         (run `hex commands init` for its typings; the API, including fetch and \
+         node:child_process, is documented at {TRANSFORMS_DOCS}). Leave \
+         `post_processing.enabled` false.\n\
          \n\
          Read the current value with `hex settings get dictation_processing`, then \
          change it with `hex settings set dictation_processing.default_mode '<json>'` \
@@ -613,6 +704,20 @@ pub(super) fn fixture(ui: &mut Ui) {
     modes[1].applications = vec!["WezTerm".into(), "Zed".into()];
     modes[1].replacements = vec![pair("dash dash", "--")];
     ui.output.trial = TextEdit::new("Um, open code shipped the hex app today.".to_string());
+}
+
+/// The fixture with a config asking to fetch and run programs.
+pub(super) fn trust_fixture(ui: &mut Ui) {
+    fixture(ui);
+    ui.modes.status.permissions = Some(crate::personal_commands::Permissions {
+        hash: "0".repeat(64),
+        fetch: true,
+        exec: true,
+        hosts: vec!["localhost".into()],
+        programs: vec!["pandoc".into(), "say".into()],
+        partial: false,
+    });
+    ui.pane = super::Pane::Output;
 }
 
 #[cfg(test)]

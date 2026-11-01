@@ -1974,6 +1974,10 @@ const SCENES: &[Scene] = &[
         ui.output.prompt_copied = true;
         ui.pane = Pane::Output;
     }),
+    ("output-trust", |ui| {
+        *ui = portal_fixture();
+        output::trust_fixture(ui);
+    }),
     ("output-empty", |ui| {
         *ui = portal_fixture();
         ui.pane = Pane::Output;

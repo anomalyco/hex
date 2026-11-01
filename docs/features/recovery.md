@@ -623,14 +623,20 @@ failure causes; a current hold-to-result sequence is still needed.
 ### Runaway Script
 
 ```ts
-handler or transformation runs past 1 s -> interrupted -> that call fails
+transformation runs past its timeout -> interrupted -> that call fails
+  // 1 s, or 30 s when the config uses fetch or node:child_process; 60 s cap
+  -> its requests abandoned, its process trees killed
   -> transformation chain -> its input is kept           // ordered processing goes on
   -> later call on the same config -> succeeds
+fetch or exec before the person allows the config -> throws -> input kept
 config load past 2 s or past 64 MiB -> rejected -> previous config stays active
 ```
 Sources: [script.rs](../../src/personal_commands/script.rs),
 [personal_commands.rs](../../src/personal_commands.rs);
-check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`.
+check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`,
+`the_transformation_timeout_ends_the_whole_process_tree` (Linux), and
+`a_throwing_or_slow_transformation_pastes_the_text_unchanged` in
+[tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs).
 Handlers return actions instead of awaiting native results, so the old late
 native tool reply ([#20](https://github.com/anomalyco/hex/issues/20)) cannot
 occur.
