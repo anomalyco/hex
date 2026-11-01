@@ -119,9 +119,6 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         }
         if let Some(tour) = &mut ui.tour {
             tour.flow.hold_download(held);
-            if choosing && tour.flow.step() == Step::Setup {
-                tour.flow.show_model_choice();
-            }
         }
     }
     let (installed, model) = progress(ui);
