@@ -85,6 +85,9 @@ pub(super) struct Picker {
     /// Labs › Use your own speech model: the file dialog, the import
     /// worker, and the name being edited.
     pub(super) import: super::model_import::ImportState,
+    /// The card whose details are open (Parakeet Ultra's credit and
+    /// published benchmarks).
+    pub(super) details: super::model_details::DetailsState,
 }
 
 impl Picker {
@@ -630,6 +633,9 @@ fn model_card(
     // An import that can't run (missing, changed, or off) offers no Use.
     let usable = model.available();
     let mut actions = row().key("actions").gap(8.0).center_y();
+    if let Some(toggle) = super::model_details::toggle(ui, p, model) {
+        actions = actions.child(toggle);
+    }
     match &status {
         Status::Active => {
             actions = actions.child(
@@ -727,6 +733,10 @@ fn model_card(
     if model.streams {
         title = title.child(Badge::new(tr("Streams")).build(p.k));
     }
+    // A catalog model behind its own Labs toggle says so.
+    if model.id == TranscriptionModelId::ParakeetUltra {
+        title = title.child(Badge::new(tr("Labs")).build(p.k));
+    }
     let metric = |key: &str, label: &str, value: String| {
         row()
             .key(key)
@@ -817,7 +827,10 @@ fn model_card(
             .wrap(),
         );
     }
-    if model.id == TranscriptionModelId::ParakeetV3 {
+    if matches!(
+        model.id,
+        TranscriptionModelId::ParakeetV3 | TranscriptionModelId::ParakeetUltra
+    ) {
         card = card.child(
             text(
                 "Detects language from audio, not the selected language. \
@@ -828,6 +841,9 @@ fn model_card(
             .color(p.muted())
             .wrap(),
         );
+    }
+    if let Some(details) = super::model_details::section(ui, p, model) {
+        card = card.child(details);
     }
     // One bar from download through verifying and loading: it fills, then
     // sweeps while the stage has no measure.

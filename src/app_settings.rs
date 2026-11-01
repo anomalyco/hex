@@ -1397,6 +1397,8 @@ pub struct LabsSettings {
     /// The Local transcription picker can add a GGUF speech model from disk
     /// (issues 648 and 743).
     pub custom_models: bool,
+    /// Parakeet Ultra joins the Local transcription picker (issue 648).
+    pub parakeet_ultra: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1426,6 +1428,7 @@ impl Default for LabsSettings {
             tap_or_hold: false,
             benchmark_details: false,
             custom_models: false,
+            parakeet_ultra: false,
         }
     }
 }
@@ -1977,7 +1980,7 @@ impl KeyboardModelChoice {
         };
         // An import stays mapped while it is missing or off, like the
         // saved selection; switching to it then runs the default model.
-        if self.model.is_custom() {
+        if self.model.is_labs_gated() {
             return crate::transcription::models::validate_saved(&selection);
         }
         let model = crate::transcription::models::validate(&selection)?;
@@ -2439,7 +2442,7 @@ impl AppSettings {
     }
 
     fn migrate_disabled_transcription_model(&mut self) {
-        if self.transcription.model.is_custom()
+        if self.transcription.model.is_labs_gated()
             || crate::transcription::models::definition(self.transcription.model).available()
         {
             return;

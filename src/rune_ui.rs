@@ -36,6 +36,7 @@ pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
+mod model_details;
 mod model_import;
 mod models;
 mod modes;
