@@ -863,8 +863,11 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
+    // macOS runs its models on Metal or Apple's speech engine.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    rows.push(speech_engine_row(ui, p, layer));
+    if ui.platform.caps.os != super::platform::Os::Macos {
+        rows.push(speech_engine_row(ui, p, layer));
+    }
     rows
 }
 
