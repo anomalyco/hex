@@ -1126,6 +1126,7 @@ Launch Hex                               // maintain.startup
 └── Show Dock icon off + usable menu-bar item -> No startup window
     ├── Dictation starts independently of the Settings window
     └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window
+        └── On the active Space, never switching back to where it last showed
 
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 
@@ -1197,6 +1198,13 @@ when the preference changes. Any open Settings window keeps the Dock icon: macOS
 deactivates an app asynchronously when it becomes menu-bar only, which dropped
 the window behind other applications ([#103](https://github.com/anomalyco/hex/issues/103)).
 Turning the preference off therefore takes effect when Settings closes.
+
+Closing the window only orders it out, and AppKit keeps an ordered-out window
+on the Space it last showed on, so reopening it from the menu bar on another
+Space switched back to that one. `macos_rune` gives the window
+`NSWindowCollectionBehaviorMoveToActiveSpace`, so it opens on the active
+Space instead. No automated check covers Spaces; it needs a native check with
+two desktops.
 
 Checks in [meeting/watcher.rs](../../src/meeting/watcher.rs):
 `dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready` and

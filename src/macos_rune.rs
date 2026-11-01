@@ -425,9 +425,15 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 listener_failure,
             )
         })?;
+    // A closed window is only ordered out, and AppKit keeps it on the Space
+    // it was last shown on: reopening it from the menu bar would switch back
+    // to that Space. Bring it to the active Space instead.
+    let native = rune::MacWindowOptions::default()
+        .collection_behavior(objc2_app_kit::NSWindowCollectionBehavior::MoveToActiveSpace.0);
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
-        .accessory();
+        .accessory()
+        .macos_window(native);
     // The first-run tour opens centred at one size; a tiling window manager
     // would otherwise stretch it to half the screen.
     if !onboarding_completed {
@@ -958,29 +964,9 @@ fn bring_forward(window: &rune::AppHandle<Ui>) {
     crate::app_settings::set_dock_icon_visible(true);
     if let Some(mtm) = MainThreadMarker::new() {
         let app = NSApplication::sharedApplication(mtm);
-        follow_active_space(&app);
         app.activate();
     }
     window.open();
-}
-
-/// Lets Hex's main window open on the Space the user is on, instead of
-/// activating Hex switching back to the Space it was first shown on (#596).
-/// Overlays and panels (which can't become main, or already join every
-/// Space) are left alone: AppKit refuses `MoveToActiveSpace` beside
-/// `CanJoinAllSpaces`.
-fn follow_active_space(app: &NSApplication) {
-    use objc2_app_kit::NSWindowCollectionBehavior;
-    for window in app.windows().iter() {
-        let behavior = window.collectionBehavior();
-        if !window.canBecomeMainWindow()
-            || behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces)
-            || behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace)
-        {
-            continue;
-        }
-        window.setCollectionBehavior(behavior | NSWindowCollectionBehavior::MoveToActiveSpace);
-    }
 }
 
 impl Pump {
