@@ -29,9 +29,11 @@ const BROWSER_PAGE_MEMORY: Duration = Duration::from_secs(60);
 
 /// Websites whose pages are calls whenever a browser holds the microphone on
 /// them. Google Meet is separate: only its meeting paths are calls.
-const CALL_SITES: [(&str, MeetingSource); 2] = [
+const CALL_SITES: [(&str, MeetingSource); 4] = [
     ("banshee.app", MeetingSource::Banshee),
     ("web.whatsapp.com", MeetingSource::WhatsApp),
+    ("app.v2.gather.town", MeetingSource::Gather),
+    ("app.gather.town", MeetingSource::Gather),
 ];
 
 /// How long a condition has held across observations, by the monotonic
@@ -220,8 +222,11 @@ impl MeetingCandidate {
 
     fn required_stability(&self) -> Duration {
         match self.source {
-            // WhatsApp also takes the microphone for voice notes (#835).
-            MeetingSource::BrowserCall | MeetingSource::WhatsApp => BROWSER_STABLE_FOR,
+            // WhatsApp also takes the microphone for voice notes (#835), and
+            // Gather can hold it while you sit in a space (#855).
+            MeetingSource::BrowserCall | MeetingSource::WhatsApp | MeetingSource::Gather => {
+                BROWSER_STABLE_FOR
+            }
             _ => STABLE_FOR,
         }
     }
@@ -267,6 +272,7 @@ pub enum MeetingSource {
     SlackHuddle,
     FaceTime,
     WhatsApp,
+    Gather,
     BrowserCall,
 }
 
@@ -281,6 +287,7 @@ impl MeetingSource {
             Self::SlackHuddle => "Slack Huddle",
             Self::FaceTime => "FaceTime",
             Self::WhatsApp => "WhatsApp",
+            Self::Gather => "Gather",
             Self::BrowserCall => "Browser call",
         }
     }
@@ -565,6 +572,7 @@ pub fn candidate_from_microphone(
         "com.tinyspeck.slackmacgap" => (MeetingSource::SlackHuddle, "Slack huddle"),
         "com.apple.FaceTime" => (MeetingSource::FaceTime, "FaceTime call"),
         "net.whatsapp.WhatsApp" => (MeetingSource::WhatsApp, "WhatsApp call"),
+        "com.gather.GatherV2" => (MeetingSource::Gather, "Gather call"),
         _ => return None,
     };
     let mut candidate = candidate(source, canonical_bundle, title);
@@ -919,6 +927,38 @@ mod tests {
             ))
             .is_none()
         );
+    }
+
+    #[test]
+    fn gather_calls_are_detected_in_its_app_and_browser() {
+        for bundle_id in [
+            "com.gather.GatherV2",
+            "com.gather.GatherV2.helper.Renderer",
+            "com.gather.Gather",
+            "Gather.exe",
+        ] {
+            let app = ActiveMicrophoneApplication {
+                pid: 7,
+                bundle_id: bundle_id.into(),
+                name: "Gather".into(),
+            };
+            let call = candidate_from_microphone(&app, &ContextSnapshot::default())
+                .unwrap_or_else(|| panic!("{bundle_id} is Gather"));
+            assert_eq!(call.source, MeetingSource::Gather);
+            assert_eq!(call.application.as_deref(), Some("com.gather.GatherV2"));
+            // Sitting in a space can hold the microphone, so about 20 s.
+            assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
+        }
+        for url in [
+            "https://app.v2.gather.town/space/abc",
+            "https://app.gather.town/app/x",
+        ] {
+            let web =
+                candidate_from_microphone(&brave(), &context("Brave Browser", Some(url), "Gather"))
+                    .unwrap();
+            assert_eq!(web.source, MeetingSource::Gather, "{url}");
+        }
+        assert_eq!(known_provider_label("com.gather.GatherV2"), Some("Gather"));
     }
 
     #[test]
