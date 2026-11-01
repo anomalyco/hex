@@ -126,7 +126,7 @@ impl Drop for ContextMonitor {
 impl ContextSnapshot {
     #[cfg(target_os = "macos")]
     pub fn capture() -> Result<Self> {
-        capture_macos()
+        capture_macos(crate::dictation::config::reads_browser())
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -146,7 +146,7 @@ impl ContextSnapshot {
                 input_revision: None,
             });
         }
-        capture_macos()
+        capture_macos(true)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -180,7 +180,9 @@ impl ContextSnapshot {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_macos() -> Result<ContextSnapshot> {
+/// `read_page` asks the front browser for its page, which can show an
+/// Automation prompt; only callers that use the page pass true.
+fn capture_macos(read_page: bool) -> Result<ContextSnapshot> {
     let (application, bundle_id, pid) = autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
@@ -192,7 +194,7 @@ fn capture_macos() -> Result<ContextSnapshot> {
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let browser_url = crate::dictation::config::reads_browser()
+    let browser_url = read_page
         .then(|| browser_url(bundle_id.as_deref(), pid))
         .flatten();
     Ok(ContextSnapshot {

@@ -27,7 +27,7 @@ fn uses_browser(settings: &DictationProcessingSettings) -> bool {
                     || mode
                         .transformations
                         .iter()
-                        .any(|id| crate::personal_commands::builtin_transformation(id).is_none())
+                        .any(|id| !crate::personal_commands::is_builtin_transformation(id))
             })
 }
 
@@ -98,27 +98,23 @@ mod tests {
             modes: vec![mode],
             ..DictationProcessingSettings::default()
         };
-        let reads = |settings: DictationProcessingSettings| {
-            update_dictation_profiles(&settings);
-            reads_browser()
-        };
 
-        assert!(!reads(DictationProcessingSettings::default()));
-        assert!(!reads(with(DictationMode {
+        assert!(!uses_browser(&DictationProcessingSettings::default()));
+        assert!(!uses_browser(&with(DictationMode {
             applications: vec!["Slack".into()],
             transformations: vec!["lowercase".into()],
             ..DictationMode::default()
         })));
-        assert!(reads(with(DictationMode {
+        assert!(uses_browser(&with(DictationMode {
             browser_hosts: vec!["x.com".into()],
             ..DictationMode::default()
         })));
-        assert!(reads(with(DictationMode {
+        assert!(uses_browser(&with(DictationMode {
             applications: vec!["Slack".into()],
             transformations: vec!["my-script".into()],
             ..DictationMode::default()
         })));
-        assert!(reads(with(DictationMode {
+        assert!(uses_browser(&with(DictationMode {
             applications: vec!["Slack".into()],
             post_processing: DictationPostProcessing {
                 enabled: true,
@@ -126,6 +122,5 @@ mod tests {
             },
             ..DictationMode::default()
         })));
-        assert!(!reads(DictationProcessingSettings::default()));
     }
 }

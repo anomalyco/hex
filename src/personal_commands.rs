@@ -81,10 +81,15 @@ const BUILTIN_TRANSFORMATIONS: &[BuiltinTransformation] = &[
     },
 ];
 
-pub(crate) fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
+fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
     BUILTIN_TRANSFORMATIONS
         .iter()
         .find(|transformation| transformation.id == id)
+}
+
+#[cfg(target_os = "macos")]
+pub fn is_builtin_transformation(id: &str) -> bool {
+    builtin_transformation(id).is_some()
 }
 
 /// `text` after the built-in transformation `id`, or None when `id` is not
