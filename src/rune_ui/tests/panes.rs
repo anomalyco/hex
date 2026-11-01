@@ -725,41 +725,23 @@ fn esc_stays_on_the_recorder_however_many_keys_are_held() {
 }
 
 #[test]
-fn the_practice_keys_stay_and_spring_back_up_on_release() {
-    let mut rt = runtime("mac-onboarding-try", true, PANE_SIZE);
-    let cap = |rt: &Runtime<Ui>| {
-        drawn(rt, "practice-hint/keys/keycap0/cap")
-            .expect("the keys stay")
-            .0
-    };
-    let hint = |rt: &Runtime<Ui>| drawn(rt, "practice-hint").unwrap().0;
-    let (rest, line) = (cap(&rt), hint(&rt));
-    onboarding::input(&mut rt.state, Input::Dictation(Observation::Started));
-    refresh(&mut rt);
-    assert!(cap(&rt)[1] > rest[1] + 0.5, "held down while it records");
-    assert_eq!(hint(&rt), line, "the page holds still");
-    onboarding::input(&mut rt.state, Input::Dictation(Observation::Transcribing));
-    rt.invalidate();
-    let mut last = cap(&rt)[1];
-    for _ in 0..30 {
-        rt.frame(1.0 / 60.0);
-        let now = cap(&rt)[1];
-        assert!(now <= last + 0.01, "the keys spring up, never back down");
-        assert_eq!(hint(&rt), line, "the page holds still");
-        last = now;
-    }
-    assert!((last - rest[1]).abs() < 0.05, "back at rest");
-    // A retry presses the keys standing up, from any outcome.
-    for outcome in [Observation::Discarded, Observation::Failed] {
-        onboarding::input(&mut rt.state, Input::Dictation(outcome));
-        refresh(&mut rt);
-        assert!((cap(&rt)[1] - rest[1]).abs() < 0.05, "up after {outcome:?}");
+fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
+    for scene in ["mac-onboarding-try", "onboarding-try"] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        let holding = |rt: &Runtime<Ui>| {
+            rt.state
+                .first_run
+                .as_ref()
+                .is_some_and(|s| s.live_hold_from.is_some())
+        };
+        assert!(rt.find("done").is_some(), "{scene}: the game shows Done");
+        assert!(!holding(&rt));
         onboarding::input(&mut rt.state, Input::Dictation(Observation::Started));
         refresh(&mut rt);
-        assert!(
-            cap(&rt)[1] > rest[1] + 0.5,
-            "pressed again after {outcome:?}"
-        );
+        assert!(holding(&rt), "{scene}: the shortcut held, as Hex records");
+        onboarding::input(&mut rt.state, Input::Dictation(Observation::Transcribing));
+        refresh(&mut rt);
+        assert!(!holding(&rt), "{scene}: released");
     }
 }
 
@@ -1317,30 +1299,29 @@ fn active_and_failed_meetings_show_their_state() {
 }
 
 #[test]
-fn the_mac_tour_asks_each_permission_then_practices() {
-    let mut rt = runtime("mac-onboarding-setup", true, PANE_SIZE);
+fn the_mac_first_run_asks_each_permission_then_practices() {
+    let mut rt = runtime("mac-onboarding-permissions", true, PANE_SIZE);
     assert_eq!(rt.state.tour.as_ref().unwrap().flow.step(), Step::Setup);
     assert!(
         matches!(sent(&rt), [Request::ChooseModel { .. }]),
         "the model downloads behind the permissions"
     );
-    tap(&mut rt, "setup-microphone/setup-grant-control/setup-grant");
+    tap(&mut rt, "mic-pill-allow");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(
             PermissionAction::RequestMicrophone
         )]
     );
-    // macOS grants everything and the model lands: setup moves on.
+    // macOS grants everything and the model lands: the practice follows.
     use crate::desktop::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
     refresh(&mut rt);
-    std::thread::sleep(std::time::Duration::from_millis(750));
+    rt.update(|ui, _| onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
     assert_eq!(rt.state.tour.as_ref().unwrap().flow.step(), Step::TryIt);
-    assert!(rt.find("tour-skip").is_some(), "practice can be skipped");
     onboarding::input(&mut rt.state, Input::Dictation(Observation::Started));
     onboarding::input(&mut rt.state, Input::Dictation(Observation::Pasted));
     refresh(&mut rt);
@@ -1348,10 +1329,11 @@ fn the_mac_tour_asks_each_permission_then_practices() {
         rt.state.tour.as_ref().unwrap().flow.view().practice,
         Practice::Landed
     );
-    tap(&mut rt, "tour-continue");
-    assert_eq!(rt.state.tour.as_ref().unwrap().flow.step(), Step::Done);
-    tap(&mut rt, "tour-continue");
+    // Done leaves the game at any point; Start using Hex closes onboarding.
+    tap(&mut rt, "done");
+    tap(&mut rt, "start-using-hex");
     assert!(rt.state.tour.is_none());
+    assert!(rt.state.first_run.is_none());
 }
 
 #[test]
@@ -1365,7 +1347,7 @@ fn a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen() {
     );
     assert_eq!(asked(&rt), [PlatformRequest::Relaunch]);
     let mut rt = runtime("mac-onboarding-reopen", true, PANE_SIZE);
-    tap(&mut rt, "tour-reopen");
+    tap(&mut rt, "reopen-hex");
     assert_eq!(asked(&rt), [PlatformRequest::Relaunch]);
 }
 
@@ -1373,7 +1355,7 @@ fn a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen() {
 fn a_grant_waiting_for_a_restart_makes_setup_restart_hex() {
     let mut rt = runtime("mac-onboarding-restart", true, PANE_SIZE);
     assert_eq!(rt.state.tour.as_ref().unwrap().flow.step(), Step::Setup);
-    tap(&mut rt, "tour-continue");
+    tap(&mut rt, "restart");
     assert_eq!(asked(&rt), [PlatformRequest::Relaunch]);
 }
 
@@ -1384,15 +1366,40 @@ fn a_refused_microphone_points_to_system_settings() {
     assert!(
         shown
             .iter()
-            .any(|text| text == "Turned off earlier. Switch Hex on in System Settings.")
+            .any(|text| text == "Switch on Hex in System Settings")
     );
-    tap(&mut rt, "setup-microphone/setup-grant-control/setup-grant");
+    tap(&mut rt, "mic-pill-allow");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(PermissionAction::ShowGuide(
             PermissionKind::Microphone
         ))]
     );
+}
+
+#[test]
+fn windows_onboarding_asks_only_for_the_microphone_switch() {
+    let mut rt = runtime("windows-onboarding-microphone", true, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text == "Let Hex hear you"),
+        "{shown:?}"
+    );
+    assert!(rt.find("ax-row").is_none(), "no Accessibility on Windows");
+    tap(&mut rt, "mic-pill-allow");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Permission(PermissionAction::ShowGuide(
+            PermissionKind::Microphone
+        ))]
+    );
+    // Switched on in Settings: the practice follows.
+    rt.state.platform.permissions.microphone = crate::desktop::onboarding::PermissionState::Ready;
+    rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
+    refresh(&mut rt);
+    rt.update(|ui, _| onboarding_kit::live::fixture_resume(ui, Page::Try));
+    settle(&mut rt);
+    assert_eq!(rt.state.tour.as_ref().unwrap().flow.step(), Step::TryIt);
 }
 
 #[test]
@@ -1406,10 +1413,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
             .iter()
             .any(|text| text == "An older Hex entry can keep this off")
     );
-    tap(
-        &mut rt,
-        "setup-accessibility/setup-grant-control/setup-grant",
-    );
+    tap(&mut rt, "ax-pill-allow");
     assert_eq!(
         asked(&rt).last(),
         Some(&PlatformRequest::Permission(
@@ -1460,7 +1464,7 @@ fn stale_permissions_offer_fix_it_and_reset_entries_across_panes() {
 
 #[test]
 fn visible_untrusted_permission_rows_are_reported_for_legacy_cleanup() {
-    let mut rt = runtime("mac-onboarding-setup", true, PANE_SIZE);
+    let mut rt = runtime("mac-onboarding-permissions", true, PANE_SIZE);
     refresh(&mut rt);
     assert_eq!(
         rt.state.platform.permissions_shown,

@@ -334,7 +334,7 @@ pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
     }
 }
 
-/// Onboarding's model list over [`fixture`]: with the recommended model's
+/// Onboarding's model step over [`fixture`]: with the recommended model's
 /// exact file too, or with the recommended model picked and downloading.
 fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading: bool) {
     *ui = super::portal_fixture();
@@ -349,6 +349,7 @@ fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading: bool) {
         super::onboarding::set_downloaded(ui, 42);
         super::onboarding::poll(ui);
     }
+    super::onboarding_kit::live::fixture(ui, super::Page::Download);
 }
 
 /// The list as it opens.
@@ -364,4 +365,12 @@ pub(super) fn loading(ui: &mut Ui) {
 /// The recommended model's exact file found too.
 pub(super) fn present(ui: &mut Ui) {
     onboarding_scene(ui, true, false);
+}
+
+/// Continued from the list with ours downloading: the next page, with Back
+/// to the list.
+pub(super) fn chosen(ui: &mut Ui) {
+    onboarding_scene(ui, false, true);
+    super::onboarding_kit::live::continue_model(ui);
+    super::onboarding_kit::live::fixture_resume(ui, super::Page::Demo);
 }

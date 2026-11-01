@@ -1,9 +1,10 @@
 //! The onboarding check (`scripts/check-onboarding.sh`, run before every
 //! stable release): every onboarding scene against its approved golden in
-//! both appearances, and a first run walked through the real tour in a
-//! clean data folder. Like every golden, these render on Linux only: the
+//! both appearances, and a first run walked through the real onboarding in
+//! a clean data folder. Like every golden, these render on Linux only: the
 //! macOS and Windows scenes are the same window drawn from fixtures.
 
+use super::super::onboarding_kit::live::Page;
 use super::*;
 use crate::desktop::onboarding::Step;
 
@@ -11,34 +12,35 @@ use crate::desktop::onboarding::Step;
 /// Windows. An intentional change refreshes these goldens in the same PR
 /// (`HEX_UPDATE_GOLDENS=1`).
 pub(super) const SCENES: &[&str] = &[
-    // A fresh install: the welcome.
+    // A fresh install: setting up Hex, the recommended model downloading.
     "onboarding",
     "mac-onboarding",
-    // Permissions (macOS): to do, refused, stale entry, waiting for a restart.
-    "mac-onboarding-setup",
-    "mac-onboarding-denied",
-    "mac-onboarding-stale",
-    "mac-onboarding-restart",
-    // The model step: nothing found, so the recommended model downloads;
-    // in progress and failed.
-    "onboarding-setup",
-    "mac-onboarding-progress",
-    "mac-onboarding-download-failed",
-    // Models already on this computer; the recommended one among them.
+    // The download stopped.
+    "onboarding-download-failed",
+    // The model step: models on this computer; the recommended one among
+    // them; ours picked and downloading; Back to the list from the next page.
     "onboarding-model-found",
     "onboarding-model-found-recommended",
     "onboarding-model-found-downloading",
-    // The practice dictation.
+    "onboarding-model-found-back",
+    // The demo while the model downloads.
+    "onboarding-demo",
+    // Permissions (macOS): to do, refused, stale entry, waiting for a
+    // restart; Windows' microphone privacy switch.
+    "mac-onboarding-permissions",
+    "mac-onboarding-denied",
+    "mac-onboarding-stale",
+    "mac-onboarding-restart",
+    "windows-onboarding-microphone",
+    // Almost ready: the model still downloads.
+    "onboarding-waiting",
+    // Your turn: the practice game, and the shortcut that didn't start.
+    "onboarding-try",
     "mac-onboarding-try",
-    "mac-onboarding-listening",
-    "mac-onboarding-landed",
-    "mac-onboarding-mic",
-    "mac-onboarding-mic-lid",
-    "mac-onboarding-mic-open",
-    "mac-onboarding-mic-silent",
     "mac-onboarding-reopen",
-    // Done.
-    "mac-onboarding-done",
+    // Hex is ready.
+    "onboarding-ready",
+    "mac-onboarding-ready",
 ];
 
 #[test]
@@ -53,12 +55,12 @@ fn onboarding_goldens() {
 
 /// A first run on Linux or Windows, in the clean data folder
 /// `HEX_APPLICATION_SUPPORT_DIR` names (no settings, no models, an empty
-/// Hugging Face cache): the real settings load, the real decision to open the
-/// tour, the real download and verification of the model the tour picks, and
-/// every step to Done. Downloads the recommended model, so only
+/// Hugging Face cache): the real settings load, the real decision to open
+/// onboarding, the real download and verification of the model it picks,
+/// and every page to Hex is ready. Downloads the recommended model, so only
 /// scripts/check-onboarding.sh runs it. The window here is a fixture, not
 /// connected to a service: the test does the service's download itself,
-/// calls the found-models scan directly, and nothing writes the completion
+/// plays the story on its own clock, and nothing writes the completion
 /// marker.
 #[test]
 #[ignore = "downloads a speech model; run by scripts/check-onboarding.sh"]
@@ -92,16 +94,23 @@ fn onboarding_walkthrough() {
     };
     assert!(!installed(&ui), "no model is installed yet");
     ui.picker.installed = Some(Vec::new());
+    // As the window opens at launch.
     ui.tour = Some(
         super::super::onboarding::Tour::start(&ui.settings, &ui.platform)
             .expect("a new install opens onboarding"),
     );
+    super::super::onboarding_kit::live::open(&mut ui);
+    assert!(ui.first_run.is_some(), "the first run shows");
     let mut rt = runtime_for(ui, true, PANE_SIZE);
     let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().map(|tour| tour.flow.step());
-    assert_eq!(step(&rt), Some(Step::Welcome));
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Setting up Hex".to_owned()), "{shown:?}");
+    assert!(
+        !shown.contains(&"Choose a speech model".to_owned()),
+        "nothing found, so no model step"
+    );
 
-    // Setup asks the service for the model the tour picked.
-    tap(&mut rt, "tour-continue");
+    // Setting up Hex asks the service for the recommended model at once.
     assert_eq!(step(&rt), Some(Step::Setup));
     let (model, language) = match sent(&rt) {
         [Request::ChooseModel { model, language }] => (*model, language.clone()),
@@ -132,22 +141,20 @@ fn onboarding_walkthrough() {
     );
     rt.state.picker.installed = Some(vec![model]);
 
-    // Setup moves on once the model is ready, then the practice step and Done.
+    // The story plays on: the demo, then the practice game once the model
+    // is ready, then Hex is ready.
     settle(&mut rt);
-    std::thread::sleep(std::time::Duration::from_millis(750));
+    rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
-    if step(&rt) == Some(Step::TryIt) {
-        tap(&mut rt, "tour-skip");
-    }
-    assert_eq!(step(&rt), Some(Step::Done));
-    assert!(
-        rt.state.tour.as_ref().unwrap().flow.view().dictation_ready,
-        "Done with dictation ready"
-    );
-    tap(&mut rt, "tour-continue");
+    assert_eq!(step(&rt), Some(Step::TryIt));
+    assert!(texts(&rt).contains(&"Clear your messages".to_owned()));
+    tap(&mut rt, "done");
+    assert!(texts(&rt).contains(&"Hex is ready".to_owned()));
+    tap(&mut rt, "start-using-hex");
     assert!(rt.state.tour.is_none(), "Start using Hex closes onboarding");
+    assert!(rt.state.first_run.is_none());
     println!(
-        "onboarding walkthrough: Welcome -> Setup -> {} downloaded ({} bytes) -> Done",
+        "onboarding walkthrough: Setting up Hex -> {} downloaded ({} bytes) -> Your turn -> Hex is ready",
         definition.name,
         downloaded.load(std::sync::atomic::Ordering::Relaxed)
     );

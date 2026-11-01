@@ -4,19 +4,21 @@
 # golden: the macOS and Windows scenes are the same window drawn from
 # fixtures, so they render here too.
 #
-#   1. Renders every onboarding scene (fresh install, permissions, the model
-#      step with nothing found, with found models, with the recommended model
-#      already present, download in progress, practice, done) in both
+#   1. Renders every onboarding scene (Setting up Hex with nothing found, a
+#      stopped download, the model step with found models, with the
+#      recommended model already present, ours downloading, Back to it, the
+#      demo, permissions, Windows' microphone switch, Almost ready, the
+#      practice game, Hex is ready) in both
 #      appearances and compares each with its approved golden in
 #      tests/golden/. Any difference fails and names the changed scenes; an
 #      intentional change refreshes the goldens in the same PR
 #      (HEX_UPDATE_GOLDENS=1 cargo test --bin hex onboarding_goldens). A GPU
 #      adapter is required (Mesa's lavapipe will do), so the check never
 #      passes by skipping.
-#   2. Walks a first run through the real tour in a clean temporary data
-#      folder (fresh settings, no models, an empty Hugging Face cache, an
-#      English locale): it downloads and verifies the model the tour picks and
-#      reaches Done.
+#   2. Walks a first run through the real onboarding in a clean temporary
+#      data folder (fresh settings, no models, an empty Hugging Face cache, an
+#      English locale): it downloads and verifies the model onboarding picks,
+#      plays the practice game, and reaches Hex is ready.
 #
 #   scripts/check-onboarding.sh [<out-dir>]   (default target/onboarding-check)
 #

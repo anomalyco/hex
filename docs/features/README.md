@@ -71,7 +71,7 @@ Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without vulkan-1.dll -> stop with driver guidance
 │   ├── another version installed (e.g. self-updated) -> install this one over it
-│   └── finish -> Open Hex -> first-run tour downloads a model
+│   └── finish -> Open Hex -> the first run downloads a model
 └── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
 
 Install on Linux                          // setup.linux-installer
@@ -121,78 +121,70 @@ Executed hosting checks and deployment details are recorded in
 with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 
 ```ts
-Launch Hex, setup incomplete              // setup.tour; full-window, own column
+Launch Hex, setup incomplete              // setup.tour; every build and OS, full window
+├── One onboarding: the first-run story (rune_ui/onboarding_kit/live.rs) over
+│   the tour state machine (desktop::onboarding::Flow); no flag, no other tour
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch
 │   │   ├── Permissions or the selected model not ready -> the old completion
-│   │   │   no longer counts -> the tour opens at Welcome
-│   │   └── Everything ready -> no tour; nothing but the ID changes
+│   │   │   no longer counts -> onboarding opens from the start
+│   │   └── Everything ready -> no onboarding; nothing but the ID changes
 │   └── Saved settings are kept; the ID is recorded either way
-├── Tour opens -> speech model download starts at once      // setup.background-download
+├── Setting up Hex -> speech model download starts at once  // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
-│   │            Parakeet v3, Japanese -> Qwen3-ASR); no picker in the tour
-│   ├── Progress sits in the top corner on every step (under the practice
-│   │   field while Give it a try waits for it); failure -> Retry
+│   │            Parakeet v3, Japanese -> Qwen3-ASR); the language capsule
+│   │            switches between English and that language
+│   ├── The download is held while the Hugging Face scan runs (headers only)
+│   ├── Models found here -> the model step instead      // setup.found-choice
+│   │   ├── "Choose a speech model": one list, ours first and selected, then the
+│   │   │   found files; a pick starts at once (ours downloads, a found one is
+│   │   │   checked and used in place); Continue starts the selected row
+│   │   ├── A found pick moves on with no download page or pill
+│   │   └── Back on the pages after it returns to the list to change the pick
+│   ├── Nothing found -> this page as always, the recommended model downloading
+│   ├── Progress moves to the top pill once the story moves on; failure ->
+│   │   "The download stopped." + Try again
 │   └── Change or delete the model later in Settings      // setup.delete-model
-├── macOS: opens centred at one fixed size, so tiling managers float it
+├── The demo: Without Hex (typed, with typos) -> With Hex (spoken) -> Continue
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
-├── Welcome -> Get started                // setup.welcome-hero
-│   ├── The Hex glyph backlit by a cool corona, drawn live on the GPU
-│   │   (`rune_ui/hero.rs`); core, middle ring, outer ring light in turn,
-│   │   then the lamp breathes. Light theme: ink rings over a pale blue glow
-│   └── Reduce Motion -> the settled frame, lamp at rest
-├── Setup: one screen, every permission   // setup.checklist; skipped when granted
-│   ├── Each row leads with its glyph: mic, text cursor, sparkle (model)
-│   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
-│   ├── Every row -> Allow; asked -> pulse + Allow; granted -> Allowed  // setup.permission-control
-│   │   └── Grant: the pill narrows into the green label, the dot shrinks into
-│   │       the check as it draws on (0.3 s, no bounce; Reduce Motion: no travel)
-│   ├── Microphone -> macOS prompt; refused -> Privacy pane + "switch Hex on" guide
-│   ├── Accessibility -> Privacy pane + drag guide
-│   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
-│   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
-│   │   │   ignoring `OSStatus -10814` when no bundle is on disk)
-│   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
-│   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
-│   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
-│   │   ├── The app tile lifts out of the row and flies, blurred, into the guide
-│   │   └── macOS 27 names the list "Device Control and Data Access"; row and guide follow
-│   ├── Rows re-read every 400 ms and flip to a check as macOS grants
-│   │   └── Accessibility flips live (`AXIsProcessTrusted`); its stale preflight never asks for a restart
-│   ├── On in System Settings, unusable until relaunch -> "Turns on when Hex restarts"
-│   │   └── Every permission on -> primary "Restart Hex" -> relaunch at setup  // setup.restart
-│   ├── The first unfinished row carries the screen's one accent
-│   └── Last grant -> 0.7 s beat -> Give it a try (Continue also works)
-├── Give it a try                         // setup.practice; every OS (rune_ui/practice.rs)
-│   ├── Model still downloading -> "Almost ready" + "Hex starts listening once…";
-│   │   progress (or Download stopped + Retry) under the field, not in the corner;
-│   │   model ready -> the normal Give it a try heading, body, and hint
-│   │   // check: try_it_waits_for_the_model_until_it_is_ready
-│   ├── Focused practice field; hold the shortcut, speak, release
-│   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
-│   ├── Discarded before transcribing -> quick-tap hint
-│   ├── Discarded after transcribing -> nothing-heard hint (mic, distance)
-│   ├── Microphone line under the hint: input in use + live level while recording
-│   │   ├── Click -> General's microphone menu; a choice saves the same setting
-│   │   ├── 1.5 s of silence while recording -> "No sound. Pick another mic?"
-│   │   └── Lid closed, no other input -> "The lid is closed, so the built-in mic is off."
-│   ├── Pasted -> words land in the field + success -> Continue
-│   └── Skip -> Done                      // practice is never required
+├── Permissions                           // setup.checklist; skipped when granted
+│   ├── macOS: "Let Hex hear you and type for you", Microphone and Accessibility
+│   │   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
+│   │   ├── Microphone -> macOS prompt; refused -> "Open System Settings" + guide
+│   │   ├── Accessibility -> Privacy pane + drag guide
+│   │   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
+│   │   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
+│   │   │   │   ignoring `OSStatus -10814` when no bundle is on disk)
+│   │   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
+│   │   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
+│   │   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
+│   │   │   └── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
+│   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
+│   │   └── Last grant -> 0.7 s beat -> the story moves on
+│   ├── Windows: only while the microphone privacy switch is off: "Let Hex hear
+│   │   you", one Microphone row -> Open Settings (ms-settings:privacy-microphone)
+│   └── Linux: no page
+├── Almost ready: the model still downloads -> waits, then Your turn
+├── Your turn: the practice game          // setup.practice; every OS
+│   ├── "Clear your messages": hold the saved shortcut and answer the lit card;
+│   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
+│   │   the keys, flies the live words, and lightning burns the answered card
+│   ├── A short, silent, or failed try -> a hint under the field
+│   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
-│   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
-│   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
-└── Done -> paste last, Modes tips
-    ├── Model ready -> green check, "You're all set", success sound -> Start using Hex
-    ├── Model still downloading (practice skipped, #676) -> neutral badge with the
-    │   download's percent in the ring, "Almost ready" + "Hex starts listening once…"
-    │   -> Continue; turns green with the success sound once the model is ready
-    │   // check: done_waits_for_the_model_after_a_skipped_practice
-    └── Download stopped -> "Download stopped" + Retry stay in the corner
-    // Windows and Linux: Welcome -> Setup (the model row only) -> Give it a try -> Done
+│   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
+│   └── Within 2 min of that relaunch -> "Hex's shortcut didn't start." + Reopen Hex
+└── Hex is ready -> where Hex lives (menu bar, system tray, or app launcher)
+    ├── Try again -> back to the practice game
+    └── Start using Hex -> records completion once setup is ready; closes onboarding
+Run setup again (Labs) or `hex onboarding reset` -> the same story from the start,
+on every build; settings, models, and permissions stay, so their pages pass
+```
 
 General > Speech model, selected model not downloaded     // settings.model-missing (#676)
 ├── Muted "Hex can't listen until the speech model has downloaded"
@@ -205,7 +197,7 @@ General > Speech model or Language
      └── Failure -> Preserve previous selection and show error
 
 Permissions revoked later
-  -> General > Permissions needed: the same rows and Allow control as the tour
+  -> General > Permissions needed: Allow rows like onboarding's
      ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
      └── On, waiting for a relaunch -> "Restart Hex"
 ```
@@ -376,66 +368,56 @@ Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription/models.rs](../../src/transcription/models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
-When the Hugging Face cache holds a compatible speech model, the setup step
-shows "Choose a speech model": one list with Hex's recommended model first and
-selected ("731 MB download", or "On this computer" when its exact file is
-there), then the found files ("On this computer", plus "not tested by Hex" for
-one outside the catalog). Picking a row starts it; Continue starts the
-selected one. With nothing found the step is unchanged
-([own-models.md](own-models.md#onboarding-choice), scenes
-`onboarding-model-found`, `-downloading`, `-recommended`).
+The model step's list and its rules are in
+[own-models.md](own-models.md#onboarding-choice) (scenes
+`onboarding-model-found`, `-downloading`, `-recommended`, `-back`).
 
-The tour is the pure `desktop::onboarding::Flow` (steps, row states, background
-download, practice hints, one-relaunch guard) drawn by
-[rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); `permission_control`
-in [rune_ui/lists.rs](../../src/rune_ui/lists.rs) is the one Allow / dot /
-Allowed control Settings and the tour share (`a_grant_gathers_then_releases_into_allowed`,
-`reduce_motion_swaps_allow_for_allowed_at_once`; scene `meetings-allow`). The
-welcome hero is a compositor pass after the UI, so goldens show its stage
-empty; `hex app -- --scene onboarding-hero` (`-still` for Reduce Motion) runs
-it live, and `--video` records it. Its springs passed motion-lint as level
-channels; native visual review is still by eye. The guide
+The tour state is the pure `desktop::onboarding::Flow` (steps, row states,
+background download, practice outcomes, one-relaunch guard), fed by
+[rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); what the person sees
+is the story in [rune_ui/onboarding_kit](../../src/rune_ui/onboarding_kit.rs),
+opened at launch by `Ui::new` and replayed by Run setup again. The guide
 beside System Settings is [permission_guide.m](../../native/permission_guide.m).
-On Windows the setup step adds a Microphone row only while the microphone
-switch in Settings › Privacy & security is off (device, user, or desktop
-apps; `CapabilityAccessManager\ConsentStore\microphone` says `Deny`). Allow
-opens `ms-settings:privacy-microphone`, the row describes the "Let desktop apps
-access your microphone" switch, and setup finishes once it is on
-(`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`; the
-registry read is cross-compiled only, not run on a Windows PC).
+On Windows the Microphone row shows only while the microphone switch in
+Settings › Privacy & security is off (device, user, or desktop apps;
+`CapabilityAccessManager\ConsentStore\microphone` says `Deny`); setup
+finishes once it is on (`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`,
+`windows_onboarding_asks_only_for_the_microphone_switch`; the registry read is
+cross-compiled only, not run on a Windows PC).
 Unit tests (`desktop::onboarding::tests`) cover step order, the download starting on the
-welcome screen and retrying from any step, permissions-only setup with the
-model waiting for practice, the auto-advance beat, live row flips, a refused
-microphone, platforms without permissions or practice, practice hints, resume,
-the relaunch guard and resume marker, resuming past a setup the relaunch
-finished (`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
+welcome screen and retrying from any step, the auto-advance beat, live row
+flips, a refused microphone, practice outcomes, resume, the relaunch guard and
+resume marker, resuming past a setup the relaunch finished
+(`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
 grants waiting for a restart
 (`a_grant_the_process_cannot_use_yet_waits_for_a_restart`,
 `setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
 advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
-and the saved step
-(`the_tour_step_is_saved_for_the_next_launch`), and the upgrade check
-(`a_fresh_install_onboards_without_the_identity_check`,
+the saved step (`the_tour_step_is_saved_for_the_next_launch`), and the upgrade
+check (`a_fresh_install_onboards_without_the_identity_check`,
 `an_upgrader_without_permissions_gets_the_tour_once`,
 `an_upgrader_whose_setup_is_ready_skips_the_tour`; a real 2.3.1 to
-`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the tour
-(`the_mac_tour_asks_each_permission_then_practices`,
+`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the
+first run (`a_new_install_opens_the_first_run`,
+`the_mac_first_run_asks_each_permission_then_practices`,
+`the_practice_game_follows_hex_s_own_dictation_on_every_os`,
 `a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen`,
 `a_refused_microphone_points_to_system_settings`,
 `a_grant_waiting_for_a_restart_makes_setup_restart_hex`,
-`onboarding_downloads_the_model_through_the_service`), and every macOS step
-is a scene (`mac-onboarding`, `-setup`, `-progress`, `-denied`, `-restart`,
-`-download-failed`, `-try`, `-listening`, `-landed`, `-reopen`, `-done`).
-Reaching the last step in a live tour with dictation ready plays the
-onboarding success sound (Classic: its stop sound); a Done still waiting for
-the model plays it once the model is ready
-(`remember_step`, `poll`; fixtures stay silent), checked by reading the code.
+`onboarding_downloads_the_model_through_the_service`,
+`a_found_model_moves_on_without_a_download_and_back_returns_to_it`), and every
+page is a scene whose goldens `scripts/check-onboarding.sh` checks (its
+`SCENES` list in `rune_ui/tests/onboarding_check.rs`). Scenes are fixtures
+played on the story's own clock to one settled moment, not native proof.
 The default model comes from `desktop::i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing
 settings keep their saved model.
-Not yet observed: a clean-account run with real grants, a real practice paste
-into the field, or a real self-relaunch after an event-tap refusal. Windows and
-Linux show the model row only and skip the practice step.
+Observed on Linux (apollo, 2026-11-01): a clean first run in a nested
+session, from Setting up Hex through the real download to Hex is ready. Not
+yet observed: a clean-account Mac run with real grants, a real practice
+answer on macOS or Windows, or a real self-relaunch after an event-tap
+refusal. The story's demo cards and the game's messages stay in English in
+every interface language; its headings, buttons, and hints are translated.
 
 ```ts
 Menu bar > Transcription Model            // setup.quick-model-switch; macOS
@@ -1822,7 +1804,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Calls the host directly: saves settings through it; woken on host changes
 ├── Sidebar: General, Modes, History
 ├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
-├── First-run setup -> desktop::onboarding::Flow without permissions or practice
+├── First run -> the onboarding story; Microphone only while the privacy switch is off
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
 ├── Modes: app icons (hicolor theme or pixmaps, PNG or SVG) in the picker,
 │   chips, and mode rows; monogram while loading or without an icon
@@ -1831,7 +1813,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 └── macOS/Windows surfaces as scenes too (Capabilities + preview data):
     Meetings (Recordings | Settings, opt-in card), Voice Filter,
     HUD Lab, Activity, permission rows, Launch at login, Dock icon, shortcut
-    sides, the full tour
+    sides, the permissions page
 macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── rune::App on the main thread: accessory, windowless unless setup/onboarding/Dock icon open it
 ├── Same AppKit loop: status item, updater, Hex/File/Window menu, Dock reopen event, the HUD pump (16 ms timer; the HUD itself is a Rune overlay)
@@ -1842,7 +1824,7 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── Meetings pane lists the store through meeting::query (1 s rescan, sent only when changed);
 │   a controller failure shows in the pane; rune::FileDialogs (file_dialog) chooses the
 │   meetings folder and Modes' "Choose a file…" .app
-├── Tour: practice dictations from the listener's event log; a listener that failed to start
+├── First run: practice dictations from the listener's event log; a listener that failed to start
 ├── Sidebar and pane header move the window (Rune El::window_drag; the title bar is transparent)
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
 ├── ⌘Q / menu-bar Quit / Ctrl-C quit and join

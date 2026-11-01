@@ -4,6 +4,7 @@
 //! `"Setting up Hex"` flies smoothly up to the top bar during the demo and
 //! permissions, then back to centre stage for `"Hex is ready"`.
 
+use crate::desktop::i18n::tr;
 use rune::{Align, El, Spring, Transition, el, icon, row, text};
 
 use super::super::controls::Paint;
@@ -51,7 +52,7 @@ pub(crate) fn pill(p: Paint, download: Download, closed: f32) -> El {
                     .color(p.success()),
             )
             .child(
-                text("Ready")
+                text(tr("Ready"))
                     .key("ready-label")
                     .font(k.ty.small_medium)
                     .color(p.success()),

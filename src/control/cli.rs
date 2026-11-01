@@ -100,7 +100,7 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: WindowCommand,
     },
-    /// Replay the first-run onboarding (needs Labs on).
+    /// Replay the first-run onboarding.
     Onboarding {
         #[command(subcommand)]
         command: OnboardingCommand,

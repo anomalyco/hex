@@ -3,6 +3,8 @@
 use rune::{El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 use rune_kit::{Button, ButtonVariant};
 
+use crate::desktop::i18n::tr;
+
 use super::super::controls::{KeySize, Paint, PushSize, key_tray, keycap};
 use super::fixture::Language;
 use super::hex_meter::{hex_meter, hex_meter_glowing};
@@ -142,6 +144,24 @@ pub(crate) fn keys(p: Paint, key: &str, caps: &[String], down: bool) -> El {
     )
 }
 
+/// Where Hex lives once onboarding closes, under `"Hex is ready"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Home {
+    MenuBar,
+    Tray,
+    Launcher,
+}
+
+impl Home {
+    fn copy(self) -> &'static str {
+        match self {
+            Self::MenuBar => tr("Lives quietly in your menu bar"),
+            Self::Tray => tr("Lives quietly in your system tray"),
+            Self::Launcher => tr("Open it again from your app launcher"),
+        }
+    }
+}
+
 /// Final `"Hex is ready"` landing: the thin single-hexagon mark arrives from
 /// the top pill with a soft outline glow, followed by staggered copy and a
 /// quiet macOS menu-bar preview showing where Hex lives.
@@ -152,6 +172,7 @@ pub(crate) fn ready(
     now: f64,
     reduced: bool,
     motion: Motion,
+    home: Home,
 ) -> El {
     let mark = hex_meter_glowing(p, "meter", 64.0, now, reduced);
     let mark = match matched {
@@ -170,7 +191,7 @@ pub(crate) fn ready(
                     .gap(10.0)
                     .items_center()
                     .child(
-                        text("Hex is ready")
+                        text(tr("Hex is ready"))
                             .key("title")
                             .font(title_font(p))
                             .color(p.text()),
@@ -180,7 +201,7 @@ pub(crate) fn ready(
                 8.0,
             ),
         )
-        .child(motion.staggered(menubar_hint(p), 2.0, 8.0))
+        .child(motion.staggered(menubar_hint(p, home), 2.0, 8.0))
 }
 
 /// `"Hold [⌥] anywhere, then talk."`
@@ -189,18 +210,19 @@ pub(crate) fn hold_anywhere(p: Paint, caps: &[String]) -> El {
         .key("hold-anywhere")
         .gap(8.0)
         .center_y()
-        .child(text("Hold").key("hold").font(LEAD).color(p.muted()))
+        .child(text(tr("Hold")).key("hold").font(LEAD).color(p.muted()))
         .child(keys(p, "keys", caps, false))
         .child(
-            text("anywhere, then talk.")
+            text(tr("anywhere, then talk."))
                 .key("anywhere")
                 .font(LEAD)
                 .color(p.muted()),
         )
 }
 
-/// Quiet capsule previewing the single-hexagon icon in the macOS menu bar.
-fn menubar_hint(p: Paint) -> El {
+/// Quiet capsule previewing the single-hexagon icon where Hex lives: the
+/// macOS menu bar, the Windows tray, or the Linux app launcher.
+fn menubar_hint(p: Paint, home: Home) -> El {
     let k = p.k;
     let strip = row()
         .key("menubar-pill")
@@ -214,7 +236,7 @@ fn menubar_hint(p: Paint) -> El {
         .child(hex_meter(p, "menubar-hex", 14.0, 1.0, 1.0))
         .child(el().key("sep").size(p.hair, 12.0).fill(k.c.border_base))
         .child(
-            text("Lives quietly in your menu bar")
+            text(home.copy())
                 .key("menubar-copy")
                 .font(k.ty.small)
                 .color(p.muted()),

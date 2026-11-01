@@ -1,16 +1,13 @@
 //! Onboarding's speech model list, shown only when the hub-cache scan found
-//! a compatible model (`found_models`): one card of selectable rows, Hex's
+//! a compatible model (`found_models`): the first run's model step
+//! (`onboarding_kit::live`) shows one card of selectable rows, Hex's
 //! recommended model first and selected, then the models already on this
 //! computer. Picking a row starts it at once: ours downloads (or, when its
 //! exact file is already here, is used in place), and a found model is used
 //! where it is. Continue starts the selected row when none was picked.
 //! Without a found model the step is exactly as before.
 
-use rune::{El, Tx, row};
-use rune_kit::{Badge, RadioItem};
-
 use super::Ui;
-use super::controls::{Paint, card};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::onboarding::{Input, ItemStatus, SetupItem};
 use crate::transcription::found_models::Found;
@@ -65,25 +62,26 @@ fn entries(ui: &Ui) -> Vec<Entry<'_>> {
         .collect()
 }
 
-/// The list, one radio row per model.
-pub(super) fn choice(ui: &Ui, p: Paint, model: ItemStatus) -> El {
-    let selected = ui.found.picked.unwrap_or(0);
-    let rows: Vec<El> = entries(ui)
-        .into_iter()
-        .enumerate()
-        .map(|(index, entry)| model_row(ui, p, index, &entry, index == selected, model))
-        .collect();
-    card(p, "model-list", rows)
+/// One row of the list as the first run shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ChoiceRow {
+    pub(super) name: String,
+    pub(super) line: String,
+    pub(super) recommended: bool,
+    pub(super) selected: bool,
 }
 
-fn model_row(
-    ui: &Ui,
-    p: Paint,
-    index: usize,
-    entry: &Entry<'_>,
-    selected: bool,
-    model: ItemStatus,
-) -> El {
+/// The list, one radio row per model.
+pub(super) fn rows(ui: &Ui, model: ItemStatus) -> Vec<ChoiceRow> {
+    let selected = ui.found.picked.unwrap_or(0);
+    entries(ui)
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| row(ui, &entry, index == selected, model))
+        .collect()
+}
+
+fn row(ui: &Ui, entry: &Entry<'_>, selected: bool, model: ItemStatus) -> ChoiceRow {
     let name = match entry {
         Entry::Recommended { .. } => transcription_models::definition(recommended(ui).model).name,
         Entry::Found(found) => found.catalog.map_or(found.name.as_str(), |id| {
@@ -111,32 +109,20 @@ fn model_row(
         (Entry::Found(found), ..) if found.catalog.is_some() => tr("On this computer").to_owned(),
         (Entry::Found(_), ..) => tr("On this computer · not tested by Hex").to_owned(),
     };
-    let radio = RadioItem::new(name, selected)
-        .description(line)
-        .on_select_tx(move |ui: &mut Ui, tx: &mut Tx| {
-            tx.instant();
-            pick(ui, index);
-        })
-        .build(p.k)
-        .key("radio")
-        .grow(1.0);
-    let tag = matches!(entry, Entry::Recommended { .. })
-        .then(|| Badge::new(tr("Recommended")).build(p.k).key("recommended"));
-    row()
-        .key(format!("model{index}"))
-        .min_h(super::controls::METRICS.row_h_described)
-        .px(super::controls::METRICS.row_px)
-        .py(10.0)
-        .gap(12.0)
-        .center_y()
-        .radius(p.k.radius.md)
-        .hover(p.k.c.hover)
-        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
-            tx.instant();
-            pick(ui, index);
-        })
-        .child(radio)
-        .children(tag)
+    ChoiceRow {
+        name: name.to_owned(),
+        line,
+        recommended: matches!(entry, Entry::Recommended { .. }),
+        selected,
+    }
+}
+
+/// Whether the pick is under way or ready, so the first run can move on:
+/// ours downloading, or a model on this computer checked and in use.
+pub(super) fn started(ui: &Ui, model: ItemStatus) -> bool {
+    ui.found.picked.is_some()
+        && !ui.found.adopting()
+        && matches!(model, ItemStatus::Ready | ItemStatus::Downloading(_))
 }
 
 /// Starts the selected row when the person continues without picking one.
@@ -146,7 +132,7 @@ pub(super) fn start_selected(ui: &mut Ui) {
 
 /// Picks row `index` and starts it. A newer pick supersedes one still
 /// preparing, as the picker's does.
-fn pick(ui: &mut Ui, index: usize) {
+pub(super) fn pick(ui: &mut Ui, index: usize) {
     let failed = ui
         .tour
         .as_ref()
